@@ -105,6 +105,15 @@ func (s *Server) handleListMembers(response http.ResponseWriter, request *http.R
 		writeProblem(response, request, err)
 		return
 	}
+	if !groups.HasRole(membership, domain.RoleAdmin) {
+		activeItems := items[:0]
+		for _, item := range items {
+			if item.Status == "ACTIVE" {
+				activeItems = append(activeItems, item)
+			}
+		}
+		items = activeItems
+	}
 	encoded, _ := json.Marshal(items)
 	digest := sha256.Sum256(encoded)
 	response.Header().Set("ETag", `"`+hex.EncodeToString(digest[:])+`"`)
@@ -123,6 +132,24 @@ func (s *Server) handleUpdatePermissions(response http.ResponseWriter, request *
 		return
 	}
 	if err := s.groups.UpdatePermissions(request.Context(), principal, membership, request.PathValue("membershipID"), input); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
+// handleArchiveMember logically removes one membership while preserving its
+// history. Self-removal requires the explicit confirmSelf=true query flag.
+// response receives 204 or Problem Details; request supplies authenticated
+// group and membership identifiers. The method returns no Go value.
+func (s *Server) handleArchiveMember(response http.ResponseWriter, request *http.Request) {
+	principal, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	confirmSelf := request.URL.Query().Get("confirmSelf") == "true"
+	if err := s.groups.ArchiveMember(request.Context(), principal, membership, request.PathValue("membershipID"), confirmSelf); err != nil {
 		writeProblem(response, request, err)
 		return
 	}
@@ -150,15 +177,16 @@ func (s *Server) handleCreateInvitation(response http.ResponseWriter, request *h
 		return
 	}
 	var input struct {
-		Email       string        `json:"email"`
-		DisplayName string        `json:"displayName"`
-		Roles       []domain.Role `json:"roles"`
+		Email          string                                 `json:"email"`
+		DisplayName    string                                 `json:"displayName"`
+		Roles          []domain.Role                          `json:"roles"`
+		CategoryGrants map[string][]domain.CategoryPermission `json:"categoryGrants"`
 	}
 	if err := decodeJSON(response, request, &input); err != nil {
 		writeProblem(response, request, err)
 		return
 	}
-	item, err := s.groups.CreateInvitation(request.Context(), principal, membership, input.Email, input.DisplayName, input.Roles)
+	item, err := s.groups.CreateInvitation(request.Context(), principal, membership, input.Email, input.DisplayName, input.Roles, input.CategoryGrants)
 	if err != nil {
 		writeProblem(response, request, err)
 		return
@@ -166,6 +194,50 @@ func (s *Server) handleCreateInvitation(response http.ResponseWriter, request *h
 	acceptURL := strings.TrimSuffix(s.config.PublicURL.String(), "/") + "/invite#token=" + url.QueryEscape(item.Token)
 	item.Token = ""
 	writeJSON(response, http.StatusCreated, map[string]any{"invitation": item, "acceptUrl": acceptURL})
+}
+
+// handleUpdateInvitation replaces the editable display-name and permission
+// defaults of an open invitation while keeping its email and token unchanged.
+// response receives the updated invitation or Problem Details; request supplies
+// the authenticated group, invitation identifier, and JSON update.
+func (s *Server) handleUpdateInvitation(response http.ResponseWriter, request *http.Request) {
+	principal, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	var input struct {
+		DisplayName    string                                 `json:"displayName"`
+		Roles          []domain.Role                          `json:"roles"`
+		CategoryGrants map[string][]domain.CategoryPermission `json:"categoryGrants"`
+	}
+	if err := decodeJSON(response, request, &input); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	item, err := s.groups.UpdateInvitation(request.Context(), principal, membership, request.PathValue("invitationID"), input.DisplayName, input.Roles, input.CategoryGrants)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, item)
+}
+
+// handleRevokeInvitation logically invalidates one invitation and cancels its
+// queued email. response receives 204 or Problem Details; request supplies the
+// authenticated group and invitation identifier. The method returns no Go
+// value.
+func (s *Server) handleRevokeInvitation(response http.ResponseWriter, request *http.Request) {
+	principal, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	if err := s.groups.RevokeInvitation(request.Context(), principal, membership, request.PathValue("invitationID"), "revoked_by_administrator"); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleDashboard(response http.ResponseWriter, request *http.Request) {

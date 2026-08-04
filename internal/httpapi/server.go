@@ -100,6 +100,7 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/logout", server.handleLogout)
 	mux.HandleFunc("GET /api/v1/session", server.handleSession)
 	mux.HandleFunc("GET /api/v1/me", server.handleSession)
+	mux.HandleFunc("POST /api/v1/invitations/preview", server.handlePreviewInvitation)
 	mux.HandleFunc("POST /api/v1/invitations/accept", server.handleAcceptInvitation)
 	mux.HandleFunc("GET /api/v1/groups", server.handleListGroups)
 	mux.HandleFunc("POST /api/v1/groups", server.handleCreateGroup)
@@ -108,10 +109,14 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/dashboard", server.handleDashboard)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/members", server.handleListMembers)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/members/{membershipID}/permissions", server.handleUpdatePermissions)
+	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/members/{membershipID}", server.handleArchiveMember)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/invitations", server.handleListInvitations)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/invitations", server.handleCreateInvitation)
+	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/invitations/{invitationID}", server.handleUpdateInvitation)
+	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/invitations/{invitationID}", server.handleRevokeInvitation)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/invitations/import", server.handleImportInvitations)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/invitations/{invitationID}/email/retry", server.handleRetryInvitationEmail)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/invitations/{invitationID}/email/resend", server.handleResendInvitationEmail)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/categories", server.handleListCategories)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/categories", server.handleCreateCategory)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/categories/{categoryID}", server.handleUpdateCategory)
@@ -178,7 +183,7 @@ func (s *Server) sessionContext(next http.Handler) http.Handler {
 
 func (s *Server) csrfCheck(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if request.Method == http.MethodGet || request.Method == http.MethodHead || request.Method == http.MethodOptions || request.URL.Path == "/api/v1/auth/login" || request.URL.Path == "/api/v1/invitations/accept" {
+		if request.Method == http.MethodGet || request.Method == http.MethodHead || request.Method == http.MethodOptions || request.URL.Path == "/api/v1/auth/login" || request.URL.Path == "/api/v1/invitations/preview" || request.URL.Path == "/api/v1/invitations/accept" {
 			next.ServeHTTP(response, request)
 			return
 		}

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Booking, BookingCommand, InvitationImportResult, InvitationMetadata, Session } from './types';
+import type { Booking, BookingCommand, InvitationImportResult, InvitationMetadata, ProductCreateCommand, Session } from './types';
 import { ApiError, api } from './client';
 
 const command: BookingCommand = {
@@ -51,6 +51,10 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function idempotencyKey(call: unknown[]): string | null {
   return new Headers((call[1] as RequestInit | undefined)?.headers).get('Idempotency-Key');
+}
+
+function requestBody(call: unknown[]): Record<string, unknown> {
+  return JSON.parse(String((call[1] as RequestInit | undefined)?.body)) as Record<string, unknown>;
 }
 
 describe('high-risk API idempotency', () => {
@@ -158,7 +162,7 @@ describe('high-risk API idempotency', () => {
   });
 
   it('sends product-create idempotency keys and renews them after success', async () => {
-    const product = { id: 'product-a', categoryId: 'category-a', version: 1, name: 'Water', priceMinor: 100, currency: 'EUR', active: true, sortOrder: 0 };
+    const product = { id: 'product-a', categoryId: 'category-a', version: 1, name: 'Water', priceMinor: 100, pricingMode: 'FIXED', currency: 'EUR', active: true, sortOrder: 0 };
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(session('user-a')))
       .mockResolvedValueOnce(jsonResponse(product, 201))
@@ -166,12 +170,44 @@ describe('high-risk API idempotency', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await api.getSession();
-    const input = { categoryId: 'category-a', name: 'Water', price: { minorUnits: '100', currency: 'EUR' } };
+    const input = { categoryId: 'category-a', name: 'Water', pricingMode: 'FIXED', price: { minorUnits: '100', currency: 'EUR' } } satisfies ProductCreateCommand;
     await api.createProduct('group-a', input);
     await api.createProduct('group-a', input);
 
     expect(idempotencyKey(fetchMock.mock.calls[1])).toBeTruthy();
     expect(idempotencyKey(fetchMock.mock.calls[1])).not.toBe(idempotencyKey(fetchMock.mock.calls[2]));
+    expect(requestBody(fetchMock.mock.calls[1])).toMatchObject({ pricingMode: 'FIXED', priceMinor: 100 });
+  });
+
+  it('sends versioned category and product updates with strong preconditions', async () => {
+    const category = { id: 'category-a', version: 4, name: 'Drinks', active: false, sortOrder: 2, products: [] };
+    const product = { id: 'product-a', categoryId: 'category-a', version: 8, name: 'Water', priceMinor: 125, pricingMode: 'FIXED', currency: 'EUR', active: true, sortOrder: 3 };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(category))
+      .mockResolvedValueOnce(jsonResponse(product));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.updateCategory('group-a', category.id, { name: 'Drinks', active: false, sortOrder: 2, version: 3 });
+    await api.updateProduct('group-a', product.id, { name: 'Water', pricingMode: 'FIXED', price: { minorUnits: '125', currency: 'EUR' }, active: true, sortOrder: 3, version: 7 });
+
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('PATCH');
+    expect(new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers).get('If-Match')).toBe('"v3"');
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ name: 'Drinks', active: false, sortOrder: 2, version: 3 });
+    expect(new Headers((fetchMock.mock.calls[1][1] as RequestInit).headers).get('If-Match')).toBe('"v7"');
+    expect(requestBody(fetchMock.mock.calls[1])).toEqual({ name: 'Water', pricingMode: 'FIXED', priceMinor: 125, active: true, sortOrder: 3, version: 7 });
+  });
+
+  it('serializes a user-chosen unit price as bounded integer minor units', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(session('user-a')))
+      .mockResolvedValueOnce(jsonResponse({ ...booking, unitPriceMinor: '250', totalMinor: '500' }, 201));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.getSession();
+    await api.createBooking('group-a', { ...command, quantity: 2, unitPrice: { minorUnits: '250', currency: 'EUR' } });
+
+    expect(requestBody(fetchMock.mock.calls[1])).toMatchObject({ quantity: 2, unitPriceMinor: 250 });
+    expect(requestBody(fetchMock.mock.calls[1])).not.toHaveProperty('unitPrice');
   });
 
   it('sends raw CSV with its explicit media type and reuses the key after a network failure', async () => {
@@ -213,6 +249,8 @@ describe('high-risk API idempotency', () => {
       id: 'invitation-a',
       email: 'new@example.test',
       displayName: 'New Member',
+	  roles: ['MEMBER'],
+	  categoryPermissions: [],
       expiresAt: '2026-08-11T12:00:00Z',
       emailDeliveryStatus: 'SENT',
       emailSentAt: '2026-08-04T12:01:00Z',

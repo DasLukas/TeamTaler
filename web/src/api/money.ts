@@ -4,7 +4,15 @@ import i18n from '@/i18n';
 /** API wire formats accepted while the backend contract is being stabilized. */
 export type MoneyInput = Money | string | number | { minor_units?: string | number; currency?: string };
 
+/** Result returned by non-throwing positive money validation. */
+export interface PositiveMajorUnitsValidation {
+  minorUnits?: string;
+  error?: string;
+}
+
 const MAX_SAFE_MINOR_UNITS = BigInt(Number.MAX_SAFE_INTEGER);
+/** Maximum supported unit price in integer minor currency units. */
+export const MAX_PRODUCT_PRICE_MINOR = 100_000_000_000n;
 const MINOR_UNITS_PATTERN = /^-?\d+$/;
 const CURRENCY_CODE_PATTERN = /^[A-Z]{3}$/;
 const exponentCache = new Map<string, number>();
@@ -59,6 +67,28 @@ export function majorUnitsPlaceholder(currency: string): string {
 }
 
 /**
+ * Converts canonical minor units into an exact locale-friendly form value.
+ *
+ * @param money - Canonical money value to place in an editable input.
+ * @returns A decimal major-unit string using a comma separator.
+ * @throws TypeError when minor units are not an integer string.
+ * @throws RangeError when the currency is invalid.
+ * @example `majorUnitsInputValue({ minorUnits: '105', currency: 'EUR' })` returns `'1,05'`.
+ */
+export function majorUnitsInputValue(money: Money): string {
+  if (!MINOR_UNITS_PATTERN.test(money.minorUnits)) throw new TypeError('Minor units must be an integer string.');
+  const exponent = currencyExponent(money.currency);
+  const factor = 10n ** BigInt(exponent);
+  const raw = BigInt(money.minorUnits);
+  const sign = raw < 0n ? '-' : '';
+  const absolute = raw < 0n ? -raw : raw;
+  const whole = absolute / factor;
+  if (exponent === 0) return `${sign}${whole}`;
+  const fraction = (absolute % factor).toString().padStart(exponent, '0');
+  return `${sign}${whole},${fraction}`;
+}
+
+/**
  * Parses a non-negative decimal major-unit string without floating-point math.
  *
  * @param value - User-entered decimal using a comma or period separator.
@@ -76,6 +106,40 @@ export function parseMajorUnits(value: string, currency = 'EUR'): string {
   const factor = 10n ** BigInt(exponent);
   const fractionValue = exponent === 0 ? 0n : BigInt(fraction.padEnd(exponent, '0'));
   return (BigInt(whole) * factor + fractionValue).toString();
+}
+
+/**
+ * Parses and bounds a positive product price without floating-point math.
+ *
+ * @param value - User-entered decimal using a comma or period separator.
+ * @param currency - Currency that determines the permitted fraction precision.
+ * @returns Positive integer minor units encoded as a decimal string.
+ * @throws TypeError when the value is empty, malformed, or zero.
+ * @throws RangeError when the value exceeds the supported product-price range.
+ * @example `parsePositiveMajorUnits('1,50', 'EUR')` returns `'150'`.
+ */
+export function parsePositiveMajorUnits(value: string, currency = 'EUR'): string {
+  const minorUnits = parseMajorUnits(value, currency);
+  const amount = BigInt(minorUnits);
+  if (amount <= 0n) throw new TypeError(i18n.t('errors.amountFormat'));
+  if (amount > MAX_PRODUCT_PRICE_MINOR) throw new RangeError(i18n.t('errors.amountRange'));
+  return minorUnits;
+}
+
+/**
+ * Validates a positive product price for interactive form rendering.
+ *
+ * @param value - User-entered localized major-unit value.
+ * @param currency - Currency that determines fraction precision.
+ * @returns Parsed minor units or a localized error without throwing.
+ * @example `validatePositiveMajorUnits('0', 'EUR')` returns an error result.
+ */
+export function validatePositiveMajorUnits(value: string, currency = 'EUR'): PositiveMajorUnitsValidation {
+  try {
+    return { minorUnits: parsePositiveMajorUnits(value, currency) };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 /**

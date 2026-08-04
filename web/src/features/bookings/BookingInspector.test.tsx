@@ -16,6 +16,8 @@ const product: Product = {
   categoryId: 'category-drinks',
   version: 1,
   name: 'Water',
+  pricingMode: 'FIXED',
+  currency: 'EUR',
   price: { minorUnits: '100', currency: 'EUR' },
   active: true,
   sortOrder: 0,
@@ -51,7 +53,7 @@ const members: Membership[] = [
   },
 ];
 
-function renderInspector(): void {
+function renderInspector(selectedProduct: Product = product): void {
   const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
   render(
@@ -61,7 +63,7 @@ function renderInspector(): void {
       members={members}
       onCancel={vi.fn()}
       period={period}
-      product={product}
+      product={selectedProduct}
     />,
     { wrapper },
   );
@@ -91,6 +93,42 @@ describe('BookingInspector category-neutral booking rules', () => {
       quantity: 2,
       targetMembershipId: 'member-target',
       reason: 'Shared team purchase',
+    });
+  });
+
+  it('requires and validates an unprefilled unit price for user-defined products', async () => {
+    const user = userEvent.setup();
+    const customProduct: Product = {
+      ...product,
+      id: 'product-donation',
+      name: 'Donation',
+      pricingMode: 'USER_DEFINED',
+      price: undefined,
+    };
+    apiMock.createBooking.mockResolvedValue({ id: 'booking-created' });
+    renderInspector(customProduct);
+
+    const priceInput = screen.getByLabelText(i18n.t('booking.unitPrice', { currency: 'EUR' }));
+    const submit = screen.getByRole('button', { name: i18n.t('booking.submit') });
+    expect(priceInput).toHaveValue('');
+    expect(submit).toBeDisabled();
+
+    await user.type(priceInput, '0');
+    await user.tab();
+    expect(screen.getByRole('alert')).toHaveTextContent(i18n.t('errors.amountFormat'));
+    await user.clear(priceInput);
+    await user.type(priceInput, '2,50');
+    await user.click(screen.getByRole('button', { name: i18n.t('booking.increaseQuantity') }));
+    await user.click(submit);
+
+    expect(apiMock.createBooking).toHaveBeenCalledWith('group-a', {
+      productId: customProduct.id,
+      productVersion: customProduct.version,
+      expectedPeriodId: period.id,
+      quantity: 2,
+      unitPrice: { minorUnits: '250', currency: 'EUR' },
+      targetMembershipId: undefined,
+      reason: undefined,
     });
   });
 });

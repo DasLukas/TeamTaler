@@ -42,6 +42,52 @@ type InvitationAcceptance struct {
 	Password    string `json:"password"`
 }
 
+// InvitationPreview is the deliberately minimal public metadata returned for a
+// valid invitation token. It omits the invited email address and all permission
+// defaults.
+type InvitationPreview struct {
+	DisplayName     string `json:"displayName"`
+	ExistingAccount bool   `json:"existingAccount"`
+}
+
+// PreviewInvitation validates token and returns only the suggested display
+// name and whether a matching active account exists. The invitation's suggested
+// name takes precedence over the account profile. It returns validation,
+// not-found, expired-invitation conflict, or database errors.
+func (s Service) PreviewInvitation(ctx context.Context, token string) (InvitationPreview, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return InvitationPreview{}, domain.ValidationError{Field: "token", Message: "is required"}
+	}
+	var preview InvitationPreview
+	var invitationDisplayName, accountDisplayName sql.NullString
+	var expiresAt string
+	var userID sql.NullString
+	err := s.DB.QueryRowContext(ctx, `SELECT i.display_name,u.display_name,i.expires_at,u.id
+		FROM invitations i LEFT JOIN users u ON u.email=i.email COLLATE NOCASE AND u.active=1
+		WHERE i.token_hash=? AND i.accepted_at IS NULL AND i.revoked_at IS NULL`, platform.HashSecret(token)).
+		Scan(&invitationDisplayName, &accountDisplayName, &expiresAt, &userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return InvitationPreview{}, domain.ErrNotFound
+	}
+	if err != nil {
+		return InvitationPreview{}, err
+	}
+	expires, err := time.Parse(time.RFC3339Nano, expiresAt)
+	if err != nil {
+		return InvitationPreview{}, fmt.Errorf("parse invitation expiry: %w", err)
+	}
+	if !expires.After(platform.Now()) {
+		return InvitationPreview{}, fmt.Errorf("%w: invitation has expired", domain.ErrConflict)
+	}
+	preview.ExistingAccount = userID.Valid
+	preview.DisplayName = strings.TrimSpace(invitationDisplayName.String)
+	if preview.DisplayName == "" {
+		preview.DisplayName = accountDisplayName.String
+	}
+	return preview, nil
+}
+
 // Bootstrap creates the first account, group, administrator membership, and open
 // period atomically. ctx bounds database work; the remaining parameters supply
 // the initial identity, group, and ISO currency. It returns validation, hashing,
@@ -137,8 +183,8 @@ func (s Service) AcceptInvitation(ctx context.Context, input InvitationAcceptanc
 	if input.Token == "" {
 		return Session{}, domain.Membership{}, domain.ValidationError{Field: "token", Message: "is required"}
 	}
-	if input.DisplayName == "" || len(input.DisplayName) > 120 {
-		return Session{}, domain.Membership{}, domain.ValidationError{Field: "displayName", Message: "must contain 1 to 120 characters"}
+	if len(input.DisplayName) > 120 || containsControlCharacter(input.DisplayName) {
+		return Session{}, domain.Membership{}, domain.ValidationError{Field: "displayName", Message: "must contain at most 120 characters without control characters"}
 	}
 	if len(input.Password) < 12 || len(input.Password) > 1024 {
 		return Session{}, domain.Membership{}, domain.ValidationError{Field: "password", Message: "must contain between 12 and 1024 characters"}
@@ -146,10 +192,10 @@ func (s Service) AcceptInvitation(ctx context.Context, input InvitationAcceptanc
 	var session Session
 	var membership domain.Membership
 	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
-		var invitationID, groupID, email, encodedRoles, expiresAt, invitationCreatedBy string
-		err := tx.QueryRowContext(ctx, `SELECT id,group_id,email,roles_json,expires_at,created_by FROM invitations
+		var invitationID, groupID, email, encodedRoles, encodedGrants, expiresAt, invitationCreatedBy string
+		err := tx.QueryRowContext(ctx, `SELECT id,group_id,email,roles_json,category_grants_json,expires_at,created_by FROM invitations
 			WHERE token_hash=? AND accepted_at IS NULL AND revoked_at IS NULL`, platform.HashSecret(input.Token)).
-			Scan(&invitationID, &groupID, &email, &encodedRoles, &expiresAt, &invitationCreatedBy)
+			Scan(&invitationID, &groupID, &email, &encodedRoles, &encodedGrants, &expiresAt, &invitationCreatedBy)
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.ErrNotFound
 		}
@@ -167,6 +213,9 @@ func (s Service) AcceptInvitation(ctx context.Context, input InvitationAcceptanc
 			Scan(&principal.UserID, &principal.Email, &principal.DisplayName, &passwordHash)
 		if errors.Is(err, sql.ErrNoRows) {
 			existingUser = false
+			if input.DisplayName == "" {
+				return domain.ValidationError{Field: "displayName", Message: "must contain 1 to 120 characters"}
+			}
 			passwordHash, err = HashPassword(input.Password)
 			if err != nil {
 				return domain.ValidationError{Field: "password", Message: err.Error()}
@@ -183,13 +232,6 @@ func (s Service) AcceptInvitation(ctx context.Context, input InvitationAcceptanc
 			return err
 		} else if !VerifyPassword(passwordHash, input.Password) {
 			return domain.ErrUnauthenticated
-		}
-		var existing int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM memberships WHERE group_id=? AND user_id=?`, groupID, principal.UserID).Scan(&existing); err != nil {
-			return err
-		}
-		if existing != 0 {
-			return fmt.Errorf("%w: user is already a group member", domain.ErrConflict)
 		}
 		var roles []domain.Role
 		if err := json.Unmarshal([]byte(encodedRoles), &roles); err != nil {
@@ -210,14 +252,78 @@ func (s Service) AcceptInvitation(ctx context.Context, input InvitationAcceptanc
 				roles = append(roles, role)
 			}
 		}
-		membershipID, _ := platform.NewID("mem")
-		now := platform.Timestamp(platform.Now())
-		if _, err := tx.ExecContext(ctx, `INSERT INTO memberships(id,group_id,user_id,status,joined_at) VALUES(?,?,?,'ACTIVE',?)`, membershipID, groupID, principal.UserID, now); err != nil {
+		var categoryGrants map[string][]domain.CategoryPermission
+		if err := json.Unmarshal([]byte(encodedGrants), &categoryGrants); err != nil {
+			return fmt.Errorf("decode invitation category grants: %w", err)
+		}
+		if categoryGrants == nil {
+			categoryGrants = map[string][]domain.CategoryPermission{}
+		}
+		for categoryID, permissions := range categoryGrants {
+			var categoryGroupID string
+			if err := tx.QueryRowContext(ctx, `SELECT group_id FROM categories WHERE id=?`, categoryID).Scan(&categoryGroupID); errors.Is(err, sql.ErrNoRows) {
+				return errors.New("invitation contains an unknown category")
+			} else if err != nil {
+				return err
+			}
+			if categoryGroupID != groupID {
+				return errors.New("invitation contains a category from another group")
+			}
+			seenPermissions := map[domain.CategoryPermission]bool{}
+			for _, permission := range permissions {
+				switch permission {
+				case domain.PermissionAssignToOthers, domain.PermissionVoidBookings:
+					seenPermissions[permission] = true
+				default:
+					return errors.New("invitation contains an unsupported category permission")
+				}
+			}
+			categoryGrants[categoryID] = categoryGrants[categoryID][:0]
+			for _, permission := range []domain.CategoryPermission{domain.PermissionAssignToOthers, domain.PermissionVoidBookings} {
+				if seenPermissions[permission] {
+					categoryGrants[categoryID] = append(categoryGrants[categoryID], permission)
+				}
+			}
+		}
+
+		membershipID := ""
+		var membershipStatus string
+		err = tx.QueryRowContext(ctx, `SELECT id,status FROM memberships WHERE group_id=? AND user_id=?`, groupID, principal.UserID).
+			Scan(&membershipID, &membershipStatus)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
+		}
+		if err == nil && membershipStatus == "ACTIVE" {
+			return fmt.Errorf("%w: user is already a group member", domain.ErrConflict)
+		}
+		reactivated := err == nil && membershipStatus == "ARCHIVED"
+		now := platform.Timestamp(platform.Now())
+		if reactivated {
+			if _, err := tx.ExecContext(ctx, `UPDATE memberships SET status='ACTIVE',archived_at=NULL WHERE id=? AND group_id=? AND status='ARCHIVED'`, membershipID, groupID); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `DELETE FROM membership_roles WHERE membership_id=?`, membershipID); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `DELETE FROM category_permissions WHERE membership_id=?`, membershipID); err != nil {
+				return err
+			}
+		} else {
+			membershipID, _ = platform.NewID("mem")
+			if _, err := tx.ExecContext(ctx, `INSERT INTO memberships(id,group_id,user_id,status,joined_at) VALUES(?,?,?,'ACTIVE',?)`, membershipID, groupID, principal.UserID, now); err != nil {
+				return err
+			}
 		}
 		for _, role := range roles {
 			if _, err := tx.ExecContext(ctx, `INSERT INTO membership_roles(group_id,membership_id,role,granted_at,granted_by) VALUES(?,?,?,?,?)`, groupID, membershipID, role, now, invitationCreatedBy); err != nil {
 				return err
+			}
+		}
+		for categoryID, permissions := range categoryGrants {
+			for _, permission := range permissions {
+				if _, err := tx.ExecContext(ctx, `INSERT INTO category_permissions(group_id,membership_id,category_id,permission,granted_at,granted_by) VALUES(?,?,?,?,?,?)`, groupID, membershipID, categoryID, permission, now, invitationCreatedBy); err != nil {
+					return err
+				}
 			}
 		}
 		accepted, err := tx.ExecContext(ctx, `UPDATE invitations SET accepted_at=? WHERE id=? AND accepted_at IS NULL`, now, invitationID)
@@ -227,6 +333,11 @@ func (s Service) AcceptInvitation(ctx context.Context, input InvitationAcceptanc
 		changed, _ := accepted.RowsAffected()
 		if changed != 1 {
 			return domain.ErrConflict
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE invitation_email_outbox SET status='CANCELLED',token_ciphertext=NULL,next_attempt_at=NULL,
+			lease_token=NULL,lease_until=NULL,last_error_code='invitation_accepted',updated_at=?
+			WHERE invitation_id=? AND status IN ('PENDING','SENDING','FAILED')`, now, invitationID); err != nil {
+			return err
 		}
 		token, err := platform.NewSecret()
 		if err != nil {
@@ -244,10 +355,19 @@ func (s Service) AcceptInvitation(ctx context.Context, input InvitationAcceptanc
 		principal.SessionHash = platform.HashSecret(token)
 		principal.CSRFToken = csrf
 		session = Session{Token: token, CSRFToken: csrf, ExpiresAt: sessionExpires, Principal: principal}
-		membership = domain.Membership{ID: membershipID, GroupID: groupID, UserID: principal.UserID, Email: principal.Email, DisplayName: principal.DisplayName, Status: "ACTIVE", Roles: roles, CategoryGrants: map[string][]domain.CategoryPermission{}}
-		return audit.Record(ctx, tx, groupID, principal.UserID, membershipID, "invitation.accepted", "invitation", invitationID, map[string]any{"existingUser": existingUser})
+		membership = domain.Membership{ID: membershipID, GroupID: groupID, UserID: principal.UserID, Email: principal.Email, DisplayName: principal.DisplayName, Status: "ACTIVE", Roles: roles, CategoryGrants: categoryGrants}
+		return audit.Record(ctx, tx, groupID, principal.UserID, membershipID, "invitation.accepted", "invitation", invitationID, map[string]any{"existingUser": existingUser, "reactivated": reactivated})
 	})
 	return session, membership, err
+}
+
+func containsControlCharacter(value string) bool {
+	for _, character := range value {
+		if character < 32 || character == 127 {
+			return true
+		}
+	}
+	return false
 }
 
 func (s Service) createSession(ctx context.Context, principal domain.Principal) (Session, error) {

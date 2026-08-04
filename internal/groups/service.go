@@ -27,6 +27,8 @@ var (
 	ErrInvitationEmailExists = errors.New("an active invitation already exists for this email address")
 )
 
+const activeInvitationEmailConstraint = "teamtaler_active_invitation_email_exists"
+
 // Service provides authorization-aware group operations over a migrated
 // TeamTaler database.
 type Service struct {
@@ -356,6 +358,76 @@ func (s Service) UpdatePermissions(ctx context.Context, actor domain.Principal, 
 	})
 }
 
+// ArchiveMember removes an active membership from the administrator's group
+// without deleting its financial or audit history. targetID identifies the
+// membership; confirmSelf must be true when the actor removes their own
+// membership. The operation clears all effective roles and category grants and
+// returns authorization, validation, not-found, last-administrator, audit, or
+// database errors.
+func (s Service) ArchiveMember(ctx context.Context, actor domain.Principal, actorMembership domain.Membership, targetID string, confirmSelf bool) error {
+	if !HasRole(actorMembership, domain.RoleAdmin) {
+		return domain.ErrForbidden
+	}
+	targetID = strings.TrimSpace(targetID)
+	if targetID == "" {
+		return domain.ValidationError{Field: "membershipId", Message: "is required"}
+	}
+	now := platform.Timestamp(platform.Now())
+	return storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		var targetGroupID, targetUserID, status string
+		err := tx.QueryRowContext(ctx, `SELECT group_id,user_id,status FROM memberships WHERE id=?`, targetID).
+			Scan(&targetGroupID, &targetUserID, &status)
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if targetGroupID != actorMembership.GroupID {
+			return domain.ErrForbidden
+		}
+		if status != "ACTIVE" {
+			return fmt.Errorf("%w: membership is not active", domain.ErrConflict)
+		}
+		if targetUserID == actor.UserID && !confirmSelf {
+			return domain.ValidationError{Field: "confirmSelf", Message: "must be true to remove your own membership"}
+		}
+		var targetIsAdmin int
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM membership_roles WHERE membership_id=? AND role='ADMIN'`, targetID).Scan(&targetIsAdmin); err != nil {
+			return err
+		}
+		if targetIsAdmin > 0 {
+			var activeAdministrators int
+			if err := tx.QueryRowContext(ctx, `SELECT count(DISTINCT mr.membership_id)
+				FROM membership_roles mr JOIN memberships m ON m.id=mr.membership_id
+				WHERE mr.group_id=? AND mr.role='ADMIN' AND m.status='ACTIVE'`, targetGroupID).Scan(&activeAdministrators); err != nil {
+				return err
+			}
+			if activeAdministrators <= 1 {
+				return fmt.Errorf("%w: the last active administrator cannot be removed", domain.ErrConflict)
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM membership_roles WHERE membership_id=?`, targetID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM category_permissions WHERE membership_id=?`, targetID); err != nil {
+			return err
+		}
+		result, err := tx.ExecContext(ctx, `UPDATE memberships SET status='ARCHIVED',archived_at=? WHERE id=? AND group_id=? AND status='ACTIVE'`, now, targetID, targetGroupID)
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed != 1 {
+			return fmt.Errorf("%w: membership state changed", domain.ErrConflict)
+		}
+		return audit.Record(ctx, tx, targetGroupID, actor.UserID, actorMembership.ID, "membership.archived", "membership", targetID, map[string]any{"selfRemoval": targetUserID == actor.UserID})
+	})
+}
+
 func validateRoles(input []domain.Role) ([]domain.Role, error) {
 	seen := map[domain.Role]bool{}
 	for _, role := range input {
@@ -377,6 +449,10 @@ func validateRoles(input []domain.Role) ([]domain.Role, error) {
 func validateGrants(input map[string][]domain.CategoryPermission) (map[string][]domain.CategoryPermission, error) {
 	result := make(map[string][]domain.CategoryPermission, len(input))
 	for category, permissions := range input {
+		category = strings.TrimSpace(category)
+		if category == "" {
+			return nil, domain.ValidationError{Field: "categoryGrants", Message: "contains an empty category identifier"}
+		}
 		seen := map[domain.CategoryPermission]bool{}
 		for _, permission := range permissions {
 			switch permission {
@@ -386,11 +462,32 @@ func validateGrants(input map[string][]domain.CategoryPermission) (map[string][]
 				return nil, domain.ValidationError{Field: "categoryGrants", Message: "contains an unsupported permission"}
 			}
 		}
+		if len(seen) == 0 {
+			continue
+		}
 		for permission := range seen {
 			result[category] = append(result[category], permission)
 		}
+		sort.Slice(result[category], func(i, j int) bool { return result[category][i] < result[category][j] })
 	}
 	return result, nil
+}
+
+func validateInvitationGrantCategoriesTx(ctx context.Context, tx *sql.Tx, groupID string, grants map[string][]domain.CategoryPermission) error {
+	for categoryID := range grants {
+		var categoryGroupID string
+		err := tx.QueryRowContext(ctx, `SELECT group_id FROM categories WHERE id=?`, categoryID).Scan(&categoryGroupID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.ValidationError{Field: "categoryGrants", Message: "contains an unknown category"}
+		}
+		if err != nil {
+			return err
+		}
+		if categoryGroupID != groupID {
+			return domain.ErrForbidden
+		}
+	}
+	return nil
 }
 
 func containsRole(roles []domain.Role, expected domain.Role) bool {
@@ -405,25 +502,28 @@ func containsRole(roles []domain.Role, expected domain.Role) bool {
 // Invitation includes safe onboarding metadata and, only in the immediate
 // CreateInvitation result, the one-time plaintext Token.
 type Invitation struct {
-	ID                  string              `json:"id"`
-	GroupID             string              `json:"groupId"`
-	Email               string              `json:"email"`
-	DisplayName         string              `json:"displayName,omitempty"`
-	Roles               []domain.Role       `json:"roles"`
-	ExpiresAt           string              `json:"expiresAt"`
-	AcceptedAt          *string             `json:"acceptedAt,omitempty"`
-	RevokedAt           *string             `json:"revokedAt,omitempty"`
-	EmailDeliveryStatus EmailDeliveryStatus `json:"emailDeliveryStatus"`
-	EmailSentAt         *string             `json:"emailSentAt,omitempty"`
-	EmailFailureCode    string              `json:"emailFailureCode,omitempty"`
-	Token               string              `json:"token,omitempty"`
+	ID                  string                                 `json:"id"`
+	GroupID             string                                 `json:"groupId"`
+	Email               string                                 `json:"email"`
+	DisplayName         string                                 `json:"displayName,omitempty"`
+	Roles               []domain.Role                          `json:"roles"`
+	CategoryGrants      map[string][]domain.CategoryPermission `json:"categoryGrants"`
+	ExpiresAt           string                                 `json:"expiresAt"`
+	AcceptedAt          *string                                `json:"acceptedAt,omitempty"`
+	RevokedAt           *string                                `json:"revokedAt,omitempty"`
+	EmailDeliveryStatus EmailDeliveryStatus                    `json:"emailDeliveryStatus"`
+	EmailSentAt         *string                                `json:"emailSentAt,omitempty"`
+	EmailFailureCode    string                                 `json:"emailFailureCode,omitempty"`
+	Token               string                                 `json:"token,omitempty"`
 }
 
 // CreateInvitation creates a seven-day, one-time invitation in membership's
-// group. ctx bounds the transaction; actor is audited and email/roles are
-// validated. It returns the invitation or forbidden, validation, randomness,
-// audit, and database errors.
-func (s Service) CreateInvitation(ctx context.Context, actor domain.Principal, membership domain.Membership, email, displayName string, roles []domain.Role) (Invitation, error) {
+// group. When TokenSealer is configured, the same transaction also queues an
+// encrypted email job while retaining the plaintext token in the immediate
+// result for manual fallback sharing. ctx bounds the transaction; actor is
+// audited and email/roles are validated. It returns the invitation or forbidden,
+// validation, randomness, encryption, audit, and database errors.
+func (s Service) CreateInvitation(ctx context.Context, actor domain.Principal, membership domain.Membership, email, displayName string, roles []domain.Role, categoryGrants map[string][]domain.CategoryPermission) (Invitation, error) {
 	if !HasRole(membership, domain.RoleAdmin) {
 		return Invitation{}, domain.ErrForbidden
 	}
@@ -440,22 +540,37 @@ func (s Service) CreateInvitation(ctx context.Context, actor domain.Principal, m
 	if err != nil {
 		return Invitation{}, err
 	}
+	categoryGrants, err = validateGrants(categoryGrants)
+	if err != nil {
+		return Invitation{}, err
+	}
 	var item Invitation
+	now := platform.Now()
 	err = storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
-		item, err = createInvitationTx(ctx, tx, actor, membership, email, displayName, roles, platform.Now())
-		return err
+		item, err = createInvitationTx(ctx, tx, actor, membership, email, displayName, roles, categoryGrants, now)
+		if err != nil || s.TokenSealer == nil {
+			return err
+		}
+		if err := s.queueInvitationEmailTx(ctx, tx, actor, membership, item, now); err != nil {
+			return err
+		}
+		item.EmailDeliveryStatus = EmailDeliveryPending
+		return nil
 	})
 	return item, err
 }
 
-func createInvitationTx(ctx context.Context, tx *sql.Tx, actor domain.Principal, membership domain.Membership, email, displayName string, roles []domain.Role, now time.Time) (Invitation, error) {
+func createInvitationTx(ctx context.Context, tx *sql.Tx, actor domain.Principal, membership domain.Membership, email, displayName string, roles []domain.Role, categoryGrants map[string][]domain.CategoryPermission, now time.Time) (Invitation, error) {
 	if roles == nil {
 		roles = []domain.Role{}
+	}
+	if categoryGrants == nil {
+		categoryGrants = map[string][]domain.CategoryPermission{}
 	}
 	nowText := platform.Timestamp(now)
 	var existing int
 	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM memberships m JOIN users u ON u.id=m.user_id
-		WHERE m.group_id=? AND u.email=?`, membership.GroupID, email).Scan(&existing); err != nil {
+		WHERE m.group_id=? AND u.email=? AND m.status='ACTIVE'`, membership.GroupID, email).Scan(&existing); err != nil {
 		return Invitation{}, err
 	}
 	if existing > 0 {
@@ -482,19 +597,95 @@ func createInvitationTx(ctx context.Context, tx *sql.Tx, actor domain.Principal,
 	if err != nil {
 		return Invitation{}, fmt.Errorf("encode invitation roles: %w", err)
 	}
-	item := Invitation{
-		ID: id, GroupID: membership.GroupID, Email: email, DisplayName: displayName,
-		Roles: roles, ExpiresAt: platform.Timestamp(now.Add(7 * 24 * time.Hour)),
-		EmailDeliveryStatus: EmailDeliveryNotRequested, Token: token,
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO invitations(id,group_id,email,display_name,token_hash,roles_json,expires_at,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,
-		item.ID, membership.GroupID, email, nullable(displayName), platform.HashSecret(token), string(encoded), item.ExpiresAt, actor.UserID, nowText); err != nil {
+	if err := validateInvitationGrantCategoriesTx(ctx, tx, membership.GroupID, categoryGrants); err != nil {
 		return Invitation{}, err
 	}
-	if err := audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "invitation.created", "invitation", item.ID, map[string]any{"email": email, "roles": roles}); err != nil {
+	encodedGrants, err := json.Marshal(categoryGrants)
+	if err != nil {
+		return Invitation{}, fmt.Errorf("encode invitation category grants: %w", err)
+	}
+	item := Invitation{
+		ID: id, GroupID: membership.GroupID, Email: email, DisplayName: displayName,
+		Roles: roles, CategoryGrants: categoryGrants, ExpiresAt: platform.Timestamp(now.Add(7 * 24 * time.Hour)),
+		EmailDeliveryStatus: EmailDeliveryNotRequested, Token: token,
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO invitations(id,group_id,email,display_name,token_hash,roles_json,category_grants_json,expires_at,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+		item.ID, membership.GroupID, email, nullable(displayName), platform.HashSecret(token), string(encoded), string(encodedGrants), item.ExpiresAt, actor.UserID, nowText); err != nil {
+		if strings.Contains(err.Error(), activeInvitationEmailConstraint) {
+			return Invitation{}, fmt.Errorf("%w: %w", domain.ErrConflict, ErrInvitationEmailExists)
+		}
+		return Invitation{}, err
+	}
+	if err := audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "invitation.created", "invitation", item.ID, map[string]any{"email": email, "roles": roles, "categoryGrants": categoryGrants}); err != nil {
 		return Invitation{}, err
 	}
 	return item, nil
+}
+
+// UpdateInvitation replaces the editable profile and permission defaults of an
+// unconsumed invitation in the administrator's group. The email address and
+// token remain unchanged. It returns the updated secret-free invitation or an
+// authorization, validation, state, audit, or database error.
+func (s Service) UpdateInvitation(ctx context.Context, actor domain.Principal, membership domain.Membership, invitationID, displayName string, roles []domain.Role, categoryGrants map[string][]domain.CategoryPermission) (Invitation, error) {
+	if !HasRole(membership, domain.RoleAdmin) {
+		return Invitation{}, domain.ErrForbidden
+	}
+	invitationID = strings.TrimSpace(invitationID)
+	if invitationID == "" {
+		return Invitation{}, domain.ValidationError{Field: "invitationId", Message: "is required"}
+	}
+	displayName = strings.TrimSpace(displayName)
+	if len(displayName) > 120 || containsControlCharacter(displayName) {
+		return Invitation{}, domain.ValidationError{Field: "displayName", Message: "must contain at most 120 characters without control characters"}
+	}
+	var err error
+	roles, err = validateRoles(roles)
+	if err != nil {
+		return Invitation{}, err
+	}
+	categoryGrants, err = validateGrants(categoryGrants)
+	if err != nil {
+		return Invitation{}, err
+	}
+	var item Invitation
+	err = storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		var acceptedAt, revokedAt sql.NullString
+		var encodedRoles, encodedGrants string
+		err := tx.QueryRowContext(ctx, `SELECT i.id,i.group_id,i.email,coalesce(i.display_name,''),i.roles_json,i.category_grants_json,
+			i.expires_at,i.accepted_at,i.revoked_at,coalesce(o.status,'NOT_REQUESTED'),o.sent_at,coalesce(o.last_error_code,'')
+			FROM invitations i LEFT JOIN invitation_email_outbox o ON o.invitation_id=i.id
+			WHERE i.id=? AND i.group_id=?`, invitationID, membership.GroupID).
+			Scan(&item.ID, &item.GroupID, &item.Email, &item.DisplayName, &encodedRoles, &encodedGrants, &item.ExpiresAt, &acceptedAt, &revokedAt, &item.EmailDeliveryStatus, &item.EmailSentAt, &item.EmailFailureCode)
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if acceptedAt.Valid || revokedAt.Valid {
+			return fmt.Errorf("%w: invitation is no longer editable", domain.ErrConflict)
+		}
+		if err := validateInvitationGrantCategoriesTx(ctx, tx, membership.GroupID, categoryGrants); err != nil {
+			return err
+		}
+		encodedRolesBytes, err := json.Marshal(roles)
+		if err != nil {
+			return fmt.Errorf("encode invitation roles: %w", err)
+		}
+		encodedGrantBytes, err := json.Marshal(categoryGrants)
+		if err != nil {
+			return fmt.Errorf("encode invitation category grants: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE invitations SET display_name=?,roles_json=?,category_grants_json=? WHERE id=? AND group_id=? AND accepted_at IS NULL AND revoked_at IS NULL`,
+			nullable(displayName), string(encodedRolesBytes), string(encodedGrantBytes), invitationID, membership.GroupID); err != nil {
+			return err
+		}
+		item.DisplayName = displayName
+		item.Roles = roles
+		item.CategoryGrants = categoryGrants
+		return audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "invitation.updated", "invitation", invitationID, map[string]any{"displayName": displayName, "roles": roles, "categoryGrants": categoryGrants})
+	})
+	return item, err
 }
 
 // RevokeInvitation invalidates one unconsumed invitation in membership's group
@@ -511,8 +702,9 @@ func (s Service) RevokeInvitation(ctx context.Context, actor domain.Principal, m
 	}
 	now := platform.Timestamp(platform.Now())
 	return storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, `UPDATE invitations SET revoked_at=?
-			WHERE id=? AND group_id=? AND accepted_at IS NULL AND revoked_at IS NULL`, now, invitationID, membership.GroupID)
+		invalidatedTokenHash := platform.HashSecret("revoked:" + invitationID + ":" + now)
+		result, err := tx.ExecContext(ctx, `UPDATE invitations SET revoked_at=?,token_hash=?
+			WHERE id=? AND group_id=? AND accepted_at IS NULL AND revoked_at IS NULL`, now, invalidatedTokenHash, invitationID, membership.GroupID)
 		if err != nil {
 			return err
 		}
@@ -522,6 +714,11 @@ func (s Service) RevokeInvitation(ctx context.Context, actor domain.Principal, m
 		}
 		if changed == 0 {
 			return domain.ErrNotFound
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE invitation_email_outbox SET
+			status='CANCELLED',token_ciphertext=NULL,next_attempt_at=NULL,lease_token=NULL,lease_until=NULL,last_error_code='invitation_revoked',updated_at=?
+			WHERE invitation_id=? AND group_id=? AND status IN ('PENDING','SENDING','FAILED')`, now, invitationID, membership.GroupID); err != nil {
+			return err
 		}
 		return audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "invitation.revoked", "invitation", invitationID, map[string]any{"reason": reason})
 	})
@@ -534,7 +731,7 @@ func (s Service) ListInvitations(ctx context.Context, membership domain.Membersh
 	if !HasRole(membership, domain.RoleAdmin) {
 		return nil, domain.ErrForbidden
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT i.id,i.group_id,i.email,coalesce(i.display_name,''),i.roles_json,
+	rows, err := s.DB.QueryContext(ctx, `SELECT i.id,i.group_id,i.email,coalesce(i.display_name,''),i.roles_json,i.category_grants_json,
 		i.expires_at,i.accepted_at,i.revoked_at,coalesce(o.status,'NOT_REQUESTED'),o.sent_at,coalesce(o.last_error_code,'')
 		FROM invitations i LEFT JOIN invitation_email_outbox o ON o.invitation_id=i.id
 		WHERE i.group_id=? ORDER BY i.created_at DESC`, membership.GroupID)
@@ -545,15 +742,21 @@ func (s Service) ListInvitations(ctx context.Context, membership domain.Membersh
 	result := make([]Invitation, 0)
 	for rows.Next() {
 		var item Invitation
-		var encoded string
-		if err := rows.Scan(&item.ID, &item.GroupID, &item.Email, &item.DisplayName, &encoded, &item.ExpiresAt, &item.AcceptedAt, &item.RevokedAt, &item.EmailDeliveryStatus, &item.EmailSentAt, &item.EmailFailureCode); err != nil {
+		var encodedRoles, encodedGrants string
+		if err := rows.Scan(&item.ID, &item.GroupID, &item.Email, &item.DisplayName, &encodedRoles, &encodedGrants, &item.ExpiresAt, &item.AcceptedAt, &item.RevokedAt, &item.EmailDeliveryStatus, &item.EmailSentAt, &item.EmailFailureCode); err != nil {
 			return nil, err
 		}
-		if err := json.Unmarshal([]byte(encoded), &item.Roles); err != nil {
+		if err := json.Unmarshal([]byte(encodedRoles), &item.Roles); err != nil {
 			return nil, fmt.Errorf("decode invitation roles: %w", err)
+		}
+		if err := json.Unmarshal([]byte(encodedGrants), &item.CategoryGrants); err != nil {
+			return nil, fmt.Errorf("decode invitation category grants: %w", err)
 		}
 		if item.Roles == nil {
 			item.Roles = []domain.Role{}
+		}
+		if item.CategoryGrants == nil {
+			item.CategoryGrants = map[string][]domain.CategoryPermission{}
 		}
 		result = append(result, item)
 	}

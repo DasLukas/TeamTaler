@@ -4,6 +4,10 @@ import Copy from 'lucide-react/dist/esm/icons/copy';
 import Download from 'lucide-react/dist/esm/icons/download';
 import FileUp from 'lucide-react/dist/esm/icons/file-up';
 import MailPlus from 'lucide-react/dist/esm/icons/mail-plus';
+import Pencil from 'lucide-react/dist/esm/icons/pencil';
+import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
+import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
+import UserMinus from 'lucide-react/dist/esm/icons/user-minus';
 import UserRoundPlus from 'lucide-react/dist/esm/icons/user-round-plus';
 import { useMemo, useState, type ChangeEvent, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -13,7 +17,10 @@ import type {
   EmailDeliveryStatus,
   InvitationImportRow,
   InvitationImportStatus,
+  InvitationInput,
   InvitationMetadata,
+  Membership,
+  PermissionUpdate,
 } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Avatar } from '@/components/ui/Avatar';
@@ -22,9 +29,10 @@ import { Field, TextInput } from '@/components/ui/FormField';
 import { Modal } from '@/components/ui/Modal';
 import { StatePanel } from '@/components/ui/StatePanel';
 import tableStyles from '@/features/shared/Table.module.css';
+import { PermissionEditor } from './PermissionEditor';
 import styles from './MembersPanel.module.css';
 
-type MembersDialog = 'invite' | 'import' | null;
+type MembersDialog = 'invite' | 'import' | 'edit' | 'revoke' | 'resend' | 'remove' | null;
 
 interface MemberImportDialogProps {
   activeGroupId: string;
@@ -55,6 +63,15 @@ const DELIVERY_STATUS_KEYS: Record<EmailDeliveryStatus, string> = {
   FAILED: 'members.csvImport.deliveryStatus.failed',
   CANCELLED: 'members.csvImport.deliveryStatus.cancelled',
   NOT_REQUESTED: 'members.csvImport.deliveryStatus.notRequested',
+};
+
+const MANUAL_DELIVERY_COPY_KEYS: Record<EmailDeliveryStatus, { title: string; description: string }> = {
+  PENDING: { title: 'members.invitationStatus.pendingTitle', description: 'members.invitationStatus.pendingDescription' },
+  SENDING: { title: 'members.invitationStatus.sendingTitle', description: 'members.invitationStatus.sendingDescription' },
+  SENT: { title: 'members.invitationStatus.sentTitle', description: 'members.invitationStatus.sentDescription' },
+  FAILED: { title: 'members.invitationStatus.failedTitle', description: 'members.invitationStatus.failedDescription' },
+  CANCELLED: { title: 'members.invitationStatus.cancelledTitle', description: 'members.invitationStatus.cancelledDescription' },
+  NOT_REQUESTED: { title: 'members.invitationStatus.notRequestedTitle', description: 'members.invitationStatus.notRequestedDescription' },
 };
 
 /**
@@ -185,7 +202,7 @@ function MemberImportDialog({ activeGroupId, onClose }: MemberImportDialogProps)
     },
   });
   const retryMutation = useMutation({
-    mutationFn: (invitationId: string) => api.retryInvitationEmail(activeGroupId, invitationId),
+    mutationFn: (invitationId: string) => api.resendInvitationEmail(activeGroupId, invitationId),
     onSuccess: async ({ invitationId, emailDeliveryStatus }) => {
       queryClient.setQueryData<InvitationMetadata[]>(invitationQueryKey, (invitations) => invitations?.map((invitation) => (
         invitation.id === invitationId ? { ...invitation, emailDeliveryStatus, emailSentAt: undefined } : invitation
@@ -319,66 +336,230 @@ function MemberImportDialog({ activeGroupId, onClose }: MemberImportDialogProps)
   );
 }
 
+/** Inputs for navigating from the member directory to one member's rights. */
+export interface MembersPanelProps {
+  onOpenRights?: (membershipId: string) => void;
+}
+
+const emptyInvitationInput = (): InvitationInput => ({ email: '', displayName: '', roles: ['MEMBER'], categoryPermissions: [] });
+
+function roleSummary(member: Pick<Membership, 'roles'>, t: TFunction): string {
+  return member.roles.filter((role) => role !== 'MEMBER').map((role) => role === 'ADMIN'
+    ? t('roles.admin.label')
+    : role === 'FINANCE_MANAGER' ? t('roles.finance.label') : t('roles.catalog.label')).join(', ') || t('roles.member');
+}
+
 /**
- * Renders the group member directory, one-time invitation flow, and CSV import.
+ * Renders open invitations, active members, former members, and all associated
+ * lifecycle dialogs.
  *
- * @returns A localized member table with invitation and bulk-import dialogs.
+ * @param props - Optional callback used to open one active member in the rights tab.
+ * @returns A localized member and invitation administration workspace.
  */
-export function MembersPanel() {
+export function MembersPanel({ onOpenRights }: MembersPanelProps) {
   const { t } = useTranslation();
-  const { activeGroupId } = useActiveGroup();
-  const membersQuery = useQuery({ queryKey: ['members', activeGroupId], queryFn: () => api.getMembers(activeGroupId) });
+  const { activeGroupId, session } = useActiveGroup();
+  const queryClient = useQueryClient();
+  const membersQueryKey = ['members', activeGroupId] as const;
+  const invitationQueryKey = ['invitations', activeGroupId] as const;
+  const membersQuery = useQuery({ queryKey: membersQueryKey, queryFn: () => api.getMembers(activeGroupId) });
+  const categoriesQuery = useQuery({ queryKey: ['categories', activeGroupId], queryFn: () => api.getCategories(activeGroupId) });
+  const invitationsQuery = useQuery({
+    queryKey: invitationQueryKey,
+    queryFn: () => api.getInvitations(activeGroupId),
+    refetchInterval: (query) => query.state.data?.some((item) => ACTIVE_DELIVERY_STATUSES.has(item.emailDeliveryStatus)) ? DELIVERY_POLL_INTERVAL_MS : false,
+  });
   const [dialog, setDialog] = useState<MembersDialog>(null);
-  const [email, setEmail] = useState('');
-  const [invitation, setInvitation] = useState<CreatedInvitation | null>(null);
-  const invitationMutation = useMutation({
-    mutationFn: () => api.createInvitation(activeGroupId, { email: email.trim() }),
-    onSuccess: setInvitation,
+  const [draft, setDraft] = useState<InvitationInput>(emptyInvitationInput);
+  const [createdInvitation, setCreatedInvitation] = useState<CreatedInvitation | null>(null);
+  const [selectedInvitation, setSelectedInvitation] = useState<InvitationMetadata | null>(null);
+  const [selectedMember, setSelectedMember] = useState<Membership | null>(null);
+  const [resendResult, setResendResult] = useState<{ acceptUrl: string; expiresAt: string } | null>(null);
+
+  const createMutation = useMutation({
+    mutationFn: () => api.createInvitation(activeGroupId, { ...draft, email: draft.email.trim(), displayName: draft.displayName.trim() }),
+    onSuccess: async (result) => {
+      setCreatedInvitation(result);
+      await queryClient.invalidateQueries({ queryKey: invitationQueryKey });
+    },
+  });
+  const updateMutation = useMutation({
+    mutationFn: () => selectedInvitation
+      ? api.updateInvitation(activeGroupId, selectedInvitation.id, { displayName: draft.displayName.trim(), roles: draft.roles, categoryPermissions: draft.categoryPermissions })
+      : Promise.reject(new Error(t('members.noInvitationSelected'))),
+    onSuccess: async () => {
+      setDialog(null);
+      await queryClient.invalidateQueries({ queryKey: invitationQueryKey });
+    },
+  });
+  const revokeMutation = useMutation({
+    mutationFn: () => selectedInvitation ? api.revokeInvitation(activeGroupId, selectedInvitation.id) : Promise.reject(new Error(t('members.noInvitationSelected'))),
+    onSuccess: async () => {
+      setDialog(null);
+      setSelectedInvitation(null);
+      await queryClient.invalidateQueries({ queryKey: invitationQueryKey });
+    },
+  });
+  const resendMutation = useMutation({
+    mutationFn: () => selectedInvitation ? api.resendInvitationEmail(activeGroupId, selectedInvitation.id) : Promise.reject(new Error(t('members.noInvitationSelected'))),
+    onSuccess: async (result) => {
+      setResendResult({ acceptUrl: result.acceptUrl, expiresAt: result.expiresAt });
+      await queryClient.invalidateQueries({ queryKey: invitationQueryKey });
+    },
+  });
+  const archiveMutation = useMutation({
+    mutationFn: () => selectedMember ? api.archiveMember(activeGroupId, selectedMember.id, selectedMember.userId === session.user.id) : Promise.reject(new Error(t('members.noMemberSelected'))),
+    onSuccess: async () => {
+      const selfRemoval = selectedMember?.userId === session.user.id;
+      setDialog(null);
+      setSelectedMember(null);
+      await queryClient.invalidateQueries({ queryKey: membersQueryKey });
+      if (selfRemoval) await queryClient.invalidateQueries({ queryKey: ['session'] });
+    },
   });
 
-  if (membersQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
-  if (!membersQuery.data) return <div className={styles.state}><StatePanel kind="error" message={t('members.error')} /></div>;
+  if (membersQuery.isLoading || invitationsQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
+  if (!membersQuery.data || !invitationsQuery.data) return <div className={styles.state}><StatePanel kind="error" message={t('members.error')} /></div>;
 
-  const closeInvitationDialog = () => {
+  const activeMembers = membersQuery.data.filter((member) => member.active);
+  const formerMembers = membersQuery.data.filter((member) => !member.active);
+  const openInvitations = invitationsQuery.data.filter((invitation) => !invitation.acceptedAt && !invitation.revokedAt);
+  const invitationDeliveryStatus = createdInvitation
+    ? invitationsQuery.data.find((item) => item.id === createdInvitation.id)?.emailDeliveryStatus ?? createdInvitation.emailDeliveryStatus
+    : null;
+  const closeDialog = () => {
     setDialog(null);
-    setEmail('');
-    setInvitation(null);
-    invitationMutation.reset();
+    setDraft(emptyInvitationInput());
+    setCreatedInvitation(null);
+    setSelectedInvitation(null);
+    setSelectedMember(null);
+    setResendResult(null);
+    createMutation.reset();
+    updateMutation.reset();
+    revokeMutation.reset();
+    resendMutation.reset();
+    archiveMutation.reset();
   };
+  const openInvite = (member?: Membership) => {
+    setDraft({ ...emptyInvitationInput(), email: member?.email ?? '', displayName: member?.displayName ?? '' });
+    setDialog('invite');
+  };
+  const openEdit = (invitation: InvitationMetadata) => {
+    setSelectedInvitation(invitation);
+    setDraft({ email: invitation.email, displayName: invitation.displayName ?? '', roles: invitation.roles, categoryPermissions: invitation.categoryPermissions });
+    setDialog('edit');
+  };
+  const permissionValue: PermissionUpdate = { roles: draft.roles, categoryPermissions: draft.categoryPermissions };
+  const setPermissionValue = (value: PermissionUpdate) => setDraft((current) => ({ ...current, ...value }));
 
   return (
     <div className={styles.content}>
       <header className={styles.header}>
-        <div><h2>{t('members.title')}</h2><p>{t('members.activeCount', { count: membersQuery.data.length })}</p></div>
-        <div className={styles.headerActions}><Button leadingIcon={<FileUp size={18} />} onClick={() => setDialog('import')} variant="secondary">{t('members.csvImport.action')}</Button><Button leadingIcon={<UserRoundPlus size={18} />} onClick={() => setDialog('invite')}>{t('members.invite')}</Button></div>
+        <div><h2>{t('members.title')}</h2><p>{t('members.activeCount', { count: activeMembers.length })}</p></div>
+        <div className={styles.headerActions}><Button leadingIcon={<FileUp size={18} />} onClick={() => setDialog('import')} variant="secondary">{t('members.csvImport.action')}</Button><Button leadingIcon={<UserRoundPlus size={18} />} onClick={() => openInvite()}>{t('members.invite')}</Button></div>
       </header>
-      <div className={tableStyles.tableWrap}>
-        <table className={tableStyles.table}>
-          <thead><tr><th>{t('common.member')}</th><th>{t('members.email')}</th><th>{t('members.roles')}</th><th>{t('common.status')}</th></tr></thead>
-          <tbody>{membersQuery.data.map((member) => <tr key={member.id}><td><span className={styles.member}><Avatar name={member.displayName} /> <strong>{member.displayName}</strong></span></td><td>{member.email}</td><td>{member.roles.filter((role) => role !== 'MEMBER').map((role) => role === 'ADMIN' ? t('roles.admin.label') : role === 'FINANCE_MANAGER' ? t('roles.finance.label') : t('roles.catalog.label')).join(', ') || t('roles.member')}</td><td><span className={`${tableStyles.status} ${!member.active ? tableStyles.statusMuted : ''}`}>{member.active ? t('common.active') : t('common.archived')}</span></td></tr>)}</tbody>
-        </table>
-      </div>
-      <Modal onClose={closeInvitationDialog} open={dialog === 'invite'} title={t('members.invite')}>
-        {invitation ? (
+
+      <section className={styles.section}>
+        <div className={styles.sectionHeading}><h3>{t('members.openInvitations')}</h3><span>{openInvitations.length}</span></div>
+        {openInvitations.length === 0 ? <p className={styles.emptySection}>{t('members.noOpenInvitations')}</p> : (
+          <div className={tableStyles.tableWrap}>
+            <table className={tableStyles.table}>
+              <thead><tr><th>{t('members.email')}</th><th>{t('common.name')}</th><th>{t('members.delivery')}</th><th>{t('members.validUntil')}</th><th><span className="sr-only">{t('common.action')}</span></th></tr></thead>
+              <tbody>{openInvitations.map((item) => {
+                const expired = Date.parse(item.expiresAt) <= invitationsQuery.dataUpdatedAt;
+                const resendBlocked = ACTIVE_DELIVERY_STATUSES.has(item.emailDeliveryStatus);
+                return (
+                  <tr key={item.id}>
+                    <td><button className={styles.rowLink} onClick={() => openEdit(item)} type="button"><strong>{item.email}</strong></button></td>
+                    <td>{item.displayName || '–'}</td>
+                    <td><span className={deliveryBadgeClass(item.emailDeliveryStatus)}>{t(DELIVERY_STATUS_KEYS[item.emailDeliveryStatus])}</span></td>
+                    <td><span className={expired ? styles.expired : ''}>{expired ? t('members.expired') : new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(item.expiresAt))}</span></td>
+                    <td><div className={styles.tableActions}>
+                      <Button aria-label={t('members.editInvitationFor', { email: item.email })} leadingIcon={<Pencil size={16} />} onClick={() => openEdit(item)} size="small" variant="ghost">{t('common.edit')}</Button>
+                      <Button aria-label={t('members.resendFor', { email: item.email })} disabled={resendBlocked} leadingIcon={<RotateCcw size={16} />} onClick={() => { setSelectedInvitation(item); setResendResult(null); setDialog('resend'); }} size="small" variant="ghost">{t('members.resend')}</Button>
+                      <Button aria-label={t('members.deleteInvitationFor', { email: item.email })} leadingIcon={<Trash2 size={16} />} onClick={() => { setSelectedInvitation(item); setDialog('revoke'); }} size="small" variant="ghost">{t('common.delete')}</Button>
+                    </div></td>
+                  </tr>
+                );
+              })}</tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section className={styles.section}>
+        <div className={styles.sectionHeading}><h3>{t('members.activeMembers')}</h3><span>{activeMembers.length}</span></div>
+        <div className={tableStyles.tableWrap}>
+          <table className={tableStyles.table}>
+            <thead><tr><th>{t('common.member')}</th><th>{t('members.email')}</th><th>{t('members.roles')}</th><th><span className="sr-only">{t('common.action')}</span></th></tr></thead>
+            <tbody>{activeMembers.map((member) => <tr key={member.id}>
+              <td><button className={`${styles.rowLink} ${styles.member}`} onClick={() => onOpenRights?.(member.id)} type="button"><Avatar decorative name={member.displayName} /> <strong>{member.displayName}</strong></button></td>
+              <td>{member.email}</td><td>{roleSummary(member, t)}</td>
+              <td><Button aria-label={t('members.removeFor', { name: member.displayName })} leadingIcon={<UserMinus size={16} />} onClick={() => { setSelectedMember(member); setDialog('remove'); }} size="small" variant="ghost">{t('members.remove')}</Button></td>
+            </tr>)}</tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className={styles.section}>
+        <div className={styles.sectionHeading}><h3>{t('members.formerMembers')}</h3><span>{formerMembers.length}</span></div>
+        {formerMembers.length === 0 ? <p className={styles.emptySection}>{t('members.noFormerMembers')}</p> : (
+          <div className={tableStyles.tableWrap}><table className={tableStyles.table}>
+            <thead><tr><th>{t('common.member')}</th><th>{t('members.email')}</th><th><span className="sr-only">{t('common.action')}</span></th></tr></thead>
+            <tbody>{formerMembers.map((member) => <tr key={member.id}><td><span className={styles.member}><Avatar decorative name={member.displayName} /> <strong>{member.displayName}</strong></span></td><td>{member.email}</td><td><Button leadingIcon={<MailPlus size={16} />} onClick={() => openInvite(member)} size="small" variant="ghost">{t('members.inviteAgain')}</Button></td></tr>)}</tbody>
+          </table></div>
+        )}
+      </section>
+
+      <Modal className={styles.permissionDialog} onClose={closeDialog} open={dialog === 'invite'} title={t('members.invite')}>
+        {createdInvitation ? (
           <div className={styles.invitationReady}>
             <MailPlus aria-hidden="true" size={38} />
-            <h3>{t('members.invitationCreated')}</h3>
-            <p>{t('members.invitationExpiry', { date: new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(invitation.expiresAt)) })}</p>
-            <div className={styles.copyRow}><TextInput aria-label={t('members.invitationLink')} readOnly value={invitation.acceptUrl} /><Button leadingIcon={<Copy size={17} />} onClick={() => void navigator.clipboard.writeText(invitation.acceptUrl)} variant="secondary">{t('common.copy')}</Button></div>
-            <Button fullWidth onClick={closeInvitationDialog}>{t('common.done')}</Button>
+            {invitationDeliveryStatus ? <section aria-live="polite" className={`${styles.deliveryNotice} ${invitationDeliveryStatus === 'FAILED' || invitationDeliveryStatus === 'CANCELLED' ? styles.deliveryNoticeError : ''}`} role="status"><h3>{t(MANUAL_DELIVERY_COPY_KEYS[invitationDeliveryStatus].title)}</h3><p>{t(MANUAL_DELIVERY_COPY_KEYS[invitationDeliveryStatus].description, { email: createdInvitation.email })}</p></section> : null}
+            {invitationsQuery.isError ? <p className={styles.error} role="alert">{t('members.invitationStatus.statusError')}</p> : null}
+            <p>{t('members.invitationExpiry', { date: new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(createdInvitation.expiresAt)) })}</p>
+            <div className={styles.fallbackLink}><p>{t('members.fallbackHint')}</p><div className={styles.copyRow}><TextInput aria-label={t('members.invitationLink')} readOnly value={createdInvitation.acceptUrl} /><Button leadingIcon={<Copy size={17} />} onClick={() => void navigator.clipboard.writeText(createdInvitation.acceptUrl)} variant="secondary">{t('common.copy')}</Button></div></div>
+            <Button fullWidth onClick={closeDialog}>{t('common.done')}</Button>
           </div>
         ) : (
-          <form className={styles.form} onSubmit={(event) => { event.preventDefault(); invitationMutation.mutate(); }}>
-            <Field hint={t('members.emailHint')} htmlFor="invitation-email" label={t('auth.email')}>
-              <TextInput id="invitation-email" onChange={(event) => setEmail(event.target.value)} required type="email" value={email} />
-            </Field>
+          <form className={styles.form} onSubmit={(event) => { event.preventDefault(); createMutation.mutate(); }}>
+            <div className={styles.formGrid}>
+              <Field hint={t('members.emailHint')} htmlFor="invitation-email" label={t('auth.email')}><TextInput id="invitation-email" onChange={(event) => setDraft((current) => ({ ...current, email: event.target.value }))} required type="email" value={draft.email} /></Field>
+              <Field hint={t('members.displayNameHint')} htmlFor="invitation-display-name" label={t('auth.displayName')}><TextInput id="invitation-display-name" maxLength={120} onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))} value={draft.displayName} /></Field>
+            </div>
+            {categoriesQuery.data ? <PermissionEditor categories={categoriesQuery.data} onChange={setPermissionValue} subjectName={draft.displayName || draft.email || t('common.member')} value={permissionValue} /> : <StatePanel kind="loading" />}
             <p className={styles.expiry}>{t('members.expiry')}</p>
-            {invitationMutation.isError ? <p className={styles.error} role="alert">{invitationMutation.error.message}</p> : null}
-            <div className={styles.actions}><Button onClick={closeInvitationDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!email.trim() || invitationMutation.isPending} type="submit">{t('members.createLink')}</Button></div>
+            {createMutation.isError ? <p className={styles.error} role="alert">{createMutation.error.message}</p> : null}
+            <div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!draft.email.trim() || createMutation.isPending || categoriesQuery.isLoading} type="submit">{t('members.createInvitation')}</Button></div>
           </form>
         )}
       </Modal>
-      {dialog === 'import' ? <MemberImportDialog activeGroupId={activeGroupId} onClose={() => setDialog(null)} /> : null}
+
+      <Modal className={styles.permissionDialog} onClose={closeDialog} open={dialog === 'edit'} title={t('members.editInvitation')}>
+        <form className={styles.form} onSubmit={(event) => { event.preventDefault(); updateMutation.mutate(); }}>
+          <Field hint={t('members.emailImmutable')} htmlFor="edit-invitation-email" label={t('auth.email')}><TextInput disabled id="edit-invitation-email" value={draft.email} /></Field>
+          <Field hint={t('members.displayNameHint')} htmlFor="edit-invitation-display-name" label={t('auth.displayName')}><TextInput id="edit-invitation-display-name" maxLength={120} onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))} value={draft.displayName} /></Field>
+          {categoriesQuery.data ? <PermissionEditor categories={categoriesQuery.data} onChange={setPermissionValue} subjectName={draft.displayName || draft.email} value={permissionValue} /> : null}
+          {updateMutation.isError ? <p className={styles.error} role="alert">{updateMutation.error.message}</p> : null}
+          <div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={updateMutation.isPending} type="submit">{t('common.save')}</Button></div>
+        </form>
+      </Modal>
+
+      <Modal onClose={closeDialog} open={dialog === 'revoke'} title={t('members.deleteInvitationTitle')}>
+        <div className={styles.confirmDialog}><p>{t('members.deleteInvitationExplanation', { email: selectedInvitation?.email ?? '' })}</p>{revokeMutation.isError ? <p className={styles.error} role="alert">{revokeMutation.error.message}</p> : null}<div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={revokeMutation.isPending} onClick={() => revokeMutation.mutate()} variant="danger">{t('common.delete')}</Button></div></div>
+      </Modal>
+
+      <Modal onClose={closeDialog} open={dialog === 'resend'} title={t('members.resendTitle')}>
+        <div className={styles.confirmDialog}>
+          {resendResult ? <><p>{t('members.resendSuccess', { email: selectedInvitation?.email ?? '', date: new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(resendResult.expiresAt)) })}</p><p className={styles.warning}>{t('members.oldLinksInvalid')}</p>{resendResult.acceptUrl ? <div className={styles.copyRow}><TextInput aria-label={t('members.invitationLink')} readOnly value={resendResult.acceptUrl} /><Button leadingIcon={<Copy size={17} />} onClick={() => void navigator.clipboard.writeText(resendResult.acceptUrl)} variant="secondary">{t('common.copy')}</Button></div> : <p className={styles.warning}>{t('members.resendFallbackUnavailable')}</p>}<Button fullWidth onClick={closeDialog}>{t('common.done')}</Button></> : <><p>{t('members.resendExplanation', { email: selectedInvitation?.email ?? '' })}</p>{resendMutation.isError ? <p className={styles.error} role="alert">{resendMutation.error.message}</p> : null}<div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={resendMutation.isPending} onClick={() => resendMutation.mutate()}>{t('members.resend')}</Button></div></>}
+        </div>
+      </Modal>
+
+      <Modal onClose={closeDialog} open={dialog === 'remove'} title={selectedMember?.userId === session.user.id ? t('members.removeSelfTitle') : t('members.removeTitle')}>
+        <div className={styles.confirmDialog}><p>{selectedMember?.userId === session.user.id ? t('members.removeSelfExplanation') : t('members.removeExplanation', { name: selectedMember?.displayName ?? '' })}</p>{archiveMutation.isError ? <p className={styles.error} role="alert">{archiveMutation.error.message}</p> : null}<div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={archiveMutation.isPending} onClick={() => archiveMutation.mutate()} variant="danger">{selectedMember?.userId === session.user.id ? t('members.confirmSelfRemoval') : t('members.remove')}</Button></div></div>
+      </Modal>
+
+      {dialog === 'import' ? <MemberImportDialog activeGroupId={activeGroupId} onClose={closeDialog} /> : null}
     </div>
   );
 }

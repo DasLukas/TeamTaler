@@ -9,12 +9,13 @@ import { LoginPage } from './LoginPage';
 
 const mocks = vi.hoisted(() => ({
   login: vi.fn(),
+  previewInvitation: vi.fn(),
   acceptInvitation: vi.fn(),
   navigate: vi.fn(),
 }));
 
 vi.mock('@/api/client', () => ({
-  api: { login: mocks.login, acceptInvitation: mocks.acceptInvitation },
+  api: { login: mocks.login, previewInvitation: mocks.previewInvitation, acceptInvitation: mocks.acceptInvitation },
   isDevelopmentDemoEnabled: false,
 }));
 
@@ -38,6 +39,7 @@ describe('authentication form policies', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.login.mockResolvedValue(session);
+  mocks.previewInvitation.mockResolvedValue({ displayName: '', existingAccount: false });
     mocks.acceptInvitation.mockResolvedValue(session);
     mocks.navigate.mockResolvedValue(undefined);
   });
@@ -56,7 +58,7 @@ describe('authentication form policies', () => {
     window.history.replaceState(null, '', '/invite#token=invite-token');
     const user = userEvent.setup();
     renderPage(<InvitationPage />);
-    await user.type(screen.getByLabelText(i18n.t('auth.displayName')), 'Alex');
+    await user.type(await screen.findByLabelText(i18n.t('auth.displayName')), 'Alex');
     await user.type(screen.getByLabelText(i18n.t('auth.password')), 'short');
     await user.type(screen.getByLabelText(i18n.t('auth.passwordConfirmation')), 'short');
     await user.click(screen.getByRole('button', { name: i18n.t('auth.acceptInvitation') }));
@@ -66,12 +68,14 @@ describe('authentication form policies', () => {
   });
 
   it('rejects an existing account password below the invitation contract minimum', async () => {
+  mocks.previewInvitation.mockResolvedValue({ displayName: 'Alex', existingAccount: true });
     window.history.replaceState(null, '', '/invite#token=invite-token');
     const user = userEvent.setup();
     renderPage(<InvitationPage />);
-    await user.click(screen.getByRole('checkbox', { name: i18n.t('auth.existingAccount') }));
+  await screen.findByRole('checkbox', { name: i18n.t('auth.existingAccountDetected') });
     expect(screen.getByText(i18n.t('auth.existingPasswordHint'))).toBeVisible();
-    await user.type(screen.getByLabelText(i18n.t('auth.displayName')), 'Alex');
+  expect(screen.getByLabelText(i18n.t('auth.displayName'))).toHaveValue('Alex');
+  expect(screen.getByLabelText(i18n.t('auth.displayName'))).toHaveAttribute('readonly');
     await user.type(screen.getByLabelText(i18n.t('auth.existingPasswordLabel')), 'short');
     await user.click(screen.getByRole('button', { name: i18n.t('auth.acceptInvitation') }));
 
@@ -80,14 +84,29 @@ describe('authentication form policies', () => {
   });
 
   it('accepts a contract-valid current password for an existing account', async () => {
+  mocks.previewInvitation.mockResolvedValue({ displayName: 'Alex', existingAccount: true });
     window.history.replaceState(null, '', '/invite#token=invite-token');
     const user = userEvent.setup();
     renderPage(<InvitationPage />);
-    await user.click(screen.getByRole('checkbox', { name: i18n.t('auth.existingAccount') }));
-    await user.type(screen.getByLabelText(i18n.t('auth.displayName')), 'Alex');
+  await screen.findByRole('checkbox', { name: i18n.t('auth.existingAccountDetected') });
     await user.type(screen.getByLabelText(i18n.t('auth.existingPasswordLabel')), 'existing-pass');
     await user.click(screen.getByRole('button', { name: i18n.t('auth.acceptInvitation') }));
 
     await waitFor(() => expect(mocks.acceptInvitation).toHaveBeenCalledWith({ token: 'invite-token', displayName: 'Alex', password: 'existing-pass' }));
+  });
+
+  it('pre-fills an invited display name and lets a new account change it', async () => {
+    mocks.previewInvitation.mockResolvedValue({ displayName: 'Suggested Name', existingAccount: false });
+    window.history.replaceState(null, '', '/invite#token=invite-token');
+    const user = userEvent.setup();
+    renderPage(<InvitationPage />);
+    const displayName = await screen.findByLabelText(i18n.t('auth.displayName'));
+    await waitFor(() => expect(displayName).toHaveValue('Suggested Name'));
+    await user.clear(displayName);
+    await user.type(displayName, 'Chosen Name');
+    await user.type(screen.getByLabelText(i18n.t('auth.password')), 'new-passphrase');
+    await user.type(screen.getByLabelText(i18n.t('auth.passwordConfirmation')), 'new-passphrase');
+    await user.click(screen.getByRole('button', { name: i18n.t('auth.acceptInvitation') }));
+    await waitFor(() => expect(mocks.acceptInvitation).toHaveBeenCalledWith({ token: 'invite-token', displayName: 'Chosen Name', password: 'new-passphrase' }));
   });
 });

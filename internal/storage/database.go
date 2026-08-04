@@ -100,6 +100,9 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("begin migration %s: %w", name, err)
 		}
 		if _, err = tx.ExecContext(ctx, string(body)); err == nil {
+			err = verifyForeignKeys(ctx, tx)
+		}
+		if err == nil {
 			_, err = tx.ExecContext(ctx, `INSERT INTO schema_migrations(version) VALUES (?)`, name)
 		}
 		if err != nil {
@@ -111,6 +114,27 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+// verifyForeignKeys rejects a migration transaction that leaves any dangling
+// SQLite foreign-key reference. ctx bounds the integrity scan and tx supplies
+// the uncommitted migrated schema.
+func verifyForeignKeys(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `PRAGMA foreign_key_check`)
+	if err != nil {
+		return fmt.Errorf("check migrated foreign keys: %w", err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		var table, parent string
+		var rowID sql.NullInt64
+		var foreignKeyID int
+		if err := rows.Scan(&table, &rowID, &parent, &foreignKeyID); err != nil {
+			return fmt.Errorf("read migrated foreign-key violation: %w", err)
+		}
+		return fmt.Errorf("migration left an invalid foreign key in %s referencing %s (constraint %d)", table, parent, foreignKeyID)
+	}
+	return rows.Err()
 }
 
 // WithTx invokes fn with a transaction derived from db and ctx.

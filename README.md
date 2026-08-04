@@ -7,13 +7,13 @@ The application combines a responsive German-language React interface, a Go HTTP
 ## Implemented features
 
 - Multiple isolated groups per installation and multiple group memberships per user.
-- Local accounts, seven-day single-use invitation links, idempotent CSV invitation imports with automatic email delivery, and server-side sessions.
+- Local accounts, seven-day single-use invitation links, optional display-name suggestions, automatic email delivery for individual and CSV invitations, idempotent CSV invitation imports, and server-side sessions.
 - Cumulative group roles:
   - `ADMIN` has all group capabilities and manages branding, roles, and category grants.
   - `FINANCE_MANAGER` records and reverses payments, views member accounts, and closes periods.
   - `CATALOG_MANAGER` creates and updates categories and products and uploads product images.
 - Category-scoped `ASSIGN_TO_OTHERS` and `VOID_BOOKINGS` grants.
-- User-defined categories without a secondary category type, integer minor-unit prices, product snapshots in bookings, and JPEG/PNG/WebP uploads normalized to content-addressed PNG files.
+- User-defined categories, fixed-price and user-defined-price products, validated integer minor-unit booking prices, immutable product/price snapshots, and JPEG/PNG/WebP uploads normalized to content-addressed PNG files.
 - Idempotent booking creation, immutable acting/target membership traceability, 30-second self-undo for self-bookings, and reasoned audited reversals.
 - Mandatory reasons whenever a booking is assigned to another member.
 - Activity views display and search both the charged member and the member who made every booking; dashboard activity highlights third-party assignments.
@@ -22,18 +22,19 @@ The application combines a responsive German-language React interface, a Go HTTP
 - Flexible accounting periods with immutable close snapshots, due dates, settlement status, and an atomically opened successor period.
 - In-app notifications, an administrator-only audit view, safe CSV export of recent account entries, and browser print/PDF views.
 - Administrator-managed group logos that replace the TeamTaler mark for members of the active group.
+- TeamTaler browser-tab and installable-web-app icons for desktop, iOS, iPadOS, and Android launchers.
 - Online backup archives containing a consistent SQLite snapshot and every image referenced by that snapshot.
 
-The administration UI currently supports group branding, individual invitations, CSV invitation imports, role and category-grant updates, catalog creation, image upload, incoming payments, payment reversals, period close, and audit review. Versioned category and product update/archive operations also exist in the API; the current catalog UI focuses on creation and display.
+The administration UI supports group branding, permission-aware individual and CSV invitations, invitation editing/revocation/resending, active and former member management, role and category-grant updates, versioned category and product creation/editing/archiving, recoverable product-image upload and replacement, incoming payments, payment reversals, period close, and audit review. Removing a member archives only the group membership and preserves every financial and audit record; a later accepted invitation reactivates the same membership identity.
 
 ## Scope and operating constraints
 
 - TeamTaler supports one application replica on a local filesystem. SQLite on NFS, SMB, or another network filesystem is unsupported.
 - TLS is terminated by an external reverse proxy. TeamTaler does not create or renew certificates.
-- Individual invitation links can be copied and shared manually. CSV imports require the optional TLS-secured SMTP configuration and deliver through a transactional retrying outbox.
+- Individual invitations are sent automatically when the optional TLS-secured SMTP configuration is enabled, while their links remain available for manual fallback sharing. Manual invitations may assign roles and category grants immediately. CSV imports require SMTP, create regular-member invitations only, and use the same transactional retrying outbox.
 - There is no payment-provider integration, SSO, MFA, offline mutation queue, public plugin loader, or built-in metrics endpoint.
 - The browser interface is German. Reusable interface, error, and accessibility copy is centralized in the i18next resource so additional locales can be added without rewriting feature components.
-- Monetary values are persisted and calculated as signed integer minor units. JSON responses encode monetary fields as exact decimal strings, while command inputs use bounded JSON integers; floating-point amounts are never used for accounting.
+- Monetary values are persisted and calculated as signed integer minor units. JSON responses encode monetary fields as exact decimal strings, while command inputs use bounded JSON integers; floating-point amounts are never used for accounting. Fixed prices are server-authoritative, while user-defined product prices must be supplied and validated for each booking.
 
 ## Repository structure
 
@@ -133,6 +134,12 @@ The default Compose file binds the application port to host loopback, runs the p
 The application trusts forwarded client addresses only when the direct peer is inside a configured trusted CIDR. Keep both proxy and application request limits compatible; product-image and group-logo input is limited to 5 MiB before normalization.
 
 SMTP configuration is fail-fast: supplying only part of the required block prevents startup. The relay certificate is verified, TLS 1.2 or newer is required, and authentication never occurs before encryption. TeamTaler considers a message sent after the relay accepts the SMTP `DATA` command; downstream mailbox delivery remains the relay operator's responsibility.
+
+## Invitation email delivery
+
+When SMTP is configured, creating an individual invitation atomically stores the invitation and its encrypted outbox job. The administrator dialog follows the delivery state until the relay accepts the message or delivery reaches a terminal failure, and it always displays the one-time acceptance link as a fallback. Without SMTP, individual invitations remain available as manually shareable links and are marked accordingly in the interface.
+
+The same normalized email address cannot have more than one current invitation in a group. This rule is shared by individual creation and CSV imports, so repeated or mixed requests reuse the existing invitation outcome instead of creating another email job. A database trigger provides a final concurrency guard for simultaneous requests. Expired, revoked, or accepted invitations do not block a later valid invitation; only an active membership blocks another invitation, while an archived membership may be invited for reactivation.
 
 ## CSV invitation import
 

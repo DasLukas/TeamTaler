@@ -4,6 +4,9 @@ export interface Money {
   currency: string;
 }
 
+/** Determines whether a product price is fixed by the catalog or chosen per booking. */
+export type ProductPricingMode = 'FIXED' | 'USER_DEFINED';
+
 /** Roles that can be assigned to a group membership. */
 export type GroupRole = 'ADMIN' | 'FINANCE_MANAGER' | 'CATALOG_MANAGER' | 'MEMBER';
 
@@ -50,19 +53,49 @@ export interface Product {
   categoryId: string;
   version: number;
   name: string;
-  price: Money;
+  pricingMode: ProductPricingMode;
+  currency: string;
+  price?: Money;
   imageUrl?: string;
   active: boolean;
   sortOrder: number;
 }
 
+/** Command used by catalog managers to create one product. */
+export interface ProductCreateCommand {
+  categoryId: string;
+  name: string;
+  pricingMode: ProductPricingMode;
+  price?: Money;
+}
+
+/** Command used by catalog managers to update one product optimistically. */
+export interface ProductUpdateCommand {
+  name: string;
+  pricingMode: ProductPricingMode;
+  price?: Money;
+  active: boolean;
+  sortOrder: number;
+  version: number;
+}
+
 /** A category and its currently available products. */
 export interface Category {
   id: string;
+  version: number;
   name: string;
   icon: 'drink' | 'penalty' | 'other';
   active: boolean;
+  sortOrder: number;
   products: Product[];
+}
+
+/** Command used by catalog managers to update one category optimistically. */
+export interface CategoryUpdateCommand {
+  name: string;
+  active: boolean;
+  sortOrder: number;
+  version: number;
 }
 
 /** Per-category permissions assigned to a member. */
@@ -131,6 +164,7 @@ export interface BookingCommand {
   productVersion: number;
   expectedPeriodId: string;
   quantity: number;
+  unitPrice?: Money;
   targetMembershipId?: string;
   reason?: string;
 }
@@ -232,6 +266,12 @@ export interface InvitationCommand {
   password: string;
 }
 
+/** Safe onboarding hints resolved from a valid invitation token. */
+export interface InvitationPreview {
+  displayName: string;
+  existingAccount: boolean;
+}
+
 /** Outbound email lifecycle state for a group invitation. */
 export type EmailDeliveryStatus = 'PENDING' | 'SENDING' | 'SENT' | 'FAILED' | 'CANCELLED' | 'NOT_REQUESTED';
 
@@ -243,15 +283,40 @@ export interface InvitationMetadata {
   id: string;
   email: string;
   displayName?: string;
+  roles: GroupRole[];
+  categoryPermissions: CategoryPermission[];
   expiresAt: string;
+  acceptedAt?: string;
+  revokedAt?: string;
   emailDeliveryStatus: EmailDeliveryStatus;
   emailSentAt?: string;
+  emailFailureCode?: string;
 }
 
 /** A newly created one-time invitation including its one-time acceptance URL. */
 export interface CreatedInvitation {
   id: string;
-  email?: string;
+  email: string;
+  displayName?: string;
+  roles: GroupRole[];
+  categoryPermissions: CategoryPermission[];
+  expiresAt: string;
+  acceptUrl: string;
+  emailDeliveryStatus: EmailDeliveryStatus;
+}
+
+/** Editable defaults assigned to a manual group invitation. */
+export interface InvitationInput {
+  email: string;
+  displayName: string;
+  roles: GroupRole[];
+  categoryPermissions: CategoryPermission[];
+}
+
+/** Result of rotating and resending an invitation email. */
+export interface InvitationEmailResendResult {
+  invitationId: string;
+  emailDeliveryStatus: 'PENDING';
   expiresAt: string;
   acceptUrl: string;
 }

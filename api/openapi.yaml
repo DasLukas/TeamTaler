@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: TeamTaler API
-  version: 0.2.0
+  version: 0.3.0
   description: |
     Same-origin JSON API for TeamTaler. Monetary values use integer minor units:
     response fields are exact decimal strings, while command inputs are bounded
@@ -84,6 +84,27 @@ paths:
               schema:
                 $ref: '#/components/schemas/Session'
         '401': { $ref: '#/components/responses/Problem' }
+  /invitations/preview:
+    post:
+      tags: [Authentication]
+      summary: Resolve safe onboarding hints for a valid invitation token
+      description: Rate-limited public lookup that never exposes the invited email address, roles, or category grants.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InvitationPreviewCommand' }
+      responses:
+        '200':
+          description: Safe invitation preview
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvitationPreview' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
   /invitations/accept:
     post:
       tags: [Authentication]
@@ -228,6 +249,25 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/members/{membershipId}:
+    delete:
+      tags: [Groups]
+      summary: Archive a membership while preserving all historical records
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/MembershipId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - name: confirmSelf
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+          description: Must be true when an administrator removes their own membership.
+      responses:
+        '204': { description: Membership archived and effective permissions cleared }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/invitations:
     get:
       tags: [Groups]
@@ -245,7 +285,14 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
     post:
       tags: [Groups]
-      summary: Create a seven-day, one-time invitation
+      summary: Create a seven-day, one-time invitation and optionally queue its email
+      description: |
+        When SMTP delivery is configured, the invitation and its encrypted
+        transactional outbox job are committed atomically. The one-time
+        acceptance URL is returned regardless of SMTP availability so an
+        administrator can use it as a fallback. A current invitation or group
+        membership for the normalized email address prevents duplicates across
+        manual creation and CSV imports.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/CSRFToken'
@@ -256,7 +303,7 @@ paths:
             schema: { $ref: '#/components/schemas/InvitationCommand' }
       responses:
         '201':
-          description: Invitation and one-time acceptance URL
+          description: Invitation with delivery status and one-time fallback acceptance URL
           content:
             application/json:
               schema:
@@ -266,6 +313,7 @@ paths:
                   invitation: { $ref: '#/components/schemas/Invitation' }
                   acceptUrl: { type: string, format: uri }
         '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/invitations/import:
     post:
       tags: [Groups]
@@ -303,6 +351,46 @@ paths:
         '415': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '503': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/invitations/{invitationId}:
+    patch:
+      tags: [Groups]
+      summary: Replace the display-name and permission defaults of an open invitation
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - name: invitationId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InvitationUpdate' }
+      responses:
+        '200':
+          description: Updated invitation metadata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Invitation' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [Groups]
+      summary: Revoke an open invitation and cancel unsent email delivery
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - name: invitationId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204': { description: Invitation revoked }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/invitations/{invitationId}/email/retry:
     post:
       tags: [Groups]
@@ -321,6 +409,30 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/InvitationEmailRetryResult' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/invitations/{invitationId}/email/resend:
+    post:
+      tags: [Groups]
+      summary: Rotate and resend an open invitation
+      description: Creates a new token and seven-day expiry. Older links become invalid; PENDING and SENDING deliveries are rejected.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - name: invitationId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Rotated invitation queued for delivery
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvitationEmailResendResult' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
@@ -857,11 +969,26 @@ components:
         password: { type: string, format: password, minLength: 12, maxLength: 1024 }
     InvitationAcceptance:
       type: object
-      required: [token, displayName, password]
+      required: [token, password]
       properties:
         token: { type: string, minLength: 1 }
-        displayName: { type: string, minLength: 1, maxLength: 120 }
+        displayName:
+          type: string
+          maxLength: 120
+          description: Required for a new account and ignored for an existing account.
         password: { type: string, format: password, minLength: 12, maxLength: 1024 }
+    InvitationPreviewCommand:
+      type: object
+      required: [token]
+      properties:
+        token: { type: string, minLength: 1 }
+    InvitationPreview:
+      type: object
+      required: [displayName, existingAccount]
+      additionalProperties: false
+      properties:
+        displayName: { type: string, maxLength: 120 }
+        existingAccount: { type: boolean }
     Session:
       type: object
       required: [user, csrfToken, groups]
@@ -931,18 +1058,41 @@ components:
             items: { $ref: '#/components/schemas/CategoryPermission' }
     InvitationCommand:
       type: object
-      required: [email, displayName, roles]
+      required: [email, roles, categoryGrants]
       properties:
         email: { type: string, format: email, maxLength: 254 }
         displayName:
           type: string
-          description: Original normalized value; invalid rows may exceed the 120-character creation limit.
+          maxLength: 120
+          description: Optional suggested name for a new account.
         roles:
           type: array
+          uniqueItems: true
           items: { $ref: '#/components/schemas/Role' }
+        categoryGrants:
+          type: object
+          additionalProperties:
+            type: array
+            uniqueItems: true
+            items: { $ref: '#/components/schemas/CategoryPermission' }
+    InvitationUpdate:
+      type: object
+      required: [roles, categoryGrants]
+      properties:
+        displayName: { type: string, maxLength: 120 }
+        roles:
+          type: array
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/Role' }
+        categoryGrants:
+          type: object
+          additionalProperties:
+            type: array
+            uniqueItems: true
+            items: { $ref: '#/components/schemas/CategoryPermission' }
     Invitation:
       type: object
-      required: [id, groupId, email, roles, expiresAt, emailDeliveryStatus]
+      required: [id, groupId, email, roles, categoryGrants, expiresAt, emailDeliveryStatus]
       properties:
         id: { type: string }
         groupId: { type: string }
@@ -951,6 +1101,12 @@ components:
         roles:
           type: array
           items: { $ref: '#/components/schemas/Role' }
+        categoryGrants:
+          type: object
+          additionalProperties:
+            type: array
+            uniqueItems: true
+            items: { $ref: '#/components/schemas/CategoryPermission' }
         expiresAt: { type: string, format: date-time }
         acceptedAt: { type: string, format: date-time }
         revokedAt: { type: string, format: date-time }
@@ -1000,6 +1156,18 @@ components:
         emailDeliveryStatus:
           type: string
           const: PENDING
+    InvitationEmailResendResult:
+      type: object
+      required: [invitationId, emailDeliveryStatus, expiresAt, acceptUrl]
+      properties:
+        invitationId: { type: string }
+        emailDeliveryStatus:
+          type: string
+          const: PENDING
+        expiresAt: { type: string, format: date-time }
+        acceptUrl:
+          type: string
+          description: New fallback URL on the first idempotent response; empty on a replay.
     Category:
       type: object
       required: [id, groupId, name, active, sortOrder, version]
@@ -1029,25 +1197,48 @@ components:
             version: { type: integer, format: int64, minimum: 1 }
     Product:
       type: object
-      required: [id, groupId, categoryId, name, priceMinor, currency, active, sortOrder, version]
+      required: [id, groupId, categoryId, name, pricingMode, currency, active, sortOrder, version]
       properties:
         id: { type: string }
         groupId: { type: string }
         categoryId: { type: string }
         name: { type: string }
         priceMinor: { $ref: '#/components/schemas/MinorUnits' }
+        pricingMode:
+          type: string
+          enum: [FIXED, USER_DEFINED]
+          description: FIXED exposes priceMinor; USER_DEFINED requires the booking actor to submit a unit price.
         currency: { type: string }
         imageUrl: { type: string }
         active: { type: boolean }
         sortOrder: { type: integer }
         version: { type: integer, format: int64 }
+      oneOf:
+        - required: [priceMinor]
+          properties:
+            pricingMode: { const: FIXED }
+        - properties:
+            pricingMode: { const: USER_DEFINED }
+            priceMinor: false
     ProductCommand:
       type: object
-      required: [name, priceMinor, sortOrder]
+      required: [name, sortOrder]
       properties:
         name: { type: string, minLength: 1, maxLength: 120 }
         priceMinor: { type: integer, format: int64, minimum: 1, maximum: 100000000000 }
+        pricingMode:
+          type: string
+          enum: [FIXED, USER_DEFINED]
+          default: FIXED
         sortOrder: { type: integer }
+      oneOf:
+        - required: [priceMinor]
+          properties:
+            pricingMode: { type: string, enum: [FIXED] }
+        - required: [pricingMode]
+          properties:
+            pricingMode: { const: USER_DEFINED }
+            priceMinor: false
     ProductUpdate:
       allOf:
         - $ref: '#/components/schemas/ProductCommand'
@@ -1064,6 +1255,12 @@ components:
         productVersion: { type: integer, format: int64, minimum: 1 }
         expectedPeriodId: { type: string }
         quantity: { type: integer, minimum: 1, maximum: 99 }
+        unitPriceMinor:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 100000000000
+          description: Required for USER_DEFINED products and forbidden for FIXED products; interpreted as the unit price.
         targetMembershipId: { type: string }
         reason: { type: string, maxLength: 500 }
     Booking:

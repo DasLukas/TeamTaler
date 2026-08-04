@@ -33,6 +33,7 @@ export function DashboardPage() {
   const [categoryId, setCategoryId] = useState('');
   const [selectedProductId, setSelectedProductId] = useState('');
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const activeMembers = useMemo(() => membersQuery.data?.filter((member) => member.active) ?? [], [membersQuery.data]);
   const bookableCategories = useMemo(() => getBookableCategories(categoriesQuery.data ?? []), [categoriesQuery.data]);
 
   const selectedProduct = useMemo(() => {
@@ -40,7 +41,7 @@ export function DashboardPage() {
     return products.find((product) => product.id === selectedProductId) ?? products.find((product) => product.name.toLocaleLowerCase('de') === 'bier') ?? products[0];
   }, [bookableCategories, selectedProductId]);
   const selectedCategory = bookableCategories.find((category) => category.id === selectedProduct?.categoryId);
-  const currentMembership = membersQuery.data?.find((member) => member.userId === session.user.id) ?? membersQuery.data?.[0];
+  const currentMembership = activeMembers.find((member) => member.userId === session.user.id) ?? activeMembers[0];
   const loading = dashboardQuery.isLoading || categoriesQuery.isLoading || membersQuery.isLoading;
   const error = dashboardQuery.error ?? categoriesQuery.error ?? membersQuery.error;
 
@@ -73,7 +74,7 @@ export function DashboardPage() {
       currentMembershipId={currentMembership.id}
       groupId={activeGroupId}
       key={selectedProduct.id}
-      members={membersQuery.data}
+      members={activeMembers}
       onBooked={() => setInspectorOpen(false)}
       onCancel={() => setInspectorOpen(false)}
       period={dashboard.currentPeriod}

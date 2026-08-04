@@ -3,11 +3,14 @@ import type {
   BookingCommand,
   Category,
   CreatedInvitation,
+  InvitationEmailResendResult,
   InvitationEmailRetryResult,
   InvitationImportResult,
   InvitationImportRow,
   InvitationCommand,
+  InvitationInput,
   InvitationMetadata,
+  InvitationPreview,
   LoginCommand,
   Membership,
   Notification,
@@ -18,6 +21,7 @@ import type {
   Product,
   Session,
 } from '@/api/types';
+import { MAX_PRODUCT_PRICE_MINOR } from '@/api/money';
 import {
   demoAudit,
   demoBookings,
@@ -37,6 +41,27 @@ type DemoRequestInit = RequestInit;
 
 const clone = <T,>(value: T): T => structuredClone(value);
 const identifier = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
+
+/**
+ * Validates a demo wire price against the production product-price bounds.
+ *
+ * @param value - Integer minor units from a simulated command.
+ * @returns Canonical decimal minor units.
+ * @throws TypeError when the value is absent, malformed, or non-positive.
+ * @throws RangeError when the value exceeds the production limit.
+ */
+function validateDemoProductPrice(value: string | number | undefined): string {
+  let amount: bigint;
+  try {
+    if (value === undefined) throw new TypeError(i18n.t('errors.amountFormat'));
+    amount = BigInt(value);
+  } catch {
+    throw new TypeError(i18n.t('errors.amountFormat'));
+  }
+  if (amount <= 0n) throw new TypeError(i18n.t('errors.amountFormat'));
+  if (amount > MAX_PRODUCT_PRICE_MINOR) throw new RangeError(i18n.t('errors.amountRange'));
+  return amount.toString();
+}
 
 interface DemoImportCandidate {
   row: number;
@@ -122,6 +147,7 @@ export class DemoTransport {
   private notifications = clone(demoNotifications);
   private audit = clone(demoAudit);
   private invitations: InvitationMetadata[] = [];
+  private invitationTokens = new Map<string, string>();
 
   /**
    * Resolves one development request.
@@ -143,6 +169,7 @@ export class DemoTransport {
     if (cleanPath === '/session' || cleanPath === '/me') return clone(this.session) as T;
     if (cleanPath === '/auth/login' && method === 'POST') return this.login(body as LoginCommand) as T;
     if (cleanPath === '/auth/logout' && method === 'POST') return undefined as T;
+    if (cleanPath === '/invitations/preview' && method === 'POST') return this.previewInvitation((body as { token?: string }).token ?? '') as T;
     if ((cleanPath === '/auth/invitations/accept' || cleanPath === '/invitations/accept') && method === 'POST') return this.acceptInvitation(body as InvitationCommand) as T;
     if (cleanPath === '/groups') return clone(this.session.groups) as T;
 
@@ -164,7 +191,7 @@ export class DemoTransport {
     if (resource === 'audit' && method === 'GET') return clone(this.audit) as T;
     if (resource === 'invitations/import' && method === 'POST') return this.importInvitations(body as string) as T;
     if (resource === 'invitations' && method === 'GET') return this.listInvitations() as T;
-    if (resource === 'invitations' && method === 'POST') return this.createInvitation(body as { email?: string; displayName?: string; expiresInDays?: number }) as T;
+    if (resource === 'invitations' && method === 'POST') return this.createInvitation(body as InvitationInput & { categoryGrants?: Record<string, string[]>; expiresInDays?: number }) as T;
     if (resource === 'categories' && method === 'POST') return this.createCategory(body as Partial<Category>) as T;
     if (resource === 'logo' && method === 'POST') {
       const image = init.body instanceof FormData ? init.body.get('image') : undefined;
@@ -181,6 +208,13 @@ export class DemoTransport {
 
     const permissionMatch = resource.match(/^members\/([^/]+)\/permissions$/);
     if (permissionMatch && method === 'PATCH') return this.updatePermissions(permissionMatch[1], body as PermissionUpdate & { categoryGrants?: Record<string, string[]> }) as T;
+    const memberMatch = resource.match(/^members\/([^/]+)$/);
+    if (memberMatch && method === 'DELETE') {
+      const confirmSelf = new URL(path, window.location.origin).searchParams.get('confirmSelf') === 'true';
+      return this.archiveMember(groupId, memberMatch[1], confirmSelf) as T;
+    }
+    const categoryUpdateMatch = resource.match(/^categories\/([^/]+)$/);
+    if (categoryUpdateMatch && method === 'PATCH') return this.updateCategory(categoryUpdateMatch[1], body as Pick<Category, 'name' | 'active' | 'sortOrder' | 'version'>) as T;
     const bookingReversalMatch = resource.match(/^bookings\/([^/]+)\/(?:reversal|void)$/);
     if (bookingReversalMatch && method === 'POST') return this.reverseBooking(bookingReversalMatch[1]) as T;
     const periodCloseMatch = resource.match(/^periods\/([^/]+)\/close$/);
@@ -191,13 +225,40 @@ export class DemoTransport {
     if (paymentReverseMatch && method === 'POST') return this.reversePayment(paymentReverseMatch[1]) as T;
     const productCreateMatch = resource.match(/^categories\/([^/]+)\/products$/);
     if (productCreateMatch && method === 'POST') {
-      const input = body as { name?: string; priceMinor?: number; sortOrder?: number };
-      return this.createProduct({ categoryId: productCreateMatch[1], name: input.name, price: { minorUnits: String(input.priceMinor ?? 0), currency: 'EUR' }, sortOrder: input.sortOrder } as Partial<Product>) as T;
+      const input = body as { name?: string; priceMinor?: number; pricingMode?: Product['pricingMode']; sortOrder?: number };
+      const pricingMode = input.pricingMode === 'USER_DEFINED' ? 'USER_DEFINED' : 'FIXED';
+      if (pricingMode === 'USER_DEFINED' && input.priceMinor !== undefined) throw new Error(i18n.t('errors.amountFormat'));
+      const fixedPriceMinor = pricingMode === 'FIXED' ? validateDemoProductPrice(input.priceMinor) : undefined;
+      return this.createProduct({
+        categoryId: productCreateMatch[1],
+        name: input.name,
+        pricingMode,
+        currency: 'EUR',
+        price: fixedPriceMinor ? { minorUnits: fixedPriceMinor, currency: 'EUR' } : undefined,
+        sortOrder: input.sortOrder,
+      } as Partial<Product>) as T;
+    }
+    const productUpdateMatch = resource.match(/^products\/([^/]+)$/);
+    if (productUpdateMatch && method === 'PATCH') {
+      const input = body as { name: string; priceMinor?: number; pricingMode: Product['pricingMode']; active: boolean; sortOrder: number; version: number };
+      const pricingMode = input.pricingMode === 'USER_DEFINED' ? 'USER_DEFINED' : 'FIXED';
+      if (pricingMode === 'USER_DEFINED' && input.priceMinor !== undefined) throw new Error(i18n.t('errors.amountFormat'));
+      const fixedPriceMinor = pricingMode === 'FIXED' ? validateDemoProductPrice(input.priceMinor) : undefined;
+      return this.updateProduct(productUpdateMatch[1], {
+        ...input,
+        pricingMode,
+        price: fixedPriceMinor ? { minorUnits: fixedPriceMinor, currency: 'EUR' } : undefined,
+      }) as T;
     }
     const productImageMatch = resource.match(/^products\/([^/]+)\/image$/);
     if (productImageMatch && method === 'POST') return { imageUrl: '' } as T;
     const invitationEmailRetryMatch = resource.match(/^invitations\/([^/]+)\/email\/retry$/);
     if (invitationEmailRetryMatch && method === 'POST') return this.retryInvitationEmail(invitationEmailRetryMatch[1]) as T;
+    const invitationEmailResendMatch = resource.match(/^invitations\/([^/]+)\/email\/resend$/);
+    if (invitationEmailResendMatch && method === 'POST') return this.resendInvitationEmail(invitationEmailResendMatch[1]) as T;
+    const invitationMatch = resource.match(/^invitations\/([^/]+)$/);
+    if (invitationMatch && method === 'PATCH') return this.updateInvitation(invitationMatch[1], body as Omit<InvitationInput, 'email'> & { categoryGrants?: Record<string, string[]> }) as T;
+    if (invitationMatch && method === 'DELETE') return this.revokeInvitation(invitationMatch[1]) as T;
 
     throw new Error(`Development demo endpoint not implemented: ${method} ${path}`);
   }
@@ -210,16 +271,45 @@ export class DemoTransport {
   }
 
   private acceptInvitation(command: InvitationCommand): Session {
-    this.session.user.displayName = command.displayName;
+    const invitationId = [...this.invitationTokens].find(([, token]) => token === command.token)?.[0];
+    const invitation = this.invitations.find((item) => item.id === invitationId);
+    if (invitation) {
+      invitation.acceptedAt = new Date().toISOString();
+      this.invitationTokens.delete(invitation.id);
+      const archivedMember = this.members.find((member) => !member.active && member.email.toLowerCase() === invitation.email.toLowerCase());
+      if (archivedMember) {
+        archivedMember.active = true;
+        archivedMember.roles = invitation.roles;
+        archivedMember.categoryPermissions = invitation.categoryPermissions;
+      } else {
+        this.session.user.displayName = command.displayName;
+      }
+    }
     return clone(this.session);
   }
 
-  private createBooking(command: BookingCommand): Booking {
+  private previewInvitation(token: string): InvitationPreview {
+    const invitationId = [...this.invitationTokens].find(([, candidate]) => candidate === token)?.[0];
+    const invitation = this.invitations.find((item) => item.id === invitationId && !item.acceptedAt && !item.revokedAt);
+    if (!invitation || Date.parse(invitation.expiresAt) <= Date.now()) throw new Error('Invitation is invalid or expired.');
+    const account = this.members.find((member) => member.email.toLowerCase() === invitation.email.toLowerCase());
+    return { displayName: invitation.displayName ?? account?.displayName ?? '', existingAccount: Boolean(account) };
+  }
+
+  private createBooking(command: BookingCommand & { unitPriceMinor?: number }): Booking {
     const product = this.categories.flatMap((category) => category.products).find((entry) => entry.id === command.productId);
     const target = this.members.find((member) => member.id === command.targetMembershipId) ?? this.members.find((member) => member.userId === this.session.user.id);
     const category = this.categories.find((entry) => entry.id === product?.categoryId);
     if (!product || !target || !category) throw new Error(i18n.t('errors.missingProductOrMember'));
-    const totalMinorUnits = BigInt(product.price.minorUnits) * BigInt(command.quantity);
+    if (product.pricingMode === 'FIXED' && (command.unitPrice || command.unitPriceMinor !== undefined)) throw new Error(i18n.t('errors.amountFormat'));
+    const chosenPrice = product.pricingMode === 'USER_DEFINED'
+      ? validateDemoProductPrice(command.unitPrice?.minorUnits ?? command.unitPriceMinor)
+      : undefined;
+    const unitPrice = product.pricingMode === 'FIXED'
+      ? product.price
+      : { minorUnits: chosenPrice as string, currency: product.currency };
+    if (!unitPrice) throw new Error(i18n.t('errors.amountFormat'));
+    const totalMinorUnits = BigInt(unitPrice.minorUnits) * BigInt(command.quantity);
     const booking: Booking = {
       id: identifier('booking'),
       memberId: target.id,
@@ -229,8 +319,8 @@ export class DemoTransport {
       categoryId: category.id,
       categoryName: category.name,
       quantity: command.quantity,
-      unitPrice: product.price,
-      total: { minorUnits: totalMinorUnits.toString(), currency: product.price.currency },
+      unitPrice,
+      total: { minorUnits: totalMinorUnits.toString(), currency: unitPrice.currency },
       bookedAt: new Date().toISOString(),
       bookedByName: this.session.user.displayName,
       reason: command.reason,
@@ -260,42 +350,99 @@ export class DemoTransport {
   }
 
   private updatePermissions(id: string, update: PermissionUpdate & { categoryGrants?: Record<string, string[]> }): Membership {
-    const member = this.members.find((entry) => entry.id === id);
+    const member = this.members.find((entry) => entry.id === id && entry.active);
     if (!member) throw new Error(i18n.t('errors.memberNotFound'));
+    if (member.roles.includes('ADMIN') && !update.roles.includes('ADMIN') && this.activeAdministratorCount() <= 1) {
+      throw new Error('The last active administrator cannot be removed.');
+    }
     member.roles = update.roles;
     member.categoryPermissions = update.categoryPermissions ?? Object.entries(update.categoryGrants ?? {}).map(([categoryId, permissions]) => ({ categoryId, assignToOthers: permissions.includes('ASSIGN_TO_OTHERS'), voidBookings: permissions.includes('VOID_BOOKINGS') }));
     member.etag = `"${id}-${Date.now()}"`;
     return clone(member);
   }
 
+  private archiveMember(groupId: string, id: string, confirmSelf: boolean): void {
+    const member = this.members.find((entry) => entry.id === id && entry.active);
+    if (!member) throw new Error(i18n.t('errors.memberNotFound'));
+    const selfRemoval = member.userId === this.session.user.id;
+    if (selfRemoval && !confirmSelf) throw new Error('Self-removal must be confirmed.');
+    if (member.roles.includes('ADMIN') && this.activeAdministratorCount() <= 1) {
+      throw new Error('The last active administrator cannot be removed.');
+    }
+    member.active = false;
+    member.roles = ['MEMBER'];
+    member.categoryPermissions = [];
+    if (selfRemoval) {
+      this.session.groups = this.session.groups.filter((group) => group.id !== groupId);
+      this.session.activeGroupId = this.session.groups[0]?.id ?? '';
+    }
+  }
+
+  private activeAdministratorCount(): number {
+    return this.members.filter((member) => member.active && member.roles.includes('ADMIN')).length;
+  }
+
   private createCategory(input: Partial<Category>): Category {
     const category: Category = {
       id: identifier('category'),
+      version: 1,
       name: input.name ?? i18n.t('demo.newCategory'),
       icon: input.icon ?? 'other',
       active: true,
+      sortOrder: this.categories.length + 1,
       products: [],
     };
     this.categories.push(category);
     return clone(category);
   }
 
-  private createInvitation(input: { email?: string; displayName?: string; expiresInDays?: number }): CreatedInvitation {
+  /** Updates one demo category while enforcing the production version contract. */
+  private updateCategory(id: string, input: Pick<Category, 'name' | 'active' | 'sortOrder' | 'version'>): Category {
+    const category = this.categories.find((entry) => entry.id === id);
+    if (!category) throw new Error(i18n.t('errors.categoryNotFound'));
+    if (category.version !== input.version) throw new Error(i18n.t('errors.requestFailed'));
+    category.name = input.name;
+    category.active = input.active;
+    category.sortOrder = input.sortOrder;
+    category.version += 1;
+    return clone(category);
+  }
+
+  private createInvitation(input: InvitationInput & { categoryGrants?: Record<string, string[]>; expiresInDays?: number }): CreatedInvitation {
+    const email = input.email.trim().toLowerCase();
+    if (this.members.some((member) => member.active && member.email.toLowerCase() === email)) throw new Error('An active membership already exists for this email address.');
+    if (this.invitations.some((item) => !item.acceptedAt && !item.revokedAt && Date.parse(item.expiresAt) > Date.now() && item.email.toLowerCase() === email)) throw new Error('An active invitation already exists for this email address.');
     const token = crypto.randomUUID();
     const invitation: CreatedInvitation = {
       id: identifier('invitation'),
-      email: input.email,
+      email,
+      displayName: input.displayName || undefined,
+      roles: [...(input.roles ?? []).filter((role) => role !== 'MEMBER'), 'MEMBER'],
+      categoryPermissions: input.categoryPermissions ?? Object.entries(input.categoryGrants ?? {}).map(([categoryId, permissions]) => ({ categoryId, assignToOthers: permissions.includes('ASSIGN_TO_OTHERS'), voidBookings: permissions.includes('VOID_BOOKINGS') })),
       expiresAt: new Date(Date.now() + (input.expiresInDays || 7) * 86_400_000).toISOString(),
       acceptUrl: `${window.location.origin}/invite#token=${token}`,
+      emailDeliveryStatus: 'PENDING',
     };
-    this.invitations.unshift({
-      id: invitation.id,
-      email: input.email ?? '',
-      displayName: input.displayName,
-      expiresAt: invitation.expiresAt,
-      emailDeliveryStatus: 'NOT_REQUESTED',
-    });
+    this.invitations.unshift({ ...invitation });
+    this.invitationTokens.set(invitation.id, token);
     return invitation;
+  }
+
+  private updateInvitation(invitationId: string, input: Omit<InvitationInput, 'email'> & { categoryGrants?: Record<string, string[]> }): InvitationMetadata {
+    const invitation = this.invitations.find((item) => item.id === invitationId && !item.acceptedAt && !item.revokedAt);
+    if (!invitation) throw new Error('Invitation not found.');
+    invitation.displayName = input.displayName || undefined;
+    invitation.roles = [...(input.roles ?? []).filter((role) => role !== 'MEMBER'), 'MEMBER'];
+    invitation.categoryPermissions = input.categoryPermissions ?? Object.entries(input.categoryGrants ?? {}).map(([categoryId, permissions]) => ({ categoryId, assignToOthers: permissions.includes('ASSIGN_TO_OTHERS'), voidBookings: permissions.includes('VOID_BOOKINGS') }));
+    return clone(invitation);
+  }
+
+  private revokeInvitation(invitationId: string): void {
+    const invitation = this.invitations.find((item) => item.id === invitationId && !item.acceptedAt && !item.revokedAt);
+    if (!invitation) throw new Error('Invitation not found.');
+    invitation.revokedAt = new Date().toISOString();
+    invitation.emailDeliveryStatus = 'CANCELLED';
+    this.invitationTokens.delete(invitationId);
   }
 
   /**
@@ -307,8 +454,10 @@ export class DemoTransport {
    */
   private importInvitations(document: string): InvitationImportResult {
     const candidates = parseDemoMemberCsv(document);
-    const memberEmails = new Set(this.members.map((member) => member.email.toLowerCase()));
-    const existingInvitations = new Map(this.invitations.map((invitation) => [invitation.email.toLowerCase(), invitation]));
+    const memberEmails = new Set(this.members.filter((member) => member.active).map((member) => member.email.toLowerCase()));
+    const existingInvitations = new Map(this.invitations
+      .filter((invitation) => !invitation.acceptedAt && !invitation.revokedAt && Date.parse(invitation.expiresAt) > Date.now())
+      .map((invitation) => [invitation.email.toLowerCase(), invitation]));
     const importedEmails = new Set<string>();
     const rows: InvitationImportRow[] = [];
     const summary = { totalRows: candidates.length, created: 0, invalid: 0, skipped: 0 };
@@ -345,10 +494,13 @@ export class DemoTransport {
         id: identifier('invitation'),
         email: candidate.email,
         displayName: candidate.displayName || undefined,
+        roles: ['MEMBER'],
+        categoryPermissions: [],
         expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString(),
         emailDeliveryStatus: 'PENDING',
       };
       this.invitations.unshift(invitation);
+      this.invitationTokens.set(invitation.id, crypto.randomUUID());
       existingInvitations.set(candidate.email, invitation);
       rows.push({ ...base, invitationId: invitation.id, invitationStatus: 'CREATED', emailDeliveryStatus: 'PENDING' });
       summary.created += 1;
@@ -380,11 +532,25 @@ export class DemoTransport {
    * @throws Error when the invitation does not exist.
    */
   private retryInvitationEmail(invitationId: string): InvitationEmailRetryResult {
-    const invitation = this.invitations.find((item) => item.id === invitationId);
+    const invitation = this.invitations.find((item) => item.id === invitationId
+      && !item.acceptedAt && !item.revokedAt && Date.parse(item.expiresAt) > Date.now()
+      && item.emailDeliveryStatus === 'FAILED');
     if (!invitation) throw new Error('Invitation not found.');
     invitation.emailDeliveryStatus = 'PENDING';
     delete invitation.emailSentAt;
     return { invitationId, emailDeliveryStatus: 'PENDING' };
+  }
+
+  private resendInvitationEmail(invitationId: string): InvitationEmailResendResult {
+    const invitation = this.invitations.find((item) => item.id === invitationId && !item.acceptedAt && !item.revokedAt);
+    if (!invitation) throw new Error('Invitation not found.');
+    if (invitation.emailDeliveryStatus === 'PENDING' || invitation.emailDeliveryStatus === 'SENDING') throw new Error('Invitation delivery is already in progress.');
+    const token = crypto.randomUUID();
+    invitation.expiresAt = new Date(Date.now() + 7 * 86_400_000).toISOString();
+    invitation.emailDeliveryStatus = 'PENDING';
+    delete invitation.emailSentAt;
+    this.invitationTokens.set(invitationId, token);
+    return { invitationId, emailDeliveryStatus: 'PENDING', expiresAt: invitation.expiresAt, acceptUrl: `${window.location.origin}/invite#token=${token}` };
   }
 
   private createProduct(input: Partial<Product>): Product {
@@ -395,12 +561,28 @@ export class DemoTransport {
       categoryId: category.id,
       version: 1,
       name: input.name ?? i18n.t('demo.newProduct'),
-      price: input.price ?? { minorUnits: '0', currency: 'EUR' },
+      pricingMode: input.pricingMode ?? 'FIXED',
+      currency: input.currency ?? 'EUR',
+      price: input.pricingMode === 'USER_DEFINED' ? undefined : input.price ?? { minorUnits: '0', currency: input.currency ?? 'EUR' },
       imageUrl: input.imageUrl,
       active: true,
       sortOrder: category.products.length + 1,
     };
     category.products.push(product);
+    return clone(product);
+  }
+
+  /** Updates one demo product while preserving its category and booking history. */
+  private updateProduct(id: string, input: Pick<Product, 'name' | 'pricingMode' | 'price' | 'active' | 'sortOrder' | 'version'>): Product {
+    const product = this.categories.flatMap((category) => category.products).find((entry) => entry.id === id);
+    if (!product) throw new Error(i18n.t('errors.missingProductOrMember'));
+    if (product.version !== input.version) throw new Error(i18n.t('errors.requestFailed'));
+    product.name = input.name;
+    product.pricingMode = input.pricingMode;
+    product.price = input.price;
+    product.active = input.active;
+    product.sortOrder = input.sortOrder;
+    product.version += 1;
     return clone(product);
   }
 
