@@ -47,7 +47,7 @@ export function ProductPicker({ categories, selectedCategoryId, onCategoryChange
             <button aria-pressed={selected} className={`${styles.product} ${selected ? styles.selectedProduct : ''}`} key={product.id} onClick={() => onProductSelect(product)} type="button">
               {product.imageUrl ? <img alt="" src={product.imageUrl} /> : <span className={styles.fallback}>{product.name.slice(0, 1)}</span>}
               <span className={styles.name}>{product.name}</span>
-              <span className={styles.price}>{formatMoney(product.price)}</span>
+              <span className={styles.price}>{product.pricingMode === 'FIXED' && product.price ? formatMoney(product.price) : t('booking.enterPrice')}</span>
               {selected ? <span className={styles.check}><Check aria-hidden="true" size={21} strokeWidth={2.3} /></span> : null}
             </button>
           );

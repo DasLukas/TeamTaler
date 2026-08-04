@@ -41,21 +41,6 @@
   font-size: var(--font-size-xl);
 }
 
-.selectWithIcon {
-  position: relative;
-}
-
-.selectWithIcon svg {
-  position: absolute;
-  z-index: 1;
-  top: 13px;
-  left: var(--space-4);
-}
-
-.selectWithIcon select {
-  padding-left: 50px;
-}
-
 .stepper {
   display: grid;
   height: 60px;

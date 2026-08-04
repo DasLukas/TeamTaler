@@ -4,6 +4,12 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+### Added
+
+- Per-product fixed or user-defined pricing with currency-aware browser validation, server-enforced booking prices, immutable price snapshots, and demo-mode coverage.
+- Version-aware category and product editing in the administration UI, including archive controls and recoverable product-image replacement.
+- TeamTaler favicon, Apple touch icon, and standard and maskable web-app icons for installed browser applications.
+
 ### Changed
 
 - Manual invitations can now assign an optional display-name suggestion, group roles, and category grants; accepted invitations apply all defaults atomically.
@@ -16,6 +22,7 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 - The last active administrator cannot be archived, self-removal requires explicit confirmation, and member removal preserves all financial and audit history while clearing effective access.
 - Invitation resend is idempotent, rotates the token and expiry, invalidates older links, and blocks duplicate delivery while an outbox job is pending or sending.
+- Fixed-price bookings now reject client-supplied price overrides, while user-defined prices are bounded and included in idempotency and audit metadata.
 
 ## [0.2.0] - 2026-08-04
 

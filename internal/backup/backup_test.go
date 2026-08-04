@@ -47,7 +47,8 @@ func TestCreateAndRestore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create backup category: %v", err)
 	}
-	product, err := categoryService.CreateProduct(ctx, session.Principal, groupItems[0].Membership, "backup-product-one", category.ID, catalog.CreateProductInput{Name: "Water", PriceMinor: 100})
+	priceMinor := int64(100)
+	product, err := categoryService.CreateProduct(ctx, session.Principal, groupItems[0].Membership, "backup-product-one", category.ID, catalog.CreateProductInput{Name: "Water", PriceMinor: &priceMinor})
 	if err != nil {
 		t.Fatalf("create backup product: %v", err)
 	}

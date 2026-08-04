@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { currencyExponent, formatMoney, majorUnitsInputPattern, minorUnitsToSafeNumber, multiplyMoney, normalizeMoney, parseMajorUnits } from './money';
+import i18n from '@/i18n';
+import { currencyExponent, formatMoney, majorUnitsInputPattern, majorUnitsInputValue, minorUnitsToSafeNumber, multiplyMoney, normalizeMoney, parseMajorUnits, parsePositiveMajorUnits, validatePositiveMajorUnits } from './money';
 
 describe('money utilities', () => {
   it('normalizes primitive major-unit values', () => {
@@ -27,8 +28,21 @@ describe('money utilities', () => {
     expect(majorUnitsInputPattern('KWD')).toContain('{1,3}');
   });
 
+  it('renders exact editable values without floating-point conversion', () => {
+    expect(majorUnitsInputValue({ minorUnits: '123', currency: 'JPY' })).toBe('123');
+    expect(majorUnitsInputValue({ minorUnits: '105', currency: 'EUR' })).toBe('1,05');
+    expect(majorUnitsInputValue({ minorUnits: '1234', currency: 'KWD' })).toBe('1,234');
+  });
+
   it.each(['1.005', '-1.00', 'abc', ''])('rejects invalid major units %s', (input) => {
     expect(() => parseMajorUnits(input)).toThrow(TypeError);
+  });
+
+  it('validates positive bounded product prices without throwing during form rendering', () => {
+    expect(parsePositiveMajorUnits('1,25', 'EUR')).toBe('125');
+    expect(() => parsePositiveMajorUnits('0', 'EUR')).toThrow(TypeError);
+    expect(() => parsePositiveMajorUnits('1000000000,01', 'EUR')).toThrow(RangeError);
+    expect(validatePositiveMajorUnits('invalid', 'EUR')).toEqual({ error: i18n.t('errors.amountFormat') });
   });
 
   it('normalizes snake-case backend values', () => {

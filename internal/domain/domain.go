@@ -96,18 +96,33 @@ type Category struct {
 	Products  []Product `json:"products,omitempty"`
 }
 
-// Product is an immutable-at-booking-time priced catalog item.
+// ProductPricingMode defines whether a product has a catalog price or requires
+// the booking actor to choose a unit price.
+type ProductPricingMode string
+
+const (
+	// ProductPricingFixed requires a positive catalog price.
+	ProductPricingFixed ProductPricingMode = "FIXED"
+	// ProductPricingUserDefined requires a positive unit price on every booking.
+	ProductPricingUserDefined ProductPricingMode = "USER_DEFINED"
+	// MaxProductPriceMinor bounds one product unit price in minor currency units.
+	MaxProductPriceMinor int64 = 100_000_000_000
+)
+
+// Product is a catalog item whose price is snapshotted when booked. PriceMinor
+// is present only for fixed-price products.
 type Product struct {
-	ID         string `json:"id"`
-	GroupID    string `json:"groupId"`
-	CategoryID string `json:"categoryId"`
-	Name       string `json:"name"`
-	PriceMinor int64  `json:"priceMinor,string"`
-	Currency   string `json:"currency"`
-	ImageURL   string `json:"imageUrl,omitempty"`
-	Active     bool   `json:"active"`
-	SortOrder  int    `json:"sortOrder"`
-	Version    int64  `json:"version"`
+	ID          string             `json:"id"`
+	GroupID     string             `json:"groupId"`
+	CategoryID  string             `json:"categoryId"`
+	Name        string             `json:"name"`
+	PriceMinor  *int64             `json:"priceMinor,omitempty,string"`
+	PricingMode ProductPricingMode `json:"pricingMode"`
+	Currency    string             `json:"currency"`
+	ImageURL    string             `json:"imageUrl,omitempty"`
+	Active      bool               `json:"active"`
+	SortOrder   int                `json:"sortOrder"`
+	Version     int64              `json:"version"`
 }
 
 // Booking is an immutable charge snapshot with optional reversal metadata.

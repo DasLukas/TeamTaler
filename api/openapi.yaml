@@ -1197,25 +1197,48 @@ components:
             version: { type: integer, format: int64, minimum: 1 }
     Product:
       type: object
-      required: [id, groupId, categoryId, name, priceMinor, currency, active, sortOrder, version]
+      required: [id, groupId, categoryId, name, pricingMode, currency, active, sortOrder, version]
       properties:
         id: { type: string }
         groupId: { type: string }
         categoryId: { type: string }
         name: { type: string }
         priceMinor: { $ref: '#/components/schemas/MinorUnits' }
+        pricingMode:
+          type: string
+          enum: [FIXED, USER_DEFINED]
+          description: FIXED exposes priceMinor; USER_DEFINED requires the booking actor to submit a unit price.
         currency: { type: string }
         imageUrl: { type: string }
         active: { type: boolean }
         sortOrder: { type: integer }
         version: { type: integer, format: int64 }
+      oneOf:
+        - required: [priceMinor]
+          properties:
+            pricingMode: { const: FIXED }
+        - properties:
+            pricingMode: { const: USER_DEFINED }
+            priceMinor: false
     ProductCommand:
       type: object
-      required: [name, priceMinor, sortOrder]
+      required: [name, sortOrder]
       properties:
         name: { type: string, minLength: 1, maxLength: 120 }
         priceMinor: { type: integer, format: int64, minimum: 1, maximum: 100000000000 }
+        pricingMode:
+          type: string
+          enum: [FIXED, USER_DEFINED]
+          default: FIXED
         sortOrder: { type: integer }
+      oneOf:
+        - required: [priceMinor]
+          properties:
+            pricingMode: { type: string, enum: [FIXED] }
+        - required: [pricingMode]
+          properties:
+            pricingMode: { const: USER_DEFINED }
+            priceMinor: false
     ProductUpdate:
       allOf:
         - $ref: '#/components/schemas/ProductCommand'
@@ -1232,6 +1255,12 @@ components:
         productVersion: { type: integer, format: int64, minimum: 1 }
         expectedPeriodId: { type: string }
         quantity: { type: integer, minimum: 1, maximum: 99 }
+        unitPriceMinor:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 100000000000
+          description: Required for USER_DEFINED products and forbidden for FIXED products; interpreted as the unit price.
         targetMembershipId: { type: string }
         reason: { type: string, maxLength: 500 }
     Booking:
