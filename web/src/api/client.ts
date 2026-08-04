@@ -20,10 +20,14 @@ import type {
   Category,
   CreatedInvitation,
   Dashboard,
+  EmailDeliveryStatus,
   InvitationEmailRetryResult,
+  InvitationEmailResendResult,
   InvitationCommand,
+  InvitationInput,
   InvitationImportResult,
   InvitationMetadata,
+  InvitationPreview,
   LedgerEntry,
   LoginCommand,
   Membership,
@@ -134,6 +138,38 @@ function setSessionActor(session: Session): Session {
   return session;
 }
 
+function invitationCategoryGrants(categoryPermissions: InvitationInput['categoryPermissions']): Record<string, string[]> {
+  return Object.fromEntries(categoryPermissions.flatMap((permission) => {
+    const grants = [permission.assignToOthers ? 'ASSIGN_TO_OTHERS' : null, permission.voidBookings ? 'VOID_BOOKINGS' : null].filter((value): value is string => Boolean(value));
+    return grants.length > 0 ? [[permission.categoryId, grants]] : [];
+  }));
+}
+
+function adaptInvitation(input: unknown): InvitationMetadata {
+  const source = input as Record<string, unknown>;
+  const grants = (source.categoryGrants ?? {}) as Record<string, string[]>;
+  const categoryPermissions = Array.isArray(source.categoryPermissions)
+    ? source.categoryPermissions as InvitationMetadata['categoryPermissions']
+    : Object.entries(grants).map(([categoryId, permissions]) => ({
+      categoryId,
+      assignToOthers: permissions.includes('ASSIGN_TO_OTHERS'),
+      voidBookings: permissions.includes('VOID_BOOKINGS'),
+    }));
+  return {
+    id: String(source.id ?? ''),
+    email: String(source.email ?? ''),
+    displayName: typeof source.displayName === 'string' && source.displayName ? source.displayName : undefined,
+    roles: [...((source.roles as InvitationMetadata['roles'] | undefined) ?? []).filter((role) => role !== 'MEMBER'), 'MEMBER'],
+    categoryPermissions,
+    expiresAt: String(source.expiresAt ?? ''),
+    acceptedAt: typeof source.acceptedAt === 'string' ? source.acceptedAt : undefined,
+    revokedAt: typeof source.revokedAt === 'string' ? source.revokedAt : undefined,
+    emailDeliveryStatus: (source.emailDeliveryStatus as EmailDeliveryStatus | undefined) ?? 'NOT_REQUESTED',
+    emailSentAt: typeof source.emailSentAt === 'string' ? source.emailSentAt : undefined,
+    emailFailureCode: typeof source.emailFailureCode === 'string' && source.emailFailureCode ? source.emailFailureCode : undefined,
+  };
+}
+
 function isDefinitiveClientError(error: unknown): boolean {
   if (!(error instanceof ApiError)) return false;
   return error.problem.status >= 400 && error.problem.status < 500 && ![408, 425, 429].includes(error.problem.status);
@@ -182,14 +218,24 @@ export const api = {
       idempotencyReservations.clearAll();
     }
   },
+  previewInvitation: async (token: string): Promise<InvitationPreview> => request<InvitationPreview>('/invitations/preview', { method: 'POST', body: json({ token }) }),
   acceptInvitation: async (command: InvitationCommand): Promise<Session> => setSessionActor(adaptSession(await request<unknown>('/invitations/accept', { method: 'POST', body: json(command) }))),
-  createInvitation: async (groupId: string, input: { email: string }): Promise<CreatedInvitation> => {
-    const response = await request<unknown>(groupPath(groupId, 'invitations'), { method: 'POST', body: json({ email: input.email, displayName: '', roles: [] }) });
-    const source = response as { invitation?: { id: string; email?: string; expiresAt: string }; acceptUrl?: string; id?: string; email?: string; expiresAt?: string };
-    const invitation = source.invitation ?? source;
-    return { id: invitation.id ?? '', email: invitation.email, expiresAt: invitation.expiresAt ?? '', acceptUrl: source.acceptUrl ?? '' };
+  createInvitation: async (groupId: string, input: InvitationInput): Promise<CreatedInvitation> => {
+  const response = await request<unknown>(groupPath(groupId, 'invitations'), { method: 'POST', body: json({ email: input.email, displayName: input.displayName, roles: input.roles.filter((role) => role !== 'MEMBER'), categoryGrants: invitationCategoryGrants(input.categoryPermissions) }) });
+  const source = response as { invitation?: unknown; acceptUrl?: string };
+  const invitation = adaptInvitation(source.invitation ?? response);
+  return {
+    ...invitation,
+    email: invitation.email || input.email,
+    acceptUrl: source.acceptUrl ?? '',
+  };
   },
-  getInvitations: async (groupId: string): Promise<InvitationMetadata[]> => request<InvitationMetadata[]>(groupPath(groupId, 'invitations')),
+  getInvitations: async (groupId: string): Promise<InvitationMetadata[]> => (await request<unknown[]>(groupPath(groupId, 'invitations'))).map(adaptInvitation),
+  updateInvitation: async (groupId: string, invitationId: string, input: Omit<InvitationInput, 'email'>): Promise<InvitationMetadata> => adaptInvitation(await request<unknown>(groupPath(groupId, `invitations/${encodeURIComponent(invitationId)}`), {
+    method: 'PATCH',
+    body: json({ displayName: input.displayName, roles: input.roles.filter((role) => role !== 'MEMBER'), categoryGrants: invitationCategoryGrants(input.categoryPermissions) }),
+  })),
+  revokeInvitation: async (groupId: string, invitationId: string): Promise<void> => request<void>(groupPath(groupId, `invitations/${encodeURIComponent(invitationId)}`), { method: 'DELETE' }),
   importInvitations: async (groupId: string, file: File): Promise<InvitationImportResult> => {
     const path = groupPath(groupId, 'invitations/import');
     let csv: string;
@@ -208,6 +254,10 @@ export const api = {
     const path = groupPath(groupId, `invitations/${encodeURIComponent(invitationId)}/email/retry`);
     return idempotentRequest<InvitationEmailRetryResult>(groupId, 'invitation.email.retry', path, { invitationId }, { method: 'POST' });
   },
+  resendInvitationEmail: async (groupId: string, invitationId: string): Promise<InvitationEmailResendResult> => {
+    const path = groupPath(groupId, `invitations/${encodeURIComponent(invitationId)}/email/resend`);
+    return idempotentRequest<InvitationEmailResendResult>(groupId, 'invitation.email.resend', path, { invitationId }, { method: 'POST' });
+  },
   uploadGroupLogo: async (groupId: string, image: File): Promise<{ logoUrl: string }> => {
     const form = new FormData();
     form.set('image', image);
@@ -217,6 +267,7 @@ export const api = {
   getDashboard: async (groupId: string): Promise<Dashboard> => adaptDashboard(await request<unknown>(groupPath(groupId, 'dashboard'))),
   getCategories: async (groupId: string): Promise<Category[]> => adaptCategories(await request<unknown>(groupPath(groupId, 'categories'))),
   getMembers: async (groupId: string): Promise<Membership[]> => adaptMemberships(await request<unknown>(groupPath(groupId, 'members'))),
+  archiveMember: async (groupId: string, membershipId: string, confirmSelf: boolean): Promise<void> => request<void>(`${groupPath(groupId, `members/${encodeURIComponent(membershipId)}`)}${confirmSelf ? '?confirmSelf=true' : ''}`, { method: 'DELETE' }),
   getBookings: async (groupId: string): Promise<Booking[]> => {
     const [bookings, members] = await Promise.all([request<unknown>(groupPath(groupId, 'bookings')), request<unknown>(groupPath(groupId, 'members'))]);
     const adaptedMembers = adaptMemberships(members);

@@ -6,6 +6,8 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/groups"
@@ -70,4 +72,33 @@ func (s *Server) handleRetryInvitationEmail(response http.ResponseWriter, reques
 		return
 	}
 	writeJSON(response, http.StatusOK, result)
+}
+
+// handleResendInvitationEmail rotates an invitation token, queues a fresh
+// delivery, and exposes the new fallback URL only for the first idempotent
+// response. response receives the secret-free delivery result plus an optional
+// acceptUrl; request supplies authenticated group context and Idempotency-Key.
+func (s *Server) handleResendInvitationEmail(response http.ResponseWriter, request *http.Request) {
+	principal, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	result, err := s.groups.ResendInvitationEmail(
+		request.Context(), principal, membership, request.Header.Get("Idempotency-Key"), request.PathValue("invitationID"),
+	)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	acceptURL := ""
+	if result.Token != "" {
+		acceptURL = strings.TrimSuffix(s.config.PublicURL.String(), "/") + "/invite#token=" + url.QueryEscape(result.Token)
+	}
+	writeJSON(response, http.StatusOK, map[string]any{
+		"invitationId":        result.InvitationID,
+		"emailDeliveryStatus": result.EmailDeliveryStatus,
+		"expiresAt":           result.ExpiresAt,
+		"acceptUrl":           acceptURL,
+	})
 }

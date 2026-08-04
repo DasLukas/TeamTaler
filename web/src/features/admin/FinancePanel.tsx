@@ -34,8 +34,9 @@ export function FinancePanel() {
   const [reference, setReference] = useState('');
   const [paymentToReverse, setPaymentToReverse] = useState<Payment | null>(null);
   const [reversalReason, setReversalReason] = useState('');
+  const activeMembers = membersQuery.data?.filter((member) => member.active) ?? [];
   const paymentMutation = useMutation({
-    mutationFn: () => api.createPayment(activeGroupId, { membershipId: membershipId || membersQuery.data?.[0]?.id || '', amount: { minorUnits: parseMajorUnits(amount, activeGroup.currency), currency: activeGroup.currency }, receivedAt, method, reference: reference.trim() || undefined }),
+    mutationFn: () => api.createPayment(activeGroupId, { membershipId: membershipId || activeMembers[0]?.id || '', amount: { minorUnits: parseMajorUnits(amount, activeGroup.currency), currency: activeGroup.currency }, receivedAt, method, reference: reference.trim() || undefined }),
     onSuccess: async () => {
       setDialogOpen(false);
       setAmount('');
@@ -77,7 +78,7 @@ export function FinancePanel() {
       )}
       <Modal onClose={() => setDialogOpen(false)} open={dialogOpen} title={t('finance.record')}>
         <form className={styles.form} onSubmit={(event) => { event.preventDefault(); paymentMutation.mutate(); }}>
-          <Field htmlFor="payment-member" label={t('common.member')}><SelectInput id="payment-member" onChange={(event) => setMembershipId(event.target.value)} value={membershipId || membersQuery.data[0]?.id}>{membersQuery.data.filter((member) => member.active).map((member) => <option key={member.id} value={member.id}>{member.displayName}</option>)}</SelectInput></Field>
+          <Field htmlFor="payment-member" label={t('common.member')}><SelectInput id="payment-member" onChange={(event) => setMembershipId(event.target.value)} value={membershipId || activeMembers[0]?.id}>{activeMembers.map((member) => <option key={member.id} value={member.id}>{member.displayName}</option>)}</SelectInput></Field>
           <div className={styles.formRow}><Field htmlFor="payment-amount" label={t('finance.amountIn', { currency: activeGroup.currency })}><TextInput id="payment-amount" inputMode="decimal" onChange={(event) => setAmount(event.target.value)} pattern={majorUnitsInputPattern(activeGroup.currency)} placeholder={majorUnitsPlaceholder(activeGroup.currency)} required type="text" value={amount} /></Field><Field htmlFor="payment-date" label={t('finance.receivedDate')}><TextInput id="payment-date" onChange={(event) => setReceivedAt(event.target.value)} required type="date" value={receivedAt} /></Field></div>
           <Field htmlFor="payment-method" label={t('finance.paymentType')}><SelectInput id="payment-method" onChange={(event) => setMethod(event.target.value as Payment['method'])} value={method}><option value="BANK_TRANSFER">{t('finance.transfer')}</option><option value="CASH">{t('finance.cash')}</option><option value="OTHER">{t('finance.other')}</option></SelectInput></Field>
           <Field htmlFor="payment-reference" label={t('common.reference')}><TextInput id="payment-reference" onChange={(event) => setReference(event.target.value)} placeholder={t('finance.referencePlaceholder')} value={reference} /></Field>

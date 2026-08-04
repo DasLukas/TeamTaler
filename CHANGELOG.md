@@ -4,6 +4,19 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+### Changed
+
+- Manual invitations can now assign an optional display-name suggestion, group roles, and category grants; accepted invitations apply all defaults atomically.
+- Member administration now separates open invitations, active members, and former members, with invitation editing, revocation, token-rotating resend, direct rights navigation, membership archival, and stable-ID reactivation.
+- Invitation acceptance now uses a rate-limited, secret-minimal preview, pre-fills names for new accounts, and preserves the global display name of existing accounts.
+- Individual invitations now use the configured transactional SMTP outbox automatically while retaining a visible fallback link and live delivery status in the administrator UI.
+- Active invitation email addresses are deduplicated consistently across manual creation, repeated CSV imports, and mixed import paths, with a database trigger protecting concurrent requests.
+
+### Security
+
+- The last active administrator cannot be archived, self-removal requires explicit confirmation, and member removal preserves all financial and audit history while clearing effective access.
+- Invitation resend is idempotent, rotates the token and expiry, invalidates older links, and blocks duplicate delivery while an outbox job is pending or sending.
+
 ## [0.2.0] - 2026-08-04
 
 ### Added

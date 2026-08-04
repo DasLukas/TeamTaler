@@ -36,7 +36,12 @@ export function AdminPage() {
   const isAdmin = roles.includes('ADMIN');
   const availableTabs = tabs.filter((tab) => isAdmin || tab.capability === 'catalog' && roles.includes('CATALOG_MANAGER') || tab.capability === 'finance' && roles.includes('FINANCE_MANAGER'));
   const [requestedTab, setRequestedTab] = useState<AdminTab>('group');
+  const [selectedMemberId, setSelectedMemberId] = useState('');
   const activeTab = availableTabs.some((tab) => tab.id === requestedTab) ? requestedTab : availableTabs[0]?.id;
+  const openMemberRights = (membershipId: string) => {
+    setSelectedMemberId(membershipId);
+    setRequestedTab('rights');
+  };
   if (!activeTab) return <Page title={t('admin.title')}><StatePanel kind="error" title={t('admin.noAccessTitle')} message={t('admin.noAccessMessage')} /></Page>;
   return (
     <Page className={styles.page} title={t('admin.title')} wide>
@@ -45,8 +50,8 @@ export function AdminPage() {
       </div>
       <section aria-label={t(availableTabs.find((tab) => tab.id === activeTab)?.labelKey ?? 'admin.title')} className={styles.panel} role="tabpanel">
         {activeTab === 'group' ? <GroupSettingsPanel /> : null}
-        {activeTab === 'members' ? <MembersPanel /> : null}
-        {activeTab === 'rights' ? <RightsPanel /> : null}
+        {activeTab === 'members' ? <MembersPanel onOpenRights={openMemberRights} /> : null}
+        {activeTab === 'rights' ? <RightsPanel onSelectedMemberChange={setSelectedMemberId} selectedMemberId={selectedMemberId || undefined} /> : null}
         {activeTab === 'catalog' ? <CatalogPanel /> : null}
         {activeTab === 'finance' ? <FinancePanel /> : null}
         {activeTab === 'periods' ? <PeriodsPanel /> : null}

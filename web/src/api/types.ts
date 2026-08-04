@@ -232,6 +232,12 @@ export interface InvitationCommand {
   password: string;
 }
 
+/** Safe onboarding hints resolved from a valid invitation token. */
+export interface InvitationPreview {
+  displayName: string;
+  existingAccount: boolean;
+}
+
 /** Outbound email lifecycle state for a group invitation. */
 export type EmailDeliveryStatus = 'PENDING' | 'SENDING' | 'SENT' | 'FAILED' | 'CANCELLED' | 'NOT_REQUESTED';
 
@@ -243,15 +249,40 @@ export interface InvitationMetadata {
   id: string;
   email: string;
   displayName?: string;
+  roles: GroupRole[];
+  categoryPermissions: CategoryPermission[];
   expiresAt: string;
+  acceptedAt?: string;
+  revokedAt?: string;
   emailDeliveryStatus: EmailDeliveryStatus;
   emailSentAt?: string;
+  emailFailureCode?: string;
 }
 
 /** A newly created one-time invitation including its one-time acceptance URL. */
 export interface CreatedInvitation {
   id: string;
-  email?: string;
+  email: string;
+  displayName?: string;
+  roles: GroupRole[];
+  categoryPermissions: CategoryPermission[];
+  expiresAt: string;
+  acceptUrl: string;
+  emailDeliveryStatus: EmailDeliveryStatus;
+}
+
+/** Editable defaults assigned to a manual group invitation. */
+export interface InvitationInput {
+  email: string;
+  displayName: string;
+  roles: GroupRole[];
+  categoryPermissions: CategoryPermission[];
+}
+
+/** Result of rotating and resending an invitation email. */
+export interface InvitationEmailResendResult {
+  invitationId: string;
+  emailDeliveryStatus: 'PENDING';
   expiresAt: string;
   acceptUrl: string;
 }

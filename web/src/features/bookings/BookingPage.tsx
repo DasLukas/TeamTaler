@@ -30,13 +30,14 @@ export function BookingPage() {
   const [categoryId, setCategoryId] = useState('');
   const [selectedProductId, setSelectedProductId] = useState('');
   const [sheetOpen, setSheetOpen] = useState(true);
+  const activeMembers = useMemo(() => membersQuery.data?.filter((member) => member.active) ?? [], [membersQuery.data]);
   const bookableCategories = useMemo(() => getBookableCategories(categoriesQuery.data ?? []), [categoriesQuery.data]);
   const selectedProduct = useMemo(() => {
     const products = bookableCategories.flatMap((category) => category.products);
     return products.find((product) => product.id === selectedProductId) ?? products.find((product) => product.name.toLocaleLowerCase('de') === 'bier') ?? products[0];
   }, [bookableCategories, selectedProductId]);
   const selectedCategory = bookableCategories.find((category) => category.id === selectedProduct?.categoryId);
-  const currentMembership = membersQuery.data?.find((member) => member.userId === session.user.id) ?? membersQuery.data?.[0];
+  const currentMembership = activeMembers.find((member) => member.userId === session.user.id) ?? activeMembers[0];
 
   const chooseProduct = (product: Product) => {
     setSelectedProductId(product.id);
@@ -61,7 +62,7 @@ export function BookingPage() {
       currentMembershipId={currentMembership.id}
       groupId={activeGroupId}
       key={selectedProduct.id}
-      members={membersQuery.data}
+      members={activeMembers}
       onBooked={() => setSheetOpen(false)}
       onCancel={() => setSheetOpen(false)}
       period={dashboardQuery.data.currentPeriod}

@@ -13,6 +13,7 @@
 .permissions { padding: var(--space-8) 34px 0; }
 .permissions > h2 { margin-bottom: var(--space-6); font-size: 1.7rem; }
 .permissions > h3 { margin-bottom: var(--space-3); font-size: var(--font-size-lg); }
+.editor > h3 { margin-bottom: var(--space-3); font-size: var(--font-size-lg); }
 .roleList, .permissionTable { border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); overflow: hidden; }
 .role { display: grid; min-height: 86px; grid-template-columns: 48px 1fr 56px 30px; align-items: center; gap: var(--space-4); padding: 0 var(--space-5); border-bottom: 1px solid var(--color-border); }
 .role:last-child { border: 0; }

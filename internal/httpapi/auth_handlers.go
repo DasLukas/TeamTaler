@@ -126,6 +126,32 @@ func (s *Server) handleAcceptInvitation(response http.ResponseWriter, request *h
 	writeJSON(response, http.StatusCreated, newSessionResponse(session.Principal, session.CSRFToken, groupItems))
 }
 
+// handlePreviewInvitation rate-limits an unauthenticated invitation-token
+// lookup and returns only safe onboarding hints. response receives the preview
+// or Problem Details; request supplies a JSON token. The method returns no Go
+// value and never exposes email addresses or permission defaults.
+func (s *Server) handlePreviewInvitation(response http.ResponseWriter, request *http.Request) {
+	var input struct {
+		Token string `json:"token"`
+	}
+	if err := decodeJSON(response, request, &input); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	key := s.clientIP(request) + "|invite-preview"
+	if !s.loginLimiter.allow(key) {
+		response.Header().Set("Retry-After", "900")
+		writeProblem(response, request, domain.ErrRateLimited)
+		return
+	}
+	preview, err := s.auth.PreviewInvitation(request.Context(), input.Token)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, preview)
+}
+
 func newSessionResponse(principal domain.Principal, csrf string, groupItems []domain.Group) sessionResponse {
 	var activeGroupID *string
 	if len(groupItems) > 0 {

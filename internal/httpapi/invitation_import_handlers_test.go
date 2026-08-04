@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,6 +19,74 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/storage"
 )
+
+func TestHandleCreateInvitationQueuesEmailAndReturnsFallbackURL(t *testing.T) {
+	t.Parallel()
+
+	server, principal, membership := invitationImportServer(t, true)
+	publicURL, err := url.Parse("https://teamtaler.example")
+	if err != nil {
+		t.Fatalf("parse public URL: %v", err)
+	}
+	server.config.PublicURL = publicURL
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+membership.GroupID+"/invitations", bytes.NewBufferString(`{"email":"manual@example.test","displayName":"Manual Member","roles":[]}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.SetPathValue("groupID", membership.GroupID)
+	request = request.WithContext(context.WithValue(request.Context(), principalKey, principal))
+	response := httptest.NewRecorder()
+
+	server.handleCreateInvitation(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var result struct {
+		Invitation groups.Invitation `json:"invitation"`
+		AcceptURL  string            `json:"acceptUrl"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if result.Invitation.EmailDeliveryStatus != groups.EmailDeliveryPending || result.Invitation.Token != "" {
+		t.Fatalf("invitation = %#v", result.Invitation)
+	}
+	if !strings.HasPrefix(result.AcceptURL, "https://teamtaler.example/invite#token=") {
+		t.Fatalf("accept URL = %q", result.AcceptURL)
+	}
+	var jobs int
+	if err := server.db.QueryRow(`SELECT count(*) FROM invitation_email_outbox WHERE invitation_id=?`, result.Invitation.ID).Scan(&jobs); err != nil || jobs != 1 {
+		t.Fatalf("outbox jobs = %d err=%v, want 1", jobs, err)
+	}
+}
+
+func TestHandlePreviewInvitationReturnsOnlySafeHints(t *testing.T) {
+	t.Parallel()
+
+	server, principal, membership := invitationImportServer(t, false)
+	invitation, err := server.groups.CreateInvitation(context.Background(), principal, membership, "preview@example.test", "Preview Member", []domain.Role{domain.RoleAdmin}, nil)
+	if err != nil {
+		t.Fatalf("create invitation: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/invitations/preview", bytes.NewBufferString(`{"token":"`+invitation.Token+`"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.RemoteAddr = "192.0.2.40:12345"
+	response := httptest.NewRecorder()
+
+	server.handlePreviewInvitation(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var preview auth.InvitationPreview
+	if err := json.Unmarshal(response.Body.Bytes(), &preview); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+	if preview.DisplayName != "Preview Member" || preview.ExistingAccount {
+		t.Fatalf("preview = %#v", preview)
+	}
+	responseText := response.Body.String()
+	if strings.Contains(responseText, "preview@example.test") || strings.Contains(responseText, "ADMIN") || strings.Contains(responseText, "category") {
+		t.Fatalf("preview leaked protected invitation data: %s", responseText)
+	}
+}
 
 func TestHandleImportInvitationsQueuesValidRows(t *testing.T) {
 	t.Parallel()
@@ -127,7 +196,7 @@ func invitationImportServer(t *testing.T, emailEnabled bool) (*Server, domain.Pr
 	if err != nil || len(groupItems) != 1 {
 		t.Fatalf("list groups: groups=%d err=%v", len(groupItems), err)
 	}
-	return &Server{db: db, groups: groupService}, session.Principal, groupItems[0].Membership
+	return &Server{db: db, auth: authService, groups: groupService, loginLimiter: newLoginLimiter()}, session.Principal, groupItems[0].Membership
 }
 
 func invitationImportRequest(principal domain.Principal, groupID, body, contentType string) *http.Request {

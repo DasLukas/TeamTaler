@@ -213,6 +213,8 @@ describe('high-risk API idempotency', () => {
       id: 'invitation-a',
       email: 'new@example.test',
       displayName: 'New Member',
+	  roles: ['MEMBER'],
+	  categoryPermissions: [],
       expiresAt: '2026-08-11T12:00:00Z',
       emailDeliveryStatus: 'SENT',
       emailSentAt: '2026-08-04T12:01:00Z',

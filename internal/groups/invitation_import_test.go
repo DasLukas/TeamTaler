@@ -15,6 +15,12 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/storage"
 )
 
+type failingTokenSealer struct{}
+
+func (failingTokenSealer) Seal(string) (string, error) {
+	return "", errors.New("test token encryption failure")
+}
+
 func TestImportInvitationsCreatesEncryptedOutboxAndReplays(t *testing.T) {
 	t.Parallel()
 
@@ -123,6 +129,160 @@ func TestImportInvitationsCreatesEncryptedOutboxAndReplays(t *testing.T) {
 		t.Fatalf("retried outbox status=%q attempts=%d err=%v", deliveryStatus, attempts, err)
 	}
 
+	manualInvitation, err := service.CreateInvitation(ctx, session.Principal, membership, "MANUAL@example.test", "Manual Member", nil, nil)
+	if err != nil {
+		t.Fatalf("CreateInvitation with email delivery: %v", err)
+	}
+	if manualInvitation.Email != "manual@example.test" || manualInvitation.Token == "" || manualInvitation.EmailDeliveryStatus != EmailDeliveryPending {
+		t.Fatalf("manual invitation = %#v", manualInvitation)
+	}
+	if _, err := service.CreateInvitation(ctx, session.Principal, membership, "manual@example.test", "Duplicate Manual", nil, nil); !errors.Is(err, ErrInvitationEmailExists) {
+		t.Fatalf("duplicate manual invitation error = %v, want active invitation conflict", err)
+	}
+	_, err = db.ExecContext(ctx, `INSERT INTO invitations(
+		id,group_id,email,display_name,token_hash,roles_json,expires_at,created_by,created_at
+	) VALUES(?,?,?,?,?,'[]',?,?,?)`,
+		"inv_database_duplicate", membership.GroupID, "MANUAL@example.test", "Concurrent Duplicate", platform.HashSecret("database-duplicate-token"),
+		platform.Timestamp(time.Now().Add(7*24*time.Hour)), session.Principal.UserID, platform.Timestamp(time.Now()))
+	if err == nil || !strings.Contains(err.Error(), activeInvitationEmailConstraint) {
+		t.Fatalf("database duplicate error = %v, want active invitation constraint", err)
+	}
+	crossPathResult, err := service.ImportInvitations(ctx, session.Principal, membership, "import-key-cross-path", []InvitationImportCandidate{
+		{Row: 2, Email: "manual@example.test", DisplayName: "Manual Again"},
+		{Row: 3, Email: "new@example.test", DisplayName: "CSV Again"},
+	})
+	if err != nil {
+		t.Fatalf("cross-path ImportInvitations: %v", err)
+	}
+	if crossPathResult.Summary != (InvitationImportSummary{TotalRows: 2, Skipped: 2}) {
+		t.Fatalf("cross-path summary = %#v", crossPathResult.Summary)
+	}
+	for _, row := range crossPathResult.Rows {
+		if row.InvitationStatus != InvitationImportSkippedInvitation || row.EmailDeliveryStatus != EmailDeliveryPending {
+			t.Fatalf("cross-path row = %#v", row)
+		}
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM invitation_email_outbox`).Scan(&jobs); err != nil || jobs != 2 {
+		t.Fatalf("cross-path outbox jobs = %d err=%v, want 2", jobs, err)
+	}
+
+	linkOnlyService := Service{DB: db}
+	linkOnlyInvitation, err := linkOnlyService.CreateInvitation(ctx, session.Principal, membership, "link-only@example.test", "Link Only", nil, nil)
+	if err != nil {
+		t.Fatalf("CreateInvitation without email delivery: %v", err)
+	}
+	if linkOnlyInvitation.Token == "" || linkOnlyInvitation.EmailDeliveryStatus != EmailDeliveryNotRequested {
+		t.Fatalf("link-only invitation = %#v", linkOnlyInvitation)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM invitation_email_outbox`).Scan(&jobs); err != nil || jobs != 2 {
+		t.Fatalf("link-only outbox jobs = %d err=%v, want 2", jobs, err)
+	}
+
+	resendInvitation, err := service.CreateInvitation(ctx, session.Principal, membership, "resend@example.test", "Resend Member", nil, nil)
+	if err != nil {
+		t.Fatalf("create resend invitation: %v", err)
+	}
+	oldToken := resendInvitation.Token
+	if _, err := db.ExecContext(ctx, `UPDATE invitation_email_outbox SET
+		status='SENT',token_ciphertext=NULL,next_attempt_at=NULL,sent_at=?,last_error_code=NULL,updated_at=?
+		WHERE invitation_id=?`, platform.Timestamp(time.Now()), platform.Timestamp(time.Now()), resendInvitation.ID); err != nil {
+		t.Fatalf("mark resend invitation sent: %v", err)
+	}
+	resent, err := service.ResendInvitationEmail(ctx, session.Principal, membership, "resend-key-one", resendInvitation.ID)
+	if err != nil {
+		t.Fatalf("ResendInvitationEmail: %v", err)
+	}
+	if resent.Token == "" || resent.Token == oldToken || resent.EmailDeliveryStatus != EmailDeliveryPending || resent.ExpiresAt == "" {
+		t.Fatalf("resend result = %#v", resent)
+	}
+	if _, err := authService.PreviewInvitation(ctx, oldToken); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("old token preview error = %v, want not found", err)
+	}
+	if _, err := authService.PreviewInvitation(ctx, resent.Token); err != nil {
+		t.Fatalf("new token preview: %v", err)
+	}
+	var resendJobs int
+	var resendStatus string
+	if err := db.QueryRowContext(ctx, `SELECT count(*),max(status) FROM invitation_email_outbox WHERE invitation_id=?`, resendInvitation.ID).Scan(&resendJobs, &resendStatus); err != nil || resendJobs != 1 || resendStatus != "PENDING" {
+		t.Fatalf("resend outbox jobs=%d status=%q err=%v", resendJobs, resendStatus, err)
+	}
+	replayedResend, err := service.ResendInvitationEmail(ctx, session.Principal, membership, "resend-key-one", resendInvitation.ID)
+	if err != nil || replayedResend.Token != "" || replayedResend.ExpiresAt != resent.ExpiresAt {
+		t.Fatalf("replayed resend = %#v err=%v", replayedResend, err)
+	}
+	if _, err := service.ResendInvitationEmail(ctx, session.Principal, membership, "resend-key-blocked", resendInvitation.ID); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("in-progress resend error = %v, want conflict", err)
+	}
+
+	failedResendInvitation, err := service.CreateInvitation(ctx, session.Principal, membership, "resend-failure@example.test", "Resend Failure", nil, nil)
+	if err != nil {
+		t.Fatalf("create failed resend invitation: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE invitation_email_outbox SET
+		status='SENT',token_ciphertext=NULL,next_attempt_at=NULL,sent_at=?,last_error_code=NULL,updated_at=?
+		WHERE invitation_id=?`, platform.Timestamp(time.Now()), platform.Timestamp(time.Now()), failedResendInvitation.ID); err != nil {
+		t.Fatalf("mark failed resend invitation sent: %v", err)
+	}
+	var tokenHashBefore string
+	if err := db.QueryRowContext(ctx, `SELECT token_hash FROM invitations WHERE id=?`, failedResendInvitation.ID).Scan(&tokenHashBefore); err != nil {
+		t.Fatalf("read token hash before failed resend: %v", err)
+	}
+	failingService := Service{DB: db, TokenSealer: failingTokenSealer{}}
+	if _, err := failingService.ResendInvitationEmail(ctx, session.Principal, membership, "resend-key-failure", failedResendInvitation.ID); err == nil {
+		t.Fatal("failed token encryption unexpectedly allowed resend")
+	}
+	var tokenHashAfter, statusAfter string
+	if err := db.QueryRowContext(ctx, `SELECT i.token_hash,o.status FROM invitations i JOIN invitation_email_outbox o ON o.invitation_id=i.id WHERE i.id=?`, failedResendInvitation.ID).Scan(&tokenHashAfter, &statusAfter); err != nil {
+		t.Fatalf("read failed resend state: %v", err)
+	}
+	if tokenHashAfter != tokenHashBefore || statusAfter != "SENT" {
+		t.Fatalf("failed resend changed token/status: before=%q after=%q status=%q", tokenHashBefore, tokenHashAfter, statusAfter)
+	}
+
+	expiredDuplicate, err := service.CreateInvitation(ctx, session.Principal, membership, "resend-duplicate@example.test", "Expired Duplicate", nil, nil)
+	if err != nil {
+		t.Fatalf("create expired duplicate invitation: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE invitations SET expires_at='2000-01-01T00:00:00Z' WHERE id=?`, expiredDuplicate.ID); err != nil {
+		t.Fatalf("expire duplicate invitation: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE invitation_email_outbox SET status='SENT',token_ciphertext=NULL,next_attempt_at=NULL,sent_at=?,updated_at=? WHERE invitation_id=?`, platform.Timestamp(time.Now()), platform.Timestamp(time.Now()), expiredDuplicate.ID); err != nil {
+		t.Fatalf("mark expired duplicate sent: %v", err)
+	}
+	if _, err := service.CreateInvitation(ctx, session.Principal, membership, "resend-duplicate@example.test", "Current Duplicate", nil, nil); err != nil {
+		t.Fatalf("create current duplicate invitation: %v", err)
+	}
+	if _, err := service.ResendInvitationEmail(ctx, session.Principal, membership, "resend-key-duplicate", expiredDuplicate.ID); !errors.Is(err, ErrInvitationEmailExists) {
+		t.Fatalf("duplicate resend error = %v, want active invitation conflict", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE invitations SET expires_at=? WHERE id=?`, platform.Timestamp(time.Now().Add(7*24*time.Hour)), expiredDuplicate.ID); err == nil || !strings.Contains(err.Error(), activeInvitationEmailConstraint) {
+		t.Fatalf("database duplicate update error = %v, want active invitation constraint", err)
+	}
+
+	revokedInvitation, err := service.CreateInvitation(ctx, session.Principal, membership, "revoked@example.test", "Revoked Member", nil, nil)
+	if err != nil {
+		t.Fatalf("create revocation invitation: %v", err)
+	}
+	var revocationTokenHashBefore string
+	if err := db.QueryRowContext(ctx, `SELECT token_hash FROM invitations WHERE id=?`, revokedInvitation.ID).Scan(&revocationTokenHashBefore); err != nil {
+		t.Fatalf("read token before revocation: %v", err)
+	}
+	if err := service.RevokeInvitation(ctx, session.Principal, membership, revokedInvitation.ID, "administrator cancelled invitation"); err != nil {
+		t.Fatalf("revoke invitation: %v", err)
+	}
+	if _, err := authService.PreviewInvitation(ctx, revokedInvitation.Token); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("revoked token preview error = %v, want not found", err)
+	}
+	var revocationTokenHashAfter, revokedAt, revokedDeliveryStatus string
+	if err := db.QueryRowContext(ctx, `SELECT i.token_hash,i.revoked_at,o.status FROM invitations i
+		JOIN invitation_email_outbox o ON o.invitation_id=i.id WHERE i.id=?`, revokedInvitation.ID).
+		Scan(&revocationTokenHashAfter, &revokedAt, &revokedDeliveryStatus); err != nil {
+		t.Fatalf("read revoked invitation state: %v", err)
+	}
+	if revocationTokenHashAfter == revocationTokenHashBefore || revokedAt == "" || revokedDeliveryStatus != "CANCELLED" {
+		t.Fatalf("revoked invitation token/status before=%q after=%q revokedAt=%q delivery=%q", revocationTokenHashBefore, revocationTokenHashAfter, revokedAt, revokedDeliveryStatus)
+	}
+
 	different := []InvitationImportCandidate{{Row: 2, Email: "other@example.test"}}
 	if _, err := service.ImportInvitations(ctx, session.Principal, membership, "import-key-one", different); !errors.Is(err, domain.ErrIdempotencyReuse) {
 		t.Fatalf("reused key error = %v, want idempotency reuse", err)
@@ -141,6 +301,10 @@ func TestInvitationEmailOperationsRequireConfiguredTokenSealer(t *testing.T) {
 	_, err = service.RetryInvitationEmail(context.Background(), domain.Principal{UserID: "usr_test"}, membership, "retry-key-two", "inv_test")
 	if !errors.Is(err, domain.ErrServiceUnavailable) {
 		t.Fatalf("RetryInvitationEmail error = %v, want unavailable", err)
+	}
+	_, err = service.ResendInvitationEmail(context.Background(), domain.Principal{UserID: "usr_test"}, membership, "resend-key-two", "inv_test")
+	if !errors.Is(err, domain.ErrServiceUnavailable) {
+		t.Fatalf("ResendInvitationEmail error = %v, want unavailable", err)
 	}
 }
 

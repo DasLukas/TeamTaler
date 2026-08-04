@@ -67,7 +67,7 @@ func newFixture(t *testing.T) *fixture {
 
 func (f *fixture) inviteMember(email, name string, roles []domain.Role) (domain.Principal, domain.Membership, string) {
 	f.t.Helper()
-	invitation, err := f.groups.CreateInvitation(f.ctx, f.admin, f.membership, email, name, roles)
+	invitation, err := f.groups.CreateInvitation(f.ctx, f.admin, f.membership, email, name, roles, nil)
 	if err != nil {
 		f.t.Fatalf("create invitation: %v", err)
 	}
