@@ -39,17 +39,17 @@ describe('GroupSettingsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:logo-preview') });
-    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
   });
 
-  it('previews and saves a supported group logo in the shared session cache', async () => {
+  it('keeps local file content out of the preview and saves a supported group logo', async () => {
     const user = userEvent.setup();
     const logo = new File(['logo'], 'club.png', { type: 'image/png' });
     apiMock.uploadGroupLogo.mockResolvedValue({ logoUrl: '/api/v1/groups/group-a/images/logo.png' });
     const queryClient = renderSettings();
 
     await user.upload(screen.getByLabelText(i18n.t('groupSettings.imageLabel')), logo);
-    expect(screen.getByAltText(i18n.t('groupSettings.previewAlt', { group: 'Group A' }))).toHaveAttribute('src', 'blob:logo-preview');
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+    expect(screen.getByAltText(i18n.t('groupSettings.previewAlt', { group: 'Group A' }))).toHaveAttribute('src', '/brand/teamtaler-mark.png');
     await user.click(screen.getByRole('button', { name: i18n.t('groupSettings.save') }));
 
     await waitFor(() => expect(apiMock.uploadGroupLogo).toHaveBeenCalledWith('group-a', logo));
@@ -79,6 +79,19 @@ describe('GroupSettingsPanel', () => {
     });
 
     expect(await screen.findByText(i18n.t('groupSettings.invalidType'))).toHaveAttribute('role', 'alert');
+    expect(screen.getByRole('button', { name: i18n.t('groupSettings.save') })).toBeDisabled();
+    expect(apiMock.uploadGroupLogo).not.toHaveBeenCalled();
+  });
+
+  it('rejects files without a trusted image media type', async () => {
+    renderSettings();
+
+    fireEvent.change(screen.getByLabelText(i18n.t('groupSettings.imageLabel')), {
+      target: { files: [new File(['<svg onload="alert(1)"></svg>'], 'club.png')] },
+    });
+
+    expect(await screen.findByText(i18n.t('groupSettings.invalidType'))).toHaveAttribute('role', 'alert');
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: i18n.t('groupSettings.save') })).toBeDisabled();
     expect(apiMock.uploadGroupLogo).not.toHaveBeenCalled();
   });

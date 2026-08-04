@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import ImageUp from 'lucide-react/dist/esm/icons/image-up';
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import type { Session } from '@/api/types';
@@ -18,7 +18,7 @@ type LogoChange = { kind: 'upload'; file: File } | { kind: 'remove' };
 /**
  * Renders administrator-only group branding controls.
  *
- * The selected file is previewed locally before upload. Successful mutations
+ * Only server-validated, normalized images are rendered. Successful mutations
  * update the shared session cache so every active brand surface changes without
  * a page reload.
  *
@@ -29,14 +29,9 @@ export function GroupSettingsPanel() {
   const { activeGroup, activeGroupId } = useActiveGroup();
   const queryClient = useQueryClient();
   const [selectedFile, setSelectedFile] = useState<File>();
-  const [previewUrl, setPreviewUrl] = useState<string>();
   const [fileInputKey, setFileInputKey] = useState(0);
   const [fileError, setFileError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
-
-  useEffect(() => () => {
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-  }, [previewUrl]);
 
   const logoMutation = useMutation({
     mutationFn: async (change: LogoChange) => change.kind === 'upload'
@@ -48,7 +43,6 @@ export function GroupSettingsPanel() {
         groups: session.groups.map((group) => group.id === activeGroupId ? { ...group, logoUrl } : group),
       } : session);
       setSelectedFile(undefined);
-      setPreviewUrl(undefined);
       setFileInputKey((current) => current + 1);
       setFileError('');
       setSuccessMessage(t(change.kind === 'upload' ? 'groupSettings.saved' : 'groupSettings.removed'));
@@ -60,28 +54,24 @@ export function GroupSettingsPanel() {
     setSuccessMessage('');
     if (!file) {
       setSelectedFile(undefined);
-      setPreviewUrl(undefined);
       setFileError('');
       return;
     }
-    if (file.type && !ACCEPTED_IMAGE_TYPES.has(file.type)) {
+    if (!ACCEPTED_IMAGE_TYPES.has(file.type)) {
       setSelectedFile(undefined);
-      setPreviewUrl(undefined);
       setFileError(t('groupSettings.invalidType'));
       return;
     }
     if (file.size > MAX_IMAGE_BYTES) {
       setSelectedFile(undefined);
-      setPreviewUrl(undefined);
       setFileError(t('groupSettings.tooLarge'));
       return;
     }
     setFileError('');
     setSelectedFile(file);
-    setPreviewUrl(URL.createObjectURL(file));
   };
 
-  const currentPreview = previewUrl || activeGroup.logoUrl || '/brand/teamtaler-mark.png';
+  const currentPreview = activeGroup.logoUrl || '/brand/teamtaler-mark.png';
 
   return (
     <div className={styles.content}>
