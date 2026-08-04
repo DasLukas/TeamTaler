@@ -2,6 +2,20 @@
 
 All notable TeamTaler changes are documented in this file. The project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## [0.2.0] - 2026-08-04
+
+### Added
+
+- Administrator-managed group logos with immediate desktop/mobile branding updates, secure normalized storage, default-logo restoration, and backup coverage.
+- Idempotent CSV invitation imports with per-row results, encrypted transactional email outbox delivery, mandatory SMTP TLS, bounded retries, and responsive administrator UI.
+
+### Changed
+
+- Removed the redundant standard/penalty category type so each user-defined category is the sole product classification.
+- Generalized third-party booking reasons, quantities, and the 30-second self-undo rule across all categories.
+
 ## [0.1.0] - 2026-08-04
 
 ### Added
@@ -23,4 +37,6 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Explicit acting and charged membership display for every booking, including searchable third-party-assignment cues.
 - Canonical backup-entry allowlisting, target-width Argon2 parameter parsing, and directory-confined SPA asset serving with traversal regression coverage.
 
+[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/DasLukas/TeamTaler/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/DasLukas/TeamTaler/releases/tag/v0.1.0

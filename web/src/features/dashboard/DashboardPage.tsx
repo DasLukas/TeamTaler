@@ -70,7 +70,6 @@ export function DashboardPage() {
 
   const inspector = selectedProduct && selectedCategory ? (
     <BookingInspector
-      categoryType={selectedCategory.type}
       currentMembershipId={currentMembership.id}
       groupId={activeGroupId}
       key={selectedProduct.id}

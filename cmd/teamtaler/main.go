@@ -19,7 +19,9 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/auth"
 	"github.com/DasLukas/TeamTaler/internal/backup"
 	"github.com/DasLukas/TeamTaler/internal/config"
+	"github.com/DasLukas/TeamTaler/internal/email"
 	"github.com/DasLukas/TeamTaler/internal/httpapi"
+	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/storage"
 	"golang.org/x/term"
 )
@@ -73,12 +75,34 @@ func serve(arguments []string) error {
 	if err != nil {
 		return err
 	}
-	ctx := context.Background()
-	db, err := storage.Open(ctx, cfg.DatabasePath)
+	processContext, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	db, err := storage.Open(processContext, cfg.DatabasePath)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
+
+	var emailWorkerErrors <-chan error
+	if cfg.SMTP.Enabled {
+		sender, err := email.NewSMTP(cfg.SMTP)
+		if err != nil {
+			return fmt.Errorf("configure SMTP sender: %w", err)
+		}
+		tokenBox, err := platform.NewSecretBox(cfg.EmailTokenKey)
+		if err != nil {
+			return fmt.Errorf("configure invitation token encryption: %w", err)
+		}
+		dispatcher, err := email.NewDispatcher(db, sender, tokenBox, cfg.PublicURL, slog.Default())
+		if err != nil {
+			return err
+		}
+		workerErrors := make(chan error, 1)
+		emailWorkerErrors = workerErrors
+		go func() {
+			workerErrors <- dispatcher.Run(processContext)
+		}()
+	}
 	server := &http.Server{
 		Addr:              cfg.ListenAddress,
 		Handler:           httpapi.New(cfg, db, slog.Default()),
@@ -90,22 +114,51 @@ func serve(arguments []string) error {
 	}
 	errChannel := make(chan error, 1)
 	go func() {
-		slog.Info("TeamTaler listening", "address", cfg.ListenAddress, "public_url", cfg.PublicURL.String())
+		slog.Info("TeamTaler listening", "address", cfg.ListenAddress, "public_url", cfg.PublicURL.String(), "smtp_enabled", cfg.SMTP.Enabled)
 		errChannel <- server.ListenAndServe()
 	}()
-	signalContext, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
+	var serveErr error
+	emailWorkerStopped := false
 	select {
-	case err := <-errChannel:
-		if !errors.Is(err, http.ErrServerClosed) {
-			return err
+	case listenErr := <-errChannel:
+		if !errors.Is(listenErr, http.ErrServerClosed) {
+			serveErr = fmt.Errorf("serve HTTP: %w", listenErr)
 		}
-	case <-signalContext.Done():
-		shutdownContext, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		return server.Shutdown(shutdownContext)
+	case workerErr := <-emailWorkerErrors:
+		emailWorkerStopped = true
+		if workerErr != nil {
+			serveErr = fmt.Errorf("invitation email dispatcher stopped: %w", workerErr)
+		} else if processContext.Err() == nil {
+			serveErr = errors.New("invitation email dispatcher stopped unexpectedly")
+		}
+	case <-processContext.Done():
 	}
-	return nil
+
+	stop()
+	shutdownContext, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if shutdownErr := server.Shutdown(shutdownContext); shutdownErr != nil {
+		serveErr = errors.Join(serveErr, fmt.Errorf("shut down HTTP server: %w", shutdownErr))
+	}
+	if emailWorkerErrors != nil && !emailWorkerStopped {
+		recordWorkerError := func(workerErr error) {
+			if workerErr != nil {
+				serveErr = errors.Join(serveErr, fmt.Errorf("shut down invitation email dispatcher: %w", workerErr))
+			}
+		}
+		select {
+		case workerErr := <-emailWorkerErrors:
+			recordWorkerError(workerErr)
+		case <-shutdownContext.Done():
+			select {
+			case workerErr := <-emailWorkerErrors:
+				recordWorkerError(workerErr)
+			default:
+				serveErr = errors.Join(serveErr, errors.New("invitation email dispatcher did not stop before the shutdown deadline"))
+			}
+		}
+	}
+	return serveErr
 }
 
 func admin(arguments []string) error {

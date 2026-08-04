@@ -10,6 +10,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/catalog"
 	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/groups"
+	"github.com/DasLukas/TeamTaler/internal/media"
 )
 
 func (s *Server) handleListCategories(response http.ResponseWriter, request *http.Request) {
@@ -128,19 +129,9 @@ func (s *Server) handleProductImage(response http.ResponseWriter, request *http.
 		writeProblem(response, request, err)
 		return
 	}
-	if err := request.ParseMultipartForm(5 << 20); err != nil {
-		writeProblem(response, request, domain.ValidationError{Field: "image", Message: "must be multipart form data no larger than 5 MiB"})
-		return
-	}
-	file, _, err := request.FormFile("image")
+	imageKey, err := s.storeUploadedImage(response, request)
 	if err != nil {
-		writeProblem(response, request, domain.ValidationError{Field: "image", Message: "is required"})
-		return
-	}
-	defer file.Close()
-	imageKey, _, err := catalog.NormalizeAndStoreImage(s.config.DataDirectory, file)
-	if err != nil {
-		writeProblem(response, request, domain.ValidationError{Field: "image", Message: err.Error()})
+		writeProblem(response, request, err)
 		return
 	}
 	imageURL, _, err := s.catalog.SetProductImage(request.Context(), principal, membership, request.PathValue("productID"), imageKey)
@@ -158,7 +149,11 @@ func (s *Server) handleImage(response http.ResponseWriter, request *http.Request
 		return
 	}
 	var references int
-	if err := s.db.QueryRowContext(request.Context(), `SELECT count(*) FROM products WHERE group_id=? AND image_key=?`, membership.GroupID, request.PathValue("imageKey")).Scan(&references); err != nil {
+	if err := s.db.QueryRowContext(request.Context(), `SELECT count(*) FROM (
+		SELECT image_key FROM products WHERE group_id=? AND image_key=?
+		UNION ALL
+		SELECT logo_key FROM groups WHERE id=? AND logo_key=?
+	)`, membership.GroupID, request.PathValue("imageKey"), membership.GroupID, request.PathValue("imageKey")).Scan(&references); err != nil {
 		writeProblem(response, request, err)
 		return
 	}
@@ -166,7 +161,7 @@ func (s *Server) handleImage(response http.ResponseWriter, request *http.Request
 		writeProblem(response, request, domain.ErrNotFound)
 		return
 	}
-	path, err := catalog.ResolveImage(s.config.DataDirectory, request.PathValue("imageKey"))
+	path, err := media.ResolveImage(s.config.DataDirectory, request.PathValue("imageKey"))
 	if err != nil {
 		http.NotFound(response, request)
 		return
@@ -179,6 +174,30 @@ func (s *Server) handleImage(response http.ResponseWriter, request *http.Request
 	response.Header().Set("Cache-Control", "private, no-store")
 	response.Header().Set("ETag", `"`+strings.TrimSuffix(request.PathValue("imageKey"), ".png")+`"`)
 	http.ServeFile(response, request, path)
+}
+
+// storeUploadedImage parses one bounded multipart image, normalizes it, and
+// stores its content-addressed PNG below the configured data directory. The
+// response writer allows net/http to stop oversized request bodies early. It
+// returns the image key or a client-safe validation error.
+func (s *Server) storeUploadedImage(response http.ResponseWriter, request *http.Request) (string, error) {
+	request.Body = http.MaxBytesReader(response, request.Body, 6<<20)
+	if err := request.ParseMultipartForm(5 << 20); err != nil {
+		return "", domain.ValidationError{Field: "image", Message: "must be multipart form data containing an image no larger than 5 MiB"}
+	}
+	if request.MultipartForm != nil {
+		defer request.MultipartForm.RemoveAll()
+	}
+	file, _, err := request.FormFile("image")
+	if err != nil {
+		return "", domain.ValidationError{Field: "image", Message: "is required"}
+	}
+	defer file.Close()
+	imageKey, _, err := media.NormalizeAndStoreImage(s.config.DataDirectory, file)
+	if err != nil {
+		return "", domain.ValidationError{Field: "image", Message: err.Error()}
+	}
+	return imageKey, nil
 }
 
 func versionETag(version int64) string { return fmt.Sprintf(`"v%d"`, version) }

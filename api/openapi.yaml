@@ -1,14 +1,15 @@
 openapi: 3.1.0
 info:
   title: TeamTaler API
-  version: 0.1.0
+  version: 0.2.0
   description: |
     Same-origin JSON API for TeamTaler. Monetary values use integer minor units:
     response fields are exact decimal strings, while command inputs are bounded
     JSON integers.
     State-changing authenticated requests require the `X-CSRF-Token` header.
-    Product creation and financial mutations that create or reverse bookings,
-    payments, or periods additionally require an `Idempotency-Key`.
+    Product creation, invitation CSV imports, and financial mutations that
+    create or reverse bookings, payments, or periods additionally require an
+    `Idempotency-Key`.
   license:
     name: AGPL-3.0-only
     identifier: AGPL-3.0-only
@@ -153,6 +154,45 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Dashboard' }
         '403': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/logo:
+    post:
+      tags: [Groups]
+      summary: Validate, normalize, and set the group logo
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [image]
+              properties:
+                image:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Normalized group-logo URL
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [logoUrl]
+                properties:
+                  logoUrl: { type: string }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [Groups]
+      summary: Restore the default TeamTaler logo for the group
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204': { description: Custom group logo removed }
+        '403': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/members:
     get:
       tags: [Groups]
@@ -226,6 +266,66 @@ paths:
                   invitation: { $ref: '#/components/schemas/Invitation' }
                   acceptUrl: { type: string, format: uri }
         '403': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/invitations/import:
+    post:
+      tags: [Groups]
+      summary: Import regular-member invitations and queue invitation emails
+      description: |
+        Accepts UTF-8 CSV with a required `email` column and an optional
+        `display_name` column. Comma and semicolon separators and an optional
+        UTF-8 BOM are supported. Valid rows are committed together with an
+        encrypted transactional email-outbox job. A membership is created only
+        after the recipient accepts the invitation.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          text/csv:
+            schema:
+              type: string
+              maxLength: 262144
+              examples:
+                - |-
+                  email,display_name
+                  alex@example.com,Alex Member
+      responses:
+        '200':
+          description: Complete or partial row-level import result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvitationImportResult' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '415': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/invitations/{invitationId}/email/retry:
+    post:
+      tags: [Groups]
+      summary: Retry a terminally failed invitation email
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - name: invitationId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Email returned to the delivery queue
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvitationEmailRetryResult' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/categories:
     get:
       tags: [Catalog]
@@ -356,7 +456,7 @@ paths:
   /groups/{groupId}/images/{imageKey}:
     get:
       tags: [Catalog]
-      summary: Read a group-referenced immutable product image
+      summary: Read a group-referenced immutable product image or group logo
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - name: imageKey
@@ -787,6 +887,7 @@ components:
         id: { type: string }
         name: { type: string }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
+        logoUrl: { type: string }
         membership: { $ref: '#/components/schemas/Membership' }
     Membership:
       type: object
@@ -833,13 +934,15 @@ components:
       required: [email, displayName, roles]
       properties:
         email: { type: string, format: email, maxLength: 254 }
-        displayName: { type: string, maxLength: 120 }
+        displayName:
+          type: string
+          description: Original normalized value; invalid rows may exceed the 120-character creation limit.
         roles:
           type: array
           items: { $ref: '#/components/schemas/Role' }
     Invitation:
       type: object
-      required: [id, groupId, email, roles, expiresAt]
+      required: [id, groupId, email, roles, expiresAt, emailDeliveryStatus]
       properties:
         id: { type: string }
         groupId: { type: string }
@@ -851,14 +954,59 @@ components:
         expiresAt: { type: string, format: date-time }
         acceptedAt: { type: string, format: date-time }
         revokedAt: { type: string, format: date-time }
+        emailDeliveryStatus: { $ref: '#/components/schemas/EmailDeliveryStatus' }
+        emailSentAt: { type: string, format: date-time }
+        emailFailureCode: { type: string }
+    EmailDeliveryStatus:
+      type: string
+      enum: [NOT_REQUESTED, PENDING, SENDING, SENT, FAILED, CANCELLED]
+    InvitationImportResult:
+      type: object
+      required: [summary, rows]
+      properties:
+        summary: { $ref: '#/components/schemas/InvitationImportSummary' }
+        rows:
+          type: array
+          maxItems: 100
+          items: { $ref: '#/components/schemas/InvitationImportRow' }
+    InvitationImportSummary:
+      type: object
+      required: [totalRows, created, invalid, skipped]
+      properties:
+        totalRows: { type: integer, minimum: 1, maximum: 100 }
+        created: { type: integer, minimum: 0, maximum: 100 }
+        invalid: { type: integer, minimum: 0, maximum: 100 }
+        skipped: { type: integer, minimum: 0, maximum: 100 }
+    InvitationImportRow:
+      type: object
+      required: [row, invitationStatus]
+      properties:
+        row: { type: integer, minimum: 2 }
+        email: { type: string, format: email }
+        displayName: { type: string, maxLength: 120 }
+        invitationId: { type: string }
+        invitationStatus:
+          type: string
+          enum: [CREATED, INVALID, SKIPPED_ALREADY_MEMBER, SKIPPED_ALREADY_INVITED]
+        emailDeliveryStatus: { $ref: '#/components/schemas/EmailDeliveryStatus' }
+        code:
+          type: string
+          enum: [invalid_email, invalid_display_name, display_name_too_long, duplicate_email, already_member, already_invited]
+    InvitationEmailRetryResult:
+      type: object
+      required: [invitationId, emailDeliveryStatus]
+      properties:
+        invitationId: { type: string }
+        emailDeliveryStatus:
+          type: string
+          const: PENDING
     Category:
       type: object
-      required: [id, groupId, name, type, active, sortOrder, version]
+      required: [id, groupId, name, active, sortOrder, version]
       properties:
         id: { type: string }
         groupId: { type: string }
         name: { type: string }
-        type: { type: string, enum: [STANDARD, PENALTY] }
         active: { type: boolean }
         sortOrder: { type: integer }
         version: { type: integer, format: int64 }
@@ -867,10 +1015,9 @@ components:
           items: { $ref: '#/components/schemas/Product' }
     CategoryCommand:
       type: object
-      required: [name, type, sortOrder]
+      required: [name, sortOrder]
       properties:
         name: { type: string, minLength: 1, maxLength: 120 }
-        type: { type: string, enum: [STANDARD, PENALTY] }
         sortOrder: { type: integer }
     CategoryUpdate:
       allOf:
@@ -921,7 +1068,7 @@ components:
         reason: { type: string, maxLength: 500 }
     Booking:
       type: object
-      required: [id, groupId, periodId, categoryId, productId, actorMembershipId, targetMembershipId, quantity, unitPriceMinor, totalMinor, currency, productName, categoryName, categoryType, createdAt, canVoid]
+      required: [id, groupId, periodId, categoryId, productId, actorMembershipId, targetMembershipId, quantity, unitPriceMinor, totalMinor, currency, productName, categoryName, createdAt, canVoid]
       properties:
         id: { type: string }
         groupId: { type: string }
@@ -936,7 +1083,6 @@ components:
         currency: { type: string }
         productName: { type: string }
         categoryName: { type: string }
-        categoryType: { type: string, enum: [STANDARD, PENALTY] }
         reason: { type: string }
         createdAt: { type: string, format: date-time }
         voidedAt: { type: string, format: date-time }

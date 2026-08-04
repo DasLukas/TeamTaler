@@ -8,7 +8,6 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { formatMoney, majorUnitsInputPattern, majorUnitsPlaceholder, parseMajorUnits } from '@/api/money';
-import type { Category } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Button } from '@/components/ui/Button';
 import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
@@ -33,7 +32,6 @@ export function CatalogPanel() {
   const categoriesQuery = useQuery({ queryKey: ['categories', activeGroupId], queryFn: () => api.getCategories(activeGroupId) });
   const [dialog, setDialog] = useState<CatalogDialog>(null);
   const [categoryName, setCategoryName] = useState('');
-  const [categoryType, setCategoryType] = useState<Category['type']>('STANDARD');
   const [productCategoryId, setProductCategoryId] = useState('');
   const [productName, setProductName] = useState('');
   const [productPrice, setProductPrice] = useState('');
@@ -49,7 +47,7 @@ export function CatalogPanel() {
   };
 
   const categoryMutation = useMutation({
-    mutationFn: () => api.createCategory(activeGroupId, { name: categoryName.trim(), type: categoryType, icon: categoryType === 'PENALTY' ? 'penalty' : 'other' }),
+    mutationFn: () => api.createCategory(activeGroupId, { name: categoryName.trim() }),
     onSuccess: async () => { setDialog(null); setCategoryName(''); await queryClient.invalidateQueries({ queryKey: ['categories', activeGroupId] }); },
   });
   const imageMutation = useMutation({
@@ -88,7 +86,7 @@ export function CatalogPanel() {
             const Icon = category.icon === 'drink' ? GlassWater : category.icon === 'penalty' ? Gavel : Archive;
             return (
               <section className={styles.category} key={category.id}>
-                <header><span><Icon size={22} /></span><div><h3>{category.name}</h3><p>{category.type === 'PENALTY' ? t('catalog.penaltyCategory') : t('catalog.standardCategory')} · {t('catalog.productCount', { count: category.products.length })}</p></div></header>
+                <header><span><Icon size={22} /></span><div><h3>{category.name}</h3><p>{t('catalog.productCount', { count: category.products.length })}</p></div></header>
                 {category.products.length === 0 ? <p className={styles.emptyProducts}>{t('catalog.emptyProducts')}</p> : (
                   <div className={styles.products}>{category.products.map((product) => <article className={!product.active ? styles.archived : ''} key={product.id}>{product.imageUrl ? <img alt="" src={product.imageUrl} /> : <span className={styles.imageFallback}><ImagePlus size={26} /></span>}<div><strong>{product.name}</strong><span>{formatMoney(product.price)}</span></div><small>{product.active ? t('common.active') : t('common.archived')}</small></article>)}</div>
                 )}
@@ -100,8 +98,6 @@ export function CatalogPanel() {
       <Modal onClose={() => setDialog(null)} open={dialog === 'category'} title={t('catalog.categoryDialog')}>
         <form className={styles.form} onSubmit={(event) => { event.preventDefault(); categoryMutation.mutate(); }}>
           <Field htmlFor="category-name" label={t('common.name')}><TextInput id="category-name" onChange={(event) => setCategoryName(event.target.value)} required value={categoryName} /></Field>
-          <Field htmlFor="category-type" label={t('catalog.categoryType')}><SelectInput id="category-type" onChange={(event) => setCategoryType(event.target.value as Category['type'])} value={categoryType}><option value="STANDARD">{t('catalog.standard')}</option><option value="PENALTY">{t('catalog.penalties')}</option></SelectInput></Field>
-          <p className={styles.hint}>{t('catalog.penaltyHint')}</p>
           {categoryMutation.isError ? <p className={styles.error}>{categoryMutation.error.message}</p> : null}
           <div className={styles.actions}><Button onClick={() => setDialog(null)} variant="secondary">{t('common.cancel')}</Button><Button disabled={!categoryName.trim() || categoryMutation.isPending} type="submit">{t('catalog.createCategoryAction')}</Button></div>
         </form>

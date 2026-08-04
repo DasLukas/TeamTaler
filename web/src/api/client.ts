@@ -18,9 +18,12 @@ import type {
   Booking,
   BookingCommand,
   Category,
+  CreatedInvitation,
   Dashboard,
+  InvitationEmailRetryResult,
   InvitationCommand,
-  Invitation,
+  InvitationImportResult,
+  InvitationMetadata,
   LedgerEntry,
   LoginCommand,
   Membership,
@@ -101,7 +104,7 @@ async function parseProblem(response: Response): Promise<ProblemDetails> {
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set('Accept', 'application/json');
-  if (init.body && !(init.body instanceof FormData)) headers.set('Content-Type', 'application/json');
+  if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   const csrf = csrfToken();
   if (csrf) headers.set('X-CSRF-Token', csrf);
 
@@ -180,12 +183,37 @@ export const api = {
     }
   },
   acceptInvitation: async (command: InvitationCommand): Promise<Session> => setSessionActor(adaptSession(await request<unknown>('/invitations/accept', { method: 'POST', body: json(command) }))),
-  createInvitation: async (groupId: string, input: { email: string }): Promise<Invitation> => {
+  createInvitation: async (groupId: string, input: { email: string }): Promise<CreatedInvitation> => {
     const response = await request<unknown>(groupPath(groupId, 'invitations'), { method: 'POST', body: json({ email: input.email, displayName: '', roles: [] }) });
     const source = response as { invitation?: { id: string; email?: string; expiresAt: string }; acceptUrl?: string; id?: string; email?: string; expiresAt?: string };
     const invitation = source.invitation ?? source;
     return { id: invitation.id ?? '', email: invitation.email, expiresAt: invitation.expiresAt ?? '', acceptUrl: source.acceptUrl ?? '' };
   },
+  getInvitations: async (groupId: string): Promise<InvitationMetadata[]> => request<InvitationMetadata[]>(groupPath(groupId, 'invitations')),
+  importInvitations: async (groupId: string, file: File): Promise<InvitationImportResult> => {
+    const path = groupPath(groupId, 'invitations/import');
+    let csv: string;
+    try {
+      csv = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
+    } catch {
+      throw new Error(i18n.t('members.csvImport.invalidUtf8'));
+    }
+    return idempotentRequest<InvitationImportResult>(groupId, 'invitation.import', path, csv, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/csv; charset=utf-8' },
+      body: csv,
+    });
+  },
+  retryInvitationEmail: async (groupId: string, invitationId: string): Promise<InvitationEmailRetryResult> => {
+    const path = groupPath(groupId, `invitations/${encodeURIComponent(invitationId)}/email/retry`);
+    return idempotentRequest<InvitationEmailRetryResult>(groupId, 'invitation.email.retry', path, { invitationId }, { method: 'POST' });
+  },
+  uploadGroupLogo: async (groupId: string, image: File): Promise<{ logoUrl: string }> => {
+    const form = new FormData();
+    form.set('image', image);
+    return request<{ logoUrl: string }>(groupPath(groupId, 'logo'), { method: 'POST', body: form });
+  },
+  removeGroupLogo: async (groupId: string): Promise<void> => request<void>(groupPath(groupId, 'logo'), { method: 'DELETE' }),
   getDashboard: async (groupId: string): Promise<Dashboard> => adaptDashboard(await request<unknown>(groupPath(groupId, 'dashboard'))),
   getCategories: async (groupId: string): Promise<Category[]> => adaptCategories(await request<unknown>(groupPath(groupId, 'categories'))),
   getMembers: async (groupId: string): Promise<Membership[]> => adaptMemberships(await request<unknown>(groupPath(groupId, 'members'))),
@@ -239,7 +267,7 @@ export const api = {
     const categoryGrants = Object.fromEntries(update.categoryPermissions.map((permission) => [permission.categoryId, [permission.assignToOthers ? 'ASSIGN_TO_OTHERS' : null, permission.voidBookings ? 'VOID_BOOKINGS' : null].filter(Boolean)]));
     await request<void>(groupPath(groupId, `members/${membershipId}/permissions`), { method: 'PATCH', headers: etag ? { 'If-Match': etag } : undefined, body: json({ roles: update.roles.filter((role) => role !== 'MEMBER'), categoryGrants }) });
   },
-  createCategory: async (groupId: string, input: Pick<Category, 'name' | 'type' | 'icon'>): Promise<Category> => adaptCategories([await request<unknown>(groupPath(groupId, 'categories'), { method: 'POST', body: json({ name: input.name, type: input.type, sortOrder: 0 }) })])[0],
+  createCategory: async (groupId: string, input: Pick<Category, 'name'>): Promise<Category> => adaptCategories([await request<unknown>(groupPath(groupId, 'categories'), { method: 'POST', body: json({ name: input.name, sortOrder: 0 }) })])[0],
   createProduct: async (groupId: string, input: Pick<Product, 'categoryId' | 'name' | 'price'>): Promise<Product> => {
     const path = groupPath(groupId, `categories/${input.categoryId}/products`);
     const payload = { name: input.name, priceMinor: minorUnitsToSafeNumber(input.price.minorUnits), sortOrder: 0 };

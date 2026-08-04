@@ -1,6 +1,6 @@
 # Deployment and operations
 
-TeamTaler runs as one application container behind an existing HTTPS reverse proxy. The container serves the API and compiled frontend and stores its SQLite database, normalized product images, and backup/restore staging data in one persistent volume.
+TeamTaler runs as one application container behind an existing HTTPS reverse proxy. The container serves the API and compiled frontend and stores its SQLite database, normalized product images and group logos, and backup/restore staging data in one persistent volume.
 
 ## Supported topology
 

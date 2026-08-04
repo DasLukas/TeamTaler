@@ -21,7 +21,12 @@ type JsonRecord = Record<string, unknown>;
 const asRecord = (value: unknown): JsonRecord => value as JsonRecord;
 const money = (minorUnits: unknown, currency: unknown) => ({ minorUnits: String(minorUnits ?? 0), currency: String(currency || 'EUR') });
 const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('');
-const categoryIcon = (name: string, type?: unknown): Category['icon'] => type === 'PENALTY' ? 'penalty' : name.toLocaleLowerCase('de').includes(i18n.t('domain.drinkCategoryKeyword')) ? 'drink' : 'other';
+const categoryIcon = (name: string): Category['icon'] => {
+  const normalizedName = name.toLocaleLowerCase('de');
+  if (normalizedName.includes(i18n.t('domain.drinkCategoryKeyword'))) return 'drink';
+  if (normalizedName.includes(i18n.t('domain.penaltyCategoryKeyword'))) return 'penalty';
+  return 'other';
+};
 const memberName = (membershipId: string, members?: Membership[], fallback = i18n.t('common.member')) => members?.find((member) => member.id === membershipId)?.displayName ?? fallback;
 const PAYMENT_DESCRIPTION_PREFIX = 'Payment received';
 const REVERSAL_DESCRIPTION_PREFIX = 'Reversal: ';
@@ -134,8 +139,7 @@ export function adaptCategories(input: unknown): Category[] {
     return {
       id: String(source.id),
       name,
-      type: source.type === 'PENALTY' ? 'PENALTY' : 'STANDARD',
-      icon: typeof source.icon === 'string' ? source.icon as Category['icon'] : categoryIcon(name, source.type),
+      icon: typeof source.icon === 'string' ? source.icon as Category['icon'] : categoryIcon(name),
       active: source.active !== false,
       products: (source.products as unknown[] ?? []).map(adaptProduct),
     };

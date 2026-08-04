@@ -13,8 +13,18 @@ import (
 
 	"github.com/DasLukas/TeamTaler/internal/audit"
 	"github.com/DasLukas/TeamTaler/internal/domain"
+	"github.com/DasLukas/TeamTaler/internal/media"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/storage"
+)
+
+var (
+	// ErrMembershipEmailExists identifies an address already attached to a
+	// membership in the target group.
+	ErrMembershipEmailExists = errors.New("a membership already exists for this email address")
+	// ErrInvitationEmailExists identifies an address with a current, unconsumed
+	// invitation in the target group.
+	ErrInvitationEmailExists = errors.New("an active invitation already exists for this email address")
 )
 
 // Service provides authorization-aware group operations over a migrated
@@ -22,6 +32,9 @@ import (
 type Service struct {
 	// DB is the shared application database connection pool.
 	DB *sql.DB
+	// TokenSealer encrypts invitation tokens before durable email delivery.
+	// It may be nil when outbound invitation email is disabled.
+	TokenSealer TokenSealer
 }
 
 // Create creates a group, its initial period, and an administrator membership
@@ -30,8 +43,8 @@ type Service struct {
 func (s Service) Create(ctx context.Context, actor domain.Principal, name, currency string) (domain.Group, error) {
 	name = strings.TrimSpace(name)
 	currency = strings.ToUpper(strings.TrimSpace(currency))
-	if name == "" || len(name) > 120 {
-		return domain.Group{}, domain.ValidationError{Field: "name", Message: "must contain 1 to 120 characters"}
+	if name == "" || len(name) > 120 || containsControlCharacter(name) {
+		return domain.Group{}, domain.ValidationError{Field: "name", Message: "must contain 1 to 120 characters without control characters"}
 	}
 	if !platform.IsCurrencyCode(currency) {
 		return domain.Group{}, domain.ValidationError{Field: "currency", Message: "must be a three-letter ISO 4217 code"}
@@ -66,7 +79,7 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, name, curre
 // List returns all active groups and effective permissions for userID. ctx
 // bounds the query; an empty result is valid, while database errors are returned.
 func (s Service) List(ctx context.Context, userID string) ([]domain.Group, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT g.id,g.name,g.currency,m.id,m.status,u.email,u.display_name
+	rows, err := s.DB.QueryContext(ctx, `SELECT g.id,g.name,g.currency,g.logo_key,m.id,m.status,u.email,u.display_name
 		FROM memberships m JOIN groups g ON g.id=m.group_id JOIN users u ON u.id=m.user_id
 		WHERE m.user_id=? AND m.status='ACTIVE' ORDER BY lower(g.name)`, userID)
 	if err != nil {
@@ -76,9 +89,13 @@ func (s Service) List(ctx context.Context, userID string) ([]domain.Group, error
 	result := make([]domain.Group, 0)
 	for rows.Next() {
 		var group domain.Group
+		var logoKey sql.NullString
 		group.Membership.UserID = userID
-		if err := rows.Scan(&group.ID, &group.Name, &group.Currency, &group.Membership.ID, &group.Membership.Status, &group.Membership.Email, &group.Membership.DisplayName); err != nil {
+		if err := rows.Scan(&group.ID, &group.Name, &group.Currency, &logoKey, &group.Membership.ID, &group.Membership.Status, &group.Membership.Email, &group.Membership.DisplayName); err != nil {
 			return nil, err
+		}
+		if logoKey.Valid {
+			group.LogoURL = "/api/v1/groups/" + group.ID + "/images/" + logoKey.String
 		}
 		group.Membership.GroupID = group.ID
 		group.Membership.Roles, err = s.roles(ctx, group.Membership.ID)
@@ -92,6 +109,62 @@ func (s Service) List(ctx context.Context, userID string) ([]domain.Group, error
 		result = append(result, group)
 	}
 	return result, rows.Err()
+}
+
+// SetLogo attaches imageKey to membership's group. Only administrators may
+// update group branding. ctx bounds the audited transaction and actor supplies
+// audit identity. It returns the authenticated image URL, the replaced key for
+// later offline maintenance, or a validation, authorization, audit, or database
+// error. Request paths must not delete replaced content hashes because another
+// database row may still reference them.
+func (s Service) SetLogo(ctx context.Context, actor domain.Principal, membership domain.Membership, imageKey string) (string, string, error) {
+	if !HasRole(membership, domain.RoleAdmin) {
+		return "", "", domain.ErrForbidden
+	}
+	if !media.ValidImageKey(imageKey) {
+		return "", "", domain.ValidationError{Field: "image", Message: "has an invalid storage key"}
+	}
+	var replacedKey string
+	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		var previous sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT logo_key FROM groups WHERE id=?`, membership.GroupID).Scan(&previous); errors.Is(err, sql.ErrNoRows) {
+			return domain.ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		replacedKey = previous.String
+		if _, err := tx.ExecContext(ctx, `UPDATE groups SET logo_key=?,updated_at=? WHERE id=?`, imageKey, platform.Timestamp(platform.Now()), membership.GroupID); err != nil {
+			return err
+		}
+		return audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "group.logo.updated", "group", membership.GroupID, map[string]any{"imageKey": imageKey})
+	})
+	return "/api/v1/groups/" + membership.GroupID + "/images/" + imageKey, replacedKey, err
+}
+
+// RemoveLogo clears the custom logo from membership's group so clients return
+// to the TeamTaler mark. Only administrators may remove group branding. ctx
+// bounds the audited transaction; actor supplies audit identity. It returns the
+// detached key for later offline maintenance or an authorization, not-found,
+// audit, or database error.
+func (s Service) RemoveLogo(ctx context.Context, actor domain.Principal, membership domain.Membership) (string, error) {
+	if !HasRole(membership, domain.RoleAdmin) {
+		return "", domain.ErrForbidden
+	}
+	var removedKey string
+	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		var previous sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT logo_key FROM groups WHERE id=?`, membership.GroupID).Scan(&previous); errors.Is(err, sql.ErrNoRows) {
+			return domain.ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		removedKey = previous.String
+		if _, err := tx.ExecContext(ctx, `UPDATE groups SET logo_key=NULL,updated_at=? WHERE id=?`, platform.Timestamp(platform.Now()), membership.GroupID); err != nil {
+			return err
+		}
+		return audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "group.logo.removed", "group", membership.GroupID, map[string]any{})
+	})
+	return removedKey, err
 }
 
 // MembershipForUser verifies that userID actively belongs to groupID and returns
@@ -332,15 +405,18 @@ func containsRole(roles []domain.Role, expected domain.Role) bool {
 // Invitation includes safe onboarding metadata and, only in the immediate
 // CreateInvitation result, the one-time plaintext Token.
 type Invitation struct {
-	ID          string        `json:"id"`
-	GroupID     string        `json:"groupId"`
-	Email       string        `json:"email"`
-	DisplayName string        `json:"displayName,omitempty"`
-	Roles       []domain.Role `json:"roles"`
-	ExpiresAt   string        `json:"expiresAt"`
-	AcceptedAt  *string       `json:"acceptedAt,omitempty"`
-	RevokedAt   *string       `json:"revokedAt,omitempty"`
-	Token       string        `json:"token,omitempty"`
+	ID                  string              `json:"id"`
+	GroupID             string              `json:"groupId"`
+	Email               string              `json:"email"`
+	DisplayName         string              `json:"displayName,omitempty"`
+	Roles               []domain.Role       `json:"roles"`
+	ExpiresAt           string              `json:"expiresAt"`
+	AcceptedAt          *string             `json:"acceptedAt,omitempty"`
+	RevokedAt           *string             `json:"revokedAt,omitempty"`
+	EmailDeliveryStatus EmailDeliveryStatus `json:"emailDeliveryStatus"`
+	EmailSentAt         *string             `json:"emailSentAt,omitempty"`
+	EmailFailureCode    string              `json:"emailFailureCode,omitempty"`
+	Token               string              `json:"token,omitempty"`
 }
 
 // CreateInvitation creates a seven-day, one-time invitation in membership's
@@ -351,31 +427,104 @@ func (s Service) CreateInvitation(ctx context.Context, actor domain.Principal, m
 	if !HasRole(membership, domain.RoleAdmin) {
 		return Invitation{}, domain.ErrForbidden
 	}
-	email = strings.ToLower(strings.TrimSpace(email))
-	if !strings.Contains(email, "@") || len(email) > 254 {
+	var err error
+	email, err = platform.NormalizeEmail(email)
+	if err != nil {
 		return Invitation{}, domain.ValidationError{Field: "email", Message: "must be a valid email address"}
 	}
-	roles, err := validateRoles(roles)
+	displayName = strings.TrimSpace(displayName)
+	if len(displayName) > 120 || containsControlCharacter(displayName) {
+		return Invitation{}, domain.ValidationError{Field: "displayName", Message: "must contain at most 120 characters without control characters"}
+	}
+	roles, err = validateRoles(roles)
 	if err != nil {
 		return Invitation{}, err
 	}
-	id, _ := platform.NewID("inv")
+	var item Invitation
+	err = storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		item, err = createInvitationTx(ctx, tx, actor, membership, email, displayName, roles, platform.Now())
+		return err
+	})
+	return item, err
+}
+
+func createInvitationTx(ctx context.Context, tx *sql.Tx, actor domain.Principal, membership domain.Membership, email, displayName string, roles []domain.Role, now time.Time) (Invitation, error) {
+	if roles == nil {
+		roles = []domain.Role{}
+	}
+	nowText := platform.Timestamp(now)
+	var existing int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM memberships m JOIN users u ON u.id=m.user_id
+		WHERE m.group_id=? AND u.email=?`, membership.GroupID, email).Scan(&existing); err != nil {
+		return Invitation{}, err
+	}
+	if existing > 0 {
+		return Invitation{}, fmt.Errorf("%w: %w", domain.ErrConflict, ErrMembershipEmailExists)
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM invitations
+		WHERE group_id=? AND email=? AND accepted_at IS NULL AND revoked_at IS NULL
+		AND julianday(expires_at)>julianday(?)`, membership.GroupID, email, nowText).Scan(&existing); err != nil {
+		return Invitation{}, err
+	}
+	if existing > 0 {
+		return Invitation{}, fmt.Errorf("%w: %w", domain.ErrConflict, ErrInvitationEmailExists)
+	}
+
+	id, err := platform.NewID("inv")
+	if err != nil {
+		return Invitation{}, err
+	}
 	token, err := platform.NewSecret()
 	if err != nil {
 		return Invitation{}, err
 	}
-	expires := platform.Now().Add(7 * 24 * time.Hour)
-	encoded, _ := json.Marshal(roles)
-	item := Invitation{ID: id, GroupID: membership.GroupID, Email: email, DisplayName: strings.TrimSpace(displayName), Roles: roles, ExpiresAt: platform.Timestamp(expires), Token: token}
-	err = storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `INSERT INTO invitations(id,group_id,email,display_name,token_hash,roles_json,expires_at,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,
-			id, membership.GroupID, email, nullable(item.DisplayName), platform.HashSecret(token), string(encoded), item.ExpiresAt, actor.UserID, platform.Timestamp(platform.Now()))
+	encoded, err := json.Marshal(roles)
+	if err != nil {
+		return Invitation{}, fmt.Errorf("encode invitation roles: %w", err)
+	}
+	item := Invitation{
+		ID: id, GroupID: membership.GroupID, Email: email, DisplayName: displayName,
+		Roles: roles, ExpiresAt: platform.Timestamp(now.Add(7 * 24 * time.Hour)),
+		EmailDeliveryStatus: EmailDeliveryNotRequested, Token: token,
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO invitations(id,group_id,email,display_name,token_hash,roles_json,expires_at,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,
+		item.ID, membership.GroupID, email, nullable(displayName), platform.HashSecret(token), string(encoded), item.ExpiresAt, actor.UserID, nowText); err != nil {
+		return Invitation{}, err
+	}
+	if err := audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "invitation.created", "invitation", item.ID, map[string]any{"email": email, "roles": roles}); err != nil {
+		return Invitation{}, err
+	}
+	return item, nil
+}
+
+// RevokeInvitation invalidates one unconsumed invitation in membership's group
+// and records the administrative reason. ctx bounds the transaction. It returns
+// forbidden, validation, not-found, audit, or database errors. Example:
+// RevokeInvitation(ctx, actor, membership, invitationID, "email delivery failed").
+func (s Service) RevokeInvitation(ctx context.Context, actor domain.Principal, membership domain.Membership, invitationID, reason string) error {
+	if !HasRole(membership, domain.RoleAdmin) {
+		return domain.ErrForbidden
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" || len(reason) > 240 {
+		return domain.ValidationError{Field: "reason", Message: "must contain 1 to 240 characters"}
+	}
+	now := platform.Timestamp(platform.Now())
+	return storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, `UPDATE invitations SET revoked_at=?
+			WHERE id=? AND group_id=? AND accepted_at IS NULL AND revoked_at IS NULL`, now, invitationID, membership.GroupID)
 		if err != nil {
 			return err
 		}
-		return audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "invitation.created", "invitation", id, map[string]any{"email": email, "roles": roles})
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed == 0 {
+			return domain.ErrNotFound
+		}
+		return audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "invitation.revoked", "invitation", invitationID, map[string]any{"reason": reason})
 	})
-	return item, err
 }
 
 // ListInvitations returns newest-first invitations for an administrator's group
@@ -385,7 +534,10 @@ func (s Service) ListInvitations(ctx context.Context, membership domain.Membersh
 	if !HasRole(membership, domain.RoleAdmin) {
 		return nil, domain.ErrForbidden
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,group_id,email,coalesce(display_name,''),roles_json,expires_at,accepted_at,revoked_at FROM invitations WHERE group_id=? ORDER BY created_at DESC`, membership.GroupID)
+	rows, err := s.DB.QueryContext(ctx, `SELECT i.id,i.group_id,i.email,coalesce(i.display_name,''),i.roles_json,
+		i.expires_at,i.accepted_at,i.revoked_at,coalesce(o.status,'NOT_REQUESTED'),o.sent_at,coalesce(o.last_error_code,'')
+		FROM invitations i LEFT JOIN invitation_email_outbox o ON o.invitation_id=i.id
+		WHERE i.group_id=? ORDER BY i.created_at DESC`, membership.GroupID)
 	if err != nil {
 		return nil, err
 	}
@@ -394,10 +546,15 @@ func (s Service) ListInvitations(ctx context.Context, membership domain.Membersh
 	for rows.Next() {
 		var item Invitation
 		var encoded string
-		if err := rows.Scan(&item.ID, &item.GroupID, &item.Email, &item.DisplayName, &encoded, &item.ExpiresAt, &item.AcceptedAt, &item.RevokedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.GroupID, &item.Email, &item.DisplayName, &encoded, &item.ExpiresAt, &item.AcceptedAt, &item.RevokedAt, &item.EmailDeliveryStatus, &item.EmailSentAt, &item.EmailFailureCode); err != nil {
 			return nil, err
 		}
-		_ = json.Unmarshal([]byte(encoded), &item.Roles)
+		if err := json.Unmarshal([]byte(encoded), &item.Roles); err != nil {
+			return nil, fmt.Errorf("decode invitation roles: %w", err)
+		}
+		if item.Roles == nil {
+			item.Roles = []domain.Role{}
+		}
 		result = append(result, item)
 	}
 	return result, rows.Err()

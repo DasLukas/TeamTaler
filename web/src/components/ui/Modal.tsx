@@ -1,5 +1,5 @@
 import X from 'lucide-react/dist/esm/icons/x';
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconButton } from './IconButton';
 import styles from './Modal.module.css';
@@ -22,6 +22,7 @@ export interface ModalProps {
  */
 export function Modal({ open, title, onClose, children, variant = 'dialog', className = '' }: ModalProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
   const { t } = useTranslation();
 
   useEffect(() => {
@@ -32,10 +33,10 @@ export function Modal({ open, title, onClose, children, variant = 'dialog', clas
   }, [open]);
 
   return (
-    <dialog className={`${styles.dialog} ${styles[variant]} ${className}`} onCancel={onClose} onClose={onClose} ref={dialogRef}>
+    <dialog aria-labelledby={titleId} className={`${styles.dialog} ${styles[variant]} ${className}`} onCancel={onClose} onClose={onClose} ref={dialogRef}>
       {variant === 'sheet' ? <span aria-hidden="true" className={styles.handle} /> : null}
       <header className={styles.header}>
-        <h2>{title}</h2>
+        <h2 id={titleId}>{title}</h2>
         <IconButton label={t('dialog.close')} onClick={onClose}><X size={28} strokeWidth={1.8} /></IconButton>
       </header>
       {children}

@@ -25,10 +25,11 @@ import (
 )
 
 const (
-	maxRestoreBytes   int64 = 2 << 30
-	databaseEntryName       = "teamtaler.db"
-	manifestEntryName       = "manifest.json"
-	imagesEntryPrefix       = "images/"
+	maxRestoreBytes    int64 = 2 << 30
+	databaseEntryName        = "teamtaler.db"
+	manifestEntryName        = "manifest.json"
+	imagesEntryPrefix        = "images/"
+	groupLogoMigration       = "0004_group_logos.sql"
 )
 
 // Manifest records the archive format, creation timestamp, and SHA-256 checksum
@@ -66,29 +67,16 @@ func Create(ctx context.Context, db *sql.DB, dataDirectory, outputPath string) e
 	if err != nil {
 		return fmt.Errorf("open SQLite snapshot for image inventory: %w", err)
 	}
-	imageRows, err := snapshotDB.QueryContext(ctx, `SELECT DISTINCT image_key FROM products WHERE image_key IS NOT NULL`)
+	imageKeys, err := referencedImageKeys(ctx, snapshotDB)
 	if err != nil {
 		snapshotDB.Close()
 		return fmt.Errorf("read referenced image inventory: %w", err)
 	}
-	var imageKeys []string
-	for imageRows.Next() {
-		var key string
-		if err := imageRows.Scan(&key); err != nil {
-			imageRows.Close()
-			snapshotDB.Close()
-			return err
-		}
+	for _, key := range imageKeys {
 		if err := validateArchiveEntryName(imagesEntryPrefix + key); err != nil {
-			imageRows.Close()
 			snapshotDB.Close()
 			return errors.New("database contains an unsafe image key")
 		}
-		imageKeys = append(imageKeys, key)
-	}
-	if err := imageRows.Close(); err != nil {
-		snapshotDB.Close()
-		return err
 	}
 	if err := snapshotDB.Close(); err != nil {
 		return err
@@ -453,25 +441,16 @@ func validateRestoredDatabase(destination string, manifest Manifest) error {
 		return err
 	}
 	referenced := make(map[string]struct{})
-	imageRows, err := db.Query(`SELECT DISTINCT image_key FROM products WHERE image_key IS NOT NULL`)
+	imageKeys, err := referencedImageKeys(context.Background(), db)
 	if err != nil {
 		return err
 	}
-	for imageRows.Next() {
-		var key string
-		if err := imageRows.Scan(&key); err != nil {
-			imageRows.Close()
-			return err
-		}
+	for _, key := range imageKeys {
 		name := imagesEntryPrefix + key
 		if _, ok := manifest.Files[name]; !ok {
-			imageRows.Close()
 			return fmt.Errorf("referenced image %s is missing from backup manifest", key)
 		}
 		referenced[name] = struct{}{}
-	}
-	if err := imageRows.Close(); err != nil {
-		return err
 	}
 	for name := range manifest.Files {
 		if strings.HasPrefix(name, imagesEntryPrefix) {
@@ -481,6 +460,36 @@ func validateRestoredDatabase(destination string, manifest Manifest) error {
 		}
 	}
 	return nil
+}
+
+// referencedImageKeys returns every distinct content-addressed image referenced
+// by db. Databases predating group-logo migration 0004 contain product images
+// only and remain valid restore inputs. ctx bounds all schema and inventory
+// reads; database and row errors are returned unchanged.
+func referencedImageKeys(ctx context.Context, db *sql.DB) ([]string, error) {
+	query := `SELECT DISTINCT image_key FROM products WHERE image_key IS NOT NULL`
+	var hasGroupLogos int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version=?`, groupLogoMigration).Scan(&hasGroupLogos); err != nil {
+		return nil, err
+	}
+	if hasGroupLogos > 0 {
+		query = `SELECT image_key FROM products WHERE image_key IS NOT NULL
+			UNION SELECT logo_key FROM groups WHERE logo_key IS NOT NULL`
+	}
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	keys := make([]string, 0)
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, rows.Err()
 }
 
 func addFile(writer *tar.Writer, name, path string) error {

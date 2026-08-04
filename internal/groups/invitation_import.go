@@ -1,0 +1,318 @@
+package groups
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/DasLukas/TeamTaler/internal/audit"
+	"github.com/DasLukas/TeamTaler/internal/domain"
+	"github.com/DasLukas/TeamTaler/internal/idempotency"
+	"github.com/DasLukas/TeamTaler/internal/platform"
+	"github.com/DasLukas/TeamTaler/internal/storage"
+)
+
+const maxInvitationImportRows = 100
+
+// TokenSealer encrypts an invitation token for temporary outbox persistence.
+// Implementations must use authenticated encryption and be safe for concurrent
+// use. Seal must never include plaintext in returned errors.
+type TokenSealer interface {
+	Seal(plaintext string) (string, error)
+}
+
+// InvitationImportStatus describes the business outcome for one CSV row.
+type InvitationImportStatus string
+
+const (
+	// InvitationImportCreated means an invitation and email job were committed.
+	InvitationImportCreated InvitationImportStatus = "CREATED"
+	// InvitationImportInvalid means row-level validation prevented creation.
+	InvitationImportInvalid InvitationImportStatus = "INVALID"
+	// InvitationImportSkippedMember means the address already belongs to the group.
+	InvitationImportSkippedMember InvitationImportStatus = "SKIPPED_ALREADY_MEMBER"
+	// InvitationImportSkippedInvitation means a current invitation already exists.
+	InvitationImportSkippedInvitation InvitationImportStatus = "SKIPPED_ALREADY_INVITED"
+)
+
+// EmailDeliveryStatus describes durable invitation email delivery state.
+type EmailDeliveryStatus string
+
+const (
+	// EmailDeliveryNotRequested identifies manually shared invitation links.
+	EmailDeliveryNotRequested EmailDeliveryStatus = "NOT_REQUESTED"
+	// EmailDeliveryPending identifies a queued delivery waiting for a worker.
+	EmailDeliveryPending EmailDeliveryStatus = "PENDING"
+	// EmailDeliverySending identifies a delivery protected by a worker lease.
+	EmailDeliverySending EmailDeliveryStatus = "SENDING"
+	// EmailDeliverySent identifies a message accepted by the configured SMTP relay.
+	EmailDeliverySent EmailDeliveryStatus = "SENT"
+	// EmailDeliveryFailed identifies a delivery that exhausted automatic retries.
+	EmailDeliveryFailed EmailDeliveryStatus = "FAILED"
+	// EmailDeliveryCancelled identifies a job invalidated before delivery.
+	EmailDeliveryCancelled EmailDeliveryStatus = "CANCELLED"
+)
+
+// InvitationImportCandidate is one parsed CSV row supplied to the group service.
+// ValidationCode may be set by a structural parser to preserve partial results.
+type InvitationImportCandidate struct {
+	Row            int    `json:"row"`
+	Email          string `json:"email,omitempty"`
+	DisplayName    string `json:"displayName,omitempty"`
+	ValidationCode string `json:"validationCode,omitempty"`
+}
+
+// InvitationImportRow is the stable, secret-free outcome for one source row.
+type InvitationImportRow struct {
+	Row                 int                    `json:"row"`
+	Email               string                 `json:"email,omitempty"`
+	DisplayName         string                 `json:"displayName,omitempty"`
+	InvitationID        string                 `json:"invitationId,omitempty"`
+	InvitationStatus    InvitationImportStatus `json:"invitationStatus"`
+	EmailDeliveryStatus EmailDeliveryStatus    `json:"emailDeliveryStatus,omitempty"`
+	Code                string                 `json:"code,omitempty"`
+}
+
+// InvitationImportSummary aggregates one idempotent CSV import result.
+type InvitationImportSummary struct {
+	TotalRows int `json:"totalRows"`
+	Created   int `json:"created"`
+	Invalid   int `json:"invalid"`
+	Skipped   int `json:"skipped"`
+}
+
+// InvitationImportResult is the complete secret-free response persisted for
+// idempotent replay.
+type InvitationImportResult struct {
+	Summary InvitationImportSummary `json:"summary"`
+	Rows    []InvitationImportRow   `json:"rows"`
+}
+
+// InvitationEmailRetryResult reports a failed job returned to the delivery
+// queue. It contains no invitation token or SMTP error detail.
+type InvitationEmailRetryResult struct {
+	InvitationID        string              `json:"invitationId"`
+	EmailDeliveryStatus EmailDeliveryStatus `json:"emailDeliveryStatus"`
+}
+
+// ImportInvitations atomically creates regular-member invitations and encrypted
+// email outbox jobs for valid candidates. Invalid, existing-member, and current-
+// invitation rows are returned as partial outcomes. idempotencyKey protects the
+// batch from duplicate jobs. It returns forbidden, unavailable, validation,
+// idempotency, encryption, audit, or database errors. No plaintext token is
+// returned or stored in the idempotency result.
+func (s Service) ImportInvitations(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey string, candidates []InvitationImportCandidate) (InvitationImportResult, error) {
+	if !HasRole(membership, domain.RoleAdmin) {
+		return InvitationImportResult{}, domain.ErrForbidden
+	}
+	if s.TokenSealer == nil {
+		return InvitationImportResult{}, fmt.Errorf("%w: invitation email is not configured", domain.ErrServiceUnavailable)
+	}
+	if err := idempotency.ValidateKey(idempotencyKey); err != nil {
+		return InvitationImportResult{}, err
+	}
+	if len(candidates) < 1 || len(candidates) > maxInvitationImportRows {
+		return InvitationImportResult{}, domain.ValidationError{Field: "file", Message: fmt.Sprintf("must contain 1 to %d data rows", maxInvitationImportRows)}
+	}
+
+	normalized := normalizeImportCandidates(candidates)
+	requestHash, err := idempotency.Hash(map[string]any{"action": "invitation.import", "rows": normalized})
+	if err != nil {
+		return InvitationImportResult{}, fmt.Errorf("hash invitation import: %w", err)
+	}
+	result := InvitationImportResult{
+		Summary: InvitationImportSummary{TotalRows: len(normalized)},
+		Rows:    make([]InvitationImportRow, 0, len(normalized)),
+	}
+	err = storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		found, err := idempotency.Load(ctx, tx, membership.GroupID, actor.UserID, idempotencyKey, requestHash, &result)
+		if err != nil || found {
+			return err
+		}
+
+		now := platform.Now()
+		for _, candidate := range normalized {
+			row := InvitationImportRow{Row: candidate.Row, Email: candidate.Email, DisplayName: candidate.DisplayName}
+			if candidate.ValidationCode != "" {
+				row.InvitationStatus = InvitationImportInvalid
+				row.Code = candidate.ValidationCode
+				result.Summary.Invalid++
+				result.Rows = append(result.Rows, row)
+				continue
+			}
+
+			invitation, createErr := createInvitationTx(ctx, tx, actor, membership, candidate.Email, candidate.DisplayName, nil, now)
+			switch {
+			case errors.Is(createErr, ErrMembershipEmailExists):
+				row.InvitationStatus = InvitationImportSkippedMember
+				row.Code = "already_member"
+				result.Summary.Skipped++
+				result.Rows = append(result.Rows, row)
+				continue
+			case errors.Is(createErr, ErrInvitationEmailExists):
+				row.InvitationStatus = InvitationImportSkippedInvitation
+				row.Code = "already_invited"
+				row.InvitationID, row.EmailDeliveryStatus, err = currentInvitationDeliveryTx(ctx, tx, membership.GroupID, candidate.Email, now)
+				if err != nil {
+					return err
+				}
+				result.Summary.Skipped++
+				result.Rows = append(result.Rows, row)
+				continue
+			case createErr != nil:
+				return createErr
+			}
+
+			encryptedToken, err := s.TokenSealer.Seal(invitation.Token)
+			if err != nil {
+				return fmt.Errorf("encrypt invitation token: %w", err)
+			}
+			nowText := platform.Timestamp(now)
+			if _, err := tx.ExecContext(ctx, `INSERT INTO invitation_email_outbox(
+				invitation_id,group_id,token_ciphertext,status,attempt_count,next_attempt_at,created_at,updated_at
+			) VALUES(?,?,?,'PENDING',0,?,?,?)`, invitation.ID, membership.GroupID, encryptedToken, nowText, nowText, nowText); err != nil {
+				return err
+			}
+			if err := audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "invitation.email.queued", "invitation", invitation.ID, map[string]any{"email": invitation.Email}); err != nil {
+				return err
+			}
+			row.InvitationID = invitation.ID
+			row.InvitationStatus = InvitationImportCreated
+			row.EmailDeliveryStatus = EmailDeliveryPending
+			result.Summary.Created++
+			result.Rows = append(result.Rows, row)
+		}
+		return idempotency.Store(ctx, tx, membership.GroupID, actor.UserID, idempotencyKey, requestHash, 200, result)
+	})
+	if err != nil {
+		return InvitationImportResult{}, err
+	}
+	return result, nil
+}
+
+func currentInvitationDeliveryTx(ctx context.Context, tx *sql.Tx, groupID, email string, now time.Time) (string, EmailDeliveryStatus, error) {
+	var invitationID string
+	var status EmailDeliveryStatus
+	err := tx.QueryRowContext(ctx, `SELECT i.id,coalesce(o.status,'NOT_REQUESTED')
+		FROM invitations i LEFT JOIN invitation_email_outbox o ON o.invitation_id=i.id
+		WHERE i.group_id=? AND i.email=? AND i.accepted_at IS NULL AND i.revoked_at IS NULL
+		AND julianday(i.expires_at)>julianday(?)
+		ORDER BY julianday(i.created_at) DESC LIMIT 1`, groupID, email, platform.Timestamp(now)).Scan(&invitationID, &status)
+	if err != nil {
+		return "", "", fmt.Errorf("load existing invitation delivery: %w", err)
+	}
+	return invitationID, status, nil
+}
+
+// RetryInvitationEmail atomically returns one terminally failed, unconsumed,
+// unexpired invitation email to the outbox. idempotencyKey prevents duplicate
+// administrative retry commands. It returns forbidden, validation, not-found,
+// conflict, idempotency, audit, or database errors. The encrypted token remains
+// unchanged and no network I/O occurs inside the transaction.
+func (s Service) RetryInvitationEmail(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey, invitationID string) (InvitationEmailRetryResult, error) {
+	if !HasRole(membership, domain.RoleAdmin) {
+		return InvitationEmailRetryResult{}, domain.ErrForbidden
+	}
+	if s.TokenSealer == nil {
+		return InvitationEmailRetryResult{}, fmt.Errorf("%w: invitation email is not configured", domain.ErrServiceUnavailable)
+	}
+	if err := idempotency.ValidateKey(idempotencyKey); err != nil {
+		return InvitationEmailRetryResult{}, err
+	}
+	invitationID = strings.TrimSpace(invitationID)
+	if invitationID == "" {
+		return InvitationEmailRetryResult{}, domain.ValidationError{Field: "invitationId", Message: "is required"}
+	}
+	requestHash, err := idempotency.Hash(map[string]any{"action": "invitation.email.retry", "invitationId": invitationID})
+	if err != nil {
+		return InvitationEmailRetryResult{}, fmt.Errorf("hash invitation email retry: %w", err)
+	}
+	result := InvitationEmailRetryResult{InvitationID: invitationID, EmailDeliveryStatus: EmailDeliveryPending}
+	err = storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		found, err := idempotency.Load(ctx, tx, membership.GroupID, actor.UserID, idempotencyKey, requestHash, &result)
+		if err != nil || found {
+			return err
+		}
+		var status string
+		var acceptedAt, revokedAt, ciphertext sql.NullString
+		var expiresAt string
+		err = tx.QueryRowContext(ctx, `SELECT o.status,i.accepted_at,i.revoked_at,i.expires_at,o.token_ciphertext
+			FROM invitation_email_outbox o JOIN invitations i ON i.id=o.invitation_id
+			WHERE o.invitation_id=? AND o.group_id=?`, invitationID, membership.GroupID).
+			Scan(&status, &acceptedAt, &revokedAt, &expiresAt, &ciphertext)
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		nowValue := platform.Now()
+		expiry, parseErr := time.Parse(time.RFC3339Nano, expiresAt)
+		if parseErr != nil {
+			return fmt.Errorf("parse invitation expiry: %w", parseErr)
+		}
+		if status != string(EmailDeliveryFailed) || acceptedAt.Valid || revokedAt.Valid || !expiry.After(nowValue) || !ciphertext.Valid || ciphertext.String == "" {
+			return fmt.Errorf("%w: invitation email is not retryable", domain.ErrConflict)
+		}
+		now := platform.Timestamp(nowValue)
+		updated, err := tx.ExecContext(ctx, `UPDATE invitation_email_outbox SET
+			status='PENDING',attempt_count=0,next_attempt_at=?,lease_token=NULL,lease_until=NULL,last_error_code=NULL,updated_at=?
+			WHERE invitation_id=? AND group_id=? AND status='FAILED'`, now, now, invitationID, membership.GroupID)
+		if err != nil {
+			return err
+		}
+		changed, err := updated.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed != 1 {
+			return fmt.Errorf("%w: invitation email state changed", domain.ErrConflict)
+		}
+		if err := audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "invitation.email.retried", "invitation", invitationID, map[string]any{}); err != nil {
+			return err
+		}
+		return idempotency.Store(ctx, tx, membership.GroupID, actor.UserID, idempotencyKey, requestHash, 200, result)
+	})
+	if err != nil {
+		return InvitationEmailRetryResult{}, err
+	}
+	return result, nil
+}
+
+func normalizeImportCandidates(candidates []InvitationImportCandidate) []InvitationImportCandidate {
+	result := make([]InvitationImportCandidate, len(candidates))
+	for index, candidate := range candidates {
+		candidate.Email = strings.TrimSpace(candidate.Email)
+		candidate.DisplayName = strings.TrimSpace(candidate.DisplayName)
+		if candidate.ValidationCode == "" {
+			email, err := platform.NormalizeEmail(candidate.Email)
+			switch {
+			case err != nil:
+				candidate.Email = ""
+				candidate.ValidationCode = "invalid_email"
+			case len(candidate.DisplayName) > 120:
+				candidate.Email = email
+				candidate.ValidationCode = "display_name_too_long"
+			case containsControlCharacter(candidate.DisplayName):
+				candidate.Email = email
+				candidate.ValidationCode = "invalid_display_name"
+			default:
+				candidate.Email = email
+			}
+		}
+		result[index] = candidate
+	}
+	return result
+}
+
+func containsControlCharacter(value string) bool {
+	for _, character := range value {
+		if character < 32 || character == 127 {
+			return true
+		}
+	}
+	return false
+}
