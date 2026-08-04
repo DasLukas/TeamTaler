@@ -34,12 +34,16 @@ export function Modal({ open, title, onClose, children, variant = 'dialog', clas
 
   return (
     <dialog aria-labelledby={titleId} className={`${styles.dialog} ${styles[variant]} ${className}`} onCancel={onClose} onClose={onClose} ref={dialogRef}>
-      {variant === 'sheet' ? <span aria-hidden="true" className={styles.handle} /> : null}
-      <header className={styles.header}>
-        <h2 id={titleId}>{title}</h2>
-        <IconButton label={t('dialog.close')} onClick={onClose}><X size={28} strokeWidth={1.8} /></IconButton>
-      </header>
-      {children}
+      {open ? (
+        <>
+          {variant === 'sheet' ? <span aria-hidden="true" className={styles.handle} /> : null}
+          <header className={styles.header}>
+            <h2 id={titleId}>{title}</h2>
+            <IconButton label={t('dialog.close')} onClick={onClose}><X size={28} strokeWidth={1.8} /></IconButton>
+          </header>
+          {children}
+        </>
+      ) : null}
     </dialog>
   );
 }

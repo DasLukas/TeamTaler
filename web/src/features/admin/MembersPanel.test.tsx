@@ -282,7 +282,7 @@ describe('MembersPanel invitations', () => {
     expect(apiMock.importInvitations).not.toHaveBeenCalled();
   });
 
-  it('retries a failed invitation email and resumes status polling', async () => {
+  it('resends a failed invitation email with token rotation and resumes status polling', async () => {
     const user = userEvent.setup();
     const csv = new File(['email,display_name\nfailed@example.test,Failed Member'], 'members.csv', { type: 'text/csv' });
     const failedResult: InvitationImportResult = {
@@ -301,7 +301,12 @@ describe('MembersPanel invitations', () => {
     const sentMetadata: InvitationMetadata = { ...failedMetadata, emailDeliveryStatus: 'SENT', emailSentAt: '2026-08-04T12:02:00Z' };
     apiMock.importInvitations.mockResolvedValue(failedResult);
     apiMock.getInvitations.mockResolvedValueOnce([failedMetadata]).mockResolvedValue([sentMetadata]);
-    apiMock.retryInvitationEmail.mockResolvedValue({ invitationId: 'invitation-failed', emailDeliveryStatus: 'PENDING' });
+    apiMock.resendInvitationEmail.mockResolvedValue({
+      invitationId: 'invitation-failed',
+      emailDeliveryStatus: 'PENDING',
+      expiresAt: '2026-08-12T12:00:00Z',
+      acceptUrl: 'https://teamtaler.example/invite#token=rotated-failed',
+    });
     renderMembers();
 
     await user.click(await screen.findByRole('button', { name: i18n.t('members.csvImport.action') }));
@@ -311,7 +316,7 @@ describe('MembersPanel invitations', () => {
     const retryLabel = i18n.t('members.csvImport.retryFor', { email: 'failed@example.test' });
     await user.click(await screen.findByRole('button', { name: retryLabel }));
 
-    await waitFor(() => expect(apiMock.retryInvitationEmail).toHaveBeenCalledWith('group-a', 'invitation-failed'));
+    await waitFor(() => expect(apiMock.resendInvitationEmail).toHaveBeenCalledWith('group-a', 'invitation-failed'));
     const resultsTable = screen.getByRole('table', { name: i18n.t('members.csvImport.resultsTable') });
     const row = within(resultsTable).getByRole('row', { name: /failed@example\.test/i });
     await waitFor(() => expect(within(row).getByText(i18n.t('members.csvImport.deliveryStatus.sent'))).toBeVisible());
