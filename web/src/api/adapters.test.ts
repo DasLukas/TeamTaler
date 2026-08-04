@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import i18n from '@/i18n';
-import { adaptLedger, adaptNotification, adaptSettlement } from './adapters';
+import { adaptLedger, adaptNotification, adaptProduct, adaptSettlement } from './adapters';
 
 describe('API adapters', () => {
+  it('adapts fixed and user-defined product pricing without inventing a custom price', () => {
+    expect(adaptProduct({ id: 'fixed', name: 'Water', categoryId: 'drinks', pricingMode: 'FIXED', priceMinor: '100', currency: 'EUR' })).toMatchObject({
+      pricingMode: 'FIXED', currency: 'EUR', price: { minorUnits: '100', currency: 'EUR' },
+    });
+    expect(adaptProduct({ id: 'custom', name: 'Donation', categoryId: 'other', pricingMode: 'USER_DEFINED', currency: 'EUR' })).toMatchObject({
+      pricingMode: 'USER_DEFINED', currency: 'EUR', price: undefined,
+    });
+  });
+
   it('reconstructs ledger balances without losing integer precision', () => {
     const entries = adaptLedger({
       balanceMinor: '9007199254740993123',

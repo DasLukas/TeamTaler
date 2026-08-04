@@ -31,6 +31,7 @@ describe('ProductPicker', () => {
       />,
     );
     expect(screen.getByRole('tab', { name: demoCategories[1].name })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('button', { name: new RegExp(`${demoCategories[1].products[1].name}.*${i18n.t('booking.enterPrice')}`, 'i') })).toBeVisible();
   });
 
   it('excludes archived categories and products and renders an empty state', () => {

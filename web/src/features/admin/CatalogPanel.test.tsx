@@ -11,7 +11,9 @@ import { CatalogPanel } from './CatalogPanel';
 const apiMock = vi.hoisted(() => ({
   getCategories: vi.fn(),
   createCategory: vi.fn(),
+  updateCategory: vi.fn(),
   createProduct: vi.fn(),
+  updateProduct: vi.fn(),
   uploadProductImage: vi.fn(),
 }));
 
@@ -19,9 +21,11 @@ vi.mock('@/api/client', () => ({ api: apiMock }));
 
 const category: Category = {
   id: 'category-a',
+  version: 3,
   name: 'Drinks',
   icon: 'drink',
   active: true,
+  sortOrder: 2,
   products: [],
 };
 
@@ -30,6 +34,8 @@ const createdProduct: Product = {
   categoryId: category.id,
   version: 1,
   name: 'Water',
+  pricingMode: 'FIXED',
+  currency: 'EUR',
   price: { minorUnits: '100', currency: 'EUR' },
   active: true,
   sortOrder: 0,
@@ -59,6 +65,8 @@ describe('CatalogPanel product image recovery', () => {
     apiMock.getCategories.mockResolvedValue([category]);
     apiMock.createCategory.mockResolvedValue(category);
     apiMock.createProduct.mockResolvedValue(createdProduct);
+    apiMock.updateCategory.mockResolvedValue({ ...category, version: 4 });
+    apiMock.updateProduct.mockResolvedValue({ ...createdProduct, version: 2 });
   });
 
   it('creates a category from its name without a secondary type', async () => {
@@ -103,5 +111,73 @@ describe('CatalogPanel product image recovery', () => {
     expect(apiMock.createProduct).toHaveBeenCalledTimes(1);
     expect(apiMock.uploadProductImage).toHaveBeenCalledTimes(2);
     expect(apiMock.uploadProductImage).toHaveBeenNthCalledWith(2, 'group-a', createdProduct.id, replacementImage);
+  });
+
+  it('creates a user-defined-price product without a catalog price', async () => {
+    const user = userEvent.setup();
+    apiMock.createProduct.mockResolvedValue({ ...createdProduct, pricingMode: 'USER_DEFINED', price: undefined });
+    renderCatalog();
+
+    await screen.findByText(i18n.t('catalog.title'));
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.productAction') }));
+    await user.type(screen.getByLabelText(i18n.t('catalog.productName')), 'Donation');
+    await user.selectOptions(screen.getByLabelText(i18n.t('catalog.pricingMode')), 'USER_DEFINED');
+
+    expect(screen.queryByLabelText(i18n.t('catalog.price', { currency: 'EUR' }))).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.createProductAction') }));
+
+    await waitFor(() => expect(apiMock.createProduct).toHaveBeenCalledWith('group-a', {
+      categoryId: category.id,
+      name: 'Donation',
+      pricingMode: 'USER_DEFINED',
+      price: undefined,
+    }));
+  });
+
+  it('edits a category with its current version and preserves its sort order', async () => {
+    const user = userEvent.setup();
+    renderCatalog();
+
+    await screen.findByText(i18n.t('catalog.title'));
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.editCategory', { name: category.name }) }));
+    const dialog = screen.getByRole('dialog');
+    const name = within(dialog).getByLabelText(i18n.t('common.name'));
+    await user.clear(name);
+    await user.type(name, 'Team drinks');
+    await user.selectOptions(within(dialog).getByLabelText(i18n.t('common.status')), 'archived');
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('common.save') }));
+
+    await waitFor(() => expect(apiMock.updateCategory).toHaveBeenCalledWith('group-a', category.id, {
+      name: 'Team drinks',
+      active: false,
+      sortOrder: 2,
+      version: 3,
+    }));
+  });
+
+  it('edits a fixed-price product with an exact prefilled amount', async () => {
+    const user = userEvent.setup();
+    const existingProduct = { ...createdProduct, id: 'product-existing', version: 6, sortOrder: 4 };
+    apiMock.getCategories.mockResolvedValue([{ ...category, products: [existingProduct] }]);
+    apiMock.updateProduct.mockResolvedValue({ ...existingProduct, name: 'Mineral water', version: 7 });
+    renderCatalog();
+
+    await screen.findByText(existingProduct.name);
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.editProduct', { name: existingProduct.name }) }));
+    expect(screen.getByLabelText(i18n.t('catalog.price', { currency: 'EUR' }))).toHaveValue('1,00');
+    expect(screen.getByLabelText(i18n.t('common.category'))).toBeDisabled();
+    const name = screen.getByLabelText(i18n.t('catalog.productName'));
+    await user.clear(name);
+    await user.type(name, 'Mineral water');
+    await user.click(screen.getByRole('button', { name: i18n.t('common.save') }));
+
+    await waitFor(() => expect(apiMock.updateProduct).toHaveBeenCalledWith('group-a', existingProduct.id, {
+      name: 'Mineral water',
+      pricingMode: 'FIXED',
+      price: { minorUnits: '100', currency: 'EUR' },
+      active: true,
+      sortOrder: 4,
+      version: 6,
+    }));
   });
 });

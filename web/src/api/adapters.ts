@@ -113,13 +113,17 @@ export function adaptSession(input: unknown): Session {
  */
 export function adaptProduct(input: unknown): Product {
   const source = asRecord(input);
-  if ('price' in source) return source as unknown as Product;
+  const sourcePrice = source.price && typeof source.price === 'object' ? asRecord(source.price) : undefined;
+  const currency = String(source.currency || sourcePrice?.currency || 'EUR');
+  const pricingMode = source.pricingMode === 'USER_DEFINED' ? 'USER_DEFINED' : 'FIXED';
   return {
     id: String(source.id),
     categoryId: String(source.categoryId),
     version: Number(source.version ?? 1),
     name: String(source.name),
-    price: money(source.priceMinor, source.currency),
+    pricingMode,
+    currency,
+    price: pricingMode === 'FIXED' ? sourcePrice ? money(sourcePrice.minorUnits, sourcePrice.currency || currency) : money(source.priceMinor, currency) : undefined,
     imageUrl: typeof source.imageUrl === 'string' && source.imageUrl ? source.imageUrl : undefined,
     active: source.active !== false,
     sortOrder: Number(source.sortOrder ?? 0),
@@ -138,9 +142,11 @@ export function adaptCategories(input: unknown): Category[] {
     const name = String(source.name);
     return {
       id: String(source.id),
+      version: Number(source.version ?? 1),
       name,
       icon: typeof source.icon === 'string' ? source.icon as Category['icon'] : categoryIcon(name),
       active: source.active !== false,
+      sortOrder: Number(source.sortOrder ?? 0),
       products: (source.products as unknown[] ?? []).map(adaptProduct),
     };
   });

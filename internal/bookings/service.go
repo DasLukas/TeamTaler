@@ -38,6 +38,7 @@ type CreateInput struct {
 	ProductVersion     int64  `json:"productVersion"`
 	ExpectedPeriodID   string `json:"expectedPeriodId"`
 	Quantity           int    `json:"quantity"`
+	UnitPriceMinor     *int64 `json:"unitPriceMinor,omitempty"`
 	TargetMembershipID string `json:"targetMembershipId,omitempty"`
 	Reason             string `json:"reason,omitempty"`
 }
@@ -83,14 +84,15 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, membership 
 		}
 
 		var categoryID, productName, categoryName string
-		var unitPrice int64
+		var catalogPrice *int64
+		var pricingMode domain.ProductPricingMode
 		var productVersion int64
 		var periodID, currency string
-		err = tx.QueryRowContext(ctx, `SELECT p.category_id,p.name,p.price_minor,p.version,c.name,per.id,g.currency
+		err = tx.QueryRowContext(ctx, `SELECT p.category_id,p.name,p.price_minor,p.pricing_mode,p.version,c.name,per.id,g.currency
 			FROM products p JOIN categories c ON c.id=p.category_id AND c.group_id=p.group_id
 			JOIN groups g ON g.id=p.group_id JOIN periods per ON per.group_id=p.group_id AND per.status='OPEN'
 			WHERE p.id=? AND p.group_id=? AND p.active=1 AND c.active=1`, input.ProductID, membership.GroupID).
-			Scan(&categoryID, &productName, &unitPrice, &productVersion, &categoryName, &periodID, &currency)
+			Scan(&categoryID, &productName, &catalogPrice, &pricingMode, &productVersion, &categoryName, &periodID, &currency)
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.ErrNotFound
 		}
@@ -99,6 +101,24 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, membership 
 		}
 		if productVersion != input.ProductVersion || periodID != input.ExpectedPeriodID {
 			return domain.ErrPrecondition
+		}
+		var unitPrice int64
+		switch pricingMode {
+		case domain.ProductPricingFixed:
+			if input.UnitPriceMinor != nil {
+				return domain.ValidationError{Field: "unitPriceMinor", Message: "must be omitted for fixed-price products"}
+			}
+			if catalogPrice == nil {
+				return fmt.Errorf("fixed-price product %s has no catalog price", input.ProductID)
+			}
+			unitPrice = *catalogPrice
+		case domain.ProductPricingUserDefined:
+			if input.UnitPriceMinor == nil || *input.UnitPriceMinor <= 0 || *input.UnitPriceMinor > domain.MaxProductPriceMinor {
+				return domain.ValidationError{Field: "unitPriceMinor", Message: "must be a positive, reasonable integer for user-defined-price products"}
+			}
+			unitPrice = *input.UnitPriceMinor
+		default:
+			return fmt.Errorf("product %s has unsupported pricing mode %q", input.ProductID, pricingMode)
 		}
 		if input.TargetMembershipID != membership.ID {
 			allowed, err := hasCategoryPermissionTx(ctx, tx, membership, categoryID, domain.PermissionAssignToOthers)
@@ -153,7 +173,7 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, membership 
 			ActorMembershipID: membership.ID, TargetMembershipID: input.TargetMembershipID, Quantity: input.Quantity, UnitPriceMinor: unitPrice,
 			TotalMinor: total, Currency: currency, ProductName: productName, CategoryName: categoryName, Reason: input.Reason,
 			CreatedAt: now, CanVoid: input.TargetMembershipID == membership.ID}
-		if err := audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "booking.created", "booking", bookingID, map[string]any{"targetMembershipId": input.TargetMembershipID, "totalMinor": total}); err != nil {
+		if err := audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "booking.created", "booking", bookingID, map[string]any{"targetMembershipId": input.TargetMembershipID, "unitPriceMinor": unitPrice, "totalMinor": total}); err != nil {
 			return err
 		}
 		encodedResponse, _ := json.Marshal(booking)

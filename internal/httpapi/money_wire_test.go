@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/DasLukas/TeamTaler/internal/bookings"
 	"github.com/DasLukas/TeamTaler/internal/catalog"
 	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/finance"
@@ -14,6 +15,7 @@ import (
 
 func TestResponseMinorUnitsUseExactDecimalStrings(t *testing.T) {
 	const exact int64 = 9_007_199_254_740_993
+	exactProductPrice := exact
 	groupOutstanding := exact
 	payload := struct {
 		Product   domain.Product    `json:"product"`
@@ -22,7 +24,7 @@ func TestResponseMinorUnitsUseExactDecimalStrings(t *testing.T) {
 		Statement domain.Statement  `json:"statement"`
 		Dashboard finance.Dashboard `json:"dashboard"`
 	}{
-		Product: domain.Product{PriceMinor: exact},
+		Product: domain.Product{PriceMinor: &exactProductPrice},
 		Booking: domain.Booking{UnitPriceMinor: exact, TotalMinor: exact},
 		Payment: domain.Payment{AmountMinor: exact, Allocations: []domain.PaymentAllocation{{AmountMinor: exact}}},
 		Statement: domain.Statement{
@@ -58,8 +60,12 @@ func TestResponseMinorUnitsUseExactDecimalStrings(t *testing.T) {
 
 func TestMoneyCommandsContinueToAcceptIntegerMinorUnits(t *testing.T) {
 	var product catalog.CreateProductInput
-	if err := json.Unmarshal([]byte(`{"name":"Water","priceMinor":125,"sortOrder":0}`), &product); err != nil || product.PriceMinor != 125 {
-		t.Fatalf("decode product command: price=%d err=%v", product.PriceMinor, err)
+	if err := json.Unmarshal([]byte(`{"name":"Water","priceMinor":125,"sortOrder":0}`), &product); err != nil || product.PriceMinor == nil || *product.PriceMinor != 125 {
+		t.Fatalf("decode product command: price=%v err=%v", product.PriceMinor, err)
+	}
+	var booking bookings.CreateInput
+	if err := json.Unmarshal([]byte(`{"productId":"product-test","productVersion":1,"expectedPeriodId":"period-test","quantity":2,"unitPriceMinor":175}`), &booking); err != nil || booking.UnitPriceMinor == nil || *booking.UnitPriceMinor != 175 {
+		t.Fatalf("decode booking command: unit price=%v err=%v", booking.UnitPriceMinor, err)
 	}
 	var payment finance.CreatePaymentInput
 	if err := json.Unmarshal([]byte(`{"membershipId":"mem_test","amountMinor":125,"method":"CASH"}`), &payment); err != nil || payment.AmountMinor != 125 {

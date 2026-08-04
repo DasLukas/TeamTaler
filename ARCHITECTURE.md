@@ -34,9 +34,9 @@ This topology deliberately avoids a separate application server, database server
 - `internal/groups` implements group creation, tenant membership lookup, administrator-managed branding, member listing, cumulative roles, category grants, permission replacement, individual invitation creation/listing, and atomic idempotent CSV invitation imports.
 - `internal/memberimport` parses bounded UTF-8 comma- or semicolon-delimited invitation documents and preserves row-level validation outcomes.
 - `internal/email` implements the SMTP sender boundary, mandatory STARTTLS or implicit TLS transport, plain-text invitation rendering, and leased transactional-outbox dispatch with bounded retries.
-- `internal/catalog` implements category and product reads and writes, idempotent product creation, optimistic versions, and catalog authorization.
+- `internal/catalog` implements category and product reads and writes, fixed or user-defined pricing modes, idempotent product creation, optimistic versions, and catalog authorization.
 - `internal/media` validates JPEG/PNG/WebP input, strips metadata through PNG normalization, and owns content-addressed image paths shared by group logos and product images.
-- `internal/bookings` implements idempotent booking creation, immutable product/category/price snapshots, category-scoped third-party assignment rules, 30-second self-undo, audited reversal, and booking visibility.
+- `internal/bookings` resolves server-authoritative fixed prices or validates actor-supplied unit prices, then implements idempotent booking creation, immutable product/category/price snapshots, category-scoped third-party assignment rules, 30-second self-undo, audited reversal, and booking visibility.
 - `internal/finance` implements consolidated member accounts, personal and anonymous group category statistics, incoming payments, payment reversal, recent ledger activity, and finance-manager read models.
 - `internal/ledger` rebuilds correction and payment allocations. Negative current-period corrections offset the oldest positive claims before non-reversed payments are allocated oldest first.
 - `internal/periods` lists periods, closes the current period, snapshots member statements, opens the successor period, and returns settlement status enriched with later allocations.
@@ -46,7 +46,7 @@ This topology deliberately avoids a separate application server, database server
 - `internal/backup` creates consistent checksummed archives and validates/restores them.
 - `internal/httpapi` registers routes and composes authentication, CSRF, origin, body-limit, security-header, request-log, recovery, and SPA middleware around the services.
 - `internal/config` loads and validates `TEAMTALER_*` process configuration.
-- `internal/storage` configures SQLite, applies embedded forward-only migrations, rejects unknown future migrations, and provides transaction helpers.
+- `internal/storage` configures SQLite, applies embedded forward-only migrations, verifies their foreign-key integrity before commit, rejects unknown future migrations, and provides transaction helpers.
 - `internal/domain` defines shared roles, permissions, entities, and transport-safe error classes.
 - `internal/platform` provides random identifiers, random secrets, secret hashes, timestamps, the process clock, shared email normalization, and AES-256-GCM invitation-token envelopes.
 
@@ -65,7 +65,7 @@ The packages are internal implementation boundaries, not separately deployable s
 - `web/src/api` contains the same-origin fetch client, wire-model adapters, money conversion, and frontend types.
 - `web/src/demo` contains an explicit in-memory development transport and sample images. Vite includes them only when `VITE_DEMO_MODE=true` in a development build; production bundles exclude both fixtures and assets.
 - `web/src/i18n.ts` initializes i18next, while `web/src/locales/de.ts` centralizes reusable German interface, error, and accessibility copy.
-- `web/public` contains the brand mark and bundled development-demo product images.
+- `web/public` contains the source brand mark, generated browser/PWA icons, the web-app manifest, and bundled development-demo product images.
 
 The frontend consumes response monetary fields as exact decimal strings and uses `BigInt` for adaptation and formatting. Currency-specific fraction digits come from `Intl.NumberFormat`, including zero- and three-decimal currencies; syntactically valid private currency codes fall back to two fraction digits. Command requests send bounded JSON integers. UI role checks decide which controls are displayed; the backend repeats every authorization decision.
 
@@ -83,7 +83,7 @@ The initial schema consists of strict SQLite tables plus the migration ledger:
 | `membership_roles` | Cumulative `ADMIN`, `FINANCE_MANAGER`, and `CATALOG_MANAGER` roles. |
 | `categories` | User-defined product category, active state, sort order, and version. |
 | `category_permissions` | Per-member, per-category `ASSIGN_TO_OTHERS` and `VOID_BOOKINGS` grants. |
-| `products` | Category, current name and price, optional image key, active state, sort order, and version. |
+| `products` | Category, current name, `FIXED` or `USER_DEFINED` pricing mode, optional fixed price, optional image key, active state, sort order, and version. |
 | `periods` | Exactly one open period per group plus closed interval metadata and due date. |
 | `bookings` | Actor, target, quantity, immutable catalog/price snapshots, reason, and void metadata. |
 | `payments` | Received money, member, method, references, and reversal metadata. |
@@ -99,7 +99,7 @@ The initial schema consists of strict SQLite tables plus the migration ledger:
 
 Tenant-bearing queries are scoped by `group_id`. Composite foreign keys protect important group-owned relationships such as membership roles, category grants, products, bookings, allocations, and ledger references. The last active administrator cannot be demoted through the permission service.
 
-Prices and ledger amounts are persisted and calculated as signed 64-bit integer minor units. API responses serialize monetary fields as exact base-10 strings so browsers cannot lose precision above JavaScript's safe-integer limit; command inputs remain bounded JSON integers. Currency input is restricted to three uppercase ASCII letters but is not checked against an external ISO 4217 registry. A group has no time-zone or payment-instructions column in the current schema. Product images and group logos are files referenced by `products.image_key` and `groups.logo_key`; there is no separate image-asset table.
+Prices and ledger amounts are persisted and calculated as signed 64-bit integer minor units. A fixed-price product stores a positive `price_minor`; a user-defined-price product stores no catalog price and requires a new positive unit price, bounded to 100,000,000,000 minor units, on every booking. The schema enforces valid mode/price combinations. API responses serialize monetary fields as exact base-10 strings so browsers cannot lose precision above JavaScript's safe-integer limit; command inputs remain bounded JSON integers. Currency input is restricted to three uppercase ASCII letters but is not checked against an external ISO 4217 registry. A group has no time-zone or payment-instructions column in the current schema. Product images and group logos are files referenced by `products.image_key` and `groups.logo_key`; there is no separate image-asset table.
 
 SQLite triggers prevent update/delete of `ledger_entries`, `period_statements`, and `audit_events`, and prevent further updates to already closed `periods`. The service layer writes paired accounting entries in one transaction and integration tests verify balance for booking flows. The database schema does not implement a separate transaction/posting journal or a trigger that independently proves every set of ledger entries balances.
 
@@ -149,17 +149,17 @@ sequenceDiagram
     participant HTTP as HTTP middleware/handler
     participant Booking as Booking service
     participant DB as SQLite transaction
-    UI->>HTTP: POST booking + Idempotency-Key
+    UI->>HTTP: POST booking + optional chosen unit price + Idempotency-Key
     HTTP->>Booking: Principal, membership, command
     Booking->>DB: Load active product, category, open period
-    Booking->>DB: Validate product version, expected period, target, grant
+    Booking->>DB: Validate pricing mode, product version, period, target, grant
     Booking->>DB: Insert booking snapshot and paired ledger entries
     Booking->>DB: Rebuild allocations; write notification/audit/idempotency
     DB-->>Booking: Commit
     Booking-->>UI: Created or replayed booking
 ```
 
-The server calculates the total from the current persisted price and requested quantity. A stale product version or stale expected period produces a precondition failure. Categories are the only product classification layer; there is no additional standard/penalty type. Third-party bookings require a reason and their targets receive a notification.
+For `FIXED` products, the server rejects a submitted unit price and calculates the total from the current persisted price. For `USER_DEFINED` products, it requires and bounds the actor-supplied unit price, includes that price in the idempotency hash and audit metadata, and calculates the total as unit price times quantity. The chosen unit price is stored only in the immutable booking snapshot. A stale product version or stale expected period produces a precondition failure. Categories are the only product classification layer; there is no additional standard/penalty type. Third-party bookings require a reason and their targets receive a notification.
 
 Every booking snapshot stores both `actor_membership_id` and `target_membership_id`. The activity UI resolves, displays, and searches both identities for every booking, while dashboard activity adds an explicit actor cue when the actor and target differ.
 
@@ -202,6 +202,7 @@ The current implementation does not apply EXIF orientation or generate responsiv
 - API routes are rooted at `/api/v1`; liveness and readiness are `/health/live` and `/health/ready`.
 - API and SPA use one origin. There is no CORS configuration.
 - Product creation, CSV invitation import, booking creation/reversal, payment creation/reversal, and period close require an `Idempotency-Key`.
+- Product commands expose `FIXED` and `USER_DEFINED` pricing modes. Booking commands accept `unitPriceMinor` only for user-defined-price products.
 - Category and product update bodies carry a version. Optional `If-Match` is checked against that version, and successful catalog writes return a version ETag.
 - The member collection returns a content-derived ETag, but permission replacement currently does not enforce `If-Match`.
 - Errors use `application/problem+json` with a stable problem type, title, status, detail, and request path.
@@ -231,7 +232,7 @@ SQLite is opened with foreign keys, WAL journal mode, a 5-second busy timeout, a
 
 Bootstrap, group creation, group-logo updates, CSV invitation import, invitation acceptance, permission replacement, catalog writes, booking commands, payment commands, and period close define explicit transaction boundaries. SMTP and image decoding occur outside database transactions after the corresponding durable authorization and work records exist.
 
-Forward-only migrations run in lexical order at database open and are recorded in `schema_migrations`. Migration `0003` removes the former category-type columns while preserving category names and all booking snapshots; migration `0004` adds the optional group-logo reference; migration `0005` adds durable invitation-email delivery state. Startup and restore reject migration names unknown to the running binary. Downgrade migrations are not implemented; rollback requires the older image together with a compatible pre-upgrade backup.
+Forward-only migrations run in lexical order at database open and are recorded in `schema_migrations`. Migration `0003` removes the former category-type columns while preserving category names and all booking snapshots; migration `0004` adds the optional group-logo reference; migration `0005` adds durable invitation-email delivery state; migration `0006` adds explicit fixed or user-defined product pricing while preserving existing products, bookings, versions, and image references. Startup and restore reject migration names unknown to the running binary. Downgrade migrations are not implemented; rollback requires the older image together with a compatible pre-upgrade backup.
 
 The restore command stages data below `TEAMTALER_DATA_DIR`, requires `TEAMTALER_DATABASE_PATH` to be a direct child of that directory, and installs the snapshot at that configured path. The direct-child constraint keeps staging, recovery, and final renames on the same mounted filesystem.
 
@@ -309,9 +310,9 @@ Backend Go tests currently cover:
 - Administrator-only group-logo updates and authenticated, group-referenced image delivery.
 - bootstrap/login, single-use invitation acceptance, tenant isolation, and role/category authorization.
 - throttled session last-seen writes.
-- booking undo, assignment validation, and paired ledger balance.
+- fixed-price override rejection, user-defined product-price validation and snapshots, booking undo, assignment validation, and paired ledger balance.
 - payment FIFO, reversal, closed-period immutability, future-credit use, and negative/partial correction allocation.
 
-Frontend Vitest tests currently cover API adapters, exact money handling for zero-, two-, and three-decimal currencies, durable scoped idempotency reservations and retry semantics, group-logo updates, staged product/image recovery, active-product filtering, authentication and invitation behavior, acting/target booking traceability, localized ledger descriptions and plural forms, the toggle primitive, product selection, account settlement adaptation, and CSV formula neutralization. CI runs Go formatting, vet, race-enabled tests with coverage, frontend lint/tests/build/audit, and a container image build plus `teamtaler version` command smoke check.
+Frontend Vitest tests currently cover API adapters, exact money handling for zero-, two-, and three-decimal currencies, positive bounded product-price validation, fixed and user-defined product flows, optimistic category/product editing, durable scoped idempotency reservations and retry semantics, group-logo updates, staged product/image recovery, active-product filtering, authentication and invitation behavior, acting/target booking traceability, localized ledger descriptions and plural forms, the toggle primitive, product selection, account settlement adaptation, and CSV formula neutralization. CI runs Go formatting, vet, race-enabled tests with coverage, frontend lint/tests/build/audit, and a container image build plus `teamtaler version` command smoke check.
 
 There is currently no committed Playwright end-to-end suite, automated browser visual-regression suite, property-test suite, or dedicated security-test suite. Browser acceptance and responsive inspection are release QA activities rather than repository test jobs.

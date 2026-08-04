@@ -18,6 +18,7 @@ import type {
   Booking,
   BookingCommand,
   Category,
+  CategoryUpdateCommand,
   CreatedInvitation,
   Dashboard,
   InvitationEmailRetryResult,
@@ -34,6 +35,8 @@ import type {
   PermissionUpdate,
   ProblemDetails,
   Product,
+  ProductCreateCommand,
+  ProductUpdateCommand,
   Session,
   Settlement,
 } from './types';
@@ -224,7 +227,12 @@ export const api = {
   },
   createBooking: async (groupId: string, command: BookingCommand): Promise<Booking> => {
     const path = groupPath(groupId, 'bookings');
-    return adaptBooking(await idempotentRequest<unknown>(groupId, 'booking.create', path, command, { method: 'POST', body: json(command) }));
+    const payload = {
+      ...command,
+      unitPriceMinor: command.unitPrice ? minorUnitsToSafeNumber(command.unitPrice.minorUnits) : undefined,
+      unitPrice: undefined,
+    };
+    return adaptBooking(await idempotentRequest<unknown>(groupId, 'booking.create', path, payload, { method: 'POST', body: json(payload) }));
   },
   reverseBooking: async (groupId: string, bookingId: string, reason: string): Promise<Booking> => {
     const path = groupPath(groupId, `bookings/${bookingId}/void`);
@@ -268,10 +276,35 @@ export const api = {
     await request<void>(groupPath(groupId, `members/${membershipId}/permissions`), { method: 'PATCH', headers: etag ? { 'If-Match': etag } : undefined, body: json({ roles: update.roles.filter((role) => role !== 'MEMBER'), categoryGrants }) });
   },
   createCategory: async (groupId: string, input: Pick<Category, 'name'>): Promise<Category> => adaptCategories([await request<unknown>(groupPath(groupId, 'categories'), { method: 'POST', body: json({ name: input.name, sortOrder: 0 }) })])[0],
-  createProduct: async (groupId: string, input: Pick<Product, 'categoryId' | 'name' | 'price'>): Promise<Product> => {
+  updateCategory: async (groupId: string, categoryId: string, input: CategoryUpdateCommand): Promise<Category> => adaptCategories([await request<unknown>(groupPath(groupId, `categories/${encodeURIComponent(categoryId)}`), {
+    method: 'PATCH',
+    headers: { 'If-Match': `"v${input.version}"` },
+    body: json(input),
+  })])[0],
+  createProduct: async (groupId: string, input: ProductCreateCommand): Promise<Product> => {
     const path = groupPath(groupId, `categories/${input.categoryId}/products`);
-    const payload = { name: input.name, priceMinor: minorUnitsToSafeNumber(input.price.minorUnits), sortOrder: 0 };
+    const payload = {
+      name: input.name,
+      pricingMode: input.pricingMode,
+      priceMinor: input.price ? minorUnitsToSafeNumber(input.price.minorUnits) : undefined,
+      sortOrder: 0,
+    };
     return adaptProduct(await idempotentRequest<unknown>(groupId, 'product.create', path, payload, { method: 'POST', body: json(payload) }));
+  },
+  updateProduct: async (groupId: string, productId: string, input: ProductUpdateCommand): Promise<Product> => {
+    const payload = {
+      name: input.name,
+      pricingMode: input.pricingMode,
+      priceMinor: input.price ? minorUnitsToSafeNumber(input.price.minorUnits) : undefined,
+      active: input.active,
+      sortOrder: input.sortOrder,
+      version: input.version,
+    };
+    return adaptProduct(await request<unknown>(groupPath(groupId, `products/${encodeURIComponent(productId)}`), {
+      method: 'PATCH',
+      headers: { 'If-Match': `"v${input.version}"` },
+      body: json(payload),
+    }));
   },
   uploadProductImage: async (groupId: string, productId: string, image: File): Promise<{ imageUrl: string }> => {
     const form = new FormData();

@@ -43,19 +43,21 @@ type UpdateCategoryInput struct {
 // CreateProductInput is the public product creation command expressed in the
 // owning group's minor currency unit.
 type CreateProductInput struct {
-	Name       string `json:"name"`
-	PriceMinor int64  `json:"priceMinor"`
-	SortOrder  int    `json:"sortOrder"`
+	Name        string                    `json:"name"`
+	PriceMinor  *int64                    `json:"priceMinor,omitempty"`
+	PricingMode domain.ProductPricingMode `json:"pricingMode,omitempty"`
+	SortOrder   int                       `json:"sortOrder"`
 }
 
 // UpdateProductInput describes a full optimistic product update; Version must
 // match the current persisted version and historical booking snapshots remain unchanged.
 type UpdateProductInput struct {
-	Name       string `json:"name"`
-	PriceMinor int64  `json:"priceMinor"`
-	Active     bool   `json:"active"`
-	SortOrder  int    `json:"sortOrder"`
-	Version    int64  `json:"version"`
+	Name        string                    `json:"name"`
+	PriceMinor  *int64                    `json:"priceMinor,omitempty"`
+	PricingMode domain.ProductPricingMode `json:"pricingMode,omitempty"`
+	Active      bool                      `json:"active"`
+	SortOrder   int                       `json:"sortOrder"`
+	Version     int64                     `json:"version"`
 }
 
 // List returns all categories and products for groupID in display order. ctx
@@ -80,7 +82,7 @@ func (s Service) List(ctx context.Context, groupID string) ([]domain.Category, e
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	products, err := s.DB.QueryContext(ctx, `SELECT p.id,p.group_id,p.category_id,p.name,p.price_minor,g.currency,p.image_key,p.active,p.sort_order,p.version
+	products, err := s.DB.QueryContext(ctx, `SELECT p.id,p.group_id,p.category_id,p.name,p.price_minor,p.pricing_mode,g.currency,p.image_key,p.active,p.sort_order,p.version
 		FROM products p JOIN groups g ON g.id=p.group_id WHERE p.group_id=? ORDER BY p.sort_order,lower(p.name)`, groupID)
 	if err != nil {
 		return nil, err
@@ -89,7 +91,7 @@ func (s Service) List(ctx context.Context, groupID string) ([]domain.Category, e
 	for products.Next() {
 		var item domain.Product
 		var imageKey sql.NullString
-		if err := products.Scan(&item.ID, &item.GroupID, &item.CategoryID, &item.Name, &item.PriceMinor, &item.Currency, &imageKey, &item.Active, &item.SortOrder, &item.Version); err != nil {
+		if err := products.Scan(&item.ID, &item.GroupID, &item.CategoryID, &item.Name, &item.PriceMinor, &item.PricingMode, &item.Currency, &imageKey, &item.Active, &item.SortOrder, &item.Version); err != nil {
 			return nil, err
 		}
 		if imageKey.Valid {
@@ -175,9 +177,11 @@ func (s Service) CreateProduct(ctx context.Context, actor domain.Principal, memb
 	if input.Name == "" || len(input.Name) > 120 {
 		return domain.Product{}, domain.ValidationError{Field: "name", Message: "must contain 1 to 120 characters"}
 	}
-	if input.PriceMinor <= 0 || input.PriceMinor > 100_000_000_000 {
-		return domain.Product{}, domain.ValidationError{Field: "priceMinor", Message: "must be a positive, reasonable integer"}
+	pricingMode, err := validateProductPricing(input.PricingMode, input.PriceMinor)
+	if err != nil {
+		return domain.Product{}, err
 	}
+	input.PricingMode = pricingMode
 	requestHash, err := idempotency.Hash(map[string]any{"action": "product.create", "categoryId": categoryID, "input": input})
 	if err != nil {
 		return domain.Product{}, err
@@ -201,11 +205,11 @@ func (s Service) CreateProduct(ctx context.Context, actor domain.Principal, memb
 			return err
 		}
 		now := platform.Timestamp(platform.Now())
-		if _, err := tx.ExecContext(ctx, `INSERT INTO products(id,group_id,category_id,name,price_minor,active,sort_order,created_at,updated_at) VALUES(?,?,?,?,?,1,?,?,?)`,
-			id, membership.GroupID, categoryID, input.Name, input.PriceMinor, input.SortOrder, now, now); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO products(id,group_id,category_id,name,price_minor,pricing_mode,active,sort_order,created_at,updated_at) VALUES(?,?,?,?,?,?,1,?,?,?)`,
+			id, membership.GroupID, categoryID, input.Name, input.PriceMinor, input.PricingMode, input.SortOrder, now, now); err != nil {
 			return err
 		}
-		item = domain.Product{ID: id, GroupID: membership.GroupID, CategoryID: categoryID, Name: input.Name, PriceMinor: input.PriceMinor, Currency: currency, Active: true, SortOrder: input.SortOrder, Version: 1}
+		item = domain.Product{ID: id, GroupID: membership.GroupID, CategoryID: categoryID, Name: input.Name, PriceMinor: input.PriceMinor, PricingMode: input.PricingMode, Currency: currency, Active: true, SortOrder: input.SortOrder, Version: 1}
 		if err := audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "product.created", "product", id, input); err != nil {
 			return err
 		}
@@ -222,14 +226,19 @@ func (s Service) UpdateProduct(ctx context.Context, actor domain.Principal, memb
 		return domain.Product{}, domain.ErrForbidden
 	}
 	input.Name = strings.TrimSpace(input.Name)
-	if input.Name == "" || len(input.Name) > 120 || input.PriceMinor <= 0 || input.PriceMinor > 100_000_000_000 || input.Version < 1 {
-		return domain.Product{}, domain.ValidationError{Field: "product", Message: "valid name, priceMinor, and version are required"}
+	if input.Name == "" || len(input.Name) > 120 || input.Version < 1 {
+		return domain.Product{}, domain.ValidationError{Field: "product", Message: "valid name and version are required"}
 	}
+	pricingMode, err := validateProductPricing(input.PricingMode, input.PriceMinor)
+	if err != nil {
+		return domain.Product{}, err
+	}
+	input.PricingMode = pricingMode
 	now := platform.Timestamp(platform.Now())
 	var item domain.Product
-	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, `UPDATE products SET name=?,price_minor=?,active=?,sort_order=?,version=version+1,updated_at=? WHERE id=? AND group_id=? AND version=?`,
-			input.Name, input.PriceMinor, input.Active, input.SortOrder, now, productID, membership.GroupID, input.Version)
+	err = storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, `UPDATE products SET name=?,price_minor=?,pricing_mode=?,active=?,sort_order=?,version=version+1,updated_at=? WHERE id=? AND group_id=? AND version=?`,
+			input.Name, input.PriceMinor, input.PricingMode, input.Active, input.SortOrder, now, productID, membership.GroupID, input.Version)
 		if err != nil {
 			return err
 		}
@@ -246,10 +255,33 @@ func (s Service) UpdateProduct(ctx context.Context, actor domain.Principal, memb
 		if err := tx.QueryRowContext(ctx, `SELECT p.category_id,g.currency FROM products p JOIN groups g ON g.id=p.group_id WHERE p.id=?`, productID).Scan(&categoryID, &currency); err != nil {
 			return err
 		}
-		item = domain.Product{ID: productID, GroupID: membership.GroupID, CategoryID: categoryID, Name: input.Name, PriceMinor: input.PriceMinor, Currency: currency, Active: input.Active, SortOrder: input.SortOrder, Version: input.Version + 1}
+		item = domain.Product{ID: productID, GroupID: membership.GroupID, CategoryID: categoryID, Name: input.Name, PriceMinor: input.PriceMinor, PricingMode: input.PricingMode, Currency: currency, Active: input.Active, SortOrder: input.SortOrder, Version: input.Version + 1}
 		return audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "product.updated", "product", productID, input)
 	})
 	return item, err
+}
+
+// validateProductPricing normalizes legacy fixed-price commands and validates
+// the mode-specific price contract. pricingMode may be omitted only when a
+// legacy fixed price is present. It returns the normalized mode or a safe
+// validation error.
+func validateProductPricing(pricingMode domain.ProductPricingMode, priceMinor *int64) (domain.ProductPricingMode, error) {
+	if pricingMode == "" && priceMinor != nil {
+		pricingMode = domain.ProductPricingFixed
+	}
+	switch pricingMode {
+	case domain.ProductPricingFixed:
+		if priceMinor == nil || *priceMinor <= 0 || *priceMinor > domain.MaxProductPriceMinor {
+			return "", domain.ValidationError{Field: "priceMinor", Message: "must be a positive, reasonable integer for fixed-price products"}
+		}
+	case domain.ProductPricingUserDefined:
+		if priceMinor != nil {
+			return "", domain.ValidationError{Field: "priceMinor", Message: "must be omitted for user-defined-price products"}
+		}
+	default:
+		return "", domain.ValidationError{Field: "pricingMode", Message: "must be FIXED or USER_DEFINED"}
+	}
+	return pricingMode, nil
 }
 
 // SetProductImage attaches imageKey to productID in membership's group. ctx
