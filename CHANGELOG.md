@@ -4,6 +4,8 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-04
+
 ### Added
 
 - Per-product fixed or user-defined pricing with currency-aware browser validation, server-enforced booking prices, immutable price snapshots, and demo-mode coverage.
@@ -61,6 +63,7 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Explicit acting and charged membership display for every booking, including searchable third-party-assignment cues.
 - Canonical backup-entry allowlisting, target-width Argon2 parameter parsing, and directory-confined SPA asset serving with traversal regression coverage.
 
-[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/DasLukas/TeamTaler/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/DasLukas/TeamTaler/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/DasLukas/TeamTaler/releases/tag/v0.1.0
