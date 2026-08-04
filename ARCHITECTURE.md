@@ -191,7 +191,7 @@ The current implementation does not apply EXIF orientation or generate responsiv
 - There are no destructive financial DELETE routes. Reversal commands preserve original records.
 - Product images require an active membership in the group path and a product reference to the image in that group. Responses use `private, no-store` caching; storage remains globally content-addressed below the data directory.
 
-The compiled SPA uses history fallback for non-API GET/HEAD routes. Hashed frontend assets receive immutable caching; `index.html` is served with `no-cache`.
+The compiled SPA is served through `net/http`'s directory-confined file-server abstraction. Extensionless non-API GET/HEAD routes fall back to `index.html`; missing concrete files and assets remain 404 responses. Hashed frontend assets receive immutable caching, other concrete files revalidate hourly, and `index.html` is served with `no-cache`.
 
 ## Authentication and security boundaries
 
@@ -221,7 +221,7 @@ The restore command stages data below `TEAMTALER_DATA_DIR`, requires `TEAMTALER_
 
 `backup create` uses SQLite `VACUUM INTO` to create a consistent snapshot. It queries that snapshot for distinct product image keys and includes only referenced files. The archive contains `teamtaler.db`, optional `images/<sha256>.png` files, and `manifest.json` with format version, creation time, and per-file SHA-256 checksums.
 
-Restore stages extraction below the writable data directory and permits only regular files at known paths. It limits expanded content to 2 GiB and validates manifest coverage, checksums, image content addresses, SQLite integrity, foreign keys, embedded migration compatibility, and exact referenced-image coverage. With `--force`, existing database/WAL/SHM files and the image directory move to a timestamped recovery directory before installation.
+Restore stages extraction below the writable data directory and permits only regular files with canonical names: `teamtaler.db`, `manifest.json`, or `images/<64-lowercase-hex>.png`. It limits expanded content to 2 GiB and validates manifest coverage, checksums, image content addresses, SQLite integrity, foreign keys, embedded migration compatibility, and exact referenced-image coverage. With `--force`, existing database/WAL/SHM files and the image directory move to a timestamped recovery directory before installation.
 
 ## External dependencies
 

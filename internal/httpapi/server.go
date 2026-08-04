@@ -9,13 +9,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"mime"
 	"net"
 	"net/http"
 	"net/netip"
-	"os"
-	"path/filepath"
+	"path"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -339,34 +339,58 @@ func (s *Server) isTrustedProxy(address netip.Addr) bool {
 	return false
 }
 
+// spaFileSystem confines static reads to an http.Dir and falls back to the SPA
+// shell only for extensionless client-side routes. Missing asset requests remain
+// ordinary 404 responses instead of receiving index.html.
+type spaFileSystem struct {
+	root http.FileSystem
+}
+
+// Open resolves name through the hardened http.Dir implementation. It returns
+// index.html for missing extensionless routes, the requested regular file when
+// present, and an error for missing assets, directories below /assets, or I/O
+// failures. The caller owns and closes every returned file.
+func (filesystem spaFileSystem) Open(name string) (http.File, error) {
+	file, err := filesystem.root.Open(name)
+	if err == nil {
+		info, statErr := file.Stat()
+		if statErr != nil {
+			_ = file.Close()
+			return nil, statErr
+		}
+		if !info.IsDir() {
+			return file, nil
+		}
+		if name == "/" {
+			return file, nil
+		}
+		_ = file.Close()
+		err = fs.ErrNotExist
+	}
+	if path.Ext(name) != "" || strings.HasPrefix(name, "/assets/") {
+		return nil, err
+	}
+	return filesystem.root.Open("/index.html")
+}
+
+// spaHandler serves build assets from directory through net/http's constrained
+// file-server abstraction and returns index.html for extensionless React routes.
+// Only GET and HEAD are accepted. Hashed /assets files receive immutable caching,
+// other concrete files revalidate hourly, and the SPA shell is never cached.
 func spaHandler(directory string) http.Handler {
+	files := http.FileServer(spaFileSystem{root: http.Dir(directory)})
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodGet && request.Method != http.MethodHead {
 			http.NotFound(response, request)
 			return
 		}
-		root, err := filepath.Abs(directory)
-		if err != nil {
-			http.NotFound(response, request)
-			return
-		}
-		name := strings.TrimPrefix(filepath.Clean(request.URL.Path), string(filepath.Separator))
-		path := filepath.Join(root, name)
-		if !strings.HasPrefix(path, root+string(filepath.Separator)) && path != root {
-			http.NotFound(response, request)
-			return
-		}
-		info, statErr := os.Stat(path)
-		if statErr != nil || info.IsDir() {
-			path = filepath.Join(root, "index.html")
-		}
 		response.Header().Set("Cache-Control", "no-cache")
-		if strings.HasPrefix(request.URL.Path, "/assets/") && strings.Contains(filepath.Base(path), ".") {
+		if strings.HasPrefix(request.URL.Path, "/assets/") && path.Ext(request.URL.Path) != "" {
 			response.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		} else if filepath.Base(path) != "index.html" {
+		} else if path.Ext(request.URL.Path) != "" && path.Base(request.URL.Path) != "index.html" {
 			response.Header().Set("Cache-Control", "public, max-age=3600, must-revalidate")
 		}
-		http.ServeFile(response, request, path)
+		files.ServeHTTP(response, request)
 	})
 }
 

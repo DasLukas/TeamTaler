@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -23,7 +24,12 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const maxRestoreBytes int64 = 2 << 30
+const (
+	maxRestoreBytes   int64 = 2 << 30
+	databaseEntryName       = "teamtaler.db"
+	manifestEntryName       = "manifest.json"
+	imagesEntryPrefix       = "images/"
+)
 
 // Manifest records the archive format, creation timestamp, and SHA-256 checksum
 // for every payload file. It is serialized as manifest.json inside the archive.
@@ -51,11 +57,11 @@ func Create(ctx context.Context, db *sql.DB, dataDirectory, outputPath string) e
 		return err
 	}
 	defer os.RemoveAll(working)
-	databaseSnapshot := filepath.Join(working, "teamtaler.db")
+	databaseSnapshot := filepath.Join(working, databaseEntryName)
 	if _, err := db.ExecContext(ctx, `VACUUM INTO ?`, databaseSnapshot); err != nil {
 		return fmt.Errorf("create SQLite snapshot: %w", err)
 	}
-	files := map[string]string{"teamtaler.db": databaseSnapshot}
+	files := map[string]string{databaseEntryName: databaseSnapshot}
 	snapshotDB, err := sql.Open("sqlite", "file:"+filepath.ToSlash(databaseSnapshot)+"?mode=ro")
 	if err != nil {
 		return fmt.Errorf("open SQLite snapshot for image inventory: %w", err)
@@ -73,7 +79,7 @@ func Create(ctx context.Context, db *sql.DB, dataDirectory, outputPath string) e
 			snapshotDB.Close()
 			return err
 		}
-		if filepath.Base(key) != key || strings.Contains(key, "..") {
+		if err := validateArchiveEntryName(imagesEntryPrefix + key); err != nil {
 			imageRows.Close()
 			snapshotDB.Close()
 			return errors.New("database contains an unsafe image key")
@@ -88,11 +94,12 @@ func Create(ctx context.Context, db *sql.DB, dataDirectory, outputPath string) e
 		return err
 	}
 	for _, key := range imageKeys {
-		path := filepath.Join(dataDirectory, "images", key)
-		if _, err := os.Stat(path); err != nil {
+		imagePath := filepath.Join(dataDirectory, "images", key)
+		if _, err := os.Stat(imagePath); err != nil {
 			return fmt.Errorf("referenced image %s is unavailable: %w", key, err)
 		}
-		files[filepath.ToSlash(filepath.Join("images", key))] = path
+		archiveName := imagesEntryPrefix + key
+		files[archiveName] = imagePath
 	}
 	manifest := Manifest{FormatVersion: 1, CreatedAt: platform.Timestamp(platform.Now()), Files: map[string]string{}}
 	for name, path := range files {
@@ -130,7 +137,7 @@ func Create(ctx context.Context, db *sql.DB, dataDirectory, outputPath string) e
 			return err
 		}
 	}
-	if err := addBytes(tarWriter, "manifest.json", manifestBody, 0o640); err != nil {
+	if err := addBytes(tarWriter, manifestEntryName, manifestBody, 0o640); err != nil {
 		return err
 	}
 	if err := tarWriter.Close(); err != nil {
@@ -183,8 +190,8 @@ func Restore(archivePath, dataDirectory, databasePath string, force bool) (strin
 	if err := extractValidated(archivePath, working); err != nil {
 		return "", err
 	}
-	if _, err := os.Stat(filepath.Join(working, "teamtaler.db")); err != nil {
-		return "", errors.New("backup does not contain teamtaler.db")
+	if _, err := os.Stat(filepath.Join(working, databaseEntryName)); err != nil {
+		return "", fmt.Errorf("backup does not contain %s", databaseEntryName)
 	}
 	recovery := ""
 	hasExistingData := false
@@ -217,7 +224,7 @@ func Restore(archivePath, dataDirectory, databasePath string, force bool) (strin
 			}
 		}
 	}
-	if err := os.Rename(filepath.Join(working, "teamtaler.db"), databasePath); err != nil {
+	if err := os.Rename(filepath.Join(working, databaseEntryName), databasePath); err != nil {
 		return recovery, err
 	}
 	if _, err := os.Stat(filepath.Join(working, "images")); err == nil {
@@ -253,20 +260,25 @@ func extractValidated(archivePath, destination string) error {
 		if header.Typeflag != tar.TypeReg || header.Size < 0 {
 			return errors.New("backup contains an unsupported entry")
 		}
-		name := filepath.ToSlash(filepath.Clean(header.Name))
-		if name == "." || strings.HasPrefix(name, "/") || strings.HasPrefix(name, "../") || (name != "teamtaler.db" && name != "manifest.json" && !strings.HasPrefix(name, "images/")) {
+		name := header.Name
+		if err := validateArchiveEntryName(name); err != nil {
 			return fmt.Errorf("backup contains unsafe path %q", header.Name)
 		}
-		extracted[name] = struct{}{}
-		total += header.Size
-		if total > maxRestoreBytes {
+		if _, exists := extracted[name]; exists {
+			return fmt.Errorf("backup contains duplicate entry %q", name)
+		}
+		if header.Size > maxRestoreBytes-total {
 			return errors.New("expanded backup exceeds 2 GiB")
 		}
-		path := filepath.Join(destination, filepath.FromSlash(name))
-		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		total += header.Size
+		targetPath, err := archiveDestinationPath(destination, name)
+		if err != nil {
 			return err
 		}
-		output, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o640)
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0o750); err != nil {
+			return err
+		}
+		output, err := os.OpenFile(targetPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o640)
 		if err != nil {
 			return err
 		}
@@ -278,23 +290,24 @@ func extractValidated(archivePath, destination string) error {
 		if closeErr != nil {
 			return closeErr
 		}
+		extracted[name] = struct{}{}
 	}
-	manifestBody, err := os.ReadFile(filepath.Join(destination, "manifest.json"))
+	manifestBody, err := os.ReadFile(filepath.Join(destination, manifestEntryName))
 	if err != nil {
-		return errors.New("backup does not contain manifest.json")
+		return fmt.Errorf("backup does not contain %s", manifestEntryName)
 	}
 	var manifest Manifest
 	if err := json.Unmarshal(manifestBody, &manifest); err != nil || manifest.FormatVersion != 1 {
 		return errors.New("backup manifest is invalid or unsupported")
 	}
-	if _, ok := manifest.Files["teamtaler.db"]; !ok {
-		return errors.New("backup manifest does not include teamtaler.db")
+	if _, ok := manifest.Files[databaseEntryName]; !ok {
+		return fmt.Errorf("backup manifest does not include %s", databaseEntryName)
 	}
 	if _, err := time.Parse(time.RFC3339Nano, manifest.CreatedAt); err != nil {
 		return errors.New("backup manifest creation time is invalid")
 	}
 	for name := range extracted {
-		if name == "manifest.json" {
+		if name == manifestEntryName {
 			continue
 		}
 		if _, ok := manifest.Files[name]; !ok {
@@ -302,18 +315,21 @@ func extractValidated(archivePath, destination string) error {
 		}
 	}
 	for name, expected := range manifest.Files {
-		clean := filepath.ToSlash(filepath.Clean(name))
-		if name != clean || name == "manifest.json" || strings.HasPrefix(name, "/") || strings.HasPrefix(name, "../") || (name != "teamtaler.db" && !strings.HasPrefix(name, "images/")) {
+		if err := validateArchiveEntryName(name); err != nil || name == manifestEntryName {
 			return errors.New("backup manifest contains an unsafe path")
 		}
 		if _, ok := extracted[name]; !ok {
 			return fmt.Errorf("backup manifest references missing file %s", name)
 		}
-		actual, err := fileDigest(filepath.Join(destination, filepath.FromSlash(name)))
+		targetPath, err := archiveDestinationPath(destination, name)
+		if err != nil {
+			return errors.New("backup manifest contains an unsafe path")
+		}
+		actual, err := fileDigest(targetPath)
 		if err != nil || actual != expected {
 			return fmt.Errorf("backup checksum mismatch for %s", name)
 		}
-		if strings.HasPrefix(name, "images/") {
+		if strings.HasPrefix(name, imagesEntryPrefix) {
 			base := strings.TrimSuffix(filepath.Base(name), ".png")
 			if len(base) != 64 || actual != base {
 				return fmt.Errorf("image %s does not match its content address", name)
@@ -326,8 +342,65 @@ func extractValidated(archivePath, destination string) error {
 	return validateRestoredDatabase(destination, manifest)
 }
 
+// validateArchiveEntryName enforces TeamTaler's canonical archive allowlist.
+// The name parameter must use forward slashes and identify teamtaler.db,
+// manifest.json, or an image named by exactly 64 lowercase hexadecimal digits.
+// It returns an error for absolute, non-local, non-canonical, nested, traversal,
+// backslash-containing, or otherwise unsupported names. Callers should invoke it
+// before using any archive-supplied name in a filesystem operation.
+func validateArchiveEntryName(name string) error {
+	if name == "" || strings.Contains(name, "..") || strings.ContainsRune(name, '\\') || path.IsAbs(name) || path.Clean(name) != name || !filepath.IsLocal(filepath.FromSlash(name)) {
+		return errors.New("archive entry name is not a canonical local path")
+	}
+	if name == databaseEntryName || name == manifestEntryName {
+		return nil
+	}
+	if !strings.HasPrefix(name, imagesEntryPrefix) {
+		return errors.New("archive entry name is not allowed")
+	}
+	filename := strings.TrimPrefix(name, imagesEntryPrefix)
+	if len(filename) != 68 || !strings.HasSuffix(filename, ".png") {
+		return errors.New("archive image name is invalid")
+	}
+	contentAddress := strings.TrimSuffix(filename, ".png")
+	for _, character := range contentAddress {
+		if !((character >= '0' && character <= '9') || (character >= 'a' && character <= 'f')) {
+			return errors.New("archive image name is not a lowercase hexadecimal content address")
+		}
+	}
+	return nil
+}
+
+// archiveDestinationPath resolves a validated archive name below destination.
+// destination is the trusted extraction root and name is the untrusted archive
+// entry. It returns an absolute path only when the exact canonical relative name
+// remains inside that root; invalid names and containment failures return errors.
+// Callers can safely pass the returned path to file-creation operations.
+func archiveDestinationPath(destination, name string) (string, error) {
+	if err := validateArchiveEntryName(name); err != nil {
+		return "", err
+	}
+	root, err := filepath.Abs(destination)
+	if err != nil {
+		return "", fmt.Errorf("resolve archive destination: %w", err)
+	}
+	target := filepath.Join(root, filepath.FromSlash(name))
+	relative, err := filepath.Rel(root, target)
+	if err != nil || !filepath.IsLocal(relative) || relative != filepath.FromSlash(name) {
+		return "", errors.New("archive entry resolves outside its destination")
+	}
+	rootPrefix := filepath.Clean(root)
+	if !strings.HasSuffix(rootPrefix, string(filepath.Separator)) {
+		rootPrefix += string(filepath.Separator)
+	}
+	if !strings.HasPrefix(target, rootPrefix) {
+		return "", errors.New("archive entry resolves outside its destination")
+	}
+	return target, nil
+}
+
 func validateRestoredDatabase(destination string, manifest Manifest) error {
-	path := filepath.Join(destination, "teamtaler.db")
+	path := filepath.Join(destination, databaseEntryName)
 	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=ro&_pragma=foreign_keys(1)")
 	if err != nil {
 		return err
@@ -390,7 +463,7 @@ func validateRestoredDatabase(destination string, manifest Manifest) error {
 			imageRows.Close()
 			return err
 		}
-		name := "images/" + key
+		name := imagesEntryPrefix + key
 		if _, ok := manifest.Files[name]; !ok {
 			imageRows.Close()
 			return fmt.Errorf("referenced image %s is missing from backup manifest", key)
@@ -401,7 +474,7 @@ func validateRestoredDatabase(destination string, manifest Manifest) error {
 		return err
 	}
 	for name := range manifest.Files {
-		if strings.HasPrefix(name, "images/") {
+		if strings.HasPrefix(name, imagesEntryPrefix) {
 			if _, ok := referenced[name]; !ok {
 				return fmt.Errorf("backup contains unreferenced image %s", name)
 			}

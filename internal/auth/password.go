@@ -55,28 +55,54 @@ func VerifyPassword(encoded, password string) bool {
 	if len(parts) != 6 || parts[1] != "argon2id" || parts[2] != "v=19" {
 		return false
 	}
-	var memory uint64
-	var iterations uint64
-	var parallelism uint64
+	var memory uint32
+	var iterations uint32
+	var parallelism uint8
+	var hasMemory bool
+	var hasIterations bool
+	var hasParallelism bool
 	for _, setting := range strings.Split(parts[3], ",") {
 		pair := strings.SplitN(setting, "=", 2)
 		if len(pair) != 2 {
 			return false
 		}
-		value, err := strconv.ParseUint(pair[1], 10, 32)
-		if err != nil {
-			return false
-		}
 		switch pair[0] {
 		case "m":
-			memory = value
+			if hasMemory {
+				return false
+			}
+			value, err := strconv.ParseUint(pair[1], 10, 32)
+			if err != nil {
+				return false
+			}
+			memory = uint32(value)
+			hasMemory = true
 		case "t":
-			iterations = value
+			if hasIterations {
+				return false
+			}
+			value, err := strconv.ParseUint(pair[1], 10, 32)
+			if err != nil {
+				return false
+			}
+			iterations = uint32(value)
+			hasIterations = true
 		case "p":
-			parallelism = value
+			if hasParallelism {
+				return false
+			}
+			value, err := strconv.ParseUint(pair[1], 10, 8)
+			if err != nil {
+				return false
+			}
+			parallelism = uint8(value)
+			hasParallelism = true
+		default:
+			return false
 		}
 	}
-	if memory != argonMemory || iterations != argonIterations || parallelism != argonParallelism {
+	if !hasMemory || !hasIterations || !hasParallelism ||
+		memory != argonMemory || iterations != argonIterations || parallelism != argonParallelism {
 		return false
 	}
 	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
@@ -87,6 +113,6 @@ func VerifyPassword(encoded, password string) bool {
 	if err != nil || len(expected) != argonKeyLength {
 		return false
 	}
-	actual := argon2.IDKey([]byte(password), salt, uint32(iterations), uint32(memory), uint8(parallelism), uint32(len(expected)))
+	actual := argon2.IDKey([]byte(password), salt, iterations, memory, parallelism, argonKeyLength)
 	return subtle.ConstantTimeCompare(actual, expected) == 1
 }

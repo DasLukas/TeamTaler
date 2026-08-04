@@ -21,5 +21,6 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Reload-safe, actor- and payload-scoped idempotency reservations for high-risk browser mutations.
 - Recoverable product image uploads that never duplicate an already-created product.
 - Explicit acting and charged membership display for every booking, including searchable third-party-assignment cues.
+- Canonical backup-entry allowlisting, target-width Argon2 parameter parsing, and directory-confined SPA asset serving with traversal regression coverage.
 
 [0.1.0]: https://github.com/DasLukas/TeamTaler/releases/tag/v0.1.0
