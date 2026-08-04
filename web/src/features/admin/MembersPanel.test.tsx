@@ -313,12 +313,12 @@ describe('MembersPanel invitations', () => {
     await user.upload(screen.getByLabelText(i18n.t('members.csvImport.fileLabel')), csv);
     await user.click(screen.getByRole('button', { name: i18n.t('members.csvImport.submit') }));
 
+    const resultsTable = await screen.findByRole('table', { name: i18n.t('members.csvImport.resultsTable') });
+    const row = within(resultsTable).getByRole('row', { name: /failed@example\.test/i });
     const retryLabel = i18n.t('members.csvImport.retryFor', { email: 'failed@example.test' });
-    await user.click(await screen.findByRole('button', { name: retryLabel }));
+    await user.click(within(row).getByRole('button', { name: retryLabel }));
 
     await waitFor(() => expect(apiMock.resendInvitationEmail).toHaveBeenCalledWith('group-a', 'invitation-failed'));
-    const resultsTable = screen.getByRole('table', { name: i18n.t('members.csvImport.resultsTable') });
-    const row = within(resultsTable).getByRole('row', { name: /failed@example\.test/i });
     await waitFor(() => expect(within(row).getByText(i18n.t('members.csvImport.deliveryStatus.sent'))).toBeVisible());
   });
 });
