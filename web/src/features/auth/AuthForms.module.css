@@ -1,0 +1,24 @@
+.form {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.error,
+.warning {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+
+.error {
+  color: var(--color-red-600);
+  background: var(--color-red-100);
+}
+
+.warning {
+  margin-bottom: var(--space-5);
+  color: #805100;
+  background: #fff4d6;
+}

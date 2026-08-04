@@ -1,0 +1,35 @@
+# Environment and local configuration
+.env
+.env.local
+!.env.example
+
+# Go
+/bin/
+/coverage/
+*.coverprofile
+
+# Frontend
+/web/node_modules/
+/web/dist/
+/web/coverage/
+/web/.vite/
+
+# Runtime data and backups
+/data/
+/backups/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.tar.gz
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Security and tooling output
+*.sarif
+/tmp/

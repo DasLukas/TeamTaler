@@ -1,0 +1,382 @@
+import type {
+  AuditEntry,
+  Booking,
+  Category,
+  Dashboard,
+  Group,
+  GroupRole,
+  LedgerEntry,
+  Membership,
+  Notification,
+  Payment,
+  Period,
+  Product,
+  Session,
+  Settlement,
+} from './types';
+import i18n from '@/i18n';
+
+type JsonRecord = Record<string, unknown>;
+
+const asRecord = (value: unknown): JsonRecord => value as JsonRecord;
+const money = (minorUnits: unknown, currency: unknown) => ({ minorUnits: String(minorUnits ?? 0), currency: String(currency || 'EUR') });
+const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('');
+const categoryIcon = (name: string, type?: unknown): Category['icon'] => type === 'PENALTY' ? 'penalty' : name.toLocaleLowerCase('de').includes(i18n.t('domain.drinkCategoryKeyword')) ? 'drink' : 'other';
+const memberName = (membershipId: string, members?: Membership[], fallback = i18n.t('common.member')) => members?.find((member) => member.id === membershipId)?.displayName ?? fallback;
+const PAYMENT_DESCRIPTION_PREFIX = 'Payment received';
+const REVERSAL_DESCRIPTION_PREFIX = 'Reversal: ';
+
+/**
+ * Extracts the user-provided reference from a structured payment description.
+ *
+ * @param description - Backend ledger description for a payment or its reversal.
+ * @returns The preserved payment reference, or `undefined` when none is present.
+ */
+function paymentReference(description: string): string | undefined {
+  const original = description.startsWith(REVERSAL_DESCRIPTION_PREFIX)
+    ? description.slice(REVERSAL_DESCRIPTION_PREFIX.length)
+    : description;
+  const referencePrefix = `${PAYMENT_DESCRIPTION_PREFIX}: `;
+  return original.startsWith(referencePrefix) ? original.slice(referencePrefix.length).trim() || undefined : undefined;
+}
+
+/**
+ * Produces localized copy for a structured backend ledger movement.
+ *
+ * Product, category, and payment-reference values remain untouched because they
+ * are group-authored business data; backend-owned English labels are replaced.
+ *
+ * @param wire - Untrusted ledger wire entry.
+ * @returns A localized description suitable for the account table and CSV export.
+ */
+function ledgerDescription(wire: JsonRecord): string {
+  const description = String(wire.description ?? '');
+  const reversed = Boolean(wire.reversalOf);
+  if (wire.paymentId) {
+    const reference = paymentReference(description);
+    if (reversed) {
+      return reference
+        ? i18n.t('ledger.paymentReversedWithReference', { reference })
+        : i18n.t('ledger.paymentReversed');
+    }
+    return reference
+      ? i18n.t('ledger.paymentReceivedWithReference', { reference })
+      : i18n.t('ledger.paymentReceived');
+  }
+  if (wire.bookingId) {
+    const original = description.startsWith(REVERSAL_DESCRIPTION_PREFIX)
+      ? description.slice(REVERSAL_DESCRIPTION_PREFIX.length)
+      : description;
+    const localized = original.replace(/^(\d+)\s+x\s+/, '$1 × ');
+    return reversed ? i18n.t('ledger.bookingReversed', { description: localized }) : localized;
+  }
+  return reversed ? i18n.t('ledger.reversal') : i18n.t('ledger.adjustment');
+}
+
+/**
+ * Adapts the session wire model to the stable frontend session.
+ *
+ * @param input - Untrusted session response from `/api/v1/session` or authentication.
+ * @returns A session with a deterministic active group identifier.
+ */
+export function adaptSession(input: unknown): Session {
+  const source = asRecord(input);
+  const groups = (source.groups as unknown[] ?? []).map((entry) => {
+    const group = asRecord(entry);
+    const membership = group.membership && typeof group.membership === 'object' ? asRecord(group.membership) : undefined;
+    return {
+      id: String(group.id),
+      name: String(group.name),
+      currency: String(group.currency || 'EUR'),
+      logoUrl: typeof group.logoUrl === 'string' ? group.logoUrl : undefined,
+      membership: membership ? { id: String(membership.id), roles: [...(membership.roles as GroupRole[] ?? []), 'MEMBER'] } : undefined,
+    } satisfies Group;
+  });
+  return {
+    user: source.user as Session['user'],
+    groups,
+    activeGroupId: typeof source.activeGroupId === 'string' ? source.activeGroupId : groups[0]?.id ?? '',
+    demo: source.demo === true,
+  };
+}
+
+/**
+ * Adapts one catalogue product and its integer minor-unit price.
+ *
+ * @param input - Product wire or canonical product value.
+ * @returns Canonical frontend product.
+ */
+export function adaptProduct(input: unknown): Product {
+  const source = asRecord(input);
+  if ('price' in source) return source as unknown as Product;
+  return {
+    id: String(source.id),
+    categoryId: String(source.categoryId),
+    version: Number(source.version ?? 1),
+    name: String(source.name),
+    price: money(source.priceMinor, source.currency),
+    imageUrl: typeof source.imageUrl === 'string' && source.imageUrl ? source.imageUrl : undefined,
+    active: source.active !== false,
+    sortOrder: Number(source.sortOrder ?? 0),
+  };
+}
+
+/**
+ * Adapts catalogue categories and nested products.
+ *
+ * @param input - Category array returned by the group catalogue endpoint.
+ * @returns Canonical categories sorted by the backend.
+ */
+export function adaptCategories(input: unknown): Category[] {
+  return (input as unknown[] ?? []).map((entry) => {
+    const source = asRecord(entry);
+    const name = String(source.name);
+    return {
+      id: String(source.id),
+      name,
+      type: source.type === 'PENALTY' ? 'PENALTY' : 'STANDARD',
+      icon: typeof source.icon === 'string' ? source.icon as Category['icon'] : categoryIcon(name, source.type),
+      active: source.active !== false,
+      products: (source.products as unknown[] ?? []).map(adaptProduct),
+    };
+  });
+}
+
+/**
+ * Adapts member roles and the backend's category-grant map.
+ *
+ * @param input - Membership wire or canonical membership value.
+ * @param etag - Optional strong collection ETag used for optimistic updates.
+ * @returns Canonical membership with boolean category permissions.
+ */
+export function adaptMembership(input: unknown, etag?: string): Membership {
+  const source = asRecord(input);
+  if ('categoryPermissions' in source) return { ...(source as unknown as Membership), etag: etag ?? source.etag as string | undefined };
+  const grants = (source.categoryGrants ?? {}) as Record<string, string[]>;
+  const roles = (source.roles as GroupRole[] ?? []).filter((role) => role !== 'MEMBER');
+  return {
+    id: String(source.id),
+    userId: String(source.userId),
+    displayName: String(source.displayName),
+    email: String(source.email),
+    initials: initials(String(source.displayName)),
+    roles: [...roles, 'MEMBER'],
+    categoryPermissions: Object.entries(grants).map(([categoryId, permissions]) => ({
+      categoryId,
+      assignToOthers: permissions.includes('ASSIGN_TO_OTHERS'),
+      voidBookings: permissions.includes('VOID_BOOKINGS'),
+    })),
+    active: source.status ? source.status === 'ACTIVE' : source.active !== false,
+    etag,
+  };
+}
+
+/**
+ * Adapts a member collection.
+ *
+ * @param input - Membership array from the API.
+ * @param etag - Shared strong ETag from the collection response.
+ * @returns Canonical memberships.
+ */
+export function adaptMemberships(input: unknown, etag?: string): Membership[] {
+  return (input as unknown[] ?? []).map((entry) => adaptMembership(entry, etag));
+}
+
+/**
+ * Adapts an immutable booking snapshot.
+ *
+ * @param input - Booking wire or canonical value.
+ * @param members - Optional member directory used to resolve display names.
+ * @param fallbackMemberName - Name used when the target is the current account.
+ * @returns Canonical booking.
+ */
+export function adaptBooking(input: unknown, members?: Membership[], fallbackMemberName = i18n.t('common.member')): Booking {
+  const source = asRecord(input);
+  if ('bookedAt' in source) return source as unknown as Booking;
+  const targetId = String(source.targetMembershipId ?? '');
+  const actorId = String(source.actorMembershipId ?? '');
+  const createdAt = String(source.createdAt);
+  return {
+    id: String(source.id),
+    memberId: targetId,
+    memberName: memberName(targetId, members, fallbackMemberName),
+    productId: String(source.productId),
+    productName: String(source.productName),
+    categoryId: String(source.categoryId),
+    categoryName: String(source.categoryName),
+    quantity: Number(source.quantity ?? 1),
+    unitPrice: money(source.unitPriceMinor, source.currency),
+    total: money(source.totalMinor, source.currency),
+    bookedAt: createdAt,
+    bookedByName: memberName(actorId, members, actorId === targetId ? fallbackMemberName : i18n.t('common.member')),
+    bookedByMemberId: actorId || undefined,
+    reason: typeof source.reason === 'string' && source.reason ? source.reason : undefined,
+    status: source.voidedAt ? 'REVERSED' : 'POSTED',
+    undoUntil: source.canVoid === true ? new Date(new Date(createdAt).getTime() + 30_000).toISOString() : undefined,
+    canVoid: source.canVoid === true,
+  };
+}
+
+/**
+ * Adapts the grouped dashboard read model.
+ *
+ * @param input - Dashboard response containing account, period, and recent bookings.
+ * @returns Canonical dashboard consumed by dashboard and booking views.
+ */
+export function adaptDashboard(input: unknown): Dashboard {
+  const source = asRecord(input);
+  if ('openBalance' in source) return source as unknown as Dashboard;
+  const account = asRecord(source.account);
+  const currentPeriod = adaptPeriod(source.openPeriod);
+  return {
+    openBalance: money(account.balanceMinor, account.currency),
+    currentPeriod,
+    categoryTotals: (account.categoryStatistics as unknown[] ?? []).map((entry) => {
+      const statistic = asRecord(entry);
+      const name = String(statistic.categoryName);
+      return { categoryId: String(statistic.categoryId), categoryName: name, icon: categoryIcon(name), total: money(statistic.netMinor, account.currency) };
+    }),
+    groupCategoryTotals: (account.groupCategoryStatistics as unknown[] ?? []).map((entry) => {
+      const statistic = asRecord(entry);
+      const name = String(statistic.categoryName);
+      return { categoryId: String(statistic.categoryId), categoryName: name, icon: categoryIcon(name), quantity: Number(statistic.quantity ?? 0), total: money(statistic.netMinor, account.currency) };
+    }),
+    recentBookings: (source.recentBookings as unknown[] ?? []).map((entry) => adaptBooking(entry)),
+  };
+}
+
+/**
+ * Adapts one accounting period.
+ *
+ * @param input - Period wire or canonical value.
+ * @returns Canonical period with nullable timestamps normalized to undefined.
+ */
+export function adaptPeriod(input: unknown): Period {
+  const source = asRecord(input);
+  return {
+    id: String(source.id),
+    label: String(source.label),
+    status: source.status === 'CLOSED' ? 'CLOSED' : 'OPEN',
+    startsAt: String(source.startsAt),
+    closedAt: typeof source.closedAt === 'string' ? source.closedAt : undefined,
+    dueAt: typeof source.dueAt === 'string' ? source.dueAt : undefined,
+  };
+}
+
+/**
+ * Adapts an account read model into a running ledger statement.
+ *
+ * @param input - Account response or existing canonical ledger array.
+ * @returns Newest-first ledger entries with reconstructed running balances.
+ */
+export function adaptLedger(input: unknown): LedgerEntry[] {
+  if (Array.isArray(input)) return input as LedgerEntry[];
+  const source = asRecord(input);
+  let runningBalance = BigInt(String(source.balanceMinor ?? 0));
+  const currency = String(source.currency || 'EUR');
+  return (source.recentEntries as unknown[] ?? []).map((entry) => {
+    const wire = asRecord(entry);
+    const amountMinor = BigInt(String(wire.amountMinor ?? 0));
+    const balance = runningBalance;
+    runningBalance -= amountMinor;
+    return {
+      id: String(wire.id),
+      occurredAt: String(wire.createdAt),
+      kind: wire.reversalOf ? 'REVERSAL' : wire.paymentId ? 'PAYMENT' : wire.bookingId ? 'BOOKING' : 'CREDIT',
+      description: ledgerDescription(wire),
+      amount: money(amountMinor.toString(), currency),
+      balance: money(balance.toString(), currency),
+      referenceId: String(wire.bookingId ?? wire.paymentId ?? wire.id),
+    };
+  });
+}
+
+/**
+ * Adapts a payment with member display data.
+ *
+ * @param input - Payment wire or canonical value.
+ * @returns Canonical payment.
+ */
+export function adaptPayment(input: unknown): Payment {
+  const source = asRecord(input);
+  if ('amount' in source) return source as unknown as Payment;
+  return {
+    id: String(source.id),
+    membershipId: String(source.membershipId),
+    memberName: String(source.memberName ?? i18n.t('common.member')),
+    amount: money(source.amountMinor, source.currency),
+    receivedAt: String(source.receivedAt),
+    method: source.method as Payment['method'],
+    reference: typeof source.reference === 'string' && source.reference ? source.reference : undefined,
+    note: typeof source.note === 'string' && source.note ? source.note : undefined,
+    status: source.status === 'REVERSED' || source.reversedAt ? 'REVERSED' : 'POSTED',
+  };
+}
+
+/**
+ * Adapts an immutable statement into the settlement UI model.
+ *
+ * @param input - Statement wire or canonical settlement value.
+ * @param periods - Periods used to resolve labels and due dates.
+ * @returns Canonical settlement.
+ */
+export function adaptSettlement(input: unknown, periods: Period[]): Settlement {
+  const source = asRecord(input);
+  if ('periodLabel' in source) return source as unknown as Settlement;
+  const period = periods.find((entry) => entry.id === source.periodId);
+  const obligationMinor = (BigInt(String(source.chargesMinor ?? 0)) + BigInt(String(source.adjustmentsProvidedMinor ?? 0))).toString();
+  const settledMinor = (BigInt(String(source.paymentsAllocatedMinor ?? 0)) + BigInt(String(source.adjustmentsAppliedMinor ?? 0))).toString();
+  return {
+    id: String(source.id),
+    periodId: String(source.periodId),
+    periodLabel: period?.label ?? i18n.t('common.settlementFallback'),
+    membershipId: String(source.membershipId),
+    memberName: String(source.displayName ?? i18n.t('common.member')),
+    amount: money(obligationMinor, source.currency),
+    paidAmount: money(settledMinor, source.currency),
+    openAmount: money(source.amountDueMinor, source.currency),
+    dueAt: period?.dueAt ?? '',
+    status: source.status as Settlement['status'],
+  };
+}
+
+/**
+ * Adapts an in-app notification.
+ *
+ * @param input - Notification wire or canonical value.
+ * @returns Canonical notification.
+ */
+export function adaptNotification(input: unknown): Notification {
+  const source = asRecord(input);
+  if ('message' in source) return source as unknown as Notification;
+  const type = String(source.type ?? '').toUpperCase();
+  const kind: Notification['kind'] = type.includes('PAYMENT') ? 'PAYMENT' : type.includes('SETTLEMENT') || type.includes('PERIOD') ? 'SETTLEMENT' : type.includes('BOOK') || type.includes('PENAL') ? 'BOOKING' : 'SYSTEM';
+  const localizedCopy: Record<Notification['kind'], { title: string; message: string }> = {
+    PAYMENT: { title: i18n.t('notifications.fallback.paymentTitle'), message: i18n.t('notifications.fallback.paymentMessage') },
+    SETTLEMENT: { title: i18n.t('notifications.fallback.settlementTitle'), message: i18n.t('notifications.fallback.settlementMessage') },
+    BOOKING: { title: i18n.t('notifications.fallback.bookingTitle'), message: i18n.t('notifications.fallback.bookingMessage') },
+    SYSTEM: { title: i18n.t('notifications.fallback.systemTitle'), message: i18n.t('notifications.fallback.systemMessage') },
+  };
+  return { id: String(source.id), ...localizedCopy[kind], createdAt: String(source.createdAt), readAt: typeof source.readAt === 'string' ? source.readAt : undefined, kind };
+}
+
+/**
+ * Adapts an append-only audit event and resolves its actor when possible.
+ *
+ * @param input - Audit wire or canonical value.
+ * @param members - Group directory used for actor names.
+ * @returns Canonical audit entry.
+ */
+export function adaptAuditEntry(input: unknown, members: Membership[]): AuditEntry {
+  const source = asRecord(input);
+  if ('actorName' in source) return source as unknown as AuditEntry;
+  const metadata = source.metadata && typeof source.metadata === 'object' ? JSON.stringify(source.metadata) : '';
+  return {
+    id: String(source.id),
+    occurredAt: String(source.occurredAt),
+    actorName: memberName(String(source.actorMembershipId ?? ''), members, i18n.t('common.system')),
+    action: String(source.action),
+    subject: `${String(source.resourceType ?? '')}${source.resourceId ? ` · ${String(source.resourceId)}` : ''}`,
+    details: metadata,
+  };
+}

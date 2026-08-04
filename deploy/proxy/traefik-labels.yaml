@@ -1,0 +1,9 @@
+services:
+  app:
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.teamtaler.rule=Host(`teamtaler.example.com`)
+      - traefik.http.routers.teamtaler.entrypoints=websecure
+      - traefik.http.routers.teamtaler.tls=true
+      - traefik.http.routers.teamtaler.tls.certresolver=letsencrypt
+      - traefik.http.services.teamtaler.loadbalancer.server.port=8080

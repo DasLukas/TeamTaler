@@ -1,0 +1,153 @@
+.dashboard {
+  display: grid;
+  min-height: 100vh;
+  grid-template-columns: minmax(560px, 1fr) 420px;
+}
+
+.content {
+  width: min(100%, 820px);
+  margin: 0 auto;
+  padding: 50px 42px 64px;
+}
+
+.content > h1 {
+  margin-bottom: var(--space-8);
+  font-size: clamp(2.35rem, 4vw, 3.1rem);
+}
+
+.balanceCard {
+  display: grid;
+  min-height: 146px;
+  grid-template-columns: 1fr 1.2fr;
+  align-items: center;
+  padding: var(--space-6);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.balanceCard > div:first-child {
+  display: grid;
+  gap: var(--space-1);
+  padding-right: var(--space-8);
+}
+
+.balanceCard span,
+.period strong { color: var(--color-ink); font-weight: 700; }
+
+.balanceCard > div:first-child strong {
+  color: var(--color-orange-600);
+  font-size: clamp(2.5rem, 5vw, 3.7rem);
+  letter-spacing: -0.04em;
+  white-space: nowrap;
+}
+
+.period {
+  min-height: 86px;
+  padding-left: var(--space-8);
+  border-left: 1px solid var(--color-border);
+}
+
+.period p {
+  max-width: 280px;
+  margin: var(--space-3) 0 0;
+  color: var(--color-muted);
+  line-height: 1.45;
+}
+
+.quick { margin-top: var(--space-8); }
+.quick h2 { margin-bottom: var(--space-3); font-size: 1.75rem; }
+
+.lower {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(240px, 0.85fr);
+  gap: var(--space-6);
+  margin-top: var(--space-8);
+}
+
+.lower h2 { margin-bottom: var(--space-3); }
+
+.activityList,
+.monthCard {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.activity {
+  display: grid;
+  min-height: 58px;
+  grid-template-columns: 34px minmax(0, 1fr) auto 18px;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--font-size-xs);
+}
+
+.activityCopy { display: grid; min-width: 0; gap: 2px; }
+.activityCopy span,
+.activityCopy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activityCopy small { color: var(--color-muted); }
+.activity time { color: var(--color-muted); }
+.allActivities { display: flex; min-height: 48px; align-items: center; justify-content: space-between; padding: 0 var(--space-4); color: var(--color-teal-700); font-size: var(--font-size-xs); }
+
+.monthCard {
+  padding: var(--space-4);
+}
+
+.monthCard h2 { font-size: var(--font-size-lg); }
+
+.totalRow,
+.sum {
+  display: grid;
+  min-height: 57px;
+  grid-template-columns: 32px 1fr auto;
+  align-items: center;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.totalRow:first-of-type { color: var(--color-teal-700); }
+.sum { grid-template-columns: 1fr auto; border: 0; font-weight: 700; }
+.sum strong { color: var(--color-orange-600); }
+
+.inspector {
+  min-width: 0;
+  border-left: 1px solid var(--color-border);
+  padding-top: 56px;
+}
+
+.inspector > h2 {
+  margin: 0;
+  padding: 0 var(--space-8) var(--space-5);
+  font-size: 1.75rem;
+}
+
+.state {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: var(--space-8);
+}
+
+.state > * { width: min(100%, 640px); }
+
+@media (max-width: 1199px) {
+  .dashboard { display: block; }
+  .content { width: min(100%, 900px); }
+}
+
+@media (max-width: 767px) {
+  .content {
+    width: 100%;
+    padding: 28px var(--space-5) 40px;
+  }
+
+  .content > h1 { font-size: 2rem; margin-bottom: var(--space-5); }
+  .balanceCard { min-height: 110px; grid-template-columns: 1fr; }
+  .period { display: none; }
+  .balanceCard > div:first-child strong { font-size: 2.3rem; }
+  .quick h2 { font-size: 1.5rem; }
+  .lower { grid-template-columns: 1fr; }
+  .monthCard { order: -1; }
+}

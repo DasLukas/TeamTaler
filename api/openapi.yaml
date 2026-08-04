@@ -1,0 +1,1105 @@
+openapi: 3.1.0
+info:
+  title: TeamTaler API
+  version: 0.1.0
+  description: |
+    Same-origin JSON API for TeamTaler. Monetary values use integer minor units:
+    response fields are exact decimal strings, while command inputs are bounded
+    JSON integers.
+    State-changing authenticated requests require the `X-CSRF-Token` header.
+    Product creation and financial mutations that create or reverse bookings,
+    payments, or periods additionally require an `Idempotency-Key`.
+  license:
+    name: AGPL-3.0-only
+    identifier: AGPL-3.0-only
+servers:
+  - url: /api/v1
+security:
+  - sessionCookie: []
+tags:
+  - name: Authentication
+  - name: Groups
+  - name: Catalog
+  - name: Bookings
+  - name: Finance
+  - name: Periods
+  - name: Operations
+paths:
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: Create a local session
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginCommand'
+      responses:
+        '200':
+          description: Authenticated session
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '401': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+  /auth/logout:
+    post:
+      tags: [Authentication]
+      summary: Revoke the current session
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204': { description: Session revoked }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /session:
+    get:
+      tags: [Authentication]
+      summary: Read the current session and group memberships
+      responses:
+        '200':
+          description: Current session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '401': { $ref: '#/components/responses/Problem' }
+  /me:
+    get:
+      tags: [Authentication]
+      summary: Read the current session and group memberships
+      description: Compatibility alias for `/session`.
+      responses:
+        '200':
+          description: Current session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '401': { $ref: '#/components/responses/Problem' }
+  /invitations/accept:
+    post:
+      tags: [Authentication]
+      summary: Consume an invitation and create or validate an account
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvitationAcceptance'
+      responses:
+        '201':
+          description: Joined group and authenticated session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+  /groups:
+    get:
+      tags: [Groups]
+      summary: List groups available to the current user
+      responses:
+        '200':
+          description: Active group memberships
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Group' }
+    post:
+      tags: [Groups]
+      summary: Create a group owned by the current user
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, currency]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 120 }
+                currency: { type: string, pattern: '^[A-Z]{3}$' }
+      responses:
+        '201':
+          description: Created group
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Group' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/dashboard:
+    get:
+      tags: [Groups]
+      summary: Read the active member dashboard
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Dashboard read model
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Dashboard' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/members:
+    get:
+      tags: [Groups]
+      summary: List group members and effective permissions
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Group members
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Membership' }
+  /groups/{groupId}/members/{membershipId}/permissions:
+    patch:
+      tags: [Groups]
+      summary: Replace group roles and category grants
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/MembershipId'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PermissionUpdate' }
+      responses:
+        '204': { description: Permissions replaced }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/invitations:
+    get:
+      tags: [Groups]
+      summary: List invitation metadata without secret tokens
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Invitations
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Invitation' }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Groups]
+      summary: Create a seven-day, one-time invitation
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InvitationCommand' }
+      responses:
+        '201':
+          description: Invitation and one-time acceptance URL
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [invitation, acceptUrl]
+                properties:
+                  invitation: { $ref: '#/components/schemas/Invitation' }
+                  acceptUrl: { type: string, format: uri }
+        '403': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/categories:
+    get:
+      tags: [Catalog]
+      summary: List categories with nested products
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Catalog
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Category' }
+    post:
+      tags: [Catalog]
+      summary: Create a category
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CategoryCommand' }
+      responses:
+        '201':
+          description: Created category
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Category' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/categories/{categoryId}:
+    patch:
+      tags: [Catalog]
+      summary: Update or archive a category
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CategoryId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CategoryUpdate' }
+      responses:
+        '200':
+          description: Updated category
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Category' }
+        '412': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/categories/{categoryId}/products:
+    post:
+      tags: [Catalog]
+      summary: Create a product in a category
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CategoryId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductCommand' }
+      responses:
+        '201':
+          description: Created product
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/products/{productId}:
+    patch:
+      tags: [Catalog]
+      summary: Update or archive a product
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/ProductId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductUpdate' }
+      responses:
+        '200':
+          description: Updated product
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '412': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/products/{productId}/image:
+    post:
+      tags: [Catalog]
+      summary: Validate, normalize, and attach a product image
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/ProductId'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [image]
+              properties:
+                image:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Normalized image URL
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [imageUrl]
+                properties:
+                  imageUrl: { type: string }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/images/{imageKey}:
+    get:
+      tags: [Catalog]
+      summary: Read a group-referenced immutable product image
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - name: imageKey
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[0-9a-f]{64}\.png$'
+      responses:
+        '200':
+          description: Normalized PNG image
+          headers:
+            ETag:
+              schema: { type: string }
+            Cache-Control:
+              schema: { type: string }
+          content:
+            image/png:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: Image not found }
+  /groups/{groupId}/bookings:
+    get:
+      tags: [Bookings]
+      summary: List bookings visible to the current member
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - name: periodId
+          in: query
+          schema: { type: string }
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Visible booking snapshots
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Booking' }
+    post:
+      tags: [Bookings]
+      summary: Create an immutable booking and balanced ledger entries
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BookingCommand' }
+      responses:
+        '201':
+          description: Created booking
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Booking' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/bookings/{bookingId}/void:
+    post:
+      tags: [Bookings]
+      summary: Create an audited booking reversal in the open period
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/BookingId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, maxLength: 500 }
+      responses:
+        '200':
+          description: Voided booking snapshot
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Booking' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/accounts/me:
+    get:
+      tags: [Finance]
+      summary: Read the current member account
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Consolidated account
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Account' }
+  /groups/{groupId}/accounts/{membershipId}:
+    get:
+      tags: [Finance]
+      summary: Read a member account as a finance manager
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/MembershipId'
+      responses:
+        '200':
+          description: Consolidated account
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Account' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/payments:
+    get:
+      tags: [Finance]
+      summary: List incoming payments
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Payments
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Payment' }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Finance]
+      summary: Record and FIFO-allocate an incoming payment
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PaymentCommand' }
+      responses:
+        '201':
+          description: Recorded payment
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payment' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/payments/{paymentId}/reverse:
+    post:
+      tags: [Finance]
+      summary: Reverse a payment and rebuild FIFO allocations
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/PaymentId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        '204': { description: Payment reversed }
+        '409': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/periods:
+    get:
+      tags: [Periods]
+      summary: List accounting periods
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Newest-first periods
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Period' }
+  /groups/{groupId}/periods/{periodId}/close:
+    post:
+      tags: [Periods]
+      summary: Permanently close a period and open its successor
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/PeriodId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClosePeriodCommand' }
+      responses:
+        '200':
+          description: Closed period, successor, and snapshot count
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [closedPeriod, openPeriod, statementCount]
+                properties:
+                  closedPeriod: { $ref: '#/components/schemas/Period' }
+                  openPeriod: { $ref: '#/components/schemas/Period' }
+                  statementCount: { type: integer, format: int64 }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/periods/{periodId}/statements:
+    get:
+      tags: [Periods]
+      summary: Read statements for one closed period
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/PeriodId'
+      responses:
+        '200':
+          description: Visible statements
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Statement' }
+  /groups/{groupId}/settlements:
+    get:
+      tags: [Periods]
+      summary: List visible settlement statements
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - name: periodId
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Settlement statements
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Statement' }
+  /groups/{groupId}/notifications:
+    get:
+      tags: [Groups]
+      summary: List current member notifications
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Notifications
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Notification' }
+  /groups/{groupId}/notifications/{notificationId}:
+    patch:
+      tags: [Groups]
+      summary: Mark one notification read or unread
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - name: notificationId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [read]
+              properties:
+                read: { type: boolean }
+      responses:
+        '200':
+          description: Updated notification
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Notification' }
+  /groups/{groupId}/audit:
+    get:
+      tags: [Groups]
+      summary: List append-only administrative audit events
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Audit events
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AuditEvent' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /health/live:
+    get:
+      tags: [Operations]
+      summary: Process liveness probe
+      security: []
+      servers:
+        - url: /
+      responses:
+        '200': { description: Process is live }
+  /health/ready:
+    get:
+      tags: [Operations]
+      summary: Database readiness probe
+      security: []
+      servers:
+        - url: /
+      responses:
+        '200': { description: Database is ready }
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: teamtaler_session
+  parameters:
+    GroupId:
+      name: groupId
+      in: path
+      required: true
+      schema: { type: string }
+    MembershipId:
+      name: membershipId
+      in: path
+      required: true
+      schema: { type: string }
+    CategoryId:
+      name: categoryId
+      in: path
+      required: true
+      schema: { type: string }
+    ProductId:
+      name: productId
+      in: path
+      required: true
+      schema: { type: string }
+    BookingId:
+      name: bookingId
+      in: path
+      required: true
+      schema: { type: string }
+    PaymentId:
+      name: paymentId
+      in: path
+      required: true
+      schema: { type: string }
+    PeriodId:
+      name: periodId
+      in: path
+      required: true
+      schema: { type: string }
+    CSRFToken:
+      name: X-CSRF-Token
+      in: header
+      required: true
+      schema: { type: string, minLength: 1 }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 8, maxLength: 200 }
+    IfMatch:
+      name: If-Match
+      in: header
+      required: false
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 100 }
+  responses:
+    Problem:
+      description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    MinorUnits:
+      type: string
+      pattern: '^-?[0-9]+$'
+      description: Exact signed integer amount in the currency's minor unit, encoded as a decimal string to preserve 64-bit precision in browsers.
+      examples: ['1250']
+    LoginCommand:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        password: { type: string, format: password, minLength: 12, maxLength: 1024 }
+    InvitationAcceptance:
+      type: object
+      required: [token, displayName, password]
+      properties:
+        token: { type: string, minLength: 1 }
+        displayName: { type: string, minLength: 1, maxLength: 120 }
+        password: { type: string, format: password, minLength: 12, maxLength: 1024 }
+    Session:
+      type: object
+      required: [user, csrfToken, groups]
+      properties:
+        user: { $ref: '#/components/schemas/User' }
+        csrfToken: { type: string }
+        groups:
+          type: array
+          items: { $ref: '#/components/schemas/Group' }
+        activeGroupId:
+          type: [string, 'null']
+    User:
+      type: object
+      required: [id, email, displayName]
+      properties:
+        id: { type: string }
+        email: { type: string, format: email }
+        displayName: { type: string }
+    Group:
+      type: object
+      required: [id, name, currency, membership]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        membership: { $ref: '#/components/schemas/Membership' }
+    Membership:
+      type: object
+      required: [id, groupId, userId, email, displayName, status, roles, categoryGrants]
+      properties:
+        id: { type: string }
+        groupId: { type: string }
+        userId: { type: string }
+        email: { type: string, format: email }
+        displayName: { type: string }
+        status: { type: string, enum: [ACTIVE, ARCHIVED] }
+        roles:
+          type: array
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/Role' }
+        categoryGrants:
+          type: object
+          additionalProperties:
+            type: array
+            uniqueItems: true
+            items: { $ref: '#/components/schemas/CategoryPermission' }
+    Role:
+      type: string
+      enum: [ADMIN, FINANCE_MANAGER, CATALOG_MANAGER]
+    CategoryPermission:
+      type: string
+      enum: [ASSIGN_TO_OTHERS, VOID_BOOKINGS]
+    PermissionUpdate:
+      type: object
+      required: [roles, categoryGrants]
+      properties:
+        roles:
+          type: array
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/Role' }
+        categoryGrants:
+          type: object
+          additionalProperties:
+            type: array
+            uniqueItems: true
+            items: { $ref: '#/components/schemas/CategoryPermission' }
+    InvitationCommand:
+      type: object
+      required: [email, displayName, roles]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        displayName: { type: string, maxLength: 120 }
+        roles:
+          type: array
+          items: { $ref: '#/components/schemas/Role' }
+    Invitation:
+      type: object
+      required: [id, groupId, email, roles, expiresAt]
+      properties:
+        id: { type: string }
+        groupId: { type: string }
+        email: { type: string, format: email }
+        displayName: { type: string }
+        roles:
+          type: array
+          items: { $ref: '#/components/schemas/Role' }
+        expiresAt: { type: string, format: date-time }
+        acceptedAt: { type: string, format: date-time }
+        revokedAt: { type: string, format: date-time }
+    Category:
+      type: object
+      required: [id, groupId, name, type, active, sortOrder, version]
+      properties:
+        id: { type: string }
+        groupId: { type: string }
+        name: { type: string }
+        type: { type: string, enum: [STANDARD, PENALTY] }
+        active: { type: boolean }
+        sortOrder: { type: integer }
+        version: { type: integer, format: int64 }
+        products:
+          type: array
+          items: { $ref: '#/components/schemas/Product' }
+    CategoryCommand:
+      type: object
+      required: [name, type, sortOrder]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        type: { type: string, enum: [STANDARD, PENALTY] }
+        sortOrder: { type: integer }
+    CategoryUpdate:
+      allOf:
+        - $ref: '#/components/schemas/CategoryCommand'
+        - type: object
+          required: [active, version]
+          properties:
+            active: { type: boolean }
+            version: { type: integer, format: int64, minimum: 1 }
+    Product:
+      type: object
+      required: [id, groupId, categoryId, name, priceMinor, currency, active, sortOrder, version]
+      properties:
+        id: { type: string }
+        groupId: { type: string }
+        categoryId: { type: string }
+        name: { type: string }
+        priceMinor: { $ref: '#/components/schemas/MinorUnits' }
+        currency: { type: string }
+        imageUrl: { type: string }
+        active: { type: boolean }
+        sortOrder: { type: integer }
+        version: { type: integer, format: int64 }
+    ProductCommand:
+      type: object
+      required: [name, priceMinor, sortOrder]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        priceMinor: { type: integer, format: int64, minimum: 1, maximum: 100000000000 }
+        sortOrder: { type: integer }
+    ProductUpdate:
+      allOf:
+        - $ref: '#/components/schemas/ProductCommand'
+        - type: object
+          required: [active, version]
+          properties:
+            active: { type: boolean }
+            version: { type: integer, format: int64, minimum: 1 }
+    BookingCommand:
+      type: object
+      required: [productId, productVersion, expectedPeriodId, quantity]
+      properties:
+        productId: { type: string }
+        productVersion: { type: integer, format: int64, minimum: 1 }
+        expectedPeriodId: { type: string }
+        quantity: { type: integer, minimum: 1, maximum: 99 }
+        targetMembershipId: { type: string }
+        reason: { type: string, maxLength: 500 }
+    Booking:
+      type: object
+      required: [id, groupId, periodId, categoryId, productId, actorMembershipId, targetMembershipId, quantity, unitPriceMinor, totalMinor, currency, productName, categoryName, categoryType, createdAt, canVoid]
+      properties:
+        id: { type: string }
+        groupId: { type: string }
+        periodId: { type: string }
+        categoryId: { type: string }
+        productId: { type: string }
+        actorMembershipId: { type: string }
+        targetMembershipId: { type: string }
+        quantity: { type: integer }
+        unitPriceMinor: { $ref: '#/components/schemas/MinorUnits' }
+        totalMinor: { $ref: '#/components/schemas/MinorUnits' }
+        currency: { type: string }
+        productName: { type: string }
+        categoryName: { type: string }
+        categoryType: { type: string, enum: [STANDARD, PENALTY] }
+        reason: { type: string }
+        createdAt: { type: string, format: date-time }
+        voidedAt: { type: string, format: date-time }
+        voidReason: { type: string }
+        canVoid: { type: boolean }
+    CategoryStatistic:
+      type: object
+      required: [categoryId, categoryName, quantity, grossMinor, voidedMinor, netMinor]
+      properties:
+        categoryId: { type: string }
+        categoryName: { type: string }
+        quantity: { type: integer, format: int64 }
+        grossMinor: { $ref: '#/components/schemas/MinorUnits' }
+        voidedMinor: { $ref: '#/components/schemas/MinorUnits' }
+        netMinor: { $ref: '#/components/schemas/MinorUnits' }
+    LedgerEntry:
+      type: object
+      required: [id, periodId, amountMinor, description, createdAt]
+      properties:
+        id: { type: string }
+        periodId: { type: string }
+        bookingId: { type: string }
+        paymentId: { type: string }
+        reversalOf: { type: string }
+        amountMinor: { $ref: '#/components/schemas/MinorUnits' }
+        description: { type: string }
+        createdAt: { type: string, format: date-time }
+    Account:
+      type: object
+      required: [membershipId, displayName, currency, balanceMinor, openPeriodId, openPeriodDueMinor, categoryStatistics, groupCategoryStatistics, recentEntries]
+      properties:
+        membershipId: { type: string }
+        displayName: { type: string }
+        currency: { type: string }
+        balanceMinor: { $ref: '#/components/schemas/MinorUnits' }
+        openPeriodId: { type: string }
+        openPeriodDueMinor: { $ref: '#/components/schemas/MinorUnits' }
+        categoryStatistics:
+          type: array
+          items: { $ref: '#/components/schemas/CategoryStatistic' }
+        groupCategoryStatistics:
+          type: array
+          description: Anonymous current-period category totals across the group.
+          items: { $ref: '#/components/schemas/CategoryStatistic' }
+        recentEntries:
+          type: array
+          maxItems: 50
+          items: { $ref: '#/components/schemas/LedgerEntry' }
+    Dashboard:
+      type: object
+      required: [account, openPeriod, recentBookings, unreadNotificationCount]
+      properties:
+        account: { $ref: '#/components/schemas/Account' }
+        openPeriod: { $ref: '#/components/schemas/Period' }
+        recentBookings:
+          type: array
+          items: { $ref: '#/components/schemas/Booking' }
+        unreadNotificationCount: { type: integer, format: int64 }
+        groupOutstandingMinor: { $ref: '#/components/schemas/MinorUnits' }
+    PaymentCommand:
+      type: object
+      required: [membershipId, amountMinor, method]
+      properties:
+        membershipId: { type: string }
+        amountMinor: { type: integer, format: int64, minimum: 1 }
+        receivedAt: { type: string, format: date-time }
+        method: { type: string, enum: [CASH, BANK_TRANSFER, OTHER] }
+        reference: { type: string, maxLength: 120 }
+        note: { type: string, maxLength: 1000 }
+    Payment:
+      type: object
+      required: [id, groupId, membershipId, memberName, amountMinor, currency, receivedAt, method, status, allocations]
+      properties:
+        id: { type: string }
+        groupId: { type: string }
+        membershipId: { type: string }
+        memberName: { type: string }
+        amountMinor: { $ref: '#/components/schemas/MinorUnits' }
+        currency: { type: string }
+        receivedAt: { type: string, format: date-time }
+        method: { type: string, enum: [CASH, BANK_TRANSFER, OTHER] }
+        reference: { type: string }
+        note: { type: string }
+        status: { type: string, enum: [POSTED, REVERSED] }
+        reversedAt: { type: string, format: date-time }
+        allocations:
+          type: array
+          items:
+            type: object
+            required: [periodId, amountMinor]
+            properties:
+              periodId: { type: string }
+              amountMinor: { $ref: '#/components/schemas/MinorUnits' }
+    Period:
+      type: object
+      required: [id, groupId, label, status, startsAt]
+      properties:
+        id: { type: string }
+        groupId: { type: string }
+        label: { type: string }
+        status: { type: string, enum: [OPEN, CLOSED] }
+        startsAt: { type: string, format: date-time }
+        closedAt: { type: string, format: date-time }
+        dueAt: { type: string, format: date }
+    ClosePeriodCommand:
+      type: object
+      required: [label, dueAt, nextPeriodLabel]
+      properties:
+        label: { type: string, minLength: 1, maxLength: 120 }
+        dueAt: { type: string, format: date }
+        nextPeriodLabel: { type: string, minLength: 1, maxLength: 120 }
+    Statement:
+      type: object
+      required: [id, periodId, membershipId, displayName, email, chargesMinor, paymentsAllocatedMinor, adjustmentsAppliedMinor, adjustmentsProvidedMinor, amountDueMinor, currency, status]
+      properties:
+        id: { type: string }
+        periodId: { type: string }
+        membershipId: { type: string }
+        displayName: { type: string }
+        email: { type: string, format: email }
+        chargesMinor: { $ref: '#/components/schemas/MinorUnits' }
+        paymentsAllocatedMinor: { $ref: '#/components/schemas/MinorUnits' }
+        adjustmentsAppliedMinor:
+          $ref: '#/components/schemas/MinorUnits'
+          description: Later negative corrections allocated against this period's claim.
+        adjustmentsProvidedMinor:
+          $ref: '#/components/schemas/MinorUnits'
+          description: This period's negative corrections allocated to older claims.
+        amountDueMinor: { $ref: '#/components/schemas/MinorUnits' }
+        currency: { type: string }
+        status: { type: string, enum: [OPEN, PARTIAL, PAID, CREDIT] }
+    Notification:
+      type: object
+      required: [id, groupId, type, title, body, createdAt]
+      properties:
+        id: { type: string }
+        groupId: { type: string }
+        type: { type: string }
+        title: { type: string }
+        body: { type: string }
+        resourceType: { type: string }
+        resourceId: { type: string }
+        readAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+    AuditEvent:
+      type: object
+      required: [id, action, resourceType, metadata, occurredAt]
+      properties:
+        id: { type: string }
+        groupId: { type: string }
+        actorUserId: { type: string }
+        actorMembershipId: { type: string }
+        action: { type: string }
+        resourceType: { type: string }
+        resourceId: { type: string }
+        metadata: { type: object, additionalProperties: true }
+        occurredAt: { type: string, format: date-time }
+    Problem:
+      type: object
+      required: [type, title, status, detail, instance]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer, minimum: 400, maximum: 599 }
+        detail: { type: string }
+        instance: { type: string }

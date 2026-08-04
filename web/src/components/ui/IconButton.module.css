@@ -1,0 +1,33 @@
+.button {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  transition: color var(--motion-fast), background var(--motion-fast), border-color var(--motion-fast);
+}
+
+.plain {
+  color: var(--color-ink);
+}
+
+.plain:hover {
+  color: var(--color-teal-700);
+  background: var(--color-surface-teal);
+}
+
+.surface {
+  color: var(--color-ink);
+  background: var(--color-white);
+  border-color: var(--color-border);
+}
+
+.dark {
+  color: var(--color-white);
+  background: rgb(255 255 255 / 8%);
+  border-color: rgb(255 255 255 / 26%);
+}

@@ -1,0 +1,16 @@
+.content { padding: var(--space-8) 0; }
+.header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-5); margin-bottom: var(--space-6); }
+.header h2, .header p { margin: 0; }
+.header p { margin-top: 5px; color: var(--color-muted); }
+.member { display: inline-flex; align-items: center; gap: var(--space-3); }
+.form, .invitationReady { display: grid; gap: var(--space-5); padding: var(--space-4) var(--space-6) var(--space-6); }
+.actions { display: flex; justify-content: flex-end; gap: var(--space-3); }
+.error { color: var(--color-red-600); }
+.expiry { margin: 0; color: var(--color-muted); font-size: var(--font-size-sm); }
+.invitationReady { place-items: center; color: var(--color-teal-700); text-align: center; }
+.invitationReady h3, .invitationReady p { margin: 0; }
+.invitationReady p { color: var(--color-muted); }
+.invitationReady > button { width: 100%; }
+.copyRow { display: grid; width: 100%; grid-template-columns: 1fr auto; gap: var(--space-2); }
+.state { padding: var(--space-8) 0; }
+@media (max-width: 600px) { .header { align-items: stretch; flex-direction: column; } .copyRow { grid-template-columns: 1fr; } }

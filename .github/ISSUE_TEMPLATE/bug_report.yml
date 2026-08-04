@@ -1,0 +1,35 @@
+name: Bug report
+description: Report a reproducible TeamTaler defect. Do not report security vulnerabilities here.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: For vulnerabilities, follow SECURITY.md instead of creating a public issue.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Release tag or commit SHA.
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Provide the smallest reliable sequence without personal or financial data.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Browser, architecture, Docker version, and reverse proxy.

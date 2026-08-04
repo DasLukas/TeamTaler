@@ -1,0 +1,44 @@
+name: teamtaler
+
+services:
+  app:
+    image: ${TEAMTALER_IMAGE:-ghcr.io/daslukas/teamtaler}:${TEAMTALER_VERSION:-0.1.0}
+    build:
+      context: .
+      args:
+        VERSION: ${TEAMTALER_VERSION:-dev}
+    env_file:
+      - .env
+    environment:
+      TEAMTALER_LISTEN: 0.0.0.0:8080
+      TEAMTALER_DATA_DIR: /var/lib/teamtaler
+      TEAMTALER_DATABASE_PATH: /var/lib/teamtaler/teamtaler.db
+      TEAMTALER_WEB_DIR: /app/web
+    ports:
+      - "127.0.0.1:${TEAMTALER_HOST_PORT:-8080}:8080"
+    volumes:
+      - teamtaler-data:/var/lib/teamtaler
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/teamtaler", "healthcheck", "--url", "http://127.0.0.1:8080/health/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  teamtaler-data:
+    name: teamtaler-data

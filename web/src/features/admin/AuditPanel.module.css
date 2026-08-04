@@ -1,0 +1,5 @@
+.content { padding: var(--space-8) 0; }
+.content header { margin-bottom: var(--space-6); }
+.content h2, .content p { margin: 0; }
+.content p { margin-top: 5px; color: var(--color-muted); }
+.state { padding-top: var(--space-8); }
