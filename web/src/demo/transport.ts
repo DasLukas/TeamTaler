@@ -18,6 +18,7 @@ import type {
   Product,
   Session,
 } from '@/api/types';
+import { MAX_PRODUCT_PRICE_MINOR } from '@/api/money';
 import {
   demoAudit,
   demoBookings,
@@ -37,6 +38,27 @@ type DemoRequestInit = RequestInit;
 
 const clone = <T,>(value: T): T => structuredClone(value);
 const identifier = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
+
+/**
+ * Validates a demo wire price against the production product-price bounds.
+ *
+ * @param value - Integer minor units from a simulated command.
+ * @returns Canonical decimal minor units.
+ * @throws TypeError when the value is absent, malformed, or non-positive.
+ * @throws RangeError when the value exceeds the production limit.
+ */
+function validateDemoProductPrice(value: string | number | undefined): string {
+  let amount: bigint;
+  try {
+    if (value === undefined) throw new TypeError(i18n.t('errors.amountFormat'));
+    amount = BigInt(value);
+  } catch {
+    throw new TypeError(i18n.t('errors.amountFormat'));
+  }
+  if (amount <= 0n) throw new TypeError(i18n.t('errors.amountFormat'));
+  if (amount > MAX_PRODUCT_PRICE_MINOR) throw new RangeError(i18n.t('errors.amountRange'));
+  return amount.toString();
+}
 
 interface DemoImportCandidate {
   row: number;
@@ -181,6 +203,8 @@ export class DemoTransport {
 
     const permissionMatch = resource.match(/^members\/([^/]+)\/permissions$/);
     if (permissionMatch && method === 'PATCH') return this.updatePermissions(permissionMatch[1], body as PermissionUpdate & { categoryGrants?: Record<string, string[]> }) as T;
+    const categoryUpdateMatch = resource.match(/^categories\/([^/]+)$/);
+    if (categoryUpdateMatch && method === 'PATCH') return this.updateCategory(categoryUpdateMatch[1], body as Pick<Category, 'name' | 'active' | 'sortOrder' | 'version'>) as T;
     const bookingReversalMatch = resource.match(/^bookings\/([^/]+)\/(?:reversal|void)$/);
     if (bookingReversalMatch && method === 'POST') return this.reverseBooking(bookingReversalMatch[1]) as T;
     const periodCloseMatch = resource.match(/^periods\/([^/]+)\/close$/);
@@ -191,8 +215,30 @@ export class DemoTransport {
     if (paymentReverseMatch && method === 'POST') return this.reversePayment(paymentReverseMatch[1]) as T;
     const productCreateMatch = resource.match(/^categories\/([^/]+)\/products$/);
     if (productCreateMatch && method === 'POST') {
-      const input = body as { name?: string; priceMinor?: number; sortOrder?: number };
-      return this.createProduct({ categoryId: productCreateMatch[1], name: input.name, price: { minorUnits: String(input.priceMinor ?? 0), currency: 'EUR' }, sortOrder: input.sortOrder } as Partial<Product>) as T;
+      const input = body as { name?: string; priceMinor?: number; pricingMode?: Product['pricingMode']; sortOrder?: number };
+      const pricingMode = input.pricingMode === 'USER_DEFINED' ? 'USER_DEFINED' : 'FIXED';
+      if (pricingMode === 'USER_DEFINED' && input.priceMinor !== undefined) throw new Error(i18n.t('errors.amountFormat'));
+      const fixedPriceMinor = pricingMode === 'FIXED' ? validateDemoProductPrice(input.priceMinor) : undefined;
+      return this.createProduct({
+        categoryId: productCreateMatch[1],
+        name: input.name,
+        pricingMode,
+        currency: 'EUR',
+        price: fixedPriceMinor ? { minorUnits: fixedPriceMinor, currency: 'EUR' } : undefined,
+        sortOrder: input.sortOrder,
+      } as Partial<Product>) as T;
+    }
+    const productUpdateMatch = resource.match(/^products\/([^/]+)$/);
+    if (productUpdateMatch && method === 'PATCH') {
+      const input = body as { name: string; priceMinor?: number; pricingMode: Product['pricingMode']; active: boolean; sortOrder: number; version: number };
+      const pricingMode = input.pricingMode === 'USER_DEFINED' ? 'USER_DEFINED' : 'FIXED';
+      if (pricingMode === 'USER_DEFINED' && input.priceMinor !== undefined) throw new Error(i18n.t('errors.amountFormat'));
+      const fixedPriceMinor = pricingMode === 'FIXED' ? validateDemoProductPrice(input.priceMinor) : undefined;
+      return this.updateProduct(productUpdateMatch[1], {
+        ...input,
+        pricingMode,
+        price: fixedPriceMinor ? { minorUnits: fixedPriceMinor, currency: 'EUR' } : undefined,
+      }) as T;
     }
     const productImageMatch = resource.match(/^products\/([^/]+)\/image$/);
     if (productImageMatch && method === 'POST') return { imageUrl: '' } as T;
@@ -214,12 +260,20 @@ export class DemoTransport {
     return clone(this.session);
   }
 
-  private createBooking(command: BookingCommand): Booking {
+  private createBooking(command: BookingCommand & { unitPriceMinor?: number }): Booking {
     const product = this.categories.flatMap((category) => category.products).find((entry) => entry.id === command.productId);
     const target = this.members.find((member) => member.id === command.targetMembershipId) ?? this.members.find((member) => member.userId === this.session.user.id);
     const category = this.categories.find((entry) => entry.id === product?.categoryId);
     if (!product || !target || !category) throw new Error(i18n.t('errors.missingProductOrMember'));
-    const totalMinorUnits = BigInt(product.price.minorUnits) * BigInt(command.quantity);
+    if (product.pricingMode === 'FIXED' && (command.unitPrice || command.unitPriceMinor !== undefined)) throw new Error(i18n.t('errors.amountFormat'));
+    const chosenPrice = product.pricingMode === 'USER_DEFINED'
+      ? validateDemoProductPrice(command.unitPrice?.minorUnits ?? command.unitPriceMinor)
+      : undefined;
+    const unitPrice = product.pricingMode === 'FIXED'
+      ? product.price
+      : { minorUnits: chosenPrice as string, currency: product.currency };
+    if (!unitPrice) throw new Error(i18n.t('errors.amountFormat'));
+    const totalMinorUnits = BigInt(unitPrice.minorUnits) * BigInt(command.quantity);
     const booking: Booking = {
       id: identifier('booking'),
       memberId: target.id,
@@ -229,8 +283,8 @@ export class DemoTransport {
       categoryId: category.id,
       categoryName: category.name,
       quantity: command.quantity,
-      unitPrice: product.price,
-      total: { minorUnits: totalMinorUnits.toString(), currency: product.price.currency },
+      unitPrice,
+      total: { minorUnits: totalMinorUnits.toString(), currency: unitPrice.currency },
       bookedAt: new Date().toISOString(),
       bookedByName: this.session.user.displayName,
       reason: command.reason,
@@ -271,12 +325,26 @@ export class DemoTransport {
   private createCategory(input: Partial<Category>): Category {
     const category: Category = {
       id: identifier('category'),
+      version: 1,
       name: input.name ?? i18n.t('demo.newCategory'),
       icon: input.icon ?? 'other',
       active: true,
+      sortOrder: this.categories.length + 1,
       products: [],
     };
     this.categories.push(category);
+    return clone(category);
+  }
+
+  /** Updates one demo category while enforcing the production version contract. */
+  private updateCategory(id: string, input: Pick<Category, 'name' | 'active' | 'sortOrder' | 'version'>): Category {
+    const category = this.categories.find((entry) => entry.id === id);
+    if (!category) throw new Error(i18n.t('errors.categoryNotFound'));
+    if (category.version !== input.version) throw new Error(i18n.t('errors.requestFailed'));
+    category.name = input.name;
+    category.active = input.active;
+    category.sortOrder = input.sortOrder;
+    category.version += 1;
     return clone(category);
   }
 
@@ -395,12 +463,28 @@ export class DemoTransport {
       categoryId: category.id,
       version: 1,
       name: input.name ?? i18n.t('demo.newProduct'),
-      price: input.price ?? { minorUnits: '0', currency: 'EUR' },
+      pricingMode: input.pricingMode ?? 'FIXED',
+      currency: input.currency ?? 'EUR',
+      price: input.pricingMode === 'USER_DEFINED' ? undefined : input.price ?? { minorUnits: '0', currency: input.currency ?? 'EUR' },
       imageUrl: input.imageUrl,
       active: true,
       sortOrder: category.products.length + 1,
     };
     category.products.push(product);
+    return clone(product);
+  }
+
+  /** Updates one demo product while preserving its category and booking history. */
+  private updateProduct(id: string, input: Pick<Product, 'name' | 'pricingMode' | 'price' | 'active' | 'sortOrder' | 'version'>): Product {
+    const product = this.categories.flatMap((category) => category.products).find((entry) => entry.id === id);
+    if (!product) throw new Error(i18n.t('errors.missingProductOrMember'));
+    if (product.version !== input.version) throw new Error(i18n.t('errors.requestFailed'));
+    product.name = input.name;
+    product.pricingMode = input.pricingMode;
+    product.price = input.price;
+    product.active = input.active;
+    product.sortOrder = input.sortOrder;
+    product.version += 1;
     return clone(product);
   }
 

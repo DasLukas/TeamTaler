@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -84,7 +85,7 @@ func (f *fixture) catalogItem(categoryName string, price int64) (domain.Category
 	if err != nil {
 		f.t.Fatalf("create category: %v", err)
 	}
-	product, err := f.catalog.CreateProduct(f.ctx, f.admin, f.membership, "fixture-product-"+category.ID, category.ID, catalog.CreateProductInput{Name: "Item " + categoryName, PriceMinor: price})
+	product, err := f.catalog.CreateProduct(f.ctx, f.admin, f.membership, "fixture-product-"+category.ID, category.ID, catalog.CreateProductInput{Name: "Item " + categoryName, PriceMinor: &price})
 	if err != nil {
 		f.t.Fatalf("create product: %v", err)
 	}
@@ -109,7 +110,8 @@ func TestBootstrapLoginInvitationReplayAndTenantRBAC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create idempotency category: %v", err)
 	}
-	productInput := catalog.CreateProductInput{Name: "Retry-safe product", PriceMinor: 250}
+	productPrice := int64(250)
+	productInput := catalog.CreateProductInput{Name: "Retry-safe product", PriceMinor: &productPrice}
 	product, err := f.catalog.CreateProduct(f.ctx, f.admin, f.membership, "product-create-retry", category.ID, productInput)
 	if err != nil {
 		t.Fatalf("create idempotent product: %v", err)
@@ -122,7 +124,8 @@ func TestBootstrapLoginInvitationReplayAndTenantRBAC(t *testing.T) {
 	if _, err := f.catalog.CreateProduct(f.ctx, f.admin, f.membership, "product-create-retry", category.ID, productInput); !errors.Is(err, domain.ErrIdempotencyReuse) {
 		t.Fatalf("reused product key error = %v, want idempotency reuse", err)
 	}
-	if _, err := f.catalog.UpdateProduct(f.ctx, f.admin, f.membership, product.ID, catalog.UpdateProductInput{Name: product.Name, PriceMinor: 100_000_000_001, Active: true, Version: product.Version}); !errors.Is(err, domain.ErrValidation) {
+	extremePrice := int64(100_000_000_001)
+	if _, err := f.catalog.UpdateProduct(f.ctx, f.admin, f.membership, product.ID, catalog.UpdateProductInput{Name: product.Name, PriceMinor: &extremePrice, Active: true, Version: product.Version}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("extreme product price error = %v, want validation", err)
 	}
 	if _, err := f.auth.Login(f.ctx, "admin@example.test", "definitely-the-wrong-password"); !errors.Is(err, domain.ErrUnauthenticated) {
@@ -293,6 +296,88 @@ func TestBookingUndoAssignmentValidationAndBalancedLedger(t *testing.T) {
 	}
 	if !foundPrimary {
 		t.Fatal("category void grantee could not discover and manage the foreign booking")
+	}
+}
+
+func TestUserDefinedProductPricingIsValidatedAndSnapshotted(t *testing.T) {
+	f := newFixture(t)
+	category, err := f.catalog.CreateCategory(f.ctx, f.admin, f.membership, catalog.CreateCategoryInput{Name: "Flexible charges"})
+	if err != nil {
+		t.Fatalf("create flexible category: %v", err)
+	}
+	customProduct, err := f.catalog.CreateProduct(f.ctx, f.admin, f.membership, "custom-product-price", category.ID, catalog.CreateProductInput{
+		Name: "Contribution", PricingMode: domain.ProductPricingUserDefined,
+	})
+	if err != nil {
+		t.Fatalf("create user-defined-price product: %v", err)
+	}
+	if customProduct.PricingMode != domain.ProductPricingUserDefined || customProduct.PriceMinor != nil {
+		t.Fatalf("custom product pricing = %s/%v", customProduct.PricingMode, customProduct.PriceMinor)
+	}
+	fixedPrice := int64(125)
+	fixedProduct, err := f.catalog.CreateProduct(f.ctx, f.admin, f.membership, "fixed-product-price", category.ID, catalog.CreateProductInput{
+		Name: "Fixed", PriceMinor: &fixedPrice,
+	})
+	if err != nil || fixedProduct.PricingMode != domain.ProductPricingFixed {
+		t.Fatalf("create compatible fixed product: product=%#v err=%v", fixedProduct, err)
+	}
+	if _, err := f.catalog.CreateProduct(f.ctx, f.admin, f.membership, "invalid-custom-price", category.ID, catalog.CreateProductInput{
+		Name: "Invalid", PricingMode: domain.ProductPricingUserDefined, PriceMinor: &fixedPrice,
+	}); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("custom product with catalog price error = %v, want validation", err)
+	}
+	if _, err := f.catalog.CreateProduct(f.ctx, f.admin, f.membership, "invalid-fixed-price", category.ID, catalog.CreateProductInput{
+		Name: "Invalid", PricingMode: domain.ProductPricingFixed,
+	}); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("fixed product without catalog price error = %v, want validation", err)
+	}
+
+	periodID := f.openPeriodID()
+	baseInput := bookings.CreateInput{ProductID: customProduct.ID, ProductVersion: customProduct.Version, ExpectedPeriodID: periodID, Quantity: 2}
+	if _, err := f.bookings.Create(f.ctx, f.admin, f.membership, "custom-price-missing", baseInput); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("missing user-defined unit price error = %v, want validation", err)
+	}
+	chosenPrice := int64(350)
+	baseInput.UnitPriceMinor = &chosenPrice
+	booking, err := f.bookings.Create(f.ctx, f.admin, f.membership, "custom-price-booking", baseInput)
+	if err != nil {
+		t.Fatalf("book user-defined price: %v", err)
+	}
+	if booking.UnitPriceMinor != chosenPrice || booking.TotalMinor != 700 {
+		t.Fatalf("custom booking price = %d total = %d, want 350/700", booking.UnitPriceMinor, booking.TotalMinor)
+	}
+	replayed, err := f.bookings.Create(f.ctx, f.admin, f.membership, "custom-price-booking", baseInput)
+	if err != nil || replayed.ID != booking.ID {
+		t.Fatalf("replay custom booking = %#v err=%v", replayed, err)
+	}
+	differentPrice := int64(400)
+	baseInput.UnitPriceMinor = &differentPrice
+	if _, err := f.bookings.Create(f.ctx, f.admin, f.membership, "custom-price-booking", baseInput); !errors.Is(err, domain.ErrIdempotencyReuse) {
+		t.Fatalf("changed custom price idempotency error = %v, want reuse rejection", err)
+	}
+	if _, err := f.bookings.Create(f.ctx, f.admin, f.membership, "fixed-price-override", bookings.CreateInput{
+		ProductID: fixedProduct.ID, ProductVersion: fixedProduct.Version, ExpectedPeriodID: periodID, Quantity: 1, UnitPriceMinor: &chosenPrice,
+	}); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("fixed-price override error = %v, want validation", err)
+	}
+	var metadata string
+	if err := f.db.QueryRowContext(f.ctx, `SELECT metadata_json FROM audit_events WHERE action='booking.created' AND resource_id=?`, booking.ID).Scan(&metadata); err != nil {
+		t.Fatalf("read custom-price audit event: %v", err)
+	}
+	if !strings.Contains(metadata, `"unitPriceMinor":350`) || !strings.Contains(metadata, `"totalMinor":700`) {
+		t.Fatalf("custom-price audit metadata = %s", metadata)
+	}
+	updatedCustom, err := f.catalog.UpdateProduct(f.ctx, f.admin, f.membership, fixedProduct.ID, catalog.UpdateProductInput{
+		Name: fixedProduct.Name, PricingMode: domain.ProductPricingUserDefined, Active: true, Version: fixedProduct.Version,
+	})
+	if err != nil || updatedCustom.PricingMode != domain.ProductPricingUserDefined || updatedCustom.PriceMinor != nil {
+		t.Fatalf("switch fixed product to user-defined pricing: product=%#v err=%v", updatedCustom, err)
+	}
+	updatedFixed, err := f.catalog.UpdateProduct(f.ctx, f.admin, f.membership, fixedProduct.ID, catalog.UpdateProductInput{
+		Name: fixedProduct.Name, PricingMode: domain.ProductPricingFixed, PriceMinor: &fixedPrice, Active: true, Version: updatedCustom.Version,
+	})
+	if err != nil || updatedFixed.PricingMode != domain.ProductPricingFixed || updatedFixed.PriceMinor == nil || *updatedFixed.PriceMinor != fixedPrice {
+		t.Fatalf("switch user-defined product to fixed pricing: product=%#v err=%v", updatedFixed, err)
 	}
 }
 

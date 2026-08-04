@@ -45,7 +45,8 @@ func TestImageRequiresMembershipAndGroupReference(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create category: %v", err)
 	}
-	product, err := catalogService.CreateProduct(ctx, session.Principal, groupItems[0].Membership, "image-product-one", category.ID, catalog.CreateProductInput{Name: "Water", PriceMinor: 100})
+	priceMinor := int64(100)
+	product, err := catalogService.CreateProduct(ctx, session.Principal, groupItems[0].Membership, "image-product-one", category.ID, catalog.CreateProductInput{Name: "Water", PriceMinor: &priceMinor})
 	if err != nil {
 		t.Fatalf("create product: %v", err)
 	}
