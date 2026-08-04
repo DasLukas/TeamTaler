@@ -16,6 +16,10 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Removed the redundant standard/penalty category type so each user-defined category is the sole product classification.
 - Generalized third-party booking reasons, quantities, and the 30-second self-undo rule across all categories.
 
+### Security
+
+- Prevented unvalidated local logo files from being rendered before server-side normalization and required an explicitly supported browser media type before upload.
+
 ## [0.1.0] - 2026-08-04
 
 ### Added
