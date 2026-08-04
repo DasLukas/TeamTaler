@@ -2,8 +2,12 @@ import type {
   Booking,
   BookingCommand,
   Category,
+  CreatedInvitation,
+  InvitationEmailRetryResult,
+  InvitationImportResult,
+  InvitationImportRow,
   InvitationCommand,
-  Invitation,
+  InvitationMetadata,
   LoginCommand,
   Membership,
   Notification,
@@ -34,6 +38,73 @@ type DemoRequestInit = RequestInit;
 const clone = <T,>(value: T): T => structuredClone(value);
 const identifier = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
 
+interface DemoImportCandidate {
+  row: number;
+  email: string;
+  displayName: string;
+}
+
+/**
+ * Parses one flat CSV record for the development-only invitation simulator.
+ *
+ * @param record - One CSV line without a line ending.
+ * @param delimiter - Detected comma or semicolon delimiter.
+ * @returns Decoded cells with surrounding whitespace removed.
+ */
+function parseDemoCsvRecord(record: string, delimiter: string): string[] {
+  const cells: string[] = [];
+  let cell = '';
+  let quoted = false;
+  for (let index = 0; index < record.length; index += 1) {
+    const character = record[index];
+    if (character === '"') {
+      if (quoted && record[index + 1] === '"') {
+        cell += '"';
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (character === delimiter && !quoted) {
+      cells.push(cell.trim());
+      cell = '';
+    } else {
+      cell += character;
+    }
+  }
+  cells.push(cell.trim());
+  return cells;
+}
+
+/**
+ * Reads the supported member invitation columns for the development demo.
+ *
+ * @param document - UTF-8 CSV text containing `email` and optional `display_name` columns.
+ * @returns Data rows with their original one-based source line numbers.
+ * @throws Error when the CSV has no usable header or email column.
+ */
+function parseDemoMemberCsv(document: string): DemoImportCandidate[] {
+  const lines = document.replace(/^\uFEFF/, '').split(/\r?\n/);
+  const headerIndex = lines.findIndex((line) => line.trim().length > 0);
+  if (headerIndex < 0) throw new Error('The CSV file must contain a header row.');
+  const delimiter = (lines[headerIndex].match(/;/g)?.length ?? 0) > (lines[headerIndex].match(/,/g)?.length ?? 0) ? ';' : ',';
+  const header = parseDemoCsvRecord(lines[headerIndex], delimiter).map((cell) => cell.toLowerCase());
+  const emailIndex = header.indexOf('email');
+  const displayNameIndex = header.indexOf('display_name');
+  if (emailIndex < 0) throw new Error('The CSV header must contain an email column.');
+  const result: DemoImportCandidate[] = [];
+  for (let index = headerIndex + 1; index < lines.length; index += 1) {
+    if (!lines[index].trim()) continue;
+    const cells = parseDemoCsvRecord(lines[index], delimiter);
+    result.push({
+      row: index + 1,
+      email: (cells[emailIndex] ?? '').trim().toLowerCase(),
+      displayName: displayNameIndex >= 0 ? (cells[displayNameIndex] ?? '').trim() : '',
+    });
+  }
+  if (result.length === 0) throw new Error('The CSV file must contain at least one data row.');
+  return result;
+}
+
 /**
  * In-memory API substitute used exclusively by the development build.
  * It deliberately mirrors the real group-prefixed REST contract.
@@ -50,6 +121,7 @@ export class DemoTransport {
   private settlements = clone(demoSettlements);
   private notifications = clone(demoNotifications);
   private audit = clone(demoAudit);
+  private invitations: InvitationMetadata[] = [];
 
   /**
    * Resolves one development request.
@@ -62,7 +134,10 @@ export class DemoTransport {
   async request<T>(path: string, init: DemoRequestInit = {}): Promise<T> {
     await new Promise((resolve) => window.setTimeout(resolve, 90));
     const method = init.method ?? 'GET';
-    const body = typeof init.body === 'string' ? JSON.parse(init.body) as unknown : undefined;
+    const contentType = new Headers(init.headers).get('Content-Type')?.toLowerCase() ?? '';
+    const body = typeof init.body === 'string'
+      ? contentType.startsWith('text/csv') ? init.body : JSON.parse(init.body) as unknown
+      : undefined;
     const cleanPath = path.split('?')[0];
 
     if (cleanPath === '/session' || cleanPath === '/me') return clone(this.session) as T;
@@ -73,7 +148,7 @@ export class DemoTransport {
 
     const groupMatch = cleanPath.match(/^\/groups\/([^/]+)\/(.+)$/);
     if (!groupMatch) throw new Error(`Development demo endpoint not implemented: ${method} ${path}`);
-    const [, , resource] = groupMatch;
+    const [, groupId, resource] = groupMatch;
 
     if (resource === 'dashboard') return clone(this.dashboard) as T;
     if (resource === 'members' && method === 'GET') return clone(this.members) as T;
@@ -87,8 +162,22 @@ export class DemoTransport {
     if (resource === 'settlements' && method === 'GET') return clone(this.settlements) as T;
     if (resource === 'notifications' && method === 'GET') return clone(this.notifications) as T;
     if (resource === 'audit' && method === 'GET') return clone(this.audit) as T;
-    if (resource === 'invitations' && method === 'POST') return this.createInvitation(body as { email?: string; expiresInDays: number }) as T;
+    if (resource === 'invitations/import' && method === 'POST') return this.importInvitations(body as string) as T;
+    if (resource === 'invitations' && method === 'GET') return this.listInvitations() as T;
+    if (resource === 'invitations' && method === 'POST') return this.createInvitation(body as { email?: string; displayName?: string; expiresInDays?: number }) as T;
     if (resource === 'categories' && method === 'POST') return this.createCategory(body as Partial<Category>) as T;
+    if (resource === 'logo' && method === 'POST') {
+      const image = init.body instanceof FormData ? init.body.get('image') : undefined;
+      const logoUrl = image instanceof Blob ? URL.createObjectURL(image) : '';
+      const group = this.session.groups.find((entry) => entry.id === groupId);
+      if (group) group.logoUrl = logoUrl;
+      return { logoUrl } as T;
+    }
+    if (resource === 'logo' && method === 'DELETE') {
+      const group = this.session.groups.find((entry) => entry.id === groupId);
+      if (group) delete group.logoUrl;
+      return undefined as T;
+    }
 
     const permissionMatch = resource.match(/^members\/([^/]+)\/permissions$/);
     if (permissionMatch && method === 'PATCH') return this.updatePermissions(permissionMatch[1], body as PermissionUpdate & { categoryGrants?: Record<string, string[]> }) as T;
@@ -107,6 +196,8 @@ export class DemoTransport {
     }
     const productImageMatch = resource.match(/^products\/([^/]+)\/image$/);
     if (productImageMatch && method === 'POST') return { imageUrl: '' } as T;
+    const invitationEmailRetryMatch = resource.match(/^invitations\/([^/]+)\/email\/retry$/);
+    if (invitationEmailRetryMatch && method === 'POST') return this.retryInvitationEmail(invitationEmailRetryMatch[1]) as T;
 
     throw new Error(`Development demo endpoint not implemented: ${method} ${path}`);
   }
@@ -181,7 +272,6 @@ export class DemoTransport {
     const category: Category = {
       id: identifier('category'),
       name: input.name ?? i18n.t('demo.newCategory'),
-      type: input.type ?? 'STANDARD',
       icon: input.icon ?? 'other',
       active: true,
       products: [],
@@ -190,14 +280,111 @@ export class DemoTransport {
     return clone(category);
   }
 
-  private createInvitation(input: { email?: string; expiresInDays: number }): Invitation {
+  private createInvitation(input: { email?: string; displayName?: string; expiresInDays?: number }): CreatedInvitation {
     const token = crypto.randomUUID();
-    return {
+    const invitation: CreatedInvitation = {
       id: identifier('invitation'),
       email: input.email,
       expiresAt: new Date(Date.now() + (input.expiresInDays || 7) * 86_400_000).toISOString(),
-      acceptUrl: `${window.location.origin}/invite#${token}`,
+      acceptUrl: `${window.location.origin}/invite#token=${token}`,
     };
+    this.invitations.unshift({
+      id: invitation.id,
+      email: input.email ?? '',
+      displayName: input.displayName,
+      expiresAt: invitation.expiresAt,
+      emailDeliveryStatus: 'NOT_REQUESTED',
+    });
+    return invitation;
+  }
+
+  /**
+   * Imports member invitation rows and queues simulated email delivery.
+   *
+   * @param document - UTF-8 CSV text containing the invitation candidates.
+   * @returns Row-level import outcomes and aggregate counters.
+   * @throws Error when the CSV header or data rows are missing.
+   */
+  private importInvitations(document: string): InvitationImportResult {
+    const candidates = parseDemoMemberCsv(document);
+    const memberEmails = new Set(this.members.map((member) => member.email.toLowerCase()));
+    const existingInvitations = new Map(this.invitations.map((invitation) => [invitation.email.toLowerCase(), invitation]));
+    const importedEmails = new Set<string>();
+    const rows: InvitationImportRow[] = [];
+    const summary = { totalRows: candidates.length, created: 0, invalid: 0, skipped: 0 };
+    for (const candidate of candidates) {
+      const base = { row: candidate.row, email: candidate.email || undefined, displayName: candidate.displayName || undefined };
+      const invalidCode = !candidate.email.includes('@')
+        ? 'invalid_email'
+        : candidate.displayName.length > 120
+          ? 'display_name_too_long'
+          : importedEmails.has(candidate.email) ? 'duplicate_email' : undefined;
+      if (invalidCode) {
+        rows.push({ ...base, invitationStatus: 'INVALID', emailDeliveryStatus: 'NOT_REQUESTED', code: invalidCode });
+        summary.invalid += 1;
+        continue;
+      }
+      importedEmails.add(candidate.email);
+      if (memberEmails.has(candidate.email)) {
+        rows.push({ ...base, invitationStatus: 'SKIPPED_ALREADY_MEMBER', emailDeliveryStatus: 'NOT_REQUESTED' });
+        summary.skipped += 1;
+        continue;
+      }
+      const existingInvitation = existingInvitations.get(candidate.email);
+      if (existingInvitation) {
+        rows.push({
+          ...base,
+          invitationId: existingInvitation.id,
+          invitationStatus: 'SKIPPED_ALREADY_INVITED',
+          emailDeliveryStatus: existingInvitation.emailDeliveryStatus,
+        });
+        summary.skipped += 1;
+        continue;
+      }
+      const invitation: InvitationMetadata = {
+        id: identifier('invitation'),
+        email: candidate.email,
+        displayName: candidate.displayName || undefined,
+        expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString(),
+        emailDeliveryStatus: 'PENDING',
+      };
+      this.invitations.unshift(invitation);
+      existingInvitations.set(candidate.email, invitation);
+      rows.push({ ...base, invitationId: invitation.id, invitationStatus: 'CREATED', emailDeliveryStatus: 'PENDING' });
+      summary.created += 1;
+    }
+    return clone({ summary, rows });
+  }
+
+  /**
+   * Lists invitation metadata and advances pending demo deliveries.
+   *
+   * @returns A cloned snapshot of all invitation delivery states.
+   */
+  private listInvitations(): InvitationMetadata[] {
+    for (const invitation of this.invitations) {
+      if (invitation.emailDeliveryStatus === 'PENDING') invitation.emailDeliveryStatus = 'SENDING';
+      else if (invitation.emailDeliveryStatus === 'SENDING') {
+        invitation.emailDeliveryStatus = 'SENT';
+        invitation.emailSentAt = new Date().toISOString();
+      }
+    }
+    return clone(this.invitations);
+  }
+
+  /**
+   * Restarts simulated email delivery for an existing invitation.
+   *
+   * @param invitationId - Identifier of the invitation to retry.
+   * @returns The invitation identifier and its reset pending state.
+   * @throws Error when the invitation does not exist.
+   */
+  private retryInvitationEmail(invitationId: string): InvitationEmailRetryResult {
+    const invitation = this.invitations.find((item) => item.id === invitationId);
+    if (!invitation) throw new Error('Invitation not found.');
+    invitation.emailDeliveryStatus = 'PENDING';
+    delete invitation.emailSentAt;
+    return { invitationId, emailDeliveryStatus: 'PENDING' };
   }
 
   private createProduct(input: Partial<Product>): Product {

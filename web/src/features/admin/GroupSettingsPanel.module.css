@@ -1,0 +1,94 @@
+.content {
+  padding: var(--space-8) 0;
+}
+
+.header {
+  margin-bottom: var(--space-6);
+}
+
+.header h2,
+.header p,
+.controls h3,
+.controls p {
+  margin: 0;
+}
+
+.header p,
+.controls > div:first-child p {
+  margin-top: var(--space-2);
+  color: var(--color-muted);
+}
+
+.card {
+  display: grid;
+  max-width: 840px;
+  padding: var(--space-6);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-white);
+  box-shadow: var(--shadow-sm);
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: var(--space-8);
+}
+
+.preview {
+  display: grid;
+  width: 180px;
+  height: 180px;
+  padding: var(--space-5);
+  place-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-surface-muted);
+  background-image: linear-gradient(45deg, rgb(3 24 47 / 4%) 25%, transparent 25%), linear-gradient(-45deg, rgb(3 24 47 / 4%) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, rgb(3 24 47 / 4%) 75%), linear-gradient(-45deg, transparent 75%, rgb(3 24 47 / 4%) 75%);
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  background-size: 16px 16px;
+}
+
+.preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.controls {
+  display: grid;
+  align-content: start;
+  gap: var(--space-5);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+.error,
+.success {
+  margin: 0;
+  font-size: var(--font-size-sm);
+}
+
+.error {
+  color: var(--color-red-600);
+}
+
+.success {
+  color: var(--color-green-600);
+}
+
+@media (max-width: 680px) {
+  .card {
+    grid-template-columns: 1fr;
+  }
+
+  .preview {
+    width: 140px;
+    height: 140px;
+  }
+
+  .actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+}

@@ -41,7 +41,7 @@ func TestImageRequiresMembershipAndGroupReference(t *testing.T) {
 		t.Fatalf("list groups: groups=%d err=%v", len(groupItems), err)
 	}
 	catalogService := catalog.Service{DB: db}
-	category, err := catalogService.CreateCategory(ctx, session.Principal, groupItems[0].Membership, catalog.CreateCategoryInput{Name: "Drinks", Type: domain.CategoryStandard})
+	category, err := catalogService.CreateCategory(ctx, session.Principal, groupItems[0].Membership, catalog.CreateCategoryInput{Name: "Drinks"})
 	if err != nil {
 		t.Fatalf("create category: %v", err)
 	}
@@ -73,6 +73,15 @@ func TestImageRequiresMembershipAndGroupReference(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create second group: %v", err)
 	}
+	logoBody := []byte("normalized-logo-fixture")
+	logoDigest := sha256.Sum256(logoBody)
+	logoKey := hex.EncodeToString(logoDigest[:]) + ".png"
+	if err := os.WriteFile(filepath.Join(dataDirectory, "images", logoKey), logoBody, 0o640); err != nil {
+		t.Fatalf("write logo image: %v", err)
+	}
+	if _, _, err := groupService.SetLogo(ctx, session.Principal, groupItems[0].Membership, logoKey); err != nil {
+		t.Fatalf("set group logo: %v", err)
+	}
 	server := &Server{config: config.Config{DataDirectory: dataDirectory}, db: db, groups: groupService}
 
 	positive := imageRequest(t, groupItems[0].ID, imageKey, session.Principal)
@@ -87,6 +96,19 @@ func TestImageRequiresMembershipAndGroupReference(t *testing.T) {
 	server.handleImage(crossTenantResponse, crossTenant)
 	if crossTenantResponse.Code != http.StatusNotFound {
 		t.Fatalf("known hash in unreferencing tenant status = %d, want 404", crossTenantResponse.Code)
+	}
+
+	logoPositive := imageRequest(t, groupItems[0].ID, logoKey, session.Principal)
+	logoPositiveResponse := httptest.NewRecorder()
+	server.handleImage(logoPositiveResponse, logoPositive)
+	if logoPositiveResponse.Code != http.StatusOK {
+		t.Fatalf("authorized group logo response status = %d, want 200", logoPositiveResponse.Code)
+	}
+	logoCrossTenant := imageRequest(t, secondGroup.ID, logoKey, session.Principal)
+	logoCrossTenantResponse := httptest.NewRecorder()
+	server.handleImage(logoCrossTenantResponse, logoCrossTenant)
+	if logoCrossTenantResponse.Code != http.StatusNotFound {
+		t.Fatalf("group logo in unreferencing tenant status = %d, want 404", logoCrossTenantResponse.Code)
 	}
 
 	loggedOut := imageRequest(t, groupItems[0].ID, imageKey, domain.Principal{})

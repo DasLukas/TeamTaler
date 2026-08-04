@@ -7,29 +7,30 @@ The application combines a responsive German-language React interface, a Go HTTP
 ## Implemented features
 
 - Multiple isolated groups per installation and multiple group memberships per user.
-- Local accounts, seven-day single-use invitation links, and server-side sessions.
+- Local accounts, seven-day single-use invitation links, idempotent CSV invitation imports with automatic email delivery, and server-side sessions.
 - Cumulative group roles:
-  - `ADMIN` has all group capabilities and manages roles and category grants.
+  - `ADMIN` has all group capabilities and manages branding, roles, and category grants.
   - `FINANCE_MANAGER` records and reverses payments, views member accounts, and closes periods.
   - `CATALOG_MANAGER` creates and updates categories and products and uploads product images.
 - Category-scoped `ASSIGN_TO_OTHERS` and `VOID_BOOKINGS` grants.
-- Standard and penalty categories, integer minor-unit prices, product snapshots in bookings, and JPEG/PNG/WebP uploads normalized to content-addressed PNG files.
-- Idempotent booking creation, immutable acting/target membership traceability, 30-second self-undo for standard self-bookings, and reasoned audited reversals.
-- Mandatory reasons when a penalty is assigned to another member.
+- User-defined categories without a secondary category type, integer minor-unit prices, product snapshots in bookings, and JPEG/PNG/WebP uploads normalized to content-addressed PNG files.
+- Idempotent booking creation, immutable acting/target membership traceability, 30-second self-undo for self-bookings, and reasoned audited reversals.
+- Mandatory reasons whenever a booking is assigned to another member.
 - Activity views display and search both the charged member and the member who made every booking; dashboard activity highlights third-party assignments.
 - A consolidated member receivable account across all categories, current-period personal statistics, and anonymous group category aggregates.
 - Incoming payments, payment reversals, oldest-claim-first allocation, overpayment credit, and correction allocation across periods.
 - Flexible accounting periods with immutable close snapshots, due dates, settlement status, and an atomically opened successor period.
 - In-app notifications, an administrator-only audit view, safe CSV export of recent account entries, and browser print/PDF views.
+- Administrator-managed group logos that replace the TeamTaler mark for members of the active group.
 - Online backup archives containing a consistent SQLite snapshot and every image referenced by that snapshot.
 
-The administration UI currently supports invitations, role and category-grant updates, catalog creation, image upload, incoming payments, payment reversals, period close, and audit review. Versioned category and product update/archive operations also exist in the API; the current catalog UI focuses on creation and display.
+The administration UI currently supports group branding, individual invitations, CSV invitation imports, role and category-grant updates, catalog creation, image upload, incoming payments, payment reversals, period close, and audit review. Versioned category and product update/archive operations also exist in the API; the current catalog UI focuses on creation and display.
 
 ## Scope and operating constraints
 
 - TeamTaler supports one application replica on a local filesystem. SQLite on NFS, SMB, or another network filesystem is unsupported.
 - TLS is terminated by an external reverse proxy. TeamTaler does not create or renew certificates.
-- Invitation links are copied and shared manually; there is no SMTP integration.
+- Individual invitation links can be copied and shared manually. CSV imports require the optional TLS-secured SMTP configuration and deliver through a transactional retrying outbox.
 - There is no payment-provider integration, SSO, MFA, offline mutation queue, public plugin loader, or built-in metrics endpoint.
 - The browser interface is German. Reusable interface, error, and accessibility copy is centralized in the i18next resource so additional locales can be added without rewriting feature components.
 - Monetary values are persisted and calculated as signed integer minor units. JSON responses encode monetary fields as exact decimal strings, while command inputs use bounded JSON integers; floating-point amounts are never used for accounting.
@@ -37,7 +38,7 @@ The administration UI currently supports invitations, role and category-grant up
 ## Repository structure
 
 - `cmd/teamtaler` contains the server and operator CLI entry point.
-- `internal` contains the backend modules for authentication, groups, catalog, bookings, finance, periods, notifications, audit, backup, HTTP delivery, and SQLite infrastructure.
+- `internal` contains the backend modules for authentication, groups, CSV member import, SMTP email delivery, catalog, shared image media, bookings, finance, periods, notifications, audit, backup, HTTP delivery, and SQLite infrastructure.
 - `migrations` contains the forward-only SQLite schema embedded into the Go binary.
 - `web` contains the React/Vite single-page application organized by feature.
 - `api/openapi.yaml` is the machine-readable HTTP contract.
@@ -78,6 +79,14 @@ For local development:
 
 3. Set `TEAMTALER_PUBLIC_URL` to the exact external origin and restrict `TEAMTALER_TRUSTED_PROXY_CIDRS` to the addresses from which the proxy connects. The public URL must use HTTPS for secure production cookies.
 
+   To enable automatic invitation email, configure the complete SMTP block from `.env.example` and generate the outbox encryption key once:
+
+   ```sh
+   openssl rand -base64 32
+   ```
+
+   Store the result in `TEAMTALER_EMAIL_TOKEN_KEY`. Keep this key and the SMTP password outside version control and preserve the key across restores while pending email jobs may exist.
+
 4. Build and start the application:
 
    ```sh
@@ -112,8 +121,34 @@ The default Compose file binds the application port to host loopback, runs the p
 | `TEAMTALER_DATABASE_PATH` | No | `<data-dir>/teamtaler.db` | SQLite database path. Configuration requires this path to be a direct child of the data directory; a custom filename is supported. |
 | `TEAMTALER_WEB_DIR` | No | `./web/dist` | Compiled frontend directory served by the Go process. |
 | `TEAMTALER_MAX_REQUEST_BYTES` | No | `6291456` | Maximum HTTP request body size in bytes. |
+| `TEAMTALER_SMTP_HOST` | With email | disabled | SMTP hostname or IP address without a scheme or port. |
+| `TEAMTALER_SMTP_PORT` | With email | none | SMTP submission port, commonly `587` for STARTTLS or `465` for implicit TLS. |
+| `TEAMTALER_SMTP_USERNAME` | With email | none | SMTP authentication username. |
+| `TEAMTALER_SMTP_PASSWORD` | With email | none | SMTP authentication secret. Never commit it. |
+| `TEAMTALER_SMTP_FROM_ADDRESS` | With email | none | Single ASCII envelope and message sender mailbox. |
+| `TEAMTALER_SMTP_FROM_NAME` | No | empty | Optional sender display name. |
+| `TEAMTALER_SMTP_TLS_MODE` | With email | `starttls` | Mandatory transport mode: `starttls` or `tls`; plaintext SMTP is unsupported. |
+| `TEAMTALER_EMAIL_TOKEN_KEY` | With email | none | Standard-base64 encoding of exactly 32 random bytes used to encrypt queued invitation tokens. |
 
-The application trusts forwarded client addresses only when the direct peer is inside a configured trusted CIDR. Keep both proxy and application request limits compatible; product image input is limited to 5 MiB before normalization.
+The application trusts forwarded client addresses only when the direct peer is inside a configured trusted CIDR. Keep both proxy and application request limits compatible; product-image and group-logo input is limited to 5 MiB before normalization.
+
+SMTP configuration is fail-fast: supplying only part of the required block prevents startup. The relay certificate is verified, TLS 1.2 or newer is required, and authentication never occurs before encryption. TeamTaler considers a message sent after the relay accepts the SMTP `DATA` command; downstream mailbox delivery remains the relay operator's responsibility.
+
+## CSV invitation import
+
+Administrators can upload UTF-8 CSV files from the member administration screen. The first row must contain `email` and may additionally contain `display_name`. Comma and semicolon delimiters, LF or CRLF line endings, and an optional UTF-8 BOM are accepted. Unknown columns are rejected. Example:
+
+```csv
+email,display_name
+alex@example.com,Alex Member
+sam@example.com,Sam Member
+```
+
+Each file is limited to 256 KiB and 100 data rows. Imported people receive no elevated role; administrators grant roles and category permissions separately after the invitation is accepted. Invalid rows, duplicate addresses, existing memberships, and already-pending invitations are reported individually without discarding valid rows.
+
+The import creates invitations, not memberships. A membership appears only after the recipient follows the emailed one-time link and completes the existing invitation flow. The database transaction stores each invitation together with an encrypted email job and the idempotent import result. A background dispatcher retries temporary delivery failures up to five times. The plaintext token is never stored in the outbox or API result, and its encrypted copy is removed after SMTP acceptance.
+
+The result dialog follows queued deliveries until they are sent or reach a terminal state. An administrator can explicitly requeue a failed delivery from that dialog; accepted, revoked, expired, pending, or already-sent invitations cannot be retried.
 
 ## Local development
 
@@ -201,7 +236,7 @@ Follow the exact backup, restore, upgrade, and rollback procedures in [deploy/RE
 
 ## Security
 
-TeamTaler uses Argon2id password hashing, hashed opaque server-side session tokens, an HttpOnly session cookie, a readable CSRF cookie, SameSite Strict cookies, the Secure attribute under HTTPS, exact-origin validation for mutations, bounded request bodies, trusted-proxy filtering, and in-process throttling for login and invitation acceptance. Product image delivery also requires active membership and a product reference inside the requested group.
+TeamTaler uses Argon2id password hashing, hashed opaque server-side session tokens, an HttpOnly session cookie, a readable CSRF cookie, SameSite Strict cookies, the Secure attribute under HTTPS, exact-origin validation for mutations, bounded request bodies, trusted-proxy filtering, and in-process throttling for login and invitation acceptance. Invitation imports additionally require an idempotency key, and queued invitation tokens use AES-256-GCM authenticated encryption. Image delivery also requires active membership and a product or logo reference inside the requested group.
 
 Financial history uses immutable `ledger_entries` plus linked counter-entries for corrections. Closed period snapshots and audit events are protected by SQLite triggers. Authorization is enforced again in backend services; frontend capability checks are presentation only.
 
@@ -212,7 +247,7 @@ Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md). Do 
 - `main` contains publishable releases only.
 - `dev` is the integration branch.
 - Feature and fix branches start from `dev` and return through reviewed pull requests.
-- Release pull requests merge `dev` into `main`; the resulting commit receives a semantic version tag such as `v0.1.0`.
+- Release pull requests merge `dev` into `main`; the resulting commit receives a semantic version tag such as `v0.2.0`.
 - Hotfixes start from `main`, are released there, and are merged back into `dev`.
 
 All code, comments, project documentation, commit messages, and pull request text are written in English. See [CONTRIBUTING.md](CONTRIBUTING.md) for quality and review requirements.

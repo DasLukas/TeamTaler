@@ -10,9 +10,6 @@ export type GroupRole = 'ADMIN' | 'FINANCE_MANAGER' | 'CATALOG_MANAGER' | 'MEMBE
 /** Rights that can be granted for one category. */
 export type CategoryPermissionName = 'ASSIGN_TO_OTHERS' | 'VOID_BOOKINGS';
 
-/** Supported product category behaviors. */
-export type CategoryType = 'STANDARD' | 'PENALTY';
-
 /** Lifecycle state of an accounting period. */
 export type PeriodStatus = 'OPEN' | 'CLOSED';
 
@@ -63,7 +60,6 @@ export interface Product {
 export interface Category {
   id: string;
   name: string;
-  type: CategoryType;
   icon: 'drink' | 'penalty' | 'other';
   active: boolean;
   products: Product[];
@@ -236,12 +232,59 @@ export interface InvitationCommand {
   password: string;
 }
 
-/** A newly created one-time group invitation. */
-export interface Invitation {
+/** Outbound email lifecycle state for a group invitation. */
+export type EmailDeliveryStatus = 'PENDING' | 'SENDING' | 'SENT' | 'FAILED' | 'CANCELLED' | 'NOT_REQUESTED';
+
+/** Result of attempting to create one invitation from an imported CSV row. */
+export type InvitationImportStatus = 'CREATED' | 'INVALID' | 'SKIPPED_ALREADY_MEMBER' | 'SKIPPED_ALREADY_INVITED';
+
+/** Non-secret invitation metadata returned by invitation list endpoints. */
+export interface InvitationMetadata {
+  id: string;
+  email: string;
+  displayName?: string;
+  expiresAt: string;
+  emailDeliveryStatus: EmailDeliveryStatus;
+  emailSentAt?: string;
+}
+
+/** A newly created one-time invitation including its one-time acceptance URL. */
+export interface CreatedInvitation {
   id: string;
   email?: string;
   expiresAt: string;
   acceptUrl: string;
+}
+
+/** Aggregate counters returned after processing one member invitation CSV. */
+export interface InvitationImportSummary {
+  totalRows: number;
+  created: number;
+  invalid: number;
+  skipped: number;
+}
+
+/** Outcome for one data row in a member invitation CSV. */
+export interface InvitationImportRow {
+  row: number;
+  email?: string;
+  displayName?: string;
+  invitationId?: string;
+  invitationStatus: InvitationImportStatus;
+  emailDeliveryStatus?: EmailDeliveryStatus;
+  code?: string;
+}
+
+/** Complete row-level response returned by the member invitation import. */
+export interface InvitationImportResult {
+  summary: InvitationImportSummary;
+  rows: InvitationImportRow[];
+}
+
+/** Delivery state returned after an administrator retries one invitation email. */
+export interface InvitationEmailRetryResult {
+  invitationId: string;
+  emailDeliveryStatus: 'PENDING';
 }
 
 /** RFC 9457 problem details returned by failed API requests. */

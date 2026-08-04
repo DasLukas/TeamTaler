@@ -12,6 +12,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/groups"
 	"github.com/DasLukas/TeamTaler/internal/idempotency"
+	"github.com/DasLukas/TeamTaler/internal/media"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/storage"
 )
@@ -24,21 +25,19 @@ type Service struct {
 }
 
 // CreateCategoryInput is the public category creation command. Service methods
-// validate its name, type, and supported limits before persistence.
+// validate its name and supported limits before persistence.
 type CreateCategoryInput struct {
-	Name      string              `json:"name"`
-	Type      domain.CategoryType `json:"type"`
-	SortOrder int                 `json:"sortOrder"`
+	Name      string `json:"name"`
+	SortOrder int    `json:"sortOrder"`
 }
 
 // UpdateCategoryInput describes a full optimistic category update; Version must
 // match the current persisted version.
 type UpdateCategoryInput struct {
-	Name      string              `json:"name"`
-	Type      domain.CategoryType `json:"type"`
-	Active    bool                `json:"active"`
-	SortOrder int                 `json:"sortOrder"`
-	Version   int64               `json:"version"`
+	Name      string `json:"name"`
+	Active    bool   `json:"active"`
+	SortOrder int    `json:"sortOrder"`
+	Version   int64  `json:"version"`
 }
 
 // CreateProductInput is the public product creation command expressed in the
@@ -62,7 +61,7 @@ type UpdateProductInput struct {
 // List returns all categories and products for groupID in display order. ctx
 // bounds database access; an empty slice is valid and SQL errors propagate.
 func (s Service) List(ctx context.Context, groupID string) ([]domain.Category, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,group_id,name,type,active,sort_order,version FROM categories WHERE group_id=? ORDER BY sort_order,lower(name)`, groupID)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,group_id,name,active,sort_order,version FROM categories WHERE group_id=? ORDER BY sort_order,lower(name)`, groupID)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +70,7 @@ func (s Service) List(ctx context.Context, groupID string) ([]domain.Category, e
 	index := map[string]int{}
 	for rows.Next() {
 		var item domain.Category
-		if err := rows.Scan(&item.ID, &item.GroupID, &item.Name, &item.Type, &item.Active, &item.SortOrder, &item.Version); err != nil {
+		if err := rows.Scan(&item.ID, &item.GroupID, &item.Name, &item.Active, &item.SortOrder, &item.Version); err != nil {
 			return nil, err
 		}
 		item.Products = make([]domain.Product, 0)
@@ -114,18 +113,12 @@ func (s Service) CreateCategory(ctx context.Context, actor domain.Principal, mem
 	if input.Name == "" || len(input.Name) > 120 {
 		return domain.Category{}, domain.ValidationError{Field: "name", Message: "must contain 1 to 120 characters"}
 	}
-	if input.Type == "" {
-		input.Type = domain.CategoryStandard
-	}
-	if input.Type != domain.CategoryStandard && input.Type != domain.CategoryPenalty {
-		return domain.Category{}, domain.ValidationError{Field: "type", Message: "must be STANDARD or PENALTY"}
-	}
 	id, _ := platform.NewID("cat")
 	now := platform.Timestamp(platform.Now())
-	item := domain.Category{ID: id, GroupID: membership.GroupID, Name: input.Name, Type: input.Type, Active: true, SortOrder: input.SortOrder, Version: 1, Products: []domain.Product{}}
+	item := domain.Category{ID: id, GroupID: membership.GroupID, Name: input.Name, Active: true, SortOrder: input.SortOrder, Version: 1, Products: []domain.Product{}}
 	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO categories(id,group_id,name,type,active,sort_order,created_at,updated_at) VALUES(?,?,?,?,1,?,?,?)`,
-			id, membership.GroupID, input.Name, input.Type, input.SortOrder, now, now); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO categories(id,group_id,name,active,sort_order,created_at,updated_at) VALUES(?,?,?,1,?,?,?)`,
+			id, membership.GroupID, input.Name, input.SortOrder, now, now); err != nil {
 			return err
 		}
 		return audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "category.created", "category", id, input)
@@ -144,14 +137,11 @@ func (s Service) UpdateCategory(ctx context.Context, actor domain.Principal, mem
 	if input.Name == "" || len(input.Name) > 120 || input.Version < 1 {
 		return domain.Category{}, domain.ValidationError{Field: "category", Message: "name and version are required"}
 	}
-	if input.Type != domain.CategoryStandard && input.Type != domain.CategoryPenalty {
-		return domain.Category{}, domain.ValidationError{Field: "type", Message: "must be STANDARD or PENALTY"}
-	}
 	now := platform.Timestamp(platform.Now())
 	var item domain.Category
 	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, `UPDATE categories SET name=?,type=?,active=?,sort_order=?,version=version+1,updated_at=? WHERE id=? AND group_id=? AND version=?`,
-			input.Name, input.Type, input.Active, input.SortOrder, now, categoryID, membership.GroupID, input.Version)
+		result, err := tx.ExecContext(ctx, `UPDATE categories SET name=?,active=?,sort_order=?,version=version+1,updated_at=? WHERE id=? AND group_id=? AND version=?`,
+			input.Name, input.Active, input.SortOrder, now, categoryID, membership.GroupID, input.Version)
 		if err != nil {
 			return err
 		}
@@ -164,7 +154,7 @@ func (s Service) UpdateCategory(ctx context.Context, actor domain.Principal, mem
 			}
 			return domain.ErrPrecondition
 		}
-		item = domain.Category{ID: categoryID, GroupID: membership.GroupID, Name: input.Name, Type: input.Type, Active: input.Active, SortOrder: input.SortOrder, Version: input.Version + 1, Products: []domain.Product{}}
+		item = domain.Category{ID: categoryID, GroupID: membership.GroupID, Name: input.Name, Active: input.Active, SortOrder: input.SortOrder, Version: input.Version + 1, Products: []domain.Product{}}
 		return audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "category.updated", "category", categoryID, input)
 	})
 	return item, err
@@ -270,6 +260,9 @@ func (s Service) UpdateProduct(ctx context.Context, actor domain.Principal, memb
 func (s Service) SetProductImage(ctx context.Context, actor domain.Principal, membership domain.Membership, productID, imageKey string) (string, string, error) {
 	if !groups.HasRole(membership, domain.RoleCatalogManager) {
 		return "", "", domain.ErrForbidden
+	}
+	if !media.ValidImageKey(imageKey) {
+		return "", "", domain.ValidationError{Field: "image", Message: "has an invalid storage key"}
 	}
 	var replacedKey string
 	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {

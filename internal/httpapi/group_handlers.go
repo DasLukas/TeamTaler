@@ -50,6 +50,50 @@ func (s *Server) handleCreateGroup(response http.ResponseWriter, request *http.R
 	writeJSON(response, http.StatusCreated, item)
 }
 
+// handleGroupLogo authorizes an administrator, normalizes one multipart image,
+// and attaches it to the group in the request path. response receives either a
+// logoUrl JSON object or Problem Details; request supplies session, CSRF-checked
+// context, groupID, and multipart input. The method returns no Go value.
+func (s *Server) handleGroupLogo(response http.ResponseWriter, request *http.Request) {
+	principal, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	if !groups.HasRole(membership, domain.RoleAdmin) {
+		writeProblem(response, request, domain.ErrForbidden)
+		return
+	}
+	imageKey, err := s.storeUploadedImage(response, request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	logoURL, _, err := s.groups.SetLogo(request.Context(), principal, membership, imageKey)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]string{"logoUrl": logoURL})
+}
+
+// handleRemoveGroupLogo authorizes an administrator and clears the custom logo
+// for the group in the request path. response receives 204 or Problem Details;
+// request supplies session, CSRF-checked context, and groupID. The method
+// returns no Go value.
+func (s *Server) handleRemoveGroupLogo(response http.ResponseWriter, request *http.Request) {
+	principal, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	if _, err := s.groups.RemoveLogo(request.Context(), principal, membership); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleListMembers(response http.ResponseWriter, request *http.Request) {
 	_, membership, err := s.membership(request)
 	if err != nil {
@@ -120,6 +164,7 @@ func (s *Server) handleCreateInvitation(response http.ResponseWriter, request *h
 		return
 	}
 	acceptURL := strings.TrimSuffix(s.config.PublicURL.String(), "/") + "/invite#token=" + url.QueryEscape(item.Token)
+	item.Token = ""
 	writeJSON(response, http.StatusCreated, map[string]any{"invitation": item, "acceptUrl": acceptURL})
 }
 

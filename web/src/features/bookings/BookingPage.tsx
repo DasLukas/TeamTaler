@@ -57,7 +57,6 @@ export function BookingPage() {
 
   const inspector = (
     <BookingInspector
-      categoryType={selectedCategory.type}
       compact
       currentMembershipId={currentMembership.id}
       groupId={activeGroupId}

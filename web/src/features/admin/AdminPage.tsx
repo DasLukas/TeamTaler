@@ -6,14 +6,16 @@ import { StatePanel } from '@/components/ui/StatePanel';
 import { AuditPanel } from './AuditPanel';
 import { CatalogPanel } from './CatalogPanel';
 import { FinancePanel } from './FinancePanel';
+import { GroupSettingsPanel } from './GroupSettingsPanel';
 import { MembersPanel } from './MembersPanel';
 import { PeriodsPanel } from './PeriodsPanel';
 import { RightsPanel } from './RightsPanel';
 import styles from './AdminPage.module.css';
 
-type AdminTab = 'members' | 'rights' | 'catalog' | 'finance' | 'periods' | 'audit';
+type AdminTab = 'group' | 'members' | 'rights' | 'catalog' | 'finance' | 'periods' | 'audit';
 
 const tabs: Array<{ id: AdminTab; labelKey: string; capability: 'admin' | 'catalog' | 'finance' }> = [
+  { id: 'group', labelKey: 'admin.tabs.group', capability: 'admin' },
   { id: 'members', labelKey: 'admin.tabs.members', capability: 'admin' },
   { id: 'rights', labelKey: 'admin.tabs.rights', capability: 'admin' },
   { id: 'catalog', labelKey: 'admin.tabs.catalog', capability: 'catalog' },
@@ -33,7 +35,7 @@ export function AdminPage() {
   const roles = activeGroup.membership?.roles ?? [];
   const isAdmin = roles.includes('ADMIN');
   const availableTabs = tabs.filter((tab) => isAdmin || tab.capability === 'catalog' && roles.includes('CATALOG_MANAGER') || tab.capability === 'finance' && roles.includes('FINANCE_MANAGER'));
-  const [requestedTab, setRequestedTab] = useState<AdminTab>('rights');
+  const [requestedTab, setRequestedTab] = useState<AdminTab>('group');
   const activeTab = availableTabs.some((tab) => tab.id === requestedTab) ? requestedTab : availableTabs[0]?.id;
   if (!activeTab) return <Page title={t('admin.title')}><StatePanel kind="error" title={t('admin.noAccessTitle')} message={t('admin.noAccessMessage')} /></Page>;
   return (
@@ -42,6 +44,7 @@ export function AdminPage() {
         {availableTabs.map((tab) => <button aria-selected={activeTab === tab.id} className={activeTab === tab.id ? styles.activeTab : ''} key={tab.id} onClick={() => setRequestedTab(tab.id)} role="tab" type="button">{t(tab.labelKey)}</button>)}
       </div>
       <section aria-label={t(availableTabs.find((tab) => tab.id === activeTab)?.labelKey ?? 'admin.title')} className={styles.panel} role="tabpanel">
+        {activeTab === 'group' ? <GroupSettingsPanel /> : null}
         {activeTab === 'members' ? <MembersPanel /> : null}
         {activeTab === 'rights' ? <RightsPanel /> : null}
         {activeTab === 'catalog' ? <CatalogPanel /> : null}

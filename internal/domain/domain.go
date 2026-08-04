@@ -8,14 +8,17 @@ import (
 
 // Stable sentinel errors allow the transport layer to produce consistent problem responses.
 var (
-	ErrNotFound         = errors.New("resource not found")
-	ErrForbidden        = errors.New("operation is not permitted")
-	ErrConflict         = errors.New("resource conflict")
-	ErrValidation       = errors.New("validation failed")
-	ErrUnauthenticated  = errors.New("authentication required")
-	ErrPrecondition     = errors.New("precondition failed")
-	ErrIdempotencyReuse = errors.New("idempotency key was reused with a different request")
-	ErrRateLimited      = errors.New("request rate limit exceeded")
+	ErrNotFound             = errors.New("resource not found")
+	ErrForbidden            = errors.New("operation is not permitted")
+	ErrConflict             = errors.New("resource conflict")
+	ErrValidation           = errors.New("validation failed")
+	ErrUnauthenticated      = errors.New("authentication required")
+	ErrPrecondition         = errors.New("precondition failed")
+	ErrIdempotencyReuse     = errors.New("idempotency key was reused with a different request")
+	ErrRateLimited          = errors.New("request rate limit exceeded")
+	ErrServiceUnavailable   = errors.New("required service is unavailable")
+	ErrUnsupportedMediaType = errors.New("unsupported media type")
+	ErrPayloadTooLarge      = errors.New("request payload is too large")
 )
 
 // ValidationError associates a safe client-facing message with invalid input.
@@ -52,14 +55,6 @@ const (
 	PermissionVoidBookings   CategoryPermission = "VOID_BOOKINGS"
 )
 
-// CategoryType controls category-specific booking validation.
-type CategoryType string
-
-const (
-	CategoryStandard CategoryType = "STANDARD"
-	CategoryPenalty  CategoryType = "PENALTY"
-)
-
 // Principal describes an authenticated user and their current session.
 type Principal struct {
 	UserID      string
@@ -86,19 +81,19 @@ type Group struct {
 	ID         string     `json:"id"`
 	Name       string     `json:"name"`
 	Currency   string     `json:"currency"`
+	LogoURL    string     `json:"logoUrl,omitempty"`
 	Membership Membership `json:"membership"`
 }
 
-// Category contains a product collection and its booking semantics.
+// Category contains one group-defined product collection.
 type Category struct {
-	ID        string       `json:"id"`
-	GroupID   string       `json:"groupId"`
-	Name      string       `json:"name"`
-	Type      CategoryType `json:"type"`
-	Active    bool         `json:"active"`
-	SortOrder int          `json:"sortOrder"`
-	Version   int64        `json:"version"`
-	Products  []Product    `json:"products,omitempty"`
+	ID        string    `json:"id"`
+	GroupID   string    `json:"groupId"`
+	Name      string    `json:"name"`
+	Active    bool      `json:"active"`
+	SortOrder int       `json:"sortOrder"`
+	Version   int64     `json:"version"`
+	Products  []Product `json:"products,omitempty"`
 }
 
 // Product is an immutable-at-booking-time priced catalog item.
@@ -117,25 +112,24 @@ type Product struct {
 
 // Booking is an immutable charge snapshot with optional reversal metadata.
 type Booking struct {
-	ID                 string       `json:"id"`
-	GroupID            string       `json:"groupId"`
-	PeriodID           string       `json:"periodId"`
-	CategoryID         string       `json:"categoryId"`
-	ProductID          string       `json:"productId"`
-	ActorMembershipID  string       `json:"actorMembershipId"`
-	TargetMembershipID string       `json:"targetMembershipId"`
-	Quantity           int          `json:"quantity"`
-	UnitPriceMinor     int64        `json:"unitPriceMinor,string"`
-	TotalMinor         int64        `json:"totalMinor,string"`
-	Currency           string       `json:"currency"`
-	ProductName        string       `json:"productName"`
-	CategoryName       string       `json:"categoryName"`
-	CategoryType       CategoryType `json:"categoryType"`
-	Reason             string       `json:"reason,omitempty"`
-	CreatedAt          string       `json:"createdAt"`
-	VoidedAt           *string      `json:"voidedAt,omitempty"`
-	VoidReason         string       `json:"voidReason,omitempty"`
-	CanVoid            bool         `json:"canVoid"`
+	ID                 string  `json:"id"`
+	GroupID            string  `json:"groupId"`
+	PeriodID           string  `json:"periodId"`
+	CategoryID         string  `json:"categoryId"`
+	ProductID          string  `json:"productId"`
+	ActorMembershipID  string  `json:"actorMembershipId"`
+	TargetMembershipID string  `json:"targetMembershipId"`
+	Quantity           int     `json:"quantity"`
+	UnitPriceMinor     int64   `json:"unitPriceMinor,string"`
+	TotalMinor         int64   `json:"totalMinor,string"`
+	Currency           string  `json:"currency"`
+	ProductName        string  `json:"productName"`
+	CategoryName       string  `json:"categoryName"`
+	Reason             string  `json:"reason,omitempty"`
+	CreatedAt          string  `json:"createdAt"`
+	VoidedAt           *string `json:"voidedAt,omitempty"`
+	VoidReason         string  `json:"voidReason,omitempty"`
+	CanVoid            bool    `json:"canVoid"`
 }
 
 // Payment records received money and its period allocations.
