@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -20,7 +20,6 @@ vi.mock('@/api/client', () => ({ api: apiMock }));
 const category: Category = {
   id: 'category-a',
   name: 'Drinks',
-  type: 'STANDARD',
   icon: 'drink',
   active: true,
   products: [],
@@ -58,7 +57,22 @@ describe('CatalogPanel product image recovery', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     apiMock.getCategories.mockResolvedValue([category]);
+    apiMock.createCategory.mockResolvedValue(category);
     apiMock.createProduct.mockResolvedValue(createdProduct);
+  });
+
+  it('creates a category from its name without a secondary type', async () => {
+    const user = userEvent.setup();
+    renderCatalog();
+
+    await screen.findByText(i18n.t('catalog.title'));
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.categoryAction') }));
+
+    expect(within(screen.getByRole('dialog')).queryByRole('combobox')).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText(i18n.t('common.name')), 'Team events');
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.createCategoryAction') }));
+
+    await waitFor(() => expect(apiMock.createCategory).toHaveBeenCalledWith('group-a', { name: 'Team events' }));
   });
 
   it('keeps the created product and retries only its image after upload failure', async () => {

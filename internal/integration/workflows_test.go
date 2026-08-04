@@ -78,13 +78,13 @@ func (f *fixture) inviteMember(email, name string, roles []domain.Role) (domain.
 	return session.Principal, membership, invitation.Token
 }
 
-func (f *fixture) catalogItem(categoryType domain.CategoryType, price int64) (domain.Category, domain.Product) {
+func (f *fixture) catalogItem(categoryName string, price int64) (domain.Category, domain.Product) {
 	f.t.Helper()
-	category, err := f.catalog.CreateCategory(f.ctx, f.admin, f.membership, catalog.CreateCategoryInput{Name: string(categoryType), Type: categoryType})
+	category, err := f.catalog.CreateCategory(f.ctx, f.admin, f.membership, catalog.CreateCategoryInput{Name: categoryName})
 	if err != nil {
 		f.t.Fatalf("create category: %v", err)
 	}
-	product, err := f.catalog.CreateProduct(f.ctx, f.admin, f.membership, "fixture-product-"+category.ID, category.ID, catalog.CreateProductInput{Name: "Item " + string(categoryType), PriceMinor: price})
+	product, err := f.catalog.CreateProduct(f.ctx, f.admin, f.membership, "fixture-product-"+category.ID, category.ID, catalog.CreateProductInput{Name: "Item " + categoryName, PriceMinor: price})
 	if err != nil {
 		f.t.Fatalf("create product: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestBootstrapLoginInvitationReplayAndTenantRBAC(t *testing.T) {
 	if _, err := f.groups.Create(f.ctx, f.admin, "Invalid Currency", "EU1"); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("invalid currency error = %v, want validation", err)
 	}
-	category, err := f.catalog.CreateCategory(f.ctx, f.admin, f.membership, catalog.CreateCategoryInput{Name: "Idempotent Products", Type: domain.CategoryStandard})
+	category, err := f.catalog.CreateCategory(f.ctx, f.admin, f.membership, catalog.CreateCategoryInput{Name: "Idempotent Products"})
 	if err != nil {
 		t.Fatalf("create idempotency category: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestBootstrapLoginInvitationReplayAndTenantRBAC(t *testing.T) {
 	if _, _, err := f.auth.AcceptInvitation(f.ctx, auth.InvitationAcceptance{Token: invitationToken, DisplayName: "Replay", Password: testPassword}); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("invitation replay error = %v, want not found", err)
 	}
-	if _, err := f.catalog.CreateCategory(f.ctx, memberPrincipal, member, catalog.CreateCategoryInput{Name: "Forbidden", Type: domain.CategoryStandard}); !errors.Is(err, domain.ErrForbidden) {
+	if _, err := f.catalog.CreateCategory(f.ctx, memberPrincipal, member, catalog.CreateCategoryInput{Name: "Forbidden"}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("catalog RBAC error = %v, want forbidden", err)
 	}
 	if err := f.groups.UpdatePermissions(f.ctx, f.admin, f.membership, f.membership.ID, groups.PermissionUpdate{}); !errors.Is(err, domain.ErrConflict) {
@@ -185,10 +185,10 @@ func TestAuthenticationThrottlesSessionActivityWrites(t *testing.T) {
 func TestBookingUndoAssignmentValidationAndBalancedLedger(t *testing.T) {
 	f := newFixture(t)
 	memberPrincipal, member, _ := f.inviteMember("booker@example.test", "Booker", nil)
-	standardCategory, standardProduct := f.catalogItem(domain.CategoryStandard, 125)
-	_, penaltyProduct := f.catalogItem(domain.CategoryPenalty, 500)
+	primaryCategory, primaryProduct := f.catalogItem("Drinks", 125)
+	_, otherProduct := f.catalogItem("Penalties", 500)
 	periodID := f.openPeriodID()
-	input := bookings.CreateInput{ProductID: standardProduct.ID, ProductVersion: standardProduct.Version, ExpectedPeriodID: periodID, Quantity: 2}
+	input := bookings.CreateInput{ProductID: primaryProduct.ID, ProductVersion: primaryProduct.Version, ExpectedPeriodID: periodID, Quantity: 2}
 	booking, err := f.bookings.Create(f.ctx, memberPrincipal, member, "booking-key-one", input)
 	if err != nil {
 		t.Fatalf("create self booking: %v", err)
@@ -219,7 +219,7 @@ func TestBookingUndoAssignmentValidationAndBalancedLedger(t *testing.T) {
 		VALUES('led_duplicate',?,?,?,?,?,?,?,?,?,'2099-01-01T00:00:00Z')`, f.group.ID, reversalPeriodID, nullableTest(reversalMembershipID), nullableTest(reversalCategoryID), booking.ID, originalLedgerID, reversalAccount, reversalAmount, reversalDescription); err == nil {
 		t.Fatal("duplicate ledger reversal unexpectedly succeeded")
 	}
-	late, err := f.bookings.Create(f.ctx, memberPrincipal, member, "booking-key-two", bookings.CreateInput{ProductID: standardProduct.ID, ProductVersion: standardProduct.Version, ExpectedPeriodID: periodID, Quantity: 1})
+	late, err := f.bookings.Create(f.ctx, memberPrincipal, member, "booking-key-two", bookings.CreateInput{ProductID: primaryProduct.ID, ProductVersion: primaryProduct.Version, ExpectedPeriodID: periodID, Quantity: 1})
 	if err != nil {
 		t.Fatalf("create late booking fixture: %v", err)
 	}
@@ -229,49 +229,49 @@ func TestBookingUndoAssignmentValidationAndBalancedLedger(t *testing.T) {
 	if _, err := f.bookings.Void(f.ctx, memberPrincipal, member, "void-booking-two", late.ID, ""); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("late self undo error = %v, want forbidden", err)
 	}
-	penaltyInput := bookings.CreateInput{ProductID: penaltyProduct.ID, ProductVersion: penaltyProduct.Version, ExpectedPeriodID: periodID, Quantity: 1, TargetMembershipID: member.ID}
-	if _, err := f.bookings.Create(f.ctx, f.admin, f.membership, "penalty-no-reason", penaltyInput); !errors.Is(err, domain.ErrValidation) {
-		t.Fatalf("third-party penalty without reason = %v, want validation", err)
+	assignmentInput := bookings.CreateInput{ProductID: otherProduct.ID, ProductVersion: otherProduct.Version, ExpectedPeriodID: periodID, Quantity: 2, TargetMembershipID: member.ID}
+	if _, err := f.bookings.Create(f.ctx, f.admin, f.membership, "assignment-no-reason", assignmentInput); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("third-party booking without reason = %v, want validation", err)
 	}
-	penaltyInput.Reason = "Late for training"
-	if _, err := f.bookings.Create(f.ctx, f.admin, f.membership, "penalty-with-reason", penaltyInput); err != nil {
-		t.Fatalf("third-party penalty with reason: %v", err)
+	assignmentInput.Reason = "Late for training"
+	if _, err := f.bookings.Create(f.ctx, f.admin, f.membership, "assignment-with-reason", assignmentInput); err != nil {
+		t.Fatalf("third-party booking with reason: %v", err)
 	}
 	var notifications int
 	if err := f.db.QueryRowContext(f.ctx, `SELECT count(*) FROM notifications WHERE membership_id=?`, member.ID).Scan(&notifications); err != nil || notifications != 1 {
 		t.Fatalf("assignment notifications = %d err=%v, want one", notifications, err)
 	}
-	if _, err := f.bookings.Create(f.ctx, memberPrincipal, member, "foreign-booking", bookings.CreateInput{ProductID: standardProduct.ID, ProductVersion: standardProduct.Version, ExpectedPeriodID: periodID, Quantity: 1, TargetMembershipID: f.membership.ID}); !errors.Is(err, domain.ErrForbidden) {
+	if _, err := f.bookings.Create(f.ctx, memberPrincipal, member, "foreign-booking", bookings.CreateInput{ProductID: primaryProduct.ID, ProductVersion: primaryProduct.Version, ExpectedPeriodID: periodID, Quantity: 1, TargetMembershipID: f.membership.ID}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("unauthorized foreign booking = %v, want forbidden", err)
 	}
-	if err := f.groups.UpdatePermissions(f.ctx, f.admin, f.membership, member.ID, groups.PermissionUpdate{CategoryGrants: map[string][]domain.CategoryPermission{standardCategory.ID: {domain.PermissionAssignToOthers}}}); err != nil {
+	if err := f.groups.UpdatePermissions(f.ctx, f.admin, f.membership, member.ID, groups.PermissionUpdate{CategoryGrants: map[string][]domain.CategoryPermission{primaryCategory.ID: {domain.PermissionAssignToOthers}}}); err != nil {
 		t.Fatalf("grant category assignment permission: %v", err)
 	}
 	member, err = f.groups.MembershipForUser(f.ctx, f.group.ID, memberPrincipal.UserID)
 	if err != nil {
 		t.Fatalf("reload member grants: %v", err)
 	}
-	if _, err := f.bookings.Create(f.ctx, memberPrincipal, member, "foreign-booking-granted", bookings.CreateInput{ProductID: standardProduct.ID, ProductVersion: standardProduct.Version, ExpectedPeriodID: periodID, Quantity: 1, TargetMembershipID: f.membership.ID}); err != nil {
+	if _, err := f.bookings.Create(f.ctx, memberPrincipal, member, "foreign-booking-granted", bookings.CreateInput{ProductID: primaryProduct.ID, ProductVersion: primaryProduct.Version, ExpectedPeriodID: periodID, Quantity: 1, TargetMembershipID: f.membership.ID, Reason: "Team purchase"}); err != nil {
 		t.Fatalf("category-granted foreign booking: %v", err)
 	}
-	adminStandard, err := f.bookings.Create(f.ctx, f.admin, f.membership, "admin-only-standard", bookings.CreateInput{ProductID: standardProduct.ID, ProductVersion: standardProduct.Version, ExpectedPeriodID: periodID, Quantity: 1})
+	adminPrimary, err := f.bookings.Create(f.ctx, f.admin, f.membership, "admin-only-primary", bookings.CreateInput{ProductID: primaryProduct.ID, ProductVersion: primaryProduct.Version, ExpectedPeriodID: periodID, Quantity: 1})
 	if err != nil {
-		t.Fatalf("create administrator standard booking: %v", err)
+		t.Fatalf("create administrator primary booking: %v", err)
 	}
-	adminPenalty, err := f.bookings.Create(f.ctx, f.admin, f.membership, "admin-only-penalty", bookings.CreateInput{ProductID: penaltyProduct.ID, ProductVersion: penaltyProduct.Version, ExpectedPeriodID: periodID, Quantity: 1})
+	adminOther, err := f.bookings.Create(f.ctx, f.admin, f.membership, "admin-only-other", bookings.CreateInput{ProductID: otherProduct.ID, ProductVersion: otherProduct.Version, ExpectedPeriodID: periodID, Quantity: 1})
 	if err != nil {
-		t.Fatalf("create administrator penalty booking: %v", err)
+		t.Fatalf("create administrator other booking: %v", err)
 	}
 	visible, err := f.bookings.List(f.ctx, member, periodID, 200)
 	if err != nil {
 		t.Fatalf("list before void grant: %v", err)
 	}
 	for _, item := range visible {
-		if item.ID == adminStandard.ID || item.ID == adminPenalty.ID {
+		if item.ID == adminPrimary.ID || item.ID == adminOther.ID {
 			t.Fatalf("foreign booking %s leaked without void grant", item.ID)
 		}
 	}
-	if err := f.groups.UpdatePermissions(f.ctx, f.admin, f.membership, member.ID, groups.PermissionUpdate{CategoryGrants: map[string][]domain.CategoryPermission{standardCategory.ID: {domain.PermissionAssignToOthers, domain.PermissionVoidBookings}}}); err != nil {
+	if err := f.groups.UpdatePermissions(f.ctx, f.admin, f.membership, member.ID, groups.PermissionUpdate{CategoryGrants: map[string][]domain.CategoryPermission{primaryCategory.ID: {domain.PermissionAssignToOthers, domain.PermissionVoidBookings}}}); err != nil {
 		t.Fatalf("grant category void permission: %v", err)
 	}
 	member, err = f.groups.MembershipForUser(f.ctx, f.group.ID, memberPrincipal.UserID)
@@ -282,23 +282,23 @@ func TestBookingUndoAssignmentValidationAndBalancedLedger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list after void grant: %v", err)
 	}
-	foundStandard := false
+	foundPrimary := false
 	for _, item := range visible {
-		if item.ID == adminStandard.ID {
-			foundStandard = item.CanVoid
+		if item.ID == adminPrimary.ID {
+			foundPrimary = item.CanVoid
 		}
-		if item.ID == adminPenalty.ID {
+		if item.ID == adminOther.ID {
 			t.Fatal("foreign booking from an ungranted category was visible")
 		}
 	}
-	if !foundStandard {
+	if !foundPrimary {
 		t.Fatal("category void grantee could not discover and manage the foreign booking")
 	}
 }
 
 func TestPaymentFIFOReversalAndClosedPeriodImmutability(t *testing.T) {
 	f := newFixture(t)
-	_, product := f.catalogItem(domain.CategoryStandard, 100)
+	_, product := f.catalogItem("Products", 100)
 	periodOne := f.openPeriodID()
 	if _, err := f.bookings.Create(f.ctx, f.admin, f.membership, "period-one-booking", bookings.CreateInput{ProductID: product.ID, ProductVersion: product.Version, ExpectedPeriodID: periodOne, Quantity: 1}); err != nil {
 		t.Fatalf("period one booking: %v", err)
@@ -378,7 +378,7 @@ func TestPaymentFIFOReversalAndClosedPeriodImmutability(t *testing.T) {
 
 func TestOverpaymentCreditsFutureClaims(t *testing.T) {
 	f := newFixture(t)
-	_, product := f.catalogItem(domain.CategoryStandard, 100)
+	_, product := f.catalogItem("Products", 100)
 	periodOne := f.openPeriodID()
 	if _, err := f.bookings.Create(f.ctx, f.admin, f.membership, "credit-charge-one", bookings.CreateInput{ProductID: product.ID, ProductVersion: product.Version, ExpectedPeriodID: periodOne, Quantity: 1}); err != nil {
 		t.Fatalf("first credit scenario charge: %v", err)
@@ -413,7 +413,7 @@ func TestOverpaymentCreditsFutureClaims(t *testing.T) {
 
 func TestNegativeCorrectionOffsetsOldClaimBeforePayment(t *testing.T) {
 	f := newFixture(t)
-	_, product := f.catalogItem(domain.CategoryStandard, 100)
+	_, product := f.catalogItem("Products", 100)
 	periodOne := f.openPeriodID()
 	booking, err := f.bookings.Create(f.ctx, f.admin, f.membership, "correction-charge", bookings.CreateInput{ProductID: product.ID, ProductVersion: product.Version, ExpectedPeriodID: periodOne, Quantity: 1})
 	if err != nil {
@@ -452,7 +452,7 @@ func TestNegativeCorrectionOffsetsOldClaimBeforePayment(t *testing.T) {
 
 func TestPartialCorrectionAndPaymentSettleOriginalClaim(t *testing.T) {
 	f := newFixture(t)
-	_, product := f.catalogItem(domain.CategoryStandard, 50)
+	_, product := f.catalogItem("Products", 50)
 	periodOne := f.openPeriodID()
 	first, err := f.bookings.Create(f.ctx, f.admin, f.membership, "partial-correction-first", bookings.CreateInput{ProductID: product.ID, ProductVersion: product.Version, ExpectedPeriodID: periodOne, Quantity: 1})
 	if err != nil {

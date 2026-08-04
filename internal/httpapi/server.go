@@ -69,7 +69,16 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	groupService := groups.Service{DB: db}
+	var tokenSealer groups.TokenSealer
+	if cfg.SMTP.Enabled {
+		box, err := platform.NewSecretBox(cfg.EmailTokenKey)
+		if err != nil {
+			logger.Error("invitation email token encryption is unavailable", "error", err)
+		} else {
+			tokenSealer = box
+		}
+	}
+	groupService := groups.Service{DB: db, TokenSealer: tokenSealer}
 	server := &Server{
 		config:        cfg,
 		db:            db,
@@ -94,11 +103,15 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /api/v1/invitations/accept", server.handleAcceptInvitation)
 	mux.HandleFunc("GET /api/v1/groups", server.handleListGroups)
 	mux.HandleFunc("POST /api/v1/groups", server.handleCreateGroup)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/logo", server.handleGroupLogo)
+	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/logo", server.handleRemoveGroupLogo)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/dashboard", server.handleDashboard)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/members", server.handleListMembers)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/members/{membershipID}/permissions", server.handleUpdatePermissions)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/invitations", server.handleListInvitations)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/invitations", server.handleCreateInvitation)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/invitations/import", server.handleImportInvitations)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/invitations/{invitationID}/email/retry", server.handleRetryInvitationEmail)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/categories", server.handleListCategories)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/categories", server.handleCreateCategory)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/categories/{categoryID}", server.handleUpdateCategory)
@@ -290,6 +303,12 @@ func writeProblem(response http.ResponseWriter, request *http.Request, err error
 		status, title, problemType = http.StatusConflict, "Conflict", "https://teamtaler.dev/problems/conflict"
 	case errors.Is(err, domain.ErrRateLimited):
 		status, title, problemType = http.StatusTooManyRequests, "Too Many Requests", "https://teamtaler.dev/problems/rate-limited"
+	case errors.Is(err, domain.ErrServiceUnavailable):
+		status, title, problemType = http.StatusServiceUnavailable, "Service Unavailable", "https://teamtaler.dev/problems/service-unavailable"
+	case errors.Is(err, domain.ErrUnsupportedMediaType):
+		status, title, problemType = http.StatusUnsupportedMediaType, "Unsupported Media Type", "https://teamtaler.dev/problems/unsupported-media-type"
+	case errors.Is(err, domain.ErrPayloadTooLarge):
+		status, title, problemType = http.StatusRequestEntityTooLarge, "Content Too Large", "https://teamtaler.dev/problems/content-too-large"
 	}
 	detail := err.Error()
 	if status == http.StatusInternalServerError {

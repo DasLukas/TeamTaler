@@ -48,7 +48,6 @@ export const demoCategories: Category[] = [
   {
     id: 'category-drinks',
     name: 'Getränke',
-    type: 'STANDARD',
     icon: 'drink',
     active: true,
     products: [
@@ -87,7 +86,6 @@ export const demoCategories: Category[] = [
   {
     id: 'category-penalties',
     name: 'Strafen',
-    type: 'PENALTY',
     icon: 'penalty',
     active: true,
     products: [

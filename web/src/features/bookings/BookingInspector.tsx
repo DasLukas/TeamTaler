@@ -17,7 +17,6 @@ import styles from './BookingInspector.module.css';
 export interface BookingInspectorProps {
   groupId: string;
   product: Product;
-  categoryType: 'STANDARD' | 'PENALTY';
   period: Period;
   members: Membership[];
   currentMembershipId: string;
@@ -27,7 +26,7 @@ export interface BookingInspectorProps {
 }
 
 /**
- * Renders product booking confirmation with target and penalty validation.
+ * Renders product booking confirmation with target and reason validation.
  *
  * @param props - Product, group, period, member, and callback configuration.
  * @returns A localized booking form or success confirmation.
@@ -35,7 +34,6 @@ export interface BookingInspectorProps {
 export function BookingInspector({
   groupId,
   product,
-  categoryType,
   period,
   members,
   currentMembershipId,
@@ -49,7 +47,6 @@ export function BookingInspector({
   const [targetMembershipId, setTargetMembershipId] = useState(currentMembershipId);
   const [reason, setReason] = useState('');
   const [confirmed, setConfirmed] = useState(false);
-  const isPenalty = categoryType === 'PENALTY';
   const currentMember = members.find((member) => member.id === currentMembershipId);
   const canAssignOthers = currentMember?.roles.includes('ADMIN') || currentMember?.categoryPermissions.some((permission) => permission.categoryId === product.categoryId && permission.assignToOthers);
   const availableMembers = canAssignOthers ? members.filter((member) => member.active) : members.filter((member) => member.id === currentMembershipId);
@@ -60,9 +57,9 @@ export function BookingInspector({
       productId: product.id,
       productVersion: product.version,
       expectedPeriodId: period.id,
-      quantity: isPenalty ? 1 : quantity,
+      quantity,
       targetMembershipId: targetMembershipId === currentMembershipId ? undefined : targetMembershipId,
-      reason: isPenalty && isForeignAssignment ? reason.trim() : undefined,
+      reason: isForeignAssignment ? reason.trim() : undefined,
     }),
     onSuccess: async () => {
       setConfirmed(true);
@@ -76,7 +73,7 @@ export function BookingInspector({
   });
 
   const selectedMember = members.find((member) => member.id === targetMembershipId);
-  const total = multiplyMoney(product.price, isPenalty ? 1 : quantity);
+  const total = multiplyMoney(product.price, quantity);
 
   if (confirmed) {
     return (
@@ -104,25 +101,25 @@ export function BookingInspector({
         </div>
       </Field>
 
-      {isPenalty && isForeignAssignment ? (
-        <Field error={!reason.trim() && bookingMutation.isError ? t('booking.reasonRequired') : undefined} htmlFor="penalty-reason" label={t('booking.reason')}>
-          <TextInput id="penalty-reason" onChange={(event) => setReason(event.target.value)} placeholder={t('booking.reasonPlaceholder')} value={reason} />
+      {isForeignAssignment ? (
+        <Field error={!reason.trim() && bookingMutation.isError ? t('booking.reasonRequired') : undefined} htmlFor="booking-reason" label={t('booking.reason')}>
+          <TextInput id="booking-reason" onChange={(event) => setReason(event.target.value)} placeholder={t('booking.reasonPlaceholder')} required value={reason} />
         </Field>
-      ) : (
-        <Field htmlFor="booking-quantity" label={t('booking.quantity')}>
-          <div className={styles.stepper} id="booking-quantity">
-            <IconButton disabled={quantity <= 1} label={t('booking.decreaseQuantity')} onClick={() => setQuantity((current) => Math.max(1, current - 1))}><Minus size={22} /></IconButton>
-            <output aria-live="polite">{quantity}</output>
-            <IconButton disabled={quantity >= 99} label={t('booking.increaseQuantity')} onClick={() => setQuantity((current) => Math.min(99, current + 1))}><Plus size={22} /></IconButton>
-          </div>
-        </Field>
-      )}
+      ) : null}
+
+      <Field htmlFor="booking-quantity" label={t('booking.quantity')}>
+        <div className={styles.stepper} id="booking-quantity">
+          <IconButton disabled={quantity <= 1} label={t('booking.decreaseQuantity')} onClick={() => setQuantity((current) => Math.max(1, current - 1))}><Minus size={22} /></IconButton>
+          <output aria-live="polite">{quantity}</output>
+          <IconButton disabled={quantity >= 99} label={t('booking.increaseQuantity')} onClick={() => setQuantity((current) => Math.min(99, current + 1))}><Plus size={22} /></IconButton>
+        </div>
+      </Field>
 
       <div className={styles.total}><span>{t('booking.total')}</span><strong>{formatMoney(total)}</strong></div>
       {bookingMutation.isError ? <p className={styles.error} role="alert">{bookingMutation.error.message}</p> : null}
       <div className={styles.actions}>
         <Button fullWidth onClick={onCancel} size="large" variant="secondary">{t('common.cancel')}</Button>
-        <Button disabled={bookingMutation.isPending || (isPenalty && isForeignAssignment && !reason.trim())} fullWidth size="large" type="submit">
+        <Button disabled={bookingMutation.isPending || (isForeignAssignment && !reason.trim())} fullWidth size="large" type="submit">
           {bookingMutation.isPending ? t('booking.pending') : t('booking.submit')}
         </Button>
       </div>

@@ -2,7 +2,10 @@
 package config
 
 import (
+	"encoding/base64"
 	"fmt"
+	"net"
+	"net/mail"
 	"net/netip"
 	"net/url"
 	"os"
@@ -11,6 +14,42 @@ import (
 	"strings"
 	"time"
 )
+
+// SMTPTLSMode identifies the mandatory transport-security negotiation used for
+// an SMTP connection. Supported values are SMTPTLSModeStartTLS and
+// SMTPTLSModeTLS; no plaintext mode exists.
+type SMTPTLSMode string
+
+const (
+	// SMTPTLSModeStartTLS upgrades an SMTP connection before authentication or
+	// message data is transmitted.
+	SMTPTLSModeStartTLS SMTPTLSMode = "starttls"
+	// SMTPTLSModeTLS establishes TLS before the SMTP greeting is exchanged.
+	SMTPTLSModeTLS SMTPTLSMode = "tls"
+)
+
+// SMTPConfig contains validated SMTP delivery settings. Enabled is false only
+// when no TEAMTALER_SMTP_* variable is configured. Host, Port, Username,
+// Password, and FromAddress are required together when Enabled is true;
+// FromName is optional and TLSMode defaults to SMTPTLSModeStartTLS.
+type SMTPConfig struct {
+	// Enabled reports whether the complete SMTP environment block was supplied.
+	Enabled bool
+	// Host is the certificate-verified SMTP hostname or IP address without a port.
+	Host string
+	// Port is the TCP port used for the selected TLS mode.
+	Port int
+	// Username authenticates the application after TLS is established.
+	Username string
+	// Password authenticates the application after TLS is established.
+	Password string
+	// FromAddress is the ASCII envelope and message sender mailbox.
+	FromAddress string
+	// FromName is the optional human-readable sender name.
+	FromName string
+	// TLSMode selects required STARTTLS or implicit TLS negotiation.
+	TLSMode SMTPTLSMode
+}
 
 // Config contains validated, immutable process-level configuration.
 // Construct it with Load rather than populating fields directly so URL,
@@ -25,11 +64,16 @@ type Config struct {
 	SecureCookies     bool
 	SessionLifetime   time.Duration
 	MaxRequestBytes   int64
+	// SMTP contains validated invitation-delivery configuration.
+	SMTP SMTPConfig
+	// EmailTokenKey is an optional decoded 32-byte AES key and is required when SMTP is enabled.
+	EmailTokenKey []byte
 }
 
 // Load reads TEAMTALER_* environment variables and applies secure local defaults.
 // It takes no parameters and returns a complete Config. It returns an error for
-// malformed URLs, proxy CIDRs, or request limits. Example: set
+// malformed URLs, proxy CIDRs, request limits, SMTP settings, or email token
+// keys. Example: set
 // TEAMTALER_PUBLIC_URL=https://teamtaler.example before calling Load.
 func Load() (Config, error) {
 	dataDir := env("TEAMTALER_DATA_DIR", "./data")
@@ -63,6 +107,17 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	smtpConfig, err := loadSMTPConfig()
+	if err != nil {
+		return Config{}, err
+	}
+	emailTokenKey, err := loadEmailTokenKey()
+	if err != nil {
+		return Config{}, err
+	}
+	if smtpConfig.Enabled && len(emailTokenKey) == 0 {
+		return Config{}, fmt.Errorf("TEAMTALER_EMAIL_TOKEN_KEY is required when SMTP delivery is configured")
+	}
 
 	return Config{
 		ListenAddress:     env("TEAMTALER_LISTEN", "127.0.0.1:8080"),
@@ -74,7 +129,141 @@ func Load() (Config, error) {
 		SecureCookies:     publicURL.Scheme == "https",
 		SessionLifetime:   30 * 24 * time.Hour,
 		MaxRequestBytes:   maxRequestBytes,
+		SMTP:              smtpConfig,
+		EmailTokenKey:     emailTokenKey,
 	}, nil
+}
+
+func loadEmailTokenKey() ([]byte, error) {
+	encoded := strings.TrimSpace(os.Getenv("TEAMTALER_EMAIL_TOKEN_KEY"))
+	if encoded == "" {
+		return nil, nil
+	}
+	key, err := base64.StdEncoding.Strict().DecodeString(encoded)
+	if err != nil || len(key) != 32 {
+		return nil, fmt.Errorf("TEAMTALER_EMAIL_TOKEN_KEY must be standard base64 encoding exactly 32 bytes")
+	}
+	return key, nil
+}
+
+func loadSMTPConfig() (SMTPConfig, error) {
+	variables := []string{
+		"TEAMTALER_SMTP_HOST",
+		"TEAMTALER_SMTP_PORT",
+		"TEAMTALER_SMTP_USERNAME",
+		"TEAMTALER_SMTP_PASSWORD",
+		"TEAMTALER_SMTP_FROM_ADDRESS",
+		"TEAMTALER_SMTP_FROM_NAME",
+		"TEAMTALER_SMTP_TLS_MODE",
+	}
+	configured := false
+	for _, name := range variables {
+		if strings.TrimSpace(os.Getenv(name)) != "" {
+			configured = true
+			break
+		}
+	}
+	if !configured {
+		return SMTPConfig{}, nil
+	}
+
+	required := []string{
+		"TEAMTALER_SMTP_HOST",
+		"TEAMTALER_SMTP_PORT",
+		"TEAMTALER_SMTP_USERNAME",
+		"TEAMTALER_SMTP_PASSWORD",
+		"TEAMTALER_SMTP_FROM_ADDRESS",
+	}
+	for _, name := range required {
+		if strings.TrimSpace(os.Getenv(name)) == "" {
+			return SMTPConfig{}, fmt.Errorf("%s is required when SMTP delivery is configured", name)
+		}
+	}
+
+	rawHost := os.Getenv("TEAMTALER_SMTP_HOST")
+	if containsControlCharacter(rawHost) {
+		return SMTPConfig{}, fmt.Errorf("TEAMTALER_SMTP_HOST must not contain control characters")
+	}
+	host := strings.TrimSpace(rawHost)
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+	}
+	if host == "" || len(host) > 253 || strings.ContainsAny(host, "\x00\r\n\t /@") {
+		return SMTPConfig{}, fmt.Errorf("TEAMTALER_SMTP_HOST must be a hostname or IP address without a scheme, path, or port")
+	}
+	if parsedHost, parsedPort, splitErr := net.SplitHostPort(host); splitErr == nil && parsedHost != "" && parsedPort != "" {
+		return SMTPConfig{}, fmt.Errorf("TEAMTALER_SMTP_HOST must not include a port")
+	}
+	if strings.Contains(host, ":") && net.ParseIP(host) == nil {
+		return SMTPConfig{}, fmt.Errorf("TEAMTALER_SMTP_HOST must be a valid hostname or IP address")
+	}
+
+	port, err := strconv.Atoi(strings.TrimSpace(os.Getenv("TEAMTALER_SMTP_PORT")))
+	if err != nil || port < 1 || port > 65535 {
+		return SMTPConfig{}, fmt.Errorf("TEAMTALER_SMTP_PORT must be an integer between 1 and 65535")
+	}
+
+	rawUsername := os.Getenv("TEAMTALER_SMTP_USERNAME")
+	username := strings.TrimSpace(rawUsername)
+	password := os.Getenv("TEAMTALER_SMTP_PASSWORD")
+	if containsControlCharacter(rawUsername) || strings.ContainsRune(password, '\x00') {
+		return SMTPConfig{}, fmt.Errorf("TEAMTALER_SMTP_USERNAME and TEAMTALER_SMTP_PASSWORD must not contain SMTP control characters")
+	}
+
+	rawFromAddress := os.Getenv("TEAMTALER_SMTP_FROM_ADDRESS")
+	if containsControlCharacter(rawFromAddress) {
+		return SMTPConfig{}, fmt.Errorf("TEAMTALER_SMTP_FROM_ADDRESS must not contain control characters")
+	}
+	fromAddress := strings.TrimSpace(rawFromAddress)
+	parsedAddress, err := mail.ParseAddress(fromAddress)
+	if err != nil || len(fromAddress) > 254 || parsedAddress.Name != "" || parsedAddress.Address != fromAddress || !strings.Contains(fromAddress, "@") || !isASCII(fromAddress) {
+		return SMTPConfig{}, fmt.Errorf("TEAMTALER_SMTP_FROM_ADDRESS must be one ASCII mailbox address without a display name")
+	}
+	rawFromName := os.Getenv("TEAMTALER_SMTP_FROM_NAME")
+	if containsControlCharacter(rawFromName) {
+		return SMTPConfig{}, fmt.Errorf("TEAMTALER_SMTP_FROM_NAME must contain at most 120 characters without control characters")
+	}
+	fromName := strings.TrimSpace(rawFromName)
+	if len(fromName) > 120 {
+		return SMTPConfig{}, fmt.Errorf("TEAMTALER_SMTP_FROM_NAME must contain at most 120 characters without control characters")
+	}
+
+	tlsMode := SMTPTLSMode(strings.ToLower(strings.TrimSpace(os.Getenv("TEAMTALER_SMTP_TLS_MODE"))))
+	if tlsMode == "" {
+		tlsMode = SMTPTLSModeStartTLS
+	}
+	if tlsMode != SMTPTLSModeStartTLS && tlsMode != SMTPTLSModeTLS {
+		return SMTPConfig{}, fmt.Errorf("TEAMTALER_SMTP_TLS_MODE must be starttls or tls")
+	}
+
+	return SMTPConfig{
+		Enabled:     true,
+		Host:        host,
+		Port:        port,
+		Username:    username,
+		Password:    password,
+		FromAddress: fromAddress,
+		FromName:    fromName,
+		TLSMode:     tlsMode,
+	}, nil
+}
+
+func isASCII(value string) bool {
+	for _, character := range value {
+		if character > 127 {
+			return false
+		}
+	}
+	return true
+}
+
+func containsControlCharacter(value string) bool {
+	for _, character := range value {
+		if character < 32 || character == 127 {
+			return true
+		}
+	}
+	return false
 }
 
 func isLoopbackHost(host string) bool {

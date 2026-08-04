@@ -2,9 +2,9 @@
 
 ## System overview
 
-TeamTaler is a self-hosted group expense and settlement application implemented as a modular monolith. One Go process serves the versioned JSON API and the compiled React single-page application. The same process owns authentication, authorization, domain transactions, SQLite access, image delivery, health endpoints, and request logging.
+TeamTaler is a self-hosted group expense and settlement application implemented as a modular monolith. One Go process serves the versioned JSON API and the compiled React single-page application. The same process owns authentication, authorization, domain transactions, SQLite access, image delivery, optional SMTP invitation delivery, health endpoints, and request logging.
 
-Production uses one TeamTaler application replica, one SQLite database on a local filesystem, and content-addressed product images below the application data directory. An external reverse proxy terminates TLS. The `teamtaler` binary also provides operator commands that open the same local database or data directory directly.
+Production uses one TeamTaler application replica, one SQLite database on a local filesystem, and content-addressed product images and group logos below the application data directory. An external reverse proxy terminates TLS. The `teamtaler` binary also provides operator commands that open the same local database or data directory directly.
 
 ```mermaid
 flowchart LR
@@ -14,6 +14,8 @@ flowchart LR
     HTTP --> SPA["Compiled React assets"]
     API --> DB[("SQLite database")]
     API --> Images["Content-addressed PNG files"]
+    Worker["Invitation email outbox workers"] --> DB
+    Worker -->|"TLS-secured SMTP"| SMTP["Configured SMTP relay"]
     CLI["TeamTaler operator command"] --> DB
     CLI --> Images
 ```
@@ -24,14 +26,17 @@ This topology deliberately avoids a separate application server, database server
 
 ### Process entry point
 
-- `cmd/teamtaler` selects the `serve`, `version`, `healthcheck`, `admin bootstrap`, `backup create`, or `restore` command. The server applies configuration and migrations before accepting traffic and shuts down on `SIGINT` or `SIGTERM`.
+- `cmd/teamtaler` selects the `serve`, `version`, `healthcheck`, `admin bootstrap`, `backup create`, or `restore` command. The server applies configuration and migrations, starts optional invitation-email outbox workers, and shuts HTTP and worker activity down on `SIGINT` or `SIGTERM`.
 
 ### Backend packages
 
 - `internal/auth` implements Argon2id password hashing, first-run bootstrap, login, invitation acceptance, opaque server-side sessions, logout, and expired-session cleanup.
-- `internal/groups` implements group creation, tenant membership lookup, member listing, cumulative roles, category grants, permission replacement, and seven-day invitation creation/listing.
-- `internal/catalog` implements category and product reads and writes, idempotent product creation, optimistic versions, catalog authorization, image validation, PNG normalization, and content-addressed image paths.
-- `internal/bookings` implements idempotent booking creation, immutable product/category/price snapshots, third-party assignment rules, 30-second standard self-undo, audited reversal, and booking visibility.
+- `internal/groups` implements group creation, tenant membership lookup, administrator-managed branding, member listing, cumulative roles, category grants, permission replacement, individual invitation creation/listing, and atomic idempotent CSV invitation imports.
+- `internal/memberimport` parses bounded UTF-8 comma- or semicolon-delimited invitation documents and preserves row-level validation outcomes.
+- `internal/email` implements the SMTP sender boundary, mandatory STARTTLS or implicit TLS transport, plain-text invitation rendering, and leased transactional-outbox dispatch with bounded retries.
+- `internal/catalog` implements category and product reads and writes, idempotent product creation, optimistic versions, and catalog authorization.
+- `internal/media` validates JPEG/PNG/WebP input, strips metadata through PNG normalization, and owns content-addressed image paths shared by group logos and product images.
+- `internal/bookings` implements idempotent booking creation, immutable product/category/price snapshots, category-scoped third-party assignment rules, 30-second self-undo, audited reversal, and booking visibility.
 - `internal/finance` implements consolidated member accounts, personal and anonymous group category statistics, incoming payments, payment reversal, recent ledger activity, and finance-manager read models.
 - `internal/ledger` rebuilds correction and payment allocations. Negative current-period corrections offset the oldest positive claims before non-reversed payments are allocated oldest first.
 - `internal/periods` lists periods, closes the current period, snapshots member statements, opens the successor period, and returns settlement status enriched with later allocations.
@@ -43,7 +48,7 @@ This topology deliberately avoids a separate application server, database server
 - `internal/config` loads and validates `TEAMTALER_*` process configuration.
 - `internal/storage` configures SQLite, applies embedded forward-only migrations, rejects unknown future migrations, and provides transaction helpers.
 - `internal/domain` defines shared roles, permissions, entities, and transport-safe error classes.
-- `internal/platform` provides random identifiers, random secrets, secret hashes, timestamps, and the process clock.
+- `internal/platform` provides random identifiers, random secrets, secret hashes, timestamps, the process clock, shared email normalization, and AES-256-GCM invitation-token envelopes.
 
 The packages are internal implementation boundaries, not separately deployable services. Transaction-owning services call SQL directly through `database/sql`; there is no repository abstraction or runtime dependency-injection container.
 
@@ -73,10 +78,10 @@ The initial schema consists of strict SQLite tables plus the migration ledger:
 | `schema_migrations` | Applied embedded migration filenames. |
 | `users` | Global local identities and Argon2id password hashes. |
 | `sessions` | Hashed session and CSRF secrets, expiry, and throttled last-seen time. |
-| `groups` | Tenant name and three-letter accounting currency. |
+| `groups` | Tenant name, three-letter accounting currency, and optional custom-logo image key. |
 | `memberships` | User participation and active/archive status within a group. |
 | `membership_roles` | Cumulative `ADMIN`, `FINANCE_MANAGER`, and `CATALOG_MANAGER` roles. |
-| `categories` | Standard or penalty category, active state, sort order, and version. |
+| `categories` | User-defined product category, active state, sort order, and version. |
 | `category_permissions` | Per-member, per-category `ASSIGN_TO_OTHERS` and `VOID_BOOKINGS` grants. |
 | `products` | Category, current name and price, optional image key, active state, sort order, and version. |
 | `periods` | Exactly one open period per group plus closed interval metadata and due date. |
@@ -87,13 +92,14 @@ The initial schema consists of strict SQLite tables plus the migration ledger:
 | `ledger_entries` | Immutable member receivable, category revenue, and group cash movements. |
 | `period_statements` | Immutable close-time member snapshots, including payment and correction fields at close. |
 | `invitations` | Hashed single-use tokens, invited email, optional roles, expiry, and acceptance state. |
+| `invitation_email_outbox` | Encrypted temporary token envelopes, delivery state, retry schedule, worker leases, safe failure codes, and SMTP acceptance time. |
 | `notifications` | Member-visible events and read state. |
 | `audit_events` | Immutable administrative and domain action history. |
 | `idempotency_results` | Request hash and serialized response for protected mutation retries. |
 
 Tenant-bearing queries are scoped by `group_id`. Composite foreign keys protect important group-owned relationships such as membership roles, category grants, products, bookings, allocations, and ledger references. The last active administrator cannot be demoted through the permission service.
 
-Prices and ledger amounts are persisted and calculated as signed 64-bit integer minor units. API responses serialize monetary fields as exact base-10 strings so browsers cannot lose precision above JavaScript's safe-integer limit; command inputs remain bounded JSON integers. Currency input is restricted to three uppercase ASCII letters but is not checked against an external ISO 4217 registry. A group has no time-zone or payment-instructions column in the current schema. Product images are files referenced by `products.image_key`; there is no separate image-asset table.
+Prices and ledger amounts are persisted and calculated as signed 64-bit integer minor units. API responses serialize monetary fields as exact base-10 strings so browsers cannot lose precision above JavaScript's safe-integer limit; command inputs remain bounded JSON integers. Currency input is restricted to three uppercase ASCII letters but is not checked against an external ISO 4217 registry. A group has no time-zone or payment-instructions column in the current schema. Product images and group logos are files referenced by `products.image_key` and `groups.logo_key`; there is no separate image-asset table.
 
 SQLite triggers prevent update/delete of `ledger_entries`, `period_statements`, and `audit_events`, and prevent further updates to already closed `periods`. The service layer writes paired accounting entries in one transaction and integration tests verify balance for booking flows. The database schema does not implement a separate transaction/posting journal or a trigger that independently proves every set of ledger entries balances.
 
@@ -101,7 +107,7 @@ SQLite triggers prevent update/delete of `ledger_entries`, `period_statements`, 
 
 An authenticated user first resolves an active membership for the group in the request path.
 
-- `ADMIN` implies all group-level roles and all category permissions.
+- `ADMIN` implies all group-level roles and all category permissions, and may set or restore the group's logo.
 - `FINANCE_MANAGER` can inspect other member accounts, list all bookings, manage payments, list settlements for all members, and close periods.
 - `CATALOG_MANAGER` can create/update categories and products and assign product images.
 - `ASSIGN_TO_OTHERS` permits a member to book a product from one category to another active member.
@@ -109,7 +115,7 @@ An authenticated user first resolves an active membership for the group in the r
 - A regular member sees the group member directory, bookings they created or that target them, their own account/statements, anonymous group category aggregates, and their own notifications.
 - Only an administrator can replace roles/category grants or read the audit feed.
 
-A standard self-booking made for the same membership may be undone for 30 seconds without the category reversal grant. Other reversals require the grant and a reason. Assigning a penalty to another member requires both the assignment grant and a reason.
+A self-booking made for the same membership may be undone for 30 seconds without the category reversal grant. Other reversals require the grant and a reason. Assigning any product to another member requires both the assignment grant for that product's category and a reason.
 
 ## Data flow
 
@@ -122,6 +128,18 @@ A standard self-booking made for the same membership may be undone for 30 second
 5. The domain service reloads group-owned resources and applies role, category, state, and version checks.
 6. A transaction persists the command, accounting effects, notifications, audit event, and idempotency result where applicable.
 7. The HTTP layer returns JSON or RFC 9457-shaped Problem Details.
+
+### CSV invitation import and email delivery
+
+1. The administrator uploads at most 256 KiB and 100 CSV data rows with an idempotency key.
+2. The HTTP layer validates the media type and CSV structure; row-level address, duplicate, membership, and invitation outcomes remain visible without rejecting valid neighbors.
+3. One SQLite transaction creates every valid seven-day invitation, encrypts each plaintext token with AES-256-GCM, inserts its `PENDING` outbox job, writes audit events, and stores the secret-free idempotency response.
+4. Outbox workers claim due jobs with short database leases. Revoked, accepted, or expired invitations are cancelled before network access.
+5. The worker decrypts a token only in memory, constructs the public fragment URL, and submits the message through the configured TLS-secured SMTP relay outside the database transaction.
+6. SMTP acceptance moves the job to `SENT` and deletes the ciphertext. A safe failure code schedules bounded backoff; the raw SMTP error and token never enter API responses or audit metadata.
+7. The administration UI polls invitation metadata while imported jobs are `PENDING` or `SENDING`. The recipient becomes a member only through the existing invitation-acceptance transaction.
+
+The database-to-SMTP boundary provides at-least-once delivery. A connection failure after remote acceptance but before the local success update can produce a duplicate message with the same single-use link; consuming either copy invalidates replay.
 
 ### Booking
 
@@ -141,7 +159,7 @@ sequenceDiagram
     Booking-->>UI: Created or replayed booking
 ```
 
-The server calculates the total from the current persisted price and requested quantity. A stale product version or stale expected period produces a precondition failure. Third-party targets receive a notification.
+The server calculates the total from the current persisted price and requested quantity. A stale product version or stale expected period produces a precondition failure. Categories are the only product classification layer; there is no additional standard/penalty type. Third-party bookings require a reason and their targets receive a notification.
 
 Every booking snapshot stores both `actor_membership_id` and `target_membership_id`. The activity UI resolves, displays, and searches both identities for every booking, while dashboard activity adds an explicit actor cue when the actor and target differ.
 
@@ -167,7 +185,7 @@ Statement rows preserve close-time identity and accounting fields. Statement rea
 
 ### Image upload
 
-The handler resolves the authenticated group membership, catalog role, and product before parsing image data. The image module then:
+The handler resolves the authenticated group membership and required authorization before parsing image data. Product images require the catalog role and a product in the requested group; group logos require the administrator role. The shared media module then:
 
 1. Limits raw input to 5 MiB.
 2. Accepts decoded JPEG, PNG, or WebP only.
@@ -175,7 +193,7 @@ The handler resolves the authenticated group membership, catalog role, and produ
 4. Decodes and re-encodes one PNG, stripping source metadata.
 5. Rejects a normalized PNG larger than 10 MiB.
 6. Names the file with the SHA-256 digest of normalized content and publishes it with a rename.
-7. Stores the key on the product in an audited transaction.
+7. Stores the key on the product or group in an audited transaction.
 
 The current implementation does not apply EXIF orientation or generate responsive variants. It also does not delete replaced content hashes during an online request because a concurrent transaction could begin referencing the same hash. Such stale files remain local until deliberate offline maintenance, but backup archives include only hashes referenced by their database snapshot.
 
@@ -183,13 +201,13 @@ The current implementation does not apply EXIF orientation or generate responsiv
 
 - API routes are rooted at `/api/v1`; liveness and readiness are `/health/live` and `/health/ready`.
 - API and SPA use one origin. There is no CORS configuration.
-- Product creation, booking creation/reversal, payment creation/reversal, and period close require an `Idempotency-Key`.
+- Product creation, CSV invitation import, booking creation/reversal, payment creation/reversal, and period close require an `Idempotency-Key`.
 - Category and product update bodies carry a version. Optional `If-Match` is checked against that version, and successful catalog writes return a version ETag.
 - The member collection returns a content-derived ETag, but permission replacement currently does not enforce `If-Match`.
 - Errors use `application/problem+json` with a stable problem type, title, status, detail, and request path.
 - List handlers for bookings, payments, notifications, and audit accept a bounded `limit` up to 200. Cursor pagination is not implemented.
 - There are no destructive financial DELETE routes. Reversal commands preserve original records.
-- Product images require an active membership in the group path and a product reference to the image in that group. Responses use `private, no-store` caching; storage remains globally content-addressed below the data directory.
+- Product images and group logos require an active membership in the group path and a matching database reference in that group. Responses use `private, no-store` caching; storage remains globally content-addressed below the data directory.
 
 The compiled SPA is served through `net/http`'s directory-confined file-server abstraction. Extensionless non-API GET/HEAD routes fall back to `index.html`; missing concrete files and assets remain 404 responses. Hashed frontend assets receive immutable caching, other concrete files revalidate hourly, and `index.html` is served with `no-cache`.
 
@@ -200,7 +218,7 @@ The compiled SPA is served through `net/http`'s directory-confined file-server a
 - Session and CSRF secrets are generated randomly and stored only as SHA-256 hashes. Sessions last 30 days; last-seen writes are throttled to once per 15 minutes.
 - The session cookie is HttpOnly. Session and CSRF cookies use SameSite Strict and become Secure when `TEAMTALER_PUBLIC_URL` uses HTTPS.
 - Mutation requests require a matching CSRF header and, when an `Origin` header is present, the exact configured origin.
-- Invitation tokens are stored as hashes, expire after seven days, and are consumed once. The generated browser URL carries the token in a fragment, and the React page sends it in the acceptance request body.
+- Invitation tokens are stored as hashes, expire after seven days, and are consumed once. The generated browser URL carries the token in a fragment, and the React page sends it in the acceptance request body. CSV-imported invitation tokens additionally exist as AES-256-GCM ciphertext only while their email job is unsent; the key comes from process configuration and ciphertext is deleted after relay acceptance.
 - Login attempts are limited in memory by peer IP and IP/email pair; invitation acceptance is limited by peer IP. At most two password-hash operations run concurrently. These limits reset when the single process restarts.
 - Forwarded client addresses are accepted only when the immediate peer belongs to `TEAMTALER_TRUSTED_PROXY_CIDRS`.
 - Security headers include a same-origin content security policy, frame denial, MIME sniffing prevention, a restrictive permissions policy, and HSTS when secure cookies are enabled.
@@ -211,15 +229,15 @@ TeamTaler does not protect its local database, image files, or backups from a fu
 
 SQLite is opened with foreign keys, WAL journal mode, a 5-second busy timeout, and `synchronous=FULL`. The process configures up to four open database connections and uses short service-owned write transactions.
 
-Bootstrap, group creation, invitation acceptance, permission replacement, catalog writes, booking commands, payment commands, and period close define explicit transaction boundaries. Image decoding occurs outside a database transaction after authorization and product lookup.
+Bootstrap, group creation, group-logo updates, CSV invitation import, invitation acceptance, permission replacement, catalog writes, booking commands, payment commands, and period close define explicit transaction boundaries. SMTP and image decoding occur outside database transactions after the corresponding durable authorization and work records exist.
 
-Forward-only migrations run in lexical order at database open and are recorded in `schema_migrations`. Startup and restore reject migration names unknown to the running binary. Downgrade migrations are not implemented; rollback requires the older image together with a compatible pre-upgrade backup.
+Forward-only migrations run in lexical order at database open and are recorded in `schema_migrations`. Migration `0003` removes the former category-type columns while preserving category names and all booking snapshots; migration `0004` adds the optional group-logo reference; migration `0005` adds durable invitation-email delivery state. Startup and restore reject migration names unknown to the running binary. Downgrade migrations are not implemented; rollback requires the older image together with a compatible pre-upgrade backup.
 
 The restore command stages data below `TEAMTALER_DATA_DIR`, requires `TEAMTALER_DATABASE_PATH` to be a direct child of that directory, and installs the snapshot at that configured path. The direct-child constraint keeps staging, recovery, and final renames on the same mounted filesystem.
 
 ## Backup architecture
 
-`backup create` uses SQLite `VACUUM INTO` to create a consistent snapshot. It queries that snapshot for distinct product image keys and includes only referenced files. The archive contains `teamtaler.db`, optional `images/<sha256>.png` files, and `manifest.json` with format version, creation time, and per-file SHA-256 checksums.
+`backup create` uses SQLite `VACUUM INTO` to create a consistent snapshot. It queries that snapshot for distinct product-image and group-logo keys and includes only referenced files. The archive contains `teamtaler.db`, optional `images/<sha256>.png` files, and `manifest.json` with format version, creation time, and per-file SHA-256 checksums.
 
 Restore stages extraction below the writable data directory and permits only regular files with canonical names: `teamtaler.db`, `manifest.json`, or `images/<64-lowercase-hex>.png`. It limits expanded content to 2 GiB and validates manifest coverage, checksums, image content addresses, SQLite integrity, foreign keys, embedded migration compatibility, and exact referenced-image coverage. With `--force`, existing database/WAL/SHM files and the image directory move to a timestamped recovery directory before installation.
 
@@ -227,7 +245,7 @@ Restore stages extraction below the writable data directory and permits only reg
 
 ### Backend runtime
 
-- The Go standard library provides HTTP, JSON, SQL interfaces, cryptographic randomness/hashes, archive handling, image codecs for JPEG/PNG, and structured key-value logging.
+- The Go standard library provides HTTP, JSON, SQL and SMTP interfaces, TLS, AES-GCM, cryptographic randomness/hashes, archive handling, image codecs for JPEG/PNG, and structured key-value logging.
 - `modernc.org/sqlite` provides the pure-Go SQLite driver.
 - `golang.org/x/crypto` provides Argon2id.
 - `golang.org/x/image` provides WebP decoding.
@@ -251,7 +269,7 @@ TypeScript, Vite, ESLint, Vitest, jsdom, and Testing Library are development/bui
 - A reverse proxy provides HTTPS and certificate lifecycle.
 - A local filesystem persists the named volume.
 
-TeamTaler v1 does not require SMTP, a payment provider, Redis, an external database, object storage, or a message broker.
+TeamTaler v1 does not require a payment provider, Redis, an external database, object storage, or a message broker. Automatic CSV invitation delivery optionally requires one authenticated SMTP relay; manual individual invitation links remain available without it.
 
 ## Deployment architecture
 
@@ -274,7 +292,7 @@ TeamTaler v1 has no plugin loader, extension manifest, scripting runtime, event 
 
 The supported external integration boundary is the versioned same-origin HTTP API described by `api/openapi.yaml`. Additive endpoints should remain under `/api/v1` when backward compatible; incompatible contracts require a new API version.
 
-Internal package boundaries provide places for future adapters, but current clock, identifier, storage, notification, and persistence implementations are concrete functions/services rather than interchangeable plugin interfaces. A future extension system must define failure isolation, authorization, transaction ownership, audit behavior, and compatibility before third-party code is loaded.
+The invitation mailer is an internal `Sender` interface so SMTP transport and deterministic test doubles remain isolated without exposing a public plugin API. Other current clock, identifier, storage, notification, and persistence implementations are concrete functions/services rather than interchangeable plugins. A future extension system must define failure isolation, authorization, transaction ownership, audit behavior, and compatibility before third-party code is loaded.
 
 ## Implemented test coverage
 
@@ -282,17 +300,18 @@ Backend Go tests currently cover:
 
 - Argon2id hashing and password limits.
 - Public URL, loopback-only HTTP, and direct-child database-path configuration validation.
+- Complete/partial SMTP configuration, mandatory TLS modes, SMTP header-injection rejection, encrypted token envelopes, CSV parsing limits, idempotent mixed-row imports, leased outbox success/retry/cancellation, and secret-free API results.
 - Three-uppercase-letter currency-code validation.
 - rejection of unknown future migrations.
 - image normalization and invalid-image rejection.
 - backup creation and restore.
 - Password-hash concurrency overload response shape.
-- Authenticated, group-referenced image delivery.
+- Administrator-only group-logo updates and authenticated, group-referenced image delivery.
 - bootstrap/login, single-use invitation acceptance, tenant isolation, and role/category authorization.
 - throttled session last-seen writes.
 - booking undo, assignment validation, and paired ledger balance.
 - payment FIFO, reversal, closed-period immutability, future-credit use, and negative/partial correction allocation.
 
-Frontend Vitest tests currently cover API adapters, exact money handling for zero-, two-, and three-decimal currencies, durable scoped idempotency reservations and retry semantics, staged product/image recovery, active-product filtering, authentication and invitation behavior, acting/target booking traceability, localized ledger descriptions and plural forms, the toggle primitive, product selection, account settlement adaptation, and CSV formula neutralization. CI runs Go formatting, vet, race-enabled tests with coverage, frontend lint/tests/build/audit, and a container image build plus `teamtaler version` command smoke check.
+Frontend Vitest tests currently cover API adapters, exact money handling for zero-, two-, and three-decimal currencies, durable scoped idempotency reservations and retry semantics, group-logo updates, staged product/image recovery, active-product filtering, authentication and invitation behavior, acting/target booking traceability, localized ledger descriptions and plural forms, the toggle primitive, product selection, account settlement adaptation, and CSV formula neutralization. CI runs Go formatting, vet, race-enabled tests with coverage, frontend lint/tests/build/audit, and a container image build plus `teamtaler version` command smoke check.
 
 There is currently no committed Playwright end-to-end suite, automated browser visual-regression suite, property-test suite, or dedicated security-test suite. Browser acceptance and responsive inspection are release QA activities rather than repository test jobs.

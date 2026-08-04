@@ -83,15 +83,14 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, membership 
 		}
 
 		var categoryID, productName, categoryName string
-		var categoryType domain.CategoryType
 		var unitPrice int64
 		var productVersion int64
 		var periodID, currency string
-		err = tx.QueryRowContext(ctx, `SELECT p.category_id,p.name,p.price_minor,p.version,c.name,c.type,per.id,g.currency
+		err = tx.QueryRowContext(ctx, `SELECT p.category_id,p.name,p.price_minor,p.version,c.name,per.id,g.currency
 			FROM products p JOIN categories c ON c.id=p.category_id AND c.group_id=p.group_id
 			JOIN groups g ON g.id=p.group_id JOIN periods per ON per.group_id=p.group_id AND per.status='OPEN'
 			WHERE p.id=? AND p.group_id=? AND p.active=1 AND c.active=1`, input.ProductID, membership.GroupID).
-			Scan(&categoryID, &productName, &unitPrice, &productVersion, &categoryName, &categoryType, &periodID, &currency)
+			Scan(&categoryID, &productName, &unitPrice, &productVersion, &categoryName, &periodID, &currency)
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.ErrNotFound
 		}
@@ -101,9 +100,6 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, membership 
 		if productVersion != input.ProductVersion || periodID != input.ExpectedPeriodID {
 			return domain.ErrPrecondition
 		}
-		if categoryType == domain.CategoryPenalty && input.Quantity != 1 {
-			return domain.ValidationError{Field: "quantity", Message: "penalty products require quantity 1"}
-		}
 		if input.TargetMembershipID != membership.ID {
 			allowed, err := hasCategoryPermissionTx(ctx, tx, membership, categoryID, domain.PermissionAssignToOthers)
 			if err != nil {
@@ -112,8 +108,8 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, membership 
 			if !allowed {
 				return domain.ErrForbidden
 			}
-			if categoryType == domain.CategoryPenalty && input.Reason == "" {
-				return domain.ValidationError{Field: "reason", Message: "is required when assigning a penalty to another member"}
+			if input.Reason == "" {
+				return domain.ValidationError{Field: "reason", Message: "is required when assigning a booking to another member"}
 			}
 		}
 		var targetExists int
@@ -130,9 +126,9 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, membership 
 		bookingID, _ := platform.NewID("bok")
 		now := platform.Timestamp(platform.Now())
 		ledgerDescription := fmt.Sprintf("%d x %s (%s)", input.Quantity, productName, categoryName)
-		_, err = tx.ExecContext(ctx, `INSERT INTO bookings(id,group_id,period_id,category_id,product_id,actor_membership_id,target_membership_id,quantity,unit_price_minor,total_minor,product_name,category_name,category_type,reason,created_at)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, bookingID, membership.GroupID, periodID, categoryID, input.ProductID, membership.ID, input.TargetMembershipID,
-			input.Quantity, unitPrice, total, productName, categoryName, categoryType, nullable(input.Reason), now)
+		_, err = tx.ExecContext(ctx, `INSERT INTO bookings(id,group_id,period_id,category_id,product_id,actor_membership_id,target_membership_id,quantity,unit_price_minor,total_minor,product_name,category_name,reason,created_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, bookingID, membership.GroupID, periodID, categoryID, input.ProductID, membership.ID, input.TargetMembershipID,
+			input.Quantity, unitPrice, total, productName, categoryName, nullable(input.Reason), now)
 		if err != nil {
 			return err
 		}
@@ -155,8 +151,8 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, membership 
 		}
 		booking = domain.Booking{ID: bookingID, GroupID: membership.GroupID, PeriodID: periodID, CategoryID: categoryID, ProductID: input.ProductID,
 			ActorMembershipID: membership.ID, TargetMembershipID: input.TargetMembershipID, Quantity: input.Quantity, UnitPriceMinor: unitPrice,
-			TotalMinor: total, Currency: currency, ProductName: productName, CategoryName: categoryName, CategoryType: categoryType, Reason: input.Reason,
-			CreatedAt: now, CanVoid: categoryType == domain.CategoryStandard && input.TargetMembershipID == membership.ID}
+			TotalMinor: total, Currency: currency, ProductName: productName, CategoryName: categoryName, Reason: input.Reason,
+			CreatedAt: now, CanVoid: input.TargetMembershipID == membership.ID}
 		if err := audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "booking.created", "booking", bookingID, map[string]any{"targetMembershipId": input.TargetMembershipID, "totalMinor": total}); err != nil {
 			return err
 		}
@@ -179,7 +175,7 @@ func (s Service) List(ctx context.Context, membership domain.Membership, periodI
 	}
 	viewAll := groups.HasRole(membership, domain.RoleFinanceManager)
 	query := `SELECT b.id,b.group_id,b.period_id,b.category_id,b.product_id,b.actor_membership_id,b.target_membership_id,b.quantity,
-		b.unit_price_minor,b.total_minor,g.currency,b.product_name,b.category_name,b.category_type,coalesce(b.reason,''),b.created_at,b.voided_at,coalesce(b.void_reason,'')
+		b.unit_price_minor,b.total_minor,g.currency,b.product_name,b.category_name,coalesce(b.reason,''),b.created_at,b.voided_at,coalesce(b.void_reason,'')
 		FROM bookings b JOIN groups g ON g.id=b.group_id WHERE b.group_id=?`
 	args := []any{membership.GroupID}
 	if periodID != "" {
@@ -204,7 +200,7 @@ func (s Service) List(ctx context.Context, membership domain.Membership, periodI
 	for rows.Next() {
 		var item domain.Booking
 		if err := rows.Scan(&item.ID, &item.GroupID, &item.PeriodID, &item.CategoryID, &item.ProductID, &item.ActorMembershipID, &item.TargetMembershipID,
-			&item.Quantity, &item.UnitPriceMinor, &item.TotalMinor, &item.Currency, &item.ProductName, &item.CategoryName, &item.CategoryType, &item.Reason,
+			&item.Quantity, &item.UnitPriceMinor, &item.TotalMinor, &item.Currency, &item.ProductName, &item.CategoryName, &item.Reason,
 			&item.CreatedAt, &item.VoidedAt, &item.VoidReason); err != nil {
 			return nil, err
 		}
@@ -242,10 +238,10 @@ func (s Service) Void(ctx context.Context, actor domain.Principal, membership do
 		}
 		var voided sql.NullString
 		err = tx.QueryRowContext(ctx, `SELECT b.id,b.group_id,b.period_id,b.category_id,b.product_id,b.actor_membership_id,b.target_membership_id,b.quantity,
-			b.unit_price_minor,b.total_minor,g.currency,b.product_name,b.category_name,b.category_type,coalesce(b.reason,''),b.created_at,b.voided_at
+			b.unit_price_minor,b.total_minor,g.currency,b.product_name,b.category_name,coalesce(b.reason,''),b.created_at,b.voided_at
 			FROM bookings b JOIN groups g ON g.id=b.group_id WHERE b.id=? AND b.group_id=?`, bookingID, membership.GroupID).
 			Scan(&booking.ID, &booking.GroupID, &booking.PeriodID, &booking.CategoryID, &booking.ProductID, &booking.ActorMembershipID, &booking.TargetMembershipID,
-				&booking.Quantity, &booking.UnitPriceMinor, &booking.TotalMinor, &booking.Currency, &booking.ProductName, &booking.CategoryName, &booking.CategoryType,
+				&booking.Quantity, &booking.UnitPriceMinor, &booking.TotalMinor, &booking.Currency, &booking.ProductName, &booking.CategoryName,
 				&booking.Reason, &booking.CreatedAt, &voided)
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.ErrNotFound
@@ -324,7 +320,7 @@ func (s Service) Void(ctx context.Context, actor domain.Principal, membership do
 }
 
 func canSelfUndo(booking domain.Booking, membership domain.Membership) bool {
-	if booking.CategoryType != domain.CategoryStandard || booking.ActorMembershipID != membership.ID || booking.TargetMembershipID != membership.ID {
+	if booking.ActorMembershipID != membership.ID || booking.TargetMembershipID != membership.ID {
 		return false
 	}
 	created, err := time.Parse(time.RFC3339Nano, booking.CreatedAt)

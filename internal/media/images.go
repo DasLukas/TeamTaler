@@ -1,4 +1,5 @@
-package catalog
+// Package media validates, normalizes, stores, and resolves uploaded images.
+package media
 
 import (
 	"bytes"
@@ -92,8 +93,14 @@ func NormalizeAndStoreImage(dataDirectory string, source io.Reader) (string, boo
 // local path below dataDirectory. Invalid keys return an error; the function
 // does not access the filesystem or guarantee that the file exists.
 func ResolveImage(dataDirectory, key string) (string, error) {
-	if !imageKeyPattern.MatchString(key) {
+	if !ValidImageKey(key) {
 		return "", errors.New("invalid image key")
 	}
 	return filepath.Join(dataDirectory, "images", key), nil
+}
+
+// ValidImageKey reports whether key is a canonical SHA-256-addressed PNG name.
+// It performs no filesystem access and cannot fail.
+func ValidImageKey(key string) bool {
+	return imageKeyPattern.MatchString(key)
 }

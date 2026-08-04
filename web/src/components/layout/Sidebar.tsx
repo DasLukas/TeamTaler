@@ -35,7 +35,7 @@ export function Sidebar() {
 
   return (
     <aside className={styles.sidebar}>
-      <Brand />
+      <Brand imageAlt={activeGroup?.logoUrl ? t('brand.groupMarkAlt', { group: activeGroup.name }) : undefined} imageUrl={activeGroup?.logoUrl} />
       <label className={styles.groupLabel} htmlFor="desktop-group">{t('nav.group')}</label>
       <div className={styles.groupSelectWrap}>
         <select id="desktop-group" onChange={(event) => setActiveGroupId(event.target.value)} value={activeGroupId}>

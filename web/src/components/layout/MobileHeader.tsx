@@ -13,9 +13,10 @@ import styles from './MobileHeader.module.css';
 export function MobileHeader() {
   const { t } = useTranslation();
   const { session, activeGroupId, setActiveGroupId } = useActiveGroup();
+  const activeGroup = session.groups.find((group) => group.id === activeGroupId);
   return (
     <header className={styles.header}>
-      <Brand />
+      <Brand imageAlt={activeGroup?.logoUrl ? t('brand.groupMarkAlt', { group: activeGroup.name }) : undefined} imageUrl={activeGroup?.logoUrl} />
       <div className={styles.group}>
         <UsersRound aria-hidden="true" size={23} strokeWidth={1.8} />
         <select aria-label={t('nav.selectGroup')} onChange={(event) => setActiveGroupId(event.target.value)} value={activeGroupId}>
