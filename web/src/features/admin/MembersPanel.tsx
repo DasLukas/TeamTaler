@@ -466,7 +466,7 @@ export function MembersPanel({ onOpenRights }: MembersPanelProps) {
             <table className={tableStyles.table}>
               <thead><tr><th>{t('members.email')}</th><th>{t('common.name')}</th><th>{t('members.delivery')}</th><th>{t('members.validUntil')}</th><th><span className="sr-only">{t('common.action')}</span></th></tr></thead>
               <tbody>{openInvitations.map((item) => {
-                const expired = Date.parse(item.expiresAt) <= Date.now();
+                const expired = Date.parse(item.expiresAt) <= invitationsQuery.dataUpdatedAt;
                 const resendBlocked = ACTIVE_DELIVERY_STATUSES.has(item.emailDeliveryStatus);
                 return (
                   <tr key={item.id}>
