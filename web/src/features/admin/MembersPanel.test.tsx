@@ -300,7 +300,10 @@ describe('MembersPanel invitations', () => {
     };
     const sentMetadata: InvitationMetadata = { ...failedMetadata, emailDeliveryStatus: 'SENT', emailSentAt: '2026-08-04T12:02:00Z' };
     apiMock.importInvitations.mockResolvedValue(failedResult);
-    apiMock.getInvitations.mockResolvedValueOnce([failedMetadata]).mockResolvedValue([sentMetadata]);
+    apiMock.getInvitations
+      .mockResolvedValueOnce([failedMetadata])
+      .mockResolvedValueOnce([failedMetadata])
+      .mockResolvedValue([sentMetadata]);
     apiMock.resendInvitationEmail.mockResolvedValue({
       invitationId: 'invitation-failed',
       emailDeliveryStatus: 'PENDING',
