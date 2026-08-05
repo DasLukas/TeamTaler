@@ -4,7 +4,7 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
-## [0.3.0] - 2026-08-04
+## [0.4.0] - 2026-08-06
 
 ### Added
 
@@ -14,9 +14,6 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Self-service profile-image upload and removal with protected delivery plus consistent avatars in member, permission, booking, dashboard, and account views.
 - Administrator-only group-name editing with immediate navigation updates, server validation, and audit logging.
 - Persisted, editable category symbols with an accessible administration picker and consistent booking, dashboard, and report rendering.
-- Per-product fixed or user-defined pricing with currency-aware browser validation, server-enforced booking prices, immutable price snapshots, and demo-mode coverage.
-- Version-aware category and product editing in the administration UI, including archive controls and recoverable product-image replacement.
-- TeamTaler favicon, Apple touch icon, and standard and maskable web-app icons for installed browser applications.
 
 ### Changed
 
@@ -28,6 +25,17 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Dashboard greetings now follow local night, morning, daytime, and evening hours and refresh while the page stays open.
 - Booking activity rows now show compact product thumbnails when a catalogue image is available.
 - Product image selections can now be removed explicitly and are cleared reliably between product form sessions.
+
+## [0.3.0] - 2026-08-04
+
+### Added
+
+- Per-product fixed or user-defined pricing with currency-aware browser validation, server-enforced booking prices, immutable price snapshots, and demo-mode coverage.
+- Version-aware category and product editing in the administration UI, including archive controls and recoverable product-image replacement.
+- TeamTaler favicon, Apple touch icon, and standard and maskable web-app icons for installed browser applications.
+
+### Changed
+
 - Manual invitations can now assign an optional display-name suggestion, group roles, and category grants; accepted invitations apply all defaults atomically.
 - Member administration now separates open invitations, active members, and former members, with invitation editing, revocation, token-rotating resend, direct rights navigation, membership archival, and stable-ID reactivation.
 - Invitation acceptance now uses a rate-limited, secret-minimal preview, pre-fills names for new accounts, and preserves the global display name of existing accounts.
@@ -77,7 +85,8 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Explicit acting and charged membership display for every booking, including searchable third-party-assignment cues.
 - Canonical backup-entry allowlisting, target-width Argon2 parameter parsing, and directory-confined SPA asset serving with traversal regression coverage.
 
-[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/DasLukas/TeamTaler/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/DasLukas/TeamTaler/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/DasLukas/TeamTaler/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/DasLukas/TeamTaler/releases/tag/v0.1.0
