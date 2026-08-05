@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
 import Search from 'lucide-react/dist/esm/icons/search';
-import { useDeferredValue, useState } from 'react';
+import { useDeferredValue, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { formatMoney } from '@/api/money';
@@ -26,10 +26,14 @@ export function ActivitiesPage() {
   const { activeGroupId } = useActiveGroup();
   const queryClient = useQueryClient();
   const bookingsQuery = useQuery({ queryKey: ['bookings', activeGroupId], queryFn: () => api.getBookings(activeGroupId) });
+  const categoriesQuery = useQuery({ queryKey: ['categories', activeGroupId], queryFn: () => api.getCategories(activeGroupId) });
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search.toLowerCase());
   const [reversal, setReversal] = useState<Booking | null>(null);
   const [reason, setReason] = useState('');
+  const productImages = useMemo(() => new Map(
+    categoriesQuery.data?.flatMap((category) => category.products.map((product) => [product.id, product.imageUrl] as const)) ?? [],
+  ), [categoriesQuery.data]);
   const reverseMutation = useMutation({
     mutationFn: () => reversal ? api.reverseBooking(activeGroupId, reversal.id, reason) : Promise.reject(new Error(t('activities.noSelection'))),
     onSuccess: async () => {
@@ -39,6 +43,7 @@ export function ActivitiesPage() {
         queryClient.invalidateQueries({ queryKey: ['bookings', activeGroupId] }),
         queryClient.invalidateQueries({ queryKey: ['dashboard', activeGroupId] }),
         queryClient.invalidateQueries({ queryKey: ['ledger', activeGroupId] }),
+        queryClient.invalidateQueries({ queryKey: ['account-summaries', activeGroupId] }),
       ]);
     },
   });
@@ -62,18 +67,24 @@ export function ActivitiesPage() {
           <table className={tableStyles.table}>
             <thead><tr><th>{t('activities.bookedFor')}</th><th>{t('activities.bookedBy')}</th><th>{t('activities.booking')}</th><th>{t('common.category')}</th><th>{t('activities.time')}</th><th className={tableStyles.number}>{t('common.amount')}</th><th>{t('common.status')}</th><th><span className="sr-only">{t('common.action')}</span></th></tr></thead>
             <tbody>
-              {filtered.map((booking) => (
-                <tr key={booking.id}>
-                  <td><span className={styles.member}><Avatar name={booking.memberName} size="small" />{booking.memberName}</span></td>
-                  <td><span className={styles.member}><Avatar name={booking.bookedByName} size="small" />{booking.bookedByName}</span></td>
-                  <td><strong>{booking.productName}</strong>{booking.quantity > 1 ? ` × ${booking.quantity}` : ''}{booking.reason ? <small>{booking.reason}</small> : null}</td>
+              {filtered.map((booking) => {
+                const productImageUrl = productImages.get(booking.productId);
+                return <tr key={booking.id}>
+                  <td><span className={styles.member}><Avatar name={booking.memberName} size="small" src={booking.memberAvatarUrl} />{booking.memberName}</span></td>
+                  <td><span className={styles.member}><Avatar name={booking.bookedByName} size="small" src={booking.bookedByAvatarUrl} />{booking.bookedByName}</span></td>
+                  <td>
+                    <span className={styles.bookingProduct}>
+                      {productImageUrl ? <img alt="" decoding="async" loading="lazy" src={productImageUrl} /> : null}
+                      <span><strong>{booking.productName}</strong>{booking.quantity > 1 ? ` × ${booking.quantity}` : ''}{booking.reason ? <small>{booking.reason}</small> : null}</span>
+                    </span>
+                  </td>
                   <td>{booking.categoryName}</td>
                   <td>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(booking.bookedAt))}</td>
                   <td className={tableStyles.number}>{formatMoney(booking.total)}</td>
                   <td><span className={`${tableStyles.status} ${booking.status === 'REVERSED' ? tableStyles.statusMuted : ''}`}>{booking.status === 'POSTED' ? t('common.booked') : t('common.reversed')}</span></td>
                   <td>{booking.status === 'POSTED' && booking.canVoid ? <Button leadingIcon={<RotateCcw size={16} />} onClick={() => setReversal(booking)} size="small" variant="ghost">{t('activities.reverse')}</Button> : null}</td>
-                </tr>
-              ))}
+                </tr>;
+              })}
             </tbody>
           </table>
         </div>

@@ -16,13 +16,60 @@ const ACCEPTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 type LogoChange = { kind: 'upload'; file: File } | { kind: 'remove' };
 
 /**
- * Renders administrator-only group branding controls.
+ * Renders the administrator-only group-name form and synchronizes successful
+ * updates into the shared session cache.
+ *
+ * @param props - Stable group identity and the currently persisted name.
+ * @returns A validated group-name form with mutation feedback.
+ */
+function GroupNameForm({ groupId, currentName }: { groupId: string; currentName: string }) {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const [name, setName] = useState(currentName);
+  const [savedName, setSavedName] = useState(currentName);
+  const normalizedName = name.trim();
+  const nameMutation = useMutation({
+    mutationFn: () => api.updateGroupName(groupId, normalizedName),
+    onSuccess: ({ name: persistedName }) => {
+      queryClient.setQueryData<Session>(['session'], (session) => session ? {
+        ...session,
+        groups: session.groups.map((group) => group.id === groupId ? { ...group, name: persistedName } : group),
+      } : session);
+      setName(persistedName);
+      setSavedName(persistedName);
+    },
+  });
+
+  return (
+    <form className={`${styles.card} ${styles.nameCard}`} onSubmit={(event) => { event.preventDefault(); nameMutation.mutate(); }}>
+      <div className={styles.controls}>
+        <div>
+          <h3>{t('groupSettings.nameTitle')}</h3>
+          <p>{t('groupSettings.nameDescription')}</p>
+        </div>
+        <Field htmlFor="group-name" label={t('groupSettings.nameLabel')}>
+          <TextInput autoComplete="organization" id="group-name" maxLength={120} onChange={(event) => { setName(event.target.value); nameMutation.reset(); }} required value={name} />
+        </Field>
+        {nameMutation.isError ? <p className={styles.error} role="alert">{t('groupSettings.nameUpdateError')} {nameMutation.error.message}</p> : null}
+        {nameMutation.isSuccess ? <p className={styles.success} role="status">{t('groupSettings.nameSaved')}</p> : null}
+        <div className={styles.actions}>
+          <Button disabled={!normalizedName || normalizedName === savedName || nameMutation.isPending} type="submit">
+            {nameMutation.isPending ? t('groupSettings.nameSaving') : t('groupSettings.nameSave')}
+          </Button>
+        </div>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * Renders administrator-only group identity and branding controls.
  *
  * Only server-validated, normalized images are rendered. Successful mutations
  * update the shared session cache so every active brand surface changes without
  * a page reload.
  *
- * @returns A group-logo preview, validated file input, and update actions.
+ * @returns Group-name settings, a group-logo preview, and update actions.
  */
 export function GroupSettingsPanel() {
   const { t } = useTranslation();
@@ -79,32 +126,35 @@ export function GroupSettingsPanel() {
         <h2>{t('groupSettings.title')}</h2>
         <p>{t('groupSettings.intro')}</p>
       </header>
-      <section className={styles.card}>
-        <div className={styles.preview}>
-          <img alt={t('groupSettings.previewAlt', { group: activeGroup.name })} src={currentPreview} />
-        </div>
-        <div className={styles.controls}>
-          <div>
-            <h3>{t('groupSettings.logoTitle')}</h3>
-            <p>{t('groupSettings.logoDescription')}</p>
+      <div className={styles.cards}>
+        <GroupNameForm currentName={activeGroup.name} groupId={activeGroupId} key={activeGroupId} />
+        <section className={styles.card}>
+          <div className={styles.preview}>
+            <img alt={t('groupSettings.previewAlt', { group: activeGroup.name })} src={currentPreview} />
           </div>
-          <Field error={fileError || undefined} hint={t('groupSettings.imageHint')} htmlFor="group-logo" label={t('groupSettings.imageLabel')}>
-            <TextInput accept="image/jpeg,image/png,image/webp" id="group-logo" key={fileInputKey} onChange={(event) => selectFile(event.target.files?.[0])} type="file" />
-          </Field>
-          {logoMutation.isError ? <p className={styles.error} role="alert">{t('groupSettings.uploadError')} {logoMutation.error.message}</p> : null}
-          {successMessage ? <p className={styles.success} role="status">{successMessage}</p> : null}
-          <div className={styles.actions}>
-            {activeGroup.logoUrl ? (
-              <Button disabled={logoMutation.isPending} leadingIcon={<RotateCcw size={18} />} onClick={() => logoMutation.mutate({ kind: 'remove' })} variant="secondary">
-                {t('groupSettings.restoreDefault')}
+          <div className={styles.controls}>
+            <div>
+              <h3>{t('groupSettings.logoTitle')}</h3>
+              <p>{t('groupSettings.logoDescription')}</p>
+            </div>
+            <Field error={fileError || undefined} hint={t('groupSettings.imageHint')} htmlFor="group-logo" label={t('groupSettings.imageLabel')}>
+              <TextInput accept="image/jpeg,image/png,image/webp" id="group-logo" key={fileInputKey} onChange={(event) => selectFile(event.target.files?.[0])} type="file" />
+            </Field>
+            {logoMutation.isError ? <p className={styles.error} role="alert">{t('groupSettings.uploadError')} {logoMutation.error.message}</p> : null}
+            {successMessage ? <p className={styles.success} role="status">{successMessage}</p> : null}
+            <div className={styles.actions}>
+              {activeGroup.logoUrl ? (
+                <Button disabled={logoMutation.isPending} leadingIcon={<RotateCcw size={18} />} onClick={() => logoMutation.mutate({ kind: 'remove' })} variant="secondary">
+                  {t('groupSettings.restoreDefault')}
+                </Button>
+              ) : null}
+              <Button disabled={!selectedFile || logoMutation.isPending} leadingIcon={<ImageUp size={18} />} onClick={() => selectedFile && logoMutation.mutate({ kind: 'upload', file: selectedFile })}>
+                {logoMutation.isPending ? t('groupSettings.saving') : t('groupSettings.save')}
               </Button>
-            ) : null}
-            <Button disabled={!selectedFile || logoMutation.isPending} leadingIcon={<ImageUp size={18} />} onClick={() => selectedFile && logoMutation.mutate({ kind: 'upload', file: selectedFile })}>
-              {logoMutation.isPending ? t('groupSettings.saving') : t('groupSettings.save')}
-            </Button>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      </div>
     </div>
   );
 }

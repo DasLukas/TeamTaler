@@ -75,7 +75,7 @@ export function RightsPanel({ selectedMemberId, onSelectedMemberChange }: Rights
         <div className={styles.members}>
           {filteredMembers.map((member) => (
             <button className={member.id === draft.id ? styles.selectedMember : ''} key={member.id} onClick={() => chooseMember(member.id)} type="button">
-              <Avatar name={member.displayName} />
+              <Avatar name={member.displayName} src={member.avatarUrl} />
               <span><strong>{member.displayName}</strong><small>{member.roles.includes('ADMIN') ? t('roles.admin.label') : member.roles.includes('FINANCE_MANAGER') ? t('roles.finance.label') : member.roles.includes('CATALOG_MANAGER') ? t('roles.catalog.label') : t('roles.member')}</small></span>
               {member.id === draft.id ? <ChevronRight aria-hidden="true" size={22} /> : null}
             </button>

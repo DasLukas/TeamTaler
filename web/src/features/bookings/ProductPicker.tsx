@@ -1,8 +1,7 @@
 import Check from 'lucide-react/dist/esm/icons/check';
-import Gavel from 'lucide-react/dist/esm/icons/gavel';
-import GlassWater from 'lucide-react/dist/esm/icons/glass-water';
 import type { Category, Product } from '@/api/types';
 import { formatMoney } from '@/api/money';
+import { CategoryIcon } from '@/features/shared/CategoryIcon';
 import { useTranslation } from 'react-i18next';
 import { getBookableCategories } from './bookable';
 import styles from './ProductPicker.module.css';
@@ -31,11 +30,10 @@ export function ProductPicker({ categories, selectedCategoryId, onCategoryChange
     <div className={styles.picker}>
       <div aria-label={t('booking.categoryTabs')} className={styles.tabs} role="tablist">
         {bookableCategories.map((category) => {
-          const Icon = category.icon === 'drink' ? GlassWater : Gavel;
           const selected = category.id === activeCategory?.id;
           return (
             <button aria-selected={selected} className={selected ? styles.activeTab : ''} key={category.id} onClick={() => onCategoryChange(category.id)} role="tab" type="button">
-              <Icon aria-hidden="true" size={23} strokeWidth={1.8} /> {category.name}
+              <CategoryIcon icon={category.icon} size={23} /> {category.name}
             </button>
           );
         })}

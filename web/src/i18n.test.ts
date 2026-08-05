@@ -10,7 +10,7 @@ describe('German localization resources', () => {
     ['members.csvImport.deliveryWaiting', de.members.csvImport.deliveryWaiting_one, de.members.csvImport.deliveryWaiting_other],
     ['members.csvImport.deliverySent', de.members.csvImport.deliverySent_one, de.members.csvImport.deliverySent_other],
     ['members.csvImport.deliveryFailed', de.members.csvImport.deliveryFailed_one, de.members.csvImport.deliveryFailed_other],
-    ['reports.bookingCount', de.reports.bookingCount_one, de.reports.bookingCount_other],
+    ['dashboard.groupStatistics.bookingCount', de.dashboard.groupStatistics.bookingCount_one, de.dashboard.groupStatistics.bookingCount_other],
   ])('pluralizes %s', (key, singular, plural) => {
     expect(i18n.t(key, { count: 1 })).toBe(singular.replace('{{count}}', '1'));
     expect(i18n.t(key, { count: 2 })).toBe(plural.replace('{{count}}', '2'));

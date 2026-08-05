@@ -70,6 +70,23 @@ function renderInspector(selectedProduct: Product = product): void {
 }
 
 describe('BookingInspector category-neutral booking rules', () => {
+  it('releases the selected product for another booking after showing confirmation', async () => {
+    const user = userEvent.setup();
+    apiMock.createBooking.mockResolvedValue({ id: 'booking-created' });
+    renderInspector();
+
+    await user.click(screen.getByRole('button', { name: i18n.t('booking.increaseQuantity') }));
+    await user.click(screen.getByRole('button', { name: i18n.t('booking.submit') }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent(i18n.t('booking.successTitle'));
+    const releasedSubmit = await screen.findByRole('button', { name: i18n.t('booking.submit') }, { timeout: 2_000 });
+    expect(releasedSubmit).toBeEnabled();
+    expect(screen.getByRole('status')).toHaveTextContent('1');
+
+    await user.click(releasedSubmit);
+    expect(apiMock.createBooking).toHaveBeenCalledTimes(2);
+  });
+
   it('requires a reason for every third-party booking while retaining quantity', async () => {
     const user = userEvent.setup();
     apiMock.createBooking.mockResolvedValue({ id: 'booking-created' });

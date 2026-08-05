@@ -1,4 +1,5 @@
 import type {
+  AccountSummary,
   AuditEntry,
   Booking,
   Category,
@@ -14,6 +15,7 @@ import type {
   Session,
   Settlement,
 } from './types';
+import { isCategoryIcon } from './types';
 import i18n from '@/i18n';
 
 type JsonRecord = Record<string, unknown>;
@@ -21,13 +23,9 @@ type JsonRecord = Record<string, unknown>;
 const asRecord = (value: unknown): JsonRecord => value as JsonRecord;
 const money = (minorUnits: unknown, currency: unknown) => ({ minorUnits: String(minorUnits ?? 0), currency: String(currency || 'EUR') });
 const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('');
-const categoryIcon = (name: string): Category['icon'] => {
-  const normalizedName = name.toLocaleLowerCase('de');
-  if (normalizedName.includes(i18n.t('domain.drinkCategoryKeyword'))) return 'drink';
-  if (normalizedName.includes(i18n.t('domain.penaltyCategoryKeyword'))) return 'penalty';
-  return 'other';
-};
+const categoryIcon = (value: unknown): Category['icon'] => isCategoryIcon(value) ? value : 'other';
 const memberName = (membershipId: string, members?: Membership[], fallback = i18n.t('common.member')) => members?.find((member) => member.id === membershipId)?.displayName ?? fallback;
+const memberAvatarUrl = (membershipId: string, members?: Membership[]) => members?.find((member) => member.id === membershipId)?.avatarUrl;
 const PAYMENT_DESCRIPTION_PREFIX = 'Payment received';
 const REVERSAL_DESCRIPTION_PREFIX = 'Reversal: ';
 
@@ -86,6 +84,7 @@ function ledgerDescription(wire: JsonRecord): string {
  */
 export function adaptSession(input: unknown): Session {
   const source = asRecord(input);
+  const user = asRecord(source.user);
   const groups = (source.groups as unknown[] ?? []).map((entry) => {
     const group = asRecord(entry);
     const membership = group.membership && typeof group.membership === 'object' ? asRecord(group.membership) : undefined;
@@ -98,7 +97,12 @@ export function adaptSession(input: unknown): Session {
     } satisfies Group;
   });
   return {
-    user: source.user as Session['user'],
+    user: {
+      id: String(user.id),
+      displayName: String(user.displayName),
+      email: String(user.email),
+      avatarUrl: typeof user.avatarUrl === 'string' && user.avatarUrl ? user.avatarUrl : undefined,
+    },
     groups,
     activeGroupId: typeof source.activeGroupId === 'string' ? source.activeGroupId : groups[0]?.id ?? '',
     demo: source.demo === true,
@@ -144,7 +148,7 @@ export function adaptCategories(input: unknown): Category[] {
       id: String(source.id),
       version: Number(source.version ?? 1),
       name,
-      icon: typeof source.icon === 'string' ? source.icon as Category['icon'] : categoryIcon(name),
+      icon: categoryIcon(source.icon),
       active: source.active !== false,
       sortOrder: Number(source.sortOrder ?? 0),
       products: (source.products as unknown[] ?? []).map(adaptProduct),
@@ -170,6 +174,7 @@ export function adaptMembership(input: unknown, etag?: string): Membership {
     displayName: String(source.displayName),
     email: String(source.email),
     initials: initials(String(source.displayName)),
+    avatarUrl: typeof source.avatarUrl === 'string' && source.avatarUrl ? source.avatarUrl : undefined,
     roles: [...roles, 'MEMBER'],
     categoryPermissions: Object.entries(grants).map(([categoryId, permissions]) => ({
       categoryId,
@@ -202,7 +207,20 @@ export function adaptMemberships(input: unknown, etag?: string): Membership[] {
  */
 export function adaptBooking(input: unknown, members?: Membership[], fallbackMemberName = i18n.t('common.member')): Booking {
   const source = asRecord(input);
-  if ('bookedAt' in source) return source as unknown as Booking;
+  if ('bookedAt' in source) {
+    const booking = source as unknown as Booking;
+    const target = members?.find((member) => member.id === booking.memberId);
+    const actor = members?.find((member) => booking.bookedByMemberId
+      ? member.id === booking.bookedByMemberId
+      : member.displayName === booking.bookedByName);
+    return {
+      ...booking,
+      memberName: target?.displayName ?? booking.memberName,
+      memberAvatarUrl: target?.avatarUrl ?? booking.memberAvatarUrl,
+      bookedByName: actor?.displayName ?? booking.bookedByName,
+      bookedByAvatarUrl: actor?.avatarUrl ?? booking.bookedByAvatarUrl,
+    };
+  }
   const targetId = String(source.targetMembershipId ?? '');
   const actorId = String(source.actorMembershipId ?? '');
   const createdAt = String(source.createdAt);
@@ -210,6 +228,7 @@ export function adaptBooking(input: unknown, members?: Membership[], fallbackMem
     id: String(source.id),
     memberId: targetId,
     memberName: memberName(targetId, members, fallbackMemberName),
+    memberAvatarUrl: memberAvatarUrl(targetId, members),
     productId: String(source.productId),
     productName: String(source.productName),
     categoryId: String(source.categoryId),
@@ -220,6 +239,7 @@ export function adaptBooking(input: unknown, members?: Membership[], fallbackMem
     bookedAt: createdAt,
     bookedByName: memberName(actorId, members, actorId === targetId ? fallbackMemberName : i18n.t('common.member')),
     bookedByMemberId: actorId || undefined,
+    bookedByAvatarUrl: memberAvatarUrl(actorId, members),
     reason: typeof source.reason === 'string' && source.reason ? source.reason : undefined,
     status: source.voidedAt ? 'REVERSED' : 'POSTED',
     undoUntil: source.canVoid === true ? new Date(new Date(createdAt).getTime() + 30_000).toISOString() : undefined,
@@ -244,12 +264,12 @@ export function adaptDashboard(input: unknown): Dashboard {
     categoryTotals: (account.categoryStatistics as unknown[] ?? []).map((entry) => {
       const statistic = asRecord(entry);
       const name = String(statistic.categoryName);
-      return { categoryId: String(statistic.categoryId), categoryName: name, icon: categoryIcon(name), total: money(statistic.netMinor, account.currency) };
+      return { categoryId: String(statistic.categoryId), categoryName: name, icon: categoryIcon(statistic.icon), total: money(statistic.netMinor, account.currency) };
     }),
     groupCategoryTotals: (account.groupCategoryStatistics as unknown[] ?? []).map((entry) => {
       const statistic = asRecord(entry);
       const name = String(statistic.categoryName);
-      return { categoryId: String(statistic.categoryId), categoryName: name, icon: categoryIcon(name), quantity: Number(statistic.quantity ?? 0), total: money(statistic.netMinor, account.currency) };
+      return { categoryId: String(statistic.categoryId), categoryName: name, icon: categoryIcon(statistic.icon), quantity: Number(statistic.quantity ?? 0), total: money(statistic.netMinor, account.currency) };
     }),
     recentBookings: (source.recentBookings as unknown[] ?? []).map((entry) => adaptBooking(entry)),
   };
@@ -297,6 +317,28 @@ export function adaptLedger(input: unknown): LedgerEntry[] {
       amount: money(amountMinor.toString(), currency),
       balance: money(balance.toString(), currency),
       referenceId: String(wire.bookingId ?? wire.paymentId ?? wire.id),
+    };
+  });
+}
+
+/**
+ * Adapts consolidated group account balances without numeric precision loss.
+ *
+ * @param input - Account-summary array returned by the finance endpoint.
+ * @returns Canonical account summaries with exact money values.
+ */
+export function adaptAccountSummaries(input: unknown): AccountSummary[] {
+  return (input as unknown[] ?? []).map((entry) => {
+    const source = asRecord(entry);
+    const sourceBalance = source.balance && typeof source.balance === 'object' ? asRecord(source.balance) : undefined;
+    const currency = String(source.currency || sourceBalance?.currency || 'EUR');
+    return {
+      membershipId: String(source.membershipId),
+      displayName: String(source.displayName),
+      avatarUrl: typeof source.avatarUrl === 'string' && source.avatarUrl ? source.avatarUrl : undefined,
+      status: source.status === 'ARCHIVED' ? 'ARCHIVED' : 'ACTIVE',
+      currency,
+      balance: sourceBalance ? money(sourceBalance.minorUnits, sourceBalance.currency || currency) : money(source.balanceMinor, currency),
     };
   });
 }

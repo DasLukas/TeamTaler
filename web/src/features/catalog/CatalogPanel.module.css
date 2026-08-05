@@ -1,7 +1,6 @@
-.content { padding: var(--space-8) 0; }
+.content { padding: 0 0 var(--space-8); }
 .header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-5); margin-bottom: var(--space-6); }
-.header h2, .header p { margin: 0; }
-.header p { margin-top: 5px; color: var(--color-muted); }
+.header p { margin: 0; color: var(--color-muted); }
 .header > div:last-child { display: flex; gap: var(--space-3); }
 .categories { display: grid; gap: var(--space-5); }
 .category { border: 1px solid var(--color-border); border-radius: var(--radius-lg); overflow: hidden; }
@@ -20,7 +19,20 @@
 .productEdit { position: absolute; top: var(--space-2); right: var(--space-2); }
 .archived { opacity: 0.6; }
 .emptyProducts { margin: 0; padding: var(--space-6); color: var(--color-muted); }
+.roundAdd {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  color: var(--color-teal-700);
+  border-color: var(--color-teal-700);
+  box-shadow: var(--shadow-sm);
+}
+.roundAdd:hover { color: var(--color-white); background: var(--color-teal-700); }
+.productAdd { display: flex; margin: 0 var(--space-5) var(--space-5) auto; }
+.categoryAdd { justify-self: center; }
 .form { display: grid; gap: var(--space-5); padding: var(--space-4) var(--space-6) var(--space-6); }
+.imageSelection { display: grid; gap: var(--space-2); }
+.imageSelection > button { justify-self: start; }
 .actions { display: flex; justify-content: flex-end; gap: var(--space-3); }
 .hint { margin: 0; color: var(--color-muted); font-size: var(--font-size-sm); line-height: 1.5; }
 .error { color: var(--color-red-600); }

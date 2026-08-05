@@ -14,6 +14,7 @@ import (
 
 	"github.com/DasLukas/TeamTaler/internal/auth"
 	"github.com/DasLukas/TeamTaler/internal/catalog"
+	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/groups"
 	"github.com/DasLukas/TeamTaler/internal/storage"
 )
@@ -43,7 +44,7 @@ func TestCreateAndRestore(t *testing.T) {
 		t.Fatalf("list backup group: groups=%d err=%v", len(groupItems), err)
 	}
 	categoryService := catalog.Service{DB: db}
-	category, err := categoryService.CreateCategory(ctx, session.Principal, groupItems[0].Membership, catalog.CreateCategoryInput{Name: "Drinks"})
+	category, err := categoryService.CreateCategory(ctx, session.Principal, groupItems[0].Membership, catalog.CreateCategoryInput{Name: "Drinks", Icon: domain.CategoryIconDrink})
 	if err != nil {
 		t.Fatalf("create backup category: %v", err)
 	}
@@ -62,6 +63,11 @@ func TestCreateAndRestore(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `UPDATE groups SET logo_key=? WHERE id=?`, logoKey, groupItems[0].ID); err != nil {
 		t.Fatalf("reference backup logo: %v", err)
 	}
+	avatarDigest := sha256.Sum256([]byte("avatar-fixture"))
+	avatarKey := hex.EncodeToString(avatarDigest[:]) + ".png"
+	if _, err := db.ExecContext(ctx, `UPDATE users SET avatar_key=? WHERE id=?`, avatarKey, session.Principal.UserID); err != nil {
+		t.Fatalf("reference backup avatar: %v", err)
+	}
 	if err := os.MkdirAll(filepath.Join(sourceDirectory, "images"), 0o750); err != nil {
 		t.Fatalf("create image directory: %v", err)
 	}
@@ -70,6 +76,9 @@ func TestCreateAndRestore(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(sourceDirectory, "images", logoKey), []byte("logo-fixture"), 0o640); err != nil {
 		t.Fatalf("write logo fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDirectory, "images", avatarKey), []byte("avatar-fixture"), 0o640); err != nil {
+		t.Fatalf("write avatar fixture: %v", err)
 	}
 	archive := filepath.Join(t.TempDir(), "backup.tar.gz")
 	if err := Create(ctx, db, sourceDirectory, archive); err != nil {
@@ -100,6 +109,9 @@ func TestCreateAndRestore(t *testing.T) {
 	}
 	if body, err := os.ReadFile(filepath.Join(restoreDirectory, "images", logoKey)); err != nil || string(body) != "logo-fixture" {
 		t.Fatalf("restored logo=%q err=%v", body, err)
+	}
+	if body, err := os.ReadFile(filepath.Join(restoreDirectory, "images", avatarKey)); err != nil || string(body) != "avatar-fixture" {
+		t.Fatalf("restored avatar=%q err=%v", body, err)
 	}
 	if err := restored.Close(); err != nil {
 		t.Fatalf("close restored database: %v", err)

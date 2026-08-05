@@ -52,6 +52,7 @@ describe('authentication form policies', () => {
     await user.click(screen.getByRole('button', { name: i18n.t('auth.loginAction') }));
     await waitFor(() => expect(mocks.login).toHaveBeenCalled());
     expect(mocks.login.mock.calls[0]?.[0]).toEqual({ email: 'alex@example.test', password: 'short' });
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith({ to: '/book' }));
   });
 
   it('requires 12 characters for a new account and uses a neutral acceptance action', async () => {
@@ -93,6 +94,7 @@ describe('authentication form policies', () => {
     await user.click(screen.getByRole('button', { name: i18n.t('auth.acceptInvitation') }));
 
     await waitFor(() => expect(mocks.acceptInvitation).toHaveBeenCalledWith({ token: 'invite-token', displayName: 'Alex', password: 'existing-pass' }));
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith({ to: '/book' }));
   });
 
   it('pre-fills an invited display name and lets a new account change it', async () => {

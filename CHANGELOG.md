@@ -8,12 +8,26 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ### Added
 
+- A dedicated role-protected catalog workspace with contextual round product and category creation actions.
+- A dedicated role-protected finance workspace with consolidated active and former member balances, exact receivable/credit/net totals, responsive account presentation, payments, and settlements.
+- A finance-manager account-summary endpoint that includes zero balances, preserves full signed 64-bit precision, and remains strictly group-scoped.
+- Self-service profile-image upload and removal with protected delivery plus consistent avatars in member, permission, booking, dashboard, and account views.
+- Administrator-only group-name editing with immediate navigation updates, server validation, and audit logging.
+- Persisted, editable category symbols with an accessible administration picker and consistent booking, dashboard, and report rendering.
 - Per-product fixed or user-defined pricing with currency-aware browser validation, server-enforced booking prices, immutable price snapshots, and demo-mode coverage.
 - Version-aware category and product editing in the administration UI, including archive controls and recoverable product-image replacement.
 - TeamTaler favicon, Apple touch icon, and standard and maskable web-app icons for installed browser applications.
 
 ### Changed
 
+- Limited mobile primary navigation to overview, booking, activities, and overflow for every role; authorized finance and catalog destinations now live exclusively under overflow.
+- Reordered the mobile overflow menu by capability as finance, catalog, administration, account, and logout.
+- Moved category and product management out of administration and added role-aware desktop and overflow catalog navigation while retaining the existing global create actions.
+- Mobile booking confirmation now uses a viewport-attached modal sheet that covers the inactive bottom navigation, respects device safe areas, contains scrolling, and restores focus to the selected product when closed.
+- Moved payment and settlement management out of administration and added role-aware desktop and overflow finance navigation.
+- Dashboard greetings now follow local night, morning, daytime, and evening hours and refresh while the page stays open.
+- Booking activity rows now show compact product thumbnails when a catalogue image is available.
+- Product image selections can now be removed explicitly and are cleared reliably between product form sessions.
 - Manual invitations can now assign an optional display-name suggestion, group roles, and category grants; accepted invitations apply all defaults atomically.
 - Member administration now separates open invitations, active members, and former members, with invitation editing, revocation, token-rotating resend, direct rights navigation, membership archival, and stable-ID reactivation.
 - Invitation acceptance now uses a rate-limited, secret-minimal preview, pre-fills names for new accounts, and preserves the global display name of existing accounts.

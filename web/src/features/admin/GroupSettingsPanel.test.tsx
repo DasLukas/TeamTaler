@@ -9,6 +9,7 @@ import i18n from '@/i18n';
 import { GroupSettingsPanel } from './GroupSettingsPanel';
 
 const apiMock = vi.hoisted(() => ({
+  updateGroupName: vi.fn(),
   uploadGroupLogo: vi.fn(),
   removeGroupLogo: vi.fn(),
 }));
@@ -39,6 +40,24 @@ describe('GroupSettingsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:logo-preview') });
+  });
+
+  it('renames the group and updates the shared session immediately', async () => {
+    const user = userEvent.setup();
+    apiMock.updateGroupName.mockResolvedValue({ name: 'Renamed Group' });
+    const queryClient = renderSettings();
+    const nameInput = screen.getByLabelText(i18n.t('groupSettings.nameLabel'));
+
+    expect(nameInput).toHaveValue('Group A');
+    expect(screen.getByRole('button', { name: i18n.t('groupSettings.nameSave') })).toBeDisabled();
+    await user.clear(nameInput);
+    await user.type(nameInput, '  Renamed Group  ');
+    await user.click(screen.getByRole('button', { name: i18n.t('groupSettings.nameSave') }));
+
+    await waitFor(() => expect(apiMock.updateGroupName).toHaveBeenCalledWith('group-a', 'Renamed Group'));
+    await waitFor(() => expect(queryClient.getQueryData<Session>(['session'])?.groups[0].name).toBe('Renamed Group'));
+    expect(nameInput).toHaveValue('Renamed Group');
+    expect(await screen.findByText(i18n.t('groupSettings.nameSaved'))).toHaveAttribute('role', 'status');
   });
 
   it('keeps local file content out of the preview and saves a supported group logo', async () => {

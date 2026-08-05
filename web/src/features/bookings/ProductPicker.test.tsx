@@ -22,15 +22,17 @@ describe('ProductPicker', () => {
   });
 
   it('announces the active category as selected', () => {
+    const categories = demoCategories.map((category) => category.id === 'category-penalties' ? { ...category, icon: 'sport' as const } : category);
     render(
       <ProductPicker
-        categories={demoCategories}
+        categories={categories}
         onCategoryChange={vi.fn()}
         onProductSelect={vi.fn()}
         selectedCategoryId="category-penalties"
       />,
     );
     expect(screen.getByRole('tab', { name: demoCategories[1].name })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: demoCategories[1].name }).querySelector('[data-category-icon="sport"]')).not.toBeNull();
     expect(screen.getByRole('button', { name: new RegExp(`${demoCategories[1].products[1].name}.*${i18n.t('booking.enterPrice')}`, 'i') })).toBeVisible();
   });
 

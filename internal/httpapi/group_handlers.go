@@ -50,6 +50,31 @@ func (s *Server) handleCreateGroup(response http.ResponseWriter, request *http.R
 	writeJSON(response, http.StatusCreated, item)
 }
 
+// handleUpdateGroup authorizes an administrator and updates the normalized
+// group name. response receives the persisted name or Problem Details; request
+// supplies session, CSRF-checked context, groupID, and JSON input. The method
+// returns no Go value.
+func (s *Server) handleUpdateGroup(response http.ResponseWriter, request *http.Request) {
+	principal, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	var input struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(response, request, &input); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	name, err := s.groups.UpdateName(request.Context(), principal, membership, input.Name)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]string{"name": name})
+}
+
 // handleGroupLogo authorizes an administrator, normalizes one multipart image,
 // and attaches it to the group in the request path. response receives either a
 // logoUrl JSON object or Problem Details; request supplies session, CSRF-checked

@@ -81,7 +81,7 @@ func (f *fixture) inviteMember(email, name string, roles []domain.Role) (domain.
 
 func (f *fixture) catalogItem(categoryName string, price int64) (domain.Category, domain.Product) {
 	f.t.Helper()
-	category, err := f.catalog.CreateCategory(f.ctx, f.admin, f.membership, catalog.CreateCategoryInput{Name: categoryName})
+	category, err := f.catalog.CreateCategory(f.ctx, f.admin, f.membership, catalog.CreateCategoryInput{Name: categoryName, Icon: domain.CategoryIconOther})
 	if err != nil {
 		f.t.Fatalf("create category: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestBootstrapLoginInvitationReplayAndTenantRBAC(t *testing.T) {
 	if _, err := f.groups.Create(f.ctx, f.admin, "Invalid Currency", "EU1"); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("invalid currency error = %v, want validation", err)
 	}
-	category, err := f.catalog.CreateCategory(f.ctx, f.admin, f.membership, catalog.CreateCategoryInput{Name: "Idempotent Products"})
+	category, err := f.catalog.CreateCategory(f.ctx, f.admin, f.membership, catalog.CreateCategoryInput{Name: "Idempotent Products", Icon: domain.CategoryIconOther})
 	if err != nil {
 		t.Fatalf("create idempotency category: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestBootstrapLoginInvitationReplayAndTenantRBAC(t *testing.T) {
 	if _, _, err := f.auth.AcceptInvitation(f.ctx, auth.InvitationAcceptance{Token: invitationToken, DisplayName: "Replay", Password: testPassword}); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("invitation replay error = %v, want not found", err)
 	}
-	if _, err := f.catalog.CreateCategory(f.ctx, memberPrincipal, member, catalog.CreateCategoryInput{Name: "Forbidden"}); !errors.Is(err, domain.ErrForbidden) {
+	if _, err := f.catalog.CreateCategory(f.ctx, memberPrincipal, member, catalog.CreateCategoryInput{Name: "Forbidden", Icon: domain.CategoryIconOther}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("catalog RBAC error = %v, want forbidden", err)
 	}
 	if err := f.groups.UpdatePermissions(f.ctx, f.admin, f.membership, f.membership.ID, groups.PermissionUpdate{}); !errors.Is(err, domain.ErrConflict) {
@@ -153,6 +153,148 @@ func TestBootstrapLoginInvitationReplayAndTenantRBAC(t *testing.T) {
 	}
 	if err := f.groups.UpdatePermissions(f.ctx, f.admin, secondGroup.Membership, member.ID, groups.PermissionUpdate{Roles: []domain.Role{domain.RoleFinanceManager}}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("cross-tenant permission update error = %v, want forbidden", err)
+	}
+}
+
+func TestFinanceAccountSummariesEnforceRolesAndTenantIsolation(t *testing.T) {
+	f := newFixture(t)
+	_, financeMember, _ := f.inviteMember("finance@example.test", "Finance Manager", []domain.Role{domain.RoleFinanceManager})
+	_, regularMember, _ := f.inviteMember("regular@example.test", "Regular Member", nil)
+	_, catalogMember, _ := f.inviteMember("catalog@example.test", "Catalog Manager", []domain.Role{domain.RoleCatalogManager})
+	_, archivedMember, _ := f.inviteMember("former@example.test", "Former Member", nil)
+	if err := f.groups.ArchiveMember(f.ctx, f.admin, f.membership, archivedMember.ID, false); err != nil {
+		t.Fatalf("archive account summary member: %v", err)
+	}
+
+	periodID := f.openPeriodID()
+	entries := []struct {
+		id           string
+		membershipID string
+		amount       int64
+	}{
+		{id: "led-summary-admin", membershipID: f.membership.ID, amount: 9_007_199_254_740_993},
+		{id: "led-summary-catalog", membershipID: catalogMember.ID, amount: 350},
+		{id: "led-summary-regular", membershipID: regularMember.ID, amount: -200},
+		{id: "led-summary-archived", membershipID: archivedMember.ID, amount: 75},
+	}
+	for _, entry := range entries {
+		if _, err := f.db.ExecContext(f.ctx, `INSERT INTO ledger_entries(id,group_id,period_id,membership_id,account,amount_minor,description,created_at)
+			VALUES(?,?,?,?,'MEMBER_RECEIVABLE',?,'Account summary fixture','2026-08-05T00:00:00Z')`, entry.id, f.group.ID, periodID, entry.membershipID, entry.amount); err != nil {
+			t.Fatalf("insert account summary entry %s: %v", entry.id, err)
+		}
+	}
+
+	if _, err := f.finance.ListAccountSummaries(f.ctx, regularMember); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("regular account summary access error = %v, want forbidden", err)
+	}
+	if _, err := f.finance.ListAccountSummaries(f.ctx, catalogMember); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("catalog account summary access error = %v, want forbidden", err)
+	}
+	financeSummaries, err := f.finance.ListAccountSummaries(f.ctx, financeMember)
+	if err != nil {
+		t.Fatalf("finance-manager account summaries: %v", err)
+	}
+	adminSummaries, err := f.finance.ListAccountSummaries(f.ctx, f.membership)
+	if err != nil {
+		t.Fatalf("administrator account summaries: %v", err)
+	}
+	if len(financeSummaries) != 5 || len(adminSummaries) != len(financeSummaries) {
+		t.Fatalf("account summary counts finance=%d admin=%d, want 5", len(financeSummaries), len(adminSummaries))
+	}
+	wantBalances := map[string]int64{
+		f.membership.ID:   9_007_199_254_740_993,
+		financeMember.ID:  0,
+		regularMember.ID:  -200,
+		catalogMember.ID:  350,
+		archivedMember.ID: 75,
+	}
+	for _, summary := range financeSummaries {
+		if summary.BalanceMinor != wantBalances[summary.MembershipID] {
+			t.Fatalf("balance for %s = %d, want %d", summary.MembershipID, summary.BalanceMinor, wantBalances[summary.MembershipID])
+		}
+		if summary.MembershipID == archivedMember.ID && summary.Status != "ARCHIVED" {
+			t.Fatalf("archived status = %q, want ARCHIVED", summary.Status)
+		}
+	}
+	if financeSummaries[0].MembershipID != f.membership.ID || financeSummaries[len(financeSummaries)-1].MembershipID != archivedMember.ID {
+		t.Fatalf("account summary ordering = %#v", financeSummaries)
+	}
+
+	secondGroup, err := f.groups.Create(f.ctx, f.admin, "Tenant Two Finance", "EUR")
+	if err != nil {
+		t.Fatalf("create second finance tenant: %v", err)
+	}
+	var secondPeriodID string
+	if err := f.db.QueryRowContext(f.ctx, `SELECT id FROM periods WHERE group_id=? AND status='OPEN'`, secondGroup.ID).Scan(&secondPeriodID); err != nil {
+		t.Fatalf("read second tenant period: %v", err)
+	}
+	if _, err := f.db.ExecContext(f.ctx, `INSERT INTO ledger_entries(id,group_id,period_id,membership_id,account,amount_minor,description,created_at)
+		VALUES('led-summary-second-tenant',?,?,?,'MEMBER_RECEIVABLE',999,'Tenant fixture','2026-08-05T00:00:00Z')`, secondGroup.ID, secondPeriodID, secondGroup.Membership.ID); err != nil {
+		t.Fatalf("insert second tenant account summary: %v", err)
+	}
+	secondSummaries, err := f.finance.ListAccountSummaries(f.ctx, secondGroup.Membership)
+	if err != nil || len(secondSummaries) != 1 || secondSummaries[0].BalanceMinor != 999 {
+		t.Fatalf("second tenant summaries = %#v, err=%v", secondSummaries, err)
+	}
+}
+
+func TestDefaultOpenPeriodLabels(t *testing.T) {
+	f := newFixture(t)
+	var bootstrapLabel string
+	if err := f.db.QueryRowContext(f.ctx, `SELECT label FROM periods WHERE group_id=? AND status='OPEN'`, f.group.ID).Scan(&bootstrapLabel); err != nil || bootstrapLabel != domain.DefaultOpenPeriodLabel {
+		t.Fatalf("bootstrap open period label = %q err=%v, want %q", bootstrapLabel, err, domain.DefaultOpenPeriodLabel)
+	}
+	secondGroup, err := f.groups.Create(f.ctx, f.admin, "Second Team", "EUR")
+	if err != nil {
+		t.Fatalf("create second group: %v", err)
+	}
+	var createdLabel string
+	if err := f.db.QueryRowContext(f.ctx, `SELECT label FROM periods WHERE group_id=? AND status='OPEN'`, secondGroup.ID).Scan(&createdLabel); err != nil || createdLabel != domain.DefaultOpenPeriodLabel {
+		t.Fatalf("created group open period label = %q err=%v, want %q", createdLabel, err, domain.DefaultOpenPeriodLabel)
+	}
+	closed, err := f.periods.Close(f.ctx, f.admin, f.membership, "default-period-label", f.openPeriodID(), periods.CloseInput{Label: "Initial period", DueAt: "2099-01-01"})
+	if err != nil {
+		t.Fatalf("close period with default successor label: %v", err)
+	}
+	if closed.OpenPeriod.Label != domain.DefaultOpenPeriodLabel {
+		t.Fatalf("successor period label = %q, want %q", closed.OpenPeriod.Label, domain.DefaultOpenPeriodLabel)
+	}
+}
+
+func TestCategoryIconCreationUpdateAndValidation(t *testing.T) {
+	f := newFixture(t)
+	category, err := f.catalog.CreateCategory(f.ctx, f.admin, f.membership, catalog.CreateCategoryInput{
+		Name: "Team events", Icon: domain.CategoryIconEvent, SortOrder: 4,
+	})
+	if err != nil {
+		t.Fatalf("create category with icon: %v", err)
+	}
+	if category.Icon != domain.CategoryIconEvent {
+		t.Fatalf("created category icon = %q, want %q", category.Icon, domain.CategoryIconEvent)
+	}
+
+	updated, err := f.catalog.UpdateCategory(f.ctx, f.admin, f.membership, category.ID, catalog.UpdateCategoryInput{
+		Name: category.Name, Icon: domain.CategoryIconSport, Active: true, SortOrder: category.SortOrder, Version: category.Version,
+	})
+	if err != nil {
+		t.Fatalf("update category icon: %v", err)
+	}
+	if updated.Icon != domain.CategoryIconSport || updated.Version != category.Version+1 {
+		t.Fatalf("updated category = %#v", updated)
+	}
+
+	listed, err := f.catalog.List(f.ctx, f.group.ID)
+	if err != nil || len(listed) != 1 || listed[0].Icon != domain.CategoryIconSport {
+		t.Fatalf("listed categories = %#v, err=%v", listed, err)
+	}
+	account, err := f.finance.Account(f.ctx, f.membership, f.membership.ID)
+	if err != nil || len(account.CategoryStats) != 1 || account.CategoryStats[0].Icon != domain.CategoryIconSport {
+		t.Fatalf("category statistics = %#v, err=%v", account.CategoryStats, err)
+	}
+	if _, err := f.catalog.CreateCategory(f.ctx, f.admin, f.membership, catalog.CreateCategoryInput{
+		Name: "Unsafe icon", Icon: domain.CategoryIcon("<script>"),
+	}); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("unsupported category icon error = %v, want validation", err)
 	}
 }
 
@@ -301,7 +443,7 @@ func TestBookingUndoAssignmentValidationAndBalancedLedger(t *testing.T) {
 
 func TestUserDefinedProductPricingIsValidatedAndSnapshotted(t *testing.T) {
 	f := newFixture(t)
-	category, err := f.catalog.CreateCategory(f.ctx, f.admin, f.membership, catalog.CreateCategoryInput{Name: "Flexible charges"})
+	category, err := f.catalog.CreateCategory(f.ctx, f.admin, f.membership, catalog.CreateCategoryInput{Name: "Flexible charges", Icon: domain.CategoryIconMoney})
 	if err != nil {
 		t.Fatalf("create flexible category: %v", err)
 	}

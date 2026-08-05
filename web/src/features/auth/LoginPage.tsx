@@ -4,6 +4,7 @@ import { useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { api, isDevelopmentDemoEnabled } from '@/api/client';
 import type { LoginCommand } from '@/api/types';
+import { memberPaths } from '@/app/paths';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
 import { AuthLayout } from './AuthLayout';
@@ -23,7 +24,7 @@ export function LoginPage() {
     mutationFn: api.login,
     onSuccess: async (session) => {
       queryClient.setQueryData(['session'], session);
-      await navigate({ to: '/' });
+      await navigate({ to: memberPaths.booking });
     },
   });
 

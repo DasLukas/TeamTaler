@@ -59,7 +59,7 @@ function renderCatalog(): void {
   render(<CatalogPanel />, { wrapper });
 }
 
-describe('CatalogPanel product image recovery', () => {
+describe('CatalogPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     apiMock.getCategories.mockResolvedValue([category]);
@@ -69,18 +69,19 @@ describe('CatalogPanel product image recovery', () => {
     apiMock.updateProduct.mockResolvedValue({ ...createdProduct, version: 2 });
   });
 
-  it('creates a category from its name without a secondary type', async () => {
+  it('creates a category with a selected icon', async () => {
     const user = userEvent.setup();
     renderCatalog();
 
-    await screen.findByText(i18n.t('catalog.title'));
+    await screen.findByText(i18n.t('catalog.intro'));
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.categoryAction') }));
 
     expect(within(screen.getByRole('dialog')).queryByRole('combobox')).not.toBeInTheDocument();
     await user.type(screen.getByLabelText(i18n.t('common.name')), 'Team events');
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.categoryIcons.event') }));
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.createCategoryAction') }));
 
-    await waitFor(() => expect(apiMock.createCategory).toHaveBeenCalledWith('group-a', { name: 'Team events' }));
+    await waitFor(() => expect(apiMock.createCategory).toHaveBeenCalledWith('group-a', { name: 'Team events', icon: 'event' }));
   });
 
   it('keeps the created product and retries only its image after upload failure', async () => {
@@ -92,7 +93,7 @@ describe('CatalogPanel product image recovery', () => {
       .mockResolvedValueOnce({ imageUrl: '/api/v1/groups/group-a/products/product-created/image' });
     renderCatalog();
 
-    await screen.findByText(i18n.t('catalog.title'));
+    await screen.findByText(i18n.t('catalog.intro'));
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.productAction') }));
     await user.type(screen.getByLabelText(i18n.t('catalog.productName')), createdProduct.name);
     await user.type(screen.getByLabelText(i18n.t('catalog.price', { currency: 'EUR' })), '1,00');
@@ -113,12 +114,55 @@ describe('CatalogPanel product image recovery', () => {
     expect(apiMock.uploadProductImage).toHaveBeenNthCalledWith(2, 'group-a', createdProduct.id, replacementImage);
   });
 
+  it('removes a selected image from the product form before creation', async () => {
+    const user = userEvent.setup();
+    const image = new File(['selected'], 'selected.png', { type: 'image/png' });
+    renderCatalog();
+
+    await screen.findByText(i18n.t('catalog.intro'));
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.productAction') }));
+    await user.upload(screen.getByLabelText(i18n.t('catalog.image')), image);
+
+    expect(screen.getByLabelText(i18n.t('catalog.image'))).toHaveValue('C:\\fakepath\\selected.png');
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.removeSelectedImage') }));
+    expect(screen.getByLabelText(i18n.t('catalog.image'))).toHaveValue('');
+    expect(screen.queryByRole('button', { name: i18n.t('catalog.removeSelectedImage') })).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText(i18n.t('catalog.productName')), createdProduct.name);
+    await user.type(screen.getByLabelText(i18n.t('catalog.price', { currency: 'EUR' })), '1,00');
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.createProductAction') }));
+
+    await waitFor(() => expect(apiMock.createProduct).toHaveBeenCalledTimes(1));
+    expect(apiMock.uploadProductImage).not.toHaveBeenCalled();
+  });
+
+  it('clears the native file input before another product is created', async () => {
+    const user = userEvent.setup();
+    const image = new File(['first'], 'first.png', { type: 'image/png' });
+    apiMock.uploadProductImage.mockResolvedValue({ imageUrl: '/api/v1/groups/group-a/products/product-created/image' });
+    renderCatalog();
+
+    await screen.findByText(i18n.t('catalog.intro'));
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.productAction') }));
+    await user.type(screen.getByLabelText(i18n.t('catalog.productName')), createdProduct.name);
+    await user.type(screen.getByLabelText(i18n.t('catalog.price', { currency: 'EUR' })), '1,00');
+    await user.upload(screen.getByLabelText(i18n.t('catalog.image')), image);
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.createProductAction') }));
+
+    await waitFor(() => expect(apiMock.uploadProductImage).toHaveBeenCalledWith('group-a', createdProduct.id, image));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.productAction') }));
+
+    expect(screen.getByLabelText(i18n.t('catalog.image'))).toHaveValue('');
+    expect(screen.queryByRole('button', { name: i18n.t('catalog.removeSelectedImage') })).not.toBeInTheDocument();
+  });
+
   it('creates a user-defined-price product without a catalog price', async () => {
     const user = userEvent.setup();
     apiMock.createProduct.mockResolvedValue({ ...createdProduct, pricingMode: 'USER_DEFINED', price: undefined });
     renderCatalog();
 
-    await screen.findByText(i18n.t('catalog.title'));
+    await screen.findByText(i18n.t('catalog.intro'));
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.productAction') }));
     await user.type(screen.getByLabelText(i18n.t('catalog.productName')), 'Donation');
     await user.selectOptions(screen.getByLabelText(i18n.t('catalog.pricingMode')), 'USER_DEFINED');
@@ -138,17 +182,20 @@ describe('CatalogPanel product image recovery', () => {
     const user = userEvent.setup();
     renderCatalog();
 
-    await screen.findByText(i18n.t('catalog.title'));
+    await screen.findByText(i18n.t('catalog.intro'));
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.editCategory', { name: category.name }) }));
     const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByRole('button', { name: i18n.t('catalog.categoryIcons.drink') })).toHaveAttribute('aria-pressed', 'true');
     const name = within(dialog).getByLabelText(i18n.t('common.name'));
     await user.clear(name);
     await user.type(name, 'Team drinks');
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('catalog.categoryIcons.sport') }));
     await user.selectOptions(within(dialog).getByLabelText(i18n.t('common.status')), 'archived');
     await user.click(within(dialog).getByRole('button', { name: i18n.t('common.save') }));
 
     await waitFor(() => expect(apiMock.updateCategory).toHaveBeenCalledWith('group-a', category.id, {
       name: 'Team drinks',
+      icon: 'sport',
       active: false,
       sortOrder: 2,
       version: 3,
@@ -179,5 +226,18 @@ describe('CatalogPanel product image recovery', () => {
       sortOrder: 4,
       version: 6,
     }));
+  });
+
+  it('offers contextual round create actions and preselects their category', async () => {
+    const user = userEvent.setup();
+    const secondCategory: Category = { ...category, id: 'category-b', name: 'Snacks', sortOrder: 3 };
+    apiMock.getCategories.mockResolvedValue([category, secondCategory]);
+    renderCatalog();
+
+    await screen.findByText(i18n.t('catalog.intro'));
+    expect(screen.getByRole('button', { name: i18n.t('catalog.addCategoryAfterList') })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.addProductToCategory', { name: secondCategory.name }) }));
+
+    expect(screen.getByLabelText(i18n.t('common.category'))).toHaveValue(secondCategory.id);
   });
 });

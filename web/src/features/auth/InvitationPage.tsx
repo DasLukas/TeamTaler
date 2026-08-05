@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
+import { memberPaths } from '@/app/paths';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
 import { AuthLayout } from './AuthLayout';
@@ -45,7 +46,7 @@ export function InvitationPage() {
       queryClient.setQueryData(['session'], session);
       queryClient.removeQueries({ queryKey: ['invitation-preview'] });
       window.history.replaceState(null, '', '/invite');
-      await navigate({ to: '/' });
+      await navigate({ to: memberPaths.booking });
     },
   });
 
