@@ -12,6 +12,7 @@ import (
 
 	"github.com/DasLukas/TeamTaler/internal/audit"
 	"github.com/DasLukas/TeamTaler/internal/domain"
+	"github.com/DasLukas/TeamTaler/internal/media"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/storage"
 )
@@ -134,7 +135,7 @@ func (s Service) Bootstrap(ctx context.Context, email, displayName, password, gr
 			{`INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES(?,?,?,?,?)`, []any{groupID, groupName, currency, now, now}},
 			{`INSERT INTO memberships(id,group_id,user_id,status,joined_at) VALUES(?,?,?,'ACTIVE',?)`, []any{membershipID, groupID, userID, now}},
 			{`INSERT INTO membership_roles(group_id,membership_id,role,granted_at,granted_by) VALUES(?,?,'ADMIN',?,?)`, []any{groupID, membershipID, now, userID}},
-			{`INSERT INTO periods(id,group_id,label,status,starts_at,created_at) VALUES(?,?,?,'OPEN',?,?)`, []any{periodID, groupID, "Current period", now, now}},
+			{`INSERT INTO periods(id,group_id,label,status,starts_at,created_at) VALUES(?,?,?,'OPEN',?,?)`, []any{periodID, groupID, domain.DefaultOpenPeriodLabel, now, now}},
 		}
 		for _, statement := range statements {
 			if _, err := tx.ExecContext(ctx, statement.query, statement.args...); err != nil {
@@ -157,8 +158,9 @@ func (s Service) Login(ctx context.Context, email, password string) (Session, er
 	}
 	var principal domain.Principal
 	var passwordHash string
-	err := s.DB.QueryRowContext(ctx, `SELECT id,email,display_name,password_hash FROM users WHERE email=? AND active=1`, email).
-		Scan(&principal.UserID, &principal.Email, &principal.DisplayName, &passwordHash)
+	var avatarKey sql.NullString
+	err := s.DB.QueryRowContext(ctx, `SELECT id,email,display_name,password_hash,avatar_key FROM users WHERE email=? AND active=1`, email).
+		Scan(&principal.UserID, &principal.Email, &principal.DisplayName, &passwordHash, &avatarKey)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return Session{}, err
 	}
@@ -169,6 +171,7 @@ func (s Service) Login(ctx context.Context, email, password string) (Session, er
 		}
 		return Session{}, domain.ErrUnauthenticated
 	}
+	principal.AvatarURL = media.UserAvatarURL(principal.UserID, avatarKey.String)
 	return s.createSession(ctx, principal)
 }
 
@@ -208,9 +211,10 @@ func (s Service) AcceptInvitation(ctx context.Context, input InvitationAcceptanc
 		}
 		var principal domain.Principal
 		var passwordHash string
+		var avatarKey sql.NullString
 		existingUser := true
-		err = tx.QueryRowContext(ctx, `SELECT id,email,display_name,password_hash FROM users WHERE email=? AND active=1`, email).
-			Scan(&principal.UserID, &principal.Email, &principal.DisplayName, &passwordHash)
+		err = tx.QueryRowContext(ctx, `SELECT id,email,display_name,password_hash,avatar_key FROM users WHERE email=? AND active=1`, email).
+			Scan(&principal.UserID, &principal.Email, &principal.DisplayName, &passwordHash, &avatarKey)
 		if errors.Is(err, sql.ErrNoRows) {
 			existingUser = false
 			if input.DisplayName == "" {
@@ -233,6 +237,7 @@ func (s Service) AcceptInvitation(ctx context.Context, input InvitationAcceptanc
 		} else if !VerifyPassword(passwordHash, input.Password) {
 			return domain.ErrUnauthenticated
 		}
+		principal.AvatarURL = media.UserAvatarURL(principal.UserID, avatarKey.String)
 		var roles []domain.Role
 		if err := json.Unmarshal([]byte(encodedRoles), &roles); err != nil {
 			return fmt.Errorf("decode invitation roles: %w", err)
@@ -355,7 +360,7 @@ func (s Service) AcceptInvitation(ctx context.Context, input InvitationAcceptanc
 		principal.SessionHash = platform.HashSecret(token)
 		principal.CSRFToken = csrf
 		session = Session{Token: token, CSRFToken: csrf, ExpiresAt: sessionExpires, Principal: principal}
-		membership = domain.Membership{ID: membershipID, GroupID: groupID, UserID: principal.UserID, Email: principal.Email, DisplayName: principal.DisplayName, Status: "ACTIVE", Roles: roles, CategoryGrants: categoryGrants}
+		membership = domain.Membership{ID: membershipID, GroupID: groupID, UserID: principal.UserID, Email: principal.Email, DisplayName: principal.DisplayName, AvatarURL: principal.AvatarURL, Status: "ACTIVE", Roles: roles, CategoryGrants: categoryGrants}
 		return audit.Record(ctx, tx, groupID, principal.UserID, membershipID, "invitation.accepted", "invitation", invitationID, map[string]any{"existingUser": existingUser, "reactivated": reactivated})
 	})
 	return session, membership, err
@@ -403,17 +408,19 @@ func (s Service) Authenticate(ctx context.Context, token, csrfToken string) (dom
 	}
 	var principal domain.Principal
 	var csrfHash, expiresAt, lastSeenAt string
+	var avatarKey sql.NullString
 	principal.SessionHash = platform.HashSecret(token)
-	err := s.DB.QueryRowContext(ctx, `SELECT u.id,u.email,u.display_name,s.csrf_hash,s.expires_at,s.last_seen_at
+	err := s.DB.QueryRowContext(ctx, `SELECT u.id,u.email,u.display_name,u.avatar_key,s.csrf_hash,s.expires_at,s.last_seen_at
 		FROM sessions s JOIN users u ON u.id=s.user_id
 		WHERE s.id_hash=? AND u.active=1`, principal.SessionHash).
-		Scan(&principal.UserID, &principal.Email, &principal.DisplayName, &csrfHash, &expiresAt, &lastSeenAt)
+		Scan(&principal.UserID, &principal.Email, &principal.DisplayName, &avatarKey, &csrfHash, &expiresAt, &lastSeenAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Principal{}, domain.ErrUnauthenticated
 	}
 	if err != nil {
 		return domain.Principal{}, err
 	}
+	principal.AvatarURL = media.UserAvatarURL(principal.UserID, avatarKey.String)
 	now := platform.Now()
 	expires, err := time.Parse(time.RFC3339Nano, expiresAt)
 	if err != nil || !expires.After(now) {
@@ -428,6 +435,48 @@ func (s Service) Authenticate(ctx context.Context, token, csrfToken string) (dom
 		_, _ = s.DB.ExecContext(ctx, `UPDATE sessions SET last_seen_at=? WHERE id_hash=?`, platform.Timestamp(now), principal.SessionHash)
 	}
 	return principal, nil
+}
+
+// SetAvatar attaches an already normalized image to the authenticated account.
+// The context bounds the atomic user update, actor selects the account, and
+// imageKey must be a valid content-addressed PNG key. It returns the protected
+// image URL, the detached previous key, or validation and storage errors.
+func (s Service) SetAvatar(ctx context.Context, actor domain.Principal, imageKey string) (string, string, error) {
+	if !media.ValidImageKey(imageKey) {
+		return "", "", domain.ValidationError{Field: "image", Message: "has an invalid storage key"}
+	}
+	var replacedKey string
+	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		var previous sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT avatar_key FROM users WHERE id=? AND active=1`, actor.UserID).Scan(&previous); errors.Is(err, sql.ErrNoRows) {
+			return domain.ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		replacedKey = previous.String
+		_, err := tx.ExecContext(ctx, `UPDATE users SET avatar_key=?,updated_at=? WHERE id=?`, imageKey, platform.Timestamp(platform.Now()), actor.UserID)
+		return err
+	})
+	return media.UserAvatarURL(actor.UserID, imageKey), replacedKey, err
+}
+
+// RemoveAvatar clears the authenticated account's profile image. The context
+// bounds the atomic update and actor selects the account. It returns the
+// detached content key or not-found and storage errors.
+func (s Service) RemoveAvatar(ctx context.Context, actor domain.Principal) (string, error) {
+	var removedKey string
+	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		var previous sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT avatar_key FROM users WHERE id=? AND active=1`, actor.UserID).Scan(&previous); errors.Is(err, sql.ErrNoRows) {
+			return domain.ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		removedKey = previous.String
+		_, err := tx.ExecContext(ctx, `UPDATE users SET avatar_key=NULL,updated_at=? WHERE id=?`, platform.Timestamp(platform.Now()), actor.UserID)
+		return err
+	})
+	return removedKey, err
 }
 
 // Logout revokes sessionHash immediately within ctx. An empty hash is a

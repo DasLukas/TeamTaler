@@ -13,7 +13,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/storage"
 )
 
-func TestSetAndRemoveGroupLogo(t *testing.T) {
+func TestUpdateGroupSettings(t *testing.T) {
 	ctx := context.Background()
 	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), "teamtaler.db"))
 	if err != nil {
@@ -34,6 +34,28 @@ func TestSetAndRemoveGroupLogo(t *testing.T) {
 		t.Fatalf("list groups: groups=%d err=%v", len(items), err)
 	}
 	group := items[0]
+	updatedName, err := service.UpdateName(ctx, session.Principal, group.Membership, "  Renamed Group  ")
+	if err != nil || updatedName != "Renamed Group" {
+		t.Fatalf("update group name: name=%q err=%v", updatedName, err)
+	}
+	items, err = service.List(ctx, session.Principal.UserID)
+	if err != nil || items[0].Name != "Renamed Group" {
+		t.Fatalf("listed group name = %q err=%v", items[0].Name, err)
+	}
+	var auditCount int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM audit_events WHERE group_id=? AND action='group.name.updated'`, group.ID).Scan(&auditCount); err != nil || auditCount != 1 {
+		t.Fatalf("group-name audit count = %d err=%v", auditCount, err)
+	}
+	unauthorized := group.Membership
+	unauthorized.Roles = nil
+	if _, err := service.UpdateName(ctx, session.Principal, unauthorized, "Forbidden Name"); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("non-admin update name error = %v, want forbidden", err)
+	}
+	for _, invalidName := range []string{"", "Invalid\nName", strings.Repeat("a", 121)} {
+		if _, err := service.UpdateName(ctx, session.Principal, group.Membership, invalidName); !errors.Is(err, domain.ErrValidation) {
+			t.Fatalf("invalid group name %q error = %v, want validation", invalidName, err)
+		}
+	}
 	imageKey := strings.Repeat("a", 64) + ".png"
 	logoURL, replacedKey, err := service.SetLogo(ctx, session.Principal, group.Membership, imageKey)
 	if err != nil || replacedKey != "" {
@@ -47,8 +69,6 @@ func TestSetAndRemoveGroupLogo(t *testing.T) {
 	if err != nil || items[0].LogoURL != wantURL {
 		t.Fatalf("listed logo URL = %q err=%v", items[0].LogoURL, err)
 	}
-	unauthorized := group.Membership
-	unauthorized.Roles = nil
 	if _, _, err := service.SetLogo(ctx, session.Principal, unauthorized, strings.Repeat("b", 64)+".png"); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("non-admin set logo error = %v, want forbidden", err)
 	}

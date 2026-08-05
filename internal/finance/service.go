@@ -16,6 +16,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/groups"
 	"github.com/DasLukas/TeamTaler/internal/idempotency"
 	"github.com/DasLukas/TeamTaler/internal/ledger"
+	"github.com/DasLukas/TeamTaler/internal/media"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/storage"
 )
@@ -30,12 +31,13 @@ type Service struct {
 // CategoryStatistic summarizes current-period booking and reversal totals for a
 // category without exposing other member identities.
 type CategoryStatistic struct {
-	CategoryID   string `json:"categoryId"`
-	CategoryName string `json:"categoryName"`
-	Quantity     int64  `json:"quantity"`
-	GrossMinor   int64  `json:"grossMinor,string"`
-	VoidedMinor  int64  `json:"voidedMinor,string"`
-	NetMinor     int64  `json:"netMinor,string"`
+	CategoryID   string              `json:"categoryId"`
+	CategoryName string              `json:"categoryName"`
+	Icon         domain.CategoryIcon `json:"icon"`
+	Quantity     int64               `json:"quantity"`
+	GrossMinor   int64               `json:"grossMinor,string"`
+	VoidedMinor  int64               `json:"voidedMinor,string"`
+	NetMinor     int64               `json:"netMinor,string"`
 }
 
 // Account is the current consolidated account for a member, combining the
@@ -50,6 +52,17 @@ type Account struct {
 	CategoryStats      []CategoryStatistic `json:"categoryStatistics"`
 	GroupCategoryStats []CategoryStatistic `json:"groupCategoryStatistics"`
 	RecentEntries      []LedgerEntry       `json:"recentEntries"`
+}
+
+// AccountSummary exposes one group membership's consolidated receivable to
+// authorized finance managers without returning its ledger movements.
+type AccountSummary struct {
+	MembershipID string `json:"membershipId"`
+	DisplayName  string `json:"displayName"`
+	AvatarURL    string `json:"avatarUrl,omitempty"`
+	Status       string `json:"status"`
+	Currency     string `json:"currency"`
+	BalanceMinor int64  `json:"balanceMinor,string"`
 }
 
 // LedgerEntry is one immutable movement on a member receivable account. Positive
@@ -106,7 +119,7 @@ func (s Service) Account(ctx context.Context, membership domain.Membership, targ
 		membership.GroupID, account.OpenPeriodID, targetMembershipID).Scan(&account.OpenPeriodDue); err != nil {
 		return Account{}, err
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT c.id,c.name,
+	rows, err := s.DB.QueryContext(ctx, `SELECT c.id,c.name,c.icon,
 		coalesce((SELECT sum(b.quantity) FROM bookings b WHERE b.category_id=c.id AND b.target_membership_id=? AND b.period_id=? AND b.voided_at IS NULL),0),
 		coalesce((SELECT sum(b.total_minor) FROM bookings b WHERE b.category_id=c.id AND b.target_membership_id=? AND b.period_id=?),0),
 		coalesce(-(SELECT sum(le.amount_minor) FROM ledger_entries le WHERE le.category_id=c.id AND le.membership_id=? AND le.period_id=? AND le.account='MEMBER_RECEIVABLE' AND le.reversal_of IS NOT NULL AND le.amount_minor<0),0),
@@ -120,7 +133,7 @@ func (s Service) Account(ctx context.Context, membership domain.Membership, targ
 	account.CategoryStats = make([]CategoryStatistic, 0)
 	for rows.Next() {
 		var statistic CategoryStatistic
-		if err := rows.Scan(&statistic.CategoryID, &statistic.CategoryName, &statistic.Quantity, &statistic.GrossMinor, &statistic.VoidedMinor, &statistic.NetMinor); err != nil {
+		if err := rows.Scan(&statistic.CategoryID, &statistic.CategoryName, &statistic.Icon, &statistic.Quantity, &statistic.GrossMinor, &statistic.VoidedMinor, &statistic.NetMinor); err != nil {
 			return Account{}, err
 		}
 		account.CategoryStats = append(account.CategoryStats, statistic)
@@ -128,7 +141,7 @@ func (s Service) Account(ctx context.Context, membership domain.Membership, targ
 	if err := rows.Err(); err != nil {
 		return Account{}, err
 	}
-	groupStats, err := s.DB.QueryContext(ctx, `SELECT c.id,c.name,
+	groupStats, err := s.DB.QueryContext(ctx, `SELECT c.id,c.name,c.icon,
 		coalesce((SELECT sum(b.quantity) FROM bookings b WHERE b.category_id=c.id AND b.period_id=? AND b.voided_at IS NULL),0),
 		coalesce((SELECT sum(b.total_minor) FROM bookings b WHERE b.category_id=c.id AND b.period_id=?),0),
 		coalesce(-(SELECT sum(le.amount_minor) FROM ledger_entries le WHERE le.category_id=c.id AND le.period_id=? AND le.account='MEMBER_RECEIVABLE' AND le.reversal_of IS NOT NULL AND le.amount_minor<0),0),
@@ -141,7 +154,7 @@ func (s Service) Account(ctx context.Context, membership domain.Membership, targ
 	account.GroupCategoryStats = make([]CategoryStatistic, 0)
 	for groupStats.Next() {
 		var statistic CategoryStatistic
-		if err := groupStats.Scan(&statistic.CategoryID, &statistic.CategoryName, &statistic.Quantity, &statistic.GrossMinor, &statistic.VoidedMinor, &statistic.NetMinor); err != nil {
+		if err := groupStats.Scan(&statistic.CategoryID, &statistic.CategoryName, &statistic.Icon, &statistic.Quantity, &statistic.GrossMinor, &statistic.VoidedMinor, &statistic.NetMinor); err != nil {
 			groupStats.Close()
 			return Account{}, err
 		}
@@ -166,6 +179,41 @@ func (s Service) Account(ctx context.Context, membership domain.Membership, targ
 		account.RecentEntries = append(account.RecentEntries, entry)
 	}
 	return account, entries.Err()
+}
+
+// ListAccountSummaries returns every active or archived membership with its
+// consolidated receivable balance. The caller must have finance-manager
+// privileges in the requested group. Results are grouped by membership status,
+// then ordered by descending balance and display name.
+func (s Service) ListAccountSummaries(ctx context.Context, membership domain.Membership) ([]AccountSummary, error) {
+	if !groups.HasRole(membership, domain.RoleFinanceManager) {
+		return nil, domain.ErrForbidden
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT m.id,u.id,u.display_name,u.avatar_key,m.status,g.currency,coalesce(sum(le.amount_minor),0)
+		FROM memberships m
+		JOIN users u ON u.id=m.user_id
+		JOIN groups g ON g.id=m.group_id
+		LEFT JOIN ledger_entries le ON le.group_id=m.group_id AND le.membership_id=m.id AND le.account='MEMBER_RECEIVABLE'
+		WHERE m.group_id=?
+		GROUP BY m.id,u.id,u.display_name,u.avatar_key,m.status,g.currency
+		ORDER BY CASE m.status WHEN 'ACTIVE' THEN 0 ELSE 1 END,
+			coalesce(sum(le.amount_minor),0) DESC,lower(u.display_name),m.id`, membership.GroupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]AccountSummary, 0)
+	for rows.Next() {
+		var item AccountSummary
+		var userID string
+		var avatarKey sql.NullString
+		if err := rows.Scan(&item.MembershipID, &userID, &item.DisplayName, &avatarKey, &item.Status, &item.Currency, &item.BalanceMinor); err != nil {
+			return nil, err
+		}
+		item.AvatarURL = media.UserAvatarURL(userID, avatarKey.String)
+		result = append(result, item)
+	}
+	return result, rows.Err()
 }
 
 // CreatePaymentInput is the received-money command. AmountMinor uses the group's

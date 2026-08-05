@@ -493,7 +493,7 @@ export function MembersPanel({ onOpenRights }: MembersPanelProps) {
           <table className={tableStyles.table}>
             <thead><tr><th>{t('common.member')}</th><th>{t('members.email')}</th><th>{t('members.roles')}</th><th><span className="sr-only">{t('common.action')}</span></th></tr></thead>
             <tbody>{activeMembers.map((member) => <tr key={member.id}>
-              <td><button className={`${styles.rowLink} ${styles.member}`} onClick={() => onOpenRights?.(member.id)} type="button"><Avatar decorative name={member.displayName} /> <strong>{member.displayName}</strong></button></td>
+              <td><button className={`${styles.rowLink} ${styles.member}`} onClick={() => onOpenRights?.(member.id)} type="button"><Avatar decorative name={member.displayName} src={member.avatarUrl} /> <strong>{member.displayName}</strong></button></td>
               <td>{member.email}</td><td>{roleSummary(member, t)}</td>
               <td><Button aria-label={t('members.removeFor', { name: member.displayName })} leadingIcon={<UserMinus size={16} />} onClick={() => { setSelectedMember(member); setDialog('remove'); }} size="small" variant="ghost">{t('members.remove')}</Button></td>
             </tr>)}</tbody>
@@ -506,7 +506,7 @@ export function MembersPanel({ onOpenRights }: MembersPanelProps) {
         {formerMembers.length === 0 ? <p className={styles.emptySection}>{t('members.noFormerMembers')}</p> : (
           <div className={tableStyles.tableWrap}><table className={tableStyles.table}>
             <thead><tr><th>{t('common.member')}</th><th>{t('members.email')}</th><th><span className="sr-only">{t('common.action')}</span></th></tr></thead>
-            <tbody>{formerMembers.map((member) => <tr key={member.id}><td><span className={styles.member}><Avatar decorative name={member.displayName} /> <strong>{member.displayName}</strong></span></td><td>{member.email}</td><td><Button leadingIcon={<MailPlus size={16} />} onClick={() => openInvite(member)} size="small" variant="ghost">{t('members.inviteAgain')}</Button></td></tr>)}</tbody>
+            <tbody>{formerMembers.map((member) => <tr key={member.id}><td><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /> <strong>{member.displayName}</strong></span></td><td>{member.email}</td><td><Button leadingIcon={<MailPlus size={16} />} onClick={() => openInvite(member)} size="small" variant="ghost">{t('members.inviteAgain')}</Button></td></tr>)}</tbody>
           </table></div>
         )}
       </section>

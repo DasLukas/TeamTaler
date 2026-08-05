@@ -13,4 +13,7 @@
 .actions { display: flex; justify-content: flex-end; gap: var(--space-3); }
 .error { color: var(--color-red-600) !important; }
 .state { padding-top: var(--space-8); }
-@media (max-width: 600px) { .header { align-items: stretch; flex-direction: column; } }
+
+@media (max-width: 600px) {
+  .header { align-items: stretch; flex-direction: column; }
+}

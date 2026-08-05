@@ -34,6 +34,23 @@ func (s *Server) handleMemberAccount(response http.ResponseWriter, request *http
 	writeJSON(response, http.StatusOK, account)
 }
 
+// handleListAccounts returns consolidated member balances to finance managers.
+// The request supplies the authenticated group and response receives the exact
+// minor-unit account summaries or Problem Details.
+func (s *Server) handleListAccounts(response http.ResponseWriter, request *http.Request) {
+	_, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	items, err := s.finance.ListAccountSummaries(request.Context(), membership)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, items)
+}
+
 func (s *Server) handleListPayments(response http.ResponseWriter, request *http.Request) {
 	_, membership, err := s.membership(request)
 	if err != nil {

@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2';
 import Minus from 'lucide-react/dist/esm/icons/minus';
 import Plus from 'lucide-react/dist/esm/icons/plus';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { formatMoney, majorUnitsInputPattern, majorUnitsPlaceholder, multiplyMoney, validatePositiveMajorUnits } from '@/api/money';
@@ -11,6 +11,8 @@ import { Button } from '@/components/ui/Button';
 import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { IconButton } from '@/components/ui/IconButton';
 import styles from './BookingInspector.module.css';
+
+const BOOKING_CONFIRMATION_DURATION_MS = 700;
 
 /** Properties accepted by the booking confirmation inspector. */
 export interface BookingInspectorProps {
@@ -48,6 +50,7 @@ export function BookingInspector({
   const [targetMembershipId, setTargetMembershipId] = useState(currentMembershipId);
   const [reason, setReason] = useState('');
   const [confirmed, setConfirmed] = useState(false);
+  const confirmationTimerRef = useRef<number | undefined>(undefined);
   const currentMember = members.find((member) => member.id === currentMembershipId);
   const canAssignOthers = currentMember?.roles.includes('ADMIN') || currentMember?.categoryPermissions.some((permission) => permission.categoryId === product.categoryId && permission.assignToOthers);
   const availableMembers = canAssignOthers ? members.filter((member) => member.active) : members.filter((member) => member.id === currentMembershipId);
@@ -57,6 +60,10 @@ export function BookingInspector({
   const unitPrice = userDefinesPrice
     ? unitPriceValidation.minorUnits ? { minorUnits: unitPriceValidation.minorUnits, currency: product.currency } : undefined
     : product.price;
+
+  useEffect(() => () => {
+    if (confirmationTimerRef.current !== undefined) window.clearTimeout(confirmationTimerRef.current);
+  }, []);
 
   const bookingMutation = useMutation({
     mutationFn: () => {
@@ -71,14 +78,24 @@ export function BookingInspector({
         reason: isForeignAssignment ? reason.trim() : undefined,
       });
     },
-    onSuccess: async () => {
+    onSuccess: () => {
       setConfirmed(true);
-      await Promise.all([
+      confirmationTimerRef.current = window.setTimeout(() => {
+        confirmationTimerRef.current = undefined;
+        setQuantity(1);
+        setUnitPriceInput('');
+        setUnitPriceTouched(false);
+        setTargetMembershipId(currentMembershipId);
+        setReason('');
+        setConfirmed(false);
+        onBooked?.();
+      }, BOOKING_CONFIRMATION_DURATION_MS);
+      void Promise.all([
         queryClient.invalidateQueries({ queryKey: ['dashboard', groupId] }),
         queryClient.invalidateQueries({ queryKey: ['bookings', groupId] }),
         queryClient.invalidateQueries({ queryKey: ['ledger', groupId] }),
+        queryClient.invalidateQueries({ queryKey: ['account-summaries', groupId] }),
       ]);
-      window.setTimeout(() => onBooked?.(), 700);
     },
   });
 

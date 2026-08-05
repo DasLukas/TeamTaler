@@ -17,7 +17,7 @@ func TestInvitationPermissionsPreviewArchiveAndReactivation(t *testing.T) {
 	if _, err := f.auth.PreviewInvitation(f.ctx, "not-a-real-token"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("invalid preview error = %v, want not found", err)
 	}
-	category, err := f.catalog.CreateCategory(f.ctx, f.admin, f.membership, catalog.CreateCategoryInput{Name: "Invited category"})
+	category, err := f.catalog.CreateCategory(f.ctx, f.admin, f.membership, catalog.CreateCategoryInput{Name: "Invited category", Icon: domain.CategoryIconOther})
 	if err != nil {
 		t.Fatalf("create category: %v", err)
 	}
@@ -25,7 +25,7 @@ func TestInvitationPermissionsPreviewArchiveAndReactivation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create other group: %v", err)
 	}
-	otherCategory, err := f.catalog.CreateCategory(f.ctx, f.admin, otherGroup.Membership, catalog.CreateCategoryInput{Name: "Other category"})
+	otherCategory, err := f.catalog.CreateCategory(f.ctx, f.admin, otherGroup.Membership, catalog.CreateCategoryInput{Name: "Other category", Icon: domain.CategoryIconOther})
 	if err != nil {
 		t.Fatalf("create other category: %v", err)
 	}

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,7 +42,7 @@ func TestImageRequiresMembershipAndGroupReference(t *testing.T) {
 		t.Fatalf("list groups: groups=%d err=%v", len(groupItems), err)
 	}
 	catalogService := catalog.Service{DB: db}
-	category, err := catalogService.CreateCategory(ctx, session.Principal, groupItems[0].Membership, catalog.CreateCategoryInput{Name: "Drinks"})
+	category, err := catalogService.CreateCategory(ctx, session.Principal, groupItems[0].Membership, catalog.CreateCategoryInput{Name: "Drinks", Icon: domain.CategoryIconDrink})
 	if err != nil {
 		t.Fatalf("create category: %v", err)
 	}
@@ -124,6 +125,69 @@ func imageRequest(t *testing.T, groupID, imageKey string, principal domain.Princ
 	t.Helper()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/groups/"+groupID+"/images/"+imageKey, nil)
 	request.SetPathValue("groupID", groupID)
+	request.SetPathValue("imageKey", imageKey)
+	if principal.UserID != "" {
+		request = request.WithContext(context.WithValue(request.Context(), principalKey, principal))
+	}
+	return request
+}
+
+func TestUserAvatarRequiresCurrentReferenceAndAuthentication(t *testing.T) {
+	ctx := context.Background()
+	dataDirectory := t.TempDir()
+	db, err := storage.Open(ctx, filepath.Join(dataDirectory, "teamtaler.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+	authService := auth.Service{DB: db, SessionLifetime: 24 * time.Hour}
+	if err := authService.Bootstrap(ctx, "avatar-admin@example.test", "Avatar Admin", "avatar-test-password-long", "Avatar Group", "EUR"); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	session, err := authService.Login(ctx, "avatar-admin@example.test", "avatar-test-password-long")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	imageBody := []byte("normalized-avatar-fixture")
+	digest := sha256.Sum256(imageBody)
+	imageKey := hex.EncodeToString(digest[:]) + ".png"
+	if err := os.MkdirAll(filepath.Join(dataDirectory, "images"), 0o750); err != nil {
+		t.Fatalf("create image directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDirectory, "images", imageKey), imageBody, 0o640); err != nil {
+		t.Fatalf("write avatar: %v", err)
+	}
+	if _, _, err := authService.SetAvatar(ctx, session.Principal, imageKey); err != nil {
+		t.Fatalf("set avatar: %v", err)
+	}
+	server := &Server{config: config.Config{DataDirectory: dataDirectory}, db: db, auth: authService}
+
+	request := userAvatarRequest(t, session.Principal.UserID, imageKey, session.Principal)
+	response := httptest.NewRecorder()
+	server.handleUserAvatar(response, request)
+	if response.Code != http.StatusOK || response.Body.String() != string(imageBody) {
+		t.Fatalf("current avatar response: status=%d body=%q", response.Code, response.Body.String())
+	}
+
+	staleRequest := userAvatarRequest(t, session.Principal.UserID, strings.Repeat("a", 64)+".png", session.Principal)
+	staleResponse := httptest.NewRecorder()
+	server.handleUserAvatar(staleResponse, staleRequest)
+	if staleResponse.Code != http.StatusNotFound {
+		t.Fatalf("stale avatar status=%d, want 404", staleResponse.Code)
+	}
+
+	loggedOutRequest := userAvatarRequest(t, session.Principal.UserID, imageKey, domain.Principal{})
+	loggedOutResponse := httptest.NewRecorder()
+	server.handleUserAvatar(loggedOutResponse, loggedOutRequest)
+	if loggedOutResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("logged-out avatar status=%d, want 401", loggedOutResponse.Code)
+	}
+}
+
+func userAvatarRequest(t *testing.T, userID, imageKey string, principal domain.Principal) *http.Request {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/users/"+userID+"/avatar/"+imageKey, nil)
+	request.SetPathValue("userID", userID)
 	request.SetPathValue("imageKey", imageKey)
 	if principal.UserID != "" {
 		request = request.WithContext(context.WithValue(request.Context(), principalKey, principal))

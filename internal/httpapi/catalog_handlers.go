@@ -3,7 +3,6 @@ package httpapi
 import (
 	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 
@@ -161,19 +160,7 @@ func (s *Server) handleImage(response http.ResponseWriter, request *http.Request
 		writeProblem(response, request, domain.ErrNotFound)
 		return
 	}
-	path, err := media.ResolveImage(s.config.DataDirectory, request.PathValue("imageKey"))
-	if err != nil {
-		http.NotFound(response, request)
-		return
-	}
-	if _, err := os.Stat(path); err != nil {
-		http.NotFound(response, request)
-		return
-	}
-	response.Header().Set("Content-Type", "image/png")
-	response.Header().Set("Cache-Control", "private, no-store")
-	response.Header().Set("ETag", `"`+strings.TrimSuffix(request.PathValue("imageKey"), ".png")+`"`)
-	http.ServeFile(response, request, path)
+	s.serveStoredImage(response, request, request.PathValue("imageKey"))
 }
 
 // storeUploadedImage parses one bounded multipart image, normalizes it, and

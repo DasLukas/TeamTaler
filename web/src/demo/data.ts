@@ -1,4 +1,5 @@
 import type {
+  AccountSummary,
   AuditEntry,
   Booking,
   Category,
@@ -244,6 +245,14 @@ export const demoLedger: LedgerEntry[] = [
   { id: 'ledger-1', occurredAt: '2026-08-04T19:45:00+02:00', kind: 'BOOKING', description: 'Bier', amount: { minorUnits: '200', currency: 'EUR' }, balance: { minorUnits: '2340', currency: 'EUR' }, referenceId: 'booking-1' },
   { id: 'ledger-2', occurredAt: '2026-08-02T17:10:00+02:00', kind: 'BOOKING', description: 'Zu spät zum Training', amount: { minorUnits: '500', currency: 'EUR' }, balance: { minorUnits: '2140', currency: 'EUR' }, referenceId: 'booking-old-2' },
   { id: 'ledger-3', occurredAt: '2026-08-01T09:00:00+02:00', kind: 'PAYMENT', description: 'Zahlungseingang', amount: { minorUnits: '-2000', currency: 'EUR' }, balance: { minorUnits: '1640', currency: 'EUR' }, referenceId: 'payment-1' },
+];
+
+/** Consolidated demo account balances for the finance overview. */
+export const demoAccountSummaries: AccountSummary[] = [
+  { membershipId: 'member-lukas', displayName: 'Lukas Waschul', status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '2340', currency: 'EUR' } },
+  { membershipId: 'member-jonas', displayName: 'Jonas Krüger', status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '500', currency: 'EUR' } },
+  { membershipId: 'member-mara', displayName: 'Mara Becker', status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '-250', currency: 'EUR' } },
+  { membershipId: 'member-pia-archived', displayName: 'Pia Lehmann', status: 'ARCHIVED', currency: 'EUR', balance: { minorUnits: '0', currency: 'EUR' } },
 ];
 
 /** Demo payments managed by finance users. */

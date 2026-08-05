@@ -1,8 +1,51 @@
 import { describe, expect, it } from 'vitest';
 import i18n from '@/i18n';
-import { adaptLedger, adaptNotification, adaptProduct, adaptSettlement } from './adapters';
+import { adaptAccountSummaries, adaptBooking, adaptCategories, adaptDashboard, adaptLedger, adaptMembership, adaptNotification, adaptProduct, adaptSession, adaptSettlement } from './adapters';
 
 describe('API adapters', () => {
+  it('propagates protected profile-image URLs through sessions, memberships, and bookings', () => {
+    const avatarUrl = '/api/v1/users/user-a/avatar/hash.png';
+    const session = adaptSession({
+      user: { id: 'user-a', displayName: 'Alex', email: 'alex@example.test', avatarUrl },
+      groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', roles: [] } }],
+      activeGroupId: 'group-a',
+    });
+    const member = adaptMembership({ id: 'member-a', userId: 'user-a', displayName: 'Alex', email: 'alex@example.test', avatarUrl, status: 'ACTIVE', roles: [], categoryGrants: {} });
+    const booking = adaptBooking({
+      id: 'booking-a',
+      targetMembershipId: 'member-a',
+      actorMembershipId: 'member-a',
+      productId: 'product-a',
+      productName: 'Water',
+      categoryId: 'category-a',
+      categoryName: 'Drinks',
+      unitPriceMinor: 100,
+      totalMinor: 100,
+      currency: 'EUR',
+      createdAt: '2026-08-05T00:00:00Z',
+    }, [member]);
+
+    expect(session.user.avatarUrl).toBe(avatarUrl);
+    expect(member.avatarUrl).toBe(avatarUrl);
+    expect(booking).toMatchObject({ memberAvatarUrl: avatarUrl, bookedByAvatarUrl: avatarUrl });
+    expect(adaptBooking({ ...booking, memberAvatarUrl: undefined, bookedByAvatarUrl: undefined }, [member])).toMatchObject({
+      memberAvatarUrl: avatarUrl,
+      bookedByAvatarUrl: avatarUrl,
+    });
+  });
+
+  it('uses persisted category icons and safely falls back for unsupported values', () => {
+    expect(adaptCategories([{ id: 'food', name: 'Meals', icon: 'food' }])[0]?.icon).toBe('food');
+    expect(adaptCategories([{ id: 'unsafe', name: 'Unsafe', icon: '<script>' }])[0]?.icon).toBe('other');
+    expect(adaptDashboard({
+      account: {
+        balanceMinor: '0', currency: 'EUR', categoryStatistics: [{ categoryId: 'sport', categoryName: 'Training', icon: 'sport', netMinor: '0' }], groupCategoryStatistics: [],
+      },
+      openPeriod: { id: 'period', label: 'Current', status: 'OPEN', startsAt: '2026-08-01T00:00:00Z' },
+      recentBookings: [],
+    }).categoryTotals[0]?.icon).toBe('sport');
+  });
+
   it('adapts fixed and user-defined product pricing without inventing a custom price', () => {
     expect(adaptProduct({ id: 'fixed', name: 'Water', categoryId: 'drinks', pricingMode: 'FIXED', priceMinor: '100', currency: 'EUR' })).toMatchObject({
       pricingMode: 'FIXED', currency: 'EUR', price: { minorUnits: '100', currency: 'EUR' },
@@ -27,6 +70,26 @@ describe('API adapters', () => {
 
     expect(entries[0]?.balance.minorUnits).toBe('9007199254740993123');
     expect(entries[0]?.amount.minorUnits).toBe('123');
+  });
+
+  it('adapts consolidated account summaries without losing integer precision', () => {
+    const [summary] = adaptAccountSummaries([{
+      membershipId: 'member-large',
+      displayName: 'Large Balance',
+      avatarUrl: '/api/v1/users/user-large/avatar/hash.png',
+      status: 'ARCHIVED',
+      currency: 'EUR',
+      balanceMinor: '9007199254740993123',
+    }]);
+
+    expect(summary).toEqual({
+      membershipId: 'member-large',
+      displayName: 'Large Balance',
+      avatarUrl: '/api/v1/users/user-large/avatar/hash.png',
+      status: 'ARCHIVED',
+      currency: 'EUR',
+      balance: { minorUnits: '9007199254740993123', currency: 'EUR' },
+    });
   });
 
   it('localizes a received payment while preserving its reference', () => {

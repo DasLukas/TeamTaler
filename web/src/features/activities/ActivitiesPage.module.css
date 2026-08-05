@@ -2,6 +2,8 @@
 .searchControl svg { position: absolute; z-index: 1; top: 14px; left: 14px; color: var(--color-muted); }
 .searchControl input { padding-left: 42px; }
 .member { display: inline-flex; align-items: center; gap: var(--space-3); }
+.bookingProduct { display: inline-flex; align-items: center; gap: var(--space-3); }
+.bookingProduct > img { width: 40px; height: 40px; flex: 0 0 40px; border-radius: var(--radius-sm); object-fit: cover; background: var(--color-surface-muted); }
 td small { display: block; margin-top: 4px; color: var(--color-muted); }
 .reversalForm { display: grid; gap: var(--space-5); padding: var(--space-4) var(--space-6) var(--space-6); }
 .reversalForm p { margin: 0; color: var(--color-muted); line-height: 1.55; }

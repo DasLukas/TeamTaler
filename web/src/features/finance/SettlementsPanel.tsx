@@ -13,14 +13,14 @@ import { Field, TextInput } from '@/components/ui/FormField';
 import { Modal } from '@/components/ui/Modal';
 import { StatePanel } from '@/components/ui/StatePanel';
 import tableStyles from '@/features/shared/Table.module.css';
-import styles from './PeriodsPanel.module.css';
+import styles from './SettlementsPanel.module.css';
 
 /**
  * Renders the period-close workflow and immutable settlement overview.
  *
  * @returns Localized period controls, settlement table, and close dialog.
  */
-export function PeriodsPanel() {
+export function SettlementsPanel() {
   const { t } = useTranslation();
   const { activeGroupId } = useActiveGroup();
   const queryClient = useQueryClient();

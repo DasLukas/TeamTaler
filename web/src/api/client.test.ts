@@ -179,20 +179,30 @@ describe('high-risk API idempotency', () => {
     expect(requestBody(fetchMock.mock.calls[1])).toMatchObject({ pricingMode: 'FIXED', priceMinor: 100 });
   });
 
+  it('sends the selected icon when creating a category', async () => {
+    const category = { id: 'category-event', version: 1, name: 'Events', icon: 'event', active: true, sortOrder: 0, products: [] };
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(category, 201));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.createCategory('group-a', { name: 'Events', icon: 'event' });
+
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ name: 'Events', icon: 'event', sortOrder: 0 });
+  });
+
   it('sends versioned category and product updates with strong preconditions', async () => {
-    const category = { id: 'category-a', version: 4, name: 'Drinks', active: false, sortOrder: 2, products: [] };
+    const category = { id: 'category-a', version: 4, name: 'Drinks', icon: 'drink' as const, active: false, sortOrder: 2, products: [] };
     const product = { id: 'product-a', categoryId: 'category-a', version: 8, name: 'Water', priceMinor: 125, pricingMode: 'FIXED', currency: 'EUR', active: true, sortOrder: 3 };
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(category))
       .mockResolvedValueOnce(jsonResponse(product));
     vi.stubGlobal('fetch', fetchMock);
 
-    await api.updateCategory('group-a', category.id, { name: 'Drinks', active: false, sortOrder: 2, version: 3 });
+    await api.updateCategory('group-a', category.id, { name: 'Drinks', icon: 'sport', active: false, sortOrder: 2, version: 3 });
     await api.updateProduct('group-a', product.id, { name: 'Water', pricingMode: 'FIXED', price: { minorUnits: '125', currency: 'EUR' }, active: true, sortOrder: 3, version: 7 });
 
     expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('PATCH');
     expect(new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers).get('If-Match')).toBe('"v3"');
-    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ name: 'Drinks', active: false, sortOrder: 2, version: 3 });
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ name: 'Drinks', icon: 'sport', active: false, sortOrder: 2, version: 3 });
     expect(new Headers((fetchMock.mock.calls[1][1] as RequestInit).headers).get('If-Match')).toBe('"v7"');
     expect(requestBody(fetchMock.mock.calls[1])).toEqual({ name: 'Water', pricingMode: 'FIXED', priceMinor: 125, active: true, sortOrder: 3, version: 7 });
   });
@@ -295,5 +305,79 @@ describe('high-risk API idempotency', () => {
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST', body: expect.any(FormData) });
     expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/groups/group-a/logo');
     expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: 'DELETE' });
+  });
+
+  it('updates the group name through the group settings resource', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ name: 'Renamed Group' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.updateGroupName('group-a', 'Renamed Group')).resolves.toEqual({ name: 'Renamed Group' });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group-a');
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'PATCH' });
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ name: 'Renamed Group' });
+  });
+
+  it('opens the successor accounting period with the localized default label', async () => {
+    const closedPeriod = { id: 'period-a', label: 'August 2026', status: 'CLOSED', startsAt: '2026-08-01T00:00:00Z', closedAt: '2026-09-01T00:00:00Z', dueAt: '2026-09-14' };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(session('user-a')))
+      .mockResolvedValueOnce(jsonResponse({ closedPeriod }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.getSession();
+    await api.closePeriod('group-a', 'period-a', { label: 'August 2026', dueAt: '2026-09-14' });
+
+    expect(requestBody(fetchMock.mock.calls[1])).toMatchObject({
+      label: 'August 2026',
+      dueAt: '2026-09-14',
+      nextPeriodLabel: 'Aktueller Zeitraum',
+    });
+  });
+});
+
+describe('finance account summaries', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('loads the group-scoped endpoint and preserves exact balance strings', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse([{
+      membershipId: 'member-large',
+      displayName: 'Large Balance',
+      status: 'ACTIVE',
+      currency: 'EUR',
+      balanceMinor: '9007199254740993123',
+    }]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const summaries = await api.getAccountSummaries('group with spaces');
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/groups/group%20with%20spaces/accounts', expect.any(Object));
+    expect(summaries[0]?.balance.minorUnits).toBe('9007199254740993123');
+  });
+});
+
+describe('profile-image API', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('uploads multipart image data and removes the persisted avatar', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ avatarUrl: '/api/v1/users/user-a/avatar/hash.png' }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const image = new File(['avatar'], 'avatar.png', { type: 'image/png' });
+
+    await expect(api.uploadProfileAvatar(image)).resolves.toEqual({ avatarUrl: '/api/v1/users/user-a/avatar/hash.png' });
+    await api.removeProfileAvatar();
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/me/avatar');
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('POST');
+    expect((fetchMock.mock.calls[0][1] as RequestInit).body).toBeInstanceOf(FormData);
+    expect(((fetchMock.mock.calls[0][1] as RequestInit).body as FormData).get('image')).toBe(image);
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/me/avatar');
+    expect((fetchMock.mock.calls[1][1] as RequestInit).method).toBe('DELETE');
   });
 });

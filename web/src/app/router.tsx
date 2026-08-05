@@ -1,4 +1,4 @@
-import { Outlet, createRootRoute, createRoute, createRouter } from '@tanstack/react-router';
+import { Navigate, Outlet, createRootRoute, createRoute, createRouter } from '@tanstack/react-router';
 import { AppShell } from '@/components/layout/AppShell';
 import { AccountPage } from '@/features/account/AccountPage';
 import { ActivitiesPage } from '@/features/activities/ActivitiesPage';
@@ -6,11 +6,13 @@ import { AdminPage } from '@/features/admin/AdminPage';
 import { InvitationPage } from '@/features/auth/InvitationPage';
 import { LoginPage } from '@/features/auth/LoginPage';
 import { BookingPage } from '@/features/bookings/BookingPage';
+import { CatalogPage } from '@/features/catalog/CatalogPage';
 import { DashboardPage } from '@/features/dashboard/DashboardPage';
+import { FinancePage } from '@/features/finance/FinancePage';
 import { MorePage } from '@/features/more/MorePage';
 import { NotificationsPage } from '@/features/notifications/NotificationsPage';
-import { ReportsPage } from '@/features/reports/ReportsPage';
 import { NotFoundPage } from './NotFoundPage';
+import { memberPaths } from './paths';
 
 const rootRoute = createRootRoute({
   component: Outlet,
@@ -23,10 +25,13 @@ const authenticatedRoute = createRoute({
   component: AppShell,
 });
 
-const dashboardRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: '/', component: DashboardPage });
-const bookingRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: '/book', component: BookingPage });
+const landingRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: memberPaths.landing, component: () => <Navigate replace to={memberPaths.booking} /> });
+const dashboardRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: memberPaths.overview, component: DashboardPage });
+const bookingRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: memberPaths.booking, component: BookingPage });
+const legacyReportsRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: memberPaths.legacyReports, component: () => <Navigate replace to={memberPaths.overview} /> });
 const activitiesRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: '/activities', component: ActivitiesPage });
-const reportsRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: '/reports', component: ReportsPage });
+const catalogRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: memberPaths.catalog, component: CatalogPage });
+const financeRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: memberPaths.finance, component: FinancePage });
 const adminRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: '/admin', component: AdminPage });
 const notificationsRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: '/notifications', component: NotificationsPage });
 const accountRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: '/account', component: AccountPage });
@@ -35,7 +40,7 @@ const loginRoute = createRoute({ getParentRoute: () => rootRoute, path: '/login'
 const inviteRoute = createRoute({ getParentRoute: () => rootRoute, path: '/invite', component: InvitationPage });
 
 const routeTree = rootRoute.addChildren([
-  authenticatedRoute.addChildren([dashboardRoute, bookingRoute, activitiesRoute, reportsRoute, adminRoute, notificationsRoute, accountRoute, moreRoute]),
+  authenticatedRoute.addChildren([landingRoute, dashboardRoute, bookingRoute, legacyReportsRoute, activitiesRoute, catalogRoute, financeRoute, adminRoute, notificationsRoute, accountRoute, moreRoute]),
   loginRoute,
   inviteRoute,
 ]);

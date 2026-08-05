@@ -84,6 +84,65 @@ paths:
               schema:
                 $ref: '#/components/schemas/Session'
         '401': { $ref: '#/components/responses/Problem' }
+  /me/avatar:
+    post:
+      tags: [Authentication]
+      summary: Validate, normalize, and set the current user's profile image
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [image]
+              properties:
+                image:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Protected content-addressed profile-image URL
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [avatarUrl]
+                properties:
+                  avatarUrl: { type: string }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [Authentication]
+      summary: Remove the current user's profile image
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204': { description: Profile image removed }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /users/{userId}/avatar/{imageKey}:
+    get:
+      tags: [Authentication]
+      summary: Read the current profile image of a user sharing a group
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+        - name: imageKey
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[0-9a-f]{64}\.png$'
+      responses:
+        '200':
+          description: Normalized profile image
+          content:
+            image/png:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /invitations/preview:
     post:
       tags: [Authentication]
@@ -161,6 +220,34 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Group' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}:
+    patch:
+      tags: [Groups]
+      summary: Update administrator-managed group settings
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 120 }
+      responses:
+        '200':
+          description: Persisted normalized group settings
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name]
+                properties:
+                  name: { type: string }
+        '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/dashboard:
     get:
@@ -656,6 +743,21 @@ paths:
               schema: { $ref: '#/components/schemas/Booking' }
         '403': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/accounts:
+    get:
+      tags: [Finance]
+      summary: List consolidated member balances as a finance manager
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Active and archived group membership balances
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AccountSummary' }
+        '403': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/accounts/me:
     get:
       tags: [Finance]
@@ -900,6 +1002,11 @@ components:
       in: path
       required: true
       schema: { type: string }
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema: { type: string }
     MembershipId:
       name: membershipId
       in: path
@@ -1007,6 +1114,7 @@ components:
         id: { type: string }
         email: { type: string, format: email }
         displayName: { type: string }
+        avatarUrl: { type: string }
     Group:
       type: object
       required: [id, name, currency, membership]
@@ -1025,6 +1133,7 @@ components:
         userId: { type: string }
         email: { type: string, format: email }
         displayName: { type: string }
+        avatarUrl: { type: string }
         status: { type: string, enum: [ACTIVE, ARCHIVED] }
         roles:
           type: array
@@ -1170,11 +1279,12 @@ components:
           description: New fallback URL on the first idempotent response; empty on a replay.
     Category:
       type: object
-      required: [id, groupId, name, active, sortOrder, version]
+      required: [id, groupId, name, icon, active, sortOrder, version]
       properties:
         id: { type: string }
         groupId: { type: string }
         name: { type: string }
+        icon: { $ref: '#/components/schemas/CategoryIcon' }
         active: { type: boolean }
         sortOrder: { type: integer }
         version: { type: integer, format: int64 }
@@ -1183,10 +1293,14 @@ components:
           items: { $ref: '#/components/schemas/Product' }
     CategoryCommand:
       type: object
-      required: [name, sortOrder]
+      required: [name, icon, sortOrder]
       properties:
         name: { type: string, minLength: 1, maxLength: 120 }
+        icon: { $ref: '#/components/schemas/CategoryIcon' }
         sortOrder: { type: integer }
+    CategoryIcon:
+      type: string
+      enum: [other, drink, food, penalty, sport, event, transport, money]
     CategoryUpdate:
       allOf:
         - $ref: '#/components/schemas/CategoryCommand'
@@ -1287,10 +1401,11 @@ components:
         canVoid: { type: boolean }
     CategoryStatistic:
       type: object
-      required: [categoryId, categoryName, quantity, grossMinor, voidedMinor, netMinor]
+      required: [categoryId, categoryName, icon, quantity, grossMinor, voidedMinor, netMinor]
       properties:
         categoryId: { type: string }
         categoryName: { type: string }
+        icon: { $ref: '#/components/schemas/CategoryIcon' }
         quantity: { type: integer, format: int64 }
         grossMinor: { $ref: '#/components/schemas/MinorUnits' }
         voidedMinor: { $ref: '#/components/schemas/MinorUnits' }
@@ -1307,6 +1422,16 @@ components:
         amountMinor: { $ref: '#/components/schemas/MinorUnits' }
         description: { type: string }
         createdAt: { type: string, format: date-time }
+    AccountSummary:
+      type: object
+      required: [membershipId, displayName, status, currency, balanceMinor]
+      properties:
+        membershipId: { type: string }
+        displayName: { type: string }
+        avatarUrl: { type: string }
+        status: { type: string, enum: [ACTIVE, ARCHIVED] }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        balanceMinor: { $ref: '#/components/schemas/MinorUnits' }
     Account:
       type: object
       required: [membershipId, displayName, currency, balanceMinor, openPeriodId, openPeriodDueMinor, categoryStatistics, groupCategoryStatistics, recentEntries]
