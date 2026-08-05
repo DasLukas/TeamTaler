@@ -1,4 +1,5 @@
 import type {
+  AccountSummary,
   Booking,
   BookingCommand,
   Category,
@@ -21,8 +22,10 @@ import type {
   Product,
   Session,
 } from '@/api/types';
+import { isCategoryIcon } from '@/api/types';
 import { MAX_PRODUCT_PRICE_MINOR } from '@/api/money';
 import {
+  demoAccountSummaries,
   demoAudit,
   demoBookings,
   demoCategories,
@@ -141,6 +144,7 @@ export class DemoTransport {
   private bookings = clone(demoBookings);
   private dashboard = clone(demoDashboard);
   private ledger = clone(demoLedger);
+  private accountSummaries: AccountSummary[] = clone(demoAccountSummaries);
   private payments = clone(demoPayments);
   private periods = clone(demoPeriods);
   private settlements = clone(demoSettlements);
@@ -167,11 +171,42 @@ export class DemoTransport {
     const cleanPath = path.split('?')[0];
 
     if (cleanPath === '/session' || cleanPath === '/me') return clone(this.session) as T;
+    if (cleanPath === '/me/avatar' && method === 'POST') {
+      const image = init.body instanceof FormData ? init.body.get('image') : undefined;
+      if (!(image instanceof Blob)) throw new Error('A profile image is required.');
+      if (this.session.user.avatarUrl?.startsWith('blob:')) URL.revokeObjectURL(this.session.user.avatarUrl);
+      const avatarUrl = URL.createObjectURL(image);
+      this.session.user.avatarUrl = avatarUrl;
+      this.members = this.members.map((member) => member.userId === this.session.user.id ? { ...member, avatarUrl } : member);
+      return { avatarUrl } as T;
+    }
+    if (cleanPath === '/me/avatar' && method === 'DELETE') {
+      if (this.session.user.avatarUrl?.startsWith('blob:')) URL.revokeObjectURL(this.session.user.avatarUrl);
+      delete this.session.user.avatarUrl;
+      this.members = this.members.map((member) => {
+        if (member.userId !== this.session.user.id) return member;
+        const updated = { ...member };
+        delete updated.avatarUrl;
+        return updated;
+      });
+      return undefined as T;
+    }
     if (cleanPath === '/auth/login' && method === 'POST') return this.login(body as LoginCommand) as T;
     if (cleanPath === '/auth/logout' && method === 'POST') return undefined as T;
     if (cleanPath === '/invitations/preview' && method === 'POST') return this.previewInvitation((body as { token?: string }).token ?? '') as T;
     if ((cleanPath === '/auth/invitations/accept' || cleanPath === '/invitations/accept') && method === 'POST') return this.acceptInvitation(body as InvitationCommand) as T;
     if (cleanPath === '/groups') return clone(this.session.groups) as T;
+
+    const groupRootMatch = cleanPath.match(/^\/groups\/([^/]+)$/);
+    if (groupRootMatch && method === 'PATCH') {
+      const name = String((body as { name?: string }).name ?? '').trim();
+      const containsControlCharacter = [...name].some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127);
+      if (!name || name.length > 120 || containsControlCharacter) throw new Error('The group name must contain 1 to 120 characters without control characters.');
+      const group = this.session.groups.find((entry) => entry.id === groupRootMatch[1]);
+      if (!group) throw new Error('The group does not exist.');
+      group.name = name;
+      return { name } as T;
+    }
 
     const groupMatch = cleanPath.match(/^\/groups\/([^/]+)\/(.+)$/);
     if (!groupMatch) throw new Error(`Development demo endpoint not implemented: ${method} ${path}`);
@@ -183,6 +218,7 @@ export class DemoTransport {
     if (resource === 'bookings' && method === 'GET') return clone(this.bookings) as T;
     if (resource === 'bookings' && method === 'POST') return this.createBooking(body as BookingCommand) as T;
     if (resource === 'accounts/me') return clone(this.ledger) as T;
+    if (resource === 'accounts' && method === 'GET') return clone(this.accountSummaries) as T;
     if (resource === 'payments' && method === 'GET') return clone(this.payments) as T;
     if (resource === 'payments' && method === 'POST') return this.createPayment(body as PaymentCommand) as T;
     if (resource === 'periods' && method === 'GET') return clone(this.periods) as T;
@@ -214,7 +250,7 @@ export class DemoTransport {
       return this.archiveMember(groupId, memberMatch[1], confirmSelf) as T;
     }
     const categoryUpdateMatch = resource.match(/^categories\/([^/]+)$/);
-    if (categoryUpdateMatch && method === 'PATCH') return this.updateCategory(categoryUpdateMatch[1], body as Pick<Category, 'name' | 'active' | 'sortOrder' | 'version'>) as T;
+    if (categoryUpdateMatch && method === 'PATCH') return this.updateCategory(categoryUpdateMatch[1], body as Pick<Category, 'name' | 'icon' | 'active' | 'sortOrder' | 'version'>) as T;
     const bookingReversalMatch = resource.match(/^bookings\/([^/]+)\/(?:reversal|void)$/);
     if (bookingReversalMatch && method === 'POST') return this.reverseBooking(bookingReversalMatch[1]) as T;
     const periodCloseMatch = resource.match(/^periods\/([^/]+)\/close$/);
@@ -332,6 +368,7 @@ export class DemoTransport {
     this.dashboard.recentBookings.unshift(booking);
     this.dashboard.recentBookings = this.dashboard.recentBookings.slice(0, 5);
     this.dashboard.openBalance.minorUnits = (BigInt(this.dashboard.openBalance.minorUnits) + totalMinorUnits).toString();
+    this.adjustAccountBalance(target.id, totalMinorUnits);
     const categoryTotal = this.dashboard.categoryTotals.find((entry) => entry.categoryId === category.id);
     if (categoryTotal) categoryTotal.total.minorUnits = (BigInt(categoryTotal.total.minorUnits) + totalMinorUnits).toString();
     const groupCategoryTotal = this.dashboard.groupCategoryTotals.find((entry) => entry.categoryId === category.id);
@@ -345,6 +382,7 @@ export class DemoTransport {
   private reverseBooking(id: string): Booking {
     const booking = this.bookings.find((entry) => entry.id === id);
     if (!booking) throw new Error(i18n.t('errors.bookingNotFound'));
+    if (booking.status === 'POSTED') this.adjustAccountBalance(booking.memberId, -BigInt(booking.total.minorUnits));
     booking.status = 'REVERSED';
     return clone(booking);
   }
@@ -383,11 +421,12 @@ export class DemoTransport {
   }
 
   private createCategory(input: Partial<Category>): Category {
+    if (!isCategoryIcon(input.icon)) throw new Error(i18n.t('errors.requestFailed'));
     const category: Category = {
       id: identifier('category'),
       version: 1,
       name: input.name ?? i18n.t('demo.newCategory'),
-      icon: input.icon ?? 'other',
+      icon: input.icon,
       active: true,
       sortOrder: this.categories.length + 1,
       products: [],
@@ -397,11 +436,13 @@ export class DemoTransport {
   }
 
   /** Updates one demo category while enforcing the production version contract. */
-  private updateCategory(id: string, input: Pick<Category, 'name' | 'active' | 'sortOrder' | 'version'>): Category {
+  private updateCategory(id: string, input: Pick<Category, 'name' | 'icon' | 'active' | 'sortOrder' | 'version'>): Category {
     const category = this.categories.find((entry) => entry.id === id);
     if (!category) throw new Error(i18n.t('errors.categoryNotFound'));
     if (category.version !== input.version) throw new Error(i18n.t('errors.requestFailed'));
+    if (!isCategoryIcon(input.icon)) throw new Error(i18n.t('errors.requestFailed'));
     category.name = input.name;
+    category.icon = input.icon;
     category.active = input.active;
     category.sortOrder = input.sortOrder;
     category.version += 1;
@@ -597,13 +638,22 @@ export class DemoTransport {
       amount: command.amount ?? { minorUnits: String(command.amountMinor ?? 0), currency: 'EUR' },
     };
     this.payments.unshift(payment);
+    this.adjustAccountBalance(member.id, -BigInt(payment.amount.minorUnits));
     return clone(payment);
   }
 
   private reversePayment(id: string): void {
     const payment = this.payments.find((entry) => entry.id === id);
     if (!payment) throw new Error(i18n.t('errors.paymentNotFound'));
+    if (payment.status === 'POSTED') this.adjustAccountBalance(payment.membershipId, BigInt(payment.amount.minorUnits));
     payment.status = 'REVERSED';
+  }
+
+  /** Applies an exact balance movement to one demo account summary. */
+  private adjustAccountBalance(membershipId: string, amount: bigint): void {
+    const account = this.accountSummaries.find((entry) => entry.membershipId === membershipId);
+    if (!account) return;
+    account.balance.minorUnits = (BigInt(account.balance.minorUnits) + amount).toString();
   }
 
   private closePeriod(id: string, input: { label: string; dueAt: string }): Period {

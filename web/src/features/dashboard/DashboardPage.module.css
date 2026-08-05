@@ -1,11 +1,9 @@
 .dashboard {
-  display: grid;
   min-height: 100vh;
-  grid-template-columns: minmax(560px, 1fr) 420px;
 }
 
 .content {
-  width: min(100%, 820px);
+  width: min(100%, 1040px);
   margin: 0 auto;
   padding: 50px 42px 64px;
 }
@@ -53,9 +51,6 @@
   color: var(--color-muted);
   line-height: 1.45;
 }
-
-.quick { margin-top: var(--space-8); }
-.quick h2 { margin-bottom: var(--space-3); font-size: 1.75rem; }
 
 .lower {
   display: grid;
@@ -111,18 +106,6 @@
 .sum { grid-template-columns: 1fr auto; border: 0; font-weight: 700; }
 .sum strong { color: var(--color-orange-600); }
 
-.inspector {
-  min-width: 0;
-  border-left: 1px solid var(--color-border);
-  padding-top: 56px;
-}
-
-.inspector > h2 {
-  margin: 0;
-  padding: 0 var(--space-8) var(--space-5);
-  font-size: 1.75rem;
-}
-
 .state {
   display: grid;
   min-height: 100vh;
@@ -131,11 +114,6 @@
 }
 
 .state > * { width: min(100%, 640px); }
-
-@media (max-width: 1199px) {
-  .dashboard { display: block; }
-  .content { width: min(100%, 900px); }
-}
 
 @media (max-width: 767px) {
   .content {
@@ -147,7 +125,6 @@
   .balanceCard { min-height: 110px; grid-template-columns: 1fr; }
   .period { display: none; }
   .balanceCard > div:first-child strong { font-size: 2.3rem; }
-  .quick h2 { font-size: 1.5rem; }
   .lower { grid-template-columns: 1fr; }
   .monthCard { order: -1; }
 }

@@ -21,6 +21,11 @@ var (
 	ErrPayloadTooLarge      = errors.New("request payload is too large")
 )
 
+const (
+	// DefaultOpenPeriodLabel is the user-facing label assigned to a new open accounting period.
+	DefaultOpenPeriodLabel = "Aktueller Zeitraum"
+)
+
 // ValidationError associates a safe client-facing message with invalid input.
 type ValidationError struct {
 	Field   string
@@ -60,6 +65,7 @@ type Principal struct {
 	UserID      string
 	Email       string
 	DisplayName string
+	AvatarURL   string
 	SessionHash string
 	CSRFToken   string
 }
@@ -71,6 +77,7 @@ type Membership struct {
 	UserID         string                          `json:"userId"`
 	Email          string                          `json:"email"`
 	DisplayName    string                          `json:"displayName"`
+	AvatarURL      string                          `json:"avatarUrl,omitempty"`
 	Status         string                          `json:"status"`
 	Roles          []Role                          `json:"roles"`
 	CategoryGrants map[string][]CategoryPermission `json:"categoryGrants"`
@@ -85,15 +92,56 @@ type Group struct {
 	Membership Membership `json:"membership"`
 }
 
+// CategoryIcon identifies one supported visual category marker.
+type CategoryIcon string
+
+const (
+	// CategoryIconOther is the general-purpose category marker.
+	CategoryIconOther CategoryIcon = "other"
+	// CategoryIconDrink represents beverage categories.
+	CategoryIconDrink CategoryIcon = "drink"
+	// CategoryIconFood represents meal and snack categories.
+	CategoryIconFood CategoryIcon = "food"
+	// CategoryIconPenalty represents fine and penalty categories.
+	CategoryIconPenalty CategoryIcon = "penalty"
+	// CategoryIconSport represents sport and training categories.
+	CategoryIconSport CategoryIcon = "sport"
+	// CategoryIconEvent represents event categories.
+	CategoryIconEvent CategoryIcon = "event"
+	// CategoryIconTransport represents travel and transport categories.
+	CategoryIconTransport CategoryIcon = "transport"
+	// CategoryIconMoney represents financial and donation categories.
+	CategoryIconMoney CategoryIcon = "money"
+)
+
+// ValidCategoryIcon reports whether icon belongs to the closed set accepted by
+// the database and public catalogue API.
+//
+// Parameters:
+//   - icon: Category icon value supplied by a caller or decoded command.
+//
+// Returns:
+//   - bool: True only for a supported category icon.
+func ValidCategoryIcon(icon CategoryIcon) bool {
+	switch icon {
+	case CategoryIconOther, CategoryIconDrink, CategoryIconFood, CategoryIconPenalty,
+		CategoryIconSport, CategoryIconEvent, CategoryIconTransport, CategoryIconMoney:
+		return true
+	default:
+		return false
+	}
+}
+
 // Category contains one group-defined product collection.
 type Category struct {
-	ID        string    `json:"id"`
-	GroupID   string    `json:"groupId"`
-	Name      string    `json:"name"`
-	Active    bool      `json:"active"`
-	SortOrder int       `json:"sortOrder"`
-	Version   int64     `json:"version"`
-	Products  []Product `json:"products,omitempty"`
+	ID        string       `json:"id"`
+	GroupID   string       `json:"groupId"`
+	Name      string       `json:"name"`
+	Icon      CategoryIcon `json:"icon"`
+	Active    bool         `json:"active"`
+	SortOrder int          `json:"sortOrder"`
+	Version   int64        `json:"version"`
+	Products  []Product    `json:"products,omitempty"`
 }
 
 // ProductPricingMode defines whether a product has a catalog price or requires

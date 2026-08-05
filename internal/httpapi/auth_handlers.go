@@ -24,6 +24,7 @@ type userResponse struct {
 	ID          string `json:"id"`
 	Email       string `json:"email"`
 	DisplayName string `json:"displayName"`
+	AvatarURL   string `json:"avatarUrl,omitempty"`
 }
 
 func (s *Server) handleLogin(response http.ResponseWriter, request *http.Request) {
@@ -158,7 +159,7 @@ func newSessionResponse(principal domain.Principal, csrf string, groupItems []do
 		value := groupItems[0].ID
 		activeGroupID = &value
 	}
-	return sessionResponse{User: userResponse{ID: principal.UserID, Email: principal.Email, DisplayName: principal.DisplayName}, CSRFToken: csrf, Groups: groupItems, ActiveGroupID: activeGroupID}
+	return sessionResponse{User: userResponse{ID: principal.UserID, Email: principal.Email, DisplayName: principal.DisplayName, AvatarURL: principal.AvatarURL}, CSRFToken: csrf, Groups: groupItems, ActiveGroupID: activeGroupID}
 }
 
 func (s *Server) acquirePasswordSlot() bool {

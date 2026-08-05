@@ -104,3 +104,14 @@ func ResolveImage(dataDirectory, key string) (string, error) {
 func ValidImageKey(key string) bool {
 	return imageKeyPattern.MatchString(key)
 }
+
+// UserAvatarURL builds the protected HTTP path for one persisted profile image.
+// userID identifies the account and imageKey is its current content-addressed
+// PNG key. It returns an empty string when no image key is present and otherwise
+// returns a same-origin API path; it performs no I/O and cannot fail.
+func UserAvatarURL(userID, imageKey string) string {
+	if imageKey == "" {
+		return ""
+	}
+	return "/api/v1/users/" + userID + "/avatar/" + imageKey
+}

@@ -78,7 +78,7 @@ func (s Service) Close(ctx context.Context, actor domain.Principal, membership d
 		return CloseResult{}, domain.ValidationError{Field: "label", Message: "must contain 1 to 120 characters"}
 	}
 	if input.NextPeriodLabel == "" {
-		input.NextPeriodLabel = "Next period"
+		input.NextPeriodLabel = domain.DefaultOpenPeriodLabel
 	}
 	if len(input.NextPeriodLabel) > 120 {
 		return CloseResult{}, domain.ValidationError{Field: "nextPeriodLabel", Message: "must contain at most 120 characters"}

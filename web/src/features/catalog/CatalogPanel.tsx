@@ -1,27 +1,27 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import Archive from 'lucide-react/dist/esm/icons/archive';
-import Gavel from 'lucide-react/dist/esm/icons/gavel';
-import GlassWater from 'lucide-react/dist/esm/icons/glass-water';
 import ImagePlus from 'lucide-react/dist/esm/icons/image-plus';
 import Pencil from 'lucide-react/dist/esm/icons/pencil';
 import Plus from 'lucide-react/dist/esm/icons/plus';
+import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { formatMoney, majorUnitsInputPattern, majorUnitsInputValue, majorUnitsPlaceholder, validatePositiveMajorUnits } from '@/api/money';
-import type { Category, Product, ProductPricingMode } from '@/api/types';
+import type { Category, CategoryIcon as CategoryIconName, Product, ProductPricingMode } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Button } from '@/components/ui/Button';
 import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { IconButton } from '@/components/ui/IconButton';
 import { Modal } from '@/components/ui/Modal';
 import { StatePanel } from '@/components/ui/StatePanel';
+import { CategoryIcon } from '@/features/shared/CategoryIcon';
+import { CategoryIconPicker } from './CategoryIconPicker';
 import styles from './CatalogPanel.module.css';
 
 type CatalogDialog = 'category' | 'product' | null;
 
 /**
- * Renders the version-aware category and product catalogue editor.
+ * Renders the version-aware category and product catalog editor.
  *
  * Creation, metadata updates, and image upload remain separate operations so a
  * failed image upload can be retried without duplicating or reverting a product.
@@ -36,6 +36,7 @@ export function CatalogPanel() {
   const [dialog, setDialog] = useState<CatalogDialog>(null);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [categoryName, setCategoryName] = useState('');
+  const [categoryIcon, setCategoryIcon] = useState<CategoryIconName>('other');
   const [categoryActive, setCategoryActive] = useState(true);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [productCategoryId, setProductCategoryId] = useState('');
@@ -45,14 +46,21 @@ export function CatalogPanel() {
   const [productPriceTouched, setProductPriceTouched] = useState(false);
   const [productActive, setProductActive] = useState(true);
   const [productImage, setProductImage] = useState<File | undefined>();
+  const [productImageInputKey, setProductImageInputKey] = useState(0);
   const [persistedProduct, setPersistedProduct] = useState<Product | null>(null);
 
   const invalidateCatalog = () => queryClient.invalidateQueries({ queryKey: ['categories', activeGroupId] });
+
+  const resetProductImageInput = () => {
+    setProductImage(undefined);
+    setProductImageInputKey((current) => current + 1);
+  };
 
   const clearCategoryDialog = () => {
     setDialog(null);
     setEditingCategory(null);
     setCategoryName('');
+    setCategoryIcon('other');
     setCategoryActive(true);
   };
 
@@ -60,6 +68,7 @@ export function CatalogPanel() {
     categoryMutation.reset();
     setEditingCategory(null);
     setCategoryName('');
+    setCategoryIcon('other');
     setCategoryActive(true);
     setDialog('category');
   };
@@ -68,6 +77,7 @@ export function CatalogPanel() {
     categoryMutation.reset();
     setEditingCategory(category);
     setCategoryName(category.name);
+    setCategoryIcon(category.icon);
     setCategoryActive(category.active);
     setDialog('category');
   };
@@ -81,7 +91,7 @@ export function CatalogPanel() {
     setProductPrice('');
     setProductPriceTouched(false);
     setProductActive(true);
-    setProductImage(undefined);
+    resetProductImageInput();
     setPersistedProduct(null);
   };
 
@@ -90,16 +100,16 @@ export function CatalogPanel() {
     imageMutation.reset();
   };
 
-  const openNewProduct = () => {
+  const openNewProduct = (categoryId?: string) => {
     resetProductMutations();
     setEditingProduct(null);
-    setProductCategoryId(categoriesQuery.data?.[0]?.id ?? '');
+    setProductCategoryId(categoryId ?? categoriesQuery.data?.[0]?.id ?? '');
     setProductName('');
     setProductPricingMode('FIXED');
     setProductPrice('');
     setProductPriceTouched(false);
     setProductActive(true);
-    setProductImage(undefined);
+    resetProductImageInput();
     setPersistedProduct(null);
     setDialog('product');
   };
@@ -113,7 +123,7 @@ export function CatalogPanel() {
     setProductPrice(product.price ? majorUnitsInputValue(product.price) : '');
     setProductPriceTouched(false);
     setProductActive(product.active);
-    setProductImage(undefined);
+    resetProductImageInput();
     setPersistedProduct(null);
     setDialog('product');
   };
@@ -122,11 +132,12 @@ export function CatalogPanel() {
     mutationFn: () => editingCategory
       ? api.updateCategory(activeGroupId, editingCategory.id, {
           name: categoryName.trim(),
+          icon: categoryIcon,
           active: categoryActive,
           sortOrder: editingCategory.sortOrder,
           version: editingCategory.version,
         })
-      : api.createCategory(activeGroupId, { name: categoryName.trim() }),
+      : api.createCategory(activeGroupId, { name: categoryName.trim(), icon: categoryIcon }),
     onSuccess: async () => {
       clearCategoryDialog();
       await invalidateCatalog();
@@ -190,41 +201,41 @@ export function CatalogPanel() {
   return (
     <div className={styles.content}>
       <header className={styles.header}>
-        <div><h2>{t('catalog.title')}</h2><p>{t('catalog.intro')}</p></div>
+        <p>{t('catalog.intro')}</p>
         <div>
           <Button leadingIcon={<Plus size={18} />} onClick={openNewCategory} variant="secondary">{t('catalog.categoryAction')}</Button>
-          <Button disabled={categoriesQuery.data.length === 0} leadingIcon={<Plus size={18} />} onClick={openNewProduct}>{t('catalog.productAction')}</Button>
+          <Button disabled={categoriesQuery.data.length === 0} leadingIcon={<Plus size={18} />} onClick={() => openNewProduct()}>{t('catalog.productAction')}</Button>
         </div>
       </header>
       {categoriesQuery.data.length === 0 ? <StatePanel actionLabel={t('catalog.createCategoryAction')} kind="empty" message={t('catalog.empty')} onAction={openNewCategory} /> : (
         <div className={styles.categories}>
-          {categoriesQuery.data.map((category) => {
-            const Icon = category.icon === 'drink' ? GlassWater : category.icon === 'penalty' ? Gavel : Archive;
-            return (
-              <section className={`${styles.category} ${!category.active ? styles.archived : ''}`} key={category.id}>
-                <header>
-                  <span><Icon size={22} /></span>
-                  <div><h3>{category.name}</h3><p>{t('catalog.productCount', { count: category.products.length })} · {category.active ? t('common.active') : t('common.archived')}</p></div>
-                  <IconButton className={styles.categoryEdit} label={t('catalog.editCategory', { name: category.name })} onClick={() => openCategoryEditor(category)} variant="surface"><Pencil size={17} /></IconButton>
-                </header>
-                {category.products.length === 0 ? <p className={styles.emptyProducts}>{t('catalog.emptyProducts')}</p> : (
-                  <div className={styles.products}>{category.products.map((product) => (
-                    <article className={!product.active ? styles.archived : ''} key={product.id}>
-                      {product.imageUrl ? <img alt="" src={product.imageUrl} /> : <span className={styles.imageFallback}><ImagePlus size={26} /></span>}
-                      <div><strong>{product.name}</strong><span>{product.pricingMode === 'FIXED' && product.price ? formatMoney(product.price) : t('catalog.userDefinedPrice')}</span></div>
-                      <small>{product.active ? t('common.active') : t('common.archived')}</small>
-                      <IconButton className={styles.productEdit} label={t('catalog.editProduct', { name: product.name })} onClick={() => openProductEditor(product)} variant="surface"><Pencil size={16} /></IconButton>
-                    </article>
-                  ))}</div>
-                )}
-              </section>
-            );
-          })}
+          {categoriesQuery.data.map((category) => (
+            <section className={`${styles.category} ${!category.active ? styles.archived : ''}`} key={category.id}>
+              <header>
+                <span><CategoryIcon icon={category.icon} size={22} /></span>
+                <div><h3>{category.name}</h3><p>{t('catalog.productCount', { count: category.products.length })} · {category.active ? t('common.active') : t('common.archived')}</p></div>
+                <IconButton className={styles.categoryEdit} label={t('catalog.editCategory', { name: category.name })} onClick={() => openCategoryEditor(category)} variant="surface"><Pencil size={17} /></IconButton>
+              </header>
+              {category.products.length === 0 ? <p className={styles.emptyProducts}>{t('catalog.emptyProducts')}</p> : (
+                <div className={styles.products}>{category.products.map((product) => (
+                  <article className={!product.active ? styles.archived : ''} key={product.id}>
+                    {product.imageUrl ? <img alt="" src={product.imageUrl} /> : <span className={styles.imageFallback}><ImagePlus size={26} /></span>}
+                    <div><strong>{product.name}</strong><span>{product.pricingMode === 'FIXED' && product.price ? formatMoney(product.price) : t('catalog.userDefinedPrice')}</span></div>
+                    <small>{product.active ? t('common.active') : t('common.archived')}</small>
+                    <IconButton className={styles.productEdit} label={t('catalog.editProduct', { name: product.name })} onClick={() => openProductEditor(product)} variant="surface"><Pencil size={16} /></IconButton>
+                  </article>
+                ))}</div>
+              )}
+              <IconButton className={`${styles.roundAdd} ${styles.productAdd}`} label={t('catalog.addProductToCategory', { name: category.name })} onClick={() => openNewProduct(category.id)} variant="surface"><Plus size={22} /></IconButton>
+            </section>
+          ))}
+          <IconButton className={`${styles.roundAdd} ${styles.categoryAdd}`} label={t('catalog.addCategoryAfterList')} onClick={openNewCategory} variant="surface"><Plus size={24} /></IconButton>
         </div>
       )}
       <Modal onClose={clearCategoryDialog} open={dialog === 'category'} title={editingCategory ? t('catalog.editCategoryDialog') : t('catalog.categoryDialog')}>
         <form className={styles.form} onSubmit={(event) => { event.preventDefault(); categoryMutation.mutate(); }}>
           <Field htmlFor="category-name" label={t('common.name')}><TextInput id="category-name" onChange={(event) => setCategoryName(event.target.value)} required value={categoryName} /></Field>
+          <CategoryIconPicker onChange={setCategoryIcon} value={categoryIcon} />
           {editingCategory ? <Field htmlFor="category-status" label={t('common.status')}><SelectInput id="category-status" onChange={(event) => setCategoryActive(event.target.value === 'active')} value={categoryActive ? 'active' : 'archived'}><option value="active">{t('common.active')}</option><option value="archived">{t('common.archived')}</option></SelectInput></Field> : null}
           {categoryMutation.isError ? <p className={styles.error} role="alert">{categoryMutation.error.message}</p> : null}
           <div className={styles.actions}><Button onClick={clearCategoryDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!categoryName.trim() || categoryMutation.isPending} type="submit">{editingCategory ? t('common.save') : t('catalog.createCategoryAction')}</Button></div>
@@ -242,7 +253,12 @@ export function CatalogPanel() {
           <Field htmlFor="product-pricing-mode" label={t('catalog.pricingMode')}><SelectInput disabled={metadataLocked} id="product-pricing-mode" onChange={(event) => { setProductPricingMode(event.target.value as ProductPricingMode); setProductPrice(''); setProductPriceTouched(false); }} value={productPricingMode}><option value="FIXED">{t('catalog.fixedPrice')}</option><option value="USER_DEFINED">{t('catalog.userDefinedPrice')}</option></SelectInput></Field>
           {productPricingMode === 'FIXED' ? <Field error={productPriceTouched ? productPriceValidation.error : undefined} htmlFor="product-price" label={t('catalog.price', { currency: activeGroup.currency })}><TextInput disabled={metadataLocked} id="product-price" inputMode="decimal" onBlur={() => setProductPriceTouched(true)} onChange={(event) => setProductPrice(event.target.value)} pattern={majorUnitsInputPattern(activeGroup.currency)} placeholder={majorUnitsPlaceholder(activeGroup.currency)} required type="text" value={productPrice} /></Field> : null}
           {editingProduct ? <Field htmlFor="product-status" label={t('common.status')}><SelectInput disabled={metadataLocked} id="product-status" onChange={(event) => setProductActive(event.target.value === 'active')} value={productActive ? 'active' : 'archived'}><option value="active">{t('common.active')}</option><option value="archived">{t('common.archived')}</option></SelectInput></Field> : null}
-          <Field hint={editingProduct || persistedProduct ? t('catalog.replaceImage') : t('catalog.imageHint')} htmlFor="product-image" label={t('catalog.image')}><TextInput accept="image/jpeg,image/png,image/webp" id="product-image" onChange={(event) => { setProductImage(event.target.files?.[0]); imageMutation.reset(); }} type="file" /></Field>
+          <Field hint={editingProduct || persistedProduct ? t('catalog.replaceImage') : t('catalog.imageHint')} htmlFor="product-image" label={t('catalog.image')}>
+            <div className={styles.imageSelection}>
+              <TextInput accept="image/jpeg,image/png,image/webp" id="product-image" key={productImageInputKey} onChange={(event) => { setProductImage(event.target.files?.[0]); imageMutation.reset(); }} type="file" />
+              {productImage ? <Button leadingIcon={<Trash2 size={16} />} onClick={() => { resetProductImageInput(); imageMutation.reset(); }} size="small" variant="ghost">{t('catalog.removeSelectedImage')}</Button> : null}
+            </div>
+          </Field>
           {productMutation.isError ? <p className={styles.error} role="alert">{productMutation.error.message}</p> : null}
           {persistedProduct && imageMutation.isError ? <p className={styles.error} role="alert">{editingProduct ? t('catalog.imageUpdateError') : t('catalog.imageUploadError')} {imageMutation.error.message}</p> : null}
           <div className={styles.actions}>

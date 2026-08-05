@@ -13,14 +13,14 @@ import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { Modal } from '@/components/ui/Modal';
 import { StatePanel } from '@/components/ui/StatePanel';
 import tableStyles from '@/features/shared/Table.module.css';
-import styles from './FinancePanel.module.css';
+import styles from './PaymentsPanel.module.css';
 
 /**
  * Renders the finance workspace for auditable incoming payments.
  *
  * @returns A localized payment ledger with create and reversal dialogs.
  */
-export function FinancePanel() {
+export function PaymentsPanel() {
   const { t } = useTranslation();
   const { activeGroupId, activeGroup } = useActiveGroup();
   const queryClient = useQueryClient();
@@ -35,18 +35,20 @@ export function FinancePanel() {
   const [paymentToReverse, setPaymentToReverse] = useState<Payment | null>(null);
   const [reversalReason, setReversalReason] = useState('');
   const activeMembers = membersQuery.data?.filter((member) => member.active) ?? [];
+  const invalidateFinancialReads = async () => Promise.all([
+    queryClient.invalidateQueries({ queryKey: ['payments', activeGroupId] }),
+    queryClient.invalidateQueries({ queryKey: ['account-summaries', activeGroupId] }),
+    queryClient.invalidateQueries({ queryKey: ['ledger', activeGroupId] }),
+    queryClient.invalidateQueries({ queryKey: ['settlements', activeGroupId] }),
+    queryClient.invalidateQueries({ queryKey: ['dashboard', activeGroupId] }),
+  ]);
   const paymentMutation = useMutation({
     mutationFn: () => api.createPayment(activeGroupId, { membershipId: membershipId || activeMembers[0]?.id || '', amount: { minorUnits: parseMajorUnits(amount, activeGroup.currency), currency: activeGroup.currency }, receivedAt, method, reference: reference.trim() || undefined }),
     onSuccess: async () => {
       setDialogOpen(false);
       setAmount('');
       setReference('');
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['payments', activeGroupId] }),
-        queryClient.invalidateQueries({ queryKey: ['ledger', activeGroupId] }),
-        queryClient.invalidateQueries({ queryKey: ['settlements', activeGroupId] }),
-        queryClient.invalidateQueries({ queryKey: ['dashboard', activeGroupId] }),
-      ]);
+      await invalidateFinancialReads();
     },
   });
   const reversalMutation = useMutation({
@@ -54,12 +56,7 @@ export function FinancePanel() {
     onSuccess: async () => {
       setPaymentToReverse(null);
       setReversalReason('');
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['payments', activeGroupId] }),
-        queryClient.invalidateQueries({ queryKey: ['ledger', activeGroupId] }),
-        queryClient.invalidateQueries({ queryKey: ['settlements', activeGroupId] }),
-        queryClient.invalidateQueries({ queryKey: ['dashboard', activeGroupId] }),
-      ]);
+      await invalidateFinancialReads();
     },
   });
 

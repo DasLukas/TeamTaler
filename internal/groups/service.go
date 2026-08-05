@@ -65,7 +65,7 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, name, curre
 		if _, err := tx.ExecContext(ctx, `INSERT INTO membership_roles(group_id,membership_id,role,granted_at,granted_by) VALUES(?,?,'ADMIN',?,?)`, groupID, membershipID, now, actor.UserID); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO periods(id,group_id,label,status,starts_at,created_at) VALUES(?,?,?,'OPEN',?,?)`, periodID, groupID, "Current period", now, now); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO periods(id,group_id,label,status,starts_at,created_at) VALUES(?,?,?,'OPEN',?,?)`, periodID, groupID, domain.DefaultOpenPeriodLabel, now, now); err != nil {
 			return err
 		}
 		return audit.Record(ctx, tx, groupID, actor.UserID, membershipID, "group.created", "group", groupID, map[string]any{"name": name, "currency": currency})
@@ -74,14 +74,14 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, name, curre
 		return domain.Group{}, fmt.Errorf("create group: %w", err)
 	}
 	return domain.Group{ID: groupID, Name: name, Currency: currency, Membership: domain.Membership{
-		ID: membershipID, GroupID: groupID, UserID: actor.UserID, Email: actor.Email, DisplayName: actor.DisplayName, Status: "ACTIVE", Roles: []domain.Role{domain.RoleAdmin}, CategoryGrants: map[string][]domain.CategoryPermission{},
+		ID: membershipID, GroupID: groupID, UserID: actor.UserID, Email: actor.Email, DisplayName: actor.DisplayName, AvatarURL: actor.AvatarURL, Status: "ACTIVE", Roles: []domain.Role{domain.RoleAdmin}, CategoryGrants: map[string][]domain.CategoryPermission{},
 	}}, nil
 }
 
 // List returns all active groups and effective permissions for userID. ctx
 // bounds the query; an empty result is valid, while database errors are returned.
 func (s Service) List(ctx context.Context, userID string) ([]domain.Group, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT g.id,g.name,g.currency,g.logo_key,m.id,m.status,u.email,u.display_name
+	rows, err := s.DB.QueryContext(ctx, `SELECT g.id,g.name,g.currency,g.logo_key,m.id,m.status,u.email,u.display_name,u.avatar_key
 		FROM memberships m JOIN groups g ON g.id=m.group_id JOIN users u ON u.id=m.user_id
 		WHERE m.user_id=? AND m.status='ACTIVE' ORDER BY lower(g.name)`, userID)
 	if err != nil {
@@ -91,15 +91,16 @@ func (s Service) List(ctx context.Context, userID string) ([]domain.Group, error
 	result := make([]domain.Group, 0)
 	for rows.Next() {
 		var group domain.Group
-		var logoKey sql.NullString
+		var logoKey, avatarKey sql.NullString
 		group.Membership.UserID = userID
-		if err := rows.Scan(&group.ID, &group.Name, &group.Currency, &logoKey, &group.Membership.ID, &group.Membership.Status, &group.Membership.Email, &group.Membership.DisplayName); err != nil {
+		if err := rows.Scan(&group.ID, &group.Name, &group.Currency, &logoKey, &group.Membership.ID, &group.Membership.Status, &group.Membership.Email, &group.Membership.DisplayName, &avatarKey); err != nil {
 			return nil, err
 		}
 		if logoKey.Valid {
 			group.LogoURL = "/api/v1/groups/" + group.ID + "/images/" + logoKey.String
 		}
 		group.Membership.GroupID = group.ID
+		group.Membership.AvatarURL = media.UserAvatarURL(userID, avatarKey.String)
 		group.Membership.Roles, err = s.roles(ctx, group.Membership.ID)
 		if err != nil {
 			return nil, err
@@ -111,6 +112,40 @@ func (s Service) List(ctx context.Context, userID string) ([]domain.Group, error
 		result = append(result, group)
 	}
 	return result, rows.Err()
+}
+
+// UpdateName validates and changes the current group's display name. Only
+// administrators may rename a group. ctx bounds the atomic name and audit
+// update; actor and membership scope authorization and attribution. It returns
+// the normalized name or validation, authorization, not-found, audit, and
+// database errors.
+func (s Service) UpdateName(ctx context.Context, actor domain.Principal, membership domain.Membership, name string) (string, error) {
+	if !HasRole(membership, domain.RoleAdmin) {
+		return "", domain.ErrForbidden
+	}
+	name = strings.TrimSpace(name)
+	if name == "" || len(name) > 120 || containsControlCharacter(name) {
+		return "", domain.ValidationError{Field: "name", Message: "must contain 1 to 120 characters without control characters"}
+	}
+	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		var previousName string
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM groups WHERE id=?`, membership.GroupID).Scan(&previousName); errors.Is(err, sql.ErrNoRows) {
+			return domain.ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		if previousName == name {
+			return nil
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE groups SET name=?,updated_at=? WHERE id=?`, name, platform.Timestamp(platform.Now()), membership.GroupID); err != nil {
+			return err
+		}
+		return audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "group.name.updated", "group", membership.GroupID, map[string]any{"previousName": previousName, "name": name})
+	})
+	if err != nil {
+		return "", err
+	}
+	return name, nil
 }
 
 // SetLogo attaches imageKey to membership's group. Only administrators may
@@ -174,16 +209,18 @@ func (s Service) RemoveLogo(ctx context.Context, actor domain.Principal, members
 // queries; non-members receive ErrForbidden and storage failures are returned.
 func (s Service) MembershipForUser(ctx context.Context, groupID, userID string) (domain.Membership, error) {
 	var membership domain.Membership
-	err := s.DB.QueryRowContext(ctx, `SELECT m.id,m.group_id,m.user_id,u.email,u.display_name,m.status
+	var avatarKey sql.NullString
+	err := s.DB.QueryRowContext(ctx, `SELECT m.id,m.group_id,m.user_id,u.email,u.display_name,u.avatar_key,m.status
 		FROM memberships m JOIN users u ON u.id=m.user_id
 		WHERE m.group_id=? AND m.user_id=? AND m.status='ACTIVE'`, groupID, userID).
-		Scan(&membership.ID, &membership.GroupID, &membership.UserID, &membership.Email, &membership.DisplayName, &membership.Status)
+		Scan(&membership.ID, &membership.GroupID, &membership.UserID, &membership.Email, &membership.DisplayName, &avatarKey, &membership.Status)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Membership{}, domain.ErrForbidden
 	}
 	if err != nil {
 		return domain.Membership{}, err
 	}
+	membership.AvatarURL = media.UserAvatarURL(membership.UserID, avatarKey.String)
 	membership.Roles, err = s.roles(ctx, membership.ID)
 	if err == nil {
 		membership.CategoryGrants, err = s.categoryGrants(ctx, membership.ID)
@@ -254,7 +291,7 @@ func (s Service) HasCategoryPermission(ctx context.Context, membership domain.Me
 // bounds the query. Non-finance callers may use this identity-only result for
 // permitted assignment because it contains no balance data; SQL errors propagate.
 func (s Service) ListMembers(ctx context.Context, groupID string) ([]domain.Membership, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT m.id,m.group_id,m.user_id,u.email,u.display_name,m.status
+	rows, err := s.DB.QueryContext(ctx, `SELECT m.id,m.group_id,m.user_id,u.email,u.display_name,u.avatar_key,m.status
 		FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.group_id=? ORDER BY m.status,lower(u.display_name)`, groupID)
 	if err != nil {
 		return nil, err
@@ -263,9 +300,11 @@ func (s Service) ListMembers(ctx context.Context, groupID string) ([]domain.Memb
 	result := make([]domain.Membership, 0)
 	for rows.Next() {
 		var item domain.Membership
-		if err := rows.Scan(&item.ID, &item.GroupID, &item.UserID, &item.Email, &item.DisplayName, &item.Status); err != nil {
+		var avatarKey sql.NullString
+		if err := rows.Scan(&item.ID, &item.GroupID, &item.UserID, &item.Email, &item.DisplayName, &avatarKey, &item.Status); err != nil {
 			return nil, err
 		}
+		item.AvatarURL = media.UserAvatarURL(item.UserID, avatarKey.String)
 		item.Roles, err = s.roles(ctx, item.ID)
 		if err != nil {
 			return nil, err

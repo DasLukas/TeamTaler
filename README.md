@@ -8,24 +8,45 @@ The application combines a responsive German-language React interface, a Go HTTP
 
 - Multiple isolated groups per installation and multiple group memberships per user.
 - Local accounts, seven-day single-use invitation links, optional display-name suggestions, automatic email delivery for individual and CSV invitations, idempotent CSV invitation imports, and server-side sessions.
+- Self-service profile images shown consistently in member administration, role assignment, booking activity, dashboards, and account surfaces.
 - Cumulative group roles:
   - `ADMIN` has all group capabilities and manages branding, roles, and category grants.
   - `FINANCE_MANAGER` records and reverses payments, views member accounts, and closes periods.
   - `CATALOG_MANAGER` creates and updates categories and products and uploads product images.
 - Category-scoped `ASSIGN_TO_OTHERS` and `VOID_BOOKINGS` grants.
-- User-defined categories, fixed-price and user-defined-price products, validated integer minor-unit booking prices, immutable product/price snapshots, and JPEG/PNG/WebP uploads normalized to content-addressed PNG files.
+- User-defined categories with editable visual symbols, fixed-price and user-defined-price products, validated integer minor-unit booking prices, immutable product/price snapshots, and JPEG/PNG/WebP uploads normalized to content-addressed PNG files.
 - Idempotent booking creation, immutable acting/target membership traceability, 30-second self-undo for self-bookings, and reasoned audited reversals.
 - Mandatory reasons whenever a booking is assigned to another member.
 - Activity views display and search both the charged member and the member who made every booking; dashboard activity highlights third-party assignments.
-- A consolidated member receivable account across all categories, current-period personal statistics, and anonymous group category aggregates.
+- A dedicated overview combines personal account information, recent activity, current-period statistics, and a clearly separated anonymous aggregate group balance; the mobile-first booking workspace remains focused on explicit product selection and confirmation.
+- A consolidated member receivable account across all categories and anonymous group category aggregates without exposing other members' balances.
 - Incoming payments, payment reversals, oldest-claim-first allocation, overpayment credit, and correction allocation across periods.
+- A dedicated role-protected finance workspace at `/finance` with consolidated active/former-member balances, exact receivable/credit/net totals, payment management, and period settlements.
+- A dedicated role-protected catalog workspace at `/catalog` with versioned category and product management, contextual create actions, controlled category symbols, and recoverable image uploads.
 - Flexible accounting periods with immutable close snapshots, due dates, settlement status, and an atomically opened successor period.
 - In-app notifications, an administrator-only audit view, safe CSV export of recent account entries, and browser print/PDF views.
-- Administrator-managed group logos that replace the TeamTaler mark for members of the active group.
+- Administrator-managed group names and logos that update navigation identity and replace the TeamTaler mark for members of the active group.
 - TeamTaler browser-tab and installable-web-app icons for desktop, iOS, iPadOS, and Android launchers.
-- Online backup archives containing a consistent SQLite snapshot and every image referenced by that snapshot.
+- Online backup archives containing a consistent SQLite snapshot and every product, group, and profile image referenced by that snapshot.
 
-The administration UI supports group branding, permission-aware individual and CSV invitations, invitation editing/revocation/resending, active and former member management, role and category-grant updates, versioned category and product creation/editing/archiving, recoverable product-image upload and replacement, incoming payments, payment reversals, period close, and audit review. Removing a member archives only the group membership and preserves every financial and audit record; a later accepted invitation reactivates the same membership identity.
+The administration UI supports group identity and branding, permission-aware individual and CSV invitations, invitation editing/revocation/resending, active and former member management, role and category-grant updates, and audit review. Catalog managers and administrators use the separate catalog workspace for categories, products, symbols, and product images. Finance managers and administrators use the separate finance workspace for group balances, payments, and period close. Removing a member archives only the group membership and preserves every financial and audit record; a later accepted invitation reactivates the same membership identity.
+
+## Binding UI/UX principles
+
+TeamTaler is mobile-first for regular members. Member-facing workflows must be designed and reviewed at a narrow mobile viewport before being enhanced for wider screens. Desktop layouts may expose more context, but they must not define the interaction model for everyday member tasks.
+
+The canonical member routes are `/book` for the default launch and booking workflow and `/overview` for personal information plus anonymized group statistics. `/catalog` is visible and queryable only to catalog managers and administrators, while `/finance` is visible and queryable only to finance managers and administrators. Mobile primary navigation always contains exactly overview, booking, activities, and overflow. The overflow menu exposes authorized management workspaces in the fixed order finance, catalog, administration, account, and logout. The legacy `/reports` route redirects to `/overview`.
+
+Fast product booking is the primary interaction goal. A regular member must be able to create the common fixed-price self-booking with as few deliberate interactions as possible. Once the desired product is visible, the default flow must require no more than two actions: select the product and confirm the booking. Additional input or confirmation is permitted only when required by the booking itself, such as a user-defined price, non-default quantity, another target member, or a mandatory reason.
+
+Member-facing changes must therefore preserve these constraints:
+
+- The primary booking action remains immediately discoverable and thumb-reachable on common phone widths without horizontal scrolling.
+- Common defaults select the current member, quantity one, and the catalog price without asking the member to re-enter known information.
+- Secondary information and administrative controls must not obstruct or lengthen the standard self-booking path.
+- Successful booking feedback must be brief and automatically return the interface to a ready-to-book state.
+- The booking workspace may preselect a category for orientation, but it must never preselect a product or open confirmation controls before an explicit product selection.
+- New steps, dialogs, or confirmations in the standard booking path require a documented product, accounting, security, or safety reason.
 
 ## Scope and operating constraints
 

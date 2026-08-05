@@ -19,6 +19,11 @@
   color: var(--color-muted);
 }
 
+.cards {
+  display: grid;
+  gap: var(--space-5);
+}
+
 .card {
   display: grid;
   max-width: 840px;
@@ -29,6 +34,10 @@
   box-shadow: var(--shadow-sm);
   grid-template-columns: 180px minmax(0, 1fr);
   gap: var(--space-8);
+}
+
+.nameCard {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .preview {

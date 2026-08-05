@@ -36,6 +36,9 @@ Do not force-push shared branches or commit generated runtime data, local config
 - Update README and ARCHITECTURE whenever setup, modules, APIs, data flow, dependencies, or deployment behavior changes.
 - Preserve keyboard operation, accessible names, visible focus, semantic markup, and WCAG AA contrast.
 - Preserve the accepted true-white/navy/teal TeamTaler design system. New component families require a documented product need.
+- Treat regular-member workflows as mobile-first: design and verify narrow phone layouts before adding desktop enhancements.
+- Preserve the standard fixed-price self-booking interaction budget: after a product is visible, selection and confirmation are the only required actions unless the command requires additional data.
+- Document the product, accounting, security, or safety reason for every new step, dialog, or confirmation added to the standard booking path.
 
 ## Tests
 
@@ -46,6 +49,7 @@ At minimum, pull requests must pass:
 - Go formatting, vet, unit, integration, and race tests.
 - Frontend lint, typecheck, unit tests, and production build.
 - Browser end-to-end tests for affected workflows.
+- Mobile-viewport interaction-count verification for every booking-flow change.
 - Migration and container smoke tests when persistence or deployment changes.
 - Accessibility and visual regression checks for user-interface changes.
 

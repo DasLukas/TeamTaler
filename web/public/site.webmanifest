@@ -4,7 +4,7 @@
   "short_name": "TeamTaler",
   "description": "Shared expense management for groups and teams.",
   "lang": "de",
-  "start_url": "/",
+  "start_url": "/book",
   "scope": "/",
   "display": "standalone",
   "background_color": "#ffffff",

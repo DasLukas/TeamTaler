@@ -25,11 +25,12 @@ import (
 )
 
 const (
-	maxRestoreBytes    int64 = 2 << 30
-	databaseEntryName        = "teamtaler.db"
-	manifestEntryName        = "manifest.json"
-	imagesEntryPrefix        = "images/"
-	groupLogoMigration       = "0004_group_logos.sql"
+	maxRestoreBytes     int64 = 2 << 30
+	databaseEntryName         = "teamtaler.db"
+	manifestEntryName         = "manifest.json"
+	imagesEntryPrefix         = "images/"
+	groupLogoMigration        = "0004_group_logos.sql"
+	userAvatarMigration       = "0010_user_avatars.sql"
 )
 
 // Manifest records the archive format, creation timestamp, and SHA-256 checksum
@@ -463,9 +464,9 @@ func validateRestoredDatabase(destination string, manifest Manifest) error {
 }
 
 // referencedImageKeys returns every distinct content-addressed image referenced
-// by db. Databases predating group-logo migration 0004 contain product images
-// only and remain valid restore inputs. ctx bounds all schema and inventory
-// reads; database and row errors are returned unchanged.
+// by db. Databases predating the group-logo and user-avatar migrations remain
+// valid restore inputs. ctx bounds all schema and inventory reads; database and
+// row errors are returned unchanged.
 func referencedImageKeys(ctx context.Context, db *sql.DB) ([]string, error) {
 	query := `SELECT DISTINCT image_key FROM products WHERE image_key IS NOT NULL`
 	var hasGroupLogos int
@@ -475,6 +476,13 @@ func referencedImageKeys(ctx context.Context, db *sql.DB) ([]string, error) {
 	if hasGroupLogos > 0 {
 		query = `SELECT image_key FROM products WHERE image_key IS NOT NULL
 			UNION SELECT logo_key FROM groups WHERE logo_key IS NOT NULL`
+	}
+	var hasUserAvatars int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version=?`, userAvatarMigration).Scan(&hasUserAvatars); err != nil {
+		return nil, err
+	}
+	if hasUserAvatars > 0 {
+		query += ` UNION SELECT avatar_key FROM users WHERE avatar_key IS NOT NULL`
 	}
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {

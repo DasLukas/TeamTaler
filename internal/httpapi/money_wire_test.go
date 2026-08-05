@@ -18,11 +18,12 @@ func TestResponseMinorUnitsUseExactDecimalStrings(t *testing.T) {
 	exactProductPrice := exact
 	groupOutstanding := exact
 	payload := struct {
-		Product   domain.Product    `json:"product"`
-		Booking   domain.Booking    `json:"booking"`
-		Payment   domain.Payment    `json:"payment"`
-		Statement domain.Statement  `json:"statement"`
-		Dashboard finance.Dashboard `json:"dashboard"`
+		Product   domain.Product           `json:"product"`
+		Booking   domain.Booking           `json:"booking"`
+		Payment   domain.Payment           `json:"payment"`
+		Statement domain.Statement         `json:"statement"`
+		Dashboard finance.Dashboard        `json:"dashboard"`
+		Accounts  []finance.AccountSummary `json:"accounts"`
 	}{
 		Product: domain.Product{PriceMinor: &exactProductPrice},
 		Booking: domain.Booking{UnitPriceMinor: exact, TotalMinor: exact},
@@ -34,12 +35,13 @@ func TestResponseMinorUnitsUseExactDecimalStrings(t *testing.T) {
 		Dashboard: finance.Dashboard{
 			Account: finance.Account{
 				BalanceMinor: exact, OpenPeriodDue: exact,
-				CategoryStats:      []finance.CategoryStatistic{{GrossMinor: exact, VoidedMinor: exact, NetMinor: exact}},
-				GroupCategoryStats: []finance.CategoryStatistic{{GrossMinor: exact, VoidedMinor: exact, NetMinor: exact}},
+				CategoryStats:      []finance.CategoryStatistic{{Icon: domain.CategoryIconOther, GrossMinor: exact, VoidedMinor: exact, NetMinor: exact}},
+				GroupCategoryStats: []finance.CategoryStatistic{{Icon: domain.CategoryIconOther, GrossMinor: exact, VoidedMinor: exact, NetMinor: exact}},
 				RecentEntries:      []finance.LedgerEntry{{AmountMinor: exact}},
 			},
 			GroupOutstanding: &groupOutstanding,
 		},
+		Accounts: []finance.AccountSummary{{BalanceMinor: exact}},
 	}
 
 	handler := http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {

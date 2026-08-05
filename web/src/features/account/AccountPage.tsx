@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/Button';
 import { StatePanel } from '@/components/ui/StatePanel';
 import tableStyles from '@/features/shared/Table.module.css';
 import { safeCsvCell } from './csv';
+import { ProfileImagePanel } from './ProfileImagePanel';
 import i18n from '@/i18n';
 import styles from './AccountPage.module.css';
 
@@ -50,6 +51,7 @@ export function AccountPage() {
   const ownSettlements = settlementsQuery.data.filter((settlement) => settlement.membershipId === activeGroup.membership?.id);
   return (
     <Page actions={<><Button leadingIcon={<Download size={18} />} onClick={() => downloadLedger(ledgerQuery.data)} variant="secondary">{t('account.csvExport')}</Button><Button leadingIcon={<Printer size={18} />} onClick={() => window.print()}>{t('common.print')}</Button></>} intro={t('account.intro')} title={t('account.title')} wide>
+      <ProfileImagePanel />
       <section className={styles.balance}>
         <span>{t('account.currentOpenAmount')}</span><strong>{formatMoney(balance)}</strong>
       </section>

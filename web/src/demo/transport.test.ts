@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Booking, Category, InvitationImportResult, InvitationMetadata, Product } from '@/api/types';
+import type { AccountSummary, Booking, Category, Group, InvitationImportResult, InvitationMetadata, Membership, Product, Session } from '@/api/types';
 import { DemoTransport } from './transport';
 
 describe('DemoTransport invitation import', () => {
@@ -41,6 +41,60 @@ describe('DemoTransport invitation import', () => {
   });
 });
 
+describe('DemoTransport group settings', () => {
+  it('persists a normalized group name in the demo session', async () => {
+    const transport = new DemoTransport();
+    await expect(transport.request<{ name: string }>('/groups/group-sv-adler', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: '  Renamed Group  ' }),
+    })).resolves.toEqual({ name: 'Renamed Group' });
+
+    const groups = await transport.request<Group[]>('/groups');
+    expect(groups.find((group) => group.id === 'group-sv-adler')?.name).toBe('Renamed Group');
+  });
+});
+
+describe('DemoTransport finance accounts', () => {
+  it('lists active and archived summaries and applies booking movements', async () => {
+    const transport = new DemoTransport();
+    const before = await transport.request<AccountSummary[]>('/groups/group-sv-adler/accounts');
+    const lukasBefore = before.find((account) => account.membershipId === 'member-lukas');
+    expect(before.some((account) => account.status === 'ARCHIVED')).toBe(true);
+
+    await transport.request<Booking>('/groups/group-sv-adler/bookings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ productId: 'product-water', productVersion: 1, expectedPeriodId: 'period-august', quantity: 1 }),
+    });
+    const after = await transport.request<AccountSummary[]>('/groups/group-sv-adler/accounts');
+    const lukasAfter = after.find((account) => account.membershipId === 'member-lukas');
+
+    expect(BigInt(lukasAfter?.balance.minorUnits ?? '0') - BigInt(lukasBefore?.balance.minorUnits ?? '0')).toBe(100n);
+  });
+});
+
+describe('DemoTransport profile images', () => {
+  it('propagates upload and removal between session and memberships', async () => {
+    const transport = new DemoTransport();
+    const form = new FormData();
+    form.set('image', new File(['avatar'], 'avatar.png', { type: 'image/png' }));
+
+    const uploaded = await transport.request<{ avatarUrl: string }>('/me/avatar', { method: 'POST', body: form });
+    const session = await transport.request<Session>('/session');
+    const members = await transport.request<Membership[]>('/groups/group-sv-adler/members');
+    expect(uploaded.avatarUrl).toMatch(/^blob:/);
+    expect(session.user.avatarUrl).toBe(uploaded.avatarUrl);
+    expect(members.find((member) => member.userId === session.user.id)?.avatarUrl).toBe(uploaded.avatarUrl);
+
+    await transport.request<void>('/me/avatar', { method: 'DELETE' });
+    const removedSession = await transport.request<Session>('/session');
+    const removedMembers = await transport.request<Membership[]>('/groups/group-sv-adler/members');
+    expect(removedSession.user.avatarUrl).toBeUndefined();
+    expect(removedMembers.find((member) => member.userId === session.user.id)?.avatarUrl).toBeUndefined();
+  });
+});
+
 describe('DemoTransport product pricing', () => {
   it('creates and books a user-defined-price product with production-equivalent totals', async () => {
     const transport = new DemoTransport();
@@ -75,7 +129,7 @@ describe('DemoTransport product pricing', () => {
     const category = await transport.request<Category>('/groups/group-sv-adler/categories/category-drinks', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', 'If-Match': '"v1"' },
-      body: JSON.stringify({ name: 'Refreshments', active: false, sortOrder: 5, version: 1 }),
+      body: JSON.stringify({ name: 'Refreshments', icon: 'event', active: false, sortOrder: 5, version: 1 }),
     });
     const product = await transport.request<Product>('/groups/group-sv-adler/products/product-water', {
       method: 'PATCH',
@@ -83,7 +137,7 @@ describe('DemoTransport product pricing', () => {
       body: JSON.stringify({ name: 'Still water', pricingMode: 'USER_DEFINED', active: false, sortOrder: 4, version: 1 }),
     });
 
-    expect(category).toMatchObject({ name: 'Refreshments', active: false, sortOrder: 5, version: 2 });
+    expect(category).toMatchObject({ name: 'Refreshments', icon: 'event', active: false, sortOrder: 5, version: 2 });
     expect(product).toMatchObject({ name: 'Still water', pricingMode: 'USER_DEFINED', price: undefined, active: false, sortOrder: 4, version: 2 });
   });
 });

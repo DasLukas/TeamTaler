@@ -13,6 +13,22 @@ export type GroupRole = 'ADMIN' | 'FINANCE_MANAGER' | 'CATALOG_MANAGER' | 'MEMBE
 /** Rights that can be granted for one category. */
 export type CategoryPermissionName = 'ASSIGN_TO_OTHERS' | 'VOID_BOOKINGS';
 
+/** Closed set of visual markers supported for product categories. */
+export const CATEGORY_ICON_VALUES = ['other', 'drink', 'food', 'penalty', 'sport', 'event', 'transport', 'money'] as const;
+
+/** Visual marker persisted for a product category. */
+export type CategoryIcon = typeof CATEGORY_ICON_VALUES[number];
+
+/**
+ * Determines whether an untrusted value is a supported category icon.
+ *
+ * @param value - Wire or user-provided value to validate.
+ * @returns Whether the value belongs to the supported icon set.
+ */
+export function isCategoryIcon(value: unknown): value is CategoryIcon {
+  return typeof value === 'string' && CATEGORY_ICON_VALUES.some((icon) => icon === value);
+}
+
 /** Lifecycle state of an accounting period. */
 export type PeriodStatus = 'OPEN' | 'CLOSED';
 
@@ -84,15 +100,22 @@ export interface Category {
   id: string;
   version: number;
   name: string;
-  icon: 'drink' | 'penalty' | 'other';
+  icon: CategoryIcon;
   active: boolean;
   sortOrder: number;
   products: Product[];
 }
 
+/** Command used by catalog managers to create one category. */
+export interface CategoryCreateCommand {
+  name: string;
+  icon: CategoryIcon;
+}
+
 /** Command used by catalog managers to update one category optimistically. */
 export interface CategoryUpdateCommand {
   name: string;
+  icon: CategoryIcon;
   active: boolean;
   sortOrder: number;
   version: number;
@@ -124,6 +147,7 @@ export interface Booking {
   id: string;
   memberId: string;
   memberName: string;
+  memberAvatarUrl?: string;
   productId: string;
   productName: string;
   categoryId: string;
@@ -134,6 +158,7 @@ export interface Booking {
   bookedAt: string;
   bookedByName: string;
   bookedByMemberId?: string;
+  bookedByAvatarUrl?: string;
   reason?: string;
   status: 'POSTED' | 'REVERSED';
   undoUntil?: string;
@@ -178,6 +203,16 @@ export interface LedgerEntry {
   amount: Money;
   balance: Money;
   referenceId: string;
+}
+
+/** Consolidated group account balance for one active or archived membership. */
+export interface AccountSummary {
+  membershipId: string;
+  displayName: string;
+  avatarUrl?: string;
+  status: 'ACTIVE' | 'ARCHIVED';
+  currency: string;
+  balance: Money;
 }
 
 /** A payment received for a member account. */
