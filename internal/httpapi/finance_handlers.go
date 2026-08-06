@@ -84,6 +84,28 @@ func (s *Server) handleCreatePayment(response http.ResponseWriter, request *http
 	writeJSON(response, http.StatusCreated, item)
 }
 
+// handleCreateOwnPayment records received money for the authenticated
+// membership. The request cannot choose a target membership; authorization and
+// target derivation remain server-side.
+func (s *Server) handleCreateOwnPayment(response http.ResponseWriter, request *http.Request) {
+	principal, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	var input finance.CreateOwnPaymentInput
+	if err := decodeJSON(response, request, &input); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	item, err := s.finance.CreateOwnPayment(request.Context(), principal, membership, request.Header.Get("Idempotency-Key"), input)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, item)
+}
+
 func (s *Server) handleReversePayment(response http.ResponseWriter, request *http.Request) {
 	principal, membership, err := s.membership(request)
 	if err != nil {

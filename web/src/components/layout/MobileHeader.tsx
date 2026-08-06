@@ -19,7 +19,7 @@ export function MobileHeader() {
       <Brand imageAlt={activeGroup?.logoUrl ? t('brand.groupMarkAlt', { group: activeGroup.name }) : undefined} imageUrl={activeGroup?.logoUrl} />
       <div className={styles.group}>
         <UsersRound aria-hidden="true" size={23} strokeWidth={1.8} />
-        <select aria-label={t('nav.selectGroup')} onChange={(event) => setActiveGroupId(event.target.value)} value={activeGroupId}>
+        <select aria-label={t('nav.selectGroup')} onChange={(event) => setActiveGroupId(event.target.value)} title={activeGroup?.name} value={activeGroupId}>
           {session.groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
         </select>
         <ChevronDown aria-hidden="true" size={18} />

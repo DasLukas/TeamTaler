@@ -190,10 +190,31 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, membership 
 // and bookings in categories for which they may void entries. It returns the
 // slice or SQL errors.
 func (s Service) List(ctx context.Context, membership domain.Membership, periodID string, limit int) ([]domain.Booking, error) {
+	return s.list(ctx, membership, periodID, limit, false)
+}
+
+// ListActivity returns the activity workspace's visible booking history. When
+// administrators enable group-wide visibility, regular members receive every
+// historical group booking; finance-manager visibility remains unconditional.
+// ctx bounds settings and booking queries. It returns visible bookings or
+// settings and SQL errors.
+func (s Service) ListActivity(ctx context.Context, membership domain.Membership, periodID string, limit int) ([]domain.Booking, error) {
+	viewAll := groups.HasRole(membership, domain.RoleFinanceManager)
+	if !viewAll {
+		var err error
+		viewAll, err = s.Groups.MembersCanViewAllBookings(ctx, membership.GroupID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return s.list(ctx, membership, periodID, limit, viewAll)
+}
+
+func (s Service) list(ctx context.Context, membership domain.Membership, periodID string, limit int, viewAll bool) ([]domain.Booking, error) {
 	if limit < 1 || limit > 200 {
 		limit = 100
 	}
-	viewAll := groups.HasRole(membership, domain.RoleFinanceManager)
+	viewAll = viewAll || groups.HasRole(membership, domain.RoleFinanceManager)
 	query := `SELECT b.id,b.group_id,b.period_id,b.category_id,b.product_id,b.actor_membership_id,b.target_membership_id,b.quantity,
 		b.unit_price_minor,b.total_minor,g.currency,b.product_name,b.category_name,coalesce(b.reason,''),b.created_at,b.voided_at,coalesce(b.void_reason,'')
 		FROM bookings b JOIN groups g ON g.id=b.group_id WHERE b.group_id=?`

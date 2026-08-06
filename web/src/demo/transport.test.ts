@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AccountSummary, Booking, Category, Group, InvitationImportResult, InvitationMetadata, Membership, Product, Session } from '@/api/types';
+import type { AccountSummary, Booking, Category, Dashboard, Group, GroupSettings, InvitationImportResult, InvitationMetadata, LedgerEntry, Membership, Payment, Product, Session } from '@/api/types';
 import { DemoTransport } from './transport';
 
 describe('DemoTransport invitation import', () => {
@@ -53,6 +53,54 @@ describe('DemoTransport group settings', () => {
     const groups = await transport.request<Group[]>('/groups');
     expect(groups.find((group) => group.id === 'group-sv-adler')?.name).toBe('Renamed Group');
   });
+
+  it('persists typed behavior settings', async () => {
+    const transport = new DemoTransport();
+    await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings')).resolves.toEqual({ membersCanViewAllBookings: false });
+    await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ membersCanViewAllBookings: true }),
+    })).resolves.toEqual({ membersCanViewAllBookings: true });
+    await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings')).resolves.toEqual({ membersCanViewAllBookings: true });
+  });
+});
+
+describe('DemoTransport catalog order', () => {
+  it('persists category and product positions across catalog and dashboard reads', async () => {
+    const transport = new DemoTransport();
+    const reordered = await transport.request<Category[]>('/groups/group-sv-adler/catalog/order', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        categoryIds: ['category-penalties', 'category-drinks'],
+        productIdsByCategory: {
+          'category-penalties': ['product-kit', 'product-late'],
+          'category-drinks': ['product-beer', 'product-water', 'product-spezi'],
+        },
+      }),
+    });
+    const catalog = await transport.request<Category[]>('/groups/group-sv-adler/categories');
+    const dashboard = await transport.request<Dashboard>('/groups/group-sv-adler/dashboard');
+
+    expect(reordered.map((category) => category.id)).toEqual(['category-penalties', 'category-drinks']);
+    expect(catalog[0].products.map((product) => product.id)).toEqual(['product-kit', 'product-late']);
+    expect(catalog[1].products.map((product) => product.id)).toEqual(['product-beer', 'product-water', 'product-spezi']);
+    expect(dashboard.categoryTotals.map((total) => total.categoryId)).toEqual(['category-penalties', 'category-drinks']);
+    expect(dashboard.groupCategoryTotals.map((total) => total.categoryId)).toEqual(['category-penalties', 'category-drinks']);
+  });
+
+  it('rejects incomplete orders without changing the catalog', async () => {
+    const transport = new DemoTransport();
+    await expect(transport.request<Category[]>('/groups/group-sv-adler/catalog/order', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ categoryIds: ['category-drinks'], productIdsByCategory: { 'category-drinks': [] } }),
+    })).rejects.toThrow();
+
+    const catalog = await transport.request<Category[]>('/groups/group-sv-adler/categories');
+    expect(catalog.map((category) => category.id)).toEqual(['category-drinks', 'category-penalties']);
+  });
 });
 
 describe('DemoTransport finance accounts', () => {
@@ -71,6 +119,24 @@ describe('DemoTransport finance accounts', () => {
     const lukasAfter = after.find((account) => account.membershipId === 'member-lukas');
 
     expect(BigInt(lukasAfter?.balance.minorUnits ?? '0') - BigInt(lukasBefore?.balance.minorUnits ?? '0')).toBe(100n);
+  });
+
+  it('posts an authorized own payment to the session membership and exposes resulting credit', async () => {
+    const transport = new DemoTransport();
+    const before = await transport.request<Dashboard>('/groups/group-sv-adler/dashboard');
+
+    const payment = await transport.request<Payment>('/groups/group-sv-adler/payments/self', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amountMinor: 3000, receivedAt: '2026-08-06T00:00:00.000Z', method: 'PAYPAL', reference: 'PayPal advance' }),
+    });
+    const after = await transport.request<Dashboard>('/groups/group-sv-adler/dashboard');
+    const ledger = await transport.request<LedgerEntry[]>('/groups/group-sv-adler/accounts/me');
+
+    expect(payment).toMatchObject({ membershipId: 'member-lukas', method: 'PAYPAL', reference: 'PayPal advance', status: 'POSTED' });
+    expect(BigInt(after.openBalance.minorUnits)).toBe(BigInt(before.openBalance.minorUnits) - 3000n);
+    expect(after.openBalance.minorUnits).toBe('-660');
+    expect(ledger[0]).toMatchObject({ kind: 'PAYMENT', referenceId: payment.id, balance: { minorUnits: '-660', currency: 'EUR' } });
   });
 });
 
@@ -139,5 +205,36 @@ describe('DemoTransport product pricing', () => {
 
     expect(category).toMatchObject({ name: 'Refreshments', icon: 'event', active: false, sortOrder: 5, version: 2 });
     expect(product).toMatchObject({ name: 'Still water', pricingMode: 'USER_DEFINED', price: undefined, active: false, sortOrder: 4, version: 2 });
+  });
+
+  it('deletes only archived and unused catalog entries', async () => {
+    const transport = new DemoTransport();
+    const category = await transport.request<Category>('/groups/group-sv-adler/categories', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Temporary', icon: 'other', sortOrder: 0 }),
+    });
+    const product = await transport.request<Product>(`/groups/group-sv-adler/categories/${category.id}/products`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Temporary item', pricingMode: 'FIXED', priceMinor: 100, sortOrder: 0 }),
+    });
+
+    await expect(transport.request<void>(`/groups/group-sv-adler/products/${product.id}`, { method: 'DELETE', headers: { 'If-Match': `"v${product.version}"` } })).rejects.toThrow();
+    const archivedProduct = await transport.request<Product>(`/groups/group-sv-adler/products/${product.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: product.name, pricingMode: product.pricingMode, priceMinor: 100, active: false, sortOrder: product.sortOrder, version: product.version }),
+    });
+    await transport.request<void>(`/groups/group-sv-adler/products/${archivedProduct.id}`, { method: 'DELETE', headers: { 'If-Match': `"v${archivedProduct.version}"` } });
+    const archivedCategory = await transport.request<Category>(`/groups/group-sv-adler/categories/${category.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: category.name, icon: category.icon, active: false, sortOrder: category.sortOrder, version: category.version }),
+    });
+    await transport.request<void>(`/groups/group-sv-adler/categories/${archivedCategory.id}`, { method: 'DELETE', headers: { 'If-Match': `"v${archivedCategory.version}"` } });
+
+    const catalog = await transport.request<Category[]>('/groups/group-sv-adler/categories');
+    expect(catalog.some((entry) => entry.id === category.id)).toBe(false);
   });
 });

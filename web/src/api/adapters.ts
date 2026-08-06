@@ -93,7 +93,11 @@ export function adaptSession(input: unknown): Session {
       name: String(group.name),
       currency: String(group.currency || 'EUR'),
       logoUrl: typeof group.logoUrl === 'string' ? group.logoUrl : undefined,
-      membership: membership ? { id: String(membership.id), roles: [...(membership.roles as GroupRole[] ?? []), 'MEMBER'] } : undefined,
+      membership: membership ? {
+        id: String(membership.id),
+        roles: [...(membership.roles as GroupRole[] ?? []), 'MEMBER'],
+        groupPermissions: (membership.groupPermissions as Membership['groupPermissions'] | undefined) ?? [],
+      } : undefined,
     } satisfies Group;
   });
   return {
@@ -165,7 +169,11 @@ export function adaptCategories(input: unknown): Category[] {
  */
 export function adaptMembership(input: unknown, etag?: string): Membership {
   const source = asRecord(input);
-  if ('categoryPermissions' in source) return { ...(source as unknown as Membership), etag: etag ?? source.etag as string | undefined };
+  if ('categoryPermissions' in source) return {
+    ...(source as unknown as Membership),
+    groupPermissions: (source.groupPermissions as Membership['groupPermissions'] | undefined) ?? [],
+    etag: etag ?? source.etag as string | undefined,
+  };
   const grants = (source.categoryGrants ?? {}) as Record<string, string[]>;
   const roles = (source.roles as GroupRole[] ?? []).filter((role) => role !== 'MEMBER');
   return {
@@ -176,6 +184,7 @@ export function adaptMembership(input: unknown, etag?: string): Membership {
     initials: initials(String(source.displayName)),
     avatarUrl: typeof source.avatarUrl === 'string' && source.avatarUrl ? source.avatarUrl : undefined,
     roles: [...roles, 'MEMBER'],
+    groupPermissions: (source.groupPermissions as Membership['groupPermissions'] | undefined) ?? [],
     categoryPermissions: Object.entries(grants).map(([categoryId, permissions]) => ({
       categoryId,
       assignToOthers: permissions.includes('ASSIGN_TO_OTHERS'),

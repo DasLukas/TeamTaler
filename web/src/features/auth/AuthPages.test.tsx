@@ -26,7 +26,7 @@ vi.mock('@tanstack/react-router', () => ({
 
 const session = {
   user: { id: 'user-a', displayName: 'Alex', email: 'alex@example.test' },
-  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', roles: ['MEMBER'] as const } }],
+  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', roles: ['MEMBER'] as const, groupPermissions: [] } }],
   activeGroupId: 'group-a',
 };
 

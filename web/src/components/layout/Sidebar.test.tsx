@@ -11,7 +11,7 @@ vi.mock('@/components/brand/Brand', () => ({ Brand: () => <div>brand</div> }));
 vi.mock('@/components/auth/LogoutButton', () => ({ LogoutButton: () => <button type="button">logout</button> }));
 
 function useRoles(roles: string[]): void {
-  const group = { id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', roles } };
+  const group = { id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', roles, groupPermissions: [] } };
   mocks.useActiveGroup.mockReturnValue({ session: { groups: [group] }, activeGroupId: group.id, setActiveGroupId: vi.fn() });
 }
 

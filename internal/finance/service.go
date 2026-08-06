@@ -227,6 +227,21 @@ type CreatePaymentInput struct {
 	Note         string `json:"note,omitempty"`
 }
 
+// CreateOwnPaymentInput is the self-service payment command. The target
+// membership is intentionally absent and is derived from the authenticated
+// membership by CreateOwnPayment.
+type CreateOwnPaymentInput struct {
+	AmountMinor int64  `json:"amountMinor"`
+	ReceivedAt  string `json:"receivedAt"`
+	Method      string `json:"method"`
+	Reference   string `json:"reference,omitempty"`
+}
+
+const (
+	paymentSourceFinanceWorkspace = "FINANCE_WORKSPACE"
+	paymentSourceSelfService      = "SELF_SERVICE"
+)
+
 // CreatePayment validates finance authorization and idempotencyKey, records
 // input, creates balanced ledger entries and a notification, and allocates funds
 // to the oldest remaining claims. ctx bounds the transaction; actor is audited.
@@ -236,8 +251,41 @@ func (s Service) CreatePayment(ctx context.Context, actor domain.Principal, memb
 	if !groups.HasRole(membership, domain.RoleFinanceManager) {
 		return domain.Payment{}, domain.ErrForbidden
 	}
+	return s.createPayment(ctx, actor, membership, idempotencyKey, input, true, paymentSourceFinanceWorkspace)
+}
+
+// CreateOwnPayment records a payment for the authenticated membership only.
+// The caller must have SELF_RECORD_PAYMENT or a broader finance role. The
+// resulting payment is immediately posted, audited, and FIFO-allocated without
+// creating a redundant notification for the actor.
+func (s Service) CreateOwnPayment(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey string, input CreateOwnPaymentInput) (domain.Payment, error) {
+	if !groups.HasGroupPermission(membership, domain.PermissionSelfRecordPayment) {
+		return domain.Payment{}, domain.ErrForbidden
+	}
+	input.ReceivedAt = strings.TrimSpace(input.ReceivedAt)
+	if input.ReceivedAt == "" {
+		return domain.Payment{}, domain.ValidationError{Field: "receivedAt", Message: "is required"}
+	}
+	input.Reference = strings.TrimSpace(input.Reference)
+	if input.Reference == "" {
+		return domain.Payment{}, domain.ValidationError{Field: "reference", Message: "is required"}
+	}
+	return s.createPayment(ctx, actor, membership, idempotencyKey, CreatePaymentInput{
+		MembershipID: membership.ID,
+		AmountMinor:  input.AmountMinor,
+		ReceivedAt:   input.ReceivedAt,
+		Method:       input.Method,
+		Reference:    input.Reference,
+	}, false, paymentSourceSelfService)
+}
+
+func (s Service) createPayment(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey string, input CreatePaymentInput, notifyTarget bool, source string) (domain.Payment, error) {
 	if len(idempotencyKey) < 8 || len(idempotencyKey) > 200 {
 		return domain.Payment{}, domain.ValidationError{Field: "Idempotency-Key", Message: "must contain 8 to 200 characters"}
+	}
+	storedIdempotencyKey := idempotencyKey
+	if source == paymentSourceSelfService {
+		storedIdempotencyKey = "self:" + idempotencyKey
 	}
 	input.MembershipID = strings.TrimSpace(input.MembershipID)
 	input.Method = strings.ToUpper(strings.TrimSpace(input.Method))
@@ -252,8 +300,8 @@ func (s Service) CreatePayment(ctx context.Context, actor domain.Principal, memb
 	if input.AmountMinor <= 0 || input.AmountMinor > 100_000_000_000 {
 		return domain.Payment{}, domain.ValidationError{Field: "amountMinor", Message: "must be a positive, reasonable integer"}
 	}
-	if input.Method != "CASH" && input.Method != "BANK_TRANSFER" && input.Method != "OTHER" {
-		return domain.Payment{}, domain.ValidationError{Field: "method", Message: "must be CASH, BANK_TRANSFER, or OTHER"}
+	if input.Method != "CASH" && input.Method != "BANK_TRANSFER" && input.Method != "PAYPAL" && input.Method != "OTHER" {
+		return domain.Payment{}, domain.ValidationError{Field: "method", Message: "must be CASH, BANK_TRANSFER, PAYPAL, or OTHER"}
 	}
 	receivedAt := platform.Now()
 	if input.ReceivedAt != "" {
@@ -268,9 +316,21 @@ func (s Service) CreatePayment(ctx context.Context, actor domain.Principal, memb
 	requestHash := hex.EncodeToString(digest[:])
 	var payment domain.Payment
 	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		if source == paymentSourceSelfService {
+			var allowed int
+			if err := tx.QueryRowContext(ctx, `SELECT
+				EXISTS(SELECT 1 FROM membership_roles WHERE group_id=? AND membership_id=? AND role IN ('ADMIN','FINANCE_MANAGER'))
+				OR EXISTS(SELECT 1 FROM membership_permissions WHERE group_id=? AND membership_id=? AND permission='SELF_RECORD_PAYMENT')`,
+				membership.GroupID, membership.ID, membership.GroupID, membership.ID).Scan(&allowed); err != nil {
+				return err
+			}
+			if allowed == 0 {
+				return domain.ErrForbidden
+			}
+		}
 		var storedHash, storedResponse string
 		err := tx.QueryRowContext(ctx, `SELECT request_hash,response_json FROM idempotency_results WHERE group_id=? AND actor_user_id=? AND idempotency_key=?`,
-			membership.GroupID, actor.UserID, idempotencyKey).Scan(&storedHash, &storedResponse)
+			membership.GroupID, actor.UserID, storedIdempotencyKey).Scan(&storedHash, &storedResponse)
 		if err == nil {
 			if storedHash != requestHash {
 				return domain.ErrIdempotencyReuse
@@ -335,17 +395,19 @@ func (s Service) CreatePayment(ctx context.Context, actor domain.Principal, memb
 		if err := allocationRows.Close(); err != nil {
 			return err
 		}
-		notificationID, _ := platform.NewID("ntf")
-		if _, err := tx.ExecContext(ctx, `INSERT INTO notifications(id,group_id,membership_id,type,title,body,resource_type,resource_id,created_at)
-			VALUES(?,?,?,'PAYMENT_RECORDED','Payment recorded','A payment was added to your account.','payment',?,?)`, notificationID, membership.GroupID, input.MembershipID, paymentID, now); err != nil {
-			return err
+		if notifyTarget {
+			notificationID, _ := platform.NewID("ntf")
+			if _, err := tx.ExecContext(ctx, `INSERT INTO notifications(id,group_id,membership_id,type,title,body,resource_type,resource_id,created_at)
+				VALUES(?,?,?,'PAYMENT_RECORDED','Payment recorded','A payment was added to your account.','payment',?,?)`, notificationID, membership.GroupID, input.MembershipID, paymentID, now); err != nil {
+				return err
+			}
 		}
-		if err := audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "payment.created", "payment", paymentID, map[string]any{"membershipId": input.MembershipID, "amountMinor": input.AmountMinor}); err != nil {
+		if err := audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "payment.created", "payment", paymentID, map[string]any{"membershipId": input.MembershipID, "amountMinor": input.AmountMinor, "source": source}); err != nil {
 			return err
 		}
 		encodedResponse, _ := json.Marshal(payment)
 		_, err = tx.ExecContext(ctx, `INSERT INTO idempotency_results(group_id,actor_user_id,idempotency_key,request_hash,status_code,response_json,created_at) VALUES(?,?,?,?,201,?,?)`,
-			membership.GroupID, actor.UserID, idempotencyKey, requestHash, string(encodedResponse), now)
+			membership.GroupID, actor.UserID, storedIdempotencyKey, requestHash, string(encodedResponse), now)
 		return err
 	})
 	return payment, err

@@ -129,14 +129,14 @@ func TestImportInvitationsCreatesEncryptedOutboxAndReplays(t *testing.T) {
 		t.Fatalf("retried outbox status=%q attempts=%d err=%v", deliveryStatus, attempts, err)
 	}
 
-	manualInvitation, err := service.CreateInvitation(ctx, session.Principal, membership, "MANUAL@example.test", "Manual Member", nil, nil)
+	manualInvitation, err := service.CreateInvitation(ctx, session.Principal, membership, "MANUAL@example.test", "Manual Member", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateInvitation with email delivery: %v", err)
 	}
 	if manualInvitation.Email != "manual@example.test" || manualInvitation.Token == "" || manualInvitation.EmailDeliveryStatus != EmailDeliveryPending {
 		t.Fatalf("manual invitation = %#v", manualInvitation)
 	}
-	if _, err := service.CreateInvitation(ctx, session.Principal, membership, "manual@example.test", "Duplicate Manual", nil, nil); !errors.Is(err, ErrInvitationEmailExists) {
+	if _, err := service.CreateInvitation(ctx, session.Principal, membership, "manual@example.test", "Duplicate Manual", nil, nil, nil); !errors.Is(err, ErrInvitationEmailExists) {
 		t.Fatalf("duplicate manual invitation error = %v, want active invitation conflict", err)
 	}
 	_, err = db.ExecContext(ctx, `INSERT INTO invitations(
@@ -167,7 +167,7 @@ func TestImportInvitationsCreatesEncryptedOutboxAndReplays(t *testing.T) {
 	}
 
 	linkOnlyService := Service{DB: db}
-	linkOnlyInvitation, err := linkOnlyService.CreateInvitation(ctx, session.Principal, membership, "link-only@example.test", "Link Only", nil, nil)
+	linkOnlyInvitation, err := linkOnlyService.CreateInvitation(ctx, session.Principal, membership, "link-only@example.test", "Link Only", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateInvitation without email delivery: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestImportInvitationsCreatesEncryptedOutboxAndReplays(t *testing.T) {
 		t.Fatalf("link-only outbox jobs = %d err=%v, want 2", jobs, err)
 	}
 
-	resendInvitation, err := service.CreateInvitation(ctx, session.Principal, membership, "resend@example.test", "Resend Member", nil, nil)
+	resendInvitation, err := service.CreateInvitation(ctx, session.Principal, membership, "resend@example.test", "Resend Member", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("create resend invitation: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestImportInvitationsCreatesEncryptedOutboxAndReplays(t *testing.T) {
 		t.Fatalf("in-progress resend error = %v, want conflict", err)
 	}
 
-	failedResendInvitation, err := service.CreateInvitation(ctx, session.Principal, membership, "resend-failure@example.test", "Resend Failure", nil, nil)
+	failedResendInvitation, err := service.CreateInvitation(ctx, session.Principal, membership, "resend-failure@example.test", "Resend Failure", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("create failed resend invitation: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestImportInvitationsCreatesEncryptedOutboxAndReplays(t *testing.T) {
 		t.Fatalf("failed resend changed token/status: before=%q after=%q status=%q", tokenHashBefore, tokenHashAfter, statusAfter)
 	}
 
-	expiredDuplicate, err := service.CreateInvitation(ctx, session.Principal, membership, "resend-duplicate@example.test", "Expired Duplicate", nil, nil)
+	expiredDuplicate, err := service.CreateInvitation(ctx, session.Principal, membership, "resend-duplicate@example.test", "Expired Duplicate", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("create expired duplicate invitation: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestImportInvitationsCreatesEncryptedOutboxAndReplays(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `UPDATE invitation_email_outbox SET status='SENT',token_ciphertext=NULL,next_attempt_at=NULL,sent_at=?,updated_at=? WHERE invitation_id=?`, platform.Timestamp(time.Now()), platform.Timestamp(time.Now()), expiredDuplicate.ID); err != nil {
 		t.Fatalf("mark expired duplicate sent: %v", err)
 	}
-	if _, err := service.CreateInvitation(ctx, session.Principal, membership, "resend-duplicate@example.test", "Current Duplicate", nil, nil); err != nil {
+	if _, err := service.CreateInvitation(ctx, session.Principal, membership, "resend-duplicate@example.test", "Current Duplicate", nil, nil, nil); err != nil {
 		t.Fatalf("create current duplicate invitation: %v", err)
 	}
 	if _, err := service.ResendInvitationEmail(ctx, session.Principal, membership, "resend-key-duplicate", expiredDuplicate.ID); !errors.Is(err, ErrInvitationEmailExists) {
@@ -259,7 +259,7 @@ func TestImportInvitationsCreatesEncryptedOutboxAndReplays(t *testing.T) {
 		t.Fatalf("database duplicate update error = %v, want active invitation constraint", err)
 	}
 
-	revokedInvitation, err := service.CreateInvitation(ctx, session.Principal, membership, "revoked@example.test", "Revoked Member", nil, nil)
+	revokedInvitation, err := service.CreateInvitation(ctx, session.Principal, membership, "revoked@example.test", "Revoked Member", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("create revocation invitation: %v", err)
 	}

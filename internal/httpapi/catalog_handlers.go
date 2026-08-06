@@ -46,6 +46,29 @@ func (s *Server) handleCreateCategory(response http.ResponseWriter, request *htt
 	writeJSON(response, http.StatusCreated, item)
 }
 
+func (s *Server) handleReorderCatalog(response http.ResponseWriter, request *http.Request) {
+	principal, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	var input catalog.ReorderInput
+	if err := decodeJSON(response, request, &input); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	if err := s.catalog.Reorder(request.Context(), principal, membership, input); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	items, err := s.catalog.List(request.Context(), membership.GroupID)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, items)
+}
+
 func (s *Server) handleUpdateCategory(response http.ResponseWriter, request *http.Request) {
 	principal, membership, err := s.membership(request)
 	if err != nil {
@@ -68,6 +91,24 @@ func (s *Server) handleUpdateCategory(response http.ResponseWriter, request *htt
 	}
 	response.Header().Set("ETag", versionETag(item.Version))
 	writeJSON(response, http.StatusOK, item)
+}
+
+func (s *Server) handleDeleteCategory(response http.ResponseWriter, request *http.Request) {
+	principal, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	version, err := requiredIfMatchVersion(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	if err := s.catalog.DeleteCategory(request.Context(), principal, membership, request.PathValue("categoryID"), version); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleCreateProduct(response http.ResponseWriter, request *http.Request) {
@@ -112,6 +153,24 @@ func (s *Server) handleUpdateProduct(response http.ResponseWriter, request *http
 	}
 	response.Header().Set("ETag", versionETag(item.Version))
 	writeJSON(response, http.StatusOK, item)
+}
+
+func (s *Server) handleDeleteProduct(response http.ResponseWriter, request *http.Request) {
+	principal, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	version, err := requiredIfMatchVersion(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	if err := s.catalog.DeleteProduct(request.Context(), principal, membership, request.PathValue("productID"), version); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleProductImage(response http.ResponseWriter, request *http.Request) {
@@ -201,4 +260,18 @@ func validateIfMatch(request *http.Request, version int64) error {
 		return domain.ErrPrecondition
 	}
 	return nil
+}
+
+func requiredIfMatchVersion(request *http.Request) (int64, error) {
+	value := request.Header.Get("If-Match")
+	if len(value) < 4 || value[0] != '"' || value[len(value)-1] != '"' {
+		return 0, fmt.Errorf("%w: If-Match is required", domain.ErrPrecondition)
+	}
+	value = value[1 : len(value)-1]
+	value = strings.TrimPrefix(value, "v")
+	version, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || version < 1 {
+		return 0, fmt.Errorf("%w: If-Match must contain a valid version", domain.ErrPrecondition)
+	}
+	return version, nil
 }

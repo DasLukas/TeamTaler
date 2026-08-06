@@ -133,6 +133,7 @@ func (s Service) Bootstrap(ctx context.Context, email, displayName, password, gr
 		}{
 			{`INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES(?,?,?,?,?,?)`, []any{userID, email, displayName, passwordHash, now, now}},
 			{`INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES(?,?,?,?,?)`, []any{groupID, groupName, currency, now, now}},
+			{`INSERT INTO group_settings(group_id,members_can_view_all_bookings,updated_at) VALUES(?,0,?)`, []any{groupID, now}},
 			{`INSERT INTO memberships(id,group_id,user_id,status,joined_at) VALUES(?,?,?,'ACTIVE',?)`, []any{membershipID, groupID, userID, now}},
 			{`INSERT INTO membership_roles(group_id,membership_id,role,granted_at,granted_by) VALUES(?,?,'ADMIN',?,?)`, []any{groupID, membershipID, now, userID}},
 			{`INSERT INTO periods(id,group_id,label,status,starts_at,created_at) VALUES(?,?,?,'OPEN',?,?)`, []any{periodID, groupID, domain.DefaultOpenPeriodLabel, now, now}},
@@ -195,10 +196,10 @@ func (s Service) AcceptInvitation(ctx context.Context, input InvitationAcceptanc
 	var session Session
 	var membership domain.Membership
 	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
-		var invitationID, groupID, email, encodedRoles, encodedGrants, expiresAt, invitationCreatedBy string
-		err := tx.QueryRowContext(ctx, `SELECT id,group_id,email,roles_json,category_grants_json,expires_at,created_by FROM invitations
+		var invitationID, groupID, email, encodedRoles, encodedPermissions, encodedGrants, expiresAt, invitationCreatedBy string
+		err := tx.QueryRowContext(ctx, `SELECT id,group_id,email,roles_json,group_permissions_json,category_grants_json,expires_at,created_by FROM invitations
 			WHERE token_hash=? AND accepted_at IS NULL AND revoked_at IS NULL`, platform.HashSecret(input.Token)).
-			Scan(&invitationID, &groupID, &email, &encodedRoles, &encodedGrants, &expiresAt, &invitationCreatedBy)
+			Scan(&invitationID, &groupID, &email, &encodedRoles, &encodedPermissions, &encodedGrants, &expiresAt, &invitationCreatedBy)
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.ErrNotFound
 		}
@@ -257,6 +258,23 @@ func (s Service) AcceptInvitation(ctx context.Context, input InvitationAcceptanc
 				roles = append(roles, role)
 			}
 		}
+		var groupPermissions []domain.GroupPermission
+		if err := json.Unmarshal([]byte(encodedPermissions), &groupPermissions); err != nil {
+			return fmt.Errorf("decode invitation group permissions: %w", err)
+		}
+		seenGroupPermissions := map[domain.GroupPermission]bool{}
+		for _, permission := range groupPermissions {
+			switch permission {
+			case domain.PermissionSelfRecordPayment:
+				seenGroupPermissions[permission] = true
+			default:
+				return errors.New("invitation contains an unsupported group permission")
+			}
+		}
+		groupPermissions = groupPermissions[:0]
+		if seenGroupPermissions[domain.PermissionSelfRecordPayment] {
+			groupPermissions = append(groupPermissions, domain.PermissionSelfRecordPayment)
+		}
 		var categoryGrants map[string][]domain.CategoryPermission
 		if err := json.Unmarshal([]byte(encodedGrants), &categoryGrants); err != nil {
 			return fmt.Errorf("decode invitation category grants: %w", err)
@@ -310,6 +328,9 @@ func (s Service) AcceptInvitation(ctx context.Context, input InvitationAcceptanc
 			if _, err := tx.ExecContext(ctx, `DELETE FROM membership_roles WHERE membership_id=?`, membershipID); err != nil {
 				return err
 			}
+			if _, err := tx.ExecContext(ctx, `DELETE FROM membership_permissions WHERE membership_id=?`, membershipID); err != nil {
+				return err
+			}
 			if _, err := tx.ExecContext(ctx, `DELETE FROM category_permissions WHERE membership_id=?`, membershipID); err != nil {
 				return err
 			}
@@ -321,6 +342,11 @@ func (s Service) AcceptInvitation(ctx context.Context, input InvitationAcceptanc
 		}
 		for _, role := range roles {
 			if _, err := tx.ExecContext(ctx, `INSERT INTO membership_roles(group_id,membership_id,role,granted_at,granted_by) VALUES(?,?,?,?,?)`, groupID, membershipID, role, now, invitationCreatedBy); err != nil {
+				return err
+			}
+		}
+		for _, permission := range groupPermissions {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO membership_permissions(group_id,membership_id,permission,granted_at,granted_by) VALUES(?,?,?,?,?)`, groupID, membershipID, permission, now, invitationCreatedBy); err != nil {
 				return err
 			}
 		}
@@ -360,7 +386,7 @@ func (s Service) AcceptInvitation(ctx context.Context, input InvitationAcceptanc
 		principal.SessionHash = platform.HashSecret(token)
 		principal.CSRFToken = csrf
 		session = Session{Token: token, CSRFToken: csrf, ExpiresAt: sessionExpires, Principal: principal}
-		membership = domain.Membership{ID: membershipID, GroupID: groupID, UserID: principal.UserID, Email: principal.Email, DisplayName: principal.DisplayName, AvatarURL: principal.AvatarURL, Status: "ACTIVE", Roles: roles, CategoryGrants: categoryGrants}
+		membership = domain.Membership{ID: membershipID, GroupID: groupID, UserID: principal.UserID, Email: principal.Email, DisplayName: principal.DisplayName, AvatarURL: principal.AvatarURL, Status: "ACTIVE", Roles: roles, GroupPermissions: groupPermissions, CategoryGrants: categoryGrants}
 		return audit.Record(ctx, tx, groupID, principal.UserID, membershipID, "invitation.accepted", "invitation", invitationID, map[string]any{"existingUser": existingUser, "reactivated": reactivated})
 	})
 	return session, membership, err

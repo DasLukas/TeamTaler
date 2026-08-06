@@ -62,7 +62,7 @@ func TestHandlePreviewInvitationReturnsOnlySafeHints(t *testing.T) {
 	t.Parallel()
 
 	server, principal, membership := invitationImportServer(t, false)
-	invitation, err := server.groups.CreateInvitation(context.Background(), principal, membership, "preview@example.test", "Preview Member", []domain.Role{domain.RoleAdmin}, nil)
+	invitation, err := server.groups.CreateInvitation(context.Background(), principal, membership, "preview@example.test", "Preview Member", []domain.Role{domain.RoleAdmin}, nil, nil)
 	if err != nil {
 		t.Fatalf("create invitation: %v", err)
 	}

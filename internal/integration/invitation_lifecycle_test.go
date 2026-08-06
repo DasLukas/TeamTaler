@@ -29,12 +29,12 @@ func TestInvitationPermissionsPreviewArchiveAndReactivation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create other category: %v", err)
 	}
-	if _, err := f.groups.CreateInvitation(f.ctx, f.admin, f.membership, "cross-group@example.test", "Cross Group", nil, map[string][]domain.CategoryPermission{
+	if _, err := f.groups.CreateInvitation(f.ctx, f.admin, f.membership, "cross-group@example.test", "Cross Group", nil, nil, map[string][]domain.CategoryPermission{
 		otherCategory.ID: {domain.PermissionAssignToOthers},
 	}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("cross-group invitation grant error = %v, want forbidden", err)
 	}
-	expired, err := f.groups.CreateInvitation(f.ctx, f.admin, f.membership, "expired@example.test", "Expired", nil, nil)
+	expired, err := f.groups.CreateInvitation(f.ctx, f.admin, f.membership, "expired@example.test", "Expired", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("create expired invitation: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestInvitationPermissionsPreviewArchiveAndReactivation(t *testing.T) {
 	if _, err := f.auth.PreviewInvitation(f.ctx, expired.Token); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("expired preview error = %v, want conflict", err)
 	}
-	unnamed, err := f.groups.CreateInvitation(f.ctx, f.admin, f.membership, "unnamed@example.test", "", nil, nil)
+	unnamed, err := f.groups.CreateInvitation(f.ctx, f.admin, f.membership, "unnamed@example.test", "", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("create unnamed invitation: %v", err)
 	}
@@ -52,21 +52,24 @@ func TestInvitationPermissionsPreviewArchiveAndReactivation(t *testing.T) {
 	if err != nil || unnamedPreview.DisplayName != "" || unnamedPreview.ExistingAccount {
 		t.Fatalf("unnamed preview = %#v err=%v", unnamedPreview, err)
 	}
-	first, err := f.groups.CreateInvitation(f.ctx, f.admin, f.membership, "member@example.test", "Suggested Member", []domain.Role{domain.RoleFinanceManager}, map[string][]domain.CategoryPermission{
+	first, err := f.groups.CreateInvitation(f.ctx, f.admin, f.membership, "member@example.test", "Suggested Member", []domain.Role{domain.RoleFinanceManager}, []domain.GroupPermission{domain.PermissionSelfRecordPayment}, map[string][]domain.CategoryPermission{
 		category.ID: {domain.PermissionAssignToOthers},
 	})
 	if err != nil {
 		t.Fatalf("create invitation: %v", err)
 	}
-	if _, err := f.groups.UpdateInvitation(f.ctx, f.admin, f.membership, first.ID, "Suggested Member", []domain.Role{domain.Role("UNSUPPORTED")}, nil); !errors.Is(err, domain.ErrValidation) {
+	if _, err := f.groups.UpdateInvitation(f.ctx, f.admin, f.membership, first.ID, "Suggested Member", []domain.Role{domain.Role("UNSUPPORTED")}, nil, nil); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("unsupported invitation role error = %v, want validation", err)
 	}
-	if _, err := f.groups.UpdateInvitation(f.ctx, f.admin, f.membership, first.ID, "Suggested Member", nil, map[string][]domain.CategoryPermission{
+	if _, err := f.groups.UpdateInvitation(f.ctx, f.admin, f.membership, first.ID, "Suggested Member", nil, []domain.GroupPermission{domain.GroupPermission("UNSUPPORTED")}, nil); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("unsupported invitation group permission error = %v, want validation", err)
+	}
+	if _, err := f.groups.UpdateInvitation(f.ctx, f.admin, f.membership, first.ID, "Suggested Member", nil, nil, map[string][]domain.CategoryPermission{
 		otherCategory.ID: {domain.PermissionVoidBookings},
 	}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("cross-group invitation update error = %v, want forbidden", err)
 	}
-	updated, err := f.groups.UpdateInvitation(f.ctx, f.admin, f.membership, first.ID, "Suggested Member", []domain.Role{domain.RoleFinanceManager}, map[string][]domain.CategoryPermission{
+	updated, err := f.groups.UpdateInvitation(f.ctx, f.admin, f.membership, first.ID, "Suggested Member", []domain.Role{domain.RoleFinanceManager}, []domain.GroupPermission{domain.PermissionSelfRecordPayment}, map[string][]domain.CategoryPermission{
 		category.ID: {domain.PermissionAssignToOthers},
 	})
 	if err != nil || updated.Email != "member@example.test" || updated.DisplayName != "Suggested Member" {
@@ -84,6 +87,9 @@ func TestInvitationPermissionsPreviewArchiveAndReactivation(t *testing.T) {
 	}
 	if firstSession.Principal.DisplayName != "Chosen Member" || !groups.HasRole(firstMembership, domain.RoleFinanceManager) {
 		t.Fatalf("accepted membership = %#v", firstMembership)
+	}
+	if len(firstMembership.GroupPermissions) != 1 || firstMembership.GroupPermissions[0] != domain.PermissionSelfRecordPayment {
+		t.Fatalf("accepted group permissions = %#v", firstMembership.GroupPermissions)
 	}
 	if grants := firstMembership.CategoryGrants[category.ID]; len(grants) != 1 || grants[0] != domain.PermissionAssignToOthers {
 		t.Fatalf("accepted grants = %#v", firstMembership.CategoryGrants)
@@ -117,12 +123,13 @@ func TestInvitationPermissionsPreviewArchiveAndReactivation(t *testing.T) {
 	if err := f.db.QueryRowContext(f.ctx, `SELECT status FROM memberships WHERE id=?`, firstMembership.ID).Scan(&status); err != nil || status != "ARCHIVED" {
 		t.Fatalf("archived status=%q err=%v", status, err)
 	}
-	var retainedMemberships, roles, grants int
+	var retainedMemberships, roles, groupPermissions, grants int
 	_ = f.db.QueryRowContext(f.ctx, `SELECT count(*) FROM memberships WHERE id=?`, firstMembership.ID).Scan(&retainedMemberships)
 	_ = f.db.QueryRowContext(f.ctx, `SELECT count(*) FROM membership_roles WHERE membership_id=?`, firstMembership.ID).Scan(&roles)
+	_ = f.db.QueryRowContext(f.ctx, `SELECT count(*) FROM membership_permissions WHERE membership_id=?`, firstMembership.ID).Scan(&groupPermissions)
 	_ = f.db.QueryRowContext(f.ctx, `SELECT count(*) FROM category_permissions WHERE membership_id=?`, firstMembership.ID).Scan(&grants)
-	if retainedMemberships != 1 || roles != 0 || grants != 0 {
-		t.Fatalf("archive retained=%d roles=%d grants=%d", retainedMemberships, roles, grants)
+	if retainedMemberships != 1 || roles != 0 || groupPermissions != 0 || grants != 0 {
+		t.Fatalf("archive retained=%d roles=%d groupPermissions=%d grants=%d", retainedMemberships, roles, groupPermissions, grants)
 	}
 	var retainedBookings, retainedPayments, retainedLedgerEntries, auditEventsAfterArchive int
 	_ = f.db.QueryRowContext(f.ctx, `SELECT count(*) FROM bookings WHERE id=? AND target_membership_id=?`, historyBooking.ID, firstMembership.ID).Scan(&retainedBookings)
@@ -133,7 +140,7 @@ func TestInvitationPermissionsPreviewArchiveAndReactivation(t *testing.T) {
 		t.Fatalf("archive history bookings=%d payments=%d ledger=%d auditBefore=%d auditAfter=%d", retainedBookings, retainedPayments, retainedLedgerEntries, auditEventsBeforeArchive, auditEventsAfterArchive)
 	}
 
-	second, err := f.groups.CreateInvitation(f.ctx, f.admin, f.membership, "member@example.test", "Second Suggestion", []domain.Role{domain.RoleCatalogManager}, nil)
+	second, err := f.groups.CreateInvitation(f.ctx, f.admin, f.membership, "member@example.test", "Second Suggestion", []domain.Role{domain.RoleCatalogManager}, nil, nil)
 	if err != nil {
 		t.Fatalf("create reactivation invitation: %v", err)
 	}
@@ -153,7 +160,7 @@ func TestInvitationPermissionsPreviewArchiveAndReactivation(t *testing.T) {
 	if secondSession.Principal.DisplayName != "Chosen Member" {
 		t.Fatalf("existing account display name=%q", secondSession.Principal.DisplayName)
 	}
-	if !groups.HasRole(secondMembership, domain.RoleCatalogManager) || groups.HasRole(secondMembership, domain.RoleFinanceManager) || len(secondMembership.CategoryGrants) != 0 {
+	if !groups.HasRole(secondMembership, domain.RoleCatalogManager) || groups.HasRole(secondMembership, domain.RoleFinanceManager) || len(secondMembership.GroupPermissions) != 0 || len(secondMembership.CategoryGrants) != 0 {
 		t.Fatalf("reactivated permissions = %#v", secondMembership)
 	}
 }

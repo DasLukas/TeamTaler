@@ -29,6 +29,11 @@
   padding-right: var(--space-8);
 }
 
+.selfPaymentAction {
+  width: fit-content;
+  margin-top: var(--space-3);
+}
+
 .balanceCard span,
 .period strong { color: var(--color-ink); font-weight: 700; }
 
@@ -123,8 +128,10 @@
 
   .content > h1 { font-size: 2rem; margin-bottom: var(--space-5); }
   .balanceCard { min-height: 110px; grid-template-columns: 1fr; }
+  .balanceCard > div:first-child { padding-right: 0; }
   .period { display: none; }
   .balanceCard > div:first-child strong { font-size: 2.3rem; }
+  .selfPaymentAction { width: 100%; }
   .lower { grid-template-columns: 1fr; }
   .monthCard { order: -1; }
 }

@@ -194,3 +194,30 @@ func userAvatarRequest(t *testing.T, userID, imageKey string, principal domain.P
 	}
 	return request
 }
+
+func TestRequiredIfMatchVersion(t *testing.T) {
+	tests := []struct {
+		name        string
+		header      string
+		wantVersion int64
+		wantError   bool
+	}{
+		{name: "strong version", header: `"v7"`, wantVersion: 7},
+		{name: "missing", wantError: true},
+		{name: "malformed", header: `"latest"`, wantError: true},
+		{name: "unquoted", header: `v7`, wantError: true},
+		{name: "zero", header: `"v0"`, wantError: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodDelete, "/api/v1/groups/group-a/products/product-a", nil)
+			if test.header != "" {
+				request.Header.Set("If-Match", test.header)
+			}
+			version, err := requiredIfMatchVersion(request)
+			if (err != nil) != test.wantError || version != test.wantVersion {
+				t.Fatalf("required If-Match version=%d err=%v, want version=%d error=%v", version, err, test.wantVersion, test.wantError)
+			}
+		})
+	}
+}

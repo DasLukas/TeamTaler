@@ -60,6 +60,15 @@ const (
 	PermissionVoidBookings   CategoryPermission = "VOID_BOOKINGS"
 )
 
+// GroupPermission is a narrowly scoped capability assigned to one membership.
+type GroupPermission string
+
+const (
+	// PermissionSelfRecordPayment allows a membership to record payments only
+	// for its own account through the dedicated self-service endpoint.
+	PermissionSelfRecordPayment GroupPermission = "SELF_RECORD_PAYMENT"
+)
+
 // Principal describes an authenticated user and their current session.
 type Principal struct {
 	UserID      string
@@ -72,15 +81,16 @@ type Principal struct {
 
 // Membership describes one user's participation in a group.
 type Membership struct {
-	ID             string                          `json:"id"`
-	GroupID        string                          `json:"groupId"`
-	UserID         string                          `json:"userId"`
-	Email          string                          `json:"email"`
-	DisplayName    string                          `json:"displayName"`
-	AvatarURL      string                          `json:"avatarUrl,omitempty"`
-	Status         string                          `json:"status"`
-	Roles          []Role                          `json:"roles"`
-	CategoryGrants map[string][]CategoryPermission `json:"categoryGrants"`
+	ID               string                          `json:"id"`
+	GroupID          string                          `json:"groupId"`
+	UserID           string                          `json:"userId"`
+	Email            string                          `json:"email"`
+	DisplayName      string                          `json:"displayName"`
+	AvatarURL        string                          `json:"avatarUrl,omitempty"`
+	Status           string                          `json:"status"`
+	Roles            []Role                          `json:"roles"`
+	GroupPermissions []GroupPermission               `json:"groupPermissions"`
+	CategoryGrants   map[string][]CategoryPermission `json:"categoryGrants"`
 }
 
 // Group is the top-level isolation and accounting boundary.
@@ -90,6 +100,12 @@ type Group struct {
 	Currency   string     `json:"currency"`
 	LogoURL    string     `json:"logoUrl,omitempty"`
 	Membership Membership `json:"membership"`
+}
+
+// GroupSettings contains administrator-managed behavior shared by every member
+// of one group. New group-wide switches are added as explicit typed fields.
+type GroupSettings struct {
+	MembersCanViewAllBookings bool `json:"membersCanViewAllBookings"`
 }
 
 // CategoryIcon identifies one supported visual category marker.

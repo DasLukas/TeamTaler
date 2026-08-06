@@ -1,30 +1,30 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import ImagePlus from 'lucide-react/dist/esm/icons/image-plus';
-import Pencil from 'lucide-react/dist/esm/icons/pencil';
 import Plus from 'lucide-react/dist/esm/icons/plus';
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
-import { formatMoney, majorUnitsInputPattern, majorUnitsInputValue, majorUnitsPlaceholder, validatePositiveMajorUnits } from '@/api/money';
+import { majorUnitsInputPattern, majorUnitsInputValue, majorUnitsPlaceholder, validatePositiveMajorUnits } from '@/api/money';
 import type { Category, CategoryIcon as CategoryIconName, Product, ProductPricingMode } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Button } from '@/components/ui/Button';
 import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
-import { IconButton } from '@/components/ui/IconButton';
 import { Modal } from '@/components/ui/Modal';
 import { StatePanel } from '@/components/ui/StatePanel';
-import { CategoryIcon } from '@/features/shared/CategoryIcon';
+import { catalogOrderCommand } from './catalogOrder';
 import { CategoryIconPicker } from './CategoryIconPicker';
+import { CatalogSorter } from './CatalogSorter';
 import styles from './CatalogPanel.module.css';
 
-type CatalogDialog = 'category' | 'product' | null;
+type CatalogDialog = 'category' | 'product' | 'delete' | null;
+type DeleteTarget = { kind: 'category'; item: Category } | { kind: 'product'; item: Product };
 
 /**
  * Renders the version-aware category and product catalog editor.
  *
- * Creation, metadata updates, and image upload remain separate operations so a
- * failed image upload can be retried without duplicating or reverting a product.
+ * Creation, metadata updates, ordering, and image upload remain separate
+ * operations so a failed image upload can be retried without duplicating or
+ * reverting a product and failed ordering can restore the cached snapshot.
  *
  * @returns A localized catalogue workspace with create and edit dialogs.
  */
@@ -48,6 +48,7 @@ export function CatalogPanel() {
   const [productImage, setProductImage] = useState<File | undefined>();
   const [productImageInputKey, setProductImageInputKey] = useState(0);
   const [persistedProduct, setPersistedProduct] = useState<Product | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 
   const invalidateCatalog = () => queryClient.invalidateQueries({ queryKey: ['categories', activeGroupId] });
 
@@ -80,6 +81,12 @@ export function CatalogPanel() {
     setCategoryIcon(category.icon);
     setCategoryActive(category.active);
     setDialog('category');
+  };
+
+  const openCategoryDeletion = (category: Category) => {
+    deleteMutation.reset();
+    setDeleteTarget({ kind: 'category', item: category });
+    setDialog('delete');
   };
 
   const clearProductDialog = () => {
@@ -126,6 +133,18 @@ export function CatalogPanel() {
     resetProductImageInput();
     setPersistedProduct(null);
     setDialog('product');
+  };
+
+  const openProductDeletion = (product: Product) => {
+    deleteMutation.reset();
+    setDeleteTarget({ kind: 'product', item: product });
+    setDialog('delete');
+  };
+
+  const closeDeleteDialog = () => {
+    deleteMutation.reset();
+    setDialog(deleteTarget?.kind === 'category' ? 'category' : 'product');
+    setDeleteTarget(null);
   };
 
   const categoryMutation = useMutation({
@@ -191,46 +210,78 @@ export function CatalogPanel() {
     onError: async () => { await invalidateCatalog(); },
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: (target: DeleteTarget) => target.kind === 'category'
+      ? api.deleteCategory(activeGroupId, target.item.id, target.item.version)
+      : api.deleteProduct(activeGroupId, target.item.id, target.item.version),
+    onSuccess: async (_result, target) => {
+      if (target.kind === 'category') clearCategoryDialog();
+      else clearProductDialog();
+      setDeleteTarget(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['categories', activeGroupId] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard', activeGroupId] }),
+      ]);
+    },
+    onError: async () => { await invalidateCatalog(); },
+  });
+
+  const reorderMutation = useMutation({
+    mutationFn: (categories: Category[]) => api.reorderCatalog(activeGroupId, catalogOrderCommand(categories)),
+    onMutate: async (categories) => {
+      await queryClient.cancelQueries({ queryKey: ['categories', activeGroupId] });
+      const previous = queryClient.getQueryData<Category[]>(['categories', activeGroupId]);
+      queryClient.setQueryData(['categories', activeGroupId], categories);
+      return { previous };
+    },
+    onError: (_error, _categories, context) => {
+      if (context?.previous) queryClient.setQueryData(['categories', activeGroupId], context.previous);
+    },
+    onSuccess: (categories) => queryClient.setQueryData(['categories', activeGroupId], categories),
+    onSettled: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['categories', activeGroupId] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard', activeGroupId] }),
+      ]);
+    },
+  });
+
   if (categoriesQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
   if (!categoriesQuery.data) return <div className={styles.state}><StatePanel kind="error" message={t('catalog.error')} /></div>;
 
   const productPriceValidation = productPricingMode === 'FIXED' ? validatePositiveMajorUnits(productPrice, activeGroup.currency) : {};
   const productPriceValid = productPricingMode === 'USER_DEFINED' || Boolean(productPriceValidation.minorUnits);
   const metadataLocked = Boolean(persistedProduct);
+  const deleteProblemStatus = deleteMutation.error && 'problem' in deleteMutation.error
+    ? (deleteMutation.error as { problem?: { status?: number } }).problem?.status
+    : undefined;
+  const deleteError = deleteProblemStatus === 412
+    ? t('catalog.deleteStaleError')
+    : deleteTarget?.kind === 'category'
+      ? deleteTarget.item.products.length > 0 ? t('catalog.deleteCategoryProductsError') : t('catalog.deleteCategoryHistoryError')
+      : t('catalog.deleteProductHistoryError');
 
   return (
     <div className={styles.content}>
       <header className={styles.header}>
-        <p>{t('catalog.intro')}</p>
+        <div><p>{t('catalog.intro')}</p><p className={styles.reorderHint}>{t('catalog.reorderHint')}</p></div>
         <div>
           <Button leadingIcon={<Plus size={18} />} onClick={openNewCategory} variant="secondary">{t('catalog.categoryAction')}</Button>
           <Button disabled={categoriesQuery.data.length === 0} leadingIcon={<Plus size={18} />} onClick={() => openNewProduct()}>{t('catalog.productAction')}</Button>
         </div>
       </header>
+      {reorderMutation.isPending ? <p className={styles.reorderStatus} role="status">{t('catalog.reorderSaving')}</p> : null}
+      {reorderMutation.isError ? <p className={`${styles.reorderStatus} ${styles.error}`} role="alert">{t('catalog.reorderError')}</p> : null}
       {categoriesQuery.data.length === 0 ? <StatePanel actionLabel={t('catalog.createCategoryAction')} kind="empty" message={t('catalog.empty')} onAction={openNewCategory} /> : (
-        <div className={styles.categories}>
-          {categoriesQuery.data.map((category) => (
-            <section className={`${styles.category} ${!category.active ? styles.archived : ''}`} key={category.id}>
-              <header>
-                <span><CategoryIcon icon={category.icon} size={22} /></span>
-                <div><h3>{category.name}</h3><p>{t('catalog.productCount', { count: category.products.length })} · {category.active ? t('common.active') : t('common.archived')}</p></div>
-                <IconButton className={styles.categoryEdit} label={t('catalog.editCategory', { name: category.name })} onClick={() => openCategoryEditor(category)} variant="surface"><Pencil size={17} /></IconButton>
-              </header>
-              {category.products.length === 0 ? <p className={styles.emptyProducts}>{t('catalog.emptyProducts')}</p> : (
-                <div className={styles.products}>{category.products.map((product) => (
-                  <article className={!product.active ? styles.archived : ''} key={product.id}>
-                    {product.imageUrl ? <img alt="" src={product.imageUrl} /> : <span className={styles.imageFallback}><ImagePlus size={26} /></span>}
-                    <div><strong>{product.name}</strong><span>{product.pricingMode === 'FIXED' && product.price ? formatMoney(product.price) : t('catalog.userDefinedPrice')}</span></div>
-                    <small>{product.active ? t('common.active') : t('common.archived')}</small>
-                    <IconButton className={styles.productEdit} label={t('catalog.editProduct', { name: product.name })} onClick={() => openProductEditor(product)} variant="surface"><Pencil size={16} /></IconButton>
-                  </article>
-                ))}</div>
-              )}
-              <IconButton className={`${styles.roundAdd} ${styles.productAdd}`} label={t('catalog.addProductToCategory', { name: category.name })} onClick={() => openNewProduct(category.id)} variant="surface"><Plus size={22} /></IconButton>
-            </section>
-          ))}
-          <IconButton className={`${styles.roundAdd} ${styles.categoryAdd}`} label={t('catalog.addCategoryAfterList')} onClick={openNewCategory} variant="surface"><Plus size={24} /></IconButton>
-        </div>
+        <CatalogSorter
+          categories={categoriesQuery.data}
+          disabled={reorderMutation.isPending}
+          onAddCategory={openNewCategory}
+          onAddProduct={openNewProduct}
+          onEditCategory={openCategoryEditor}
+          onEditProduct={openProductEditor}
+          onReorder={(categories) => reorderMutation.mutate(categories)}
+        />
       )}
       <Modal onClose={clearCategoryDialog} open={dialog === 'category'} title={editingCategory ? t('catalog.editCategoryDialog') : t('catalog.categoryDialog')}>
         <form className={styles.form} onSubmit={(event) => { event.preventDefault(); categoryMutation.mutate(); }}>
@@ -238,7 +289,10 @@ export function CatalogPanel() {
           <CategoryIconPicker onChange={setCategoryIcon} value={categoryIcon} />
           {editingCategory ? <Field htmlFor="category-status" label={t('common.status')}><SelectInput id="category-status" onChange={(event) => setCategoryActive(event.target.value === 'active')} value={categoryActive ? 'active' : 'archived'}><option value="active">{t('common.active')}</option><option value="archived">{t('common.archived')}</option></SelectInput></Field> : null}
           {categoryMutation.isError ? <p className={styles.error} role="alert">{categoryMutation.error.message}</p> : null}
-          <div className={styles.actions}><Button onClick={clearCategoryDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!categoryName.trim() || categoryMutation.isPending} type="submit">{editingCategory ? t('common.save') : t('catalog.createCategoryAction')}</Button></div>
+          <div className={styles.actions}>
+            {editingCategory && !editingCategory.active ? <Button className={styles.deleteAction} disabled={categoryMutation.isPending} leadingIcon={<Trash2 size={16} />} onClick={() => openCategoryDeletion(editingCategory)} variant="danger">{t('catalog.deletePermanently')}</Button> : null}
+            <Button onClick={clearCategoryDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!categoryName.trim() || categoryMutation.isPending} type="submit">{editingCategory ? t('common.save') : t('catalog.createCategoryAction')}</Button>
+          </div>
         </form>
       </Modal>
       <Modal onClose={clearProductDialog} open={dialog === 'product'} title={editingProduct ? t('catalog.editProductDialog') : t('catalog.productDialog')}>
@@ -262,12 +316,24 @@ export function CatalogPanel() {
           {productMutation.isError ? <p className={styles.error} role="alert">{productMutation.error.message}</p> : null}
           {persistedProduct && imageMutation.isError ? <p className={styles.error} role="alert">{editingProduct ? t('catalog.imageUpdateError') : t('catalog.imageUploadError')} {imageMutation.error.message}</p> : null}
           <div className={styles.actions}>
+            {editingProduct && !editingProduct.active && !persistedProduct ? <Button className={styles.deleteAction} disabled={productMutation.isPending} leadingIcon={<Trash2 size={16} />} onClick={() => openProductDeletion(editingProduct)} variant="danger">{t('catalog.deletePermanently')}</Button> : null}
             <Button onClick={clearProductDialog} variant="secondary">{persistedProduct ? t('catalog.finishWithoutImage') : t('common.cancel')}</Button>
             <Button disabled={!productName.trim() || !productPriceValid || productMutation.isPending || imageMutation.isPending || Boolean(persistedProduct && !productImage)} type="submit">
               {persistedProduct ? imageMutation.isPending ? t('catalog.imageUploadPending') : t('catalog.retryImage') : editingProduct ? t('common.save') : t('catalog.createProductAction')}
             </Button>
           </div>
         </form>
+      </Modal>
+      <Modal onClose={() => { if (!deleteMutation.isPending) closeDeleteDialog(); }} open={dialog === 'delete'} title={deleteTarget?.kind === 'category' ? t('catalog.deleteCategoryTitle') : t('catalog.deleteProductTitle')}>
+        <div className={styles.deleteConfirmation}>
+          <p>{deleteTarget ? t(deleteTarget.kind === 'category' ? 'catalog.deleteCategoryExplanation' : 'catalog.deleteProductExplanation', { name: deleteTarget.item.name }) : null}</p>
+          {deleteTarget?.kind === 'category' && deleteTarget.item.products.length > 0 ? <p className={styles.hint}>{t('catalog.deleteCategoryProductsHint')}</p> : null}
+          {deleteMutation.isError ? <p className={styles.error} role="alert">{deleteError}</p> : null}
+          <div className={styles.actions}>
+            <Button disabled={deleteMutation.isPending} onClick={closeDeleteDialog} variant="secondary">{t('common.cancel')}</Button>
+            <Button disabled={!deleteTarget || deleteMutation.isPending} leadingIcon={<Trash2 size={16} />} onClick={() => { if (deleteTarget) deleteMutation.mutate(deleteTarget); }} variant="danger">{deleteMutation.isPending ? t('catalog.deleting') : t('catalog.confirmDelete')}</Button>
+          </div>
+        </div>
       </Modal>
     </div>
   );
