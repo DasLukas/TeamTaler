@@ -517,6 +517,10 @@ func TestCatalogDeletionRequiresArchivalAndPreservesHistory(t *testing.T) {
 	if err := f.catalog.DeleteProduct(f.ctx, f.admin, f.membership, product.ID, archivedProduct.Version); err != nil {
 		t.Fatalf("delete archived unused product: %v", err)
 	}
+	var deletedUnusedProducts int
+	if err := f.db.QueryRowContext(f.ctx, `SELECT count(*) FROM products WHERE id=?`, product.ID).Scan(&deletedUnusedProducts); err != nil || deletedUnusedProducts != 0 {
+		t.Fatalf("physically deleted unused products=%d err=%v, want zero", deletedUnusedProducts, err)
+	}
 	recreated, err := f.catalog.CreateProduct(f.ctx, f.admin, f.membership, "fixture-product-"+category.ID, category.ID, catalog.CreateProductInput{Name: product.Name, PriceMinor: product.PriceMinor})
 	if err != nil || recreated.ID == product.ID {
 		t.Fatalf("recreate after idempotency cleanup product=%#v err=%v", recreated, err)
@@ -563,10 +567,16 @@ func TestCatalogDeletionRequiresArchivalAndPreservesHistory(t *testing.T) {
 	}
 
 	historyCategory, historyProduct := f.catalogItem("Historical", 250)
-	if _, err := f.bookings.Create(f.ctx, f.admin, f.membership, "catalog-delete-history", bookings.CreateInput{
-		ProductID: historyProduct.ID, ProductVersion: historyProduct.Version, ExpectedPeriodID: f.openPeriodID(), Quantity: 1,
-	}); err != nil {
+	periodID := f.openPeriodID()
+	historicalBooking, err := f.bookings.Create(f.ctx, f.admin, f.membership, "catalog-delete-history", bookings.CreateInput{
+		ProductID: historyProduct.ID, ProductVersion: historyProduct.Version, ExpectedPeriodID: periodID, Quantity: 1,
+	})
+	if err != nil {
 		t.Fatalf("create historical booking: %v", err)
+	}
+	imageKey := strings.Repeat("a", 64) + ".png"
+	if _, err := f.db.ExecContext(f.ctx, `UPDATE products SET image_key=? WHERE id=? AND group_id=?`, imageKey, historyProduct.ID, f.group.ID); err != nil {
+		t.Fatalf("attach historical product image fixture: %v", err)
 	}
 	historyProduct, err = f.catalog.UpdateProduct(f.ctx, f.admin, f.membership, historyProduct.ID, catalog.UpdateProductInput{
 		Name: historyProduct.Name, PriceMinor: historyProduct.PriceMinor, PricingMode: historyProduct.PricingMode, Active: false, SortOrder: historyProduct.SortOrder, Version: historyProduct.Version,
@@ -574,8 +584,75 @@ func TestCatalogDeletionRequiresArchivalAndPreservesHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("archive historical product: %v", err)
 	}
-	if err := f.catalog.DeleteProduct(f.ctx, f.admin, f.membership, historyProduct.ID, historyProduct.Version); !errors.Is(err, domain.ErrConflict) {
-		t.Fatalf("delete historical product error=%v, want conflict", err)
+	if err := f.catalog.DeleteProduct(f.ctx, f.admin, f.membership, historyProduct.ID, historyProduct.Version); err != nil {
+		t.Fatalf("delete historical product: %v", err)
+	}
+	var tombstoneActive bool
+	var tombstoneDeletedAt sql.NullString
+	var tombstoneImageKey sql.NullString
+	var tombstoneVersion int64
+	if err := f.db.QueryRowContext(f.ctx, `SELECT active,deleted_at,image_key,version FROM products WHERE id=? AND group_id=?`, historyProduct.ID, f.group.ID).
+		Scan(&tombstoneActive, &tombstoneDeletedAt, &tombstoneImageKey, &tombstoneVersion); err != nil {
+		t.Fatalf("read historical product tombstone: %v", err)
+	}
+	if tombstoneActive || !tombstoneDeletedAt.Valid || tombstoneImageKey.Valid || tombstoneVersion != historyProduct.Version+1 {
+		t.Fatalf("historical product tombstone active=%v deletedAt=%q imageKey=%q version=%d", tombstoneActive, tombstoneDeletedAt.String, tombstoneImageKey.String, tombstoneVersion)
+	}
+	listedCatalog, err := f.catalog.List(f.ctx, f.group.ID)
+	if err != nil || len(listedCatalog) != 1 || listedCatalog[0].ID != historyCategory.ID || len(listedCatalog[0].Products) != 0 {
+		t.Fatalf("catalog after historical product deletion=%#v err=%v", listedCatalog, err)
+	}
+	if err := f.catalog.Reorder(f.ctx, f.admin, f.membership, catalog.ReorderInput{
+		CategoryIDs: []string{historyCategory.ID}, ProductIDsByCategory: map[string][]string{historyCategory.ID: {}},
+	}); err != nil {
+		t.Fatalf("reorder catalog without tombstoned product: %v", err)
+	}
+	if _, err := f.catalog.UpdateProduct(f.ctx, f.admin, f.membership, historyProduct.ID, catalog.UpdateProductInput{
+		Name: historyProduct.Name, PriceMinor: historyProduct.PriceMinor, PricingMode: historyProduct.PricingMode, Active: false, SortOrder: historyProduct.SortOrder, Version: tombstoneVersion,
+	}); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("update tombstoned product error=%v, want not found", err)
+	}
+	if _, _, err := f.catalog.SetProductImage(f.ctx, f.admin, f.membership, historyProduct.ID, strings.Repeat("b", 64)+".png"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("image update for tombstoned product error=%v, want not found", err)
+	}
+	if _, err := f.catalog.ProductCategory(f.ctx, f.group.ID, historyProduct.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("category lookup for tombstoned product error=%v, want not found", err)
+	}
+	if err := f.catalog.DeleteProduct(f.ctx, f.admin, f.membership, historyProduct.ID, tombstoneVersion); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("repeat historical product deletion error=%v, want not found", err)
+	}
+	if _, err := f.bookings.Create(f.ctx, f.admin, f.membership, "catalog-delete-history-rebook", bookings.CreateInput{
+		ProductID: historyProduct.ID, ProductVersion: tombstoneVersion, ExpectedPeriodID: periodID, Quantity: 1,
+	}); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("booking tombstoned product error=%v, want not found", err)
+	}
+	historicalBookings, err := f.bookings.List(f.ctx, f.membership, periodID, 20)
+	if err != nil || len(historicalBookings) != 1 || historicalBookings[0].ID != historicalBooking.ID || historicalBookings[0].ProductName != historyProduct.Name {
+		t.Fatalf("historical bookings after product deletion=%#v err=%v", historicalBookings, err)
+	}
+	account, err := f.finance.Account(f.ctx, f.membership, f.membership.ID)
+	if err != nil || account.BalanceMinor != 250 || account.OpenPeriodDue != 250 {
+		t.Fatalf("account after historical product deletion=%#v err=%v", account, err)
+	}
+	closeResult, err := f.periods.Close(f.ctx, f.admin, f.membership, "catalog-delete-history-close", periodID, periods.CloseInput{
+		Label: "Historical close", DueAt: "2099-01-01", NextPeriodLabel: "Next period",
+	})
+	if err != nil || closeResult.Statements != 2 {
+		t.Fatalf("close period after historical product deletion=%#v err=%v", closeResult, err)
+	}
+	statements, err := f.periods.Statements(f.ctx, f.membership, periodID)
+	if err != nil || len(statements) != 2 {
+		t.Fatalf("statements after historical product deletion=%#v err=%v", statements, err)
+	}
+	var adminStatement *domain.Statement
+	for index := range statements {
+		if statements[index].MembershipID == f.membership.ID {
+			adminStatement = &statements[index]
+			break
+		}
+	}
+	if adminStatement == nil || adminStatement.ChargesMinor != 250 || adminStatement.AmountDueMinor != 250 {
+		t.Fatalf("admin statement after historical product deletion=%#v", adminStatement)
 	}
 	historyCategory, err = f.catalog.UpdateCategory(f.ctx, f.admin, f.membership, historyCategory.ID, catalog.UpdateCategoryInput{
 		Name: historyCategory.Name, Icon: historyCategory.Icon, Active: false, SortOrder: historyCategory.SortOrder, Version: historyCategory.Version,
@@ -583,8 +660,8 @@ func TestCatalogDeletionRequiresArchivalAndPreservesHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("archive historical category: %v", err)
 	}
-	if err := f.catalog.DeleteCategory(f.ctx, f.admin, f.membership, historyCategory.ID, historyCategory.Version); !errors.Is(err, domain.ErrConflict) {
-		t.Fatalf("delete non-empty historical category error=%v, want conflict", err)
+	if err := f.catalog.DeleteCategory(f.ctx, f.admin, f.membership, historyCategory.ID, historyCategory.Version); !errors.Is(err, domain.ErrConflict) || !strings.Contains(err.Error(), "historical financial records") {
+		t.Fatalf("delete historical category error=%v, want financial-history conflict", err)
 	}
 }
 

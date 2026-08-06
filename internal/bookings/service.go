@@ -94,7 +94,7 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, membership 
 		err = tx.QueryRowContext(ctx, `SELECT p.category_id,p.name,p.price_minor,p.pricing_mode,p.version,c.name,per.id,g.currency
 			FROM products p JOIN categories c ON c.id=p.category_id AND c.group_id=p.group_id
 			JOIN groups g ON g.id=p.group_id JOIN periods per ON per.group_id=p.group_id AND per.status='OPEN'
-			WHERE p.id=? AND p.group_id=? AND p.active=1 AND c.active=1`, input.ProductID, membership.GroupID).
+			WHERE p.id=? AND p.group_id=? AND p.active=1 AND p.deleted_at IS NULL AND c.active=1`, input.ProductID, membership.GroupID).
 			Scan(&categoryID, &productName, &catalogPrice, &pricingMode, &productVersion, &categoryName, &periodID, &currency)
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.ErrNotFound

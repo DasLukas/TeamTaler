@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: TeamTaler API
-  version: 0.4.0
+  version: 0.5.0
   description: |
     Same-origin JSON API for TeamTaler. Monetary values use integer minor units:
     response fields are exact decimal strings, while command inputs are bounded
@@ -693,15 +693,15 @@ paths:
         '412': { $ref: '#/components/responses/Problem' }
     delete:
       tags: [Catalog]
-      summary: Permanently delete an archived, unused product
-      description: The product must already be archived and must never have been booked, including voided bookings. Historical products remain archived instead.
+      summary: Permanently remove an archived product from the catalog
+      description: The product must already be archived. Unused products are physically deleted; products referenced by bookings retain an internal tombstone so immutable booking, ledger, settlement, and audit history remains intact. Removed products are no longer returned by catalog APIs and cannot be restored through the API.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/ProductId'
         - $ref: '#/components/parameters/CSRFToken'
         - $ref: '#/components/parameters/RequiredIfMatch'
       responses:
-        '204': { description: Product permanently deleted }
+        '204': { description: Product permanently removed from the catalog }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }

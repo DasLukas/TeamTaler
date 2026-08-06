@@ -758,7 +758,6 @@ export class DemoTransport {
     if (!category || !product) throw new Error('The product does not exist.');
     if (product.version !== version) throw new Error(i18n.t('catalog.deleteStaleError'));
     if (product.active) throw new Error(i18n.t('catalog.deleteProductActiveError'));
-    if (this.bookings.some((booking) => booking.productId === id)) throw new Error(i18n.t('catalog.deleteProductHistoryError'));
     category.products.splice(productIndex, 1);
   }
 

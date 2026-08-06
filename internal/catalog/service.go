@@ -94,7 +94,7 @@ func (s Service) List(ctx context.Context, groupID string) ([]domain.Category, e
 		return nil, err
 	}
 	products, err := s.DB.QueryContext(ctx, `SELECT p.id,p.group_id,p.category_id,p.name,p.price_minor,p.pricing_mode,g.currency,p.image_key,p.active,p.sort_order,p.version
-		FROM products p JOIN groups g ON g.id=p.group_id WHERE p.group_id=? ORDER BY p.sort_order,lower(p.name)`, groupID)
+		FROM products p JOIN groups g ON g.id=p.group_id WHERE p.group_id=? AND p.deleted_at IS NULL ORDER BY p.sort_order,lower(p.name)`, groupID)
 	if err != nil {
 		return nil, err
 	}
@@ -212,7 +212,7 @@ func (s Service) DeleteCategory(ctx context.Context, actor domain.Principal, mem
 		}
 		var products, historicalReferences int
 		if err := tx.QueryRowContext(ctx, `SELECT
-			(SELECT count(*) FROM products WHERE group_id=? AND category_id=?),
+			(SELECT count(*) FROM products WHERE group_id=? AND category_id=? AND deleted_at IS NULL),
 			(SELECT count(*) FROM bookings WHERE group_id=? AND category_id=?) +
 			(SELECT count(*) FROM ledger_entries WHERE group_id=? AND category_id=?)`,
 			membership.GroupID, categoryID, membership.GroupID, categoryID, membership.GroupID, categoryID).
@@ -289,7 +289,7 @@ func (s Service) CreateProduct(ctx context.Context, actor domain.Principal, memb
 		if err != nil {
 			return err
 		}
-		if err := tx.QueryRowContext(ctx, `SELECT coalesce(max(sort_order),-1)+1 FROM products WHERE group_id=? AND category_id=?`, membership.GroupID, categoryID).Scan(&input.SortOrder); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT coalesce(max(sort_order),-1)+1 FROM products WHERE group_id=? AND category_id=? AND deleted_at IS NULL`, membership.GroupID, categoryID).Scan(&input.SortOrder); err != nil {
 			return err
 		}
 		id, err := platform.NewID("prd")
@@ -368,7 +368,7 @@ func (s Service) Reorder(ctx context.Context, actor domain.Principal, membership
 			}
 		}
 
-		productRows, err := tx.QueryContext(ctx, `SELECT id,category_id FROM products WHERE group_id=?`, membership.GroupID)
+		productRows, err := tx.QueryContext(ctx, `SELECT id,category_id FROM products WHERE group_id=? AND deleted_at IS NULL`, membership.GroupID)
 		if err != nil {
 			return err
 		}
@@ -417,7 +417,7 @@ func (s Service) Reorder(ctx context.Context, actor domain.Principal, membership
 				return err
 			}
 			for productPosition, productID := range input.ProductIDsByCategory[categoryID] {
-				if _, err := tx.ExecContext(ctx, `UPDATE products SET sort_order=?,version=version+1,updated_at=? WHERE id=? AND group_id=? AND category_id=? AND sort_order<>?`, productPosition, now, productID, membership.GroupID, categoryID, productPosition); err != nil {
+				if _, err := tx.ExecContext(ctx, `UPDATE products SET sort_order=?,version=version+1,updated_at=? WHERE id=? AND group_id=? AND category_id=? AND deleted_at IS NULL AND sort_order<>?`, productPosition, now, productID, membership.GroupID, categoryID, productPosition); err != nil {
 					return err
 				}
 			}
@@ -445,7 +445,7 @@ func (s Service) UpdateProduct(ctx context.Context, actor domain.Principal, memb
 	now := platform.Timestamp(platform.Now())
 	var item domain.Product
 	err = storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, `UPDATE products SET name=?,price_minor=?,pricing_mode=?,active=?,sort_order=?,version=version+1,updated_at=? WHERE id=? AND group_id=? AND version=?`,
+		result, err := tx.ExecContext(ctx, `UPDATE products SET name=?,price_minor=?,pricing_mode=?,active=?,sort_order=?,version=version+1,updated_at=? WHERE id=? AND group_id=? AND version=? AND deleted_at IS NULL`,
 			input.Name, input.PriceMinor, input.PricingMode, input.Active, input.SortOrder, now, productID, membership.GroupID, input.Version)
 		if err != nil {
 			return err
@@ -453,14 +453,14 @@ func (s Service) UpdateProduct(ctx context.Context, actor domain.Principal, memb
 		changed, _ := result.RowsAffected()
 		if changed == 0 {
 			var exists int
-			_ = tx.QueryRowContext(ctx, `SELECT count(*) FROM products WHERE id=? AND group_id=?`, productID, membership.GroupID).Scan(&exists)
+			_ = tx.QueryRowContext(ctx, `SELECT count(*) FROM products WHERE id=? AND group_id=? AND deleted_at IS NULL`, productID, membership.GroupID).Scan(&exists)
 			if exists == 0 {
 				return domain.ErrNotFound
 			}
 			return domain.ErrPrecondition
 		}
 		var categoryID, currency string
-		if err := tx.QueryRowContext(ctx, `SELECT p.category_id,g.currency FROM products p JOIN groups g ON g.id=p.group_id WHERE p.id=?`, productID).Scan(&categoryID, &currency); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT p.category_id,g.currency FROM products p JOIN groups g ON g.id=p.group_id WHERE p.id=? AND p.group_id=? AND p.deleted_at IS NULL`, productID, membership.GroupID).Scan(&categoryID, &currency); err != nil {
 			return err
 		}
 		item = domain.Product{ID: productID, GroupID: membership.GroupID, CategoryID: categoryID, Name: input.Name, PriceMinor: input.PriceMinor, PricingMode: input.PricingMode, Currency: currency, Active: input.Active, SortOrder: input.SortOrder, Version: input.Version + 1}
@@ -469,11 +469,12 @@ func (s Service) UpdateProduct(ctx context.Context, actor domain.Principal, memb
 	return item, err
 }
 
-// DeleteProduct permanently removes an archived product that has never been
-// booked, using optimistic concurrency. Any booking, including a voided one,
-// preserves the product as historical catalog data and returns a conflict.
-// Stale idempotency replays for the deleted product are removed atomically. It
-// returns forbidden, not-found, precondition, conflict, audit, and storage errors.
+// DeleteProduct removes an archived product from the visible catalog using
+// optimistic concurrency. Unused products are physically deleted, while booked
+// products retain an inactive tombstone for referential integrity. Historical
+// bookings, ledger rows, and audit events remain unchanged. Stale idempotency
+// replays and the product image reference are removed atomically. It returns
+// forbidden, not-found, precondition, conflict, audit, and storage errors.
 func (s Service) DeleteProduct(ctx context.Context, actor domain.Principal, membership domain.Membership, productID string, version int64) error {
 	if !groups.HasRole(membership, domain.RoleCatalogManager) {
 		return domain.ErrForbidden
@@ -485,7 +486,7 @@ func (s Service) DeleteProduct(ctx context.Context, actor domain.Principal, memb
 		var item domain.Product
 		var imageKey sql.NullString
 		if err := tx.QueryRowContext(ctx, `SELECT p.id,p.group_id,p.category_id,p.name,p.price_minor,p.pricing_mode,g.currency,p.image_key,p.active,p.sort_order,p.version
-			FROM products p JOIN groups g ON g.id=p.group_id WHERE p.id=? AND p.group_id=?`, productID, membership.GroupID).
+			FROM products p JOIN groups g ON g.id=p.group_id WHERE p.id=? AND p.group_id=? AND p.deleted_at IS NULL`, productID, membership.GroupID).
 			Scan(&item.ID, &item.GroupID, &item.CategoryID, &item.Name, &item.PriceMinor, &item.PricingMode, &item.Currency, &imageKey, &item.Active, &item.SortOrder, &item.Version); errors.Is(err, sql.ErrNoRows) {
 			return domain.ErrNotFound
 		} else if err != nil {
@@ -501,15 +502,25 @@ func (s Service) DeleteProduct(ctx context.Context, actor domain.Principal, memb
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM bookings WHERE group_id=? AND product_id=?`, membership.GroupID, productID).Scan(&bookings); err != nil {
 			return err
 		}
-		if bookings > 0 {
-			return fmt.Errorf("%w: product has historical bookings and must remain archived", domain.ErrConflict)
-		}
-		deleteResult, err := tx.ExecContext(ctx, `DELETE FROM products WHERE id=? AND group_id=? AND version=? AND active=0`, productID, membership.GroupID, version)
-		if err != nil {
-			return err
-		}
-		if deleted, _ := deleteResult.RowsAffected(); deleted != 1 {
-			return domain.ErrPrecondition
+		now := platform.Timestamp(platform.Now())
+		retainedForHistory := bookings > 0
+		if retainedForHistory {
+			result, err := tx.ExecContext(ctx, `UPDATE products SET active=0,image_key=NULL,deleted_at=?,version=version+1,updated_at=?
+				WHERE id=? AND group_id=? AND version=? AND active=0 AND deleted_at IS NULL`, now, now, productID, membership.GroupID, version)
+			if err != nil {
+				return err
+			}
+			if updated, _ := result.RowsAffected(); updated != 1 {
+				return domain.ErrPrecondition
+			}
+		} else {
+			deleteResult, err := tx.ExecContext(ctx, `DELETE FROM products WHERE id=? AND group_id=? AND version=? AND active=0 AND deleted_at IS NULL`, productID, membership.GroupID, version)
+			if err != nil {
+				return err
+			}
+			if deleted, _ := deleteResult.RowsAffected(); deleted != 1 {
+				return domain.ErrPrecondition
+			}
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM idempotency_results WHERE group_id=? AND json_extract(response_json,'$.id')=?`, membership.GroupID, productID); err != nil {
 			return err
@@ -517,6 +528,7 @@ func (s Service) DeleteProduct(ctx context.Context, actor domain.Principal, memb
 		return audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "product.deleted", "product", productID, map[string]any{
 			"categoryId": item.CategoryID, "name": item.Name, "priceMinor": item.PriceMinor, "pricingMode": item.PricingMode,
 			"imageKey": imageKey.String, "active": item.Active, "sortOrder": item.SortOrder, "version": item.Version,
+			"deletedAt": now, "retainedForHistory": retainedForHistory,
 		})
 	})
 }
@@ -559,13 +571,13 @@ func (s Service) SetProductImage(ctx context.Context, actor domain.Principal, me
 	var replacedKey string
 	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
 		var previous sql.NullString
-		if err := tx.QueryRowContext(ctx, `SELECT image_key FROM products WHERE id=? AND group_id=?`, productID, membership.GroupID).Scan(&previous); errors.Is(err, sql.ErrNoRows) {
+		if err := tx.QueryRowContext(ctx, `SELECT image_key FROM products WHERE id=? AND group_id=? AND deleted_at IS NULL`, productID, membership.GroupID).Scan(&previous); errors.Is(err, sql.ErrNoRows) {
 			return domain.ErrNotFound
 		} else if err != nil {
 			return err
 		}
 		replacedKey = previous.String
-		result, err := tx.ExecContext(ctx, `UPDATE products SET image_key=?,version=version+1,updated_at=? WHERE id=? AND group_id=?`, imageKey, platform.Timestamp(platform.Now()), productID, membership.GroupID)
+		result, err := tx.ExecContext(ctx, `UPDATE products SET image_key=?,version=version+1,updated_at=? WHERE id=? AND group_id=? AND deleted_at IS NULL`, imageKey, platform.Timestamp(platform.Now()), productID, membership.GroupID)
 		if err != nil {
 			return err
 		}
@@ -580,10 +592,11 @@ func (s Service) SetProductImage(ctx context.Context, actor domain.Principal, me
 
 // ProductCategory returns productID's owning category within groupID for
 // cross-resource authorization. ctx bounds the lookup; missing or cross-tenant
-// products return ErrNotFound and other SQL failures are wrapped.
+// products, including internal tombstones, return ErrNotFound and other SQL
+// failures are wrapped.
 func (s Service) ProductCategory(ctx context.Context, groupID, productID string) (string, error) {
 	var categoryID string
-	if err := s.DB.QueryRowContext(ctx, `SELECT category_id FROM products WHERE group_id=? AND id=?`, groupID, productID).Scan(&categoryID); errors.Is(err, sql.ErrNoRows) {
+	if err := s.DB.QueryRowContext(ctx, `SELECT category_id FROM products WHERE group_id=? AND id=? AND deleted_at IS NULL`, groupID, productID).Scan(&categoryID); errors.Is(err, sql.ErrNoRows) {
 		return "", domain.ErrNotFound
 	} else if err != nil {
 		return "", fmt.Errorf("resolve product: %w", err)

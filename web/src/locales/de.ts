@@ -385,7 +385,7 @@ export const de = {
     deleteCategoryTitle: 'Kategorie endgültig löschen',
     deleteProductTitle: 'Produkt endgültig löschen',
     deleteCategoryExplanation: 'Die archivierte Kategorie „{{name}}“ wird dauerhaft gelöscht. Dieser Vorgang kann nicht rückgängig gemacht werden.',
-    deleteProductExplanation: 'Das archivierte Produkt „{{name}}“ wird dauerhaft gelöscht. Dieser Vorgang kann nicht rückgängig gemacht werden.',
+    deleteProductExplanation: 'Das archivierte Produkt „{{name}}“ wird dauerhaft aus dem Katalog entfernt. Historische Buchungen und Abrechnungen bleiben erhalten. Dieser Vorgang kann nicht rückgängig gemacht werden.',
     deleteCategoryProductsHint: 'Diese Kategorie enthält noch Produkte. Archiviere und lösche diese zuerst einzeln.',
     confirmDelete: 'Endgültig löschen',
     deleting: 'Wird gelöscht …',
@@ -394,7 +394,7 @@ export const de = {
     deleteProductActiveError: 'Das Produkt muss vor dem Löschen archiviert werden.',
     deleteCategoryProductsError: 'Die Kategorie enthält noch Produkte. Archiviere und lösche diese zuerst einzeln.',
     deleteCategoryHistoryError: 'Die Kategorie besitzt historische Finanzdaten und muss archiviert bleiben.',
-    deleteProductHistoryError: 'Das Produkt besitzt historische Buchungen und muss archiviert bleiben.',
+    deleteProductError: 'Das Produkt konnte nicht gelöscht werden. Lade den Katalog neu und versuche es erneut.',
   },
   finance: {
     noPaymentSelected: 'Keine Zahlung gewählt.',

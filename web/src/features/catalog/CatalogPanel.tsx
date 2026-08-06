@@ -259,7 +259,7 @@ export function CatalogPanel() {
     ? t('catalog.deleteStaleError')
     : deleteTarget?.kind === 'category'
       ? deleteTarget.item.products.length > 0 ? t('catalog.deleteCategoryProductsError') : t('catalog.deleteCategoryHistoryError')
-      : t('catalog.deleteProductHistoryError');
+      : t('catalog.deleteProductError');
 
   return (
     <div className={styles.content}>

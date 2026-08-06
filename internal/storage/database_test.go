@@ -28,6 +28,31 @@ func TestMigrateRejectsUnknownFutureMigration(t *testing.T) {
 	}
 }
 
+func TestProductTombstoneMigrationDefaultsToVisible(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(ctx, filepath.Join(t.TempDir(), "product-tombstones.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+
+	statements := []string{
+		`INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES('group-one','One','EUR','2026-08-06T12:00:00Z','2026-08-06T12:00:00Z')`,
+		`INSERT INTO categories(id,group_id,name,icon,active,sort_order,created_at,updated_at) VALUES('category-one','group-one','One','other',1,0,'2026-08-06T12:00:00Z','2026-08-06T12:00:00Z')`,
+		`INSERT INTO products(id,group_id,category_id,name,price_minor,pricing_mode,active,sort_order,created_at,updated_at) VALUES('product-one','group-one','category-one','One',100,'FIXED',1,0,'2026-08-06T12:00:00Z','2026-08-06T12:00:00Z')`,
+	}
+	for index, statement := range statements {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("prepare tombstone fixture %d: %v", index, err)
+		}
+	}
+
+	var deletedAt sql.NullString
+	if err := db.QueryRowContext(ctx, `SELECT deleted_at FROM products WHERE id='product-one'`).Scan(&deletedAt); err != nil || deletedAt.Valid {
+		t.Fatalf("new product deleted_at=%q err=%v, want NULL", deletedAt.String, err)
+	}
+}
+
 func TestSelfPaymentPermissionMigrationUsesSafeDefaultsAndConstraints(t *testing.T) {
 	ctx := context.Background()
 	db, err := Open(ctx, filepath.Join(t.TempDir(), "self-payment-permissions.db"))

@@ -207,7 +207,7 @@ describe('DemoTransport product pricing', () => {
     expect(product).toMatchObject({ name: 'Still water', pricingMode: 'USER_DEFINED', price: undefined, active: false, sortOrder: 4, version: 2 });
   });
 
-  it('deletes only archived and unused catalog entries', async () => {
+  it('deletes archived and unused catalog entries', async () => {
     const transport = new DemoTransport();
     const category = await transport.request<Category>('/groups/group-sv-adler/categories', {
       method: 'POST',
@@ -236,5 +236,29 @@ describe('DemoTransport product pricing', () => {
 
     const catalog = await transport.request<Category[]>('/groups/group-sv-adler/categories');
     expect(catalog.some((entry) => entry.id === category.id)).toBe(false);
+  });
+
+  it('removes an archived booked product while preserving its booking history', async () => {
+    const transport = new DemoTransport();
+    const booking = await transport.request<Booking>('/groups/group-sv-adler/bookings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ productId: 'product-water', productVersion: 1, expectedPeriodId: 'period-august', quantity: 1 }),
+    });
+    const archivedProduct = await transport.request<Product>('/groups/group-sv-adler/products/product-water', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'If-Match': '"v1"' },
+      body: JSON.stringify({ name: 'Mineral Water', pricingMode: 'FIXED', priceMinor: 150, active: false, sortOrder: 1, version: 1 }),
+    });
+
+    await transport.request<void>('/groups/group-sv-adler/products/product-water', {
+      method: 'DELETE',
+      headers: { 'If-Match': `"v${archivedProduct.version}"` },
+    });
+
+    const catalog = await transport.request<Category[]>('/groups/group-sv-adler/categories');
+    const bookings = await transport.request<Booking[]>('/groups/group-sv-adler/bookings');
+    expect(catalog.flatMap((category) => category.products).some((product) => product.id === 'product-water')).toBe(false);
+    expect(bookings).toContainEqual(expect.objectContaining({ id: booking.id, productId: 'product-water', productName: booking.productName }));
   });
 });

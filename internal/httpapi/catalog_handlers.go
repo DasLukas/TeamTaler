@@ -208,7 +208,7 @@ func (s *Server) handleImage(response http.ResponseWriter, request *http.Request
 	}
 	var references int
 	if err := s.db.QueryRowContext(request.Context(), `SELECT count(*) FROM (
-		SELECT image_key FROM products WHERE group_id=? AND image_key=?
+		SELECT image_key FROM products WHERE group_id=? AND image_key=? AND deleted_at IS NULL
 		UNION ALL
 		SELECT logo_key FROM groups WHERE id=? AND logo_key=?
 	)`, membership.GroupID, request.PathValue("imageKey"), membership.GroupID, request.PathValue("imageKey")).Scan(&references); err != nil {
