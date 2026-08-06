@@ -328,6 +328,47 @@ func TestOwnPaymentPermissionPostsOnlyForAuthenticatedMembership(t *testing.T) {
 	}
 }
 
+func TestExternalPaymentChangesNotifyTarget(t *testing.T) {
+	f := newFixture(t)
+	_, member, _ := f.inviteMember("payment-target@example.test", "Payment Target", nil)
+
+	payment, err := f.finance.CreatePayment(f.ctx, f.admin, f.membership, "external-payment-create", finance.CreatePaymentInput{
+		MembershipID: member.ID,
+		AmountMinor:  725,
+		Method:       "BANK_TRANSFER",
+		Reference:    "External payment",
+	})
+	if err != nil {
+		t.Fatalf("create external payment: %v", err)
+	}
+	if err := f.finance.ReversePayment(f.ctx, f.admin, f.membership, "external-payment-reverse", payment.ID, "Bank correction"); err != nil {
+		t.Fatalf("reverse external payment: %v", err)
+	}
+
+	rows, err := f.db.QueryContext(f.ctx, `SELECT type,context_json FROM notifications WHERE membership_id=? AND resource_id=? ORDER BY created_at,id`, member.ID, payment.ID)
+	if err != nil {
+		t.Fatalf("list external payment notifications: %v", err)
+	}
+	defer rows.Close()
+	var types []string
+	for rows.Next() {
+		var notificationType, contextJSON string
+		if err := rows.Scan(&notificationType, &contextJSON); err != nil {
+			t.Fatalf("scan external payment notification: %v", err)
+		}
+		if !strings.Contains(contextJSON, `"amountMinor":"725"`) || !strings.Contains(contextJSON, `"currency":"EUR"`) {
+			t.Fatalf("external payment notification context=%s", contextJSON)
+		}
+		types = append(types, notificationType)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate external payment notifications: %v", err)
+	}
+	if len(types) != 2 || types[0] != "PAYMENT_RECORDED" || types[1] != "PAYMENT_REVERSED" {
+		t.Fatalf("external payment notification types=%v", types)
+	}
+}
+
 func TestDefaultOpenPeriodLabels(t *testing.T) {
 	f := newFixture(t)
 	var bootstrapLabel string
@@ -833,8 +874,8 @@ func TestPaymentFIFOReversalAndClosedPeriodImmutability(t *testing.T) {
 		t.Fatalf("create payment: %v", err)
 	}
 	var paymentNotifications int
-	if err := f.db.QueryRowContext(f.ctx, `SELECT count(*) FROM notifications WHERE membership_id=? AND type='PAYMENT_RECORDED' AND resource_id=?`, f.membership.ID, payment.ID).Scan(&paymentNotifications); err != nil || paymentNotifications != 1 {
-		t.Fatalf("payment notifications=%d err=%v, want one", paymentNotifications, err)
+	if err := f.db.QueryRowContext(f.ctx, `SELECT count(*) FROM notifications WHERE membership_id=? AND type='PAYMENT_RECORDED' AND resource_id=?`, f.membership.ID, payment.ID).Scan(&paymentNotifications); err != nil || paymentNotifications != 0 {
+		t.Fatalf("self-targeted payment notifications=%d err=%v, want zero", paymentNotifications, err)
 	}
 	if len(payment.Allocations) != 2 || payment.Allocations[0].PeriodID != periodOne || payment.Allocations[0].AmountMinor != 100 || payment.Allocations[1].PeriodID != periodTwo || payment.Allocations[1].AmountMinor != 50 {
 		t.Fatalf("FIFO allocations = %#v", payment.Allocations)

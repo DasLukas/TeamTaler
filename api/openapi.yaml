@@ -272,7 +272,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/GroupSettings' }
+            schema: { $ref: '#/components/schemas/GroupSettingsUpdate' }
       responses:
         '200':
           description: Persisted typed group settings
@@ -1029,14 +1029,69 @@ paths:
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/Limit'
+        - name: cursor
+          in: query
+          description: Opaque notification identifier returned in the preceding X-Next-Cursor header.
+          schema: { type: string }
       responses:
         '200':
           description: Notifications
+          headers:
+            X-Next-Cursor:
+              description: Opaque cursor for the next older page; omitted for the final page.
+              schema: { type: string }
           content:
             application/json:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/Notification' }
+  /groups/{groupId}/notifications/summary:
+    get:
+      tags: [Groups]
+      summary: Read the current member's exact unread notification count
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Unread notification summary
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationSummary' }
+  /groups/{groupId}/notifications/read:
+    patch:
+      tags: [Groups]
+      summary: Acknowledge visible notifications in one bounded batch
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [notificationIds]
+              properties:
+                notificationIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  uniqueItems: true
+                  items: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: Batch acknowledgement result
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/NotificationSummary'
+                  - type: object
+                    required: [readAt]
+                    properties:
+                      readAt: { type: string, format: date-time }
+        '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/notifications/{notificationId}:
     patch:
       tags: [Groups]
@@ -1242,11 +1297,25 @@ components:
     GroupSettings:
       type: object
       additionalProperties: false
-      required: [membersCanViewAllBookings]
+      required: [membersCanViewAllBookings, notificationEmailsEnabled, notificationEmailDeliveryAvailable]
       properties:
         membersCanViewAllBookings:
           type: boolean
           description: Whether regular members can read the complete historical booking activity of the group.
+        notificationEmailsEnabled:
+          type: boolean
+          description: Persisted group preference for companion emails on future in-app notifications.
+        notificationEmailDeliveryAvailable:
+          type: boolean
+          readOnly: true
+          description: Whether the running server has complete SMTP delivery configuration.
+    GroupSettingsUpdate:
+      type: object
+      additionalProperties: false
+      required: [membersCanViewAllBookings, notificationEmailsEnabled]
+      properties:
+        membersCanViewAllBookings: { type: boolean }
+        notificationEmailsEnabled: { type: boolean }
     Membership:
       type: object
       required: [id, groupId, userId, email, displayName, status, roles, groupPermissions, categoryGrants]
@@ -1715,17 +1784,37 @@ components:
         status: { type: string, enum: [OPEN, PARTIAL, PAID, CREDIT] }
     Notification:
       type: object
-      required: [id, groupId, type, title, body, createdAt]
+      required: [id, groupId, type, title, body, context, createdAt]
       properties:
         id: { type: string }
         groupId: { type: string }
-        type: { type: string }
+        type:
+          type: string
+          enum: [BOOKING_ASSIGNED, BOOKING_REVERSED, PAYMENT_RECORDED, PAYMENT_REVERSED, SETTLEMENT_CREATED]
         title: { type: string }
         body: { type: string }
         resourceType: { type: string }
         resourceId: { type: string }
+        context: { $ref: '#/components/schemas/NotificationContext' }
         readAt: { type: string, format: date-time }
         createdAt: { type: string, format: date-time }
+    NotificationContext:
+      type: object
+      additionalProperties: false
+      properties:
+        actorName: { type: string }
+        itemName: { type: string }
+        quantity: { type: integer, minimum: 1 }
+        amountMinor: { $ref: '#/components/schemas/MinorUnits' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        periodLabel: { type: string }
+        dueAt: { type: string, format: date }
+    NotificationSummary:
+      type: object
+      additionalProperties: false
+      required: [unreadCount]
+      properties:
+        unreadCount: { type: integer, format: int64, minimum: 0 }
     AuditEvent:
       type: object
       required: [id, action, resourceType, metadata, occurredAt]

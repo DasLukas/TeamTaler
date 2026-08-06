@@ -47,12 +47,12 @@ func TestGroupSettingsDefaultAuthorizationPersistenceAndAudit(t *testing.T) {
 		t.Fatalf("regular-member settings update error=%v, want forbidden", err)
 	}
 
-	updated, err := service.UpdateSettings(ctx, session.Principal, admin, domain.GroupSettings{MembersCanViewAllBookings: true})
-	if err != nil || !updated.MembersCanViewAllBookings {
+	updated, err := service.UpdateSettings(ctx, session.Principal, admin, domain.GroupSettings{MembersCanViewAllBookings: true, NotificationEmailsEnabled: true})
+	if err != nil || !updated.MembersCanViewAllBookings || !updated.NotificationEmailsEnabled {
 		t.Fatalf("updated settings=%#v err=%v", updated, err)
 	}
 	persisted, err := service.Settings(ctx, admin)
-	if err != nil || !persisted.MembersCanViewAllBookings {
+	if err != nil || !persisted.MembersCanViewAllBookings || !persisted.NotificationEmailsEnabled {
 		t.Fatalf("persisted settings=%#v err=%v", persisted, err)
 	}
 	var auditCount int

@@ -15,6 +15,8 @@ import { useActiveGroup } from '@/app/useActiveGroup';
 import { Brand } from '@/components/brand/Brand';
 import { LogoutButton } from '@/components/auth/LogoutButton';
 import styles from './Sidebar.module.css';
+import { NotificationBadge } from '@/features/notifications/NotificationBadge';
+import { useUnreadNotificationCount } from '@/features/notifications/NotificationSummaryContext';
 
 const primaryNavigation = [
   { to: memberPaths.overview, key: 'overview', icon: Home },
@@ -38,6 +40,7 @@ export function Sidebar() {
   const canManageCatalog = hasGroupCapability(roles, 'catalog');
   const canManageFinance = hasGroupCapability(roles, 'finance');
   const canManageAdministration = hasGroupCapability(roles, 'administration');
+  const unreadCount = useUnreadNotificationCount();
 
   return (
     <aside className={styles.sidebar}>
@@ -62,9 +65,10 @@ export function Sidebar() {
           ))}
       </nav>
       <div className={styles.bottom}>
-        <Link activeProps={{ className: styles.active }} className={styles.link} to="/notifications">
+        <Link activeProps={{ className: styles.active }} className={styles.link} to={memberPaths.notifications}>
           <Bell aria-hidden="true" size={23} strokeWidth={1.8} />
           <span>{t('nav.notifications')}</span>
+          <NotificationBadge className={styles.badge} count={unreadCount} />
         </Link>
         <Link activeProps={{ className: styles.active }} className={styles.link} to="/account">
           <CircleUserRound aria-hidden="true" size={23} strokeWidth={1.8} />

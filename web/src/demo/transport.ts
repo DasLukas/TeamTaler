@@ -169,7 +169,7 @@ export class DemoTransport {
   private audit = clone(demoAudit);
   private invitations: InvitationMetadata[] = [];
   private invitationTokens = new Map<string, string>();
-  private groupSettings: GroupSettings = { membersCanViewAllBookings: false };
+  private groupSettings: GroupSettings = { membersCanViewAllBookings: false, notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true };
 
   /**
    * Resolves one development request.
@@ -232,9 +232,9 @@ export class DemoTransport {
 
     if (resource === 'settings' && method === 'GET') return clone(this.groupSettings) as T;
     if (resource === 'settings' && method === 'PATCH') {
-      const value = (body as Partial<GroupSettings>).membersCanViewAllBookings;
-      if (typeof value !== 'boolean') throw new Error('membersCanViewAllBookings is required.');
-      this.groupSettings = { membersCanViewAllBookings: value };
+      const update = body as Partial<GroupSettings>;
+      if (typeof update.membersCanViewAllBookings !== 'boolean' || typeof update.notificationEmailsEnabled !== 'boolean') throw new Error('Complete group settings are required.');
+      this.groupSettings = { ...this.groupSettings, membersCanViewAllBookings: update.membersCanViewAllBookings, notificationEmailsEnabled: update.notificationEmailsEnabled };
       return clone(this.groupSettings) as T;
     }
     if (resource === 'dashboard') return clone(this.dashboard) as T;
@@ -250,6 +250,13 @@ export class DemoTransport {
     if (resource === 'periods' && method === 'GET') return clone(this.periods) as T;
     if (resource === 'settlements' && method === 'GET') return clone(this.settlements) as T;
     if (resource === 'notifications' && method === 'GET') return clone(this.notifications) as T;
+    if (resource === 'notifications/summary' && method === 'GET') return { unreadCount: this.notifications.filter((entry) => !entry.readAt).length } as T;
+    if (resource === 'notifications/read' && method === 'PATCH') {
+      const ids = (body as { notificationIds?: string[] }).notificationIds ?? [];
+      const readAt = new Date().toISOString();
+      this.notifications.forEach((entry) => { if (ids.includes(entry.id)) entry.readAt = readAt; });
+      return { readAt, unreadCount: this.notifications.filter((entry) => !entry.readAt).length } as T;
+    }
     if (resource === 'audit' && method === 'GET') return clone(this.audit) as T;
     if (resource === 'invitations/import' && method === 'POST') return this.importInvitations(body as string) as T;
     if (resource === 'invitations' && method === 'GET') return this.listInvitations() as T;

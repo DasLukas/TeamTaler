@@ -210,6 +210,7 @@ func TestRemoveCategoryTypeMigrationPreservesExistingRows(t *testing.T) {
 		`CREATE TABLE users(id TEXT PRIMARY KEY) STRICT`,
 		`CREATE TABLE groups(id TEXT PRIMARY KEY) STRICT`,
 		`CREATE TABLE invitations(id TEXT PRIMARY KEY, group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE) STRICT`,
+		`CREATE TABLE notifications(id TEXT PRIMARY KEY, group_id TEXT NOT NULL, membership_id TEXT NOT NULL, created_at TEXT NOT NULL) STRICT`,
 		`CREATE TABLE categories(id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL) STRICT`,
 		`CREATE TABLE products(id TEXT PRIMARY KEY, price_minor INTEGER NOT NULL CHECK(price_minor > 0)) STRICT`,
 		`CREATE TABLE periods(id TEXT PRIMARY KEY, label TEXT NOT NULL, status TEXT NOT NULL) STRICT`,

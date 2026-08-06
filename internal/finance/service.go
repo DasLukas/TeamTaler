@@ -17,6 +17,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/idempotency"
 	"github.com/DasLukas/TeamTaler/internal/ledger"
 	"github.com/DasLukas/TeamTaler/internal/media"
+	"github.com/DasLukas/TeamTaler/internal/notifications"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/storage"
 )
@@ -26,6 +27,8 @@ import (
 type Service struct {
 	// DB is the shared application database connection pool.
 	DB *sql.DB
+	// Notifications atomically records member-visible payment events.
+	Notifications notifications.Service
 }
 
 // CategoryStatistic summarizes current-period booking and reversal totals for a
@@ -395,10 +398,13 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 		if err := allocationRows.Close(); err != nil {
 			return err
 		}
-		if notifyTarget {
-			notificationID, _ := platform.NewID("ntf")
-			if _, err := tx.ExecContext(ctx, `INSERT INTO notifications(id,group_id,membership_id,type,title,body,resource_type,resource_id,created_at)
-				VALUES(?,?,?,'PAYMENT_RECORDED','Payment recorded','A payment was added to your account.','payment',?,?)`, notificationID, membership.GroupID, input.MembershipID, paymentID, now); err != nil {
+		if notifyTarget && membership.ID != input.MembershipID {
+			if _, err := s.Notifications.CreateTx(ctx, tx, notifications.CreateInput{
+				GroupID: membership.GroupID, MembershipID: input.MembershipID,
+				Type: notifications.TypePaymentRecorded, Title: "Payment recorded", Body: "A payment was added to your account.",
+				ResourceType: "payment", ResourceID: paymentID, CreatedAt: now,
+				Context: notifications.EventContext{ActorName: membership.DisplayName, AmountMinor: input.AmountMinor, Currency: currency},
+			}); err != nil {
 				return err
 			}
 		}
@@ -496,8 +502,9 @@ func (s Service) ReversePayment(ctx context.Context, actor domain.Principal, mem
 			return err
 		}
 		var reversed sql.NullString
-		var targetMembershipID string
-		if err := tx.QueryRowContext(ctx, `SELECT reversed_at,membership_id FROM payments WHERE id=? AND group_id=?`, paymentID, membership.GroupID).Scan(&reversed, &targetMembershipID); errors.Is(err, sql.ErrNoRows) {
+		var targetMembershipID, currency string
+		var amountMinor int64
+		if err := tx.QueryRowContext(ctx, `SELECT p.reversed_at,p.membership_id,p.amount_minor,g.currency FROM payments p JOIN groups g ON g.id=p.group_id WHERE p.id=? AND p.group_id=?`, paymentID, membership.GroupID).Scan(&reversed, &targetMembershipID, &amountMinor, &currency); errors.Is(err, sql.ErrNoRows) {
 			return domain.ErrNotFound
 		} else if err != nil {
 			return err
@@ -545,6 +552,16 @@ func (s Service) ReversePayment(ctx context.Context, actor domain.Principal, mem
 		}
 		if err := ledger.RebuildPaymentAllocations(ctx, tx, membership.GroupID, targetMembershipID); err != nil {
 			return err
+		}
+		if membership.ID != targetMembershipID {
+			if _, err := s.Notifications.CreateTx(ctx, tx, notifications.CreateInput{
+				GroupID: membership.GroupID, MembershipID: targetMembershipID,
+				Type: notifications.TypePaymentReversed, Title: "Payment reversed", Body: "A payment on your account was reversed.",
+				ResourceType: "payment", ResourceID: paymentID, CreatedAt: now,
+				Context: notifications.EventContext{ActorName: membership.DisplayName, AmountMinor: amountMinor, Currency: currency},
+			}); err != nil {
+				return err
+			}
 		}
 		if err := audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "payment.reversed", "payment", paymentID, map[string]any{"reason": reason}); err != nil {
 			return err

@@ -5,5 +5,7 @@ export const memberPaths = {
   booking: '/book',
   catalog: '/catalog',
   finance: '/finance',
+  notifications: '/notifications',
+  more: '/more',
   legacyReports: '/reports',
 } as const;

@@ -36,6 +36,19 @@
     content: '';
   }
 
+  .iconWrap {
+    position: relative;
+    display: grid;
+    place-items: center;
+  }
+
+  .badge {
+    position: absolute;
+    top: -9px;
+    right: -17px;
+    border-color: var(--color-white);
+  }
+
   .active {
     color: var(--color-teal-700);
   }

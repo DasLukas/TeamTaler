@@ -18,6 +18,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/groups"
 	"github.com/DasLukas/TeamTaler/internal/idempotency"
 	"github.com/DasLukas/TeamTaler/internal/ledger"
+	"github.com/DasLukas/TeamTaler/internal/notifications"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/storage"
 )
@@ -29,6 +30,8 @@ type Service struct {
 	DB *sql.DB
 	// Groups resolves effective group and category permissions.
 	Groups groups.Service
+	// Notifications atomically records member-visible booking events.
+	Notifications notifications.Service
 }
 
 // CreateInput is the idempotent booking command contract. ProductVersion and
@@ -162,10 +165,13 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, membership 
 			return err
 		}
 		if input.TargetMembershipID != membership.ID {
-			notificationID, _ := platform.NewID("ntf")
 			body := fmt.Sprintf("%s assigned %s to you.", membership.DisplayName, productName)
-			if _, err := tx.ExecContext(ctx, `INSERT INTO notifications(id,group_id,membership_id,type,title,body,resource_type,resource_id,created_at) VALUES(?,?,?,'BOOKING_ASSIGNED','New booking',?,'booking',?,?)`,
-				notificationID, membership.GroupID, input.TargetMembershipID, body, bookingID, now); err != nil {
+			if _, err := s.Notifications.CreateTx(ctx, tx, notifications.CreateInput{
+				GroupID: membership.GroupID, MembershipID: input.TargetMembershipID,
+				Type: notifications.TypeBookingAssigned, Title: "New booking", Body: body,
+				ResourceType: "booking", ResourceID: bookingID, CreatedAt: now,
+				Context: notifications.EventContext{ActorName: membership.DisplayName, ItemName: productName, Quantity: input.Quantity, AmountMinor: total, Currency: currency},
+			}); err != nil {
 				return err
 			}
 		}
@@ -348,6 +354,17 @@ func (s Service) Void(ctx context.Context, actor domain.Principal, membership do
 		}
 		if err := ledger.RebuildPaymentAllocations(ctx, tx, membership.GroupID, booking.TargetMembershipID); err != nil {
 			return err
+		}
+		if membership.ID != booking.TargetMembershipID {
+			body := fmt.Sprintf("%s reversed %s on your account.", membership.DisplayName, booking.ProductName)
+			if _, err := s.Notifications.CreateTx(ctx, tx, notifications.CreateInput{
+				GroupID: membership.GroupID, MembershipID: booking.TargetMembershipID,
+				Type: notifications.TypeBookingReversed, Title: "Booking reversed", Body: body,
+				ResourceType: "booking", ResourceID: booking.ID, CreatedAt: now,
+				Context: notifications.EventContext{ActorName: membership.DisplayName, ItemName: booking.ProductName, Quantity: booking.Quantity, AmountMinor: booking.TotalMinor, Currency: booking.Currency},
+			}); err != nil {
+				return err
+			}
 		}
 		booking.VoidedAt = &now
 		booking.VoidReason = reason

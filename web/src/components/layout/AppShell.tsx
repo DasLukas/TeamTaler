@@ -5,6 +5,7 @@ import { ApiError, api, isDevelopmentDemoEnabled } from '@/api/client';
 import { GroupProvider } from '@/app/GroupContext';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { StatePanel } from '@/components/ui/StatePanel';
+import { NotificationSummaryProvider } from '@/features/notifications/NotificationSummaryProvider';
 import { BottomNavigation } from './BottomNavigation';
 import { MobileHeader } from './MobileHeader';
 import { Sidebar } from './Sidebar';
@@ -45,17 +46,19 @@ export function AppShell() {
 
   return (
     <GroupProvider session={sessionQuery.data}>
-      <div className={styles.shell}>
-        <Sidebar />
-        <MobileHeader />
-        <main className={styles.main} id="main-content">
-          {isDevelopmentDemoEnabled && sessionQuery.data.demo ? (
-            <div className={styles.demo} role="status">{t('appShell.demoBanner')}</div>
-          ) : null}
-          <GroupScopedOutlet />
-        </main>
-        <BottomNavigation />
-      </div>
+      <NotificationSummaryProvider>
+        <div className={styles.shell}>
+          <Sidebar />
+          <MobileHeader />
+          <main className={styles.main} id="main-content">
+            {isDevelopmentDemoEnabled && sessionQuery.data.demo ? (
+              <div className={styles.demo} role="status">{t('appShell.demoBanner')}</div>
+            ) : null}
+            <GroupScopedOutlet />
+          </main>
+          <BottomNavigation />
+        </div>
+      </NotificationSummaryProvider>
     </GroupProvider>
   );
 }

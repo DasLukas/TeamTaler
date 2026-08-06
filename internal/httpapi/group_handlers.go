@@ -89,7 +89,11 @@ func (s *Server) handleGetGroupSettings(response http.ResponseWriter, request *h
 		writeProblem(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusOK, settings)
+	writeJSON(response, http.StatusOK, map[string]any{
+		"membersCanViewAllBookings":          settings.MembersCanViewAllBookings,
+		"notificationEmailsEnabled":          settings.NotificationEmailsEnabled,
+		"notificationEmailDeliveryAvailable": s.config.SMTP.Enabled,
+	})
 }
 
 // handleUpdateGroupSettings validates and persists one complete supported
@@ -104,6 +108,7 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 	}
 	var input struct {
 		MembersCanViewAllBookings *bool `json:"membersCanViewAllBookings"`
+		NotificationEmailsEnabled *bool `json:"notificationEmailsEnabled"`
 	}
 	if err := decodeJSON(response, request, &input); err != nil {
 		writeProblem(response, request, err)
@@ -113,12 +118,27 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		writeProblem(response, request, domain.ValidationError{Field: "membersCanViewAllBookings", Message: "is required"})
 		return
 	}
-	settings, err := s.groups.UpdateSettings(request.Context(), principal, membership, domain.GroupSettings{MembersCanViewAllBookings: *input.MembersCanViewAllBookings})
+	if input.NotificationEmailsEnabled == nil {
+		writeProblem(response, request, domain.ValidationError{Field: "notificationEmailsEnabled", Message: "is required"})
+		return
+	}
+	if *input.NotificationEmailsEnabled && !s.config.SMTP.Enabled {
+		writeProblem(response, request, domain.ValidationError{Field: "notificationEmailsEnabled", Message: "requires configured SMTP delivery"})
+		return
+	}
+	settings, err := s.groups.UpdateSettings(request.Context(), principal, membership, domain.GroupSettings{
+		MembersCanViewAllBookings: *input.MembersCanViewAllBookings,
+		NotificationEmailsEnabled: *input.NotificationEmailsEnabled,
+	})
 	if err != nil {
 		writeProblem(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusOK, settings)
+	writeJSON(response, http.StatusOK, map[string]any{
+		"membersCanViewAllBookings":          settings.MembersCanViewAllBookings,
+		"notificationEmailsEnabled":          settings.NotificationEmailsEnabled,
+		"notificationEmailDeliveryAvailable": s.config.SMTP.Enabled,
+	})
 }
 
 // handleGroupLogo authorizes an administrator, normalizes one multipart image,

@@ -184,20 +184,21 @@ func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, mem
 		return domain.GroupSettings{}, domain.ErrForbidden
 	}
 	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
-		var previous bool
-		if err := tx.QueryRowContext(ctx, `SELECT members_can_view_all_bookings FROM group_settings WHERE group_id=?`, membership.GroupID).Scan(&previous); errors.Is(err, sql.ErrNoRows) {
+		var previous domain.GroupSettings
+		if err := tx.QueryRowContext(ctx, `SELECT members_can_view_all_bookings,notification_emails_enabled FROM group_settings WHERE group_id=?`, membership.GroupID).Scan(&previous.MembersCanViewAllBookings, &previous.NotificationEmailsEnabled); errors.Is(err, sql.ErrNoRows) {
 			return domain.ErrNotFound
 		} else if err != nil {
 			return err
 		}
-		if previous == settings.MembersCanViewAllBookings {
+		if previous == settings {
 			return nil
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE group_settings SET members_can_view_all_bookings=?,updated_at=? WHERE group_id=?`, settings.MembersCanViewAllBookings, platform.Timestamp(platform.Now()), membership.GroupID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE group_settings SET members_can_view_all_bookings=?,notification_emails_enabled=?,updated_at=? WHERE group_id=?`, settings.MembersCanViewAllBookings, settings.NotificationEmailsEnabled, platform.Timestamp(platform.Now()), membership.GroupID); err != nil {
 			return err
 		}
 		return audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "group.settings.updated", "group", membership.GroupID, map[string]any{
-			"membersCanViewAllBookings": map[string]bool{"previous": previous, "current": settings.MembersCanViewAllBookings},
+			"membersCanViewAllBookings": map[string]bool{"previous": previous.MembersCanViewAllBookings, "current": settings.MembersCanViewAllBookings},
+			"notificationEmailsEnabled": map[string]bool{"previous": previous.NotificationEmailsEnabled, "current": settings.NotificationEmailsEnabled},
 		})
 	})
 	return settings, err
@@ -205,7 +206,7 @@ func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, mem
 
 func (s Service) settingsForGroup(ctx context.Context, groupID string) (domain.GroupSettings, error) {
 	var settings domain.GroupSettings
-	err := s.DB.QueryRowContext(ctx, `SELECT members_can_view_all_bookings FROM group_settings WHERE group_id=?`, groupID).Scan(&settings.MembersCanViewAllBookings)
+	err := s.DB.QueryRowContext(ctx, `SELECT members_can_view_all_bookings,notification_emails_enabled FROM group_settings WHERE group_id=?`, groupID).Scan(&settings.MembersCanViewAllBookings, &settings.NotificationEmailsEnabled)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.GroupSettings{}, domain.ErrNotFound
 	}

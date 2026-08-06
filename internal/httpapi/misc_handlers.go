@@ -22,12 +22,54 @@ func (s *Server) handleListNotifications(response http.ResponseWriter, request *
 		writeProblem(response, request, err)
 		return
 	}
-	items, err := s.notifications.List(request.Context(), membership, queryLimit(request))
+	page, err := s.notifications.ListPage(request.Context(), membership, queryLimit(request), request.URL.Query().Get("cursor"))
 	if err != nil {
 		writeProblem(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusOK, items)
+	if page.NextCursor != "" {
+		response.Header().Set("X-Next-Cursor", page.NextCursor)
+	}
+	writeJSON(response, http.StatusOK, page.Items)
+}
+
+// handleNotificationSummary returns the exact unread count for the current
+// membership without loading account or notification content.
+func (s *Server) handleNotificationSummary(response http.ResponseWriter, request *http.Request) {
+	_, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	count, err := s.notifications.UnreadCount(request.Context(), membership)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]int64{"unreadCount": count})
+}
+
+// handleMarkNotificationsRead acknowledges a bounded set of visible
+// notifications and returns the remaining unread count.
+func (s *Server) handleMarkNotificationsRead(response http.ResponseWriter, request *http.Request) {
+	_, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	var input struct {
+		NotificationIDs []string `json:"notificationIds"`
+	}
+	if err := decodeJSON(response, request, &input); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	result, err := s.notifications.MarkReadMany(request.Context(), membership, input.NotificationIDs)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, result)
 }
 
 func (s *Server) handleUpdateNotification(response http.ResponseWriter, request *http.Request) {

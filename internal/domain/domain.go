@@ -106,6 +106,7 @@ type Group struct {
 // of one group. New group-wide switches are added as explicit typed fields.
 type GroupSettings struct {
 	MembersCanViewAllBookings bool `json:"membersCanViewAllBookings"`
+	NotificationEmailsEnabled bool `json:"notificationEmailsEnabled"`
 }
 
 // CategoryIcon identifies one supported visual category marker.

@@ -79,16 +79,17 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 		}
 	}
 	groupService := groups.Service{DB: db, TokenSealer: tokenSealer}
+	notificationService := notifications.Service{DB: db, EmailDeliveryAvailable: cfg.SMTP.Enabled}
 	server := &Server{
 		config:        cfg,
 		db:            db,
 		auth:          auth.Service{DB: db, SessionLifetime: cfg.SessionLifetime},
 		groups:        groupService,
 		catalog:       catalog.Service{DB: db},
-		bookings:      bookings.Service{DB: db, Groups: groupService},
-		finance:       finance.Service{DB: db},
-		periods:       periods.Service{DB: db},
-		notifications: notifications.Service{DB: db},
+		bookings:      bookings.Service{DB: db, Groups: groupService, Notifications: notificationService},
+		finance:       finance.Service{DB: db, Notifications: notificationService},
+		periods:       periods.Service{DB: db, Notifications: notificationService},
+		notifications: notificationService,
 		loginLimiter:  newLoginLimiter(),
 		passwordSlots: make(chan struct{}, 2),
 		logger:        logger,
@@ -148,6 +149,8 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/periods/{periodID}/statements", server.handleStatements)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/settlements", server.handleSettlements)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/notifications", server.handleListNotifications)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/notifications/summary", server.handleNotificationSummary)
+	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/notifications/read", server.handleMarkNotificationsRead)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/notifications/{notificationID}", server.handleUpdateNotification)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/audit", server.handleAudit)
 	mux.HandleFunc("/api/", func(response http.ResponseWriter, request *http.Request) {

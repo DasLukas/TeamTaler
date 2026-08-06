@@ -62,6 +62,8 @@ export interface Group {
 /** Administrator-managed behavior shared by every member of one group. */
 export interface GroupSettings {
   membersCanViewAllBookings: boolean;
+  notificationEmailsEnabled: boolean;
+  notificationEmailDeliveryAvailable: boolean;
 }
 
 /** Authentication and active-group state returned by the API. */
@@ -289,6 +291,20 @@ export interface Settlement {
   status: SettlementStatus;
 }
 
+/** Stable event types emitted by the financial notification system. */
+export type NotificationEventType = 'BOOKING_ASSIGNED' | 'BOOKING_REVERSED' | 'PAYMENT_RECORDED' | 'PAYMENT_REVERSED' | 'SETTLEMENT_CREATED' | 'SYSTEM';
+
+/** Safe structured details used to localize one notification. */
+export interface NotificationContext {
+  actorName?: string;
+  itemName?: string;
+  quantity?: number;
+  amountMinor?: string;
+  currency?: string;
+  periodLabel?: string;
+  dueAt?: string;
+}
+
 /** An in-app notification addressed to the signed-in user. */
 export interface Notification {
   id: string;
@@ -297,6 +313,24 @@ export interface Notification {
   createdAt: string;
   readAt?: string;
   kind: 'BOOKING' | 'PAYMENT' | 'SETTLEMENT' | 'SYSTEM';
+  eventType: NotificationEventType;
+  context: NotificationContext;
+}
+
+/** One cursor-backed notification page. */
+export interface NotificationPage {
+  items: Notification[];
+  nextCursor?: string;
+}
+
+/** Exact unread count returned by the lightweight navigation endpoint. */
+export interface NotificationSummary {
+  unreadCount: number;
+}
+
+/** Result of acknowledging visible notifications. */
+export interface NotificationReadResult extends NotificationSummary {
+  readAt: string;
 }
 
 /** A security-relevant, append-only audit record. */

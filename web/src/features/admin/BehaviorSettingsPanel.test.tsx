@@ -37,12 +37,12 @@ function renderPanel(): QueryClient {
 describe('BehaviorSettingsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    apiMock.getGroupSettings.mockResolvedValue({ membersCanViewAllBookings: false });
+    apiMock.getGroupSettings.mockResolvedValue({ membersCanViewAllBookings: false, notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true });
   });
 
   it('loads, changes, and explicitly saves booking visibility', async () => {
     const user = userEvent.setup();
-    apiMock.updateGroupSettings.mockResolvedValue({ membersCanViewAllBookings: true });
+    apiMock.updateGroupSettings.mockResolvedValue({ membersCanViewAllBookings: true, notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true });
     const queryClient = renderPanel();
     const toggle = await screen.findByRole('switch', { name: i18n.t('behaviorSettings.bookingVisibilityToggle') });
     const save = screen.getByRole('button', { name: i18n.t('behaviorSettings.save') });
@@ -52,9 +52,29 @@ describe('BehaviorSettingsPanel', () => {
     await user.click(toggle);
     await user.click(save);
 
-    await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { membersCanViewAllBookings: true }));
-    await waitFor(() => expect(queryClient.getQueryData(['group-settings', 'group-a'])).toEqual({ membersCanViewAllBookings: true }));
+    await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { membersCanViewAllBookings: true, notificationEmailsEnabled: false }));
+    await waitFor(() => expect(queryClient.getQueryData(['group-settings', 'group-a'])).toEqual({ membersCanViewAllBookings: true, notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true }));
     expect(await screen.findByText(i18n.t('behaviorSettings.saved'))).toHaveAttribute('role', 'status');
+  });
+
+  it('saves notification email delivery only when SMTP is available', async () => {
+    const user = userEvent.setup();
+    apiMock.updateGroupSettings.mockResolvedValue({ membersCanViewAllBookings: false, notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true });
+    renderPanel();
+    const toggle = await screen.findByRole('switch', { name: i18n.t('behaviorSettings.notificationEmailToggle') });
+
+    await user.click(toggle);
+    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
+
+    await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { membersCanViewAllBookings: false, notificationEmailsEnabled: true }));
+  });
+
+  it('keeps notification email delivery visible but disabled without SMTP', async () => {
+    apiMock.getGroupSettings.mockResolvedValue({ membersCanViewAllBookings: false, notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: false });
+    renderPanel();
+
+    expect(await screen.findByRole('switch', { name: i18n.t('behaviorSettings.notificationEmailToggle') })).toBeDisabled();
+    expect(screen.getByText(i18n.t('behaviorSettings.notificationEmailUnavailable'))).toBeVisible();
   });
 
   it('shows a localized error when settings cannot be loaded', async () => {

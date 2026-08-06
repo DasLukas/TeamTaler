@@ -4,6 +4,12 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+### Added
+
+- Context-rich notifications for external booking assignments and reversals, administrative payments and reversals, and generated period settlements.
+- Exact unread-count badges on desktop notifications and the mobile overflow button, with notifications available first in the overflow menu and acknowledged after entering the viewport.
+- Cursor-backed notification history, batch read acknowledgements, and an administrator-controlled optional SMTP notification outbox.
+
 ## [0.4.0] - 2026-08-06
 
 ### Added

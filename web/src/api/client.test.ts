@@ -397,17 +397,17 @@ describe('high-risk API idempotency', () => {
 
   it('reads and updates typed group behavior settings', async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ membersCanViewAllBookings: false }))
-      .mockResolvedValueOnce(jsonResponse({ membersCanViewAllBookings: true }));
+      .mockResolvedValueOnce(jsonResponse({ membersCanViewAllBookings: false, notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true }))
+      .mockResolvedValueOnce(jsonResponse({ membersCanViewAllBookings: true, notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(api.getGroupSettings('group-a')).resolves.toEqual({ membersCanViewAllBookings: false });
-    await expect(api.updateGroupSettings('group-a', { membersCanViewAllBookings: true })).resolves.toEqual({ membersCanViewAllBookings: true });
+    await expect(api.getGroupSettings('group-a')).resolves.toEqual({ membersCanViewAllBookings: false, notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true });
+    await expect(api.updateGroupSettings('group-a', { membersCanViewAllBookings: true, notificationEmailsEnabled: true })).resolves.toEqual({ membersCanViewAllBookings: true, notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true });
 
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group-a/settings');
     expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/groups/group-a/settings');
     expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: 'PATCH' });
-    expect(requestBody(fetchMock.mock.calls[1])).toEqual({ membersCanViewAllBookings: true });
+    expect(requestBody(fetchMock.mock.calls[1])).toEqual({ membersCanViewAllBookings: true, notificationEmailsEnabled: true });
   });
 
   it('opens the successor accounting period with the localized default label', async () => {

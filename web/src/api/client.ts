@@ -38,6 +38,9 @@ import type {
   GroupSettings,
   Membership,
   Notification,
+  NotificationPage,
+  NotificationReadResult,
+  NotificationSummary,
   Payment,
   PaymentCommand,
   SelfPaymentCommand,
@@ -115,6 +118,10 @@ async function parseProblem(response: Response): Promise<ProblemDetails> {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return (await requestWithMetadata<T>(path, init)).data;
+}
+
+async function requestWithMetadata<T>(path: string, init: RequestInit = {}): Promise<{ data: T; headers: Headers }> {
   const headers = new Headers(init.headers);
   headers.set('Accept', 'application/json');
   if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
@@ -125,15 +132,15 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const response = await fetch(`${API_BASE}${path}`, { ...init, headers, credentials: 'include' });
     if (!response.ok) {
       if (DEMO_ENABLED && (response.status === 404 || response.status >= 500)) {
-        return requestDevelopmentDemo<T>(path, init);
+        return { data: await requestDevelopmentDemo<T>(path, init), headers: new Headers() };
       }
       throw new ApiError(await parseProblem(response));
     }
-    if (response.status === 204) return undefined as T;
-    return normalizeApiValue(await response.json()) as T;
+    if (response.status === 204) return { data: undefined as T, headers: response.headers };
+    return { data: normalizeApiValue(await response.json()) as T, headers: response.headers };
   } catch (error) {
     if (DEMO_ENABLED && !(error instanceof ApiError)) {
-      return requestDevelopmentDemo<T>(path, init);
+      return { data: await requestDevelopmentDemo<T>(path, init), headers: new Headers() };
     }
     throw error;
   }
@@ -277,7 +284,7 @@ export const api = {
   },
   updateGroupName: async (groupId: string, name: string): Promise<{ name: string }> => request<{ name: string }>(groupRootPath(groupId), { method: 'PATCH', body: json({ name }) }),
   getGroupSettings: async (groupId: string): Promise<GroupSettings> => request<GroupSettings>(groupPath(groupId, 'settings')),
-  updateGroupSettings: async (groupId: string, settings: GroupSettings): Promise<GroupSettings> => request<GroupSettings>(groupPath(groupId, 'settings'), { method: 'PATCH', body: json(settings) }),
+  updateGroupSettings: async (groupId: string, settings: Pick<GroupSettings, 'membersCanViewAllBookings' | 'notificationEmailsEnabled'>): Promise<GroupSettings> => request<GroupSettings>(groupPath(groupId, 'settings'), { method: 'PATCH', body: json(settings) }),
   uploadGroupLogo: async (groupId: string, image: File): Promise<{ logoUrl: string }> => {
     const form = new FormData();
     form.set('image', image);
@@ -339,6 +346,14 @@ export const api = {
     return statements.map((statement) => adaptSettlement(statement, adaptedPeriods));
   },
   getNotifications: async (groupId: string): Promise<Notification[]> => (await request<unknown[]>(groupPath(groupId, 'notifications'))).map(adaptNotification),
+  getNotificationsPage: async (groupId: string, cursor?: string): Promise<NotificationPage> => {
+    const query = new URLSearchParams({ limit: '50' });
+    if (cursor) query.set('cursor', cursor);
+    const response = await requestWithMetadata<unknown[]>(`${groupPath(groupId, 'notifications')}?${query.toString()}`);
+    return { items: response.data.map(adaptNotification), nextCursor: response.headers.get('X-Next-Cursor') ?? undefined };
+  },
+  getNotificationSummary: (groupId: string): Promise<NotificationSummary> => request<NotificationSummary>(groupPath(groupId, 'notifications/summary')),
+  markNotificationsRead: (groupId: string, notificationIds: string[]): Promise<NotificationReadResult> => request<NotificationReadResult>(groupPath(groupId, 'notifications/read'), { method: 'PATCH', body: json({ notificationIds }) }),
   markNotificationRead: async (groupId: string, notificationId: string): Promise<Notification> => adaptNotification(await request<unknown>(groupPath(groupId, `notifications/${notificationId}`), { method: 'PATCH', body: json({ read: true }) })),
   getAudit: async (groupId: string): Promise<AuditEntry[]> => {
     const [entries, members] = await Promise.all([request<unknown[]>(groupPath(groupId, 'audit')), request<unknown>(groupPath(groupId, 'members'))]);

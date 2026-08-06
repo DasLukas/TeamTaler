@@ -56,13 +56,13 @@ describe('DemoTransport group settings', () => {
 
   it('persists typed behavior settings', async () => {
     const transport = new DemoTransport();
-    await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings')).resolves.toEqual({ membersCanViewAllBookings: false });
+    await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings')).resolves.toEqual({ membersCanViewAllBookings: false, notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true });
     await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ membersCanViewAllBookings: true }),
-    })).resolves.toEqual({ membersCanViewAllBookings: true });
-    await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings')).resolves.toEqual({ membersCanViewAllBookings: true });
+      body: JSON.stringify({ membersCanViewAllBookings: true, notificationEmailsEnabled: true }),
+    })).resolves.toEqual({ membersCanViewAllBookings: true, notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true });
+    await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings')).resolves.toEqual({ membersCanViewAllBookings: true, notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true });
   });
 });
 

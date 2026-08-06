@@ -272,8 +272,8 @@ export const demoSettlements: Settlement[] = [
 
 /** Demo in-app notifications. */
 export const demoNotifications: Notification[] = [
-  { id: 'notification-1', title: 'Strafe gebucht', message: 'Mara hat dir „Zu spät zum Training“ über 5,00 € zugewiesen.', createdAt: '2026-08-04T18:32:00+02:00', kind: 'BOOKING' },
-  { id: 'notification-2', title: 'Zahlung erfasst', message: 'Deine Zahlung über 20,00 € wurde verbucht.', createdAt: '2026-08-01T09:00:00+02:00', readAt: '2026-08-01T09:10:00+02:00', kind: 'PAYMENT' },
+  { id: 'notification-1', title: 'Strafe gebucht', message: 'Mara hat dir „Zu spät zum Training“ über 5,00 € zugewiesen.', createdAt: '2026-08-04T18:32:00+02:00', kind: 'BOOKING', eventType: 'BOOKING_ASSIGNED', context: { actorName: 'Mara', itemName: 'Zu spät zum Training', quantity: 1, amountMinor: '500', currency: 'EUR' } },
+  { id: 'notification-2', title: 'Zahlung erfasst', message: 'Deine Zahlung über 20,00 € wurde verbucht.', createdAt: '2026-08-01T09:00:00+02:00', readAt: '2026-08-01T09:10:00+02:00', kind: 'PAYMENT', eventType: 'PAYMENT_RECORDED', context: { actorName: 'Mara', amountMinor: '2000', currency: 'EUR' } },
 ];
 
 /** Demo append-only audit records. */

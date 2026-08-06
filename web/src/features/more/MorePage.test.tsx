@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GroupRole } from '@/api/types';
 import { MorePage } from './MorePage';
+import { NotificationSummaryContext } from '@/features/notifications/NotificationSummaryContext';
 
 const mocks = vi.hoisted(() => ({ useActiveGroup: vi.fn() }));
 
@@ -30,18 +31,24 @@ describe('MorePage role navigation', () => {
     useRoles(['ADMIN', 'MEMBER']);
     render(<MorePage />);
 
-    expect(menuItems()).toEqual(['Finanzen', 'Katalog', 'Verwaltung', 'Mein Konto', 'Abmelden']);
-    expect(screen.queryByRole('link', { name: 'Benachrichtigungen' })).not.toBeInTheDocument();
+    expect(menuItems()).toEqual(['Benachrichtigungen', 'Finanzen', 'Katalog', 'Verwaltung', 'Mein Konto', 'Abmelden']);
+    expect(screen.getByRole('link', { name: 'Benachrichtigungen' })).toHaveAttribute('href', '/notifications');
   });
 
   it.each([
-    { roles: ['FINANCE_MANAGER', 'MEMBER'] as GroupRole[], expected: ['Finanzen', 'Mein Konto', 'Abmelden'] },
-    { roles: ['CATALOG_MANAGER', 'MEMBER'] as GroupRole[], expected: ['Katalog', 'Mein Konto', 'Abmelden'] },
-    { roles: ['MEMBER'] as GroupRole[], expected: ['Mein Konto', 'Abmelden'] },
+    { roles: ['FINANCE_MANAGER', 'MEMBER'] as GroupRole[], expected: ['Benachrichtigungen', 'Finanzen', 'Mein Konto', 'Abmelden'] },
+    { roles: ['CATALOG_MANAGER', 'MEMBER'] as GroupRole[], expected: ['Benachrichtigungen', 'Katalog', 'Mein Konto', 'Abmelden'] },
+    { roles: ['MEMBER'] as GroupRole[], expected: ['Benachrichtigungen', 'Mein Konto', 'Abmelden'] },
   ])('filters unavailable workspaces for $roles', ({ roles, expected }) => {
     useRoles(roles);
     render(<MorePage />);
 
     expect(menuItems()).toEqual(expected);
+  });
+
+  it('shows the exact unread count on the notification menu item', () => {
+    useRoles(['MEMBER']);
+    render(<NotificationSummaryContext.Provider value={7}><MorePage /></NotificationSummaryContext.Provider>);
+    expect(screen.getByLabelText('7 ungelesene Benachrichtigungen')).toHaveTextContent('7');
   });
 });

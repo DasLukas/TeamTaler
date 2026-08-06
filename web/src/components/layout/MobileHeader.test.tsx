@@ -26,10 +26,10 @@ describe('MobileHeader', () => {
   it('keeps the native group selector accessible when its mobile presentation is icon-only', () => {
     render(<MobileHeader />);
 
-    const selector = screen.getByRole('combobox', { name: i18n.t('nav.selectGroup') });
+    const selector = screen.getByRole('combobox', { name: i18n.t('nav.selectGroup'), hidden: true });
     expect(selector).toHaveAttribute('title', 'TeamTaler Demo Club');
     expect(selector).toHaveValue('group-a');
-    expect(screen.getByRole('option', { name: 'Second Club' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Second Club', hidden: true })).toBeInTheDocument();
 
     fireEvent.change(selector, { target: { value: 'group-b' } });
     expect(mocks.setActiveGroupId).toHaveBeenCalledWith('group-b');

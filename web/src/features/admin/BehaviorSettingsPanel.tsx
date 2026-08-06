@@ -25,14 +25,15 @@ function SettingsForm({ groupId, settings }: SettingsFormProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [membersCanViewAllBookings, setMembersCanViewAllBookings] = useState(settings.membersCanViewAllBookings);
+  const [notificationEmailsEnabled, setNotificationEmailsEnabled] = useState(settings.notificationEmailsEnabled);
   const mutation = useMutation({
-    mutationFn: () => api.updateGroupSettings(groupId, { membersCanViewAllBookings }),
+    mutationFn: () => api.updateGroupSettings(groupId, { membersCanViewAllBookings, notificationEmailsEnabled }),
     onSuccess: async (persisted) => {
       queryClient.setQueryData<GroupSettings>(['group-settings', groupId], persisted);
       await queryClient.invalidateQueries({ queryKey: ['bookings', groupId] });
     },
   });
-  const changed = membersCanViewAllBookings !== settings.membersCanViewAllBookings;
+  const changed = membersCanViewAllBookings !== settings.membersCanViewAllBookings || notificationEmailsEnabled !== settings.notificationEmailsEnabled;
 
   return (
     <form className={styles.card} onSubmit={(event) => { event.preventDefault(); mutation.mutate(); }}>
@@ -49,6 +50,19 @@ function SettingsForm({ groupId, settings }: SettingsFormProps) {
         />
       </div>
       <p className={styles.notice}>{t('behaviorSettings.bookingVisibilityNotice')}</p>
+      <div className={styles.settingRow}>
+        <div>
+          <h3>{t('behaviorSettings.notificationEmailTitle')}</h3>
+          <p>{t('behaviorSettings.notificationEmailDescription')}</p>
+        </div>
+        <Toggle
+          checked={notificationEmailsEnabled}
+          disabled={mutation.isPending || !settings.notificationEmailDeliveryAvailable}
+          label={t('behaviorSettings.notificationEmailToggle')}
+          onChange={(checked) => { setNotificationEmailsEnabled(checked); mutation.reset(); }}
+        />
+      </div>
+      <p className={styles.notice}>{settings.notificationEmailDeliveryAvailable ? t('behaviorSettings.notificationEmailNotice') : settings.notificationEmailsEnabled ? t('behaviorSettings.notificationEmailTemporarilyUnavailable') : t('behaviorSettings.notificationEmailUnavailable')}</p>
       {mutation.isError ? <p className={styles.error} role="alert">{t('behaviorSettings.saveError')} {mutation.error.message}</p> : null}
       {mutation.isSuccess ? <p className={styles.success} role="status">{t('behaviorSettings.saved')}</p> : null}
       <div className={styles.actions}>
