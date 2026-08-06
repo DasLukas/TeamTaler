@@ -1,6 +1,8 @@
 .toggle {
   position: relative;
+  flex: 0 0 52px;
   width: 52px;
+  min-width: 52px;
   height: 30px;
   padding: 2px;
   border: 0;

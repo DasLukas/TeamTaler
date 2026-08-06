@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: TeamTaler API
-  version: 0.4.0
+  version: 0.5.0
   description: |
     Same-origin JSON API for TeamTaler. Monetary values use integer minor units:
     response fields are exact decimal strings, while command inputs are bounded
@@ -247,6 +247,38 @@ paths:
                 required: [name]
                 properties:
                   name: { type: string }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/settings:
+    get:
+      tags: [Groups]
+      summary: Read administrator-managed group behavior settings
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Current typed group settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GroupSettings' }
+        '403': { $ref: '#/components/responses/Problem' }
+    patch:
+      tags: [Groups]
+      summary: Update administrator-managed group behavior settings
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GroupSettingsUpdate' }
+      responses:
+        '200':
+          description: Persisted typed group settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GroupSettings' }
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/dashboard:
@@ -557,6 +589,29 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Category' }
         '403': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/catalog/order:
+    put:
+      tags: [Catalog]
+      summary: Replace the category and product display order
+      description: Atomically persists the complete catalog order. Every category and every product in its owning category must appear exactly once; products cannot be moved between categories.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CatalogOrderCommand' }
+      responses:
+        '200':
+          description: Reordered catalog
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Category' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/categories/{categoryId}:
     patch:
       tags: [Catalog]
@@ -577,6 +632,21 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Category' }
+        '412': { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [Catalog]
+      summary: Permanently delete an archived, empty, unused category
+      description: The category must already be archived, contain no products, and have no booking or ledger history. Historical categories remain archived instead.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CategoryId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      responses:
+        '204': { description: Category permanently deleted }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/categories/{categoryId}/products:
     post:
@@ -620,6 +690,21 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Product' }
+        '412': { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [Catalog]
+      summary: Permanently remove an archived product from the catalog
+      description: The product must already be archived. Unused products are physically deleted; products referenced by bookings retain an internal tombstone so immutable booking, ledger, settlement, and audit history remains intact. Removed products are no longer returned by catalog APIs and cannot be restored through the API.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/ProductId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      responses:
+        '204': { description: Product permanently removed from the catalog }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/products/{productId}/image:
     post:
@@ -681,7 +766,8 @@ paths:
   /groups/{groupId}/bookings:
     get:
       tags: [Bookings]
-      summary: List bookings visible to the current member
+      summary: List activity bookings visible to the current member
+      description: Administrators and finance managers always see the complete group history. Regular members see their existing personal and granted-category scope unless an administrator enables group-wide booking visibility.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - name: periodId
@@ -820,6 +906,27 @@ paths:
               schema: { $ref: '#/components/schemas/Payment' }
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/payments/self:
+    post:
+      tags: [Finance]
+      summary: Record and FIFO-allocate a payment for the authenticated membership
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SelfPaymentCommand' }
+      responses:
+        '201':
+          description: Recorded self-service payment
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payment' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/payments/{paymentId}/reverse:
     post:
       tags: [Finance]
@@ -922,14 +1029,69 @@ paths:
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/Limit'
+        - name: cursor
+          in: query
+          description: Opaque notification identifier returned in the preceding X-Next-Cursor header.
+          schema: { type: string }
       responses:
         '200':
           description: Notifications
+          headers:
+            X-Next-Cursor:
+              description: Opaque cursor for the next older page; omitted for the final page.
+              schema: { type: string }
           content:
             application/json:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/Notification' }
+  /groups/{groupId}/notifications/summary:
+    get:
+      tags: [Groups]
+      summary: Read the current member's exact unread notification count
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Unread notification summary
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationSummary' }
+  /groups/{groupId}/notifications/read:
+    patch:
+      tags: [Groups]
+      summary: Acknowledge visible notifications in one bounded batch
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [notificationIds]
+              properties:
+                notificationIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  uniqueItems: true
+                  items: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: Batch acknowledgement result
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/NotificationSummary'
+                  - type: object
+                    required: [readAt]
+                    properties:
+                      readAt: { type: string, format: date-time }
+        '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/notifications/{notificationId}:
     patch:
       tags: [Groups]
@@ -1052,6 +1214,14 @@ components:
       in: header
       required: false
       schema: { type: string }
+    RequiredIfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: Strong entity tag containing the current catalog resource version, for example `"v3"`.
+      schema:
+        type: string
+        pattern: '^"v[1-9][0-9]*"$'
     Limit:
       name: limit
       in: query
@@ -1124,9 +1294,31 @@ components:
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         logoUrl: { type: string }
         membership: { $ref: '#/components/schemas/Membership' }
+    GroupSettings:
+      type: object
+      additionalProperties: false
+      required: [membersCanViewAllBookings, notificationEmailsEnabled, notificationEmailDeliveryAvailable]
+      properties:
+        membersCanViewAllBookings:
+          type: boolean
+          description: Whether regular members can read the complete historical booking activity of the group.
+        notificationEmailsEnabled:
+          type: boolean
+          description: Persisted group preference for companion emails on future in-app notifications.
+        notificationEmailDeliveryAvailable:
+          type: boolean
+          readOnly: true
+          description: Whether the running server has complete SMTP delivery configuration.
+    GroupSettingsUpdate:
+      type: object
+      additionalProperties: false
+      required: [membersCanViewAllBookings, notificationEmailsEnabled]
+      properties:
+        membersCanViewAllBookings: { type: boolean }
+        notificationEmailsEnabled: { type: boolean }
     Membership:
       type: object
-      required: [id, groupId, userId, email, displayName, status, roles, categoryGrants]
+      required: [id, groupId, userId, email, displayName, status, roles, groupPermissions, categoryGrants]
       properties:
         id: { type: string }
         groupId: { type: string }
@@ -1139,6 +1331,10 @@ components:
           type: array
           uniqueItems: true
           items: { $ref: '#/components/schemas/Role' }
+        groupPermissions:
+          type: array
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/GroupPermission' }
         categoryGrants:
           type: object
           additionalProperties:
@@ -1148,6 +1344,9 @@ components:
     Role:
       type: string
       enum: [ADMIN, FINANCE_MANAGER, CATALOG_MANAGER]
+    GroupPermission:
+      type: string
+      enum: [SELF_RECORD_PAYMENT]
     CategoryPermission:
       type: string
       enum: [ASSIGN_TO_OTHERS, VOID_BOOKINGS]
@@ -1159,6 +1358,10 @@ components:
           type: array
           uniqueItems: true
           items: { $ref: '#/components/schemas/Role' }
+        groupPermissions:
+          type: array
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/GroupPermission' }
         categoryGrants:
           type: object
           additionalProperties:
@@ -1178,6 +1381,10 @@ components:
           type: array
           uniqueItems: true
           items: { $ref: '#/components/schemas/Role' }
+        groupPermissions:
+          type: array
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/GroupPermission' }
         categoryGrants:
           type: object
           additionalProperties:
@@ -1193,6 +1400,10 @@ components:
           type: array
           uniqueItems: true
           items: { $ref: '#/components/schemas/Role' }
+        groupPermissions:
+          type: array
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/GroupPermission' }
         categoryGrants:
           type: object
           additionalProperties:
@@ -1201,7 +1412,7 @@ components:
             items: { $ref: '#/components/schemas/CategoryPermission' }
     Invitation:
       type: object
-      required: [id, groupId, email, roles, categoryGrants, expiresAt, emailDeliveryStatus]
+      required: [id, groupId, email, roles, groupPermissions, categoryGrants, expiresAt, emailDeliveryStatus]
       properties:
         id: { type: string }
         groupId: { type: string }
@@ -1210,6 +1421,10 @@ components:
         roles:
           type: array
           items: { $ref: '#/components/schemas/Role' }
+        groupPermissions:
+          type: array
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/GroupPermission' }
         categoryGrants:
           type: object
           additionalProperties:
@@ -1297,7 +1512,9 @@ components:
       properties:
         name: { type: string, minLength: 1, maxLength: 120 }
         icon: { $ref: '#/components/schemas/CategoryIcon' }
-        sortOrder: { type: integer }
+        sortOrder:
+          type: integer
+          description: Accepted for backward compatibility; newly created categories are appended to the current order.
     CategoryIcon:
       type: string
       enum: [other, drink, food, penalty, sport, event, transport, money]
@@ -1309,6 +1526,24 @@ components:
           properties:
             active: { type: boolean }
             version: { type: integer, format: int64, minimum: 1 }
+    CatalogOrderCommand:
+      type: object
+      required: [categoryIds, productIdsByCategory]
+      additionalProperties: false
+      properties:
+        categoryIds:
+          type: array
+          maxItems: 1000
+          uniqueItems: true
+          items: { type: string, minLength: 1 }
+        productIdsByCategory:
+          type: object
+          maxProperties: 1000
+          additionalProperties:
+            type: array
+            maxItems: 1000
+            uniqueItems: true
+            items: { type: string, minLength: 1 }
     Product:
       type: object
       required: [id, groupId, categoryId, name, pricingMode, currency, active, sortOrder, version]
@@ -1344,7 +1579,9 @@ components:
           type: string
           enum: [FIXED, USER_DEFINED]
           default: FIXED
-        sortOrder: { type: integer }
+        sortOrder:
+          type: integer
+          description: Accepted for backward compatibility; newly created products are appended within their category.
       oneOf:
         - required: [priceMinor]
           properties:
@@ -1471,9 +1708,18 @@ components:
         membershipId: { type: string }
         amountMinor: { type: integer, format: int64, minimum: 1 }
         receivedAt: { type: string, format: date-time }
-        method: { type: string, enum: [CASH, BANK_TRANSFER, OTHER] }
+        method: { type: string, enum: [CASH, BANK_TRANSFER, PAYPAL, OTHER] }
         reference: { type: string, maxLength: 120 }
         note: { type: string, maxLength: 1000 }
+    SelfPaymentCommand:
+      type: object
+      required: [amountMinor, receivedAt, method, reference]
+      additionalProperties: false
+      properties:
+        amountMinor: { type: integer, format: int64, minimum: 1, maximum: 100000000000 }
+        receivedAt: { type: string, format: date-time }
+        method: { type: string, enum: [CASH, BANK_TRANSFER, PAYPAL, OTHER] }
+        reference: { type: string, minLength: 1, maxLength: 120 }
     Payment:
       type: object
       required: [id, groupId, membershipId, memberName, amountMinor, currency, receivedAt, method, status, allocations]
@@ -1485,7 +1731,7 @@ components:
         amountMinor: { $ref: '#/components/schemas/MinorUnits' }
         currency: { type: string }
         receivedAt: { type: string, format: date-time }
-        method: { type: string, enum: [CASH, BANK_TRANSFER, OTHER] }
+        method: { type: string, enum: [CASH, BANK_TRANSFER, PAYPAL, OTHER] }
         reference: { type: string }
         note: { type: string }
         status: { type: string, enum: [POSTED, REVERSED] }
@@ -1538,17 +1784,37 @@ components:
         status: { type: string, enum: [OPEN, PARTIAL, PAID, CREDIT] }
     Notification:
       type: object
-      required: [id, groupId, type, title, body, createdAt]
+      required: [id, groupId, type, title, body, context, createdAt]
       properties:
         id: { type: string }
         groupId: { type: string }
-        type: { type: string }
+        type:
+          type: string
+          enum: [BOOKING_ASSIGNED, BOOKING_REVERSED, PAYMENT_RECORDED, PAYMENT_REVERSED, SETTLEMENT_CREATED]
         title: { type: string }
         body: { type: string }
         resourceType: { type: string }
         resourceId: { type: string }
+        context: { $ref: '#/components/schemas/NotificationContext' }
         readAt: { type: string, format: date-time }
         createdAt: { type: string, format: date-time }
+    NotificationContext:
+      type: object
+      additionalProperties: false
+      properties:
+        actorName: { type: string }
+        itemName: { type: string }
+        quantity: { type: integer, minimum: 1 }
+        amountMinor: { $ref: '#/components/schemas/MinorUnits' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        periodLabel: { type: string }
+        dueAt: { type: string, format: date }
+    NotificationSummary:
+      type: object
+      additionalProperties: false
+      required: [unreadCount]
+      properties:
+        unreadCount: { type: integer, format: int64, minimum: 0 }
     AuditEvent:
       type: object
       required: [id, action, resourceType, metadata, occurredAt]

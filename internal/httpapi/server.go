@@ -79,16 +79,17 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 		}
 	}
 	groupService := groups.Service{DB: db, TokenSealer: tokenSealer}
+	notificationService := notifications.Service{DB: db, EmailDeliveryAvailable: cfg.SMTP.Enabled}
 	server := &Server{
 		config:        cfg,
 		db:            db,
 		auth:          auth.Service{DB: db, SessionLifetime: cfg.SessionLifetime},
 		groups:        groupService,
 		catalog:       catalog.Service{DB: db},
-		bookings:      bookings.Service{DB: db, Groups: groupService},
-		finance:       finance.Service{DB: db},
-		periods:       periods.Service{DB: db},
-		notifications: notifications.Service{DB: db},
+		bookings:      bookings.Service{DB: db, Groups: groupService, Notifications: notificationService},
+		finance:       finance.Service{DB: db, Notifications: notificationService},
+		periods:       periods.Service{DB: db, Notifications: notificationService},
+		notifications: notificationService,
 		loginLimiter:  newLoginLimiter(),
 		passwordSlots: make(chan struct{}, 2),
 		logger:        logger,
@@ -108,6 +109,8 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /api/v1/groups", server.handleListGroups)
 	mux.HandleFunc("POST /api/v1/groups", server.handleCreateGroup)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}", server.handleUpdateGroup)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/settings", server.handleGetGroupSettings)
+	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/settings", server.handleUpdateGroupSettings)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/logo", server.handleGroupLogo)
 	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/logo", server.handleRemoveGroupLogo)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/dashboard", server.handleDashboard)
@@ -123,9 +126,12 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/invitations/{invitationID}/email/resend", server.handleResendInvitationEmail)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/categories", server.handleListCategories)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/categories", server.handleCreateCategory)
+	mux.HandleFunc("PUT /api/v1/groups/{groupID}/catalog/order", server.handleReorderCatalog)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/categories/{categoryID}", server.handleUpdateCategory)
+	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/categories/{categoryID}", server.handleDeleteCategory)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/categories/{categoryID}/products", server.handleCreateProduct)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/products/{productID}", server.handleUpdateProduct)
+	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/products/{productID}", server.handleDeleteProduct)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/products/{productID}/image", server.handleProductImage)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/images/{imageKey}", server.handleImage)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/bookings", server.handleListBookings)
@@ -136,12 +142,15 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/accounts/{membershipID}", server.handleMemberAccount)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/payments", server.handleListPayments)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/payments", server.handleCreatePayment)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/payments/self", server.handleCreateOwnPayment)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/payments/{paymentID}/reverse", server.handleReversePayment)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/periods", server.handleListPeriods)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/periods/{periodID}/close", server.handleClosePeriod)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/periods/{periodID}/statements", server.handleStatements)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/settlements", server.handleSettlements)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/notifications", server.handleListNotifications)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/notifications/summary", server.handleNotificationSummary)
+	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/notifications/read", server.handleMarkNotificationsRead)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/notifications/{notificationID}", server.handleUpdateNotification)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/audit", server.handleAudit)
 	mux.HandleFunc("/api/", func(response http.ResponseWriter, request *http.Request) {

@@ -25,7 +25,7 @@ vi.mock('@/api/client', () => ({ api: apiMock }));
 
 const session: Session = {
   user: { id: 'user-admin', displayName: 'Admin', email: 'admin@example.test' },
-  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-admin', roles: ['ADMIN', 'MEMBER'] } }],
+  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-admin', roles: ['ADMIN', 'MEMBER'], groupPermissions: [] } }],
   activeGroupId: 'group-a',
 };
 
@@ -36,6 +36,7 @@ const members: Membership[] = [{
   email: 'admin@example.test',
   initials: 'A',
   roles: ['ADMIN', 'MEMBER'],
+  groupPermissions: [],
   categoryPermissions: [],
   active: true,
 }];
@@ -55,6 +56,7 @@ const invitationMetadata: InvitationMetadata[] = [{
   email: 'new@example.test',
   displayName: 'New Member',
   roles: ['MEMBER'],
+  groupPermissions: [],
   categoryPermissions: [],
   expiresAt: '2026-08-11T12:00:00Z',
   emailDeliveryStatus: 'SENT',
@@ -87,8 +89,9 @@ describe('MembersPanel invitations', () => {
     apiMock.createInvitation.mockResolvedValue({
       id: 'invitation-manual',
       email: 'manual@example.test',
-    roles: ['MEMBER'],
-    categoryPermissions: [],
+      roles: ['MEMBER'],
+      groupPermissions: [],
+      categoryPermissions: [],
       expiresAt: '2026-08-11T12:00:00Z',
       acceptUrl: 'https://teamtaler.example/invite#token=manual-token',
       emailDeliveryStatus: 'PENDING',
@@ -96,7 +99,7 @@ describe('MembersPanel invitations', () => {
     apiMock.importInvitations.mockResolvedValue(importResult);
     apiMock.getInvitations.mockResolvedValue(invitationMetadata);
     apiMock.retryInvitationEmail.mockResolvedValue({ invitationId: 'invitation-new', emailDeliveryStatus: 'PENDING' });
-  apiMock.updateInvitation.mockImplementation((_groupId: string, _invitationId: string, input: { displayName: string; roles: Membership['roles']; categoryPermissions: Membership['categoryPermissions'] }) => Promise.resolve({ ...invitationMetadata[0], ...input }));
+  apiMock.updateInvitation.mockImplementation((_groupId: string, _invitationId: string, input: { displayName: string; roles: Membership['roles']; groupPermissions: Membership['groupPermissions']; categoryPermissions: Membership['categoryPermissions'] }) => Promise.resolve({ ...invitationMetadata[0], ...input }));
   apiMock.revokeInvitation.mockResolvedValue(undefined);
   apiMock.resendInvitationEmail.mockResolvedValue({ invitationId: 'invitation-new', emailDeliveryStatus: 'PENDING', expiresAt: '2026-08-12T12:00:00Z', acceptUrl: 'https://teamtaler.example/invite#token=rotated' });
   apiMock.archiveMember.mockResolvedValue(undefined);
@@ -109,8 +112,9 @@ describe('MembersPanel invitations', () => {
     apiMock.getInvitations.mockResolvedValue([{
       id: 'invitation-manual',
       email: 'manual@example.test',
-    roles: ['MEMBER'],
-    categoryPermissions: [],
+      roles: ['MEMBER'],
+      groupPermissions: [],
+      categoryPermissions: [],
       expiresAt: '2026-08-11T12:00:00Z',
       emailDeliveryStatus: 'SENT',
       emailSentAt: '2026-08-04T12:01:00Z',
@@ -121,7 +125,7 @@ describe('MembersPanel invitations', () => {
     await user.type(screen.getByLabelText(i18n.t('auth.email')), 'manual@example.test');
     await user.click(screen.getByRole('button', { name: i18n.t('members.createInvitation') }));
 
-  await waitFor(() => expect(apiMock.createInvitation).toHaveBeenCalledWith('group-a', { email: 'manual@example.test', displayName: '', roles: ['MEMBER'], categoryPermissions: [] }));
+    await waitFor(() => expect(apiMock.createInvitation).toHaveBeenCalledWith('group-a', { email: 'manual@example.test', displayName: '', roles: ['MEMBER'], groupPermissions: [], categoryPermissions: [] }));
     expect(await screen.findByRole('heading', { name: i18n.t('members.invitationStatus.sentTitle') })).toBeVisible();
     expect(screen.getByText(i18n.t('members.invitationStatus.sentDescription', { email: 'manual@example.test' }))).toBeVisible();
     expect(screen.getByText(i18n.t('members.fallbackHint'))).toBeVisible();
@@ -137,6 +141,7 @@ describe('MembersPanel invitations', () => {
     await user.type(screen.getByLabelText(i18n.t('auth.email')), 'rights@example.test');
     await user.type(screen.getByLabelText(i18n.t('auth.displayName')), 'Rights Member');
     await user.click(screen.getByRole('switch', { name: i18n.t('rights.toggleRole', { role: i18n.t('roles.finance.label'), name: 'Rights Member' }) }));
+    await user.click(screen.getByRole('switch', { name: i18n.t('rights.selfPayment.toggle', { name: 'Rights Member' }) }));
     await user.click(screen.getByRole('switch', { name: i18n.t('rights.categoryAssign', { category: 'Drinks' }) }));
     await user.click(screen.getByRole('button', { name: i18n.t('members.createInvitation') }));
 
@@ -144,6 +149,7 @@ describe('MembersPanel invitations', () => {
       email: 'rights@example.test',
       displayName: 'Rights Member',
       roles: ['MEMBER', 'FINANCE_MANAGER'],
+      groupPermissions: ['SELF_RECORD_PAYMENT'],
       categoryPermissions: [{ categoryId: 'category-a', assignToOthers: true, voidBookings: false }],
     }));
   });
@@ -158,7 +164,7 @@ describe('MembersPanel invitations', () => {
     await user.type(nameInput, 'Updated Member');
     await user.click(screen.getByRole('button', { name: i18n.t('common.save') }));
     await waitFor(() => expect(apiMock.updateInvitation).toHaveBeenCalledWith('group-a', 'invitation-new', {
-      displayName: 'Updated Member', roles: ['MEMBER'], categoryPermissions: [],
+      displayName: 'Updated Member', roles: ['MEMBER'], groupPermissions: [], categoryPermissions: [],
     }));
 
     await user.click(screen.getByRole('button', { name: i18n.t('members.resendFor', { email: 'new@example.test' }) }));
@@ -200,8 +206,9 @@ describe('MembersPanel invitations', () => {
     apiMock.createInvitation.mockResolvedValue({
       id: 'invitation-link-only',
       email: 'link-only@example.test',
-    roles: ['MEMBER'],
-    categoryPermissions: [],
+      roles: ['MEMBER'],
+      groupPermissions: [],
+      categoryPermissions: [],
       expiresAt: '2026-08-11T12:00:00Z',
       acceptUrl: 'https://teamtaler.example/invite#token=link-only-token',
       emailDeliveryStatus: 'NOT_REQUESTED',
@@ -215,7 +222,7 @@ describe('MembersPanel invitations', () => {
     expect(await screen.findByRole('heading', { name: i18n.t('members.invitationStatus.notRequestedTitle') })).toBeVisible();
     expect(screen.getByText(i18n.t('members.invitationStatus.notRequestedDescription', { email: 'link-only@example.test' }))).toBeVisible();
     expect(screen.getByLabelText(i18n.t('members.invitationLink'))).toHaveValue('https://teamtaler.example/invite#token=link-only-token');
-  expect(apiMock.getInvitations).toHaveBeenCalledWith('group-a');
+    expect(apiMock.getInvitations).toHaveBeenCalledWith('group-a');
   });
 
   it('offers the documented CSV schema and downloads a template', async () => {
@@ -293,8 +300,9 @@ describe('MembersPanel invitations', () => {
       id: 'invitation-failed',
       email: 'failed@example.test',
       displayName: 'Failed Member',
-    roles: ['MEMBER'],
-    categoryPermissions: [],
+      roles: ['MEMBER'],
+      groupPermissions: [],
+      categoryPermissions: [],
       expiresAt: '2026-08-11T12:00:00Z',
       emailDeliveryStatus: 'FAILED',
     };

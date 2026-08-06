@@ -33,7 +33,7 @@ const (
 // from validation, network, authentication, and remote-server failures.
 var ErrUnavailable = errors.New("email delivery is unavailable")
 
-// Sender is the invitation-delivery boundary used by application services.
+// Sender is the transactional-email delivery boundary used by application services.
 // Available reports whether delivery was completely configured at startup.
 // SendInvitation accepts a context and an InvitationMessage and returns nil only
 // after the SMTP server accepts the message; implementations may return
@@ -49,6 +49,8 @@ type Sender interface {
 	Available() bool
 	// SendInvitation submits one invitation or returns a classified failure.
 	SendInvitation(context.Context, InvitationMessage) error
+	// SendNotification submits one member notification or returns a classified failure.
+	SendNotification(context.Context, NotificationMessage) error
 }
 
 // InvitationMessage contains the recipient and onboarding data rendered into a
@@ -69,7 +71,24 @@ type InvitationMessage struct {
 	ExpiresAt time.Time
 }
 
-// SMTP sends invitation messages through one validated SMTP endpoint. Construct
+// NotificationMessage contains the recipient, localized event summary, group,
+// and same-origin action URL for one member notification email.
+type NotificationMessage struct {
+	// ToAddress is the recipient's single ASCII mailbox address.
+	ToAddress string
+	// ToName is the optional recipient display name.
+	ToName string
+	// GroupName identifies the group in the subject and body.
+	GroupName string
+	// Title is the short localized notification subject detail.
+	Title string
+	// Body is the concise localized event description.
+	Body string
+	// ActionURL opens the authenticated notification inbox.
+	ActionURL string
+}
+
+// SMTP sends invitation and notification messages through one validated SMTP endpoint. Construct
 // it with NewSMTP. Its connection uses authenticated STARTTLS or implicit TLS,
 // verifies the server certificate, requires TLS 1.2 or newer, and is bounded by
 // both the caller context and an internal operation timeout.
@@ -82,12 +101,12 @@ type SMTP struct {
 
 var _ Sender = (*SMTP)(nil)
 
-// NewSMTP constructs an SMTP invitation sender from configuration. Disabled
+// NewSMTP constructs an SMTP transactional-email sender from configuration. Disabled
 // zero configuration returns a valid sender whose Available method is false.
 // Enabled configuration must contain a host, port, credentials, sender address,
 // and one of the mandatory TLS modes; malformed or internally inconsistent
 // values return an error. The returned sender performs no network access until
-// SendInvitation is called.
+// SendInvitation or SendNotification is called.
 //
 // Example:
 //
@@ -143,44 +162,80 @@ func (s *SMTP) SendInvitation(ctx context.Context, message InvitationMessage) er
 	if err != nil {
 		return fmt.Errorf("send invitation: %w", err)
 	}
+	return s.sendPayload(ctx, "invitation", recipient, payload)
+}
+
+// SendNotification validates, renders, and submits message as one UTF-8
+// plain-text notification email. ctx bounds dialing, TLS, authentication, and
+// upload. It returns ErrUnavailable when SMTP is disabled, validation errors for
+// unsafe or incomplete message data, context errors on cancellation, or wrapped
+// transport errors. A nil result means the SMTP server accepted the message.
+//
+// Example:
+//
+//	err := sender.SendNotification(ctx, email.NotificationMessage{
+//		ToAddress: "member@example.com",
+//		GroupName: "Example Team",
+//		Title: "Neue Buchung",
+//		Body: "Alex hat dir eine Buchung zugewiesen.",
+//		ActionURL: "https://teamtaler.example/notifications",
+//	})
+func (s *SMTP) SendNotification(ctx context.Context, message NotificationMessage) error {
+	if !s.Available() {
+		return fmt.Errorf("%w: SMTP is disabled", ErrUnavailable)
+	}
+	if ctx == nil {
+		return errors.New("send notification: context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("send notification: %w", err)
+	}
+	recipient, payload, err := s.renderNotification(message)
+	if err != nil {
+		return fmt.Errorf("send notification: %w", err)
+	}
+	return s.sendPayload(ctx, "notification", recipient, payload)
+}
+
+func (s *SMTP) sendPayload(ctx context.Context, operation, recipient string, payload []byte) error {
 	endpoint := net.JoinHostPort(s.configuration.Host, strconv.Itoa(s.configuration.Port))
 	connection, err := s.dialContext(ctx, "tcp", endpoint)
 	if err != nil {
-		return fmt.Errorf("send invitation: connect to SMTP server: %w", contextualError(ctx, err))
+		return fmt.Errorf("send %s: connect to SMTP server: %w", operation, contextualError(ctx, err))
 	}
 	defer connection.Close()
 	if err := applyDeadline(ctx, connection, time.Now()); err != nil {
-		return fmt.Errorf("send invitation: set SMTP deadline: %w", err)
+		return fmt.Errorf("send %s: set SMTP deadline: %w", operation, err)
 	}
 	stopWatching := watchCancellation(ctx, connection)
 	defer stopWatching()
 
 	client, err := s.secureClient(ctx, connection)
 	if err != nil {
-		return fmt.Errorf("send invitation: %w", contextualError(ctx, err))
+		return fmt.Errorf("send %s: %w", operation, contextualError(ctx, err))
 	}
 	defer client.Close()
 
 	authentication := smtp.PlainAuth("", s.configuration.Username, s.configuration.Password, s.configuration.Host)
 	if err := client.Auth(authentication); err != nil {
-		return fmt.Errorf("send invitation: authenticate with SMTP server: %w", contextualError(ctx, err))
+		return fmt.Errorf("send %s: authenticate with SMTP server: %w", operation, contextualError(ctx, err))
 	}
 	if err := client.Mail(s.configuration.FromAddress); err != nil {
-		return fmt.Errorf("send invitation: set SMTP sender: %w", contextualError(ctx, err))
+		return fmt.Errorf("send %s: set SMTP sender: %w", operation, contextualError(ctx, err))
 	}
 	if err := client.Rcpt(recipient); err != nil {
-		return fmt.Errorf("send invitation: set SMTP recipient: %w", contextualError(ctx, err))
+		return fmt.Errorf("send %s: set SMTP recipient: %w", operation, contextualError(ctx, err))
 	}
 	writer, err := client.Data()
 	if err != nil {
-		return fmt.Errorf("send invitation: begin SMTP message: %w", contextualError(ctx, err))
+		return fmt.Errorf("send %s: begin SMTP message: %w", operation, contextualError(ctx, err))
 	}
 	if _, err := writer.Write(payload); err != nil {
 		_ = writer.Close()
-		return fmt.Errorf("send invitation: upload SMTP message: %w", contextualError(ctx, err))
+		return fmt.Errorf("send %s: upload SMTP message: %w", operation, contextualError(ctx, err))
 	}
 	if err := writer.Close(); err != nil {
-		return fmt.Errorf("send invitation: finish SMTP message: %w", contextualError(ctx, err))
+		return fmt.Errorf("send %s: finish SMTP message: %w", operation, contextualError(ctx, err))
 	}
 	// DATA completion is the SMTP acceptance boundary. A subsequent QUIT failure
 	// must not cause an outbox retry and duplicate an already accepted message.
@@ -297,6 +352,67 @@ func (s *SMTP) renderInvitation(message InvitationMessage) (string, []byte, erro
 	}
 	payload := []byte(strings.Join(headers, "\r\n") + "\r\n\r\n" + encodedBody.String())
 	return recipient, payload, nil
+}
+
+func (s *SMTP) renderNotification(message NotificationMessage) (string, []byte, error) {
+	recipient, err := parseMailbox(message.ToAddress, "recipient")
+	if err != nil {
+		return "", nil, err
+	}
+	toName := strings.TrimSpace(message.ToName)
+	groupName := strings.TrimSpace(message.GroupName)
+	title := strings.TrimSpace(message.Title)
+	bodyText := strings.TrimSpace(message.Body)
+	for field, value := range map[string]string{"recipient name": toName, "group name": groupName, "title": title, "body": bodyText} {
+		if containsHeaderControl(value) {
+			return "", nil, fmt.Errorf("%s must not contain control characters", field)
+		}
+	}
+	if len(toName) > 120 || groupName == "" || len(groupName) > 120 || title == "" || len(title) > 160 || bodyText == "" || len(bodyText) > 2000 {
+		return "", nil, errors.New("notification names and copy exceed supported bounds")
+	}
+	actionURL := strings.TrimSpace(message.ActionURL)
+	parsedURL, err := url.Parse(actionURL)
+	if err != nil || parsedURL.Host == "" || parsedURL.User != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || len(actionURL) > maximumURLSize || containsHeaderControl(actionURL) {
+		return "", nil, errors.New("action URL must be an absolute HTTP(S) URL without credentials")
+	}
+	greeting := "Hallo,"
+	if toName != "" {
+		greeting = "Hallo " + toName + ","
+	}
+	body := strings.Join([]string{
+		greeting,
+		"",
+		bodyText,
+		"",
+		"Benachrichtigungen in TeamTaler öffnen:",
+		actionURL,
+		"",
+		"Diese E-Mail wurde automatisch für die Gruppe " + groupName + " versendet.",
+	}, "\r\n") + "\r\n"
+
+	var encodedBody bytes.Buffer
+	quotedPrintable := quotedprintable.NewWriter(&encodedBody)
+	if _, err := quotedPrintable.Write([]byte(body)); err != nil {
+		return "", nil, fmt.Errorf("encode notification body: %w", err)
+	}
+	if err := quotedPrintable.Close(); err != nil {
+		return "", nil, fmt.Errorf("finish notification body: %w", err)
+	}
+	fromHeader := (&mail.Address{Name: s.configuration.FromName, Address: s.configuration.FromAddress}).String()
+	toHeader := (&mail.Address{Name: toName, Address: recipient}).String()
+	subject := mime.QEncoding.Encode("utf-8", "TeamTaler · "+title)
+	headers := []string{
+		"Date: " + s.now().UTC().Format(time.RFC1123Z),
+		"From: " + fromHeader,
+		"To: " + toHeader,
+		"Subject: " + subject,
+		"MIME-Version: 1.0",
+		"Content-Type: text/plain; charset=UTF-8",
+		"Content-Transfer-Encoding: quoted-printable",
+		"Auto-Submitted: auto-generated",
+	}
+	return recipient, []byte(strings.Join(headers, "\r\n") + "\r\n\r\n" + encodedBody.String()), nil
 }
 
 func validateConfiguration(configuration config.SMTPConfig) error {

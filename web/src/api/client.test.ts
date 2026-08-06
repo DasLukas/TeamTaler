@@ -40,7 +40,7 @@ const importResult: InvitationImportResult = {
 function session(userId: string): Session {
   return {
     user: { id: userId, displayName: userId, email: `${userId}@example.test` },
-    groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: `member-${userId}`, roles: ['MEMBER'] } }],
+    groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: `member-${userId}`, roles: ['MEMBER'], groupPermissions: [] } }],
     activeGroupId: 'group-a',
   };
 }
@@ -207,6 +207,44 @@ describe('high-risk API idempotency', () => {
     expect(requestBody(fetchMock.mock.calls[1])).toEqual({ name: 'Water', pricingMode: 'FIXED', priceMinor: 125, active: true, sortOrder: 3, version: 7 });
   });
 
+  it('deletes archived catalog entries with their current version', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.deleteCategory('group-a', 'category-a', 4);
+    await api.deleteProduct('group-a', 'product-a', 8);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group-a/categories/category-a');
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('DELETE');
+    expect(new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers).get('If-Match')).toBe('"v4"');
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/groups/group-a/products/product-a');
+    expect((fetchMock.mock.calls[1][1] as RequestInit).method).toBe('DELETE');
+    expect(new Headers((fetchMock.mock.calls[1][1] as RequestInit).headers).get('If-Match')).toBe('"v8"');
+  });
+
+  it('replaces the complete catalog order atomically', async () => {
+    const categories = [
+      { id: 'category-b', version: 2, name: 'Food', icon: 'food', active: true, sortOrder: 0, products: [] },
+      { id: 'category-a', version: 2, name: 'Drinks', icon: 'drink', active: true, sortOrder: 1, products: [] },
+    ];
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(categories));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.reorderCatalog('group-a', {
+      categoryIds: ['category-b', 'category-a'],
+      productIdsByCategory: { 'category-b': [], 'category-a': ['product-a'] },
+    })).resolves.toEqual(categories);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group-a/catalog/order');
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('PUT');
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({
+      categoryIds: ['category-b', 'category-a'],
+      productIdsByCategory: { 'category-b': [], 'category-a': ['product-a'] },
+    });
+  });
+
   it('serializes a user-chosen unit price as bounded integer minor units', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(session('user-a')))
@@ -218,6 +256,44 @@ describe('high-risk API idempotency', () => {
 
     expect(requestBody(fetchMock.mock.calls[1])).toMatchObject({ quantity: 2, unitPriceMinor: 250 });
     expect(requestBody(fetchMock.mock.calls[1])).not.toHaveProperty('unitPrice');
+  });
+
+  it('records an own payment without exposing a target membership identifier', async () => {
+    const payment = {
+      id: 'payment-self',
+      membershipId: 'member-user-a',
+      memberName: 'user-a',
+      amountMinor: 2450,
+      currency: 'EUR',
+      receivedAt: '2026-08-06T00:00:00Z',
+      method: 'PAYPAL',
+      reference: 'August transfer',
+      status: 'POSTED',
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(session('user-a')))
+      .mockResolvedValueOnce(jsonResponse(payment, 201));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.getSession();
+    await api.createOwnPayment('group-a', {
+      amount: { minorUnits: '2450', currency: 'EUR' },
+      receivedAt: '2026-08-06',
+      method: 'PAYPAL',
+      reference: 'August transfer',
+    });
+
+    const call = fetchMock.mock.calls[1];
+    expect(call[0]).toBe('/api/v1/groups/group-a/payments/self');
+    expect((call[1] as RequestInit).method).toBe('POST');
+    expect(idempotencyKey(call)).toBeTruthy();
+    expect(requestBody(call)).toEqual({
+      amountMinor: 2450,
+      receivedAt: '2026-08-06T00:00:00.000Z',
+      method: 'PAYPAL',
+      reference: 'August transfer',
+    });
+    expect(requestBody(call)).not.toHaveProperty('membershipId');
   });
 
   it('sends raw CSV with its explicit media type and reuses the key after a network failure', async () => {
@@ -259,8 +335,9 @@ describe('high-risk API idempotency', () => {
       id: 'invitation-a',
       email: 'new@example.test',
       displayName: 'New Member',
-	  roles: ['MEMBER'],
-	  categoryPermissions: [],
+      roles: ['MEMBER'],
+      groupPermissions: [],
+      categoryPermissions: [],
       expiresAt: '2026-08-11T12:00:00Z',
       emailDeliveryStatus: 'SENT',
       emailSentAt: '2026-08-04T12:01:00Z',
@@ -316,6 +393,21 @@ describe('high-risk API idempotency', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group-a');
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'PATCH' });
     expect(requestBody(fetchMock.mock.calls[0])).toEqual({ name: 'Renamed Group' });
+  });
+
+  it('reads and updates typed group behavior settings', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ membersCanViewAllBookings: false, notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true }))
+      .mockResolvedValueOnce(jsonResponse({ membersCanViewAllBookings: true, notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.getGroupSettings('group-a')).resolves.toEqual({ membersCanViewAllBookings: false, notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true });
+    await expect(api.updateGroupSettings('group-a', { membersCanViewAllBookings: true, notificationEmailsEnabled: true })).resolves.toEqual({ membersCanViewAllBookings: true, notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group-a/settings');
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/groups/group-a/settings');
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: 'PATCH' });
+    expect(requestBody(fetchMock.mock.calls[1])).toEqual({ membersCanViewAllBookings: true, notificationEmailsEnabled: true });
   });
 
   it('opens the successor accounting period with the localized default label', async () => {

@@ -4,6 +4,15 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-06
+
+### Added
+
+- Context-rich notifications for external booking assignments and reversals, administrative payments and reversals, and generated period settlements.
+- Exact unread-count badges on desktop notifications and the mobile overflow button, with notifications available first in the overflow menu and acknowledged after entering the viewport.
+- Cursor-backed notification history, batch read acknowledgements, and an administrator-controlled optional SMTP notification outbox.
+- History-preserving product tombstones that permanently remove booked products from the catalog without changing immutable booking, ledger, settlement, or audit data.
+
 ## [0.4.0] - 2026-08-06
 
 ### Added
@@ -85,7 +94,8 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Explicit acting and charged membership display for every booking, including searchable third-party-assignment cues.
 - Canonical backup-entry allowlisting, target-width Argon2 parameter parsing, and directory-confined SPA asset serving with traversal regression coverage.
 
-[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/DasLukas/TeamTaler/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/DasLukas/TeamTaler/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/DasLukas/TeamTaler/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/DasLukas/TeamTaler/compare/v0.1.0...v0.2.0

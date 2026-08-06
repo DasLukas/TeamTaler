@@ -1,0 +1,86 @@
+package email
+
+import (
+	"context"
+	"database/sql"
+	"io"
+	"log/slog"
+	"net/url"
+	"path/filepath"
+	"testing"
+	"time"
+
+	appnotifications "github.com/DasLukas/TeamTaler/internal/notifications"
+	"github.com/DasLukas/TeamTaler/internal/storage"
+)
+
+func TestNotificationDispatcherSendsLocalizedEventAndMarksJobSent(t *testing.T) {
+	ctx := context.Background()
+	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), "teamtaler.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+	const nowText = "2026-08-04T12:00:00Z"
+	for _, statement := range []string{
+		`INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('usr_notice','member@example.test','Alex Member','hash','2026-08-04T12:00:00Z','2026-08-04T12:00:00Z')`,
+		`INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES('grp_notice','Example Team','EUR','2026-08-04T12:00:00Z','2026-08-04T12:00:00Z')`,
+		`INSERT INTO memberships(id,group_id,user_id,joined_at) VALUES('mem_notice','grp_notice','usr_notice','2026-08-04T12:00:00Z')`,
+		`INSERT INTO group_settings(group_id,members_can_view_all_bookings,notification_emails_enabled,updated_at) VALUES('grp_notice',0,1,'2026-08-04T12:00:00Z')`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("seed database: %v", err)
+		}
+	}
+	service := appnotifications.Service{DB: db, EmailDeliveryAvailable: true}
+	if err := storage.WithTx(ctx, db, func(tx *sql.Tx) error {
+		_, err := service.CreateTx(ctx, tx, appnotifications.CreateInput{
+			GroupID: "grp_notice", MembershipID: "mem_notice", Type: appnotifications.TypeBookingAssigned,
+			Title: "New booking", Body: "A booking was assigned.", ResourceType: "booking", ResourceID: "bok_notice", CreatedAt: nowText,
+			Context: appnotifications.EventContext{ActorName: "Sam Admin", ItemName: "Training fine", Quantity: 1, AmountMinor: 500, Currency: "EUR"},
+		})
+		return err
+	}); err != nil {
+		t.Fatalf("create notification: %v", err)
+	}
+	sender := &recordingSender{available: true}
+	publicURL, _ := url.Parse("https://teamtaler.example.test/")
+	dispatcher, err := NewNotificationDispatcher(db, sender, publicURL, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("create dispatcher: %v", err)
+	}
+	dispatcher.now = func() time.Time { return time.Date(2026, time.August, 4, 12, 1, 0, 0, time.UTC) }
+	processed, err := dispatcher.processOne(ctx)
+	if err != nil || !processed {
+		t.Fatalf("process notification: processed=%v err=%v", processed, err)
+	}
+	sender.mu.Lock()
+	messages := append([]NotificationMessage(nil), sender.notifications...)
+	sender.mu.Unlock()
+	if len(messages) != 1 || messages[0].Title != "Neue Buchung" || messages[0].ActionURL != "https://teamtaler.example.test/notifications" {
+		t.Fatalf("notification messages=%#v", messages)
+	}
+	if messages[0].Body != "Sam Admin hat dir 1 × „Training fine“ über 5,00 EUR zugewiesen." {
+		t.Fatalf("notification body=%q", messages[0].Body)
+	}
+	var status string
+	if err := db.QueryRowContext(ctx, `SELECT status FROM notification_email_outbox`).Scan(&status); err != nil || status != "SENT" {
+		t.Fatalf("outbox status=%q err=%v", status, err)
+	}
+}
+
+func TestFormatEmailMoneyUsesCurrencyExponentWithoutFloatingPoint(t *testing.T) {
+	for _, test := range []struct {
+		amount   int64
+		currency string
+		want     string
+	}{
+		{amount: 123, currency: "EUR", want: "1,23 EUR"},
+		{amount: 123, currency: "JPY", want: "123 JPY"},
+		{amount: 1234, currency: "KWD", want: "1,234 KWD"},
+	} {
+		if got := formatEmailMoney(test.amount, test.currency); got != test.want {
+			t.Fatalf("formatEmailMoney(%d,%q)=%q want %q", test.amount, test.currency, got, test.want)
+		}
+	}
+}

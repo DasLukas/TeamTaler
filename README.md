@@ -13,29 +13,32 @@ The application combines a responsive German-language React interface, a Go HTTP
   - `ADMIN` has all group capabilities and manages branding, roles, and category grants.
   - `FINANCE_MANAGER` records and reverses payments, views member accounts, and closes periods.
   - `CATALOG_MANAGER` creates and updates categories and products and uploads product images.
+- Group-scoped `SELF_RECORD_PAYMENT` grants let regular members document externally received payments only for their own account. Administrators and finance managers receive the same capability through their broader roles.
 - Category-scoped `ASSIGN_TO_OTHERS` and `VOID_BOOKINGS` grants.
-- User-defined categories with editable visual symbols, fixed-price and user-defined-price products, validated integer minor-unit booking prices, immutable product/price snapshots, and JPEG/PNG/WebP uploads normalized to content-addressed PNG files.
+- User-defined categories with editable visual symbols, fixed-price and user-defined-price products, a two-stage archive/delete lifecycle with history-preserving product tombstones, validated integer minor-unit booking prices, immutable product/price snapshots, and JPEG/PNG/WebP uploads normalized to content-addressed PNG files.
 - Idempotent booking creation, immutable acting/target membership traceability, 30-second self-undo for self-bookings, and reasoned audited reversals.
 - Mandatory reasons whenever a booking is assigned to another member.
 - Activity views display and search both the charged member and the member who made every booking; dashboard activity highlights third-party assignments.
 - A dedicated overview combines personal account information, recent activity, current-period statistics, and a clearly separated anonymous aggregate group balance; the mobile-first booking workspace remains focused on explicit product selection and confirmation.
 - A consolidated member receivable account across all categories and anonymous group category aggregates without exposing other members' balances.
-- Incoming payments, payment reversals, oldest-claim-first allocation, overpayment credit, and correction allocation across periods.
+- Incoming payments by bank transfer, cash, PayPal, or another documented method; permission-gated self-service payments require a reference and support reversals, oldest-claim-first allocation, overpayment credit, and correction allocation across periods.
 - A dedicated role-protected finance workspace at `/finance` with consolidated active/former-member balances, exact receivable/credit/net totals, payment management, and period settlements.
-- A dedicated role-protected catalog workspace at `/catalog` with versioned category and product management, contextual create actions, controlled category symbols, and recoverable image uploads.
+- A dedicated role-protected catalog workspace at `/catalog` with versioned category and product management, persistent pointer/touch/keyboard drag-and-drop ordering, contextual create actions, controlled category symbols, and recoverable image uploads. The same catalog order drives booking and overview category displays.
 - Flexible accounting periods with immutable close snapshots, due dates, settlement status, and an atomically opened successor period.
-- In-app notifications, an administrator-only audit view, safe CSV export of recent account entries, and browser print/PDF views.
+- Context-rich in-app notifications for externally initiated bookings, payments, reversals, and period settlements, with unread badges on desktop navigation and the mobile overflow destination, viewport-based acknowledgement, and cursor-backed history.
+- An administrator-only audit view, safe CSV export of recent account entries, and browser print/PDF views.
 - Administrator-managed group names and logos that update navigation identity and replace the TeamTaler mark for members of the active group.
+- Typed administrator-managed group behavior settings, including booking-activity visibility and an opt-in switch for matching notification emails when SMTP delivery is available.
 - TeamTaler browser-tab and installable-web-app icons for desktop, iOS, iPadOS, and Android launchers.
 - Online backup archives containing a consistent SQLite snapshot and every product, group, and profile image referenced by that snapshot.
 
-The administration UI supports group identity and branding, permission-aware individual and CSV invitations, invitation editing/revocation/resending, active and former member management, role and category-grant updates, and audit review. Catalog managers and administrators use the separate catalog workspace for categories, products, symbols, and product images. Finance managers and administrators use the separate finance workspace for group balances, payments, and period close. Removing a member archives only the group membership and preserves every financial and audit record; a later accepted invitation reactivates the same membership identity.
+The administration UI supports group identity and branding, typed group-wide behavior settings, permission-aware individual and CSV invitations, invitation editing/revocation/resending, active and former member management, role, group-permission, and category-grant updates, and audit review. The booking-visibility setting is disabled by default; when enabled, every member can read all historical group bookings in the activity workspace, including actor, target, and reason, while personal overview data and mutation permissions remain unchanged. Notification email delivery is also disabled by default and can be enabled only while a complete SMTP configuration is available; in-app delivery is always retained. Catalog managers and administrators use the separate catalog workspace for categories, products, symbols, and product images. Catalog entries must be archived before deletion. Unused products are physically deleted, while booked products are hidden behind internal tombstones that preserve booking and accounting references; categories with financial history remain archived. Finance managers and administrators use the separate finance workspace for group balances, payments, and period close. Removing a member archives only the group membership and preserves every financial and audit record; a later accepted invitation reactivates the same membership identity.
 
 ## Binding UI/UX principles
 
 TeamTaler is mobile-first for regular members. Member-facing workflows must be designed and reviewed at a narrow mobile viewport before being enhanced for wider screens. Desktop layouts may expose more context, but they must not define the interaction model for everyday member tasks.
 
-The canonical member routes are `/book` for the default launch and booking workflow and `/overview` for personal information plus anonymized group statistics. `/catalog` is visible and queryable only to catalog managers and administrators, while `/finance` is visible and queryable only to finance managers and administrators. Mobile primary navigation always contains exactly overview, booking, activities, and overflow. The overflow menu exposes authorized management workspaces in the fixed order finance, catalog, administration, account, and logout. The legacy `/reports` route redirects to `/overview`.
+The canonical member routes are `/book` for the default launch and booking workflow and `/overview` for personal information plus anonymized group statistics. Members with effective self-payment permission can start a reviewed own-account payment from the overview balance card or `/account`; narrow screens use a bottom sheet and wider screens use a dialog. `/catalog` is visible and queryable only to catalog managers and administrators, while `/finance` is visible and queryable only to finance managers and administrators. Mobile primary navigation always contains exactly overview, booking, activities, and overflow. The overflow menu exposes notifications first, followed by authorized management workspaces in the fixed order finance, catalog, administration, account, and logout. The exact unread count appears on the overflow button until every new notification has intersected the visible notification viewport. The legacy `/reports` route redirects to `/overview`.
 
 Fast product booking is the primary interaction goal. A regular member must be able to create the common fixed-price self-booking with as few deliberate interactions as possible. Once the desired product is visible, the default flow must require no more than two actions: select the product and confirm the booking. Additional input or confirmation is permitted only when required by the booking itself, such as a user-defined price, non-default quantity, another target member, or a mandatory reason.
 
@@ -52,7 +55,7 @@ Member-facing changes must therefore preserve these constraints:
 
 - TeamTaler supports one application replica on a local filesystem. SQLite on NFS, SMB, or another network filesystem is unsupported.
 - TLS is terminated by an external reverse proxy. TeamTaler does not create or renew certificates.
-- Individual invitations are sent automatically when the optional TLS-secured SMTP configuration is enabled, while their links remain available for manual fallback sharing. Manual invitations may assign roles and category grants immediately. CSV imports require SMTP, create regular-member invitations only, and use the same transactional retrying outbox.
+- Individual invitations are sent automatically when the optional TLS-secured SMTP configuration is enabled, while their links remain available for manual fallback sharing. Manual invitations may assign roles, group permissions, and category grants immediately. CSV imports require SMTP, create regular-member invitations without explicit grants, and use the same transactional retrying outbox. The same SMTP relay can optionally deliver a short email alongside each in-app notification; administrators control that preference per group.
 - There is no payment-provider integration, SSO, MFA, offline mutation queue, public plugin loader, or built-in metrics endpoint.
 - The browser interface is German. Reusable interface, error, and accessibility copy is centralized in the i18next resource so additional locales can be added without rewriting feature components.
 - Monetary values are persisted and calculated as signed integer minor units. JSON responses encode monetary fields as exact decimal strings, while command inputs use bounded JSON integers; floating-point amounts are never used for accounting. Fixed prices are server-authoritative, while user-defined product prices must be supplied and validated for each booking.
@@ -101,7 +104,7 @@ For local development:
 
 3. Set `TEAMTALER_PUBLIC_URL` to the exact external origin and restrict `TEAMTALER_TRUSTED_PROXY_CIDRS` to the addresses from which the proxy connects. The public URL must use HTTPS for secure production cookies.
 
-   To enable automatic invitation email, configure the complete SMTP block from `.env.example` and generate the outbox encryption key once:
+   To enable automatic invitation and optional notification email, configure the complete SMTP block from `.env.example` and generate the invitation-outbox encryption key once:
 
    ```sh
    openssl rand -base64 32
@@ -156,11 +159,13 @@ The application trusts forwarded client addresses only when the direct peer is i
 
 SMTP configuration is fail-fast: supplying only part of the required block prevents startup. The relay certificate is verified, TLS 1.2 or newer is required, and authentication never occurs before encryption. TeamTaler considers a message sent after the relay accepts the SMTP `DATA` command; downstream mailbox delivery remains the relay operator's responsibility.
 
-## Invitation email delivery
+## Email delivery
 
 When SMTP is configured, creating an individual invitation atomically stores the invitation and its encrypted outbox job. The administrator dialog follows the delivery state until the relay accepts the message or delivery reaches a terminal failure, and it always displays the one-time acceptance link as a fallback. Without SMTP, individual invitations remain available as manually shareable links and are marked accordingly in the interface.
 
 The same normalized email address cannot have more than one current invitation in a group. This rule is shared by individual creation and CSV imports, so repeated or mixed requests reuse the existing invitation outcome instead of creating another email job. A database trigger provides a final concurrency guard for simultaneous requests. Expired, revoked, or accepted invitations do not block a later valid invitation; only an active membership blocks another invitation, while an archived membership may be invited for reactivation.
+
+Every externally initiated booking assignment or reversal, administrative payment or reversal for another member, and generated period settlement creates an in-app notification inside the originating business transaction. When SMTP is configured and an administrator has enabled notification emails for the group, the same transaction also creates a notification-email outbox job. The worker sends short localized event details and a link to the notification inbox, retries temporary failures up to five times, and never delays or replaces in-app delivery. If SMTP is unavailable, the administration switch is visible but disabled.
 
 ## CSV invitation import
 
@@ -172,7 +177,7 @@ alex@example.com,Alex Member
 sam@example.com,Sam Member
 ```
 
-Each file is limited to 256 KiB and 100 data rows. Imported people receive no elevated role; administrators grant roles and category permissions separately after the invitation is accepted. Invalid rows, duplicate addresses, existing memberships, and already-pending invitations are reported individually without discarding valid rows.
+Each file is limited to 256 KiB and 100 data rows. Imported people receive no elevated role or explicit permission; administrators grant roles, group permissions, and category permissions separately after the invitation is accepted. Invalid rows, duplicate addresses, existing memberships, and already-pending invitations are reported individually without discarding valid rows.
 
 The import creates invitations, not memberships. A membership appears only after the recipient follows the emailed one-time link and completes the existing invitation flow. The database transaction stores each invitation together with an encrypted email job and the idempotent import result. A background dispatcher retries temporary delivery failures up to five times. The plaintext token is never stored in the outbox or API result, and its encrypted copy is removed after SMTP acceptance.
 
@@ -208,6 +213,23 @@ make dev-frontend
 Vite listens on `127.0.0.1:5173` and proxies `/api` to `127.0.0.1:8080`.
 
 For frontend-only visual development, copy `web/.env.example` to `web/.env.local` and run the Vite server without the API. Demo transport and its sample images are loaded only when `VITE_DEMO_MODE=true` and Vite is in development mode. Production builds contain neither demo fixtures nor demo assets.
+
+### Disposable full-stack test server
+
+The Codex environment action **Start test server** starts the real Go backend on `127.0.0.1:8080`, the Vite frontend on `127.0.0.1:5173`, and a fresh isolated SQLite database with representative catalog, role, permission, booking, notification, and payment data. The same workflow is available from a terminal:
+
+```sh
+make test-server
+```
+
+All seeded accounts use the password `TeamTaler-Test-2026!`:
+
+- `admin@example.test` is an administrator.
+- `jonas@example.test` is a finance and catalog manager.
+- `marie@example.test` is a regular member with self-payment and one category grant.
+- `lena@example.test` is a regular member without elevated permissions.
+
+The server binds only to loopback. Stopping the action terminates both processes and removes that run's disposable database. Generated binaries remain below the ignored `tmp/test-server` directory so later starts can reuse Go's build cache.
 
 ## Verification, build, and run
 
@@ -266,7 +288,7 @@ Follow the exact backup, restore, upgrade, and rollback procedures in [deploy/RE
 
 TeamTaler uses Argon2id password hashing, hashed opaque server-side session tokens, an HttpOnly session cookie, a readable CSRF cookie, SameSite Strict cookies, the Secure attribute under HTTPS, exact-origin validation for mutations, bounded request bodies, trusted-proxy filtering, and in-process throttling for login and invitation acceptance. Invitation imports additionally require an idempotency key, and queued invitation tokens use AES-256-GCM authenticated encryption. Image delivery also requires active membership and a product or logo reference inside the requested group.
 
-Financial history uses immutable `ledger_entries` plus linked counter-entries for corrections. Closed period snapshots and audit events are protected by SQLite triggers. Authorization is enforced again in backend services; frontend capability checks are presentation only.
+Financial history uses immutable `ledger_entries` plus linked counter-entries for corrections. Closed period snapshots and audit events are protected by SQLite triggers. The self-payment API derives the target membership exclusively from the authenticated group session, requires CSRF and idempotency protection, records the `SELF_SERVICE` audit source, and never grants payment-list or reversal access. Authorization is enforced again in backend services; frontend capability checks are presentation only.
 
 Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md). Do not open a public issue for an undisclosed vulnerability.
 

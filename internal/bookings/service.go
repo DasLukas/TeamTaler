@@ -18,6 +18,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/groups"
 	"github.com/DasLukas/TeamTaler/internal/idempotency"
 	"github.com/DasLukas/TeamTaler/internal/ledger"
+	"github.com/DasLukas/TeamTaler/internal/notifications"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/storage"
 )
@@ -29,6 +30,8 @@ type Service struct {
 	DB *sql.DB
 	// Groups resolves effective group and category permissions.
 	Groups groups.Service
+	// Notifications atomically records member-visible booking events.
+	Notifications notifications.Service
 }
 
 // CreateInput is the idempotent booking command contract. ProductVersion and
@@ -91,7 +94,7 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, membership 
 		err = tx.QueryRowContext(ctx, `SELECT p.category_id,p.name,p.price_minor,p.pricing_mode,p.version,c.name,per.id,g.currency
 			FROM products p JOIN categories c ON c.id=p.category_id AND c.group_id=p.group_id
 			JOIN groups g ON g.id=p.group_id JOIN periods per ON per.group_id=p.group_id AND per.status='OPEN'
-			WHERE p.id=? AND p.group_id=? AND p.active=1 AND c.active=1`, input.ProductID, membership.GroupID).
+			WHERE p.id=? AND p.group_id=? AND p.active=1 AND p.deleted_at IS NULL AND c.active=1`, input.ProductID, membership.GroupID).
 			Scan(&categoryID, &productName, &catalogPrice, &pricingMode, &productVersion, &categoryName, &periodID, &currency)
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.ErrNotFound
@@ -162,10 +165,13 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, membership 
 			return err
 		}
 		if input.TargetMembershipID != membership.ID {
-			notificationID, _ := platform.NewID("ntf")
 			body := fmt.Sprintf("%s assigned %s to you.", membership.DisplayName, productName)
-			if _, err := tx.ExecContext(ctx, `INSERT INTO notifications(id,group_id,membership_id,type,title,body,resource_type,resource_id,created_at) VALUES(?,?,?,'BOOKING_ASSIGNED','New booking',?,'booking',?,?)`,
-				notificationID, membership.GroupID, input.TargetMembershipID, body, bookingID, now); err != nil {
+			if _, err := s.Notifications.CreateTx(ctx, tx, notifications.CreateInput{
+				GroupID: membership.GroupID, MembershipID: input.TargetMembershipID,
+				Type: notifications.TypeBookingAssigned, Title: "New booking", Body: body,
+				ResourceType: "booking", ResourceID: bookingID, CreatedAt: now,
+				Context: notifications.EventContext{ActorName: membership.DisplayName, ItemName: productName, Quantity: input.Quantity, AmountMinor: total, Currency: currency},
+			}); err != nil {
 				return err
 			}
 		}
@@ -190,10 +196,31 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, membership 
 // and bookings in categories for which they may void entries. It returns the
 // slice or SQL errors.
 func (s Service) List(ctx context.Context, membership domain.Membership, periodID string, limit int) ([]domain.Booking, error) {
+	return s.list(ctx, membership, periodID, limit, false)
+}
+
+// ListActivity returns the activity workspace's visible booking history. When
+// administrators enable group-wide visibility, regular members receive every
+// historical group booking; finance-manager visibility remains unconditional.
+// ctx bounds settings and booking queries. It returns visible bookings or
+// settings and SQL errors.
+func (s Service) ListActivity(ctx context.Context, membership domain.Membership, periodID string, limit int) ([]domain.Booking, error) {
+	viewAll := groups.HasRole(membership, domain.RoleFinanceManager)
+	if !viewAll {
+		var err error
+		viewAll, err = s.Groups.MembersCanViewAllBookings(ctx, membership.GroupID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return s.list(ctx, membership, periodID, limit, viewAll)
+}
+
+func (s Service) list(ctx context.Context, membership domain.Membership, periodID string, limit int, viewAll bool) ([]domain.Booking, error) {
 	if limit < 1 || limit > 200 {
 		limit = 100
 	}
-	viewAll := groups.HasRole(membership, domain.RoleFinanceManager)
+	viewAll = viewAll || groups.HasRole(membership, domain.RoleFinanceManager)
 	query := `SELECT b.id,b.group_id,b.period_id,b.category_id,b.product_id,b.actor_membership_id,b.target_membership_id,b.quantity,
 		b.unit_price_minor,b.total_minor,g.currency,b.product_name,b.category_name,coalesce(b.reason,''),b.created_at,b.voided_at,coalesce(b.void_reason,'')
 		FROM bookings b JOIN groups g ON g.id=b.group_id WHERE b.group_id=?`
@@ -327,6 +354,17 @@ func (s Service) Void(ctx context.Context, actor domain.Principal, membership do
 		}
 		if err := ledger.RebuildPaymentAllocations(ctx, tx, membership.GroupID, booking.TargetMembershipID); err != nil {
 			return err
+		}
+		if membership.ID != booking.TargetMembershipID {
+			body := fmt.Sprintf("%s reversed %s on your account.", membership.DisplayName, booking.ProductName)
+			if _, err := s.Notifications.CreateTx(ctx, tx, notifications.CreateInput{
+				GroupID: membership.GroupID, MembershipID: booking.TargetMembershipID,
+				Type: notifications.TypeBookingReversed, Title: "Booking reversed", Body: body,
+				ResourceType: "booking", ResourceID: booking.ID, CreatedAt: now,
+				Context: notifications.EventContext{ActorName: membership.DisplayName, ItemName: booking.ProductName, Quantity: booking.Quantity, AmountMinor: booking.TotalMinor, Currency: booking.Currency},
+			}); err != nil {
+				return err
+			}
 		}
 		booking.VoidedAt = &now
 		booking.VoidReason = reason

@@ -341,7 +341,7 @@ export interface MembersPanelProps {
   onOpenRights?: (membershipId: string) => void;
 }
 
-const emptyInvitationInput = (): InvitationInput => ({ email: '', displayName: '', roles: ['MEMBER'], categoryPermissions: [] });
+const emptyInvitationInput = (): InvitationInput => ({ email: '', displayName: '', roles: ['MEMBER'], groupPermissions: [], categoryPermissions: [] });
 
 function roleSummary(member: Pick<Membership, 'roles'>, t: TFunction): string {
   return member.roles.filter((role) => role !== 'MEMBER').map((role) => role === 'ADMIN'
@@ -385,7 +385,7 @@ export function MembersPanel({ onOpenRights }: MembersPanelProps) {
   });
   const updateMutation = useMutation({
     mutationFn: () => selectedInvitation
-      ? api.updateInvitation(activeGroupId, selectedInvitation.id, { displayName: draft.displayName.trim(), roles: draft.roles, categoryPermissions: draft.categoryPermissions })
+      ? api.updateInvitation(activeGroupId, selectedInvitation.id, { displayName: draft.displayName.trim(), roles: draft.roles, groupPermissions: draft.groupPermissions, categoryPermissions: draft.categoryPermissions })
       : Promise.reject(new Error(t('members.noInvitationSelected'))),
     onSuccess: async () => {
       setDialog(null);
@@ -446,10 +446,10 @@ export function MembersPanel({ onOpenRights }: MembersPanelProps) {
   };
   const openEdit = (invitation: InvitationMetadata) => {
     setSelectedInvitation(invitation);
-    setDraft({ email: invitation.email, displayName: invitation.displayName ?? '', roles: invitation.roles, categoryPermissions: invitation.categoryPermissions });
+    setDraft({ email: invitation.email, displayName: invitation.displayName ?? '', roles: invitation.roles, groupPermissions: invitation.groupPermissions, categoryPermissions: invitation.categoryPermissions });
     setDialog('edit');
   };
-  const permissionValue: PermissionUpdate = { roles: draft.roles, categoryPermissions: draft.categoryPermissions };
+  const permissionValue: PermissionUpdate = { roles: draft.roles, groupPermissions: draft.groupPermissions, categoryPermissions: draft.categoryPermissions };
   const setPermissionValue = (value: PermissionUpdate) => setDraft((current) => ({ ...current, ...value }));
 
   return (

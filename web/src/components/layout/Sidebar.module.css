@@ -67,6 +67,11 @@
   text-align: left;
 }
 
+.badge {
+  margin-left: auto;
+  border-color: var(--color-navy-950);
+}
+
 .link:hover {
   background: rgb(255 255 255 / 8%);
 }

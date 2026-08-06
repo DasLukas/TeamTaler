@@ -41,7 +41,7 @@ export function RightsPanel({ selectedMemberId, onSelectedMemberChange }: Rights
 
   const saveMutation = useMutation({
     mutationFn: () => draft
-      ? api.updatePermissions(activeGroupId, draft.id, { roles: draft.roles, categoryPermissions: draft.categoryPermissions }, draft.etag)
+      ? api.updatePermissions(activeGroupId, draft.id, { roles: draft.roles, groupPermissions: draft.groupPermissions, categoryPermissions: draft.categoryPermissions }, draft.etag)
       : Promise.reject(new Error(t('rights.noSelection'))),
     onSuccess: async () => {
       setDrafts((current) => {
@@ -49,7 +49,10 @@ export function RightsPanel({ selectedMemberId, onSelectedMemberChange }: Rights
         if (draft) delete next[draft.id];
         return next;
       });
-      await queryClient.invalidateQueries({ queryKey: ['members', activeGroupId] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['members', activeGroupId] }),
+        queryClient.invalidateQueries({ queryKey: ['session'] }),
+      ]);
     },
   });
 
@@ -63,7 +66,7 @@ export function RightsPanel({ selectedMemberId, onSelectedMemberChange }: Rights
   };
   const updateDraft = (permissions: PermissionUpdate) => setDrafts((current) => ({
     ...current,
-    [draft.id]: { ...draft, roles: permissions.roles, categoryPermissions: permissions.categoryPermissions },
+    [draft.id]: { ...draft, roles: permissions.roles, groupPermissions: permissions.groupPermissions, categoryPermissions: permissions.categoryPermissions },
   }));
   const filteredMembers = activeMembers.filter((member) => member.displayName.toLowerCase().includes(search.toLowerCase()));
 
@@ -89,7 +92,7 @@ export function RightsPanel({ selectedMemberId, onSelectedMemberChange }: Rights
           onChange={updateDraft}
           showAuditNotice
           subjectName={draft.displayName}
-          value={{ roles: draft.roles, categoryPermissions: draft.categoryPermissions }}
+          value={{ roles: draft.roles, groupPermissions: draft.groupPermissions, categoryPermissions: draft.categoryPermissions }}
         />
         {saveMutation.isError ? <p className={styles.error} role="alert">{saveMutation.error.message}</p> : null}
         <div className={styles.actions}>

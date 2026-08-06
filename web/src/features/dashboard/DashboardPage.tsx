@@ -5,10 +5,12 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { formatMoney } from '@/api/money';
+import { canRecordOwnPayment } from '@/app/groupCapabilities';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Avatar } from '@/components/ui/Avatar';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { CategoryIcon } from '@/features/shared/CategoryIcon';
+import { SelfPaymentDialog } from '@/features/finance/SelfPaymentDialog';
 import { getDashboardGreetingKey } from './greeting';
 import { GroupStatisticsSection } from './GroupStatisticsSection';
 import styles from './DashboardPage.module.css';
@@ -41,7 +43,7 @@ function useLocalHour(): number {
  */
 export function DashboardPage() {
   const { t } = useTranslation();
-  const { activeGroupId, session } = useActiveGroup();
+  const { activeGroupId, activeGroup, session } = useActiveGroup();
   const dashboardQuery = useQuery({ queryKey: ['dashboard', activeGroupId], queryFn: () => api.getDashboard(activeGroupId) });
   const membersQuery = useQuery({ queryKey: ['members', activeGroupId], queryFn: () => api.getMembers(activeGroupId) });
   const localHour = useLocalHour();
@@ -68,14 +70,17 @@ export function DashboardPage() {
   });
   const periodTotal = dashboard.categoryTotals.reduce((sum, entry) => sum + BigInt(entry.total.minorUnits), 0n);
   const greeting = t(`dashboard.${getDashboardGreetingKey(localHour)}`);
+  const roles = activeGroup.membership?.roles ?? [];
+  const groupPermissions = activeGroup.membership?.groupPermissions ?? [];
+  const canRecordPayment = canRecordOwnPayment(roles, groupPermissions);
 
   return (
     <div className={styles.dashboard}>
       <section className={styles.content}>
         <h1>{greeting}, {session.user.displayName.split(' ')[0]}</h1>
         <div className={styles.balanceCard}>
-          <div><span>{t('booking.openBalance')}</span><strong>{formatMoney(dashboard.openBalance)}</strong></div>
-          <div className={styles.period}><strong>{t('dashboard.settlement', { label: dashboard.currentPeriod.label.split(' ')[0] })}</strong><p>{t('dashboard.paymentNote')}</p></div>
+          <div><span>{t('booking.openBalance')}</span><strong>{formatMoney(dashboard.openBalance)}</strong>{canRecordPayment ? <SelfPaymentDialog className={styles.selfPaymentAction} openBalance={dashboard.openBalance} /> : null}</div>
+          <div className={styles.period}><strong>{t('dashboard.settlement', { label: dashboard.currentPeriod.label.split(' ')[0] })}</strong><p>{t(canRecordPayment ? 'dashboard.paymentNoteSelf' : 'dashboard.paymentNote')}</p></div>
         </div>
 
         <div className={styles.lower}>

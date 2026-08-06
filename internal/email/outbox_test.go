@@ -19,10 +19,11 @@ import (
 )
 
 type recordingSender struct {
-	mu        sync.Mutex
-	available bool
-	err       error
-	messages  []InvitationMessage
+	mu            sync.Mutex
+	available     bool
+	err           error
+	messages      []InvitationMessage
+	notifications []NotificationMessage
 }
 
 func (s *recordingSender) Available() bool {
@@ -35,6 +36,13 @@ func (s *recordingSender) SendInvitation(_ context.Context, message InvitationMe
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.messages = append(s.messages, message)
+	return s.err
+}
+
+func (s *recordingSender) SendNotification(_ context.Context, message NotificationMessage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.notifications = append(s.notifications, message)
 	return s.err
 }
 
@@ -357,6 +365,10 @@ func (s *blockingSender) SendInvitation(ctx context.Context, _ InvitationMessage
 	}
 	<-ctx.Done()
 	return ctx.Err()
+}
+
+func (s *blockingSender) SendNotification(ctx context.Context, _ NotificationMessage) error {
+	return s.SendInvitation(ctx, InvitationMessage{})
 }
 
 func TestDispatcherRunBoundsWorkersAndReleasesOnShutdown(t *testing.T) {

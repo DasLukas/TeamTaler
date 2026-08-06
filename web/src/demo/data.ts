@@ -24,8 +24,8 @@ export const demoSession: Session = {
     email: 'lukas@example.test',
   },
   groups: [
-    { id: 'group-sv-adler', name: 'SV Adler', currency: 'EUR', membership: { id: 'member-lukas', roles: ['ADMIN', 'MEMBER'] } },
-    { id: 'group-freunde', name: 'Kegelclub', currency: 'EUR', membership: { id: 'member-lukas-kegelclub', roles: ['MEMBER'] } },
+    { id: 'group-sv-adler', name: 'SV Adler', currency: 'EUR', membership: { id: 'member-lukas', roles: ['ADMIN', 'MEMBER'], groupPermissions: ['SELF_RECORD_PAYMENT'] } },
+    { id: 'group-freunde', name: 'Kegelclub', currency: 'EUR', membership: { id: 'member-lukas-kegelclub', roles: ['MEMBER'], groupPermissions: [] } },
   ],
   activeGroupId: 'group-sv-adler',
   demo: true,
@@ -52,7 +52,7 @@ export const demoCategories: Category[] = [
     name: 'Getränke',
     icon: 'drink',
     active: true,
-    sortOrder: 1,
+    sortOrder: 0,
     products: [
       {
         id: 'product-water',
@@ -64,7 +64,7 @@ export const demoCategories: Category[] = [
         price: { minorUnits: '100', currency: 'EUR' },
         imageUrl: waterImageUrl,
         active: true,
-        sortOrder: 1,
+        sortOrder: 0,
       },
       {
         id: 'product-spezi',
@@ -76,7 +76,7 @@ export const demoCategories: Category[] = [
         price: { minorUnits: '150', currency: 'EUR' },
         imageUrl: sodaImageUrl,
         active: true,
-        sortOrder: 2,
+        sortOrder: 1,
       },
       {
         id: 'product-beer',
@@ -88,7 +88,7 @@ export const demoCategories: Category[] = [
         price: { minorUnits: '200', currency: 'EUR' },
         imageUrl: beerImageUrl,
         active: true,
-        sortOrder: 3,
+        sortOrder: 2,
       },
     ],
   },
@@ -98,7 +98,7 @@ export const demoCategories: Category[] = [
     name: 'Strafen',
     icon: 'penalty',
     active: true,
-    sortOrder: 2,
+    sortOrder: 1,
     products: [
       {
         id: 'product-late',
@@ -109,7 +109,7 @@ export const demoCategories: Category[] = [
         currency: 'EUR',
         price: { minorUnits: '500', currency: 'EUR' },
         active: true,
-        sortOrder: 1,
+        sortOrder: 0,
       },
       {
         id: 'product-kit',
@@ -119,7 +119,7 @@ export const demoCategories: Category[] = [
         pricingMode: 'USER_DEFINED',
         currency: 'EUR',
         active: true,
-        sortOrder: 2,
+        sortOrder: 1,
       },
     ],
   },
@@ -134,6 +134,7 @@ export const demoMembers: Membership[] = [
     email: 'lukas@example.test',
     initials: 'LW',
     roles: ['ADMIN', 'MEMBER'],
+    groupPermissions: ['SELF_RECORD_PAYMENT'],
     categoryPermissions: [
       { categoryId: 'category-drinks', assignToOthers: true, voidBookings: true },
       { categoryId: 'category-penalties', assignToOthers: true, voidBookings: true },
@@ -148,6 +149,7 @@ export const demoMembers: Membership[] = [
     email: 'mara@example.test',
     initials: 'MB',
     roles: ['FINANCE_MANAGER', 'MEMBER'],
+    groupPermissions: [],
     categoryPermissions: [
       { categoryId: 'category-drinks', assignToOthers: false, voidBookings: false },
       { categoryId: 'category-penalties', assignToOthers: true, voidBookings: true },
@@ -162,6 +164,7 @@ export const demoMembers: Membership[] = [
     email: 'jonas@example.test',
     initials: 'JK',
     roles: ['CATALOG_MANAGER', 'MEMBER'],
+    groupPermissions: ['SELF_RECORD_PAYMENT'],
     categoryPermissions: [
       { categoryId: 'category-drinks', assignToOthers: false, voidBookings: false },
       { categoryId: 'category-penalties', assignToOthers: true, voidBookings: false },
@@ -269,8 +272,8 @@ export const demoSettlements: Settlement[] = [
 
 /** Demo in-app notifications. */
 export const demoNotifications: Notification[] = [
-  { id: 'notification-1', title: 'Strafe gebucht', message: 'Mara hat dir „Zu spät zum Training“ über 5,00 € zugewiesen.', createdAt: '2026-08-04T18:32:00+02:00', kind: 'BOOKING' },
-  { id: 'notification-2', title: 'Zahlung erfasst', message: 'Deine Zahlung über 20,00 € wurde verbucht.', createdAt: '2026-08-01T09:00:00+02:00', readAt: '2026-08-01T09:10:00+02:00', kind: 'PAYMENT' },
+  { id: 'notification-1', title: 'Strafe gebucht', message: 'Mara hat dir „Zu spät zum Training“ über 5,00 € zugewiesen.', createdAt: '2026-08-04T18:32:00+02:00', kind: 'BOOKING', eventType: 'BOOKING_ASSIGNED', context: { actorName: 'Mara', itemName: 'Zu spät zum Training', quantity: 1, amountMinor: '500', currency: 'EUR' } },
+  { id: 'notification-2', title: 'Zahlung erfasst', message: 'Deine Zahlung über 20,00 € wurde verbucht.', createdAt: '2026-08-01T09:00:00+02:00', readAt: '2026-08-01T09:10:00+02:00', kind: 'PAYMENT', eventType: 'PAYMENT_RECORDED', context: { actorName: 'Mara', amountMinor: '2000', currency: 'EUR' } },
 ];
 
 /** Demo append-only audit records. */

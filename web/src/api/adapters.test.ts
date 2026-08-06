@@ -7,7 +7,7 @@ describe('API adapters', () => {
     const avatarUrl = '/api/v1/users/user-a/avatar/hash.png';
     const session = adaptSession({
       user: { id: 'user-a', displayName: 'Alex', email: 'alex@example.test', avatarUrl },
-      groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', roles: [] } }],
+      groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', roles: [], groupPermissions: ['SELF_RECORD_PAYMENT'] } }],
       activeGroupId: 'group-a',
     });
     const member = adaptMembership({ id: 'member-a', userId: 'user-a', displayName: 'Alex', email: 'alex@example.test', avatarUrl, status: 'ACTIVE', roles: [], categoryGrants: {} });
@@ -26,6 +26,8 @@ describe('API adapters', () => {
     }, [member]);
 
     expect(session.user.avatarUrl).toBe(avatarUrl);
+    expect(session.groups[0]?.membership?.groupPermissions).toEqual(['SELF_RECORD_PAYMENT']);
+    expect(member.groupPermissions).toEqual([]);
     expect(member.avatarUrl).toBe(avatarUrl);
     expect(booking).toMatchObject({ memberAvatarUrl: avatarUrl, bookedByAvatarUrl: avatarUrl });
     expect(adaptBooking({ ...booking, memberAvatarUrl: undefined, bookedByAvatarUrl: undefined }, [member])).toMatchObject({

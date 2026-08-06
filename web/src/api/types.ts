@@ -10,6 +10,9 @@ export type ProductPricingMode = 'FIXED' | 'USER_DEFINED';
 /** Roles that can be assigned to a group membership. */
 export type GroupRole = 'ADMIN' | 'FINANCE_MANAGER' | 'CATALOG_MANAGER' | 'MEMBER';
 
+/** Narrow group-scoped rights that do not grant a management workspace. */
+export type GroupPermission = 'SELF_RECORD_PAYMENT';
+
 /** Rights that can be granted for one category. */
 export type CategoryPermissionName = 'ASSIGN_TO_OTHERS' | 'VOID_BOOKINGS';
 
@@ -52,7 +55,15 @@ export interface Group {
   membership?: {
     id: string;
     roles: GroupRole[];
+    groupPermissions: GroupPermission[];
   };
+}
+
+/** Administrator-managed behavior shared by every member of one group. */
+export interface GroupSettings {
+  membersCanViewAllBookings: boolean;
+  notificationEmailsEnabled: boolean;
+  notificationEmailDeliveryAvailable: boolean;
 }
 
 /** Authentication and active-group state returned by the API. */
@@ -121,6 +132,15 @@ export interface CategoryUpdateCommand {
   version: number;
 }
 
+/**
+ * Complete catalog order used to atomically persist category and product
+ * positions without allowing products to change their owning category.
+ */
+export interface CatalogOrderCommand {
+  categoryIds: string[];
+  productIdsByCategory: Record<string, string[]>;
+}
+
 /** Per-category permissions assigned to a member. */
 export interface CategoryPermission {
   categoryId: string;
@@ -137,6 +157,7 @@ export interface Membership {
   initials: string;
   avatarUrl?: string;
   roles: GroupRole[];
+  groupPermissions: GroupPermission[];
   categoryPermissions: CategoryPermission[];
   active: boolean;
   etag?: string;
@@ -222,7 +243,7 @@ export interface Payment {
   memberName: string;
   amount: Money;
   receivedAt: string;
-  method: 'CASH' | 'BANK_TRANSFER' | 'OTHER';
+  method: 'CASH' | 'BANK_TRANSFER' | 'PAYPAL' | 'OTHER';
   reference?: string;
   note?: string;
   status: 'POSTED' | 'REVERSED';
@@ -236,6 +257,14 @@ export interface PaymentCommand {
   method: Payment['method'];
   reference?: string;
   note?: string;
+}
+
+/** Command for recording a payment against the authenticated member account. */
+export interface SelfPaymentCommand {
+  amount: Money;
+  receivedAt: string;
+  method: Payment['method'];
+  reference: string;
 }
 
 /** An accounting period that groups bookings and payments. */
@@ -262,6 +291,20 @@ export interface Settlement {
   status: SettlementStatus;
 }
 
+/** Stable event types emitted by the financial notification system. */
+export type NotificationEventType = 'BOOKING_ASSIGNED' | 'BOOKING_REVERSED' | 'PAYMENT_RECORDED' | 'PAYMENT_REVERSED' | 'SETTLEMENT_CREATED' | 'SYSTEM';
+
+/** Safe structured details used to localize one notification. */
+export interface NotificationContext {
+  actorName?: string;
+  itemName?: string;
+  quantity?: number;
+  amountMinor?: string;
+  currency?: string;
+  periodLabel?: string;
+  dueAt?: string;
+}
+
 /** An in-app notification addressed to the signed-in user. */
 export interface Notification {
   id: string;
@@ -270,6 +313,24 @@ export interface Notification {
   createdAt: string;
   readAt?: string;
   kind: 'BOOKING' | 'PAYMENT' | 'SETTLEMENT' | 'SYSTEM';
+  eventType: NotificationEventType;
+  context: NotificationContext;
+}
+
+/** One cursor-backed notification page. */
+export interface NotificationPage {
+  items: Notification[];
+  nextCursor?: string;
+}
+
+/** Exact unread count returned by the lightweight navigation endpoint. */
+export interface NotificationSummary {
+  unreadCount: number;
+}
+
+/** Result of acknowledging visible notifications. */
+export interface NotificationReadResult extends NotificationSummary {
+  readAt: string;
 }
 
 /** A security-relevant, append-only audit record. */
@@ -285,6 +346,7 @@ export interface AuditEntry {
 /** Permission update payload for one membership. */
 export interface PermissionUpdate {
   roles: GroupRole[];
+  groupPermissions: GroupPermission[];
   categoryPermissions: CategoryPermission[];
 }
 
@@ -319,6 +381,7 @@ export interface InvitationMetadata {
   email: string;
   displayName?: string;
   roles: GroupRole[];
+  groupPermissions: GroupPermission[];
   categoryPermissions: CategoryPermission[];
   expiresAt: string;
   acceptedAt?: string;
@@ -334,6 +397,7 @@ export interface CreatedInvitation {
   email: string;
   displayName?: string;
   roles: GroupRole[];
+  groupPermissions: GroupPermission[];
   categoryPermissions: CategoryPermission[];
   expiresAt: string;
   acceptUrl: string;
@@ -345,6 +409,7 @@ export interface InvitationInput {
   email: string;
   displayName: string;
   roles: GroupRole[];
+  groupPermissions: GroupPermission[];
   categoryPermissions: CategoryPermission[];
 }
 

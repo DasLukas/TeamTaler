@@ -97,10 +97,22 @@ func serve(arguments []string) error {
 		if err != nil {
 			return err
 		}
+		notificationDispatcher, err := email.NewNotificationDispatcher(db, sender, cfg.PublicURL, slog.Default())
+		if err != nil {
+			return err
+		}
 		workerErrors := make(chan error, 1)
 		emailWorkerErrors = workerErrors
 		go func() {
-			workerErrors <- dispatcher.Run(processContext)
+			dispatchContext, cancelDispatch := context.WithCancel(processContext)
+			defer cancelDispatch()
+			results := make(chan error, 2)
+			go func() { results <- dispatcher.Run(dispatchContext) }()
+			go func() { results <- notificationDispatcher.Run(dispatchContext) }()
+			first := <-results
+			cancelDispatch()
+			second := <-results
+			workerErrors <- errors.Join(first, second)
 		}()
 	}
 	server := &http.Server{
@@ -127,9 +139,9 @@ func serve(arguments []string) error {
 	case workerErr := <-emailWorkerErrors:
 		emailWorkerStopped = true
 		if workerErr != nil {
-			serveErr = fmt.Errorf("invitation email dispatcher stopped: %w", workerErr)
+			serveErr = fmt.Errorf("email dispatchers stopped: %w", workerErr)
 		} else if processContext.Err() == nil {
-			serveErr = errors.New("invitation email dispatcher stopped unexpectedly")
+			serveErr = errors.New("email dispatchers stopped unexpectedly")
 		}
 	case <-processContext.Done():
 	}
@@ -143,7 +155,7 @@ func serve(arguments []string) error {
 	if emailWorkerErrors != nil && !emailWorkerStopped {
 		recordWorkerError := func(workerErr error) {
 			if workerErr != nil {
-				serveErr = errors.Join(serveErr, fmt.Errorf("shut down invitation email dispatcher: %w", workerErr))
+				serveErr = errors.Join(serveErr, fmt.Errorf("shut down email dispatchers: %w", workerErr))
 			}
 		}
 		select {
@@ -154,7 +166,7 @@ func serve(arguments []string) error {
 			case workerErr := <-emailWorkerErrors:
 				recordWorkerError(workerErr)
 			default:
-				serveErr = errors.Join(serveErr, errors.New("invitation email dispatcher did not stop before the shutdown deadline"))
+				serveErr = errors.Join(serveErr, errors.New("email dispatchers did not stop before the shutdown deadline"))
 			}
 		}
 	}

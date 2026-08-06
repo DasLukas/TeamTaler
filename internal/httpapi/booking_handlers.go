@@ -12,7 +12,7 @@ func (s *Server) handleListBookings(response http.ResponseWriter, request *http.
 		writeProblem(response, request, err)
 		return
 	}
-	items, err := s.bookings.List(request.Context(), membership, request.URL.Query().Get("periodId"), queryLimit(request))
+	items, err := s.bookings.ListActivity(request.Context(), membership, request.URL.Query().Get("periodId"), queryLimit(request))
 	if err != nil {
 		writeProblem(response, request, err)
 		return

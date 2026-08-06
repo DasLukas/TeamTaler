@@ -68,7 +68,7 @@ func newFixture(t *testing.T) *fixture {
 
 func (f *fixture) inviteMember(email, name string, roles []domain.Role) (domain.Principal, domain.Membership, string) {
 	f.t.Helper()
-	invitation, err := f.groups.CreateInvitation(f.ctx, f.admin, f.membership, email, name, roles, nil)
+	invitation, err := f.groups.CreateInvitation(f.ctx, f.admin, f.membership, email, name, roles, nil, nil)
 	if err != nil {
 		f.t.Fatalf("create invitation: %v", err)
 	}
@@ -238,6 +238,137 @@ func TestFinanceAccountSummariesEnforceRolesAndTenantIsolation(t *testing.T) {
 	}
 }
 
+func TestOwnPaymentPermissionPostsOnlyForAuthenticatedMembership(t *testing.T) {
+	f := newFixture(t)
+	memberPrincipal, member, _ := f.inviteMember("self-payment@example.test", "Self Payment", nil)
+	input := finance.CreateOwnPaymentInput{AmountMinor: 500, ReceivedAt: "2026-08-06T00:00:00Z", Method: "PAYPAL", Reference: "own-paypal-reference"}
+
+	if _, err := f.finance.CreateOwnPayment(f.ctx, memberPrincipal, member, "self-payment-denied", input); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("self payment without permission error=%v, want forbidden", err)
+	}
+	if err := f.groups.UpdatePermissions(f.ctx, f.admin, f.membership, member.ID, groups.PermissionUpdate{
+		GroupPermissions: []domain.GroupPermission{domain.PermissionSelfRecordPayment, domain.PermissionSelfRecordPayment},
+	}); err != nil {
+		t.Fatalf("grant self payment permission: %v", err)
+	}
+	if err := f.groups.UpdatePermissions(f.ctx, f.admin, f.membership, member.ID, groups.PermissionUpdate{
+		GroupPermissions: []domain.GroupPermission{domain.GroupPermission("UNSUPPORTED")},
+	}); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("unsupported group permission error=%v, want validation", err)
+	}
+	member, err := f.groups.MembershipForUser(f.ctx, f.group.ID, member.UserID)
+	if err != nil || len(member.GroupPermissions) != 1 || member.GroupPermissions[0] != domain.PermissionSelfRecordPayment {
+		t.Fatalf("loaded group permissions=%#v err=%v", member.GroupPermissions, err)
+	}
+
+	payment, err := f.finance.CreateOwnPayment(f.ctx, memberPrincipal, member, "self-payment-posted", input)
+	if err != nil {
+		t.Fatalf("create own payment: %v", err)
+	}
+	if payment.Method != "PAYPAL" || payment.Reference != "own-paypal-reference" {
+		t.Fatalf("self payment method/reference = %q/%q, want PAYPAL/own-paypal-reference", payment.Method, payment.Reference)
+	}
+	replayed, err := f.finance.CreateOwnPayment(f.ctx, memberPrincipal, member, "self-payment-posted", input)
+	if err != nil || replayed.ID != payment.ID || payment.MembershipID != member.ID {
+		t.Fatalf("replayed self payment=%#v original=%#v err=%v", replayed, payment, err)
+	}
+	account, err := f.finance.Account(f.ctx, member, member.ID)
+	if err != nil || account.BalanceMinor != -500 {
+		t.Fatalf("self payment balance=%d err=%v, want -500", account.BalanceMinor, err)
+	}
+	var notificationCount int
+	if err := f.db.QueryRowContext(f.ctx, `SELECT count(*) FROM notifications WHERE resource_id=?`, payment.ID).Scan(&notificationCount); err != nil || notificationCount != 0 {
+		t.Fatalf("self payment notifications=%d err=%v, want zero", notificationCount, err)
+	}
+	var auditMetadata string
+	if err := f.db.QueryRowContext(f.ctx, `SELECT metadata_json FROM audit_events WHERE resource_type='payment' AND resource_id=?`, payment.ID).Scan(&auditMetadata); err != nil || !strings.Contains(auditMetadata, `"source":"SELF_SERVICE"`) {
+		t.Fatalf("self payment audit metadata=%q err=%v", auditMetadata, err)
+	}
+	if _, err := f.finance.ListPayments(f.ctx, member, 10); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("self payment member list error=%v, want forbidden", err)
+	}
+	if err := f.finance.ReversePayment(f.ctx, memberPrincipal, member, "self-payment-member-reverse", payment.ID, "not permitted"); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("self payment member reverse error=%v, want forbidden", err)
+	}
+	if err := f.finance.ReversePayment(f.ctx, f.admin, f.membership, "self-payment-admin-reverse", payment.ID, "verified correction"); err != nil {
+		t.Fatalf("finance reverse self payment: %v", err)
+	}
+
+	staleAuthorizedMembership := member
+	if err := f.groups.UpdatePermissions(f.ctx, f.admin, f.membership, member.ID, groups.PermissionUpdate{}); err != nil {
+		t.Fatalf("revoke self payment permission: %v", err)
+	}
+	if _, err := f.finance.CreateOwnPayment(f.ctx, memberPrincipal, staleAuthorizedMembership, "self-payment-stale-permission", input); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("self payment with stale permission snapshot error=%v, want forbidden", err)
+	}
+	member, err = f.groups.MembershipForUser(f.ctx, f.group.ID, member.UserID)
+	if err != nil {
+		t.Fatalf("reload revoked member: %v", err)
+	}
+	if _, err := f.finance.CreateOwnPayment(f.ctx, memberPrincipal, member, "self-payment-revoked", input); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("self payment after revocation error=%v, want forbidden", err)
+	}
+
+	workspacePayment, err := f.finance.CreatePayment(f.ctx, f.admin, f.membership, "shared-payment-key", finance.CreatePaymentInput{
+		MembershipID: f.membership.ID,
+		AmountMinor:  100,
+		Method:       "CASH",
+	})
+	if err != nil {
+		t.Fatalf("create administrative payment with shared raw key: %v", err)
+	}
+	adminSelfPayment, err := f.finance.CreateOwnPayment(f.ctx, f.admin, f.membership, "shared-payment-key", finance.CreateOwnPaymentInput{
+		AmountMinor: 100,
+		ReceivedAt:  "2026-08-06T00:00:00Z",
+		Method:      "CASH",
+		Reference:   "Admin own cash payment",
+	})
+	if err != nil || adminSelfPayment.ID == workspacePayment.ID {
+		t.Fatalf("payment endpoint idempotency scopes collided: workspace=%#v self=%#v err=%v", workspacePayment, adminSelfPayment, err)
+	}
+}
+
+func TestExternalPaymentChangesNotifyTarget(t *testing.T) {
+	f := newFixture(t)
+	_, member, _ := f.inviteMember("payment-target@example.test", "Payment Target", nil)
+
+	payment, err := f.finance.CreatePayment(f.ctx, f.admin, f.membership, "external-payment-create", finance.CreatePaymentInput{
+		MembershipID: member.ID,
+		AmountMinor:  725,
+		Method:       "BANK_TRANSFER",
+		Reference:    "External payment",
+	})
+	if err != nil {
+		t.Fatalf("create external payment: %v", err)
+	}
+	if err := f.finance.ReversePayment(f.ctx, f.admin, f.membership, "external-payment-reverse", payment.ID, "Bank correction"); err != nil {
+		t.Fatalf("reverse external payment: %v", err)
+	}
+
+	rows, err := f.db.QueryContext(f.ctx, `SELECT type,context_json FROM notifications WHERE membership_id=? AND resource_id=? ORDER BY created_at,id`, member.ID, payment.ID)
+	if err != nil {
+		t.Fatalf("list external payment notifications: %v", err)
+	}
+	defer rows.Close()
+	var types []string
+	for rows.Next() {
+		var notificationType, contextJSON string
+		if err := rows.Scan(&notificationType, &contextJSON); err != nil {
+			t.Fatalf("scan external payment notification: %v", err)
+		}
+		if !strings.Contains(contextJSON, `"amountMinor":"725"`) || !strings.Contains(contextJSON, `"currency":"EUR"`) {
+			t.Fatalf("external payment notification context=%s", contextJSON)
+		}
+		types = append(types, notificationType)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate external payment notifications: %v", err)
+	}
+	if len(types) != 2 || types[0] != "PAYMENT_RECORDED" || types[1] != "PAYMENT_REVERSED" {
+		t.Fatalf("external payment notification types=%v", types)
+	}
+}
+
 func TestDefaultOpenPeriodLabels(t *testing.T) {
 	f := newFixture(t)
 	var bootstrapLabel string
@@ -295,6 +426,242 @@ func TestCategoryIconCreationUpdateAndValidation(t *testing.T) {
 		Name: "Unsafe icon", Icon: domain.CategoryIcon("<script>"),
 	}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("unsupported category icon error = %v, want validation", err)
+	}
+}
+
+func TestCatalogReorderPersistsAcrossCatalogBookingAndDashboardReads(t *testing.T) {
+	f := newFixture(t)
+	first, firstProduct := f.catalogItem("First", 100)
+	second, secondCategoryProduct := f.catalogItem("Second", 200)
+	third, thirdCategoryProduct := f.catalogItem("Third", 300)
+	secondFirstPrice := int64(150)
+	secondProduct, err := f.catalog.CreateProduct(f.ctx, f.admin, f.membership, "reorder-second-product", first.ID, catalog.CreateProductInput{
+		Name: "Second product", PriceMinor: &secondFirstPrice,
+	})
+	if err != nil {
+		t.Fatalf("create second reorder product: %v", err)
+	}
+	if first.SortOrder != 0 || second.SortOrder != 1 || third.SortOrder != 2 || firstProduct.SortOrder != 0 || secondProduct.SortOrder != 1 {
+		t.Fatalf("appended catalog positions categories=%d,%d,%d products=%d,%d", first.SortOrder, second.SortOrder, third.SortOrder, firstProduct.SortOrder, secondProduct.SortOrder)
+	}
+	_, regularMember, _ := f.inviteMember("catalog-reorder-member@example.test", "Catalog Reorder Member", nil)
+	order := catalog.ReorderInput{
+		CategoryIDs: []string{third.ID, first.ID, second.ID},
+		ProductIDsByCategory: map[string][]string{
+			third.ID:  {thirdCategoryProduct.ID},
+			first.ID:  {secondProduct.ID, firstProduct.ID},
+			second.ID: {secondCategoryProduct.ID},
+		},
+	}
+	if err := f.catalog.Reorder(f.ctx, f.admin, regularMember, order); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("regular member reorder error=%v, want forbidden", err)
+	}
+	invalidOrder := order
+	invalidOrder.CategoryIDs = []string{third.ID, third.ID, second.ID}
+	if err := f.catalog.Reorder(f.ctx, f.admin, f.membership, invalidOrder); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("duplicate category reorder error=%v, want validation", err)
+	}
+	if err := f.catalog.Reorder(f.ctx, f.admin, f.membership, order); err != nil {
+		t.Fatalf("reorder catalog: %v", err)
+	}
+
+	listed, err := f.catalog.List(f.ctx, f.group.ID)
+	if err != nil {
+		t.Fatalf("list reordered catalog: %v", err)
+	}
+	if len(listed) != 3 || listed[0].ID != third.ID || listed[1].ID != first.ID || listed[2].ID != second.ID {
+		t.Fatalf("reordered categories=%#v", listed)
+	}
+	if len(listed[1].Products) != 2 || listed[1].Products[0].ID != secondProduct.ID || listed[1].Products[1].ID != firstProduct.ID {
+		t.Fatalf("reordered products=%#v", listed[1].Products)
+	}
+	if listed[0].Version != third.Version+1 || listed[1].Products[0].Version != secondProduct.Version+1 {
+		t.Fatalf("reordered versions category=%d product=%d", listed[0].Version, listed[1].Products[0].Version)
+	}
+	account, err := f.finance.Account(f.ctx, f.membership, f.membership.ID)
+	if err != nil || len(account.CategoryStats) != 3 || account.CategoryStats[0].CategoryID != third.ID || account.CategoryStats[1].CategoryID != first.ID {
+		t.Fatalf("dashboard category order=%#v err=%v", account.CategoryStats, err)
+	}
+	var auditCount int
+	if err := f.db.QueryRowContext(f.ctx, `SELECT count(*) FROM audit_events WHERE group_id=? AND action='catalog.reordered'`, f.group.ID).Scan(&auditCount); err != nil || auditCount != 1 {
+		t.Fatalf("catalog reorder audit count=%d err=%v", auditCount, err)
+	}
+}
+
+func TestCatalogDeletionRequiresArchivalAndPreservesHistory(t *testing.T) {
+	f := newFixture(t)
+	category, product := f.catalogItem("Disposable", 125)
+	regularPrincipal, regularMembership, _ := f.inviteMember("catalog-delete-member@example.test", "Catalog Delete Member", nil)
+	if err := f.catalog.DeleteProduct(f.ctx, regularPrincipal, regularMembership, product.ID, product.Version); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("regular member delete product error=%v, want forbidden", err)
+	}
+	secondGroup, err := f.groups.Create(f.ctx, f.admin, "Catalog Delete Tenant", "EUR")
+	if err != nil {
+		t.Fatalf("create second deletion tenant: %v", err)
+	}
+	if err := f.catalog.DeleteProduct(f.ctx, f.admin, secondGroup.Membership, product.ID, product.Version); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("cross-tenant delete product error=%v, want not found", err)
+	}
+	if err := f.catalog.DeleteProduct(f.ctx, f.admin, f.membership, product.ID, product.Version); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("delete active product error=%v, want conflict", err)
+	}
+	archivedProduct, err := f.catalog.UpdateProduct(f.ctx, f.admin, f.membership, product.ID, catalog.UpdateProductInput{
+		Name: product.Name, PriceMinor: product.PriceMinor, PricingMode: product.PricingMode, Active: false, SortOrder: product.SortOrder, Version: product.Version,
+	})
+	if err != nil {
+		t.Fatalf("archive disposable product: %v", err)
+	}
+	if err := f.catalog.DeleteProduct(f.ctx, f.admin, f.membership, product.ID, product.Version); !errors.Is(err, domain.ErrPrecondition) {
+		t.Fatalf("delete stale product error=%v, want precondition", err)
+	}
+	if err := f.catalog.DeleteProduct(f.ctx, f.admin, f.membership, product.ID, archivedProduct.Version); err != nil {
+		t.Fatalf("delete archived unused product: %v", err)
+	}
+	var deletedUnusedProducts int
+	if err := f.db.QueryRowContext(f.ctx, `SELECT count(*) FROM products WHERE id=?`, product.ID).Scan(&deletedUnusedProducts); err != nil || deletedUnusedProducts != 0 {
+		t.Fatalf("physically deleted unused products=%d err=%v, want zero", deletedUnusedProducts, err)
+	}
+	recreated, err := f.catalog.CreateProduct(f.ctx, f.admin, f.membership, "fixture-product-"+category.ID, category.ID, catalog.CreateProductInput{Name: product.Name, PriceMinor: product.PriceMinor})
+	if err != nil || recreated.ID == product.ID {
+		t.Fatalf("recreate after idempotency cleanup product=%#v err=%v", recreated, err)
+	}
+	recreated, err = f.catalog.UpdateProduct(f.ctx, f.admin, f.membership, recreated.ID, catalog.UpdateProductInput{
+		Name: recreated.Name, PriceMinor: recreated.PriceMinor, PricingMode: recreated.PricingMode, Active: false, SortOrder: recreated.SortOrder, Version: recreated.Version,
+	})
+	if err != nil || f.catalog.DeleteProduct(f.ctx, f.admin, f.membership, recreated.ID, recreated.Version) != nil {
+		t.Fatalf("remove recreated product=%#v err=%v", recreated, err)
+	}
+	if err := f.catalog.DeleteCategory(f.ctx, f.admin, f.membership, category.ID, category.Version); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("delete active category error=%v, want conflict", err)
+	}
+	if err := f.groups.UpdatePermissions(f.ctx, f.admin, f.membership, regularMembership.ID, groups.PermissionUpdate{
+		CategoryGrants: map[string][]domain.CategoryPermission{category.ID: {domain.PermissionAssignToOthers}},
+	}); err != nil {
+		t.Fatalf("grant disposable category permission: %v", err)
+	}
+	if _, err := f.groups.CreateInvitation(f.ctx, f.admin, f.membership, "pending-delete@example.test", "Pending Delete", nil, nil,
+		map[string][]domain.CategoryPermission{category.ID: {domain.PermissionAssignToOthers}}); err != nil {
+		t.Fatalf("create invitation with category grant: %v", err)
+	}
+	archivedCategory, err := f.catalog.UpdateCategory(f.ctx, f.admin, f.membership, category.ID, catalog.UpdateCategoryInput{
+		Name: category.Name, Icon: category.Icon, Active: false, SortOrder: category.SortOrder, Version: category.Version,
+	})
+	if err != nil {
+		t.Fatalf("archive disposable category: %v", err)
+	}
+	if err := f.catalog.DeleteCategory(f.ctx, f.admin, f.membership, category.ID, archivedCategory.Version); err != nil {
+		t.Fatalf("delete archived unused category: %v", err)
+	}
+	var staleInvitationGrants, staleMembershipGrants, deletionAudits int
+	if err := f.db.QueryRowContext(f.ctx, `SELECT count(*) FROM invitations WHERE group_id=? AND json_type(category_grants_json, ?) IS NOT NULL`, f.group.ID, `$."`+category.ID+`"`).Scan(&staleInvitationGrants); err != nil {
+		t.Fatalf("read invitation grants: %v", err)
+	}
+	if err := f.db.QueryRowContext(f.ctx, `SELECT count(*) FROM audit_events WHERE group_id=? AND action IN ('product.deleted','category.deleted')`, f.group.ID).Scan(&deletionAudits); err != nil {
+		t.Fatalf("read deletion audits: %v", err)
+	}
+	if err := f.db.QueryRowContext(f.ctx, `SELECT count(*) FROM category_permissions WHERE group_id=? AND category_id=?`, f.group.ID, category.ID).Scan(&staleMembershipGrants); err != nil {
+		t.Fatalf("read membership grants: %v", err)
+	}
+	if staleInvitationGrants != 0 || staleMembershipGrants != 0 || deletionAudits != 3 {
+		t.Fatalf("post-delete invitation grants=%d membership grants=%d deletion audits=%d", staleInvitationGrants, staleMembershipGrants, deletionAudits)
+	}
+
+	historyCategory, historyProduct := f.catalogItem("Historical", 250)
+	periodID := f.openPeriodID()
+	historicalBooking, err := f.bookings.Create(f.ctx, f.admin, f.membership, "catalog-delete-history", bookings.CreateInput{
+		ProductID: historyProduct.ID, ProductVersion: historyProduct.Version, ExpectedPeriodID: periodID, Quantity: 1,
+	})
+	if err != nil {
+		t.Fatalf("create historical booking: %v", err)
+	}
+	imageKey := strings.Repeat("a", 64) + ".png"
+	if _, err := f.db.ExecContext(f.ctx, `UPDATE products SET image_key=? WHERE id=? AND group_id=?`, imageKey, historyProduct.ID, f.group.ID); err != nil {
+		t.Fatalf("attach historical product image fixture: %v", err)
+	}
+	historyProduct, err = f.catalog.UpdateProduct(f.ctx, f.admin, f.membership, historyProduct.ID, catalog.UpdateProductInput{
+		Name: historyProduct.Name, PriceMinor: historyProduct.PriceMinor, PricingMode: historyProduct.PricingMode, Active: false, SortOrder: historyProduct.SortOrder, Version: historyProduct.Version,
+	})
+	if err != nil {
+		t.Fatalf("archive historical product: %v", err)
+	}
+	if err := f.catalog.DeleteProduct(f.ctx, f.admin, f.membership, historyProduct.ID, historyProduct.Version); err != nil {
+		t.Fatalf("delete historical product: %v", err)
+	}
+	var tombstoneActive bool
+	var tombstoneDeletedAt sql.NullString
+	var tombstoneImageKey sql.NullString
+	var tombstoneVersion int64
+	if err := f.db.QueryRowContext(f.ctx, `SELECT active,deleted_at,image_key,version FROM products WHERE id=? AND group_id=?`, historyProduct.ID, f.group.ID).
+		Scan(&tombstoneActive, &tombstoneDeletedAt, &tombstoneImageKey, &tombstoneVersion); err != nil {
+		t.Fatalf("read historical product tombstone: %v", err)
+	}
+	if tombstoneActive || !tombstoneDeletedAt.Valid || tombstoneImageKey.Valid || tombstoneVersion != historyProduct.Version+1 {
+		t.Fatalf("historical product tombstone active=%v deletedAt=%q imageKey=%q version=%d", tombstoneActive, tombstoneDeletedAt.String, tombstoneImageKey.String, tombstoneVersion)
+	}
+	listedCatalog, err := f.catalog.List(f.ctx, f.group.ID)
+	if err != nil || len(listedCatalog) != 1 || listedCatalog[0].ID != historyCategory.ID || len(listedCatalog[0].Products) != 0 {
+		t.Fatalf("catalog after historical product deletion=%#v err=%v", listedCatalog, err)
+	}
+	if err := f.catalog.Reorder(f.ctx, f.admin, f.membership, catalog.ReorderInput{
+		CategoryIDs: []string{historyCategory.ID}, ProductIDsByCategory: map[string][]string{historyCategory.ID: {}},
+	}); err != nil {
+		t.Fatalf("reorder catalog without tombstoned product: %v", err)
+	}
+	if _, err := f.catalog.UpdateProduct(f.ctx, f.admin, f.membership, historyProduct.ID, catalog.UpdateProductInput{
+		Name: historyProduct.Name, PriceMinor: historyProduct.PriceMinor, PricingMode: historyProduct.PricingMode, Active: false, SortOrder: historyProduct.SortOrder, Version: tombstoneVersion,
+	}); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("update tombstoned product error=%v, want not found", err)
+	}
+	if _, _, err := f.catalog.SetProductImage(f.ctx, f.admin, f.membership, historyProduct.ID, strings.Repeat("b", 64)+".png"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("image update for tombstoned product error=%v, want not found", err)
+	}
+	if _, err := f.catalog.ProductCategory(f.ctx, f.group.ID, historyProduct.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("category lookup for tombstoned product error=%v, want not found", err)
+	}
+	if err := f.catalog.DeleteProduct(f.ctx, f.admin, f.membership, historyProduct.ID, tombstoneVersion); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("repeat historical product deletion error=%v, want not found", err)
+	}
+	if _, err := f.bookings.Create(f.ctx, f.admin, f.membership, "catalog-delete-history-rebook", bookings.CreateInput{
+		ProductID: historyProduct.ID, ProductVersion: tombstoneVersion, ExpectedPeriodID: periodID, Quantity: 1,
+	}); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("booking tombstoned product error=%v, want not found", err)
+	}
+	historicalBookings, err := f.bookings.List(f.ctx, f.membership, periodID, 20)
+	if err != nil || len(historicalBookings) != 1 || historicalBookings[0].ID != historicalBooking.ID || historicalBookings[0].ProductName != historyProduct.Name {
+		t.Fatalf("historical bookings after product deletion=%#v err=%v", historicalBookings, err)
+	}
+	account, err := f.finance.Account(f.ctx, f.membership, f.membership.ID)
+	if err != nil || account.BalanceMinor != 250 || account.OpenPeriodDue != 250 {
+		t.Fatalf("account after historical product deletion=%#v err=%v", account, err)
+	}
+	closeResult, err := f.periods.Close(f.ctx, f.admin, f.membership, "catalog-delete-history-close", periodID, periods.CloseInput{
+		Label: "Historical close", DueAt: "2099-01-01", NextPeriodLabel: "Next period",
+	})
+	if err != nil || closeResult.Statements != 2 {
+		t.Fatalf("close period after historical product deletion=%#v err=%v", closeResult, err)
+	}
+	statements, err := f.periods.Statements(f.ctx, f.membership, periodID)
+	if err != nil || len(statements) != 2 {
+		t.Fatalf("statements after historical product deletion=%#v err=%v", statements, err)
+	}
+	var adminStatement *domain.Statement
+	for index := range statements {
+		if statements[index].MembershipID == f.membership.ID {
+			adminStatement = &statements[index]
+			break
+		}
+	}
+	if adminStatement == nil || adminStatement.ChargesMinor != 250 || adminStatement.AmountDueMinor != 250 {
+		t.Fatalf("admin statement after historical product deletion=%#v", adminStatement)
+	}
+	historyCategory, err = f.catalog.UpdateCategory(f.ctx, f.admin, f.membership, historyCategory.ID, catalog.UpdateCategoryInput{
+		Name: historyCategory.Name, Icon: historyCategory.Icon, Active: false, SortOrder: historyCategory.SortOrder, Version: historyCategory.Version,
+	})
+	if err != nil {
+		t.Fatalf("archive historical category: %v", err)
+	}
+	if err := f.catalog.DeleteCategory(f.ctx, f.admin, f.membership, historyCategory.ID, historyCategory.Version); !errors.Is(err, domain.ErrConflict) || !strings.Contains(err.Error(), "historical financial records") {
+		t.Fatalf("delete historical category error=%v, want financial-history conflict", err)
 	}
 }
 
@@ -439,6 +806,43 @@ func TestBookingUndoAssignmentValidationAndBalancedLedger(t *testing.T) {
 	if !foundPrimary {
 		t.Fatal("category void grantee could not discover and manage the foreign booking")
 	}
+	activity, err := f.bookings.ListActivity(f.ctx, member, periodID, 200)
+	if err != nil {
+		t.Fatalf("list activity with disabled group setting: %v", err)
+	}
+	for _, item := range activity {
+		if item.ID == adminOther.ID {
+			t.Fatal("ungranted foreign booking leaked while group-wide visibility was disabled")
+		}
+	}
+	if _, err := f.groups.UpdateSettings(f.ctx, f.admin, f.membership, domain.GroupSettings{MembersCanViewAllBookings: true}); err != nil {
+		t.Fatalf("enable group-wide booking visibility: %v", err)
+	}
+	activity, err = f.bookings.ListActivity(f.ctx, member, periodID, 200)
+	if err != nil {
+		t.Fatalf("list activity with enabled group setting: %v", err)
+	}
+	foundOther := false
+	for _, item := range activity {
+		if item.ID == adminOther.ID {
+			foundOther = true
+			if item.CanVoid {
+				t.Fatal("group-wide read visibility unexpectedly granted void permission")
+			}
+		}
+	}
+	if !foundOther {
+		t.Fatal("group-wide booking visibility did not expose historical foreign booking")
+	}
+	dashboardVisible, err := f.bookings.List(f.ctx, member, periodID, 200)
+	if err != nil {
+		t.Fatalf("list personal dashboard bookings: %v", err)
+	}
+	for _, item := range dashboardVisible {
+		if item.ID == adminOther.ID {
+			t.Fatal("group-wide activity setting changed the personal dashboard booking scope")
+		}
+	}
 }
 
 func TestUserDefinedProductPricingIsValidatedAndSnapshotted(t *testing.T) {
@@ -547,8 +951,8 @@ func TestPaymentFIFOReversalAndClosedPeriodImmutability(t *testing.T) {
 		t.Fatalf("create payment: %v", err)
 	}
 	var paymentNotifications int
-	if err := f.db.QueryRowContext(f.ctx, `SELECT count(*) FROM notifications WHERE membership_id=? AND type='PAYMENT_RECORDED' AND resource_id=?`, f.membership.ID, payment.ID).Scan(&paymentNotifications); err != nil || paymentNotifications != 1 {
-		t.Fatalf("payment notifications=%d err=%v, want one", paymentNotifications, err)
+	if err := f.db.QueryRowContext(f.ctx, `SELECT count(*) FROM notifications WHERE membership_id=? AND type='PAYMENT_RECORDED' AND resource_id=?`, f.membership.ID, payment.ID).Scan(&paymentNotifications); err != nil || paymentNotifications != 0 {
+		t.Fatalf("self-targeted payment notifications=%d err=%v, want zero", paymentNotifications, err)
 	}
 	if len(payment.Allocations) != 2 || payment.Allocations[0].PeriodID != periodOne || payment.Allocations[0].AmountMinor != 100 || payment.Allocations[1].PeriodID != periodTwo || payment.Allocations[1].AmountMinor != 50 {
 		t.Fatalf("FIFO allocations = %#v", payment.Allocations)

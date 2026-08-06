@@ -6,14 +6,16 @@ import { Page } from '@/components/layout/Page';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { AuditPanel } from './AuditPanel';
 import { GroupSettingsPanel } from './GroupSettingsPanel';
+import { BehaviorSettingsPanel } from './BehaviorSettingsPanel';
 import { MembersPanel } from './MembersPanel';
 import { RightsPanel } from './RightsPanel';
 import styles from './AdminPage.module.css';
 
-type AdminTab = 'group' | 'members' | 'rights' | 'audit';
+type AdminTab = 'group' | 'settings' | 'members' | 'rights' | 'audit';
 
 const tabs: Array<{ id: AdminTab; labelKey: string }> = [
   { id: 'group', labelKey: 'admin.tabs.group' },
+  { id: 'settings', labelKey: 'admin.tabs.settings' },
   { id: 'members', labelKey: 'admin.tabs.members' },
   { id: 'rights', labelKey: 'admin.tabs.rights' },
   { id: 'audit', labelKey: 'admin.tabs.audit' },
@@ -44,6 +46,7 @@ export function AdminPage() {
       </div>
       <section aria-label={t(tabs.find((tab) => tab.id === activeTab)?.labelKey ?? 'admin.title')} className={styles.panel} role="tabpanel">
         {activeTab === 'group' ? <GroupSettingsPanel /> : null}
+        {activeTab === 'settings' ? <BehaviorSettingsPanel /> : null}
         {activeTab === 'members' ? <MembersPanel onOpenRights={openMemberRights} /> : null}
         {activeTab === 'rights' ? <RightsPanel onSelectedMemberChange={setSelectedMemberId} selectedMemberId={selectedMemberId || undefined} /> : null}
         {activeTab === 'audit' ? <AuditPanel /> : null}

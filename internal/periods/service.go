@@ -14,6 +14,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/groups"
 	"github.com/DasLukas/TeamTaler/internal/idempotency"
 	"github.com/DasLukas/TeamTaler/internal/ledger"
+	"github.com/DasLukas/TeamTaler/internal/notifications"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/storage"
 )
@@ -23,6 +24,8 @@ import (
 type Service struct {
 	// DB is the shared application database connection pool.
 	DB *sql.DB
+	// Notifications atomically records generated settlement events.
+	Notifications notifications.Service
 }
 
 // CloseInput provides the final period label, ISO calendar due date, and label
@@ -139,7 +142,7 @@ func (s Service) Close(ctx context.Context, actor domain.Principal, membership d
 				return err
 			}
 		}
-		statementCount, err := snapshotStatements(ctx, tx, membership.GroupID, periodID, now)
+		statementCount, err := s.snapshotStatements(ctx, tx, membership.GroupID, periodID, input.Label, now)
 		if err != nil {
 			return err
 		}
@@ -160,7 +163,7 @@ func (s Service) Close(ctx context.Context, actor domain.Principal, membership d
 	return result, err
 }
 
-func snapshotStatements(ctx context.Context, tx *sql.Tx, groupID, periodID, now string) (int64, error) {
+func (s Service) snapshotStatements(ctx context.Context, tx *sql.Tx, groupID, periodID, periodLabel, now string) (int64, error) {
 	var currency, dueAt string
 	if err := tx.QueryRowContext(ctx, `SELECT g.currency,p.due_at FROM periods p JOIN groups g ON g.id=p.group_id WHERE p.id=? AND p.group_id=?`, periodID, groupID).Scan(&currency, &dueAt); err != nil {
 		return 0, err
@@ -198,15 +201,18 @@ func snapshotStatements(ctx context.Context, tx *sql.Tx, groupID, periodID, now 
 			id, groupID, periodID, item.membershipID, item.displayName, item.email, item.charges, item.paid, item.applied, item.provided, due, status, now); err != nil {
 			return 0, err
 		}
-		notificationID, _ := platform.NewID("ntf")
 		body := "Your statement is ready. No payment is currently due."
 		if due > 0 {
 			body = fmt.Sprintf("Your statement is ready. Amount due: %d minor units (%s), due %s.", due, currency, dueAt)
 		} else if due < 0 {
 			body = fmt.Sprintf("Your statement is ready and shows a credit of %d minor units (%s).", -due, currency)
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO notifications(id,group_id,membership_id,type,title,body,resource_type,resource_id,created_at)
-			VALUES(?,?,?,'SETTLEMENT_CREATED','Settlement ready',?,'statement',?,?)`, notificationID, groupID, item.membershipID, body, id, now); err != nil {
+		if _, err := s.Notifications.CreateTx(ctx, tx, notifications.CreateInput{
+			GroupID: groupID, MembershipID: item.membershipID,
+			Type: notifications.TypeSettlementCreated, Title: "Settlement ready", Body: body,
+			ResourceType: "statement", ResourceID: id, CreatedAt: now,
+			Context: notifications.EventContext{AmountMinor: due, Currency: currency, PeriodLabel: periodLabel, DueAt: dueAt},
+		}); err != nil {
 			return 0, err
 		}
 	}

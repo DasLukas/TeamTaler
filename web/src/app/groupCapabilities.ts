@@ -1,4 +1,4 @@
-import type { GroupRole } from '@/api/types';
+import type { GroupPermission, GroupRole } from '@/api/types';
 
 /** Group-level workspaces that are protected by cumulative membership roles. */
 export type GroupCapability = 'administration' | 'catalog' | 'finance';
@@ -18,4 +18,15 @@ export function hasGroupCapability(roles: readonly GroupRole[], capability: Grou
   if (capability === 'catalog') return roles.includes('CATALOG_MANAGER');
   if (capability === 'finance') return roles.includes('FINANCE_MANAGER');
   return false;
+}
+
+/**
+ * Determines whether a membership may use the own-account payment shortcut.
+ *
+ * @param roles - Effective group roles assigned to the membership.
+ * @param permissions - Explicit narrow group permissions.
+ * @returns Whether the membership may post a payment for its own account.
+ */
+export function canRecordOwnPayment(roles: readonly GroupRole[], permissions: readonly GroupPermission[]): boolean {
+  return hasGroupCapability(roles, 'finance') || permissions.includes('SELF_RECORD_PAYMENT');
 }

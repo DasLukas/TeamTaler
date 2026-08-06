@@ -155,7 +155,7 @@ func (s Service) ImportInvitations(ctx context.Context, actor domain.Principal, 
 				continue
 			}
 
-			invitation, createErr := createInvitationTx(ctx, tx, actor, membership, candidate.Email, candidate.DisplayName, nil, nil, now)
+			invitation, createErr := createInvitationTx(ctx, tx, actor, membership, candidate.Email, candidate.DisplayName, nil, nil, nil, now)
 			switch {
 			case errors.Is(createErr, ErrMembershipEmailExists):
 				row.InvitationStatus = InvitationImportSkippedMember

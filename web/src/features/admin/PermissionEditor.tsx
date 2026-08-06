@@ -1,5 +1,6 @@
 import Archive from 'lucide-react/dist/esm/icons/archive';
 import Calculator from 'lucide-react/dist/esm/icons/calculator';
+import CircleDollarSign from 'lucide-react/dist/esm/icons/circle-dollar-sign';
 import Crown from 'lucide-react/dist/esm/icons/crown';
 import Info from 'lucide-react/dist/esm/icons/info';
 import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check';
@@ -35,6 +36,12 @@ export function PermissionEditor({ categories, value, subjectName, onChange, sho
     ...value,
     roles: checked ? [...new Set([...value.roles, role])] : value.roles.filter((entry) => entry !== role),
   });
+  const toggleSelfPayment = (checked: boolean) => onChange({
+    ...value,
+    groupPermissions: checked
+      ? [...new Set([...value.groupPermissions, 'SELF_RECORD_PAYMENT' as const])]
+      : value.groupPermissions.filter((permission) => permission !== 'SELF_RECORD_PAYMENT'),
+  });
   const updateCategoryPermission = (categoryId: string, field: keyof Pick<CategoryPermission, 'assignToOthers' | 'voidBookings'>, checked: boolean) => {
     const current = value.categoryPermissions.find((permission) => permission.categoryId === categoryId)
       ?? { categoryId, assignToOthers: false, voidBookings: false };
@@ -58,6 +65,15 @@ export function PermissionEditor({ categories, value, subjectName, onChange, sho
             <Info aria-hidden="true" className={styles.info} size={22} />
           </div>
         ))}
+      </div>
+      <h3 className={styles.categoryTitle}>{t('rights.additionalRights')}</h3>
+      <div className={styles.roleList}>
+        <div className={styles.role}>
+          <CircleDollarSign aria-hidden="true" size={34} strokeWidth={1.5} />
+          <div><strong>{t('rights.selfPayment.label')}</strong><span>{t('rights.selfPayment.description')}</span></div>
+          <Toggle checked={value.groupPermissions.includes('SELF_RECORD_PAYMENT')} label={t('rights.selfPayment.toggle', { name: subjectName })} onChange={toggleSelfPayment} />
+          <Info aria-hidden="true" className={styles.info} size={22} />
+        </div>
       </div>
       <h3 className={styles.categoryTitle}>{t('rights.categoryRights')}</h3>
       <div className={styles.permissionTable}>

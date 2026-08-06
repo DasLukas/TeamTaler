@@ -12,8 +12,11 @@ const apiMock = vi.hoisted(() => ({
   getCategories: vi.fn(),
   createCategory: vi.fn(),
   updateCategory: vi.fn(),
+  deleteCategory: vi.fn(),
+  reorderCatalog: vi.fn(),
   createProduct: vi.fn(),
   updateProduct: vi.fn(),
+  deleteProduct: vi.fn(),
   uploadProductImage: vi.fn(),
 }));
 
@@ -43,7 +46,7 @@ const createdProduct: Product = {
 
 const session: Session = {
   user: { id: 'user-a', displayName: 'Alex', email: 'alex@example.test' },
-  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', roles: ['CATALOG_MANAGER', 'MEMBER'] } }],
+  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', roles: ['CATALOG_MANAGER', 'MEMBER'], groupPermissions: [] } }],
   activeGroupId: 'group-a',
 };
 
@@ -66,7 +69,10 @@ describe('CatalogPanel', () => {
     apiMock.createCategory.mockResolvedValue(category);
     apiMock.createProduct.mockResolvedValue(createdProduct);
     apiMock.updateCategory.mockResolvedValue({ ...category, version: 4 });
+    apiMock.reorderCatalog.mockResolvedValue([category]);
     apiMock.updateProduct.mockResolvedValue({ ...createdProduct, version: 2 });
+    apiMock.deleteCategory.mockResolvedValue(undefined);
+    apiMock.deleteProduct.mockResolvedValue(undefined);
   });
 
   it('creates a category with a selected icon', async () => {
@@ -239,5 +245,53 @@ describe('CatalogPanel', () => {
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.addProductToCategory', { name: secondCategory.name }) }));
 
     expect(screen.getByLabelText(i18n.t('common.category'))).toHaveValue(secondCategory.id);
+  });
+
+  it('exposes localized keyboard drag handles for categories and products', async () => {
+    apiMock.getCategories.mockResolvedValue([{ ...category, products: [createdProduct] }]);
+    renderCatalog();
+
+    expect(await screen.findByRole('button', { name: i18n.t('catalog.moveCategory', { name: category.name }) })).toBeVisible();
+    expect(screen.getByRole('button', { name: i18n.t('catalog.moveProduct', { name: createdProduct.name }) })).toBeVisible();
+  });
+
+  it('offers permanent deletion only after a product is archived and confirmed', async () => {
+    const user = userEvent.setup();
+    const archivedProduct = { ...createdProduct, active: false, version: 5 };
+    apiMock.getCategories.mockResolvedValue([{ ...category, products: [archivedProduct] }]);
+    renderCatalog();
+
+    await screen.findByText(archivedProduct.name);
+    expect(screen.queryByRole('button', { name: i18n.t('catalog.deletePermanently') })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.editProduct', { name: archivedProduct.name }) }));
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.deletePermanently') }));
+
+    expect(screen.getByText(i18n.t('catalog.deleteProductExplanation', { name: archivedProduct.name }))).toBeVisible();
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.confirmDelete') }));
+    await waitFor(() => expect(apiMock.deleteProduct).toHaveBeenCalledWith('group-a', archivedProduct.id, archivedProduct.version));
+  });
+
+  it('does not offer permanent deletion while a category is active', async () => {
+    const user = userEvent.setup();
+    renderCatalog();
+
+    await screen.findByText(category.name);
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.editCategory', { name: category.name }) }));
+
+    expect(screen.queryByRole('button', { name: i18n.t('catalog.deletePermanently') })).not.toBeInTheDocument();
+  });
+
+  it('deletes an archived empty category only after confirmation', async () => {
+    const user = userEvent.setup();
+    const archivedCategory = { ...category, active: false, version: 6 };
+    apiMock.getCategories.mockResolvedValue([archivedCategory]);
+    renderCatalog();
+
+    await screen.findByText(archivedCategory.name);
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.editCategory', { name: archivedCategory.name }) }));
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.deletePermanently') }));
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.confirmDelete') }));
+
+    await waitFor(() => expect(apiMock.deleteCategory).toHaveBeenCalledWith('group-a', archivedCategory.id, archivedCategory.version));
   });
 });

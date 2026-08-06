@@ -17,7 +17,7 @@ vi.mock('@/api/client', () => ({ api: apiMock }));
 
 const baseSession: Session = {
   user: { id: 'user-a', displayName: 'Alex Member', email: 'alex@example.test' },
-  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', roles: ['MEMBER'] } }],
+  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', roles: ['MEMBER'], groupPermissions: [] } }],
   activeGroupId: 'group-a',
 };
 
@@ -30,6 +30,7 @@ function renderProfileImage(session: Session = baseSession): QueryClient {
     email: session.user.email,
     initials: 'AM',
     roles: ['MEMBER'],
+    groupPermissions: [],
     categoryPermissions: [],
     active: true,
   };

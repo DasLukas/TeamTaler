@@ -2,6 +2,7 @@ import type {
   AccountSummary,
   Booking,
   BookingCommand,
+  CatalogOrderCommand,
   Category,
   CreatedInvitation,
   InvitationEmailResendResult,
@@ -13,10 +14,12 @@ import type {
   InvitationMetadata,
   InvitationPreview,
   LoginCommand,
+  GroupSettings,
   Membership,
   Notification,
   Payment,
   PaymentCommand,
+  SelfPaymentCommand,
   Period,
   PermissionUpdate,
   Product,
@@ -44,6 +47,20 @@ type DemoRequestInit = RequestInit;
 
 const clone = <T,>(value: T): T => structuredClone(value);
 const identifier = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
+
+/**
+ * Resolves the strong catalog version precondition used by demo deletions.
+ *
+ * @param headers - Request headers containing a quoted `If-Match` version.
+ * @returns The positive catalog resource version.
+ * @throws Error when the precondition is absent or malformed.
+ */
+function requiredDemoVersion(headers?: HeadersInit): number {
+  const value = new Headers(headers).get('If-Match');
+  const match = /^"v([1-9][0-9]*)"$/.exec(value ?? '');
+  if (!match) throw new Error(i18n.t('catalog.deleteStaleError'));
+  return Number(match[1]);
+}
 
 /**
  * Validates a demo wire price against the production product-price bounds.
@@ -152,6 +169,7 @@ export class DemoTransport {
   private audit = clone(demoAudit);
   private invitations: InvitationMetadata[] = [];
   private invitationTokens = new Map<string, string>();
+  private groupSettings: GroupSettings = { membersCanViewAllBookings: false, notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true };
 
   /**
    * Resolves one development request.
@@ -212,6 +230,13 @@ export class DemoTransport {
     if (!groupMatch) throw new Error(`Development demo endpoint not implemented: ${method} ${path}`);
     const [, groupId, resource] = groupMatch;
 
+    if (resource === 'settings' && method === 'GET') return clone(this.groupSettings) as T;
+    if (resource === 'settings' && method === 'PATCH') {
+      const update = body as Partial<GroupSettings>;
+      if (typeof update.membersCanViewAllBookings !== 'boolean' || typeof update.notificationEmailsEnabled !== 'boolean') throw new Error('Complete group settings are required.');
+      this.groupSettings = { ...this.groupSettings, membersCanViewAllBookings: update.membersCanViewAllBookings, notificationEmailsEnabled: update.notificationEmailsEnabled };
+      return clone(this.groupSettings) as T;
+    }
     if (resource === 'dashboard') return clone(this.dashboard) as T;
     if (resource === 'members' && method === 'GET') return clone(this.members) as T;
     if (resource === 'categories' && method === 'GET') return clone(this.categories) as T;
@@ -221,13 +246,22 @@ export class DemoTransport {
     if (resource === 'accounts' && method === 'GET') return clone(this.accountSummaries) as T;
     if (resource === 'payments' && method === 'GET') return clone(this.payments) as T;
     if (resource === 'payments' && method === 'POST') return this.createPayment(body as PaymentCommand) as T;
+    if (resource === 'payments/self' && method === 'POST') return this.createOwnPayment(groupId, body as SelfPaymentCommand & { amountMinor?: number }) as T;
     if (resource === 'periods' && method === 'GET') return clone(this.periods) as T;
     if (resource === 'settlements' && method === 'GET') return clone(this.settlements) as T;
     if (resource === 'notifications' && method === 'GET') return clone(this.notifications) as T;
+    if (resource === 'notifications/summary' && method === 'GET') return { unreadCount: this.notifications.filter((entry) => !entry.readAt).length } as T;
+    if (resource === 'notifications/read' && method === 'PATCH') {
+      const ids = (body as { notificationIds?: string[] }).notificationIds ?? [];
+      const readAt = new Date().toISOString();
+      this.notifications.forEach((entry) => { if (ids.includes(entry.id)) entry.readAt = readAt; });
+      return { readAt, unreadCount: this.notifications.filter((entry) => !entry.readAt).length } as T;
+    }
     if (resource === 'audit' && method === 'GET') return clone(this.audit) as T;
     if (resource === 'invitations/import' && method === 'POST') return this.importInvitations(body as string) as T;
     if (resource === 'invitations' && method === 'GET') return this.listInvitations() as T;
     if (resource === 'invitations' && method === 'POST') return this.createInvitation(body as InvitationInput & { categoryGrants?: Record<string, string[]>; expiresInDays?: number }) as T;
+    if (resource === 'catalog/order' && method === 'PUT') return this.reorderCatalog(body as CatalogOrderCommand) as T;
     if (resource === 'categories' && method === 'POST') return this.createCategory(body as Partial<Category>) as T;
     if (resource === 'logo' && method === 'POST') {
       const image = init.body instanceof FormData ? init.body.get('image') : undefined;
@@ -251,6 +285,7 @@ export class DemoTransport {
     }
     const categoryUpdateMatch = resource.match(/^categories\/([^/]+)$/);
     if (categoryUpdateMatch && method === 'PATCH') return this.updateCategory(categoryUpdateMatch[1], body as Pick<Category, 'name' | 'icon' | 'active' | 'sortOrder' | 'version'>) as T;
+    if (categoryUpdateMatch && method === 'DELETE') return this.deleteCategory(categoryUpdateMatch[1], requiredDemoVersion(init.headers)) as T;
     const bookingReversalMatch = resource.match(/^bookings\/([^/]+)\/(?:reversal|void)$/);
     if (bookingReversalMatch && method === 'POST') return this.reverseBooking(bookingReversalMatch[1]) as T;
     const periodCloseMatch = resource.match(/^periods\/([^/]+)\/close$/);
@@ -286,6 +321,7 @@ export class DemoTransport {
         price: fixedPriceMinor ? { minorUnits: fixedPriceMinor, currency: 'EUR' } : undefined,
       }) as T;
     }
+    if (productUpdateMatch && method === 'DELETE') return this.deleteProduct(productUpdateMatch[1], requiredDemoVersion(init.headers)) as T;
     const productImageMatch = resource.match(/^products\/([^/]+)\/image$/);
     if (productImageMatch && method === 'POST') return { imageUrl: '' } as T;
     const invitationEmailRetryMatch = resource.match(/^invitations\/([^/]+)\/email\/retry$/);
@@ -316,6 +352,7 @@ export class DemoTransport {
       if (archivedMember) {
         archivedMember.active = true;
         archivedMember.roles = invitation.roles;
+        archivedMember.groupPermissions = invitation.groupPermissions;
         archivedMember.categoryPermissions = invitation.categoryPermissions;
       } else {
         this.session.user.displayName = command.displayName;
@@ -394,7 +431,13 @@ export class DemoTransport {
       throw new Error('The last active administrator cannot be removed.');
     }
     member.roles = update.roles;
+    member.groupPermissions = update.groupPermissions ?? [];
     member.categoryPermissions = update.categoryPermissions ?? Object.entries(update.categoryGrants ?? {}).map(([categoryId, permissions]) => ({ categoryId, assignToOthers: permissions.includes('ASSIGN_TO_OTHERS'), voidBookings: permissions.includes('VOID_BOOKINGS') }));
+    const sessionGroup = this.session.groups.find((group) => group.membership?.id === member.id);
+    if (sessionGroup?.membership) {
+      sessionGroup.membership.roles = member.roles;
+      sessionGroup.membership.groupPermissions = member.groupPermissions;
+    }
     member.etag = `"${id}-${Date.now()}"`;
     return clone(member);
   }
@@ -409,6 +452,7 @@ export class DemoTransport {
     }
     member.active = false;
     member.roles = ['MEMBER'];
+    member.groupPermissions = [];
     member.categoryPermissions = [];
     if (selfRemoval) {
       this.session.groups = this.session.groups.filter((group) => group.id !== groupId);
@@ -428,11 +472,67 @@ export class DemoTransport {
       name: input.name ?? i18n.t('demo.newCategory'),
       icon: input.icon,
       active: true,
-      sortOrder: this.categories.length + 1,
+      sortOrder: this.categories.length,
       products: [],
     };
     this.categories.push(category);
     return clone(category);
+  }
+
+  /**
+   * Replaces the complete demo catalog order using the production endpoint's
+   * validation rules.
+   *
+   * @param input - Every category and each category's complete product list.
+   * @returns A detached catalog snapshot in the persisted display order.
+   * @throws Error when identifiers are missing, duplicated, unknown, or assigned to another category.
+   */
+  private reorderCatalog(input: CatalogOrderCommand): Category[] {
+    if (!Array.isArray(input.categoryIds) || !input.productIdsByCategory || typeof input.productIdsByCategory !== 'object') {
+      throw new Error(i18n.t('errors.requestFailed'));
+    }
+    const categoryById = new Map(this.categories.map((category) => [category.id, category]));
+    const categoryKeys = Object.keys(input.productIdsByCategory);
+    if (input.categoryIds.length !== this.categories.length
+      || new Set(input.categoryIds).size !== this.categories.length
+      || categoryKeys.length !== this.categories.length
+      || input.categoryIds.some((categoryId) => !categoryById.has(categoryId) || !Object.hasOwn(input.productIdsByCategory, categoryId))
+      || categoryKeys.some((categoryId) => !categoryById.has(categoryId))) {
+      throw new Error(i18n.t('errors.requestFailed'));
+    }
+
+    for (const categoryId of input.categoryIds) {
+      const category = categoryById.get(categoryId)!;
+      const productIds = input.productIdsByCategory[categoryId];
+      const existingProductIds = new Set(category.products.map((product) => product.id));
+      if (!Array.isArray(productIds)
+        || productIds.length !== category.products.length
+        || new Set(productIds).size !== category.products.length
+        || productIds.some((productId) => !existingProductIds.has(productId))) {
+        throw new Error(i18n.t('errors.requestFailed'));
+      }
+    }
+
+    this.categories = input.categoryIds.map((categoryId, categoryPosition) => {
+      const category = categoryById.get(categoryId)!;
+      const productById = new Map(category.products.map((product) => [product.id, product]));
+      return {
+        ...category,
+        sortOrder: categoryPosition,
+        version: category.version + Number(category.sortOrder !== categoryPosition),
+        products: input.productIdsByCategory[categoryId].map((productId, productPosition) => {
+          const product = productById.get(productId)!;
+          return { ...product, sortOrder: productPosition, version: product.version + Number(product.sortOrder !== productPosition) };
+        }),
+      };
+    });
+    const categoryPosition = new Map(input.categoryIds.map((categoryId, position) => [categoryId, position]));
+    const sortTotals = <T extends { categoryId: string }>(totals: T[]) => totals.sort((left, right) => (
+      (categoryPosition.get(left.categoryId) ?? Number.MAX_SAFE_INTEGER) - (categoryPosition.get(right.categoryId) ?? Number.MAX_SAFE_INTEGER)
+    ));
+    sortTotals(this.dashboard.categoryTotals);
+    sortTotals(this.dashboard.groupCategoryTotals);
+    return clone(this.categories);
   }
 
   /** Updates one demo category while enforcing the production version contract. */
@@ -449,6 +549,27 @@ export class DemoTransport {
     return clone(category);
   }
 
+  private deleteCategory(id: string, version: number): void {
+    const index = this.categories.findIndex((entry) => entry.id === id);
+    const category = this.categories[index];
+    if (!category) throw new Error('The category does not exist.');
+    if (category.version !== version) throw new Error(i18n.t('catalog.deleteStaleError'));
+    if (category.active) throw new Error(i18n.t('catalog.deleteCategoryActiveError'));
+    if (category.products.length > 0) throw new Error(i18n.t('catalog.deleteCategoryProductsError'));
+    if (this.bookings.some((booking) => booking.categoryId === id)) throw new Error(i18n.t('catalog.deleteCategoryHistoryError'));
+    this.categories.splice(index, 1);
+    this.members.forEach((member) => {
+      member.categoryPermissions = member.categoryPermissions.filter((permission) => permission.categoryId !== id);
+    });
+    this.invitations.forEach((invitation) => {
+      if (!invitation.acceptedAt && !invitation.revokedAt) {
+        invitation.categoryPermissions = invitation.categoryPermissions.filter((permission) => permission.categoryId !== id);
+      }
+    });
+    this.dashboard.categoryTotals = this.dashboard.categoryTotals.filter((total) => total.categoryId !== id);
+    this.dashboard.groupCategoryTotals = this.dashboard.groupCategoryTotals.filter((total) => total.categoryId !== id);
+  }
+
   private createInvitation(input: InvitationInput & { categoryGrants?: Record<string, string[]>; expiresInDays?: number }): CreatedInvitation {
     const email = input.email.trim().toLowerCase();
     if (this.members.some((member) => member.active && member.email.toLowerCase() === email)) throw new Error('An active membership already exists for this email address.');
@@ -459,6 +580,7 @@ export class DemoTransport {
       email,
       displayName: input.displayName || undefined,
       roles: [...(input.roles ?? []).filter((role) => role !== 'MEMBER'), 'MEMBER'],
+      groupPermissions: input.groupPermissions ?? [],
       categoryPermissions: input.categoryPermissions ?? Object.entries(input.categoryGrants ?? {}).map(([categoryId, permissions]) => ({ categoryId, assignToOthers: permissions.includes('ASSIGN_TO_OTHERS'), voidBookings: permissions.includes('VOID_BOOKINGS') })),
       expiresAt: new Date(Date.now() + (input.expiresInDays || 7) * 86_400_000).toISOString(),
       acceptUrl: `${window.location.origin}/invite#token=${token}`,
@@ -474,6 +596,7 @@ export class DemoTransport {
     if (!invitation) throw new Error('Invitation not found.');
     invitation.displayName = input.displayName || undefined;
     invitation.roles = [...(input.roles ?? []).filter((role) => role !== 'MEMBER'), 'MEMBER'];
+    invitation.groupPermissions = input.groupPermissions ?? [];
     invitation.categoryPermissions = input.categoryPermissions ?? Object.entries(input.categoryGrants ?? {}).map(([categoryId, permissions]) => ({ categoryId, assignToOthers: permissions.includes('ASSIGN_TO_OTHERS'), voidBookings: permissions.includes('VOID_BOOKINGS') }));
     return clone(invitation);
   }
@@ -536,6 +659,7 @@ export class DemoTransport {
         email: candidate.email,
         displayName: candidate.displayName || undefined,
         roles: ['MEMBER'],
+        groupPermissions: [],
         categoryPermissions: [],
         expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString(),
         emailDeliveryStatus: 'PENDING',
@@ -607,7 +731,7 @@ export class DemoTransport {
       price: input.pricingMode === 'USER_DEFINED' ? undefined : input.price ?? { minorUnits: '0', currency: input.currency ?? 'EUR' },
       imageUrl: input.imageUrl,
       active: true,
-      sortOrder: category.products.length + 1,
+      sortOrder: category.products.length,
     };
     category.products.push(product);
     return clone(product);
@@ -627,6 +751,16 @@ export class DemoTransport {
     return clone(product);
   }
 
+  private deleteProduct(id: string, version: number): void {
+    const category = this.categories.find((entry) => entry.products.some((product) => product.id === id));
+    const productIndex = category?.products.findIndex((product) => product.id === id) ?? -1;
+    const product = productIndex >= 0 ? category?.products[productIndex] : undefined;
+    if (!category || !product) throw new Error('The product does not exist.');
+    if (product.version !== version) throw new Error(i18n.t('catalog.deleteStaleError'));
+    if (product.active) throw new Error(i18n.t('catalog.deleteProductActiveError'));
+    category.products.splice(productIndex, 1);
+  }
+
   private createPayment(command: PaymentCommand & { amountMinor?: number }): Payment {
     const member = this.members.find((entry) => entry.id === command.membershipId);
     if (!member) throw new Error(i18n.t('errors.memberNotFound'));
@@ -638,8 +772,52 @@ export class DemoTransport {
       amount: command.amount ?? { minorUnits: String(command.amountMinor ?? 0), currency: 'EUR' },
     };
     this.payments.unshift(payment);
-    this.adjustAccountBalance(member.id, -BigInt(payment.amount.minorUnits));
+    const paymentMinor = BigInt(payment.amount.minorUnits);
+    this.adjustAccountBalance(member.id, -paymentMinor);
+    if (member.userId === this.session.user.id) {
+      this.dashboard.openBalance.minorUnits = (BigInt(this.dashboard.openBalance.minorUnits) - paymentMinor).toString();
+      this.ledger.unshift({
+        id: identifier('ledger'),
+        occurredAt: payment.receivedAt,
+        kind: 'PAYMENT',
+        description: payment.reference ? i18n.t('ledger.paymentReceivedWithReference', { reference: payment.reference }) : i18n.t('ledger.paymentReceived'),
+        amount: { minorUnits: (-paymentMinor).toString(), currency: payment.amount.currency },
+        balance: clone(this.dashboard.openBalance),
+        referenceId: payment.id,
+      });
+      let remaining = paymentMinor;
+      for (const settlement of this.settlements.filter((entry) => entry.membershipId === member.id && (entry.status === 'OPEN' || entry.status === 'PARTIAL'))) {
+        if (remaining <= 0n) break;
+        const openMinor = BigInt(settlement.openAmount?.minorUnits ?? '0');
+        const allocated = remaining < openMinor ? remaining : openMinor;
+        settlement.paidAmount.minorUnits = (BigInt(settlement.paidAmount.minorUnits) + allocated).toString();
+        settlement.openAmount = { minorUnits: (openMinor - allocated).toString(), currency: settlement.amount.currency };
+        settlement.status = openMinor === allocated ? 'PAID' : 'PARTIAL';
+        remaining -= allocated;
+      }
+    }
     return clone(payment);
+  }
+
+  private createOwnPayment(groupId: string, command: SelfPaymentCommand & { amountMinor?: number }): Payment {
+    const membershipId = this.session.groups.find((group) => group.id === groupId)?.membership?.id;
+    const member = this.members.find((entry) => entry.id === membershipId && entry.active);
+    if (!member) throw new Error(i18n.t('errors.memberNotFound'));
+    const canRecord = member.roles.includes('ADMIN') || member.roles.includes('FINANCE_MANAGER') || member.groupPermissions.includes('SELF_RECORD_PAYMENT');
+    if (!canRecord) throw new Error(i18n.t('financeWorkspace.noAccessMessage'));
+    const amountMinor = BigInt(command.amount?.minorUnits ?? command.amountMinor ?? 0);
+    if (amountMinor <= 0n) throw new Error(i18n.t('errors.amountFormat'));
+    if (amountMinor > 100_000_000_000n) throw new Error(i18n.t('errors.amountRange'));
+    if (!command.receivedAt || Number.isNaN(Date.parse(command.receivedAt))) throw new Error(i18n.t('errors.requestFailed'));
+    if (!['BANK_TRANSFER', 'CASH', 'PAYPAL', 'OTHER'].includes(command.method)) throw new Error(i18n.t('errors.requestFailed'));
+    if (!command.reference?.trim()) throw new Error(i18n.t('selfPayment.referenceRequired'));
+    return this.createPayment({
+      membershipId: member.id,
+      amount: command.amount ?? { minorUnits: amountMinor.toString(), currency: 'EUR' },
+      receivedAt: command.receivedAt,
+      method: command.method,
+      reference: command.reference.trim(),
+    });
   }
 
   private reversePayment(id: string): void {

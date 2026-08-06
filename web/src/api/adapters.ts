@@ -16,6 +16,7 @@ import type {
   Settlement,
 } from './types';
 import { isCategoryIcon } from './types';
+import { formatMoney } from './money';
 import i18n from '@/i18n';
 
 type JsonRecord = Record<string, unknown>;
@@ -28,6 +29,7 @@ const memberName = (membershipId: string, members?: Membership[], fallback = i18
 const memberAvatarUrl = (membershipId: string, members?: Membership[]) => members?.find((member) => member.id === membershipId)?.avatarUrl;
 const PAYMENT_DESCRIPTION_PREFIX = 'Payment received';
 const REVERSAL_DESCRIPTION_PREFIX = 'Reversal: ';
+const NOTIFICATION_EVENT_TYPES: Notification['eventType'][] = ['BOOKING_ASSIGNED', 'BOOKING_REVERSED', 'PAYMENT_RECORDED', 'PAYMENT_REVERSED', 'SETTLEMENT_CREATED'];
 
 /**
  * Extracts the user-provided reference from a structured payment description.
@@ -93,7 +95,11 @@ export function adaptSession(input: unknown): Session {
       name: String(group.name),
       currency: String(group.currency || 'EUR'),
       logoUrl: typeof group.logoUrl === 'string' ? group.logoUrl : undefined,
-      membership: membership ? { id: String(membership.id), roles: [...(membership.roles as GroupRole[] ?? []), 'MEMBER'] } : undefined,
+      membership: membership ? {
+        id: String(membership.id),
+        roles: [...(membership.roles as GroupRole[] ?? []), 'MEMBER'],
+        groupPermissions: (membership.groupPermissions as Membership['groupPermissions'] | undefined) ?? [],
+      } : undefined,
     } satisfies Group;
   });
   return {
@@ -165,7 +171,11 @@ export function adaptCategories(input: unknown): Category[] {
  */
 export function adaptMembership(input: unknown, etag?: string): Membership {
   const source = asRecord(input);
-  if ('categoryPermissions' in source) return { ...(source as unknown as Membership), etag: etag ?? source.etag as string | undefined };
+  if ('categoryPermissions' in source) return {
+    ...(source as unknown as Membership),
+    groupPermissions: (source.groupPermissions as Membership['groupPermissions'] | undefined) ?? [],
+    etag: etag ?? source.etag as string | undefined,
+  };
   const grants = (source.categoryGrants ?? {}) as Record<string, string[]>;
   const roles = (source.roles as GroupRole[] ?? []).filter((role) => role !== 'MEMBER');
   return {
@@ -176,6 +186,7 @@ export function adaptMembership(input: unknown, etag?: string): Membership {
     initials: initials(String(source.displayName)),
     avatarUrl: typeof source.avatarUrl === 'string' && source.avatarUrl ? source.avatarUrl : undefined,
     roles: [...roles, 'MEMBER'],
+    groupPermissions: (source.groupPermissions as Membership['groupPermissions'] | undefined) ?? [],
     categoryPermissions: Object.entries(grants).map(([categoryId, permissions]) => ({
       categoryId,
       assignToOthers: permissions.includes('ASSIGN_TO_OTHERS'),
@@ -400,16 +411,49 @@ export function adaptSettlement(input: unknown, periods: Period[]): Settlement {
  */
 export function adaptNotification(input: unknown): Notification {
   const source = asRecord(input);
-  if ('message' in source) return source as unknown as Notification;
   const type = String(source.type ?? '').toUpperCase();
+  const canonicalKind = typeof source.kind === 'string' ? source.kind : undefined;
   const kind: Notification['kind'] = type.includes('PAYMENT') ? 'PAYMENT' : type.includes('SETTLEMENT') || type.includes('PERIOD') ? 'SETTLEMENT' : type.includes('BOOK') || type.includes('PENAL') ? 'BOOKING' : 'SYSTEM';
+  const eventType: Notification['eventType'] = NOTIFICATION_EVENT_TYPES.includes(type as Notification['eventType']) ? type as Notification['eventType'] : 'SYSTEM';
+  const rawContext = source.context && typeof source.context === 'object' ? asRecord(source.context) : {};
+  const context: Notification['context'] = {
+    actorName: typeof rawContext.actorName === 'string' ? rawContext.actorName : undefined,
+    itemName: typeof rawContext.itemName === 'string' ? rawContext.itemName : undefined,
+    quantity: typeof rawContext.quantity === 'number' ? rawContext.quantity : undefined,
+    amountMinor: typeof rawContext.amountMinor === 'string' || typeof rawContext.amountMinor === 'number' ? String(rawContext.amountMinor) : undefined,
+    currency: typeof rawContext.currency === 'string' ? rawContext.currency : undefined,
+    periodLabel: typeof rawContext.periodLabel === 'string' ? rawContext.periodLabel : undefined,
+    dueAt: typeof rawContext.dueAt === 'string' ? rawContext.dueAt : undefined,
+  };
   const localizedCopy: Record<Notification['kind'], { title: string; message: string }> = {
     PAYMENT: { title: i18n.t('notifications.fallback.paymentTitle'), message: i18n.t('notifications.fallback.paymentMessage') },
     SETTLEMENT: { title: i18n.t('notifications.fallback.settlementTitle'), message: i18n.t('notifications.fallback.settlementMessage') },
     BOOKING: { title: i18n.t('notifications.fallback.bookingTitle'), message: i18n.t('notifications.fallback.bookingMessage') },
     SYSTEM: { title: i18n.t('notifications.fallback.systemTitle'), message: i18n.t('notifications.fallback.systemMessage') },
   };
-  return { id: String(source.id), ...localizedCopy[kind], createdAt: String(source.createdAt), readAt: typeof source.readAt === 'string' ? source.readAt : undefined, kind };
+  const amount = context.amountMinor !== undefined && context.currency ? formatMoney({ minorUnits: context.amountMinor, currency: context.currency }) : undefined;
+  let copy = localizedCopy[kind];
+  if (eventType === 'BOOKING_ASSIGNED' && context.actorName && context.itemName && context.quantity && amount) {
+    copy = { title: i18n.t('notifications.events.bookingAssignedTitle'), message: i18n.t('notifications.events.bookingAssignedMessage', { actor: context.actorName, quantity: context.quantity, item: context.itemName, amount }) };
+  } else if (eventType === 'BOOKING_REVERSED' && context.actorName && context.itemName && context.quantity && amount) {
+    copy = { title: i18n.t('notifications.events.bookingReversedTitle'), message: i18n.t('notifications.events.bookingReversedMessage', { actor: context.actorName, quantity: context.quantity, item: context.itemName, amount }) };
+  } else if (eventType === 'PAYMENT_RECORDED' && context.actorName && amount) {
+    copy = { title: i18n.t('notifications.events.paymentRecordedTitle'), message: i18n.t('notifications.events.paymentRecordedMessage', { actor: context.actorName, amount }) };
+  } else if (eventType === 'PAYMENT_REVERSED' && context.actorName && amount) {
+    copy = { title: i18n.t('notifications.events.paymentReversedTitle'), message: i18n.t('notifications.events.paymentReversedMessage', { actor: context.actorName, amount }) };
+  } else if (eventType === 'SETTLEMENT_CREATED' && context.periodLabel && context.amountMinor !== undefined && context.currency) {
+    const rawAmount = BigInt(context.amountMinor);
+    const settlementAmount = formatMoney({ minorUnits: (rawAmount < 0n ? -rawAmount : rawAmount).toString(), currency: context.currency });
+    const message = rawAmount > 0n
+      ? i18n.t('notifications.events.settlementDueMessage', { period: context.periodLabel, amount: settlementAmount, dueAt: context.dueAt ?? '–' })
+      : rawAmount < 0n
+        ? i18n.t('notifications.events.settlementCreditMessage', { period: context.periodLabel, amount: settlementAmount })
+        : i18n.t('notifications.events.settlementPaidMessage', { period: context.periodLabel });
+    copy = { title: i18n.t('notifications.events.settlementTitle'), message };
+  } else if ('message' in source && typeof source.title === 'string' && typeof source.message === 'string') {
+    copy = { title: source.title, message: source.message };
+  }
+  return { id: String(source.id), ...copy, createdAt: String(source.createdAt), readAt: typeof source.readAt === 'string' ? source.readAt : undefined, kind: (canonicalKind as Notification['kind'] | undefined) ?? kind, eventType, context };
 }
 
 /**

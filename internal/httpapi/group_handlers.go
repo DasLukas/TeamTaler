@@ -75,6 +75,72 @@ func (s *Server) handleUpdateGroup(response http.ResponseWriter, request *http.R
 	writeJSON(response, http.StatusOK, map[string]string{"name": name})
 }
 
+// handleGetGroupSettings returns the current administrator-managed behavior
+// settings. response receives GroupSettings or Problem Details; request
+// supplies the authenticated group scope. The method returns no Go value.
+func (s *Server) handleGetGroupSettings(response http.ResponseWriter, request *http.Request) {
+	_, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	settings, err := s.groups.Settings(request.Context(), membership)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]any{
+		"membersCanViewAllBookings":          settings.MembersCanViewAllBookings,
+		"notificationEmailsEnabled":          settings.NotificationEmailsEnabled,
+		"notificationEmailDeliveryAvailable": s.config.SMTP.Enabled,
+	})
+}
+
+// handleUpdateGroupSettings validates and persists one complete supported
+// settings document. response receives the persisted GroupSettings or Problem
+// Details; request supplies administrator identity, group scope, and JSON input.
+// The method returns no Go value.
+func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request *http.Request) {
+	principal, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	var input struct {
+		MembersCanViewAllBookings *bool `json:"membersCanViewAllBookings"`
+		NotificationEmailsEnabled *bool `json:"notificationEmailsEnabled"`
+	}
+	if err := decodeJSON(response, request, &input); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	if input.MembersCanViewAllBookings == nil {
+		writeProblem(response, request, domain.ValidationError{Field: "membersCanViewAllBookings", Message: "is required"})
+		return
+	}
+	if input.NotificationEmailsEnabled == nil {
+		writeProblem(response, request, domain.ValidationError{Field: "notificationEmailsEnabled", Message: "is required"})
+		return
+	}
+	if *input.NotificationEmailsEnabled && !s.config.SMTP.Enabled {
+		writeProblem(response, request, domain.ValidationError{Field: "notificationEmailsEnabled", Message: "requires configured SMTP delivery"})
+		return
+	}
+	settings, err := s.groups.UpdateSettings(request.Context(), principal, membership, domain.GroupSettings{
+		MembersCanViewAllBookings: *input.MembersCanViewAllBookings,
+		NotificationEmailsEnabled: *input.NotificationEmailsEnabled,
+	})
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]any{
+		"membersCanViewAllBookings":          settings.MembersCanViewAllBookings,
+		"notificationEmailsEnabled":          settings.NotificationEmailsEnabled,
+		"notificationEmailDeliveryAvailable": s.config.SMTP.Enabled,
+	})
+}
+
 // handleGroupLogo authorizes an administrator, normalizes one multipart image,
 // and attaches it to the group in the request path. response receives either a
 // logoUrl JSON object or Problem Details; request supplies session, CSRF-checked
@@ -202,16 +268,17 @@ func (s *Server) handleCreateInvitation(response http.ResponseWriter, request *h
 		return
 	}
 	var input struct {
-		Email          string                                 `json:"email"`
-		DisplayName    string                                 `json:"displayName"`
-		Roles          []domain.Role                          `json:"roles"`
-		CategoryGrants map[string][]domain.CategoryPermission `json:"categoryGrants"`
+		Email            string                                 `json:"email"`
+		DisplayName      string                                 `json:"displayName"`
+		Roles            []domain.Role                          `json:"roles"`
+		GroupPermissions []domain.GroupPermission               `json:"groupPermissions"`
+		CategoryGrants   map[string][]domain.CategoryPermission `json:"categoryGrants"`
 	}
 	if err := decodeJSON(response, request, &input); err != nil {
 		writeProblem(response, request, err)
 		return
 	}
-	item, err := s.groups.CreateInvitation(request.Context(), principal, membership, input.Email, input.DisplayName, input.Roles, input.CategoryGrants)
+	item, err := s.groups.CreateInvitation(request.Context(), principal, membership, input.Email, input.DisplayName, input.Roles, input.GroupPermissions, input.CategoryGrants)
 	if err != nil {
 		writeProblem(response, request, err)
 		return
@@ -232,15 +299,16 @@ func (s *Server) handleUpdateInvitation(response http.ResponseWriter, request *h
 		return
 	}
 	var input struct {
-		DisplayName    string                                 `json:"displayName"`
-		Roles          []domain.Role                          `json:"roles"`
-		CategoryGrants map[string][]domain.CategoryPermission `json:"categoryGrants"`
+		DisplayName      string                                 `json:"displayName"`
+		Roles            []domain.Role                          `json:"roles"`
+		GroupPermissions []domain.GroupPermission               `json:"groupPermissions"`
+		CategoryGrants   map[string][]domain.CategoryPermission `json:"categoryGrants"`
 	}
 	if err := decodeJSON(response, request, &input); err != nil {
 		writeProblem(response, request, err)
 		return
 	}
-	item, err := s.groups.UpdateInvitation(request.Context(), principal, membership, request.PathValue("invitationID"), input.DisplayName, input.Roles, input.CategoryGrants)
+	item, err := s.groups.UpdateInvitation(request.Context(), principal, membership, request.PathValue("invitationID"), input.DisplayName, input.Roles, input.GroupPermissions, input.CategoryGrants)
 	if err != nil {
 		writeProblem(response, request, err)
 		return
