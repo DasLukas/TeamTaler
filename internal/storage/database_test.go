@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/DasLukas/TeamTaler/migrations"
@@ -136,6 +137,10 @@ func TestPayPalPaymentMethodMigrationPreservesFinancialRows(t *testing.T) {
 		`CREATE INDEX ledger_booking_idx ON ledger_entries(booking_id)`,
 		`CREATE INDEX ledger_payment_idx ON ledger_entries(payment_id)`,
 		`CREATE UNIQUE INDEX ledger_one_reversal_idx ON ledger_entries(reversal_of) WHERE reversal_of IS NOT NULL`,
+		`CREATE TRIGGER ledger_entries_no_update
+			BEFORE UPDATE ON ledger_entries BEGIN SELECT RAISE(ABORT, 'ledger entries are immutable'); END`,
+		`CREATE TRIGGER ledger_entries_no_delete
+			BEFORE DELETE ON ledger_entries BEGIN SELECT RAISE(ABORT, 'ledger entries are immutable'); END`,
 		`INSERT INTO groups(id) VALUES('group-one')`,
 		`INSERT INTO memberships(id,group_id) VALUES('member-one','group-one')`,
 		`INSERT INTO periods(id,group_id) VALUES('period-one','group-one')`,
@@ -186,6 +191,12 @@ func TestPayPalPaymentMethodMigrationPreservesFinancialRows(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `INSERT INTO payments(id,group_id,membership_id,amount_minor,received_at,method,reference,created_by,created_at)
 		VALUES('payment-unsupported','group-one','member-one',100,'2026-08-03T00:00:00Z','CARD','Card reference','member-one','2026-08-03T00:00:00Z')`); err == nil {
 		t.Fatal("unsupported payment method unexpectedly passed the database constraint")
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE ledger_entries SET description='Changed' WHERE id='ledger-one'`); err == nil || !strings.Contains(err.Error(), "ledger entries are immutable") {
+		t.Fatalf("update migrated ledger entry error=%v, want immutable trigger rejection", err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM ledger_entries WHERE id='ledger-reversal'`); err == nil || !strings.Contains(err.Error(), "ledger entries are immutable") {
+		t.Fatalf("delete migrated ledger entry error=%v, want immutable trigger rejection", err)
 	}
 }
 
