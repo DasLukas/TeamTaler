@@ -18,7 +18,7 @@ The application combines a responsive German-language React interface, a Go HTTP
 - User-defined categories with editable visual symbols, fixed-price and user-defined-price products, a two-stage archive/delete lifecycle with history-preserving product tombstones, validated integer minor-unit booking prices, immutable product/price snapshots, and JPEG/PNG/WebP uploads normalized to content-addressed PNG files.
 - Idempotent booking creation, immutable acting/target membership traceability, 30-second self-undo for self-bookings, and reasoned audited reversals.
 - Mandatory reasons whenever a booking is assigned to another member.
-- Activity views display and search both the charged member and the member who made every booking; dashboard activity highlights third-party assignments.
+- Activity views display and search both the charged member and the member who made every booking; the full-width desktop table reflows into labelled cards on constrained desktop, tablet, split-view, and mobile widths without horizontal page scrolling, while dashboard activity highlights third-party assignments.
 - A dedicated overview combines personal account information, recent activity, current-period statistics, and a clearly separated anonymous aggregate group balance; the mobile-first booking workspace remains focused on explicit product selection and confirmation.
 - A consolidated member receivable account across all categories and anonymous group category aggregates without exposing other members' balances.
 - Incoming payments by bank transfer, cash, PayPal, or another documented method; permission-gated self-service payments require a reference and support reversals, oldest-claim-first allocation, overpayment credit, and correction allocation across periods.

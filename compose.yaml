@@ -2,7 +2,7 @@ name: teamtaler
 
 services:
   app:
-    image: ${TEAMTALER_IMAGE:-ghcr.io/daslukas/teamtaler}:${TEAMTALER_VERSION:-0.5.1}
+    image: ${TEAMTALER_IMAGE:-ghcr.io/daslukas/teamtaler}:${TEAMTALER_VERSION:-0.5.2}
     build:
       context: .
       args:
