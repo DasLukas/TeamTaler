@@ -8,8 +8,8 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ### Fixed
 
-- Reworked booking activities into labelled responsive cards on constrained desktop, tablet, split-view, and mobile widths, preventing page-level horizontal overflow and keeping mobile navigation viewport-attached while scrolling.
-- Expanded the desktop activity workspace to the available content width and retained a readable fixed-column table at wide breakpoints.
+- Reworked booking activities into labelled responsive cards on narrow phone widths, preventing page-level horizontal overflow and keeping mobile navigation viewport-attached while scrolling.
+- Expanded the desktop activity workspace to the available content width and retained the booking table on tablet, split-view, and desktop widths with horizontal overflow contained inside the table viewport.
 
 ## [0.5.1] - 2026-08-07
 

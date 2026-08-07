@@ -11,16 +11,22 @@
 .bookingProduct { display: inline-flex; min-width: 0; align-items: center; gap: var(--space-3); }
 .bookingProduct > span { min-width: 0; overflow-wrap: anywhere; }
 .bookingProduct > img { width: 40px; height: 40px; flex: 0 0 40px; border-radius: var(--radius-sm); object-fit: cover; background: var(--color-surface-muted); }
-.activityTable { table-layout: fixed; }
+.activityList {
+  contain: paint;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.activityTable { min-width: 1200px; table-layout: fixed; }
 .activityTable th,
 .activityTable td { vertical-align: middle; white-space: normal; overflow-wrap: anywhere; }
+.activityTable th { white-space: nowrap; }
 .activityTable th:nth-child(1),
 .activityTable th:nth-child(2) { width: 14%; }
-.activityTable th:nth-child(3) { width: 18%; }
+.activityTable th:nth-child(3) { width: 17%; }
 .activityTable th:nth-child(4) { width: 9%; }
 .activityTable th:nth-child(5) { width: 14%; }
 .activityTable th:nth-child(6) { width: 8%; }
-.activityTable th:nth-child(7) { width: 9%; }
+.activityTable th:nth-child(7) { width: 10%; }
 .activityTable th:nth-child(8) { width: 14%; }
 .activityTable td small { display: block; margin-top: 4px; color: var(--color-muted); }
 .activityTable td:last-child button { white-space: nowrap; }
@@ -29,7 +35,7 @@
 .actions { display: flex; justify-content: flex-end; gap: var(--space-3); }
 .error { color: var(--color-red-600) !important; }
 
-@media (max-width: 1359px) {
+@media (max-width: 599px) {
   .activityList {
     margin-inline: 0;
     overflow: visible;
@@ -42,6 +48,8 @@
     display: block;
     width: 100%;
   }
+
+  .activityTable { min-width: 0; }
 
   .activityTable thead {
     position: absolute;
