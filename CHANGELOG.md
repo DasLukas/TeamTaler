@@ -4,6 +4,12 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-07
+
+### Fixed
+
+- Corrected the PayPal payment-method migration to suspend and restore ledger immutability triggers transactionally while rebuilding the constrained payment table, with regression coverage matching production schemas.
+
 ## [0.5.0] - 2026-08-06
 
 ### Added
@@ -94,7 +100,8 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Explicit acting and charged membership display for every booking, including searchable third-party-assignment cues.
 - Canonical backup-entry allowlisting, target-width Argon2 parameter parsing, and directory-confined SPA asset serving with traversal regression coverage.
 
-[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/DasLukas/TeamTaler/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/DasLukas/TeamTaler/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/DasLukas/TeamTaler/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/DasLukas/TeamTaler/compare/v0.2.0...v0.3.0

@@ -7,6 +7,9 @@ SELECT id, group_id, period_id, membership_id, category_id, booking_id, payment_
        reversal_of, account, amount_minor, description, created_at
 FROM ledger_entries;
 
+DROP TRIGGER IF EXISTS ledger_entries_no_update;
+DROP TRIGGER IF EXISTS ledger_entries_no_delete;
+
 DELETE FROM ledger_entries WHERE reversal_of IS NOT NULL;
 DELETE FROM ledger_entries;
 DROP TABLE payment_allocations;
@@ -100,6 +103,11 @@ CREATE INDEX ledger_group_member_idx ON ledger_entries(group_id, membership_id, 
 CREATE INDEX ledger_booking_idx ON ledger_entries(booking_id);
 CREATE INDEX ledger_payment_idx ON ledger_entries(payment_id);
 CREATE UNIQUE INDEX ledger_one_reversal_idx ON ledger_entries(reversal_of) WHERE reversal_of IS NOT NULL;
+
+CREATE TRIGGER ledger_entries_no_update
+BEFORE UPDATE ON ledger_entries BEGIN SELECT RAISE(ABORT, 'ledger entries are immutable'); END;
+CREATE TRIGGER ledger_entries_no_delete
+BEFORE DELETE ON ledger_entries BEGIN SELECT RAISE(ABORT, 'ledger entries are immutable'); END;
 
 DROP TABLE payment_allocations_0013_backup;
 DROP TABLE ledger_entries_0013_backup;
