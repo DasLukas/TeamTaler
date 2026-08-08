@@ -41,8 +41,8 @@ export function BookingPage() {
   const selectedCategory = bookableCategories.find((category) => category.id === selectedProduct?.categoryId);
   const currentMembership = activeMembers.find((member) => member.userId === session.user.id) ?? activeMembers[0];
   const hasBookableProducts = bookableCategories.some((category) => category.products.length > 0);
-  const activeRoles = session.groups.find((group) => group.id === activeGroupId)?.membership?.roles ?? [];
-  const canManageCatalog = hasGroupCapability(activeRoles, 'catalog');
+  const activeGrants = session.groups.find((group) => group.id === activeGroupId)?.membership?.effectiveGrants;
+  const canManageCatalog = hasGroupCapability(activeGrants, 'catalog');
 
   const clearSelection = () => {
     setSelectedProductId('');

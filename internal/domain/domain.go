@@ -43,7 +43,9 @@ func (e ValidationError) Error() string {
 // Unwrap classifies ValidationError as ErrValidation.
 func (e ValidationError) Unwrap() error { return ErrValidation }
 
-// Role is a cumulative group-level capability.
+// Role is a deprecated legacy role identifier retained for v1 compatibility.
+// New authorization decisions must use PermissionKey values resolved through
+// assigned RoleDefinition records instead of inspecting this value.
 type Role string
 
 const (
@@ -69,6 +71,133 @@ const (
 	PermissionSelfRecordPayment GroupPermission = "SELF_RECORD_PAYMENT"
 )
 
+// PermissionKey identifies one stable, group-authorized application capability.
+// Permission keys are persisted and compared directly; role names must never be
+// used for authorization decisions.
+type PermissionKey string
+
+const (
+	// PermissionGroupAdministration permits group, membership, invitation, and
+	// protected administrator-assignment management.
+	PermissionGroupAdministration PermissionKey = "GROUP_ADMINISTRATION"
+	// PermissionRoleManagement permits role, grant, and unprotected assignment management.
+	PermissionRoleManagement PermissionKey = "ROLE_MANAGEMENT"
+	// PermissionFinanceManagement permits access to group financial management functions.
+	PermissionFinanceManagement PermissionKey = "FINANCE_MANAGEMENT"
+	// PermissionCatalogManagement permits category and product management.
+	PermissionCatalogManagement PermissionKey = "CATALOG_MANAGEMENT"
+	// PermissionViewAllBookingActivity permits viewing every identified group booking in the activity feed.
+	PermissionViewAllBookingActivity PermissionKey = "VIEW_ALL_BOOKING_ACTIVITY"
+	// PermissionRecordOwnPayment permits self-service payment recording for the current member.
+	PermissionRecordOwnPayment PermissionKey = "RECORD_OWN_PAYMENT"
+	// PermissionCreateOwnBooking permits creating bookings that charge the current membership.
+	PermissionCreateOwnBooking PermissionKey = "CREATE_OWN_BOOKING"
+	// PermissionVoidOwnBooking permits voiding bookings where the current membership
+	// is either the booking actor or target.
+	PermissionVoidOwnBooking PermissionKey = "VOID_OWN_BOOKING"
+	// PermissionVoidAnyBooking permits voiding every booking in the group.
+	PermissionVoidAnyBooking PermissionKey = "VOID_ANY_BOOKING"
+	// PermissionBookForOthers permits creating bookings targeting another active member.
+	PermissionBookForOthers PermissionKey = "BOOK_FOR_OTHERS"
+)
+
+// PermissionScopeType identifies the resource boundary attached to a permission grant.
+// CATEGORY and PRODUCT are reserved by the schema for future policy versions; v1
+// mutation APIs accept GROUP grants only.
+type PermissionScopeType string
+
+const (
+	// PermissionScopeGroup applies a grant to every applicable resource in one group.
+	PermissionScopeGroup PermissionScopeType = "GROUP"
+	// PermissionScopeCategory reserves a grant for one category.
+	PermissionScopeCategory PermissionScopeType = "CATEGORY"
+	// PermissionScopeProduct reserves a grant for one product.
+	PermissionScopeProduct PermissionScopeType = "PRODUCT"
+)
+
+// PermissionScope describes where a PermissionGrant applies.
+// CategoryID is required only for CATEGORY and ProductID only for PRODUCT. In
+// v1, callers create group scopes with PermissionScope{Type: PermissionScopeGroup}.
+type PermissionScope struct {
+	Type       PermissionScopeType `json:"type"`
+	CategoryID string              `json:"categoryId,omitempty"`
+	ProductID  string              `json:"productId,omitempty"`
+}
+
+// PermissionGrant assigns one stable permission to one resource scope.
+// Permission is validated against the supported permission definitions and Scope
+// is GROUP-only in v1 mutation paths.
+type PermissionGrant struct {
+	Permission PermissionKey   `json:"permission"`
+	Scope      PermissionScope `json:"scope"`
+}
+
+// PermissionDefinition describes one supported permission and its calculated implications.
+// ImpliedPermissions is informational for clients; authorization calculates the
+// same closure server-side and does not persist redundant implied grants.
+type PermissionDefinition struct {
+	Key                PermissionKey   `json:"key"`
+	Description        string          `json:"description"`
+	ImpliedPermissions []PermissionKey `json:"impliedPermissions"`
+}
+
+// RolePresetKey identifies a seeded role template independently from its editable display name.
+// Only the group-administrator preset has a locked name; preset keys themselves
+// are immutable once a role is created.
+type RolePresetKey string
+
+const (
+	// RolePresetGroupAdministrator identifies the required protected administrator role.
+	RolePresetGroupAdministrator RolePresetKey = "GROUP_ADMINISTRATOR"
+	// RolePresetMember identifies the editable starter role seeded for new groups.
+	RolePresetMember RolePresetKey = "MEMBER"
+	// RolePresetFinanceManager identifies the optional seeded finance role.
+	RolePresetFinanceManager RolePresetKey = "FINANCE_MANAGER"
+	// RolePresetCatalogManager identifies the optional seeded catalog role.
+	RolePresetCatalogManager RolePresetKey = "CATALOG_MANAGER"
+)
+
+// RoleDefinition is one group-owned, versioned collection of permission grants.
+// ID is stable, PresetKey is empty for custom roles, and Version is the optimistic
+// concurrency token used for role updates.
+type RoleDefinition struct {
+	ID          string            `json:"id"`
+	GroupID     string            `json:"groupId"`
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	PresetKey   RolePresetKey     `json:"presetKey,omitempty"`
+	NameLocked  bool              `json:"nameLocked"`
+	Deletable   bool              `json:"deletable"`
+	Version     int64             `json:"version"`
+	Grants      []PermissionGrant `json:"grants"`
+	CreatedAt   string            `json:"createdAt"`
+	UpdatedAt   string            `json:"updatedAt"`
+}
+
+// RoleAssignmentTargetType identifies whether a role assignment belongs to an
+// active membership or to a pending invitation.
+type RoleAssignmentTargetType string
+
+const (
+	// RoleAssignmentMembership identifies an active membership assignment.
+	RoleAssignmentMembership RoleAssignmentTargetType = "MEMBERSHIP"
+	// RoleAssignmentInvitation identifies a pending invitation assignment.
+	RoleAssignmentInvitation RoleAssignmentTargetType = "INVITATION"
+)
+
+// RoleAssignment links one role to a membership or invitation target.
+// Version belongs to the assignment row; collection replacement uses the target's
+// roleAssignmentsVersion value as its optimistic concurrency token.
+type RoleAssignment struct {
+	GroupID    string                   `json:"groupId"`
+	RoleID     string                   `json:"roleId"`
+	TargetType RoleAssignmentTargetType `json:"targetType"`
+	TargetID   string                   `json:"targetId"`
+	AssignedAt string                   `json:"assignedAt"`
+	AssignedBy string                   `json:"assignedBy,omitempty"`
+	Version    int64                    `json:"version"`
+}
+
 // Principal describes an authenticated user and their current session.
 type Principal struct {
 	UserID      string
@@ -81,16 +210,19 @@ type Principal struct {
 
 // Membership describes one user's participation in a group.
 type Membership struct {
-	ID               string                          `json:"id"`
-	GroupID          string                          `json:"groupId"`
-	UserID           string                          `json:"userId"`
-	Email            string                          `json:"email"`
-	DisplayName      string                          `json:"displayName"`
-	AvatarURL        string                          `json:"avatarUrl,omitempty"`
-	Status           string                          `json:"status"`
-	Roles            []Role                          `json:"roles"`
-	GroupPermissions []GroupPermission               `json:"groupPermissions"`
-	CategoryGrants   map[string][]CategoryPermission `json:"categoryGrants"`
+	ID                     string                          `json:"id"`
+	GroupID                string                          `json:"groupId"`
+	UserID                 string                          `json:"userId"`
+	Email                  string                          `json:"email"`
+	DisplayName            string                          `json:"displayName"`
+	AvatarURL              string                          `json:"avatarUrl,omitempty"`
+	Status                 string                          `json:"status"`
+	Roles                  []Role                          `json:"roles"`
+	GroupPermissions       []GroupPermission               `json:"groupPermissions"`
+	CategoryGrants         map[string][]CategoryPermission `json:"categoryGrants"`
+	RoleIDs                []string                        `json:"roleIds"`
+	EffectiveGrants        []PermissionGrant               `json:"effectiveGrants"`
+	RoleAssignmentsVersion int64                           `json:"roleAssignmentsVersion"`
 }
 
 // Group is the top-level isolation and accounting boundary.
@@ -103,10 +235,10 @@ type Group struct {
 }
 
 // GroupSettings contains administrator-managed behavior shared by every member
-// of one group. New group-wide switches are added as explicit typed fields.
+// of one group.
 type GroupSettings struct {
-	MembersCanViewAllBookings bool `json:"membersCanViewAllBookings"`
-	NotificationEmailsEnabled bool `json:"notificationEmailsEnabled"`
+	NotificationEmailsEnabled bool    `json:"notificationEmailsEnabled"`
+	DefaultRoleID             *string `json:"defaultRoleId"`
 }
 
 // CategoryIcon identifies one supported visual category marker.
@@ -192,24 +324,26 @@ type Product struct {
 
 // Booking is an immutable charge snapshot with optional reversal metadata.
 type Booking struct {
-	ID                 string  `json:"id"`
-	GroupID            string  `json:"groupId"`
-	PeriodID           string  `json:"periodId"`
-	CategoryID         string  `json:"categoryId"`
-	ProductID          string  `json:"productId"`
-	ActorMembershipID  string  `json:"actorMembershipId"`
-	TargetMembershipID string  `json:"targetMembershipId"`
-	Quantity           int     `json:"quantity"`
-	UnitPriceMinor     int64   `json:"unitPriceMinor,string"`
-	TotalMinor         int64   `json:"totalMinor,string"`
-	Currency           string  `json:"currency"`
-	ProductName        string  `json:"productName"`
-	CategoryName       string  `json:"categoryName"`
-	Reason             string  `json:"reason,omitempty"`
-	CreatedAt          string  `json:"createdAt"`
-	VoidedAt           *string `json:"voidedAt,omitempty"`
-	VoidReason         string  `json:"voidReason,omitempty"`
-	CanVoid            bool    `json:"canVoid"`
+	ID                     string  `json:"id"`
+	GroupID                string  `json:"groupId"`
+	PeriodID               string  `json:"periodId"`
+	CategoryID             string  `json:"categoryId"`
+	ProductID              string  `json:"productId"`
+	ActorMembershipID      string  `json:"actorMembershipId"`
+	TargetMembershipID     string  `json:"targetMembershipId"`
+	Quantity               int     `json:"quantity"`
+	UnitPriceMinor         int64   `json:"unitPriceMinor,string"`
+	TotalMinor             int64   `json:"totalMinor,string"`
+	Currency               string  `json:"currency"`
+	ProductName            string  `json:"productName"`
+	CategoryName           string  `json:"categoryName"`
+	Reason                 string  `json:"reason,omitempty"`
+	CreatedAt              string  `json:"createdAt"`
+	VoidedAt               *string `json:"voidedAt,omitempty"`
+	VoidReason             string  `json:"voidReason,omitempty"`
+	CanVoid                bool    `json:"canVoid"`
+	VoidReasonRequired     bool    `json:"voidReasonRequired"`
+	VoidWithoutReasonUntil *string `json:"voidWithoutReasonUntil,omitempty"`
 }
 
 // Payment records received money and its period allocations.

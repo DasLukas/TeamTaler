@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/DasLukas/TeamTaler/internal/audit"
+	"github.com/DasLukas/TeamTaler/internal/authorization"
 	"github.com/DasLukas/TeamTaler/internal/domain"
-	"github.com/DasLukas/TeamTaler/internal/groups"
 	"github.com/DasLukas/TeamTaler/internal/idempotency"
 	"github.com/DasLukas/TeamTaler/internal/media"
 	"github.com/DasLukas/TeamTaler/internal/platform"
@@ -71,6 +71,20 @@ type ReorderInput struct {
 
 const maxCatalogOrderItems = 1000
 
+// requireCatalogManagement evaluates the current persisted role union against
+// the catalog-management permission. Passing a transaction makes revocation and
+// the protected mutation serialize in the same SQLite write transaction.
+func requireCatalogManagement(ctx context.Context, queryer authorization.Queryer, membership domain.Membership) error {
+	allowed, err := authorization.NewPolicy(queryer).Can(ctx, membership.GroupID, membership.ID, domain.PermissionCatalogManagement, authorization.ResourceContext{GroupID: membership.GroupID})
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return domain.ErrForbidden
+	}
+	return nil
+}
+
 // List returns all categories and products for groupID in display order. ctx
 // bounds database access; an empty slice is valid and SQL errors propagate.
 func (s Service) List(ctx context.Context, groupID string) ([]domain.Category, error) {
@@ -119,8 +133,8 @@ func (s Service) List(ctx context.Context, groupID string) ([]domain.Category, e
 // ctx bounds the audited transaction and actor supplies audit identity. It
 // returns the Category or forbidden, validation, audit, and database errors.
 func (s Service) CreateCategory(ctx context.Context, actor domain.Principal, membership domain.Membership, input CreateCategoryInput) (domain.Category, error) {
-	if !groups.HasRole(membership, domain.RoleCatalogManager) {
-		return domain.Category{}, domain.ErrForbidden
+	if err := requireCatalogManagement(ctx, s.DB, membership); err != nil {
+		return domain.Category{}, err
 	}
 	input.Name = strings.TrimSpace(input.Name)
 	if input.Name == "" || len(input.Name) > 120 {
@@ -133,6 +147,9 @@ func (s Service) CreateCategory(ctx context.Context, actor domain.Principal, mem
 	now := platform.Timestamp(platform.Now())
 	var item domain.Category
 	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		if err := requireCatalogManagement(ctx, tx, membership); err != nil {
+			return err
+		}
 		if err := tx.QueryRowContext(ctx, `SELECT coalesce(max(sort_order),-1)+1 FROM categories WHERE group_id=?`, membership.GroupID).Scan(&input.SortOrder); err != nil {
 			return err
 		}
@@ -150,8 +167,8 @@ func (s Service) CreateCategory(ctx context.Context, actor domain.Principal, mem
 // for optimistic concurrency. It returns the updated Category or forbidden,
 // validation, not-found, precondition, audit, and storage errors.
 func (s Service) UpdateCategory(ctx context.Context, actor domain.Principal, membership domain.Membership, categoryID string, input UpdateCategoryInput) (domain.Category, error) {
-	if !groups.HasRole(membership, domain.RoleCatalogManager) {
-		return domain.Category{}, domain.ErrForbidden
+	if err := requireCatalogManagement(ctx, s.DB, membership); err != nil {
+		return domain.Category{}, err
 	}
 	input.Name = strings.TrimSpace(input.Name)
 	if input.Name == "" || len(input.Name) > 120 || input.Version < 1 {
@@ -163,6 +180,9 @@ func (s Service) UpdateCategory(ctx context.Context, actor domain.Principal, mem
 	now := platform.Timestamp(platform.Now())
 	var item domain.Category
 	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		if err := requireCatalogManagement(ctx, tx, membership); err != nil {
+			return err
+		}
 		result, err := tx.ExecContext(ctx, `UPDATE categories SET name=?,icon=?,active=?,sort_order=?,version=version+1,updated_at=? WHERE id=? AND group_id=? AND version=?`,
 			input.Name, input.Icon, input.Active, input.SortOrder, now, categoryID, membership.GroupID, input.Version)
 		if err != nil {
@@ -190,13 +210,16 @@ func (s Service) UpdateCategory(ctx context.Context, actor domain.Principal, mem
 // the same audited transaction. It returns forbidden, not-found, precondition,
 // conflict, audit, and storage errors.
 func (s Service) DeleteCategory(ctx context.Context, actor domain.Principal, membership domain.Membership, categoryID string, version int64) error {
-	if !groups.HasRole(membership, domain.RoleCatalogManager) {
-		return domain.ErrForbidden
+	if err := requireCatalogManagement(ctx, s.DB, membership); err != nil {
+		return err
 	}
 	if version < 1 {
 		return domain.ValidationError{Field: "version", Message: "must be a positive integer"}
 	}
 	return storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		if err := requireCatalogManagement(ctx, tx, membership); err != nil {
+			return err
+		}
 		var item domain.Category
 		if err := tx.QueryRowContext(ctx, `SELECT id,group_id,name,icon,active,sort_order,version FROM categories WHERE id=? AND group_id=?`, categoryID, membership.GroupID).
 			Scan(&item.ID, &item.GroupID, &item.Name, &item.Icon, &item.Active, &item.SortOrder, &item.Version); errors.Is(err, sql.ErrNoRows) {
@@ -256,8 +279,8 @@ func (s Service) DeleteCategory(ctx context.Context, actor domain.Principal, mem
 // protects retries. It returns the created or replayed Product, or forbidden,
 // validation, not-found, idempotency, audit, and database errors.
 func (s Service) CreateProduct(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey, categoryID string, input CreateProductInput) (domain.Product, error) {
-	if !groups.HasRole(membership, domain.RoleCatalogManager) {
-		return domain.Product{}, domain.ErrForbidden
+	if err := requireCatalogManagement(ctx, s.DB, membership); err != nil {
+		return domain.Product{}, err
 	}
 	if err := idempotency.ValidateKey(idempotencyKey); err != nil {
 		return domain.Product{}, err
@@ -277,6 +300,9 @@ func (s Service) CreateProduct(ctx context.Context, actor domain.Principal, memb
 	}
 	var item domain.Product
 	err = storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		if err := requireCatalogManagement(ctx, tx, membership); err != nil {
+			return err
+		}
 		found, err := idempotency.Load(ctx, tx, membership.GroupID, actor.UserID, idempotencyKey, requestHash, &item)
 		if err != nil || found {
 			return err
@@ -315,8 +341,8 @@ func (s Service) CreateProduct(ctx context.Context, actor domain.Principal, memb
 // dropping newly created catalog items. It returns forbidden, validation,
 // audit, and database errors.
 func (s Service) Reorder(ctx context.Context, actor domain.Principal, membership domain.Membership, input ReorderInput) error {
-	if !groups.HasRole(membership, domain.RoleCatalogManager) {
-		return domain.ErrForbidden
+	if err := requireCatalogManagement(ctx, s.DB, membership); err != nil {
+		return err
 	}
 	if input.CategoryIDs == nil || input.ProductIDsByCategory == nil {
 		return domain.ValidationError{Field: "catalogOrder", Message: "categoryIds and productIdsByCategory are required"}
@@ -326,6 +352,9 @@ func (s Service) Reorder(ctx context.Context, actor domain.Principal, membership
 	}
 	now := platform.Timestamp(platform.Now())
 	return storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		if err := requireCatalogManagement(ctx, tx, membership); err != nil {
+			return err
+		}
 		categoryRows, err := tx.QueryContext(ctx, `SELECT id FROM categories WHERE group_id=?`, membership.GroupID)
 		if err != nil {
 			return err
@@ -430,8 +459,8 @@ func (s Service) Reorder(ctx context.Context, actor domain.Principal, membership
 // affecting historical booking snapshots. It returns the updated Product or
 // forbidden, validation, not-found, precondition, audit, and storage errors.
 func (s Service) UpdateProduct(ctx context.Context, actor domain.Principal, membership domain.Membership, productID string, input UpdateProductInput) (domain.Product, error) {
-	if !groups.HasRole(membership, domain.RoleCatalogManager) {
-		return domain.Product{}, domain.ErrForbidden
+	if err := requireCatalogManagement(ctx, s.DB, membership); err != nil {
+		return domain.Product{}, err
 	}
 	input.Name = strings.TrimSpace(input.Name)
 	if input.Name == "" || len(input.Name) > 120 || input.Version < 1 {
@@ -445,6 +474,9 @@ func (s Service) UpdateProduct(ctx context.Context, actor domain.Principal, memb
 	now := platform.Timestamp(platform.Now())
 	var item domain.Product
 	err = storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		if err := requireCatalogManagement(ctx, tx, membership); err != nil {
+			return err
+		}
 		result, err := tx.ExecContext(ctx, `UPDATE products SET name=?,price_minor=?,pricing_mode=?,active=?,sort_order=?,version=version+1,updated_at=? WHERE id=? AND group_id=? AND version=? AND deleted_at IS NULL`,
 			input.Name, input.PriceMinor, input.PricingMode, input.Active, input.SortOrder, now, productID, membership.GroupID, input.Version)
 		if err != nil {
@@ -476,13 +508,16 @@ func (s Service) UpdateProduct(ctx context.Context, actor domain.Principal, memb
 // replays and the product image reference are removed atomically. It returns
 // forbidden, not-found, precondition, conflict, audit, and storage errors.
 func (s Service) DeleteProduct(ctx context.Context, actor domain.Principal, membership domain.Membership, productID string, version int64) error {
-	if !groups.HasRole(membership, domain.RoleCatalogManager) {
-		return domain.ErrForbidden
+	if err := requireCatalogManagement(ctx, s.DB, membership); err != nil {
+		return err
 	}
 	if version < 1 {
 		return domain.ValidationError{Field: "version", Message: "must be a positive integer"}
 	}
 	return storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		if err := requireCatalogManagement(ctx, tx, membership); err != nil {
+			return err
+		}
 		var item domain.Product
 		var imageKey sql.NullString
 		if err := tx.QueryRowContext(ctx, `SELECT p.id,p.group_id,p.category_id,p.name,p.price_minor,p.pricing_mode,g.currency,p.image_key,p.active,p.sort_order,p.version
@@ -562,14 +597,17 @@ func validateProductPricing(pricingMode domain.ProductPricingMode, priceMinor *i
 // not-found, audit, and database errors. Request paths must not delete content
 // hashes because a concurrent transaction may begin referencing them.
 func (s Service) SetProductImage(ctx context.Context, actor domain.Principal, membership domain.Membership, productID, imageKey string) (string, string, error) {
-	if !groups.HasRole(membership, domain.RoleCatalogManager) {
-		return "", "", domain.ErrForbidden
+	if err := requireCatalogManagement(ctx, s.DB, membership); err != nil {
+		return "", "", err
 	}
 	if !media.ValidImageKey(imageKey) {
 		return "", "", domain.ValidationError{Field: "image", Message: "has an invalid storage key"}
 	}
 	var replacedKey string
 	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		if err := requireCatalogManagement(ctx, tx, membership); err != nil {
+			return err
+		}
 		var previous sql.NullString
 		if err := tx.QueryRowContext(ctx, `SELECT image_key FROM products WHERE id=? AND group_id=? AND deleted_at IS NULL`, productID, membership.GroupID).Scan(&previous); errors.Is(err, sql.ErrNoRows) {
 			return domain.ErrNotFound

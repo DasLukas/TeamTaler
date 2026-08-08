@@ -7,7 +7,7 @@ import type { Membership, Period, Product } from '@/api/types';
 import i18n from '@/i18n';
 import { BookingInspector } from './BookingInspector';
 
-const apiMock = vi.hoisted(() => ({ createBooking: vi.fn() }));
+const apiMock = vi.hoisted(() => ({ createBookings: vi.fn() }));
 
 vi.mock('@/api/client', () => ({ api: apiMock }));
 
@@ -38,6 +38,10 @@ const members: Membership[] = [
     email: 'actor@example.test',
     initials: 'AM',
     roles: ['MEMBER'],
+    effectiveGrants: [
+      { permission: 'CREATE_OWN_BOOKING', scope: { type: 'GROUP' } },
+      { permission: 'BOOK_FOR_OTHERS', scope: { type: 'GROUP' } },
+    ],
     groupPermissions: [],
     categoryPermissions: [{ categoryId: product.categoryId, assignToOthers: true, voidBookings: false }],
     active: true,
@@ -74,7 +78,7 @@ function renderInspector(selectedProduct: Product = product): void {
 describe('BookingInspector category-neutral booking rules', () => {
   it('releases the selected product for another booking after showing confirmation', async () => {
     const user = userEvent.setup();
-    apiMock.createBooking.mockResolvedValue({ id: 'booking-created' });
+    apiMock.createBookings.mockResolvedValue([{ id: 'booking-created' }]);
     renderInspector();
 
     await user.click(screen.getByRole('button', { name: i18n.t('booking.increaseQuantity') }));
@@ -86,31 +90,34 @@ describe('BookingInspector category-neutral booking rules', () => {
     expect(screen.getByRole('status')).toHaveTextContent('1');
 
     await user.click(releasedSubmit);
-    expect(apiMock.createBooking).toHaveBeenCalledTimes(2);
+    expect(apiMock.createBookings).toHaveBeenCalledTimes(2);
   });
 
   it('requires a reason for every third-party booking while retaining quantity', async () => {
     const user = userEvent.setup();
-    apiMock.createBooking.mockResolvedValue({ id: 'booking-created' });
+    apiMock.createBookings.mockResolvedValue([{ id: 'booking-created' }]);
     renderInspector();
 
-    await user.selectOptions(screen.getByLabelText(i18n.t('booking.forMember')), 'member-target');
+    await user.click(screen.getByRole('button', { name: i18n.t('booking.forMember') }));
+    await user.click(screen.getByRole('checkbox', { name: /Target Member/ }));
 
-    const submit = screen.getByRole('button', { name: i18n.t('booking.submit') });
+    const submit = screen.getByRole('button', { name: i18n.t('booking.submitMultiple', { count: 2 }) });
     expect(screen.getByLabelText(i18n.t('booking.reason'))).toBeRequired();
     expect(screen.getByText(i18n.t('booking.quantity'))).toBeVisible();
     expect(submit).toBeDisabled();
 
     await user.type(screen.getByLabelText(i18n.t('booking.reason')), 'Shared team purchase');
     await user.click(screen.getByRole('button', { name: i18n.t('booking.increaseQuantity') }));
+    expect(screen.getByText(i18n.t('booking.combinedTotal', { count: 2 }))).toBeVisible();
+    expect(screen.getByText(/2,00.*pro Mitglied/)).toBeVisible();
     await user.click(submit);
 
-    expect(apiMock.createBooking).toHaveBeenCalledWith('group-a', {
+    expect(apiMock.createBookings).toHaveBeenCalledWith('group-a', {
       productId: product.id,
       productVersion: product.version,
       expectedPeriodId: period.id,
       quantity: 2,
-      targetMembershipId: 'member-target',
+      targetMembershipIds: ['member-actor', 'member-target'],
       reason: 'Shared team purchase',
     });
   });
@@ -124,7 +131,7 @@ describe('BookingInspector category-neutral booking rules', () => {
       pricingMode: 'USER_DEFINED',
       price: undefined,
     };
-    apiMock.createBooking.mockResolvedValue({ id: 'booking-created' });
+    apiMock.createBookings.mockResolvedValue([{ id: 'booking-created' }]);
     renderInspector(customProduct);
 
     const priceInput = screen.getByLabelText(i18n.t('booking.unitPrice', { currency: 'EUR' }));
@@ -140,13 +147,13 @@ describe('BookingInspector category-neutral booking rules', () => {
     await user.click(screen.getByRole('button', { name: i18n.t('booking.increaseQuantity') }));
     await user.click(submit);
 
-    expect(apiMock.createBooking).toHaveBeenCalledWith('group-a', {
+    expect(apiMock.createBookings).toHaveBeenCalledWith('group-a', {
       productId: customProduct.id,
       productVersion: customProduct.version,
       expectedPeriodId: period.id,
       quantity: 2,
       unitPrice: { minorUnits: '250', currency: 'EUR' },
-      targetMembershipId: undefined,
+      targetMembershipIds: ['member-actor'],
       reason: undefined,
     });
   });

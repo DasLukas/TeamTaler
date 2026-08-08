@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/DasLukas/TeamTaler/internal/auth"
+	"github.com/DasLukas/TeamTaler/internal/authorization"
 	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/groups"
 	"github.com/DasLukas/TeamTaler/internal/memberimport"
@@ -29,7 +31,8 @@ func TestHandleCreateInvitationQueuesEmailAndReturnsFallbackURL(t *testing.T) {
 		t.Fatalf("parse public URL: %v", err)
 	}
 	server.config.PublicURL = publicURL
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+membership.GroupID+"/invitations", bytes.NewBufferString(`{"email":"manual@example.test","displayName":"Manual Member","roles":[]}`))
+	memberRoleID := authorization.PresetRoleID(membership.GroupID, domain.RolePresetMember)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+membership.GroupID+"/invitations", bytes.NewBufferString(fmt.Sprintf(`{"email":"manual@example.test","displayName":"Manual Member","roleIds":[%q]}`, memberRoleID)))
 	request.Header.Set("Content-Type", "application/json")
 	request.SetPathValue("groupID", membership.GroupID)
 	request = request.WithContext(context.WithValue(request.Context(), principalKey, principal))
@@ -107,6 +110,27 @@ func TestHandleImportInvitationsQueuesValidRows(t *testing.T) {
 	}
 	if strings.Contains(response.Body.String(), "token") {
 		t.Fatalf("response contains token material: %s", response.Body.String())
+	}
+}
+
+func TestHandleImportInvitationsUsesDefaultRoleWithoutQueryParameter(t *testing.T) {
+	t.Parallel()
+
+	server, principal, membership := invitationImportServer(t, true)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+membership.GroupID+"/invitations/import", bytes.NewBufferString("email,roles\ndefault@example.test,\nfinance@example.test,Finance manager\n"))
+	request.Header.Set("Content-Type", "text/csv")
+	request.Header.Set("Idempotency-Key", "csv-default-role-test")
+	request.SetPathValue("groupID", membership.GroupID)
+	request = request.WithContext(context.WithValue(request.Context(), principalKey, principal))
+	response := httptest.NewRecorder()
+
+	server.handleImportInvitations(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var result groups.InvitationImportResult
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil || result.Summary.Created != 2 {
+		t.Fatalf("result=%#v err=%v", result, err)
 	}
 }
 
@@ -200,7 +224,7 @@ func invitationImportServer(t *testing.T, emailEnabled bool) (*Server, domain.Pr
 }
 
 func invitationImportRequest(principal domain.Principal, groupID, body, contentType string) *http.Request {
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+groupID+"/invitations/import", bytes.NewBufferString(body))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+groupID+"/invitations/import?roleId="+url.QueryEscape(authorization.PresetRoleID(groupID, domain.RolePresetMember)), bytes.NewBufferString(body))
 	request.Header.Set("Content-Type", contentType)
 	request.Header.Set("Idempotency-Key", "csv-import-test-key")
 	request.SetPathValue("groupID", groupID)

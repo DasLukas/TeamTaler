@@ -101,18 +101,24 @@ func serve(arguments []string) error {
 		if err != nil {
 			return err
 		}
+		publicJoinDispatcher, err := email.NewPublicJoinDispatcher(db, sender, tokenBox, cfg.PublicURL, slog.Default())
+		if err != nil {
+			return err
+		}
 		workerErrors := make(chan error, 1)
 		emailWorkerErrors = workerErrors
 		go func() {
 			dispatchContext, cancelDispatch := context.WithCancel(processContext)
 			defer cancelDispatch()
-			results := make(chan error, 2)
+			results := make(chan error, 3)
 			go func() { results <- dispatcher.Run(dispatchContext) }()
 			go func() { results <- notificationDispatcher.Run(dispatchContext) }()
+			go func() { results <- publicJoinDispatcher.Run(dispatchContext) }()
 			first := <-results
 			cancelDispatch()
 			second := <-results
-			workerErrors <- errors.Join(first, second)
+			third := <-results
+			workerErrors <- errors.Join(first, second, third)
 		}()
 	}
 	server := &http.Server{

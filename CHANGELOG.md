@@ -4,6 +4,48 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+### Added
+
+- Group-owned, many-to-many roles with stable identifiers, cumulative permission grants, multiple roles per membership or pending invitation, four seeded starter roles, and a role-centered administration workflow.
+- Ten stable group permission keys covering group administration, role management, finance, catalog, complete booking activity, own-account payments, own booking creation, own or arbitrary booking reversal, and booking for other members.
+- Additive v1 role, permission-definition, and role-assignment endpoints with optimistic ETag concurrency control and tenant-bound identifiers.
+- A scope-aware permission-grant contract that stores `GROUP`, `CATEGORY`, and `PRODUCT` scope shapes while accepting only group-wide grants in v1.
+- A group-owned default role that preselects manual invitations and safely supplies CSV rows without an explicit role value.
+- Administrator-managed public join links with configurable finite or unlimited lifetime, local QR generation and download, copy support, immediate disable, and token rotation.
+- Email-verified public registration for new accounts plus authenticated direct joining and archived-membership reactivation for existing accounts.
+- An accessible multi-choice booking target dropdown plus an additive atomic batch-booking endpoint for applying one product, quantity, price, and reason to multiple members.
+
+### Changed
+
+- Moved role assignment from the role-definition workspace into responsive member and pending-invitation directories with compact multi-select triggers, explicit draft confirmation, optimistic-conflict refresh, and protected last-administrator controls. Unchanged preset descriptions are localized in the German interface without overwriting stored canonical values.
+- Made `MEMBER`, `FINANCE_MANAGER`, and `CATALOG_MANAGER` ordinary editable and deletable starter roles, removed implicit member-role assignment, and require every active membership and pending invitation to retain at least one explicit role.
+- Added `CREATE_OWN_BOOKING` as the independent self-booking capability. Booking navigation and target choices now reflect `CREATE_OWN_BOOKING` and `BOOK_FOR_OTHERS`, while permission-less finance or catalog roles remain possible.
+- Kept manual invitation roles explicit while preselecting the configured default. CSV imports now accept case-insensitive role names per row, use `|` for multiple roles, and fall back to the safe group default; the former shared `roleId` parameter remains compatible.
+- Users with `BOOK_FOR_OTHERS` can select multiple active targets while retaining their own membership as the default when `CREATE_OWN_BOOKING` is also effective; the confirmation shows per-member and combined totals.
+- Added deterministic permission-aware landing routes and documented that overview information and actions are filtered by effective permissions.
+- Removed the deprecated booking-activity group-settings adapter and its base-role version field; activity visibility is managed only through role grants.
+- Simplified role editing to one direct Save action and removed implementation-specific scope guidance from the user interface.
+- Kept role-assignment actions visible while constraining overflow to the role list in desktop popovers and mobile sheets.
+- Stacked the role selector above the permission editor on medium-width displays so editor controls remain readable and unclipped.
+- Constrained long role titles to their own selector card with accessible hover text instead of allowing them to overlap adjacent roles.
+- Replaced redundant preset and locked-name labels with a clearly disabled visual state for immutable role-name fields.
+- Reduced the permission editor heading to its essential label by removing redundant scope and role-union helper text.
+- Removed the redundant explanatory badge from the arbitrary-booking-reversal permission while retaining computed permission implications.
+- Aligned the duplicate-role action with the role title across desktop, medium-width, and mobile editor layouts.
+- Removed non-interactive information icons from permission rows and reclaimed their unused layout column.
+- Replaced authorization decisions based on legacy role names, direct group permissions, and category grants with a centralized effective-permission policy. Effective permissions are the union of assigned role grants; `VOID_ANY_BOOKING` implies `VOID_OWN_BOOKING` and `VIEW_ALL_BOOKING_ACTIVITY`.
+- Preserved legacy v1 role and self-payment fields as deprecated adapters. Legacy preset writes leave custom roles intact, while non-empty legacy category-grant writes now fail validation instead of silently widening access.
+- Booking responses now expose whether the current member may reverse a booking, whether a reason is required, and the optional end of the actor-only 30-second reason-free window. `VOID_OWN_BOOKING` covers both actor- and target-related bookings, while an incoming third-party booking always requires a reversal reason.
+- Migration `0017` maps existing administrator, finance, catalog, self-payment, activity-visibility, active-membership, and open-invitation state into roles. Legacy membership and invitation category grants are intentionally removed rather than converted to unsafe group-wide access.
+
+### Security
+
+- Protected the reserved group-administrator role, its fixed identity, and its non-removable core grants, and require every group to retain at least one active assignment of that exact role.
+- Revalidate permissions and last-administrator invariants inside serialized SQLite write transactions so revocation is immediate and concurrent demotions or archival cannot lock a group out.
+- Prevent default roles from being deleted or receiving `GROUP_ADMINISTRATION`, avoiding accidental administrative access through invitation defaults or CSV imports.
+- Store reusable public join tokens as hashes plus authenticated ciphertext, keep them in URL fragments, require mailbox verification for new accounts, return enumeration-resistant registration responses, and invalidate pending proofs atomically on rotation or disable.
+- Validate every multi-booking target and permission before writing, and commit all booking, ledger, allocation, notification, audit, and idempotency rows atomically.
+
 ## [0.5.2] - 2026-08-07
 
 ### Fixed

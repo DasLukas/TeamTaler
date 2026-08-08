@@ -13,9 +13,7 @@ import { CatalogPanel } from './CatalogPanel';
 export function CatalogPage() {
   const { t } = useTranslation();
   const { activeGroup } = useActiveGroup();
-  const roles = activeGroup.membership?.roles ?? [];
-
-  if (!hasGroupCapability(roles, 'catalog')) {
+  if (!hasGroupCapability(activeGroup.membership?.effectiveGrants, 'catalog')) {
     return <Page title={t('catalog.title')}><StatePanel kind="error" title={t('catalog.noAccessTitle')} message={t('catalog.noAccessMessage')} /></Page>;
   }
 

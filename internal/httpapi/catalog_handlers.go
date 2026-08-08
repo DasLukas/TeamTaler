@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/DasLukas/TeamTaler/internal/authorization"
 	"github.com/DasLukas/TeamTaler/internal/catalog"
 	"github.com/DasLukas/TeamTaler/internal/domain"
-	"github.com/DasLukas/TeamTaler/internal/groups"
 	"github.com/DasLukas/TeamTaler/internal/media"
 )
 
@@ -179,8 +179,8 @@ func (s *Server) handleProductImage(response http.ResponseWriter, request *http.
 		writeProblem(response, request, err)
 		return
 	}
-	if !groups.HasRole(membership, domain.RoleCatalogManager) {
-		writeProblem(response, request, domain.ErrForbidden)
+	if err := authorization.Require(request.Context(), s.db, membership.GroupID, membership.ID, domain.PermissionCatalogManagement, authorization.GroupResource(membership.GroupID)); err != nil {
+		writeProblem(response, request, err)
 		return
 	}
 	if _, err := s.catalog.ProductCategory(request.Context(), membership.GroupID, request.PathValue("productID")); err != nil {

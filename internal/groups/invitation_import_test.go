@@ -10,12 +10,21 @@ import (
 	"time"
 
 	"github.com/DasLukas/TeamTaler/internal/auth"
+	"github.com/DasLukas/TeamTaler/internal/authorization"
 	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/storage"
 )
 
 type failingTokenSealer struct{}
+
+func invitationImportRoleIDs(membership domain.Membership) []string {
+	return []string{authorization.PresetRoleID(membership.GroupID, domain.RolePresetMember)}
+}
+
+func createStarterInvitation(ctx context.Context, service Service, actor domain.Principal, membership domain.Membership, email, displayName string) (Invitation, error) {
+	return service.CreateInvitationWithRoles(ctx, actor, membership, email, displayName, invitationImportRoleIDs(membership))
+}
 
 func (failingTokenSealer) Seal(string) (string, error) {
 	return "", errors.New("test token encryption failure")
@@ -55,7 +64,7 @@ func TestImportInvitationsCreatesEncryptedOutboxAndReplays(t *testing.T) {
 		{Row: 5, Email: "new@example.test", DisplayName: "Duplicate"},
 	}
 
-	result, err := service.ImportInvitations(ctx, session.Principal, membership, "import-key-one", candidates)
+	result, err := service.ImportInvitations(ctx, session.Principal, membership, "import-key-one", invitationImportRoleIDs(membership), candidates)
 	if err != nil {
 		t.Fatalf("ImportInvitations: %v", err)
 	}
@@ -99,7 +108,7 @@ func TestImportInvitationsCreatesEncryptedOutboxAndReplays(t *testing.T) {
 		t.Fatalf("listed invitation roles = %#v, want an empty array", listed[0].Roles)
 	}
 
-	replayed, err := service.ImportInvitations(ctx, session.Principal, membership, "import-key-one", candidates)
+	replayed, err := service.ImportInvitations(ctx, session.Principal, membership, "import-key-one", invitationImportRoleIDs(membership), candidates)
 	if err != nil {
 		t.Fatalf("replay import: %v", err)
 	}
@@ -129,14 +138,14 @@ func TestImportInvitationsCreatesEncryptedOutboxAndReplays(t *testing.T) {
 		t.Fatalf("retried outbox status=%q attempts=%d err=%v", deliveryStatus, attempts, err)
 	}
 
-	manualInvitation, err := service.CreateInvitation(ctx, session.Principal, membership, "MANUAL@example.test", "Manual Member", nil, nil, nil)
+	manualInvitation, err := createStarterInvitation(ctx, service, session.Principal, membership, "MANUAL@example.test", "Manual Member")
 	if err != nil {
 		t.Fatalf("CreateInvitation with email delivery: %v", err)
 	}
 	if manualInvitation.Email != "manual@example.test" || manualInvitation.Token == "" || manualInvitation.EmailDeliveryStatus != EmailDeliveryPending {
 		t.Fatalf("manual invitation = %#v", manualInvitation)
 	}
-	if _, err := service.CreateInvitation(ctx, session.Principal, membership, "manual@example.test", "Duplicate Manual", nil, nil, nil); !errors.Is(err, ErrInvitationEmailExists) {
+	if _, err := createStarterInvitation(ctx, service, session.Principal, membership, "manual@example.test", "Duplicate Manual"); !errors.Is(err, ErrInvitationEmailExists) {
 		t.Fatalf("duplicate manual invitation error = %v, want active invitation conflict", err)
 	}
 	_, err = db.ExecContext(ctx, `INSERT INTO invitations(
@@ -147,7 +156,7 @@ func TestImportInvitationsCreatesEncryptedOutboxAndReplays(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), activeInvitationEmailConstraint) {
 		t.Fatalf("database duplicate error = %v, want active invitation constraint", err)
 	}
-	crossPathResult, err := service.ImportInvitations(ctx, session.Principal, membership, "import-key-cross-path", []InvitationImportCandidate{
+	crossPathResult, err := service.ImportInvitations(ctx, session.Principal, membership, "import-key-cross-path", invitationImportRoleIDs(membership), []InvitationImportCandidate{
 		{Row: 2, Email: "manual@example.test", DisplayName: "Manual Again"},
 		{Row: 3, Email: "new@example.test", DisplayName: "CSV Again"},
 	})
@@ -167,7 +176,7 @@ func TestImportInvitationsCreatesEncryptedOutboxAndReplays(t *testing.T) {
 	}
 
 	linkOnlyService := Service{DB: db}
-	linkOnlyInvitation, err := linkOnlyService.CreateInvitation(ctx, session.Principal, membership, "link-only@example.test", "Link Only", nil, nil, nil)
+	linkOnlyInvitation, err := createStarterInvitation(ctx, linkOnlyService, session.Principal, membership, "link-only@example.test", "Link Only")
 	if err != nil {
 		t.Fatalf("CreateInvitation without email delivery: %v", err)
 	}
@@ -178,7 +187,7 @@ func TestImportInvitationsCreatesEncryptedOutboxAndReplays(t *testing.T) {
 		t.Fatalf("link-only outbox jobs = %d err=%v, want 2", jobs, err)
 	}
 
-	resendInvitation, err := service.CreateInvitation(ctx, session.Principal, membership, "resend@example.test", "Resend Member", nil, nil, nil)
+	resendInvitation, err := createStarterInvitation(ctx, service, session.Principal, membership, "resend@example.test", "Resend Member")
 	if err != nil {
 		t.Fatalf("create resend invitation: %v", err)
 	}
@@ -214,7 +223,7 @@ func TestImportInvitationsCreatesEncryptedOutboxAndReplays(t *testing.T) {
 		t.Fatalf("in-progress resend error = %v, want conflict", err)
 	}
 
-	failedResendInvitation, err := service.CreateInvitation(ctx, session.Principal, membership, "resend-failure@example.test", "Resend Failure", nil, nil, nil)
+	failedResendInvitation, err := createStarterInvitation(ctx, service, session.Principal, membership, "resend-failure@example.test", "Resend Failure")
 	if err != nil {
 		t.Fatalf("create failed resend invitation: %v", err)
 	}
@@ -239,7 +248,7 @@ func TestImportInvitationsCreatesEncryptedOutboxAndReplays(t *testing.T) {
 		t.Fatalf("failed resend changed token/status: before=%q after=%q status=%q", tokenHashBefore, tokenHashAfter, statusAfter)
 	}
 
-	expiredDuplicate, err := service.CreateInvitation(ctx, session.Principal, membership, "resend-duplicate@example.test", "Expired Duplicate", nil, nil, nil)
+	expiredDuplicate, err := createStarterInvitation(ctx, service, session.Principal, membership, "resend-duplicate@example.test", "Expired Duplicate")
 	if err != nil {
 		t.Fatalf("create expired duplicate invitation: %v", err)
 	}
@@ -249,7 +258,7 @@ func TestImportInvitationsCreatesEncryptedOutboxAndReplays(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `UPDATE invitation_email_outbox SET status='SENT',token_ciphertext=NULL,next_attempt_at=NULL,sent_at=?,updated_at=? WHERE invitation_id=?`, platform.Timestamp(time.Now()), platform.Timestamp(time.Now()), expiredDuplicate.ID); err != nil {
 		t.Fatalf("mark expired duplicate sent: %v", err)
 	}
-	if _, err := service.CreateInvitation(ctx, session.Principal, membership, "resend-duplicate@example.test", "Current Duplicate", nil, nil, nil); err != nil {
+	if _, err := createStarterInvitation(ctx, service, session.Principal, membership, "resend-duplicate@example.test", "Current Duplicate"); err != nil {
 		t.Fatalf("create current duplicate invitation: %v", err)
 	}
 	if _, err := service.ResendInvitationEmail(ctx, session.Principal, membership, "resend-key-duplicate", expiredDuplicate.ID); !errors.Is(err, ErrInvitationEmailExists) {
@@ -259,7 +268,7 @@ func TestImportInvitationsCreatesEncryptedOutboxAndReplays(t *testing.T) {
 		t.Fatalf("database duplicate update error = %v, want active invitation constraint", err)
 	}
 
-	revokedInvitation, err := service.CreateInvitation(ctx, session.Principal, membership, "revoked@example.test", "Revoked Member", nil, nil, nil)
+	revokedInvitation, err := createStarterInvitation(ctx, service, session.Principal, membership, "revoked@example.test", "Revoked Member")
 	if err != nil {
 		t.Fatalf("create revocation invitation: %v", err)
 	}
@@ -284,7 +293,7 @@ func TestImportInvitationsCreatesEncryptedOutboxAndReplays(t *testing.T) {
 	}
 
 	different := []InvitationImportCandidate{{Row: 2, Email: "other@example.test"}}
-	if _, err := service.ImportInvitations(ctx, session.Principal, membership, "import-key-one", different); !errors.Is(err, domain.ErrIdempotencyReuse) {
+	if _, err := service.ImportInvitations(ctx, session.Principal, membership, "import-key-one", invitationImportRoleIDs(membership), different); !errors.Is(err, domain.ErrIdempotencyReuse) {
 		t.Fatalf("reused key error = %v, want idempotency reuse", err)
 	}
 }
@@ -292,19 +301,96 @@ func TestImportInvitationsCreatesEncryptedOutboxAndReplays(t *testing.T) {
 func TestInvitationEmailOperationsRequireConfiguredTokenSealer(t *testing.T) {
 	t.Parallel()
 
-	membership := domain.Membership{GroupID: "grp_test", Roles: []domain.Role{domain.RoleAdmin}}
-	service := Service{}
-	_, err := service.ImportInvitations(context.Background(), domain.Principal{UserID: "usr_test"}, membership, "import-key-two", []InvitationImportCandidate{{Row: 2, Email: "member@example.test"}})
+	ctx := context.Background()
+	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), "teamtaler.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+	authService := auth.Service{DB: db, SessionLifetime: 24 * time.Hour}
+	if err := authService.Bootstrap(ctx, "sealer-admin@example.test", "Sealer Admin", "correct-horse-battery-staple", "Sealer Team", "EUR"); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	session, err := authService.Login(ctx, "sealer-admin@example.test", "correct-horse-battery-staple")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	service := Service{DB: db}
+	groupItems, err := service.List(ctx, session.Principal.UserID)
+	if err != nil || len(groupItems) != 1 {
+		t.Fatalf("list groups: groups=%d err=%v", len(groupItems), err)
+	}
+	membership := groupItems[0].Membership
+	_, err = service.ImportInvitations(ctx, session.Principal, membership, "import-key-two", invitationImportRoleIDs(membership), []InvitationImportCandidate{{Row: 2, Email: "member@example.test"}})
 	if !errors.Is(err, domain.ErrServiceUnavailable) {
 		t.Fatalf("ImportInvitations error = %v, want unavailable", err)
 	}
-	_, err = service.RetryInvitationEmail(context.Background(), domain.Principal{UserID: "usr_test"}, membership, "retry-key-two", "inv_test")
+	_, err = service.RetryInvitationEmail(ctx, session.Principal, membership, "retry-key-two", "inv_test")
 	if !errors.Is(err, domain.ErrServiceUnavailable) {
 		t.Fatalf("RetryInvitationEmail error = %v, want unavailable", err)
 	}
-	_, err = service.ResendInvitationEmail(context.Background(), domain.Principal{UserID: "usr_test"}, membership, "resend-key-two", "inv_test")
+	_, err = service.ResendInvitationEmail(ctx, session.Principal, membership, "resend-key-two", "inv_test")
 	if !errors.Is(err, domain.ErrServiceUnavailable) {
 		t.Fatalf("ResendInvitationEmail error = %v, want unavailable", err)
+	}
+}
+
+func TestImportInvitationsResolvesRowRolesAndDefaultFallback(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), "teamtaler.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+	authService := auth.Service{DB: db, SessionLifetime: 24 * time.Hour}
+	if err := authService.Bootstrap(ctx, "roles-admin@example.test", "Roles Admin", "correct-horse-battery-staple", "Role Import Team", "EUR"); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	session, err := authService.Login(ctx, "roles-admin@example.test", "correct-horse-battery-staple")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	box, err := platform.NewSecretBox([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatalf("secret box: %v", err)
+	}
+	service := Service{DB: db, TokenSealer: box}
+	groups, err := service.List(ctx, session.Principal.UserID)
+	if err != nil || len(groups) != 1 {
+		t.Fatalf("list groups: groups=%d err=%v", len(groups), err)
+	}
+	membership := groups[0].Membership
+	result, err := service.ImportInvitations(ctx, session.Principal, membership, "role-name-import", nil, []InvitationImportCandidate{
+		{Row: 2, Email: "default@example.test"},
+		{Row: 3, Email: "finance@example.test", RoleNames: []string{"finance MANAGER", "Finance manager"}},
+		{Row: 4, Email: "unknown@example.test", RoleNames: []string{"Missing role"}},
+	})
+	if err != nil {
+		t.Fatalf("import invitations: %v", err)
+	}
+	if result.Summary != (InvitationImportSummary{TotalRows: 3, Created: 2, Invalid: 1}) || result.Rows[2].Code != "unknown_role" {
+		t.Fatalf("result=%#v", result)
+	}
+	for email, expectedRoleID := range map[string]string{
+		"default@example.test": authorization.PresetRoleID(membership.GroupID, domain.RolePresetMember),
+		"finance@example.test": authorization.PresetRoleID(membership.GroupID, domain.RolePresetFinanceManager),
+	} {
+		var roleID string
+		if err := db.QueryRowContext(ctx, `SELECT assignment.role_id FROM invitation_role_assignments assignment JOIN invitations invitation ON invitation.id=assignment.invitation_id WHERE invitation.group_id=? AND invitation.email=?`, membership.GroupID, email).Scan(&roleID); err != nil || roleID != expectedRoleID {
+			t.Fatalf("role for %s=%q err=%v, want %q", email, roleID, err, expectedRoleID)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE group_settings SET default_role_id=NULL WHERE group_id=?`, membership.GroupID); err != nil {
+		t.Fatalf("clear default role: %v", err)
+	}
+	missing, err := service.ImportInvitations(ctx, session.Principal, membership, "missing-default-import", nil, []InvitationImportCandidate{{Row: 2, Email: "missing-default@example.test"}})
+	if err != nil {
+		t.Fatalf("missing default import: %v", err)
+	}
+	if missing.Summary.Invalid != 1 || missing.Rows[0].Code != "missing_default_role" {
+		t.Fatalf("missing default result=%#v", missing)
 	}
 }
 

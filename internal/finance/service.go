@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/DasLukas/TeamTaler/internal/audit"
+	"github.com/DasLukas/TeamTaler/internal/authorization"
 	"github.com/DasLukas/TeamTaler/internal/domain"
-	"github.com/DasLukas/TeamTaler/internal/groups"
 	"github.com/DasLukas/TeamTaler/internal/idempotency"
 	"github.com/DasLukas/TeamTaler/internal/ledger"
 	"github.com/DasLukas/TeamTaler/internal/media"
@@ -29,6 +29,17 @@ type Service struct {
 	DB *sql.DB
 	// Notifications atomically records member-visible payment events.
 	Notifications notifications.Service
+}
+
+func requirePermission(ctx context.Context, queryer authorization.Queryer, membership domain.Membership, permission domain.PermissionKey) error {
+	allowed, err := authorization.NewPolicy(queryer).Can(ctx, membership.GroupID, membership.ID, permission, authorization.ResourceContext{GroupID: membership.GroupID})
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return domain.ErrForbidden
+	}
+	return nil
 }
 
 // CategoryStatistic summarizes current-period booking and reversal totals for a
@@ -99,8 +110,10 @@ func (s Service) Account(ctx context.Context, membership domain.Membership, targ
 	if targetMembershipID == "" {
 		targetMembershipID = membership.ID
 	}
-	if targetMembershipID != membership.ID && !groups.HasRole(membership, domain.RoleFinanceManager) {
-		return Account{}, domain.ErrForbidden
+	if targetMembershipID != membership.ID {
+		if err := requirePermission(ctx, s.DB, membership, domain.PermissionFinanceManagement); err != nil {
+			return Account{}, err
+		}
 	}
 	var account Account
 	account.MembershipID = targetMembershipID
@@ -189,8 +202,8 @@ func (s Service) Account(ctx context.Context, membership domain.Membership, targ
 // privileges in the requested group. Results are grouped by membership status,
 // then ordered by descending balance and display name.
 func (s Service) ListAccountSummaries(ctx context.Context, membership domain.Membership) ([]AccountSummary, error) {
-	if !groups.HasRole(membership, domain.RoleFinanceManager) {
-		return nil, domain.ErrForbidden
+	if err := requirePermission(ctx, s.DB, membership, domain.PermissionFinanceManagement); err != nil {
+		return nil, err
 	}
 	rows, err := s.DB.QueryContext(ctx, `SELECT m.id,u.id,u.display_name,u.avatar_key,m.status,g.currency,coalesce(sum(le.amount_minor),0)
 		FROM memberships m
@@ -251,19 +264,20 @@ const (
 // It returns the created or replayed Payment, or validation, forbidden,
 // not-found, idempotency, audit, and database errors.
 func (s Service) CreatePayment(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey string, input CreatePaymentInput) (domain.Payment, error) {
-	if !groups.HasRole(membership, domain.RoleFinanceManager) {
-		return domain.Payment{}, domain.ErrForbidden
+	if err := requirePermission(ctx, s.DB, membership, domain.PermissionFinanceManagement); err != nil {
+		return domain.Payment{}, err
 	}
 	return s.createPayment(ctx, actor, membership, idempotencyKey, input, true, paymentSourceFinanceWorkspace)
 }
 
 // CreateOwnPayment records a payment for the authenticated membership only.
-// The caller must have SELF_RECORD_PAYMENT or a broader finance role. The
-// resulting payment is immediately posted, audited, and FIFO-allocated without
-// creating a redundant notification for the actor.
+// The caller must have RECORD_OWN_PAYMENT; FINANCE_MANAGEMENT does not imply
+// this independent self-service permission. The resulting payment is
+// immediately posted, audited, and FIFO-allocated without creating a redundant
+// notification for the actor.
 func (s Service) CreateOwnPayment(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey string, input CreateOwnPaymentInput) (domain.Payment, error) {
-	if !groups.HasGroupPermission(membership, domain.PermissionSelfRecordPayment) {
-		return domain.Payment{}, domain.ErrForbidden
+	if err := requirePermission(ctx, s.DB, membership, domain.PermissionRecordOwnPayment); err != nil {
+		return domain.Payment{}, err
 	}
 	input.ReceivedAt = strings.TrimSpace(input.ReceivedAt)
 	if input.ReceivedAt == "" {
@@ -320,16 +334,11 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 	var payment domain.Payment
 	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
 		if source == paymentSourceSelfService {
-			var allowed int
-			if err := tx.QueryRowContext(ctx, `SELECT
-				EXISTS(SELECT 1 FROM membership_roles WHERE group_id=? AND membership_id=? AND role IN ('ADMIN','FINANCE_MANAGER'))
-				OR EXISTS(SELECT 1 FROM membership_permissions WHERE group_id=? AND membership_id=? AND permission='SELF_RECORD_PAYMENT')`,
-				membership.GroupID, membership.ID, membership.GroupID, membership.ID).Scan(&allowed); err != nil {
+			if err := requirePermission(ctx, tx, membership, domain.PermissionRecordOwnPayment); err != nil {
 				return err
 			}
-			if allowed == 0 {
-				return domain.ErrForbidden
-			}
+		} else if err := requirePermission(ctx, tx, membership, domain.PermissionFinanceManagement); err != nil {
+			return err
 		}
 		var storedHash, storedResponse string
 		err := tx.QueryRowContext(ctx, `SELECT request_hash,response_json FROM idempotency_results WHERE group_id=? AND actor_user_id=? AND idempotency_key=?`,
@@ -423,8 +432,8 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 // membership's group. ctx bounds queries; finance privileges are required. It
 // returns the slice or forbidden and SQL errors.
 func (s Service) ListPayments(ctx context.Context, membership domain.Membership, limit int) ([]domain.Payment, error) {
-	if !groups.HasRole(membership, domain.RoleFinanceManager) {
-		return nil, domain.ErrForbidden
+	if err := requirePermission(ctx, s.DB, membership, domain.PermissionFinanceManagement); err != nil {
+		return nil, err
 	}
 	if limit < 1 || limit > 200 {
 		limit = 100
@@ -478,8 +487,8 @@ func (s Service) allocations(ctx context.Context, paymentID string) ([]domain.Pa
 // scope audit/authorization. It returns validation, forbidden, not-found,
 // conflict, idempotency, audit, or SQL errors.
 func (s Service) ReversePayment(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey, paymentID, reason string) error {
-	if !groups.HasRole(membership, domain.RoleFinanceManager) {
-		return domain.ErrForbidden
+	if err := requirePermission(ctx, s.DB, membership, domain.PermissionFinanceManagement); err != nil {
+		return err
 	}
 	if err := idempotency.ValidateKey(idempotencyKey); err != nil {
 		return err
@@ -496,6 +505,9 @@ func (s Service) ReversePayment(ctx context.Context, actor domain.Principal, mem
 		return err
 	}
 	return storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		if err := requirePermission(ctx, tx, membership, domain.PermissionFinanceManagement); err != nil {
+			return err
+		}
 		var replay map[string]any
 		found, err := idempotency.Load(ctx, tx, membership.GroupID, actor.UserID, idempotencyKey, requestHash, &replay)
 		if err != nil || found {

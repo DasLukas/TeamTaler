@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/DasLukas/TeamTaler/internal/audit"
+	"github.com/DasLukas/TeamTaler/internal/authorization"
 	"github.com/DasLukas/TeamTaler/internal/domain"
-	"github.com/DasLukas/TeamTaler/internal/groups"
 	"github.com/DasLukas/TeamTaler/internal/idempotency"
 	"github.com/DasLukas/TeamTaler/internal/ledger"
 	"github.com/DasLukas/TeamTaler/internal/notifications"
@@ -26,6 +26,17 @@ type Service struct {
 	DB *sql.DB
 	// Notifications atomically records generated settlement events.
 	Notifications notifications.Service
+}
+
+func requireFinanceManagement(ctx context.Context, queryer authorization.Queryer, membership domain.Membership) error {
+	allowed, err := authorization.NewPolicy(queryer).Can(ctx, membership.GroupID, membership.ID, domain.PermissionFinanceManagement, authorization.ResourceContext{GroupID: membership.GroupID})
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return domain.ErrForbidden
+	}
+	return nil
 }
 
 // CloseInput provides the final period label, ISO calendar due date, and label
@@ -69,8 +80,8 @@ func (s Service) List(ctx context.Context, groupID string) ([]domain.Period, err
 // input supplies labels and due date. It returns the created or replayed result,
 // or validation, forbidden, not-found, conflict, idempotency, audit, and SQL errors.
 func (s Service) Close(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey, periodID string, input CloseInput) (CloseResult, error) {
-	if !groups.HasRole(membership, domain.RoleFinanceManager) {
-		return CloseResult{}, domain.ErrForbidden
+	if err := requireFinanceManagement(ctx, s.DB, membership); err != nil {
+		return CloseResult{}, err
 	}
 	if err := idempotency.ValidateKey(idempotencyKey); err != nil {
 		return CloseResult{}, err
@@ -99,6 +110,9 @@ func (s Service) Close(ctx context.Context, actor domain.Principal, membership d
 	}
 	var result CloseResult
 	err = storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		if err := requireFinanceManagement(ctx, tx, membership); err != nil {
+			return err
+		}
 		found, err := idempotency.Load(ctx, tx, membership.GroupID, actor.UserID, idempotencyKey, requestHash, &result)
 		if err != nil || found {
 			return err
@@ -238,7 +252,10 @@ func statementStatus(charges, paid int64) string {
 // allocations so settlement status remains useful. ctx bounds database access;
 // the method returns the result or SQL errors.
 func (s Service) Statements(ctx context.Context, membership domain.Membership, periodID string) ([]domain.Statement, error) {
-	viewAll := groups.HasRole(membership, domain.RoleFinanceManager)
+	viewAll, err := authorization.NewPolicy(s.DB).Can(ctx, membership.GroupID, membership.ID, domain.PermissionFinanceManagement, authorization.ResourceContext{GroupID: membership.GroupID})
+	if err != nil {
+		return nil, err
+	}
 	query := `SELECT ps.id,ps.period_id,ps.membership_id,ps.display_name,ps.email,ps.charges_minor,
 		coalesce((SELECT sum(pa.amount_minor) FROM payment_allocations pa JOIN payments py ON py.id=pa.payment_id WHERE pa.period_id=ps.period_id AND py.membership_id=ps.membership_id AND py.reversed_at IS NULL),0),
 		coalesce((SELECT sum(aa.amount_minor) FROM period_adjustment_allocations aa WHERE aa.target_period_id=ps.period_id AND aa.membership_id=ps.membership_id),0),

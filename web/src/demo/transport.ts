@@ -1,6 +1,7 @@
 import type {
   AccountSummary,
   Booking,
+  BookingBatchCommand,
   BookingCommand,
   CatalogOrderCommand,
   Category,
@@ -19,13 +20,21 @@ import type {
   Notification,
   Payment,
   PaymentCommand,
+  PermissionGrant,
+  PermissionKey,
   SelfPaymentCommand,
   Period,
   PermissionUpdate,
   Product,
+  PublicJoinLink,
+  PublicJoinPreview,
+  Role,
+  RoleAssignment,
+  RoleInput,
   Session,
 } from '@/api/types';
 import { isCategoryIcon } from '@/api/types';
+import { can } from '@/app/permissions';
 import { MAX_PRODUCT_PRICE_MINOR } from '@/api/money';
 import {
   demoAccountSummaries,
@@ -37,13 +46,56 @@ import {
   demoMembers,
   demoNotifications,
   demoPayments,
+  demoPermissionDefinitions,
   demoPeriods,
+  demoRoles,
   demoSession,
   demoSettlements,
 } from './data';
 import i18n from '@/i18n';
 
 type DemoRequestInit = RequestInit;
+
+const ADMIN_CORE: readonly PermissionKey[] = ['GROUP_ADMINISTRATION', 'ROLE_MANAGEMENT'];
+
+interface DemoRoutePolicy {
+  methods: readonly string[];
+  resource: RegExp;
+  anyOf: readonly PermissionKey[];
+}
+
+const DEMO_ROUTE_POLICIES: readonly DemoRoutePolicy[] = [
+  { methods: ['GET', 'PATCH'], resource: /^settings$/, anyOf: ['GROUP_ADMINISTRATION'] },
+  { methods: ['POST', 'DELETE'], resource: /^logo$/, anyOf: ['GROUP_ADMINISTRATION'] },
+  { methods: ['DELETE'], resource: /^members\/[^/]+$/, anyOf: ['GROUP_ADMINISTRATION'] },
+  { methods: ['GET', 'PUT'], resource: /^public-join-link$/, anyOf: ['GROUP_ADMINISTRATION'] },
+  { methods: ['POST'], resource: /^public-join-link\/rotate$/, anyOf: ['GROUP_ADMINISTRATION'] },
+  { methods: ['PATCH'], resource: /^members\/[^/]+\/permissions$/, anyOf: ['GROUP_ADMINISTRATION'] },
+  { methods: ['GET'], resource: /^accounts$/, anyOf: ['FINANCE_MANAGEMENT'] },
+  { methods: ['GET'], resource: /^accounts\/(?!me$)[^/]+$/, anyOf: ['FINANCE_MANAGEMENT'] },
+  { methods: ['GET', 'POST'], resource: /^payments$/, anyOf: ['FINANCE_MANAGEMENT'] },
+  { methods: ['POST'], resource: /^payments\/self$/, anyOf: ['RECORD_OWN_PAYMENT'] },
+  { methods: ['POST'], resource: /^payments\/[^/]+\/reverse$/, anyOf: ['FINANCE_MANAGEMENT'] },
+  { methods: ['GET'], resource: /^periods$/, anyOf: ['FINANCE_MANAGEMENT'] },
+  { methods: ['POST'], resource: /^periods\/[^/]+\/close$/, anyOf: ['FINANCE_MANAGEMENT'] },
+  { methods: ['GET'], resource: /^periods\/[^/]+\/statements$/, anyOf: ['FINANCE_MANAGEMENT'] },
+  { methods: ['GET'], resource: /^settlements$/, anyOf: ['FINANCE_MANAGEMENT'] },
+  { methods: ['GET'], resource: /^audit$/, anyOf: ['GROUP_ADMINISTRATION'] },
+  { methods: ['GET'], resource: /^roles(?:\/[^/]+)?$/, anyOf: ['GROUP_ADMINISTRATION', 'ROLE_MANAGEMENT'] },
+  { methods: ['GET'], resource: /^role-assignments$/, anyOf: ['GROUP_ADMINISTRATION', 'ROLE_MANAGEMENT'] },
+  { methods: ['GET'], resource: /^invitations$/, anyOf: ['GROUP_ADMINISTRATION', 'ROLE_MANAGEMENT'] },
+  { methods: ['POST'], resource: /^invitations$/, anyOf: ['GROUP_ADMINISTRATION'] },
+  { methods: ['POST'], resource: /^invitations\/import$/, anyOf: ['GROUP_ADMINISTRATION'] },
+  { methods: ['PATCH', 'DELETE'], resource: /^invitations\/[^/]+$/, anyOf: ['GROUP_ADMINISTRATION'] },
+  { methods: ['PUT'], resource: /^invitations\/[^/]+\/roles$/, anyOf: ['GROUP_ADMINISTRATION', 'ROLE_MANAGEMENT'] },
+  { methods: ['POST'], resource: /^invitations\/[^/]+\/email\/(?:retry|resend)$/, anyOf: ['GROUP_ADMINISTRATION'] },
+  { methods: ['POST'], resource: /^categories$/, anyOf: ['CATALOG_MANAGEMENT'] },
+  { methods: ['PUT'], resource: /^catalog\/order$/, anyOf: ['CATALOG_MANAGEMENT'] },
+  { methods: ['PATCH', 'DELETE'], resource: /^categories\/[^/]+$/, anyOf: ['CATALOG_MANAGEMENT'] },
+  { methods: ['POST'], resource: /^categories\/[^/]+\/products$/, anyOf: ['CATALOG_MANAGEMENT'] },
+  { methods: ['PATCH', 'DELETE'], resource: /^products\/[^/]+$/, anyOf: ['CATALOG_MANAGEMENT'] },
+  { methods: ['POST'], resource: /^products\/[^/]+\/image$/, anyOf: ['CATALOG_MANAGEMENT'] },
+];
 
 const clone = <T,>(value: T): T => structuredClone(value);
 const identifier = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
@@ -87,6 +139,7 @@ interface DemoImportCandidate {
   row: number;
   email: string;
   displayName: string;
+  roleNames: string[];
 }
 
 /**
@@ -135,6 +188,7 @@ function parseDemoMemberCsv(document: string): DemoImportCandidate[] {
   const header = parseDemoCsvRecord(lines[headerIndex], delimiter).map((cell) => cell.toLowerCase());
   const emailIndex = header.indexOf('email');
   const displayNameIndex = header.indexOf('display_name');
+  const rolesIndex = header.indexOf('roles');
   if (emailIndex < 0) throw new Error('The CSV header must contain an email column.');
   const result: DemoImportCandidate[] = [];
   for (let index = headerIndex + 1; index < lines.length; index += 1) {
@@ -144,6 +198,7 @@ function parseDemoMemberCsv(document: string): DemoImportCandidate[] {
       row: index + 1,
       email: (cells[emailIndex] ?? '').trim().toLowerCase(),
       displayName: displayNameIndex >= 0 ? (cells[displayNameIndex] ?? '').trim() : '',
+      roleNames: rolesIndex >= 0 ? (cells[rolesIndex] ?? '').split('|').map((name) => name.trim()).filter(Boolean) : [],
     });
   }
   if (result.length === 0) throw new Error('The CSV file must contain at least one data row.');
@@ -167,9 +222,13 @@ export class DemoTransport {
   private settlements = clone(demoSettlements);
   private notifications = clone(demoNotifications);
   private audit = clone(demoAudit);
+  private roles = clone(demoRoles);
+  private assignmentVersions = new Map<string, number>();
   private invitations: InvitationMetadata[] = [];
   private invitationTokens = new Map<string, string>();
-  private groupSettings: GroupSettings = { membersCanViewAllBookings: false, notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true };
+  private groupSettings: GroupSettings = { notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' };
+  private publicJoinLink: PublicJoinLink = { enabled: false, expired: false, expiresAt: null, version: 0, emailVerificationAvailable: true };
+  private publicJoinToken = '';
 
   /**
    * Resolves one development request.
@@ -189,6 +248,7 @@ export class DemoTransport {
     const cleanPath = path.split('?')[0];
 
     if (cleanPath === '/session' || cleanPath === '/me') return clone(this.session) as T;
+    if (cleanPath === '/permission-definitions' && method === 'GET') return clone(demoPermissionDefinitions) as T;
     if (cleanPath === '/me/avatar' && method === 'POST') {
       const image = init.body instanceof FormData ? init.body.get('image') : undefined;
       if (!(image instanceof Blob)) throw new Error('A profile image is required.');
@@ -213,10 +273,19 @@ export class DemoTransport {
     if (cleanPath === '/auth/logout' && method === 'POST') return undefined as T;
     if (cleanPath === '/invitations/preview' && method === 'POST') return this.previewInvitation((body as { token?: string }).token ?? '') as T;
     if ((cleanPath === '/auth/invitations/accept' || cleanPath === '/invitations/accept') && method === 'POST') return this.acceptInvitation(body as InvitationCommand) as T;
+    if (cleanPath === '/public-join-links/preview' && method === 'POST') return this.previewPublicJoin((body as { token?: string }).token ?? '') as T;
+    if (cleanPath === '/public-join-links/registrations' && method === 'POST') return { verificationRequired: true } as T;
+    if (cleanPath === '/public-join-links/registrations/resend' && method === 'POST') return { verificationRequired: true } as T;
+    if (cleanPath === '/public-join-links/registrations/confirm' && method === 'POST') return clone(this.session) as T;
+    if (cleanPath === '/public-join-links/accept' && method === 'POST') {
+      this.previewPublicJoin((body as { token?: string }).token ?? '');
+      return clone(this.session) as T;
+    }
     if (cleanPath === '/groups') return clone(this.session.groups) as T;
 
     const groupRootMatch = cleanPath.match(/^\/groups\/([^/]+)$/);
     if (groupRootMatch && method === 'PATCH') {
+      this.requirePermission(groupRootMatch[1], 'GROUP_ADMINISTRATION');
       const name = String((body as { name?: string }).name ?? '').trim();
       const containsControlCharacter = [...name].some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127);
       if (!name || name.length > 120 || containsControlCharacter) throw new Error('The group name must contain 1 to 120 characters without control characters.');
@@ -229,19 +298,62 @@ export class DemoTransport {
     const groupMatch = cleanPath.match(/^\/groups\/([^/]+)\/(.+)$/);
     if (!groupMatch) throw new Error(`Development demo endpoint not implemented: ${method} ${path}`);
     const [, groupId, resource] = groupMatch;
+    this.authorizeGroupRoute(groupId, resource, method);
 
     if (resource === 'settings' && method === 'GET') return clone(this.groupSettings) as T;
     if (resource === 'settings' && method === 'PATCH') {
+      this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
       const update = body as Partial<GroupSettings>;
-      if (typeof update.membersCanViewAllBookings !== 'boolean' || typeof update.notificationEmailsEnabled !== 'boolean') throw new Error('Complete group settings are required.');
-      this.groupSettings = { ...this.groupSettings, membersCanViewAllBookings: update.membersCanViewAllBookings, notificationEmailsEnabled: update.notificationEmailsEnabled };
+      const updatesNotificationEmails = update.notificationEmailsEnabled !== undefined;
+      const updatesDefaultRole = update.defaultRoleId !== undefined;
+      if (!updatesNotificationEmails && !updatesDefaultRole) throw new Error('At least one group setting is required.');
+      if (updatesNotificationEmails && typeof update.notificationEmailsEnabled !== 'boolean') throw new Error('Notification email delivery must be a boolean.');
+      if (updatesDefaultRole) {
+        const defaultRole = this.roles.find((role) => role.id === update.defaultRoleId);
+        if (!defaultRole) throw new Error('The default role does not exist.');
+        if (defaultRole.grants.some((grant) => grant.permission === 'GROUP_ADMINISTRATION')) throw new Error('The default role must not grant group administration.');
+      }
+      this.groupSettings = {
+        ...this.groupSettings,
+        ...(updatesNotificationEmails ? { notificationEmailsEnabled: update.notificationEmailsEnabled as boolean } : {}),
+        ...(updatesDefaultRole ? { defaultRoleId: update.defaultRoleId as string } : {}),
+      };
       return clone(this.groupSettings) as T;
+    }
+    if (resource === 'public-join-link' && method === 'GET') return clone(this.publicJoinLink) as T;
+    if (resource === 'public-join-link' && method === 'PUT') {
+      const input = body as { enabled: boolean; expiresAt: string | null };
+      const expectedVersion = this.publicJoinLink.version === 0 ? 0 : requiredDemoVersion(init.headers);
+      if (expectedVersion !== this.publicJoinLink.version) throw new Error('The public join link changed in another session.');
+      if (input.enabled && (!this.publicJoinLink.enabled || this.publicJoinLink.expiresAt && Date.parse(this.publicJoinLink.expiresAt) <= Date.now())) this.publicJoinToken = crypto.randomUUID();
+      if (!input.enabled) this.publicJoinToken = '';
+      const version = this.publicJoinLink.version + 1;
+      const now = new Date().toISOString();
+      this.publicJoinLink = {
+        enabled: input.enabled,
+        expired: false,
+        expiresAt: input.enabled ? input.expiresAt : null,
+        version,
+        emailVerificationAvailable: true,
+        createdAt: this.publicJoinLink.createdAt ?? now,
+        updatedAt: now,
+        ...(input.enabled ? { acceptUrl: `${window.location.origin}/join#token=${encodeURIComponent(this.publicJoinToken)}` } : {}),
+      };
+      return clone(this.publicJoinLink) as T;
+    }
+    if (resource === 'public-join-link/rotate' && method === 'POST') {
+      const expired = Boolean(this.publicJoinLink.expiresAt && Date.parse(this.publicJoinLink.expiresAt) <= Date.now());
+      if (!this.publicJoinLink.enabled || expired || requiredDemoVersion(init.headers) !== this.publicJoinLink.version) throw new Error('The public join link cannot be rotated.');
+      this.publicJoinToken = crypto.randomUUID();
+      this.publicJoinLink = { ...this.publicJoinLink, version: this.publicJoinLink.version + 1, updatedAt: new Date().toISOString(), acceptUrl: `${window.location.origin}/join#token=${encodeURIComponent(this.publicJoinToken)}` };
+      return clone(this.publicJoinLink) as T;
     }
     if (resource === 'dashboard') return clone(this.dashboard) as T;
     if (resource === 'members' && method === 'GET') return clone(this.members) as T;
     if (resource === 'categories' && method === 'GET') return clone(this.categories) as T;
-    if (resource === 'bookings' && method === 'GET') return clone(this.bookings) as T;
-    if (resource === 'bookings' && method === 'POST') return this.createBooking(body as BookingCommand) as T;
+    if (resource === 'bookings' && method === 'GET') return this.listBookings(groupId) as T;
+    if (resource === 'bookings' && method === 'POST') return this.createBooking(groupId, body as BookingCommand) as T;
+    if (resource === 'bookings/batch' && method === 'POST') return this.createBookingBatch(groupId, body as BookingBatchCommand & { unitPriceMinor?: number }) as T;
     if (resource === 'accounts/me') return clone(this.ledger) as T;
     if (resource === 'accounts' && method === 'GET') return clone(this.accountSummaries) as T;
     if (resource === 'payments' && method === 'GET') return clone(this.payments) as T;
@@ -258,9 +370,18 @@ export class DemoTransport {
       return { readAt, unreadCount: this.notifications.filter((entry) => !entry.readAt).length } as T;
     }
     if (resource === 'audit' && method === 'GET') return clone(this.audit) as T;
-    if (resource === 'invitations/import' && method === 'POST') return this.importInvitations(body as string) as T;
+    if (resource === 'roles' && method === 'GET') return clone(this.recountedRoles()) as T;
+    if (resource === 'roles' && method === 'POST') {
+      this.requirePermission(groupId, 'ROLE_MANAGEMENT');
+      return this.createRole(groupId, body as RoleInput) as T;
+    }
+    if (resource === 'role-assignments' && method === 'GET') return this.roleAssignments() as T;
+    if (resource === 'invitations/import' && method === 'POST') {
+      const roleIds = new URL(path, window.location.origin).searchParams.getAll('roleId');
+      return this.importInvitations(body as string, roleIds) as T;
+    }
     if (resource === 'invitations' && method === 'GET') return this.listInvitations() as T;
-    if (resource === 'invitations' && method === 'POST') return this.createInvitation(body as InvitationInput & { categoryGrants?: Record<string, string[]>; expiresInDays?: number }) as T;
+    if (resource === 'invitations' && method === 'POST') return this.createInvitation(groupId, body as InvitationInput & { categoryGrants?: Record<string, string[]>; expiresInDays?: number }) as T;
     if (resource === 'catalog/order' && method === 'PUT') return this.reorderCatalog(body as CatalogOrderCommand) as T;
     if (resource === 'categories' && method === 'POST') return this.createCategory(body as Partial<Category>) as T;
     if (resource === 'logo' && method === 'POST') {
@@ -277,7 +398,9 @@ export class DemoTransport {
     }
 
     const permissionMatch = resource.match(/^members\/([^/]+)\/permissions$/);
-    if (permissionMatch && method === 'PATCH') return this.updatePermissions(permissionMatch[1], body as PermissionUpdate & { categoryGrants?: Record<string, string[]> }) as T;
+    if (permissionMatch && method === 'PATCH') return this.updatePermissions(groupId, permissionMatch[1], body as PermissionUpdate & { categoryGrants?: Record<string, string[]> }, requiredDemoVersion(init.headers)) as T;
+    const memberRolesMatch = resource.match(/^members\/([^/]+)\/roles$/);
+    if (memberRolesMatch && method === 'PUT') return this.updateRoleAssignment(groupId, 'MEMBERSHIP', memberRolesMatch[1], (body as { roleIds?: string[] }).roleIds ?? [], requiredDemoVersion(init.headers)) as T;
     const memberMatch = resource.match(/^members\/([^/]+)$/);
     if (memberMatch && method === 'DELETE') {
       const confirmSelf = new URL(path, window.location.origin).searchParams.get('confirmSelf') === 'true';
@@ -287,7 +410,7 @@ export class DemoTransport {
     if (categoryUpdateMatch && method === 'PATCH') return this.updateCategory(categoryUpdateMatch[1], body as Pick<Category, 'name' | 'icon' | 'active' | 'sortOrder' | 'version'>) as T;
     if (categoryUpdateMatch && method === 'DELETE') return this.deleteCategory(categoryUpdateMatch[1], requiredDemoVersion(init.headers)) as T;
     const bookingReversalMatch = resource.match(/^bookings\/([^/]+)\/(?:reversal|void)$/);
-    if (bookingReversalMatch && method === 'POST') return this.reverseBooking(bookingReversalMatch[1]) as T;
+    if (bookingReversalMatch && method === 'POST') return this.reverseBooking(groupId, bookingReversalMatch[1], String((body as { reason?: string }).reason ?? '')) as T;
     const periodCloseMatch = resource.match(/^periods\/([^/]+)\/close$/);
     if (periodCloseMatch && method === 'POST') return this.closePeriod(periodCloseMatch[1], body as { label: string; dueAt: string }) as T;
     const notificationMatch = resource.match(/^notifications\/([^/]+)$/);
@@ -328,8 +451,18 @@ export class DemoTransport {
     if (invitationEmailRetryMatch && method === 'POST') return this.retryInvitationEmail(invitationEmailRetryMatch[1]) as T;
     const invitationEmailResendMatch = resource.match(/^invitations\/([^/]+)\/email\/resend$/);
     if (invitationEmailResendMatch && method === 'POST') return this.resendInvitationEmail(invitationEmailResendMatch[1]) as T;
+    const invitationRolesMatch = resource.match(/^invitations\/([^/]+)\/roles$/);
+    if (invitationRolesMatch && method === 'PUT') return this.updateRoleAssignment(groupId, 'INVITATION', invitationRolesMatch[1], (body as { roleIds?: string[] }).roleIds ?? [], requiredDemoVersion(init.headers)) as T;
+    const roleMatch = resource.match(/^roles\/([^/]+)$/);
+    if (roleMatch && method === 'GET') {
+      const role = this.recountedRoles().find((entry) => entry.id === roleMatch[1]);
+      if (!role) throw new Error('Role not found.');
+      return clone(role) as T;
+    }
+    if (roleMatch && method === 'PUT') return this.updateRole(groupId, roleMatch[1], body as RoleInput, requiredDemoVersion(init.headers)) as T;
+    if (roleMatch && method === 'DELETE') return this.deleteRole(groupId, roleMatch[1], requiredDemoVersion(init.headers)) as T;
     const invitationMatch = resource.match(/^invitations\/([^/]+)$/);
-    if (invitationMatch && method === 'PATCH') return this.updateInvitation(invitationMatch[1], body as Omit<InvitationInput, 'email'> & { categoryGrants?: Record<string, string[]> }) as T;
+    if (invitationMatch && method === 'PATCH') return this.updateInvitation(groupId, invitationMatch[1], body as Omit<InvitationInput, 'email'> & { categoryGrants?: Record<string, string[]> }, init.headers) as T;
     if (invitationMatch && method === 'DELETE') return this.revokeInvitation(invitationMatch[1]) as T;
 
     throw new Error(`Development demo endpoint not implemented: ${method} ${path}`);
@@ -352,8 +485,10 @@ export class DemoTransport {
       if (archivedMember) {
         archivedMember.active = true;
         archivedMember.roles = invitation.roles;
+        archivedMember.roleIds = this.normalizedRoleIds(invitation.roleIds ?? []);
         archivedMember.groupPermissions = invitation.groupPermissions;
         archivedMember.categoryPermissions = invitation.categoryPermissions;
+        this.syncMemberPermissions(archivedMember);
       } else {
         this.session.user.displayName = command.displayName;
       }
@@ -369,11 +504,223 @@ export class DemoTransport {
     return { displayName: invitation.displayName ?? account?.displayName ?? '', existingAccount: Boolean(account) };
   }
 
-  private createBooking(command: BookingCommand & { unitPriceMinor?: number }): Booking {
+  /** Resolves safe demo metadata for the current public join token. */
+  private previewPublicJoin(token: string): PublicJoinPreview {
+    if (!this.publicJoinLink.enabled || token !== this.publicJoinToken || this.publicJoinLink.expiresAt && Date.parse(this.publicJoinLink.expiresAt) <= Date.now()) throw new Error('Public join link is invalid or expired.');
+    const groupName = this.session.groups[0]?.name ?? 'TeamTaler Demo Club';
+    return { groupName, expiresAt: this.publicJoinLink.expiresAt };
+  }
+
+  /** Returns the signed-in membership for one demo group. */
+  private currentMembership(groupId: string): Membership | undefined {
+    const membershipId = this.session.groups.find((group) => group.id === groupId)?.membership?.id;
+    return this.members.find((member) => member.id === membershipId && member.active);
+  }
+
+  /** Rejects a demo request when the active membership lacks a stable permission. */
+  private requirePermission(groupId: string, permission: PermissionKey): void {
+    this.requireAnyPermission(groupId, [permission]);
+  }
+
+  /** Rejects a demo request unless at least one accepted permission is effective. */
+  private requireAnyPermission(groupId: string, permissions: readonly PermissionKey[]): void {
+    const grants = this.currentMembership(groupId)?.effectiveGrants;
+    if (!permissions.some((permission) => can(grants, permission))) throw new Error(i18n.t('admin.noAccessMessage'));
+  }
+
+  /** Applies the centralized production-equivalent policy for protected routes. */
+  private authorizeGroupRoute(groupId: string, resource: string, method: string): void {
+    const policy = DEMO_ROUTE_POLICIES.find((candidate) => candidate.methods.includes(method) && candidate.resource.test(resource));
+    if (policy) this.requireAnyPermission(groupId, policy.anyOf);
+  }
+
+  /** Produces unique direct grants for a complete set of role IDs. */
+  private grantsForRoleIds(roleIds: readonly string[]): PermissionGrant[] {
+    const keys = new Set<PermissionKey>();
+    for (const role of this.roles) {
+      if (!roleIds.includes(role.id)) continue;
+      role.grants.forEach((grant) => keys.add(grant.permission));
+    }
+    return [...keys].map((permission) => ({ permission, scope: { type: 'GROUP' } }));
+  }
+
+  /** Keeps a membership and matching session summary consistent after assignment changes. */
+  private syncMemberPermissions(member: Membership): void {
+    member.effectiveGrants = this.grantsForRoleIds(member.roleIds ?? []);
+    member.roles = this.legacyRolesForRoleIds(member.roleIds ?? []);
+    member.groupPermissions = member.roleIds?.includes('role-self-payment') ? ['SELF_RECORD_PAYMENT'] : [];
+    const sessionGroup = this.session.groups.find((group) => group.membership?.id === member.id);
+    if (sessionGroup?.membership) {
+      sessionGroup.membership.roleIds = [...(member.roleIds ?? [])];
+      sessionGroup.membership.effectiveGrants = clone(member.effectiveGrants);
+      sessionGroup.membership.roles = [...member.roles];
+      sessionGroup.membership.groupPermissions = [...member.groupPermissions];
+    }
+  }
+
+  /** Derives deprecated role strings only from seeded preset assignments. */
+  private legacyRolesForRoleIds(roleIds: readonly string[]): Membership['roles'] {
+    const roles = new Set<Membership['roles'][number]>();
+    for (const roleId of roleIds) {
+      const preset = this.roles.find((role) => role.id === roleId)?.presetKey;
+      if (preset === 'GROUP_ADMINISTRATOR') roles.add('ADMIN');
+      if (preset === 'FINANCE_MANAGER') roles.add('FINANCE_MANAGER');
+      if (preset === 'CATALOG_MANAGER') roles.add('CATALOG_MANAGER');
+    }
+    return [...roles];
+  }
+
+  /** Replaces legacy presets while preserving every custom role assignment. */
+  private roleIdsForLegacyUpdate(currentRoleIds: readonly string[], roles: readonly Membership['roles'][number][], groupPermissions: readonly string[]): string[] {
+    const legacyPreset = new Map<Membership['roles'][number], Role['presetKey']>([
+      ['ADMIN', 'GROUP_ADMINISTRATOR'],
+      ['FINANCE_MANAGER', 'FINANCE_MANAGER'],
+      ['CATALOG_MANAGER', 'CATALOG_MANAGER'],
+      ['MEMBER', 'MEMBER'],
+    ]);
+    const migrationRole = this.roles.find((role) => role.id === 'role-self-payment');
+    const preservedCustom = currentRoleIds.filter((roleId) => {
+      const role = this.roles.find((entry) => entry.id === roleId);
+      return role && !role.presetKey && role.id !== migrationRole?.id;
+    });
+    const presetRoleIds = roles.flatMap((legacyRole) => {
+      const preset = legacyPreset.get(legacyRole);
+      const role = this.roles.find((entry) => entry.presetKey === preset);
+      return role ? [role.id] : [];
+    });
+    const selfPaymentRoleIds = groupPermissions.includes('SELF_RECORD_PAYMENT') && migrationRole ? [migrationRole.id] : [];
+    return this.normalizedRoleIds([...preservedCustom, ...presetRoleIds, ...selfPaymentRoleIds]);
+  }
+
+  /** Normalizes an explicit role selection to unique, known identifiers. */
+  private normalizedRoleIds(roleIds: readonly string[]): string[] {
+    const known = new Set(this.roles.map((role) => role.id));
+    return [...new Set(roleIds.filter((roleId) => known.has(roleId)))];
+  }
+
+  /** Returns dynamic role assignment counters without storing redundant values. */
+  private recountedRoles(): Role[] {
+    const pending = this.invitations.filter((invitation) => !invitation.acceptedAt && !invitation.revokedAt && Date.parse(invitation.expiresAt) > Date.now());
+    return this.roles.map((role) => ({
+      ...role,
+      memberCount: this.members.filter((member) => member.active && member.roleIds?.includes(role.id)).length,
+      pendingInvitationCount: pending.filter((invitation) => invitation.roleIds?.includes(role.id)).length,
+    }));
+  }
+
+  /** Returns every active member and pending invitation assignment. */
+  private roleAssignments(): RoleAssignment[] {
+    const members: RoleAssignment[] = this.members.filter((member) => member.active).map((member) => ({
+      subjectType: 'MEMBERSHIP',
+      subjectId: member.id,
+      roleIds: [...(member.roleIds ?? [])],
+      version: this.assignmentVersions.get(`MEMBERSHIP:${member.id}`) ?? 1,
+    }));
+    const invitations: RoleAssignment[] = this.invitations.filter((invitation) => !invitation.acceptedAt && !invitation.revokedAt && Date.parse(invitation.expiresAt) > Date.now()).map((invitation) => ({
+      subjectType: 'INVITATION',
+      subjectId: invitation.id,
+      roleIds: [...(invitation.roleIds ?? [])],
+      version: this.assignmentVersions.get(`INVITATION:${invitation.id}`) ?? invitation.roleAssignmentsVersion,
+    }));
+    return clone([...members, ...invitations]);
+  }
+
+  /** Creates a validated custom demo role. */
+  private createRole(groupId: string, input: RoleInput): Role {
+    const name = input.name.trim();
+    if (!name || this.roles.some((role) => role.name.localeCompare(name, undefined, { sensitivity: 'accent' }) === 0)) throw new Error('A unique role name is required.');
+    if (input.grants.some((grant) => grant.scope.type !== 'GROUP')) throw new Error('Only group-scoped grants are enabled.');
+    if (input.grants.some((grant) => grant.permission === 'GROUP_ADMINISTRATION')) this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
+    const role: Role = { id: identifier('role'), groupId, name, description: input.description?.trim() || undefined, nameLocked: false, deletable: true, grants: clone(input.grants), version: 1, memberCount: 0, pendingInvitationCount: 0 };
+    this.roles.push(role);
+    return clone(role);
+  }
+
+  /** Updates one role while preserving protected administrator invariants. */
+  private updateRole(groupId: string, roleId: string, input: RoleInput, version: number): Role {
+    this.requirePermission(groupId, 'ROLE_MANAGEMENT');
+    const role = this.roles.find((entry) => entry.id === roleId);
+    if (!role) throw new Error('Role not found.');
+    if (role.version !== version) throw new Error('The role changed in another session.');
+    const name = input.name.trim();
+    if (!name || this.roles.some((entry) => entry.id !== roleId && entry.name.localeCompare(name, undefined, { sensitivity: 'accent' }) === 0)) throw new Error('A unique role name is required.');
+    const changesAdministration = role.grants.some((grant) => grant.permission === 'GROUP_ADMINISTRATION') !== input.grants.some((grant) => grant.permission === 'GROUP_ADMINISTRATION');
+    if (role.presetKey === 'GROUP_ADMINISTRATOR' || changesAdministration) this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
+    if (role.nameLocked && name !== role.name) throw new Error('This role name is protected.');
+    if (role.presetKey === 'GROUP_ADMINISTRATOR') {
+      if (name !== role.name) throw new Error('The group administrator role cannot be renamed.');
+      if (!ADMIN_CORE.every((permission) => input.grants.some((grant) => grant.permission === permission))) throw new Error('Administrator core permissions cannot be removed.');
+    }
+    if (this.groupSettings.defaultRoleId === roleId && input.grants.some((grant) => grant.permission === 'GROUP_ADMINISTRATION')) throw new Error('The default role must not grant group administration.');
+    role.name = name;
+    role.description = input.description?.trim() || undefined;
+    role.grants = clone(input.grants);
+    role.version += 1;
+    this.members.filter((member) => member.active && member.roleIds?.includes(role.id)).forEach((member) => this.syncMemberPermissions(member));
+    return clone(this.recountedRoles().find((entry) => entry.id === roleId) as Role);
+  }
+
+  /** Deletes an unused non-reserved role. */
+  private deleteRole(groupId: string, roleId: string, version: number): void {
+    this.requirePermission(groupId, 'ROLE_MANAGEMENT');
+    const role = this.recountedRoles().find((entry) => entry.id === roleId);
+    if (!role) throw new Error('Role not found.');
+    if (role.version !== version) throw new Error('The role changed in another session.');
+    if (role.deletable === false) throw new Error('This reserved role cannot be deleted.');
+    if (role.memberCount > 0 || role.pendingInvitationCount > 0) throw new Error(`Role is assigned to ${role.memberCount} members and ${role.pendingInvitationCount} invitations.`);
+    if (this.groupSettings.defaultRoleId === roleId) throw new Error('The default role cannot be deleted.');
+    this.roles = this.roles.filter((entry) => entry.id !== roleId);
+  }
+
+  /** Replaces a member or invitation role set atomically. */
+  private updateRoleAssignment(groupId: string, subjectType: RoleAssignment['subjectType'], subjectId: string, roleIds: string[], expectedVersion: number): RoleAssignment {
+    const key = `${subjectType}:${subjectId}`;
+    const invitation = subjectType === 'INVITATION'
+      ? this.invitations.find((entry) => entry.id === subjectId && !entry.acceptedAt && !entry.revokedAt && Date.parse(entry.expiresAt) > Date.now())
+      : undefined;
+    const currentVersion = this.assignmentVersions.get(key) ?? invitation?.roleAssignmentsVersion ?? 1;
+    if (currentVersion !== expectedVersion) throw new Error('The role assignment changed in another session.');
+    const normalized = this.normalizedRoleIds(roleIds);
+    if (normalized.length === 0) throw new Error('At least one role is required.');
+    const member = subjectType === 'MEMBERSHIP'
+      ? this.members.find((entry) => entry.id === subjectId && entry.active)
+      : undefined;
+    const currentRoleIds = member?.roleIds ?? invitation?.roleIds ?? [];
+    const changedRoleIds = [...new Set([...currentRoleIds, ...normalized])].filter((roleId) => currentRoleIds.includes(roleId) !== normalized.includes(roleId));
+    const adminRole = this.roles.find((role) => role.presetKey === 'GROUP_ADMINISTRATOR');
+    if (changedRoleIds.some((roleId) => roleId !== adminRole?.id)) this.requirePermission(groupId, 'ROLE_MANAGEMENT');
+    const changedAdministrativeRole = changedRoleIds.some((roleId) => {
+      const changed = currentRoleIds.includes(roleId) !== normalized.includes(roleId);
+      return changed && this.roles.find((role) => role.id === roleId)?.grants.some((grant) => grant.permission === 'GROUP_ADMINISTRATION');
+    });
+    if (changedAdministrativeRole) this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
+    if (subjectType === 'MEMBERSHIP') {
+      if (!member) throw new Error(i18n.t('errors.memberNotFound'));
+      const removesReservedAdmin = Boolean(adminRole && member.roleIds?.includes(adminRole.id) && !normalized.includes(adminRole.id));
+      const adminCount = adminRole ? this.members.filter((entry) => entry.active && entry.roleIds?.includes(adminRole.id)).length : 0;
+      if (removesReservedAdmin && adminCount <= 1) throw new Error('The last group administrator cannot be removed.');
+      member.roleIds = normalized;
+      this.syncMemberPermissions(member);
+    } else {
+      if (!invitation) throw new Error('Invitation not found.');
+      invitation.roleIds = normalized;
+      invitation.roleAssignmentsVersion = currentVersion + 1;
+    }
+    const version = currentVersion + 1;
+    this.assignmentVersions.set(key, version);
+    if (member) member.roleAssignmentsVersion = version;
+    return clone({ subjectType, subjectId, roleIds: normalized, version });
+  }
+
+  private createBooking(groupId: string, command: BookingCommand & { unitPriceMinor?: number }): Booking {
     const product = this.categories.flatMap((category) => category.products).find((entry) => entry.id === command.productId);
     const target = this.members.find((member) => member.id === command.targetMembershipId) ?? this.members.find((member) => member.userId === this.session.user.id);
+    const actor = this.currentMembership(groupId);
     const category = this.categories.find((entry) => entry.id === product?.categoryId);
-    if (!product || !target || !category) throw new Error(i18n.t('errors.missingProductOrMember'));
+    if (!product || !target || !actor || !category) throw new Error(i18n.t('errors.missingProductOrMember'));
+    if (target.id !== actor.id && !can(actor.effectiveGrants, 'BOOK_FOR_OTHERS')) throw new Error(i18n.t('admin.noAccessMessage'));
+    if (target.id === actor.id && !can(actor.effectiveGrants, 'CREATE_OWN_BOOKING')) throw new Error(i18n.t('admin.noAccessMessage'));
+    if (target.id !== actor.id && !command.reason?.trim()) throw new Error(i18n.t('booking.reasonRequired'));
     if (product.pricingMode === 'FIXED' && (command.unitPrice || command.unitPriceMinor !== undefined)) throw new Error(i18n.t('errors.amountFormat'));
     const chosenPrice = product.pricingMode === 'USER_DEFINED'
       ? validateDemoProductPrice(command.unitPrice?.minorUnits ?? command.unitPriceMinor)
@@ -396,10 +743,12 @@ export class DemoTransport {
       total: { minorUnits: totalMinorUnits.toString(), currency: unitPrice.currency },
       bookedAt: new Date().toISOString(),
       bookedByName: this.session.user.displayName,
-      reason: command.reason,
+      bookedByMemberId: actor.id,
+      reason: command.reason?.trim() || undefined,
       status: 'POSTED',
-      undoUntil: new Date(Date.now() + 30_000).toISOString(),
-      canVoid: true,
+      voidWithoutReasonUntil: new Date(Date.now() + 30_000).toISOString(),
+      canVoid: false,
+      voidReasonRequired: false,
     };
     this.bookings.unshift(booking);
     this.dashboard.recentBookings.unshift(booking);
@@ -413,31 +762,68 @@ export class DemoTransport {
       groupCategoryTotal.total.minorUnits = (BigInt(groupCategoryTotal.total.minorUnits) + totalMinorUnits).toString();
       groupCategoryTotal.quantity = (groupCategoryTotal.quantity ?? 0) + command.quantity;
     }
-    return clone(booking);
+    return clone(this.bookingWithPermissions(booking, actor));
   }
 
-  private reverseBooking(id: string): Booking {
+  private createBookingBatch(groupId: string, command: BookingBatchCommand & { unitPriceMinor?: number }): Booking[] {
+    const targets = command.targetMembershipIds.map((target) => target.trim());
+    if (targets.length < 1 || targets.length > 100 || targets.some((target) => !target) || new Set(targets).size !== targets.length) {
+      throw new Error(i18n.t('booking.noAvailableTarget'));
+    }
+    const actor = this.currentMembership(groupId);
+    const membersById = new Map(this.members.filter((member) => member.active).map((member) => [member.id, member]));
+    if (!actor || targets.some((target) => !membersById.has(target))) throw new Error(i18n.t('errors.missingProductOrMember'));
+    const includesOwn = targets.includes(actor.id);
+    const includesOthers = targets.some((target) => target !== actor.id);
+    if (includesOwn && !can(actor.effectiveGrants, 'CREATE_OWN_BOOKING')) throw new Error(i18n.t('admin.noAccessMessage'));
+    if (includesOthers && !can(actor.effectiveGrants, 'BOOK_FOR_OTHERS')) throw new Error(i18n.t('admin.noAccessMessage'));
+    if (includesOthers && !command.reason?.trim()) throw new Error(i18n.t('booking.reasonRequired'));
+    return targets.map((targetMembershipId) => this.createBooking(groupId, { ...command, targetMembershipId }));
+  }
+
+  private listBookings(groupId: string): Booking[] {
+    const actor = this.currentMembership(groupId);
+    if (!actor) return [];
+    const canViewAll = can(actor.effectiveGrants, 'VIEW_ALL_BOOKING_ACTIVITY');
+    return clone(this.bookings
+      .filter((booking) => canViewAll || booking.memberId === actor.id || booking.bookedByMemberId === actor.id)
+      .map((booking) => this.bookingWithPermissions(booking, actor)));
+  }
+
+  private bookingWithPermissions(booking: Booking, actor: Membership): Booking {
+    const createdByActor = booking.bookedByMemberId === actor.id;
+    const affectsActor = booking.memberId === actor.id;
+    const canVoid = booking.status === 'POSTED' && (can(actor.effectiveGrants, 'VOID_ANY_BOOKING') || (createdByActor || affectsActor) && can(actor.effectiveGrants, 'VOID_OWN_BOOKING'));
+    const deadline = booking.voidWithoutReasonUntil ?? booking.undoUntil ?? new Date(Date.parse(booking.bookedAt) + 30_000).toISOString();
+    const withinReasonlessWindow = createdByActor && Date.parse(deadline) > Date.now();
+    const reasonRequired = canVoid && !withinReasonlessWindow;
+    return { ...booking, canVoid, voidReasonRequired: reasonRequired, voidWithoutReasonUntil: canVoid && withinReasonlessWindow ? deadline : undefined, undoUntil: undefined };
+  }
+
+  private reverseBooking(groupId: string, id: string, reason: string): Booking {
     const booking = this.bookings.find((entry) => entry.id === id);
+    const actor = this.currentMembership(groupId);
     if (!booking) throw new Error(i18n.t('errors.bookingNotFound'));
+    if (!actor) throw new Error(i18n.t('errors.memberNotFound'));
+    const authorized = this.bookingWithPermissions(booking, actor);
+    if (!authorized.canVoid) throw new Error(i18n.t('admin.noAccessMessage'));
+    if (authorized.voidReasonRequired && !reason.trim()) throw new Error(i18n.t('activities.reasonRequired'));
     if (booking.status === 'POSTED') this.adjustAccountBalance(booking.memberId, -BigInt(booking.total.minorUnits));
     booking.status = 'REVERSED';
-    return clone(booking);
+    booking.canVoid = false;
+    return clone(this.bookingWithPermissions(booking, actor));
   }
 
-  private updatePermissions(id: string, update: PermissionUpdate & { categoryGrants?: Record<string, string[]> }): Membership {
+  private updatePermissions(groupId: string, id: string, update: PermissionUpdate & { categoryGrants?: Record<string, string[]> }, expectedVersion: number): Membership {
+    this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
     const member = this.members.find((entry) => entry.id === id && entry.active);
     if (!member) throw new Error(i18n.t('errors.memberNotFound'));
-    if (member.roles.includes('ADMIN') && !update.roles.includes('ADMIN') && this.activeAdministratorCount() <= 1) {
-      throw new Error('The last active administrator cannot be removed.');
-    }
-    member.roles = update.roles;
-    member.groupPermissions = update.groupPermissions ?? [];
-    member.categoryPermissions = update.categoryPermissions ?? Object.entries(update.categoryGrants ?? {}).map(([categoryId, permissions]) => ({ categoryId, assignToOthers: permissions.includes('ASSIGN_TO_OTHERS'), voidBookings: permissions.includes('VOID_BOOKINGS') }));
-    const sessionGroup = this.session.groups.find((group) => group.membership?.id === member.id);
-    if (sessionGroup?.membership) {
-      sessionGroup.membership.roles = member.roles;
-      sessionGroup.membership.groupPermissions = member.groupPermissions;
-    }
+    const hasCategoryGrant = (update.categoryPermissions ?? []).some((permission) => permission.assignToOthers || permission.voidBookings)
+      || Object.values(update.categoryGrants ?? {}).some((permissions) => permissions.length > 0);
+    if (hasCategoryGrant) throw new Error('Legacy category grants are no longer accepted.');
+    const roleIds = this.roleIdsForLegacyUpdate(member.roleIds ?? [], update.roles, update.groupPermissions ?? []);
+    this.updateRoleAssignment(groupId, 'MEMBERSHIP', id, roleIds, expectedVersion);
+    member.categoryPermissions = [];
     member.etag = `"${id}-${Date.now()}"`;
     return clone(member);
   }
@@ -447,11 +833,14 @@ export class DemoTransport {
     if (!member) throw new Error(i18n.t('errors.memberNotFound'));
     const selfRemoval = member.userId === this.session.user.id;
     if (selfRemoval && !confirmSelf) throw new Error('Self-removal must be confirmed.');
-    if (member.roles.includes('ADMIN') && this.activeAdministratorCount() <= 1) {
+    const adminRole = this.roles.find((entry) => entry.presetKey === 'GROUP_ADMINISTRATOR');
+    if (adminRole && member.roleIds?.includes(adminRole.id) && this.activeAdministratorCount() <= 1) {
       throw new Error('The last active administrator cannot be removed.');
     }
     member.active = false;
     member.roles = ['MEMBER'];
+    member.roleIds = [];
+    member.effectiveGrants = [];
     member.groupPermissions = [];
     member.categoryPermissions = [];
     if (selfRemoval) {
@@ -461,7 +850,8 @@ export class DemoTransport {
   }
 
   private activeAdministratorCount(): number {
-    return this.members.filter((member) => member.active && member.roles.includes('ADMIN')).length;
+    const role = this.roles.find((entry) => entry.presetKey === 'GROUP_ADMINISTRATOR');
+    return role ? this.members.filter((member) => member.active && member.roleIds?.includes(role.id)).length : 0;
   }
 
   private createCategory(input: Partial<Category>): Category {
@@ -570,16 +960,21 @@ export class DemoTransport {
     this.dashboard.groupCategoryTotals = this.dashboard.groupCategoryTotals.filter((total) => total.categoryId !== id);
   }
 
-  private createInvitation(input: InvitationInput & { categoryGrants?: Record<string, string[]>; expiresInDays?: number }): CreatedInvitation {
+  private createInvitation(groupId: string, input: InvitationInput & { categoryGrants?: Record<string, string[]>; expiresInDays?: number }): CreatedInvitation {
+    if (input.roleIds !== undefined) this.requirePermission(groupId, 'ROLE_MANAGEMENT');
     const email = input.email.trim().toLowerCase();
     if (this.members.some((member) => member.active && member.email.toLowerCase() === email)) throw new Error('An active membership already exists for this email address.');
     if (this.invitations.some((item) => !item.acceptedAt && !item.revokedAt && Date.parse(item.expiresAt) > Date.now() && item.email.toLowerCase() === email)) throw new Error('An active invitation already exists for this email address.');
     const token = crypto.randomUUID();
+    const selectedRoleIds = this.normalizedRoleIds(input.roleIds ?? []);
+    if (selectedRoleIds.length === 0) throw new Error('At least one role is required.');
     const invitation: CreatedInvitation = {
       id: identifier('invitation'),
       email,
       displayName: input.displayName || undefined,
-      roles: [...(input.roles ?? []).filter((role) => role !== 'MEMBER'), 'MEMBER'],
+      roles: this.legacyRolesForRoleIds(selectedRoleIds),
+      roleIds: selectedRoleIds,
+      roleAssignmentsVersion: 1,
       groupPermissions: input.groupPermissions ?? [],
       categoryPermissions: input.categoryPermissions ?? Object.entries(input.categoryGrants ?? {}).map(([categoryId, permissions]) => ({ categoryId, assignToOthers: permissions.includes('ASSIGN_TO_OTHERS'), voidBookings: permissions.includes('VOID_BOOKINGS') })),
       expiresAt: new Date(Date.now() + (input.expiresInDays || 7) * 86_400_000).toISOString(),
@@ -591,11 +986,18 @@ export class DemoTransport {
     return invitation;
   }
 
-  private updateInvitation(invitationId: string, input: Omit<InvitationInput, 'email'> & { categoryGrants?: Record<string, string[]> }): InvitationMetadata {
-    const invitation = this.invitations.find((item) => item.id === invitationId && !item.acceptedAt && !item.revokedAt);
+  private updateInvitation(groupId: string, invitationId: string, input: Omit<InvitationInput, 'email'> & { categoryGrants?: Record<string, string[]> }, headers?: HeadersInit): InvitationMetadata {
+    const invitation = this.invitations.find((item) => item.id === invitationId && !item.acceptedAt && !item.revokedAt && Date.parse(item.expiresAt) > Date.now());
     if (!invitation) throw new Error('Invitation not found.');
+    if (input.roleIds !== undefined) {
+      this.updateRoleAssignment(groupId, 'INVITATION', invitationId, input.roleIds, requiredDemoVersion(headers));
+      invitation.displayName = input.displayName || undefined;
+      return clone(invitation);
+    }
+    const roleIds = this.roleIdsForLegacyUpdate(invitation.roleIds ?? [], input.roles ?? [], input.groupPermissions ?? []);
+    this.updateRoleAssignment(groupId, 'INVITATION', invitationId, roleIds, requiredDemoVersion(headers));
     invitation.displayName = input.displayName || undefined;
-    invitation.roles = [...(input.roles ?? []).filter((role) => role !== 'MEMBER'), 'MEMBER'];
+    invitation.roles = this.legacyRolesForRoleIds(roleIds);
     invitation.groupPermissions = input.groupPermissions ?? [];
     invitation.categoryPermissions = input.categoryPermissions ?? Object.entries(input.categoryGrants ?? {}).map(([categoryId, permissions]) => ({ categoryId, assignToOthers: permissions.includes('ASSIGN_TO_OTHERS'), voidBookings: permissions.includes('VOID_BOOKINGS') }));
     return clone(invitation);
@@ -616,7 +1018,8 @@ export class DemoTransport {
    * @returns Row-level import outcomes and aggregate counters.
    * @throws Error when the CSV header or data rows are missing.
    */
-  private importInvitations(document: string): InvitationImportResult {
+  private importInvitations(document: string, roleIds: string[]): InvitationImportResult {
+    const normalizedRoleIds = this.normalizedRoleIds(roleIds);
     const candidates = parseDemoMemberCsv(document);
     const memberEmails = new Set(this.members.filter((member) => member.active).map((member) => member.email.toLowerCase()));
     const existingInvitations = new Map(this.invitations
@@ -634,6 +1037,23 @@ export class DemoTransport {
           : importedEmails.has(candidate.email) ? 'duplicate_email' : undefined;
       if (invalidCode) {
         rows.push({ ...base, invitationStatus: 'INVALID', emailDeliveryStatus: 'NOT_REQUESTED', code: invalidCode });
+        summary.invalid += 1;
+        continue;
+      }
+      let effectiveRoleIds = normalizedRoleIds;
+      if (candidate.roleNames.length > 0) {
+        const resolved = candidate.roleNames.map((name) => this.roles.find((role) => role.name.localeCompare(name, undefined, { sensitivity: 'accent' }) === 0)?.id);
+        if (resolved.some((roleId) => !roleId)) {
+          rows.push({ ...base, invitationStatus: 'INVALID', emailDeliveryStatus: 'NOT_REQUESTED', code: 'unknown_role' });
+          summary.invalid += 1;
+          continue;
+        }
+        effectiveRoleIds = this.normalizedRoleIds(resolved as string[]);
+      } else if (effectiveRoleIds.length === 0 && this.groupSettings.defaultRoleId) {
+        effectiveRoleIds = [this.groupSettings.defaultRoleId];
+      }
+      if (effectiveRoleIds.length === 0) {
+        rows.push({ ...base, invitationStatus: 'INVALID', emailDeliveryStatus: 'NOT_REQUESTED', code: 'missing_default_role' });
         summary.invalid += 1;
         continue;
       }
@@ -658,7 +1078,9 @@ export class DemoTransport {
         id: identifier('invitation'),
         email: candidate.email,
         displayName: candidate.displayName || undefined,
-        roles: ['MEMBER'],
+        roles: this.legacyRolesForRoleIds(effectiveRoleIds),
+        roleIds: [...effectiveRoleIds],
+        roleAssignmentsVersion: 1,
         groupPermissions: [],
         categoryPermissions: [],
         expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString(),
@@ -803,8 +1225,7 @@ export class DemoTransport {
     const membershipId = this.session.groups.find((group) => group.id === groupId)?.membership?.id;
     const member = this.members.find((entry) => entry.id === membershipId && entry.active);
     if (!member) throw new Error(i18n.t('errors.memberNotFound'));
-    const canRecord = member.roles.includes('ADMIN') || member.roles.includes('FINANCE_MANAGER') || member.groupPermissions.includes('SELF_RECORD_PAYMENT');
-    if (!canRecord) throw new Error(i18n.t('financeWorkspace.noAccessMessage'));
+    if (!can(member.effectiveGrants, 'RECORD_OWN_PAYMENT')) throw new Error(i18n.t('financeWorkspace.noAccessMessage'));
     const amountMinor = BigInt(command.amount?.minorUnits ?? command.amountMinor ?? 0);
     if (amountMinor <= 0n) throw new Error(i18n.t('errors.amountFormat'));
     if (amountMinor > 100_000_000_000n) throw new Error(i18n.t('errors.amountRange'));
