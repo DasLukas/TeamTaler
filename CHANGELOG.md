@@ -46,6 +46,13 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Store reusable public join tokens as hashes plus authenticated ciphertext, keep them in URL fragments, require mailbox verification for new accounts, return enumeration-resistant registration responses, and invalidate pending proofs atomically on rotation or disable.
 - Validate every multi-booking target and permission before writing, and commit all booking, ledger, allocation, notification, audit, and idempotency rows atomically.
 
+## [0.5.2] - 2026-08-07
+
+### Fixed
+
+- Reworked booking activities into labelled responsive cards on narrow phone widths, preventing page-level horizontal overflow and keeping mobile navigation viewport-attached while scrolling.
+- Expanded the desktop activity workspace to the available content width and retained the booking table on tablet, split-view, and desktop widths with horizontal overflow contained inside the table viewport.
+
 ## [0.5.1] - 2026-08-07
 
 ### Fixed
@@ -142,7 +149,8 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Explicit acting and charged membership display for every booking, including searchable third-party-assignment cues.
 - Canonical backup-entry allowlisting, target-width Argon2 parameter parsing, and directory-confined SPA asset serving with traversal regression coverage.
 
-[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/DasLukas/TeamTaler/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/DasLukas/TeamTaler/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/DasLukas/TeamTaler/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/DasLukas/TeamTaler/compare/v0.3.0...v0.4.0

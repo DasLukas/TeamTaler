@@ -93,6 +93,9 @@ describe('ActivitiesPage booking traceability', () => {
     expect(row.querySelector('img[src="/avatars/manager.png"]')).toHaveAttribute('alt', '');
     expect(screen.getByRole('columnheader', { name: i18n.t('activities.bookedFor') })).toBeVisible();
     expect(screen.getByRole('columnheader', { name: i18n.t('activities.bookedBy') })).toBeVisible();
+    expect(within(row).getByRole('cell', { name: /Target Member/ })).toHaveAttribute('data-label', i18n.t('activities.bookedFor'));
+    expect(within(row).getByRole('cell', { name: /Assigning Manager/ })).toHaveAttribute('data-label', i18n.t('activities.bookedBy'));
+    expect(within(row).getByRole('cell', { name: thirdPartyBooking.productName })).toHaveAttribute('data-label', i18n.t('activities.booking'));
 
     await user.type(screen.getByLabelText(i18n.t('activities.searchLabel')), thirdPartyBooking.bookedByName);
     expect(await screen.findByRole('row', { name: /Target Member.*Assigning Manager/ })).toBeVisible();
