@@ -35,14 +35,16 @@ type Row struct {
 	Number         int
 	Email          string
 	DisplayName    string
+	RoleNames      []string
 	ValidationCode string
 }
 
 // ParseCSV validates a UTF-8 member import document with an email column and an
-// optional display_name column. Comma and semicolon delimiters and a UTF-8 BOM
-// are supported. Structural document errors are returned as validation errors;
-// row-level errors remain attached to their row so callers can report partial
-// results. Example: ParseCSV([]byte("email,display_name\na@example.test,Ada"))
+// optional display_name and roles columns. Multiple visible role names are
+// separated with a vertical bar. Comma and semicolon delimiters and a UTF-8
+// BOM are supported. Structural document errors are returned as validation
+// errors; row-level errors remain attached to their row so callers can report
+// partial results. Example: ParseCSV([]byte("email,roles\na@example.test,Member"))
 // returns one normalized row.
 func ParseCSV(document []byte) ([]Row, error) {
 	if len(document) == 0 {
@@ -68,7 +70,7 @@ func ParseCSV(document []byte) ([]Row, error) {
 		return nil, malformedCSV(err)
 	}
 
-	emailIndex, displayNameIndex, err := parseHeader(header)
+	emailIndex, displayNameIndex, rolesIndex, err := parseHeader(header)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +97,7 @@ func ParseCSV(document []byte) ([]Row, error) {
 		}
 
 		line, _ := reader.FieldPos(0)
-		row := Row{Number: line, DisplayName: valueAt(record, displayNameIndex)}
+		row := Row{Number: line, DisplayName: valueAt(record, displayNameIndex), RoleNames: splitRoleNames(valueAt(record, rolesIndex))}
 		email, emailErr := platform.NormalizeEmail(valueAt(record, emailIndex))
 		row.Email = email
 		switch {
@@ -131,30 +133,50 @@ func detectDelimiter(document []byte) rune {
 	return ','
 }
 
-func parseHeader(header []string) (int, int, error) {
+func parseHeader(header []string) (int, int, int, error) {
 	emailIndex := -1
 	displayNameIndex := -1
+	rolesIndex := -1
 	for index, raw := range header {
 		name := strings.ToLower(strings.TrimSpace(raw))
 		switch name {
 		case "email":
 			if emailIndex >= 0 {
-				return 0, 0, domain.ValidationError{Field: "file", Message: "header contains email more than once"}
+				return 0, 0, 0, domain.ValidationError{Field: "file", Message: "header contains email more than once"}
 			}
 			emailIndex = index
 		case "display_name":
 			if displayNameIndex >= 0 {
-				return 0, 0, domain.ValidationError{Field: "file", Message: "header contains display_name more than once"}
+				return 0, 0, 0, domain.ValidationError{Field: "file", Message: "header contains display_name more than once"}
 			}
 			displayNameIndex = index
+		case "roles":
+			if rolesIndex >= 0 {
+				return 0, 0, 0, domain.ValidationError{Field: "file", Message: "header contains roles more than once"}
+			}
+			rolesIndex = index
 		default:
-			return 0, 0, domain.ValidationError{Field: "file", Message: fmt.Sprintf("header contains unsupported column %q", name)}
+			return 0, 0, 0, domain.ValidationError{Field: "file", Message: fmt.Sprintf("header contains unsupported column %q", name)}
 		}
 	}
 	if emailIndex < 0 {
-		return 0, 0, domain.ValidationError{Field: "file", Message: "header must contain an email column"}
+		return 0, 0, 0, domain.ValidationError{Field: "file", Message: "header must contain an email column"}
 	}
-	return emailIndex, displayNameIndex, nil
+	return emailIndex, displayNameIndex, rolesIndex, nil
+}
+
+func splitRoleNames(value string) []string {
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, "|")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if name := strings.TrimSpace(part); name != "" {
+			result = append(result, name)
+		}
+	}
+	return result
 }
 
 func valueAt(record []string, index int) string {

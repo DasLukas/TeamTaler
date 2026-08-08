@@ -9,3 +9,4 @@ td small { display: block; margin-top: 4px; color: var(--color-muted); }
 .reversalForm p { margin: 0; color: var(--color-muted); line-height: 1.55; }
 .actions { display: flex; justify-content: flex-end; gap: var(--space-3); }
 .error { color: var(--color-red-600) !important; }
+.reversalForm .windowNotice { padding: var(--space-3); border-radius: var(--radius-md); color: var(--color-teal-700); background: var(--color-surface-teal); font-size: var(--font-size-sm); }

@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { formatMoney } from '@/api/money';
 import type { Booking } from '@/api/types';
+import { can } from '@/app/permissions';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Page } from '@/components/layout/Page';
 import { Avatar } from '@/components/ui/Avatar';
@@ -23,7 +24,7 @@ import styles from './ActivitiesPage.module.css';
  */
 export function ActivitiesPage() {
   const { t } = useTranslation();
-  const { activeGroupId } = useActiveGroup();
+  const { activeGroupId, activeGroup } = useActiveGroup();
   const queryClient = useQueryClient();
   const bookingsQuery = useQuery({ queryKey: ['bookings', activeGroupId], queryFn: () => api.getBookings(activeGroupId) });
   const categoriesQuery = useQuery({ queryKey: ['categories', activeGroupId], queryFn: () => api.getCategories(activeGroupId) });
@@ -35,7 +36,7 @@ export function ActivitiesPage() {
     categoriesQuery.data?.flatMap((category) => category.products.map((product) => [product.id, product.imageUrl] as const)) ?? [],
   ), [categoriesQuery.data]);
   const reverseMutation = useMutation({
-    mutationFn: () => reversal ? api.reverseBooking(activeGroupId, reversal.id, reason) : Promise.reject(new Error(t('activities.noSelection'))),
+    mutationFn: () => reversal ? api.reverseBooking(activeGroupId, reversal.id, reason.trim()) : Promise.reject(new Error(t('activities.noSelection'))),
     onSuccess: async () => {
       setReversal(null);
       setReason('');
@@ -53,8 +54,10 @@ export function ActivitiesPage() {
 
   const filtered = bookingsQuery.data.filter((booking) => `${booking.memberName} ${booking.bookedByName} ${booking.productName} ${booking.categoryName}`.toLowerCase().includes(deferredSearch));
 
+  const canViewAll = can(activeGroup.membership?.effectiveGrants, 'VIEW_ALL_BOOKING_ACTIVITY');
+
   return (
-    <Page intro={t('activities.intro')} title={t('activities.title')} wide>
+    <Page intro={t(canViewAll ? 'activities.introAll' : 'activities.introOwn')} title={t('activities.title')} wide>
       <div className={tableStyles.toolbar}>
         <div className={tableStyles.search}>
           <Field htmlFor="activity-search" label={t('activities.searchLabel')}>
@@ -89,14 +92,15 @@ export function ActivitiesPage() {
           </table>
         </div>
       )}
-      <Modal onClose={() => setReversal(null)} open={Boolean(reversal)} title={t('activities.reverseTitle')}>
+      <Modal onClose={() => { setReversal(null); setReason(''); }} open={Boolean(reversal)} title={t('activities.reverseTitle')}>
         <form className={styles.reversalForm} onSubmit={(event) => { event.preventDefault(); reverseMutation.mutate(); }}>
           <p>{t('activities.reverseExplanation')}</p>
-          <Field htmlFor="reversal-reason" label={t('finance.reason')}>
-            <TextInput id="reversal-reason" onChange={(event) => setReason(event.target.value)} required value={reason} />
+          {reversal?.voidWithoutReasonUntil && !reversal.voidReasonRequired ? <p className={styles.windowNotice}>{t('activities.reasonOptionalUntil', { time: new Intl.DateTimeFormat('de-DE', { timeStyle: 'short' }).format(new Date(reversal.voidWithoutReasonUntil)) })}</p> : null}
+          <Field hint={reversal?.voidReasonRequired ? t('activities.reasonRequired') : t('activities.reasonOptional')} htmlFor="reversal-reason" label={t('finance.reason')}>
+            <TextInput id="reversal-reason" onChange={(event) => setReason(event.target.value)} required={reversal?.voidReasonRequired} value={reason} />
           </Field>
           {reverseMutation.isError ? <p className={styles.error} role="alert">{reverseMutation.error.message}</p> : null}
-          <div className={styles.actions}><Button onClick={() => setReversal(null)} variant="secondary">{t('common.cancel')}</Button><Button disabled={!reason.trim() || reverseMutation.isPending} type="submit">{t('activities.confirmReverse')}</Button></div>
+          <div className={styles.actions}><Button onClick={() => { setReversal(null); setReason(''); }} variant="secondary">{t('common.cancel')}</Button><Button disabled={Boolean(reversal?.voidReasonRequired && !reason.trim()) || reverseMutation.isPending} type="submit">{t('activities.confirmReverse')}</Button></div>
         </form>
       </Modal>
     </Page>

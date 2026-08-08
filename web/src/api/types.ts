@@ -13,6 +13,99 @@ export type GroupRole = 'ADMIN' | 'FINANCE_MANAGER' | 'CATALOG_MANAGER' | 'MEMBE
 /** Narrow group-scoped rights that do not grant a management workspace. */
 export type GroupPermission = 'SELF_RECORD_PAYMENT';
 
+/** Stable authorization keys understood by the API and every client. */
+export type PermissionKey =
+  | 'GROUP_ADMINISTRATION'
+  | 'ROLE_MANAGEMENT'
+  | 'FINANCE_MANAGEMENT'
+  | 'CATALOG_MANAGEMENT'
+  | 'VIEW_ALL_BOOKING_ACTIVITY'
+  | 'RECORD_OWN_PAYMENT'
+  | 'CREATE_OWN_BOOKING'
+  | 'VOID_OWN_BOOKING'
+  | 'VOID_ANY_BOOKING'
+  | 'BOOK_FOR_OTHERS';
+
+/** Complete permission-key registry in stable display order. */
+export const PERMISSION_KEYS = [
+  'GROUP_ADMINISTRATION',
+  'ROLE_MANAGEMENT',
+  'FINANCE_MANAGEMENT',
+  'CATALOG_MANAGEMENT',
+  'VIEW_ALL_BOOKING_ACTIVITY',
+  'RECORD_OWN_PAYMENT',
+  'CREATE_OWN_BOOKING',
+  'VOID_OWN_BOOKING',
+  'VOID_ANY_BOOKING',
+  'BOOK_FOR_OTHERS',
+] as const satisfies readonly PermissionKey[];
+
+/**
+ * Determines whether an untrusted value is a supported permission key.
+ *
+ * @param value - Wire value to validate.
+ * @returns Whether the value belongs to the stable permission registry.
+ */
+export function isPermissionKey(value: unknown): value is PermissionKey {
+  return typeof value === 'string' && PERMISSION_KEYS.some((permission) => permission === value);
+}
+
+/** Group-wide scope used by the first dynamic-permission release. */
+export interface GroupPermissionScope {
+  type: 'GROUP';
+}
+
+/** One allow-only permission attached to a role. */
+export interface PermissionGrant {
+  permission: PermissionKey;
+  scope: GroupPermissionScope;
+}
+
+/** Server-owned permission metadata used by the role editor. */
+export interface PermissionDefinition {
+  key: PermissionKey;
+  name?: string;
+  description?: string;
+  impliedPermissions?: PermissionKey[];
+  allowedScopes?: Array<'GROUP' | 'CATEGORY' | 'PRODUCT'>;
+}
+
+/** Reserved role identities whose behavior is protected by the server. */
+export type RolePresetKey = 'GROUP_ADMINISTRATOR' | 'MEMBER' | 'FINANCE_MANAGER' | 'CATALOG_MANAGER';
+
+/** A group-owned role containing reusable permission grants. */
+export interface Role {
+  id: string;
+  groupId?: string;
+  presetKey?: RolePresetKey;
+  name: string;
+  description?: string;
+  nameLocked?: boolean;
+  deletable?: boolean;
+  grants: PermissionGrant[];
+  version: number;
+  memberCount: number;
+  pendingInvitationCount: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/** Editable role fields accepted by create and update endpoints. */
+export interface RoleInput {
+  name: string;
+  description?: string;
+  grants: PermissionGrant[];
+}
+
+/** One member or pending invitation and all assigned group role IDs. */
+export interface RoleAssignment {
+  subjectType: 'MEMBERSHIP' | 'INVITATION';
+  subjectId: string;
+  roleIds: string[];
+  version: number;
+  etag?: string;
+}
+
 /** Rights that can be granted for one category. */
 export type CategoryPermissionName = 'ASSIGN_TO_OTHERS' | 'VOID_BOOKINGS';
 
@@ -56,14 +149,57 @@ export interface Group {
     id: string;
     roles: GroupRole[];
     groupPermissions: GroupPermission[];
+    roleIds?: string[];
+    effectiveGrants?: PermissionGrant[];
+    roleAssignmentsVersion?: number;
   };
 }
 
-/** Administrator-managed behavior shared by every member of one group. */
+/** Administrator-managed notification behavior shared by one group. */
 export interface GroupSettings {
-  membersCanViewAllBookings: boolean;
   notificationEmailsEnabled: boolean;
   notificationEmailDeliveryAvailable: boolean;
+  defaultRoleId: string | null;
+}
+
+/**
+ * Group notification-settings update accepted by the API.
+ */
+export interface GroupSettingsUpdateInput {
+  notificationEmailsEnabled?: boolean;
+  defaultRoleId?: string;
+}
+
+/** Administrator-visible state of the group's single public join link. */
+export interface PublicJoinLink {
+  enabled: boolean;
+  expired: boolean;
+  expiresAt: string | null;
+  acceptUrl?: string;
+  version: number;
+  createdAt?: string;
+  updatedAt?: string;
+  emailVerificationAvailable: boolean;
+}
+
+/** Full desired public join-link configuration. A null expiry is unlimited. */
+export interface PublicJoinLinkUpdate {
+  enabled: boolean;
+  expiresAt: string | null;
+}
+
+/** Safe group metadata resolved from a valid public join-link token. */
+export interface PublicJoinPreview {
+  groupName: string;
+  expiresAt: string | null;
+}
+
+/** New-account registration started from a reusable public join link. */
+export interface PublicJoinRegistrationInput {
+  joinToken: string;
+  email: string;
+  displayName: string;
+  password: string;
 }
 
 /** Authentication and active-group state returned by the API. */
@@ -159,6 +295,9 @@ export interface Membership {
   roles: GroupRole[];
   groupPermissions: GroupPermission[];
   categoryPermissions: CategoryPermission[];
+  roleIds?: string[];
+  effectiveGrants?: PermissionGrant[];
+  roleAssignmentsVersion?: number;
   active: boolean;
   etag?: string;
 }
@@ -184,6 +323,8 @@ export interface Booking {
   status: 'POSTED' | 'REVERSED';
   undoUntil?: string;
   canVoid?: boolean;
+  voidReasonRequired?: boolean;
+  voidWithoutReasonUntil?: string;
 }
 
 /** Aggregated category amount shown on the dashboard. */
@@ -212,6 +353,17 @@ export interface BookingCommand {
   quantity: number;
   unitPrice?: Money;
   targetMembershipId?: string;
+  reason?: string;
+}
+
+/** Command used to atomically create the same booking for multiple members. */
+export interface BookingBatchCommand {
+  productId: string;
+  productVersion: number;
+  expectedPeriodId: string;
+  quantity: number;
+  unitPrice?: Money;
+  targetMembershipIds: string[];
   reason?: string;
 }
 
@@ -383,6 +535,9 @@ export interface InvitationMetadata {
   roles: GroupRole[];
   groupPermissions: GroupPermission[];
   categoryPermissions: CategoryPermission[];
+  roleIds?: string[];
+  roleAssignmentsVersion: number;
+  etag?: string;
   expiresAt: string;
   acceptedAt?: string;
   revokedAt?: string;
@@ -399,6 +554,8 @@ export interface CreatedInvitation {
   roles: GroupRole[];
   groupPermissions: GroupPermission[];
   categoryPermissions: CategoryPermission[];
+  roleIds?: string[];
+  roleAssignmentsVersion: number;
   expiresAt: string;
   acceptUrl: string;
   emailDeliveryStatus: EmailDeliveryStatus;
@@ -411,7 +568,33 @@ export interface InvitationInput {
   roles: GroupRole[];
   groupPermissions: GroupPermission[];
   categoryPermissions: CategoryPermission[];
+  roleIds?: string[];
 }
+
+/**
+ * Complete editable state for an open invitation.
+ *
+ * Every update uses the assignment version for optimistic concurrency.
+ * Role-based updates intentionally exclude all deprecated permission fields;
+ * legacy updates remain available when `roleIds` is omitted.
+ */
+export type InvitationUpdateInput =
+  | {
+    displayName: string;
+    roleIds: string[];
+    roleAssignmentsVersion: number;
+    roles?: never;
+    groupPermissions?: never;
+    categoryPermissions?: never;
+  }
+  | {
+    displayName: string;
+    roleIds?: never;
+    roleAssignmentsVersion: number;
+    roles: GroupRole[];
+    groupPermissions: GroupPermission[];
+    categoryPermissions: CategoryPermission[];
+  };
 
 /** Result of rotating and resending an invitation email. */
 export interface InvitationEmailResendResult {

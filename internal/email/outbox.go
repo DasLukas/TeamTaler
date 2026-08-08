@@ -67,6 +67,10 @@ const (
 	FailureCodeDeliveryFailed FailureCode = "delivery_failed"
 	// FailureCodeDeliveryInterrupted means the final worker lease expired before acknowledgement.
 	FailureCodeDeliveryInterrupted FailureCode = "delivery_interrupted"
+	// FailureCodePublicJoinInvalidated means link rotation, disabling, or a newer registration invalidated the job.
+	FailureCodePublicJoinInvalidated FailureCode = "public_join_invalidated"
+	// FailureCodePublicJoinExpired means the registration or parent join link expired before delivery.
+	FailureCodePublicJoinExpired FailureCode = "public_join_expired"
 )
 
 // TokenOpener decrypts one persisted invitation-token ciphertext. Implementations

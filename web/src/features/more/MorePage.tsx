@@ -31,7 +31,7 @@ const links = [
 export function MorePage() {
   const { t } = useTranslation();
   const { session, activeGroup } = useActiveGroup();
-  const roles = activeGroup.membership?.roles ?? [];
+  const grants = activeGroup.membership?.effectiveGrants;
   const unreadCount = useUnreadNotificationCount();
   return (
     <Page title={t('more.title')}>
@@ -41,7 +41,7 @@ export function MorePage() {
       </section>
       <nav aria-label={t('nav.additional')} className={styles.links}>
         <Link to={memberPaths.notifications}><Bell aria-hidden="true" size={23} /><span>{t('nav.notifications')}</span><span className={styles.end}><NotificationBadge count={unreadCount} /><ChevronRight aria-hidden="true" size={20} /></span></Link>
-        {links.filter((item) => item.capability === null || hasGroupCapability(roles, item.capability)).map(({ to, labelKey, icon: Icon }) => <Link key={to} to={to}><Icon aria-hidden="true" size={23} /><span>{t(labelKey)}</span><ChevronRight aria-hidden="true" size={20} /></Link>)}
+        {links.filter((item) => item.capability === null || hasGroupCapability(grants, item.capability)).map(({ to, labelKey, icon: Icon }) => <Link key={to} to={to}><Icon aria-hidden="true" size={23} /><span>{t(labelKey)}</span><ChevronRight aria-hidden="true" size={20} /></Link>)}
         <LogoutButton className={styles.logout} showChevron />
       </nav>
     </Page>

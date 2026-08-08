@@ -26,8 +26,7 @@ export function FinancePage() {
   const { t } = useTranslation();
   const { activeGroup } = useActiveGroup();
   const [activeTab, setActiveTab] = useState<FinanceTab>('overview');
-  const roles = activeGroup.membership?.roles ?? [];
-  const canManageFinance = hasGroupCapability(roles, 'finance');
+  const canManageFinance = hasGroupCapability(activeGroup.membership?.effectiveGrants, 'finance');
 
   if (!canManageFinance) {
     return <Page title={t('financeWorkspace.title')}><StatePanel kind="error" title={t('financeWorkspace.noAccessTitle')} message={t('financeWorkspace.noAccessMessage')} /></Page>;

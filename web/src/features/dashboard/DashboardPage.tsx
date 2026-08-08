@@ -70,9 +70,7 @@ export function DashboardPage() {
   });
   const periodTotal = dashboard.categoryTotals.reduce((sum, entry) => sum + BigInt(entry.total.minorUnits), 0n);
   const greeting = t(`dashboard.${getDashboardGreetingKey(localHour)}`);
-  const roles = activeGroup.membership?.roles ?? [];
-  const groupPermissions = activeGroup.membership?.groupPermissions ?? [];
-  const canRecordPayment = canRecordOwnPayment(roles, groupPermissions);
+  const canRecordPayment = canRecordOwnPayment(activeGroup.membership?.effectiveGrants);
 
   return (
     <div className={styles.dashboard}>

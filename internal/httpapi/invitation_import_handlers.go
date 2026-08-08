@@ -44,13 +44,14 @@ func (s *Server) handleImportInvitations(response http.ResponseWriter, request *
 		writeProblem(response, request, err)
 		return
 	}
+	roleIDs := request.URL.Query()["roleId"]
 	candidates := make([]groups.InvitationImportCandidate, len(rows))
 	for index, row := range rows {
 		candidates[index] = groups.InvitationImportCandidate{
-			Row: row.Number, Email: row.Email, DisplayName: row.DisplayName, ValidationCode: row.ValidationCode,
+			Row: row.Number, Email: row.Email, DisplayName: row.DisplayName, RoleNames: row.RoleNames, ValidationCode: row.ValidationCode,
 		}
 	}
-	result, err := s.groups.ImportInvitations(request.Context(), principal, membership, request.Header.Get("Idempotency-Key"), candidates)
+	result, err := s.groups.ImportInvitations(request.Context(), principal, membership, request.Header.Get("Idempotency-Key"), roleIDs, candidates)
 	if err != nil {
 		writeProblem(response, request, err)
 		return

@@ -28,11 +28,10 @@ const (
 )
 
 type memberSeed struct {
-	email            string
-	displayName      string
-	roles            []domain.Role
-	groupPermissions []domain.GroupPermission
-	categoryGrants   map[string][]domain.CategoryPermission
+	email       string
+	displayName string
+	roles       []domain.Role
+	permissions []domain.PermissionKey
 }
 
 type seededMember struct {
@@ -131,10 +130,7 @@ func run() error {
 
 	marie, err := createMember(ctx, authService, groupService, adminSession.Principal, adminGroup.Membership, memberSeed{
 		email: "marie@example.test", displayName: "Marie Member",
-		groupPermissions: []domain.GroupPermission{domain.PermissionSelfRecordPayment},
-		categoryGrants: map[string][]domain.CategoryPermission{
-			drinks.ID: {domain.PermissionAssignToOthers},
-		},
+		permissions: []domain.PermissionKey{domain.PermissionRecordOwnPayment, domain.PermissionBookForOthers},
 	})
 	if err != nil {
 		return err
@@ -169,10 +165,11 @@ func run() error {
 	}); err != nil {
 		return fmt.Errorf("create assigned drink booking: %w", err)
 	}
-	if _, err := bookingService.Create(ctx, jonas.principal, jonas.membership, "seed-booking-jonas-pretzel", bookings.CreateInput{
+	if _, err := bookingService.Create(ctx, adminSession.Principal, adminGroup.Membership, "seed-booking-jonas-pretzel", bookings.CreateInput{
 		ProductID: pretzel.ID, ProductVersion: pretzel.Version, ExpectedPeriodID: periodID, Quantity: 2,
+		TargetMembershipID: jonas.membership.ID, Reason: "Team snack",
 	}); err != nil {
-		return fmt.Errorf("create Jonas snack booking: %w", err)
+		return fmt.Errorf("create assigned Jonas snack booking: %w", err)
 	}
 	if _, err := bookingService.Create(ctx, adminSession.Principal, adminGroup.Membership, "seed-booking-lena-late", bookings.CreateInput{
 		ProductID: lateFee.ID, ProductVersion: lateFee.Version, ExpectedPeriodID: periodID, Quantity: 1,
@@ -228,12 +225,38 @@ func createFixedProduct(ctx context.Context, service catalog.Service, actor doma
 	return item, nil
 }
 
-// createMember creates and accepts one invitation with the requested roles and
-// permissions. Every seeded account receives the shared local-only password.
-// It returns the authenticated principal and active membership or a domain
-// service error.
+// createMember creates and accepts one invitation with an explicit starter-role
+// selection, then assigns an optional dynamic permission role. Accounts without
+// requested management presets receive the editable member starter role. Every
+// seeded account receives the shared local-only password. It returns the
+// authenticated principal and active membership or a domain service error.
 func createMember(ctx context.Context, authService auth.Service, groupService groups.Service, actor domain.Principal, actorMembership domain.Membership, seed memberSeed) (seededMember, error) {
-	invitation, err := groupService.CreateInvitation(ctx, actor, actorMembership, seed.email, seed.displayName, seed.roles, seed.groupPermissions, seed.categoryGrants)
+	availableRoles, err := groupService.ListRoles(ctx, actorMembership)
+	if err != nil {
+		return seededMember{}, fmt.Errorf("list roles for %s: %w", seed.email, err)
+	}
+	wantedPresets := make(map[domain.RolePresetKey]struct{}, len(seed.roles)+1)
+	if len(seed.roles) == 0 || len(seed.permissions) > 0 {
+		wantedPresets[domain.RolePresetMember] = struct{}{}
+	}
+	for _, legacyRole := range seed.roles {
+		switch legacyRole {
+		case domain.RoleFinanceManager:
+			wantedPresets[domain.RolePresetFinanceManager] = struct{}{}
+		case domain.RoleCatalogManager:
+			wantedPresets[domain.RolePresetCatalogManager] = struct{}{}
+		}
+	}
+	roleIDs := make([]string, 0, len(wantedPresets))
+	for _, role := range availableRoles {
+		if _, selected := wantedPresets[role.PresetKey]; selected {
+			roleIDs = append(roleIDs, role.ID)
+		}
+	}
+	if len(roleIDs) == 0 {
+		return seededMember{}, fmt.Errorf("resolve starter roles for %s", seed.email)
+	}
+	invitation, err := groupService.CreateInvitationWithRoles(ctx, actor, actorMembership, seed.email, seed.displayName, roleIDs)
 	if err != nil {
 		return seededMember{}, fmt.Errorf("invite %s: %w", seed.email, err)
 	}
@@ -242,6 +265,31 @@ func createMember(ctx context.Context, authService auth.Service, groupService gr
 	})
 	if err != nil {
 		return seededMember{}, fmt.Errorf("accept invitation for %s: %w", seed.email, err)
+	}
+	if len(seed.permissions) > 0 {
+		grants := make([]domain.PermissionGrant, 0, len(seed.permissions))
+		for _, permission := range seed.permissions {
+			grants = append(grants, domain.PermissionGrant{
+				Permission: permission,
+				Scope:      domain.PermissionScope{Type: domain.PermissionScopeGroup},
+			})
+		}
+		role, createErr := groupService.CreateRole(ctx, actor, actorMembership, groups.RoleCommand{
+			Name:        seed.displayName + " permissions",
+			Description: "Editable permissions for the disposable test-data account.",
+			Grants:      grants,
+		})
+		if createErr != nil {
+			return seededMember{}, fmt.Errorf("create dynamic role for %s: %w", seed.email, createErr)
+		}
+		roleIDs := append(append([]string(nil), membership.RoleIDs...), role.ID)
+		if _, assignErr := groupService.ReplaceMemberRoles(ctx, actor, actorMembership, membership.ID, roleIDs, membership.RoleAssignmentsVersion); assignErr != nil {
+			return seededMember{}, fmt.Errorf("assign dynamic role for %s: %w", seed.email, assignErr)
+		}
+		membership, err = groupService.MembershipForUser(ctx, membership.GroupID, membership.UserID)
+		if err != nil {
+			return seededMember{}, fmt.Errorf("reload dynamic role for %s: %w", seed.email, err)
+		}
 	}
 	return seededMember{principal: session.Principal, membership: membership}, nil
 }

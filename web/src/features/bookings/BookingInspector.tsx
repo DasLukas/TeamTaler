@@ -7,9 +7,11 @@ import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { formatMoney, majorUnitsInputPattern, majorUnitsPlaceholder, multiplyMoney, validatePositiveMajorUnits } from '@/api/money';
 import type { Membership, Period, Product } from '@/api/types';
+import { can } from '@/app/permissions';
 import { Button } from '@/components/ui/Button';
 import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { IconButton } from '@/components/ui/IconButton';
+import { MemberMultiSelect } from './MemberMultiSelect';
 import styles from './BookingInspector.module.css';
 
 const BOOKING_CONFIRMATION_DURATION_MS = 700;
@@ -47,14 +49,18 @@ export function BookingInspector({
   const [quantity, setQuantity] = useState(1);
   const [unitPriceInput, setUnitPriceInput] = useState('');
   const [unitPriceTouched, setUnitPriceTouched] = useState(false);
-  const [targetMembershipId, setTargetMembershipId] = useState(currentMembershipId);
   const [reason, setReason] = useState('');
   const [confirmed, setConfirmed] = useState(false);
   const confirmationTimerRef = useRef<number | undefined>(undefined);
   const currentMember = members.find((member) => member.id === currentMembershipId);
-  const canAssignOthers = currentMember?.roles.includes('ADMIN') || currentMember?.categoryPermissions.some((permission) => permission.categoryId === product.categoryId && permission.assignToOthers);
-  const availableMembers = canAssignOthers ? members.filter((member) => member.active) : members.filter((member) => member.id === currentMembershipId);
-  const isForeignAssignment = targetMembershipId !== currentMembershipId;
+  const canBookOwn = can(currentMember?.effectiveGrants, 'CREATE_OWN_BOOKING');
+  const canAssignOthers = can(currentMember?.effectiveGrants, 'BOOK_FOR_OTHERS');
+  const availableMembers = members.filter((member) => member.active && (member.id === currentMembershipId ? canBookOwn : canAssignOthers));
+  const defaultTargetMembershipIds = () => canBookOwn ? [currentMembershipId] : availableMembers[0] ? [availableMembers[0].id] : [];
+  const [requestedTargetMembershipIds, setRequestedTargetMembershipIds] = useState<string[]>(defaultTargetMembershipIds);
+  const availableMemberIds = new Set(availableMembers.map((member) => member.id));
+  const targetMembershipIds = requestedTargetMembershipIds.filter((membershipId) => availableMemberIds.has(membershipId));
+  const isForeignAssignment = targetMembershipIds.some((membershipId) => membershipId !== currentMembershipId);
   const userDefinesPrice = product.pricingMode === 'USER_DEFINED';
   const unitPriceValidation = userDefinesPrice ? validatePositiveMajorUnits(unitPriceInput, product.currency) : {};
   const unitPrice = userDefinesPrice
@@ -68,13 +74,14 @@ export function BookingInspector({
   const bookingMutation = useMutation({
     mutationFn: () => {
       if (userDefinesPrice && !unitPrice) throw new Error(unitPriceValidation.error ?? t('errors.amountFormat'));
-      return api.createBooking(groupId, {
+      if (targetMembershipIds.length === 0) throw new Error(t('booking.noAvailableTarget'));
+      return api.createBookings(groupId, {
         productId: product.id,
         productVersion: product.version,
         expectedPeriodId: period.id,
         quantity,
         unitPrice: userDefinesPrice ? unitPrice : undefined,
-        targetMembershipId: targetMembershipId === currentMembershipId ? undefined : targetMembershipId,
+        targetMembershipIds,
         reason: isForeignAssignment ? reason.trim() : undefined,
       });
     },
@@ -85,7 +92,7 @@ export function BookingInspector({
         setQuantity(1);
         setUnitPriceInput('');
         setUnitPriceTouched(false);
-        setTargetMembershipId(currentMembershipId);
+        setRequestedTargetMembershipIds(defaultTargetMembershipIds());
         setReason('');
         setConfirmed(false);
         onBooked?.();
@@ -99,15 +106,18 @@ export function BookingInspector({
     },
   });
 
-  const selectedMember = members.find((member) => member.id === targetMembershipId);
-  const total = unitPrice ? multiplyMoney(unitPrice, quantity) : undefined;
+  const selectedMembers = members.filter((member) => targetMembershipIds.includes(member.id));
+  const totalPerMember = unitPrice ? multiplyMoney(unitPrice, quantity) : undefined;
+  const combinedTotal = totalPerMember && targetMembershipIds.length > 0 ? multiplyMoney(totalPerMember, targetMembershipIds.length) : undefined;
 
   if (confirmed) {
     return (
       <div className={styles.success} role="status">
         <CheckCircle2 aria-hidden="true" size={46} strokeWidth={1.6} />
         <h2>{t('booking.successTitle')}</h2>
-        <p>{t('booking.successMessage', { product: product.name, member: selectedMember?.displayName ?? t('common.selectedMemberFallback') })}</p>
+        <p>{targetMembershipIds.length > 1
+          ? t('booking.successMessageMultiple', { product: product.name, count: targetMembershipIds.length })
+          : t('booking.successMessage', { product: product.name, member: selectedMembers[0]?.displayName ?? t('common.selectedMemberFallback') })}</p>
       </div>
     );
   }
@@ -126,9 +136,21 @@ export function BookingInspector({
       ) : null}
 
       <Field htmlFor="booking-member" label={t('booking.forMember')}>
-        <SelectInput id="booking-member" onChange={(event) => setTargetMembershipId(event.target.value)} value={targetMembershipId}>
-          {availableMembers.map((member) => <option key={member.id} value={member.id}>{member.displayName}</option>)}
-        </SelectInput>
+        {canAssignOthers ? (
+          <MemberMultiSelect
+            disabled={availableMembers.length === 0}
+            id="booking-member"
+            label={t('booking.forMember')}
+            members={availableMembers}
+            onChange={setRequestedTargetMembershipIds}
+            placeholder={t('booking.selectMembers')}
+            selectedIds={targetMembershipIds}
+          />
+        ) : (
+          <SelectInput disabled id="booking-member" value={targetMembershipIds[0] ?? ''}>
+            {availableMembers.map((member) => <option key={member.id} value={member.id}>{member.displayName}</option>)}
+          </SelectInput>
+        )}
       </Field>
 
       {isForeignAssignment ? (
@@ -145,12 +167,16 @@ export function BookingInspector({
         </div>
       </Field>
 
-      <div className={styles.total}><span>{t('booking.total')}</span><strong>{total ? formatMoney(total) : '—'}</strong></div>
+      <div className={styles.total}>
+        <span>{targetMembershipIds.length > 1 ? t('booking.combinedTotal', { count: targetMembershipIds.length }) : t('booking.total')}</span>
+        <strong>{combinedTotal ? formatMoney(combinedTotal) : '—'}</strong>
+        {targetMembershipIds.length > 1 && totalPerMember ? <small>{t('booking.totalPerMember', { total: formatMoney(totalPerMember) })}</small> : null}
+      </div>
       {bookingMutation.isError ? <p className={styles.error} role="alert">{bookingMutation.error.message}</p> : null}
       <div className={styles.actions}>
         <Button fullWidth onClick={onCancel} size="large" variant="secondary">{t('common.cancel')}</Button>
-        <Button disabled={bookingMutation.isPending || (userDefinesPrice && !unitPrice) || (isForeignAssignment && !reason.trim())} fullWidth size="large" type="submit">
-          {bookingMutation.isPending ? t('booking.pending') : t('booking.submit')}
+        <Button disabled={bookingMutation.isPending || targetMembershipIds.length === 0 || (userDefinesPrice && !unitPrice) || (isForeignAssignment && !reason.trim())} fullWidth size="large" type="submit">
+          {bookingMutation.isPending ? t('booking.pending') : targetMembershipIds.length > 1 ? t('booking.submitMultiple', { count: targetMembershipIds.length }) : t('booking.submit')}
         </Button>
       </div>
       <p className={styles.note}><CheckCircle2 aria-hidden="true" size={18} /> {t('booking.balanceUpdateNote')}</p>

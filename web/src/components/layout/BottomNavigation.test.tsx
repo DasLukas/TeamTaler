@@ -9,6 +9,10 @@ vi.mock('@tanstack/react-router', () => ({
   useRouterState: ({ select }: { select: (state: { location: { pathname: string } }) => string }) => select({ location: { pathname: '/overview' } }),
 }));
 
+vi.mock('@/app/useActiveGroup', () => ({
+  useActiveGroup: () => ({ activeGroup: { membership: { effectiveGrants: [{ permission: 'CREATE_OWN_BOOKING', scope: { type: 'GROUP' } }] } } }),
+}));
+
 describe('BottomNavigation', () => {
   it('always renders the four primary mobile destinations', () => {
     render(<BottomNavigation />);
