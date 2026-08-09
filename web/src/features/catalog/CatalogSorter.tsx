@@ -96,14 +96,17 @@ function SortableCategory({ category, disabled, onAddProduct, onEditCategory, on
         <div><h3>{category.name}</h3><p>{t('catalog.productCount', { count: category.products.length })} · {category.active ? t('common.active') : t('common.archived')}</p></div>
         <IconButton className={styles.categoryEdit} label={t('catalog.editCategory', { name: category.name })} onClick={() => onEditCategory(category)} variant="surface"><Pencil size={17} /></IconButton>
       </header>
-      {category.products.length === 0 ? <p className={styles.emptyProducts}>{t('catalog.emptyProducts')}</p> : (
-        <SortableContext items={category.products.map((product) => productSortableId(product.id))} strategy={rectSortingStrategy}>
-          <div className={styles.products}>{category.products.map((product) => (
+      {category.products.length === 0 ? <p className={styles.emptyProducts}>{t('catalog.emptyProducts')}</p> : null}
+      <SortableContext items={category.products.map((product) => productSortableId(product.id))} strategy={rectSortingStrategy}>
+        <div className={styles.products}>
+          {category.products.map((product) => (
             <SortableProduct disabled={disabled} key={product.id} onEdit={onEditProduct} product={product} />
-          ))}</div>
-        </SortableContext>
-      )}
-      <IconButton className={`${styles.roundAdd} ${styles.productAdd}`} label={t('catalog.addProductToCategory', { name: category.name })} onClick={() => onAddProduct(category.id)} variant="surface"><Plus size={22} /></IconButton>
+          ))}
+          <div className={styles.productAddTile}>
+            <IconButton className={styles.roundAdd} label={t('catalog.addProductToCategory', { name: category.name })} onClick={() => onAddProduct(category.id)} variant="surface"><Plus size={22} /></IconButton>
+          </div>
+        </div>
+      </SortableContext>
     </section>
   );
 }

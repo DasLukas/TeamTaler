@@ -15,8 +15,8 @@ import (
 
 func TestDefinitionsAndPermissionImplications(t *testing.T) {
 	definitions := authorization.Definitions()
-	if len(definitions) != 12 {
-		t.Fatalf("definition count = %d, want 12", len(definitions))
+	if len(definitions) != 13 {
+		t.Fatalf("definition count = %d, want 13", len(definitions))
 	}
 	if definitions[0].ImpliedPermissions == nil {
 		t.Fatal("permission implications are nil, want an empty API array")
@@ -44,6 +44,9 @@ func TestDefinitionsAndPermissionImplications(t *testing.T) {
 	}
 	if len(effective) != 5 {
 		t.Fatalf("expanded permissions = %#v, want five unique keys", effective)
+	}
+	if containsPermission(effective, domain.PermissionBookForGuests) {
+		t.Fatal("BOOK_FOR_OTHERS must not imply BOOK_FOR_GUESTS")
 	}
 }
 

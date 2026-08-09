@@ -11,7 +11,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/storage"
 )
 
-func TestSnapshotStatementsSkipsOnlyIdleManagedGuestsAndKeepsNullableEmail(t *testing.T) {
+func TestSnapshotStatementsSkipsOnlyIdleTemporaryGuestsAndKeepsNullableEmail(t *testing.T) {
 	ctx := context.Background()
 	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), "managed-statements.db"))
 	if err != nil {
@@ -27,8 +27,8 @@ func TestSnapshotStatementsSkipsOnlyIdleManagedGuestsAndKeepsNullableEmail(t *te
 		`INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES('group-one','One','EUR','2026-08-08T12:00:00Z','2026-08-08T12:00:00Z')`,
 		`INSERT INTO memberships(id,group_id,user_id,status,joined_at) VALUES('member-admin','group-one','user-admin','ACTIVE','2026-08-08T12:00:00Z')`,
 		`INSERT INTO memberships(id,group_id,user_id,status,joined_at) VALUES('member-regular','group-one','user-regular','ACTIVE','2026-08-08T12:00:00Z')`,
-		`INSERT INTO memberships(id,group_id,user_id,status,joined_at,managed_guest_name_key) VALUES('member-managed-idle','group-one','user-managed-idle','ACTIVE','2026-08-08T12:00:00Z','idle guest')`,
-		`INSERT INTO memberships(id,group_id,user_id,status,joined_at,managed_guest_name_key) VALUES('member-managed-active','group-one','user-managed-active','ACTIVE','2026-08-08T12:00:00Z','active guest')`,
+		`INSERT INTO memberships(id,group_id,user_id,status,joined_at,temporary_guest_name_key) VALUES('member-managed-idle','group-one','user-managed-idle','ACTIVE','2026-08-08T12:00:00Z','idle guest')`,
+		`INSERT INTO memberships(id,group_id,user_id,status,joined_at,temporary_guest_name_key) VALUES('member-managed-active','group-one','user-managed-active','ACTIVE','2026-08-08T12:00:00Z','active guest')`,
 		`INSERT INTO periods(id,group_id,label,status,starts_at,due_at,created_at) VALUES('period-one','group-one','One','OPEN','2026-08-08T12:00:00Z','2026-08-31','2026-08-08T12:00:00Z')`,
 		`INSERT INTO ledger_entries(id,group_id,period_id,membership_id,account,amount_minor,description,created_at) VALUES('ledger-managed','group-one','period-one','member-managed-active','MEMBER_RECEIVABLE',500,'Managed booking','2026-08-08T12:00:00Z')`,
 	}

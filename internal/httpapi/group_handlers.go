@@ -94,8 +94,6 @@ func (s *Server) handleGetGroupSettings(response http.ResponseWriter, request *h
 		"notificationEmailsEnabled":          settings.NotificationEmailsEnabled,
 		"notificationEmailDeliveryAvailable": s.config.SMTP.Enabled,
 		"defaultRoleId":                      settings.DefaultRoleID,
-		"guestsEnabled":                      settings.GuestsEnabled,
-		"guestRoleId":                        settings.GuestRoleID,
 	})
 }
 
@@ -137,8 +135,6 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		"notificationEmailsEnabled":          settings.NotificationEmailsEnabled,
 		"notificationEmailDeliveryAvailable": s.config.SMTP.Enabled,
 		"defaultRoleId":                      settings.DefaultRoleID,
-		"guestsEnabled":                      settings.GuestsEnabled,
-		"guestRoleId":                        settings.GuestRoleID,
 	})
 }
 

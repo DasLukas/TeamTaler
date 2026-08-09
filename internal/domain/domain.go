@@ -101,8 +101,10 @@ const (
 	PermissionVoidOwnBooking PermissionKey = "VOID_OWN_BOOKING"
 	// PermissionVoidAnyBooking permits voiding every booking in the group.
 	PermissionVoidAnyBooking PermissionKey = "VOID_ANY_BOOKING"
-	// PermissionBookForOthers permits creating bookings targeting another active member.
+	// PermissionBookForOthers permits reasoned bookings for another credentialed active member.
 	PermissionBookForOthers PermissionKey = "BOOK_FOR_OTHERS"
+	// PermissionBookForGuests permits bookings for credentialless temporary guests.
+	PermissionBookForGuests PermissionKey = "BOOK_FOR_GUESTS"
 )
 
 // PermissionScopeType identifies the resource boundary attached to a permission grant.
@@ -221,7 +223,7 @@ type Membership struct {
 	DisplayName            string                          `json:"displayName"`
 	AvatarURL              string                          `json:"avatarUrl,omitempty"`
 	Status                 string                          `json:"status"`
-	IsGuest                bool                            `json:"isGuest"`
+	IsTemporaryGuest       bool                            `json:"isTemporaryGuest"`
 	Roles                  []Role                          `json:"roles"`
 	GroupPermissions       []GroupPermission               `json:"groupPermissions"`
 	CategoryGrants         map[string][]CategoryPermission `json:"categoryGrants"`
@@ -244,8 +246,6 @@ type Group struct {
 type GroupSettings struct {
 	NotificationEmailsEnabled bool    `json:"notificationEmailsEnabled"`
 	DefaultRoleID             *string `json:"defaultRoleId"`
-	GuestsEnabled             bool    `json:"guestsEnabled"`
-	GuestRoleID               *string `json:"guestRoleId"`
 }
 
 // CategoryIcon identifies one supported visual category marker.

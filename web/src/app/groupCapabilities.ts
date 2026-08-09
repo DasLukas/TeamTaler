@@ -30,7 +30,7 @@ export function canRecordOwnPayment(grants: readonly PermissionGrant[] | undefin
 
 /** Determines whether a membership may create at least one kind of booking. */
 export function canOpenBooking(grants: readonly PermissionGrant[] | undefined): boolean {
-  return can(grants, 'CREATE_OWN_BOOKING') || can(grants, 'BOOK_FOR_OTHERS');
+  return can(grants, 'CREATE_OWN_BOOKING') || can(grants, 'BOOK_FOR_OTHERS') || can(grants, 'BOOK_FOR_GUESTS');
 }
 
 /**

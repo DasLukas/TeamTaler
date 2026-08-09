@@ -59,17 +59,17 @@ func TestAcceptClaimInvitationUpgradesManagedIdentityInPlace(t *testing.T) {
 	if session.Principal.UserID != "managed-user" || membership.ID != "managed-member" || membership.UserID != "managed-user" {
 		t.Fatalf("claimed identity/session=%#v membership=%#v", session.Principal, membership)
 	}
-	if membership.Email == nil || *membership.Email != "claimed@example.test" || !membership.IsGuest {
-		t.Fatalf("claimed membership email/isGuest=%v/%v", membership.Email, membership.IsGuest)
+	if membership.Email == nil || *membership.Email != "claimed@example.test" || membership.IsTemporaryGuest {
+		t.Fatalf("claimed membership email/isTemporaryGuest=%v/%v", membership.Email, membership.IsTemporaryGuest)
 	}
 	var email, nameKey any
-	if err := db.QueryRowContext(ctx, `SELECT u.email,m.managed_guest_name_key FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.id='managed-member'`).Scan(&email, &nameKey); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT u.email,m.temporary_guest_name_key FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.id='managed-member'`).Scan(&email, &nameKey); err != nil {
 		t.Fatalf("read claimed membership: %v", err)
 	}
 	if email != "claimed@example.test" || nameKey != nil {
 		t.Fatalf("claimed email/name key=%v/%v, want email and released key", email, nameKey)
 	}
-	assertExclusiveGuestRole(t, ctx, db, "managed-member")
+	assertClaimedRoles(t, ctx, db, "managed-member", "role:MEMBER:group-claim")
 	if _, err := service.Login(ctx, "claimed@example.test", "claim-password-long"); err != nil {
 		t.Fatalf("login claimed account: %v", err)
 	}
@@ -100,13 +100,13 @@ func TestAcceptClaimInvitationRebindsExistingAccountWithoutMergingMemberships(t 
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM users WHERE id='managed-user'`).Scan(&managedUsers); err != nil {
 		t.Fatalf("count retired managed identity: %v", err)
 	}
-	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM memberships WHERE id='managed-member' AND user_id='existing-user' AND managed_guest_name_key IS NULL`).Scan(&rebound); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM memberships WHERE id='managed-member' AND user_id='existing-user' AND temporary_guest_name_key IS NULL`).Scan(&rebound); err != nil {
 		t.Fatalf("read rebound membership: %v", err)
 	}
 	if managedUsers != 0 || rebound != 1 {
 		t.Fatalf("managed users/rebound memberships=%d/%d, want 0/1", managedUsers, rebound)
 	}
-	assertExclusiveGuestRole(t, ctx, db, "managed-member")
+	assertClaimedRoles(t, ctx, db, "managed-member", "role:MEMBER:group-claim")
 }
 
 func TestAcceptClaimInvitationRejectsExistingSameGroupMembership(t *testing.T) {
@@ -138,7 +138,7 @@ func TestAcceptClaimInvitationRejectsExistingSameGroupMembership(t *testing.T) {
 				t.Fatalf("same-group %s claim error=%v, want conflict", membershipStatus, err)
 			}
 			var unchanged int
-			if err := db.QueryRowContext(ctx, `SELECT count(*) FROM memberships WHERE id='managed-member' AND user_id='managed-user' AND managed_guest_name_key='managed guest'`).Scan(&unchanged); err != nil || unchanged != 1 {
+			if err := db.QueryRowContext(ctx, `SELECT count(*) FROM memberships WHERE id='managed-member' AND user_id='managed-user' AND temporary_guest_name_key='managed guest'`).Scan(&unchanged); err != nil || unchanged != 1 {
 				t.Fatalf("rolled-back managed membership=%d err=%v, want unchanged", unchanged, err)
 			}
 			var persistedStatus string
@@ -160,9 +160,6 @@ func newClaimFixture(t *testing.T, ctx context.Context) (*sql.DB, Service) {
 		`INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES('group-claim','Claim Group','EUR','2026-08-08T12:00:00Z','2026-08-08T12:00:00Z')`,
 		`INSERT INTO group_settings(group_id,members_can_view_all_bookings,notification_emails_enabled,default_role_id,updated_at) VALUES('group-claim',0,0,'role:MEMBER:group-claim','2026-08-08T12:00:00Z')`,
 		`INSERT INTO memberships(id,group_id,user_id,status,joined_at) VALUES('admin-member','group-claim','admin-user','ACTIVE','2026-08-08T12:00:00Z')`,
-		`INSERT INTO roles(id,group_id,name,description,created_at,updated_at) VALUES('role-guest','group-claim','Guest','Booking-only guest','2026-08-08T12:00:00Z','2026-08-08T12:00:00Z')`,
-		`INSERT INTO role_permission_grants(group_id,role_id,permission_key,scope_type,created_at,updated_at) VALUES('group-claim','role-guest','CREATE_OWN_BOOKING','GROUP','2026-08-08T12:00:00Z','2026-08-08T12:00:00Z')`,
-		`UPDATE group_settings SET guests_enabled=1,guest_role_id='role-guest',default_role_id='role-guest',updated_at='2026-08-08T12:00:00Z' WHERE group_id='group-claim'`,
 	}
 	for index, statement := range seed {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
@@ -181,9 +178,9 @@ func seedClaimTarget(t *testing.T, ctx context.Context, db *sql.DB, userID, memb
 		args  []any
 	}{
 		{`INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES(?,NULL,?,NULL,?,?)`, []any{userID, displayName, now, now}},
-		{`INSERT INTO memberships(id,group_id,user_id,status,joined_at,managed_guest_name_key) VALUES(?,'group-claim',?,'ACTIVE',?,?)`, []any{membershipID, userID, now, nameKey}},
+		{`INSERT INTO memberships(id,group_id,user_id,status,joined_at,temporary_guest_name_key) VALUES(?,'group-claim',?,'ACTIVE',?,?)`, []any{membershipID, userID, now, nameKey}},
 		{`INSERT INTO invitations(id,group_id,email,token_hash,expires_at,created_by,created_at,target_membership_id) VALUES(?,'group-claim',?,?,?,'admin-user',?,?)`, []any{"invitation-" + membershipID, email, platform.HashSecret(token), "2099-01-01T00:00:00Z", now, membershipID}},
-		{`INSERT INTO invitation_role_assignments(group_id,invitation_id,role_id,assigned_at,assigned_by) VALUES('group-claim',?,'role-guest',?,'admin-user')`, []any{"invitation-" + membershipID, now}},
+		{`INSERT INTO invitation_role_assignments(group_id,invitation_id,role_id,assigned_at,assigned_by) VALUES('group-claim',?,'role:MEMBER:group-claim',?,'admin-user')`, []any{"invitation-" + membershipID, now}},
 	}
 	for index, statement := range statements {
 		if _, err := db.ExecContext(ctx, statement.query, statement.args...); err != nil {
@@ -192,13 +189,13 @@ func seedClaimTarget(t *testing.T, ctx context.Context, db *sql.DB, userID, memb
 	}
 }
 
-func assertExclusiveGuestRole(t *testing.T, ctx context.Context, db *sql.DB, membershipID string) {
+func assertClaimedRoles(t *testing.T, ctx context.Context, db *sql.DB, membershipID string, expectedRoleID string) {
 	t.Helper()
-	var roleCount, guestRoleCount int
-	if err := db.QueryRowContext(ctx, `SELECT count(*),sum(CASE WHEN role_id='role-guest' THEN 1 ELSE 0 END) FROM membership_role_assignments WHERE membership_id=?`, membershipID).Scan(&roleCount, &guestRoleCount); err != nil {
+	var roleCount, expectedRoleCount int
+	if err := db.QueryRowContext(ctx, `SELECT count(*),sum(CASE WHEN role_id=? THEN 1 ELSE 0 END) FROM membership_role_assignments WHERE membership_id=?`, expectedRoleID, membershipID).Scan(&roleCount, &expectedRoleCount); err != nil {
 		t.Fatalf("read claimed roles: %v", err)
 	}
-	if roleCount != 1 || guestRoleCount != 1 {
-		t.Fatalf("claimed role counts=%d/%d, want exclusive guest role", roleCount, guestRoleCount)
+	if roleCount != 1 || expectedRoleCount != 1 {
+		t.Fatalf("claimed role counts=%d/%d, want exactly %s", roleCount, expectedRoleCount, expectedRoleID)
 	}
 }

@@ -472,15 +472,8 @@ func hydrateJoinedMembership(ctx context.Context, queryer publicJoinQueryer, pri
 	membership.DisplayName = principal.DisplayName
 	membership.AvatarURL = media.UserAvatarURL(principal.UserID, "")
 	membership.Status = "ACTIVE"
-	return queryer.QueryRowContext(ctx, `SELECT EXISTS (
-		SELECT 1
-		FROM group_settings settings
-		JOIN membership_role_assignments assignment
-		  ON assignment.group_id=settings.group_id
-		 AND assignment.membership_id=?
-		 AND assignment.role_id=settings.guest_role_id
-		WHERE settings.group_id=?
-	)`, membershipID, groupID).Scan(&membership.IsGuest)
+	membership.IsTemporaryGuest = false
+	return nil
 }
 
 func createSessionTx(ctx context.Context, tx *sql.Tx, principal domain.Principal, lifetime time.Duration, now time.Time) (Session, error) {

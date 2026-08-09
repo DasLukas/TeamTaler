@@ -6,15 +6,15 @@ import i18n from '@/i18n';
 import { MemberMultiSelect } from './MemberMultiSelect';
 
 const targets: BookingTarget[] = [
-  { membershipId: 'member-regular', displayName: 'Regular Member', isGuest: false },
-  { membershipId: 'member-guest', displayName: 'Existing Guest', isGuest: true },
+  { membershipId: 'member-regular', displayName: 'Regular Member', isTemporaryGuest: false },
+  { membershipId: 'member-guest', displayName: 'Existing Guest', isTemporaryGuest: true },
 ];
 
 describe('MemberMultiSelect', () => {
   it('exposes named member groups and enforces the shared 100-target limit', async () => {
     const user = userEvent.setup();
     render(<MemberMultiSelect
-      canCreateManagedGuests
+      canBookForGuests
       id="target-picker"
       label={i18n.t('booking.forMember')}
       onAddGuest={vi.fn()}
@@ -39,7 +39,7 @@ describe('MemberMultiSelect', () => {
     const user = userEvent.setup();
     const onAddGuest = vi.fn();
     render(<MemberMultiSelect
-      canCreateManagedGuests
+      canBookForGuests
       id="target-picker"
       label={i18n.t('booking.forMember')}
       onAddGuest={onAddGuest}

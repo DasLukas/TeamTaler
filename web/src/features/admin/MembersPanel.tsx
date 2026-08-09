@@ -57,13 +57,13 @@ const DELIVERY_POLL_INTERVAL_MS = 1_200;
 const ACTIVE_DELIVERY_STATUSES = new Set<EmailDeliveryStatus>(['PENDING', 'SENDING']);
 
 /**
- * Determines whether a guest membership is still managed without login data.
+ * Determines whether a membership still represents a temporary guest.
  *
  * @param member - Membership returned by the administrator directory.
  * @returns Whether the guest has no claimable account email yet.
  */
-function isManagedGuest(member: Membership): boolean {
-  return member.isGuest && member.email === null;
+function isTemporaryGuest(member: Membership): boolean {
+  return member.isTemporaryGuest && member.email === null;
 }
 
 const INVITATION_STATUS_KEYS: Record<InvitationImportStatus, string> = {
@@ -393,6 +393,7 @@ export function MembersPanel() {
   const [resendResult, setResendResult] = useState<{ acceptUrl: string; expiresAt: string } | null>(null);
   const [guestDisplayName, setGuestDisplayName] = useState('');
   const [guestClaimEmail, setGuestClaimEmail] = useState('');
+  const [guestClaimRoleIds, setGuestClaimRoleIds] = useState<string[]>([]);
   const [guestClaimInvitation, setGuestClaimInvitation] = useState<CreatedInvitation | null>(null);
 
   const createMutation = useMutation({
@@ -467,7 +468,7 @@ export function MembersPanel() {
   });
   const claimGuestMutation = useMutation({
     mutationFn: () => selectedMember
-      ? api.createGuestClaimInvitation(activeGroupId, selectedMember.id, guestClaimEmail.trim())
+      ? api.createTemporaryGuestClaimInvitation(activeGroupId, selectedMember.id, guestClaimEmail.trim(), guestClaimRoleIds)
       : Promise.reject(new Error(t('members.noMemberSelected'))),
     onSuccess: async (invitation) => {
       setGuestClaimInvitation(invitation);
@@ -525,6 +526,7 @@ export function MembersPanel() {
     setResendResult(null);
     setGuestDisplayName('');
     setGuestClaimEmail('');
+    setGuestClaimRoleIds([]);
     setGuestClaimInvitation(null);
     createMutation.reset();
     updateMutation.reset();
@@ -551,12 +553,13 @@ export function MembersPanel() {
   const openGuestClaim = (member: Membership) => {
     setSelectedMember(member);
     setGuestClaimEmail('');
+    setGuestClaimRoleIds(settingsQuery.data?.defaultRoleId ? [settingsQuery.data.defaultRoleId] : []);
     setGuestClaimInvitation(null);
     setDialog('claim-guest');
   };
   const roles = rolesQuery.data ?? [];
   const defaultRole = roles.find((role) => role.id === settingsQuery.data?.defaultRoleId);
-  const guestClaimRoleConfigured = Boolean(settingsQuery.data?.guestRoleId);
+  const guestClaimRoleConfigured = Boolean(settingsQuery.data?.defaultRoleId);
   const reservedAdminRole = roles.find((role) => role.presetKey === 'GROUP_ADMINISTRATOR');
   const lockedAdministratorRoleIds = (roleIds: readonly string[]) => reservedAdminRole
     && reservedAdminRole.memberCount <= 1
@@ -604,7 +607,7 @@ export function MembersPanel() {
             return <article className={styles.mobileCard} key={item.id}>
               <header className={styles.mobileCardHeader}><div><strong>{item.displayName || item.email}</strong><small>{item.email}</small></div><span className={deliveryBadgeClass(item.emailDeliveryStatus)}>{t(DELIVERY_STATUS_KEYS[item.emailDeliveryStatus])}</span></header>
               <p className={expired ? styles.expired : styles.mobileMetadata}>{expired ? t('members.expired') : t('members.validUntilDate', { date: new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(item.expiresAt)) })}</p>
-              {claimInvitation ? <p className={styles.managedGuestRole}>{t('members.claimInvitationRoleLocked')}</p> : <RoleAssignmentPicker canManageGroup={canManageProtectedRoles} canManageRoles={canManageRoles} onApply={(roleIds) => applyInvitationRoles(item, roleIds)} roleIds={item.roleIds ?? []} roles={roles} subjectName={item.displayName || item.email} />}
+              {claimInvitation ? <p className={styles.temporaryGuestRole}>{t('members.claimInvitationRoleLocked')}</p> : <RoleAssignmentPicker canManageGroup={canManageProtectedRoles} canManageRoles={canManageRoles} onApply={(roleIds) => applyInvitationRoles(item, roleIds)} roleIds={item.roleIds ?? []} roles={roles} subjectName={item.displayName || item.email} />}
               {canManageProtectedRoles ? <div className={styles.mobileActions}>
                 {!claimInvitation ? <Button aria-label={t('members.editInvitationFor', { email: item.email })} leadingIcon={<Pencil size={16} />} onClick={() => openEdit(item)} size="small" variant="ghost">{t('common.edit')}</Button> : null}
                 <Button aria-label={t('members.resendFor', { email: item.email })} disabled={resendBlocked} leadingIcon={<RotateCcw size={16} />} onClick={() => { setSelectedInvitation(item); setResendResult(null); setDialog('resend'); }} size="small" variant="ghost">{t('members.resend')}</Button>
@@ -622,7 +625,7 @@ export function MembersPanel() {
                   <tr key={item.id}>
                     <td>{canManageProtectedRoles && !claimInvitation ? <button className={styles.rowLink} onClick={() => openEdit(item)} type="button"><strong>{item.email}</strong></button> : <strong>{item.email}</strong>}</td>
                     <td>{item.displayName || '–'}</td>
-                    <td className={styles.roleCell}>{claimInvitation ? <span className={styles.managedGuestRole}>{t('members.claimInvitationRoleLocked')}</span> : <RoleAssignmentPicker canManageGroup={canManageProtectedRoles} canManageRoles={canManageRoles} onApply={(roleIds) => applyInvitationRoles(item, roleIds)} roleIds={item.roleIds ?? []} roles={roles} subjectName={item.displayName || item.email} />}</td>
+                    <td className={styles.roleCell}>{claimInvitation ? <span className={styles.temporaryGuestRole}>{t('members.claimInvitationRoleLocked')}</span> : <RoleAssignmentPicker canManageGroup={canManageProtectedRoles} canManageRoles={canManageRoles} onApply={(roleIds) => applyInvitationRoles(item, roleIds)} roleIds={item.roleIds ?? []} roles={roles} subjectName={item.displayName || item.email} />}</td>
                     <td><span className={deliveryBadgeClass(item.emailDeliveryStatus)}>{t(DELIVERY_STATUS_KEYS[item.emailDeliveryStatus])}</span></td>
                     <td><span className={expired ? styles.expired : ''}>{expired ? t('members.expired') : new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(item.expiresAt))}</span></td>
                     {canManageProtectedRoles ? <td><div className={styles.tableActions}>
@@ -641,31 +644,31 @@ export function MembersPanel() {
       <section className={styles.section}>
         <div className={styles.sectionHeading}><h3>{t('members.activeMembers')}</h3><span>{activeMembers.length}</span></div>
         {compact ? <div className={styles.mobileCards}>{activeMembers.map((member) => {
-          const managedGuest = isManagedGuest(member);
+          const temporaryGuest = isTemporaryGuest(member);
           const claimPending = claimInvitationMembershipIds.has(member.id);
           return <article className={styles.mobileCard} key={member.id}>
-            <header className={styles.mobileCardHeader}><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /><span><span className={styles.memberName}><strong>{member.displayName}</strong>{member.isGuest ? <span className={styles.guestBadge}>{managedGuest ? t('members.managedGuestBadge') : t('members.guestBadge')}</span> : null}</span><small>{member.email ?? t('members.noLogin')}</small></span></span></header>
-            {managedGuest ? <p className={styles.managedGuestRole}>{t('members.managedGuestRole')}</p> : <RoleAssignmentPicker canManageGroup={canManageProtectedRoles} canManageRoles={canManageRoles} lockedRoleIds={lockedAdministratorRoleIds(member.roleIds ?? [])} onApply={(roleIds) => applyMemberRoles(member, roleIds)} roleIds={member.roleIds ?? []} roles={roles} subjectName={member.displayName} />}
+            <header className={styles.mobileCardHeader}><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /><span><span className={styles.memberName}><strong>{member.displayName}</strong>{temporaryGuest ? <span className={styles.guestBadge}>{t('members.temporaryGuestBadge')}</span> : null}</span><small>{member.email ?? t('members.noLogin')}</small></span></span></header>
+            {temporaryGuest ? <p className={styles.temporaryGuestRole}>{t('members.temporaryGuestRole')}</p> : <RoleAssignmentPicker canManageGroup={canManageProtectedRoles} canManageRoles={canManageRoles} lockedRoleIds={lockedAdministratorRoleIds(member.roleIds ?? [])} onApply={(roleIds) => applyMemberRoles(member, roleIds)} roleIds={member.roleIds ?? []} roles={roles} subjectName={member.displayName} />}
             {canManageProtectedRoles ? <div className={styles.mobileActions}>
-              {managedGuest ? <Button aria-label={t('members.renameGuestFor', { name: member.displayName })} leadingIcon={<Pencil size={16} />} onClick={() => openGuestRename(member)} size="small" variant="ghost">{t('members.renameGuest')}</Button> : null}
-              {managedGuest ? renderGuestClaimAction(member, claimPending) : null}
-              <Button aria-label={t('members.removeFor', { name: member.displayName })} leadingIcon={<UserMinus size={16} />} onClick={() => { setSelectedMember(member); setDialog('remove'); }} size="small" variant="ghost">{managedGuest ? t('members.archiveGuest') : t('members.remove')}</Button>
+              {temporaryGuest ? <Button aria-label={t('members.renameGuestFor', { name: member.displayName })} leadingIcon={<Pencil size={16} />} onClick={() => openGuestRename(member)} size="small" variant="ghost">{t('members.renameGuest')}</Button> : null}
+              {temporaryGuest ? renderGuestClaimAction(member, claimPending) : null}
+              <Button aria-label={t('members.removeFor', { name: member.displayName })} leadingIcon={<UserMinus size={16} />} onClick={() => { setSelectedMember(member); setDialog('remove'); }} size="small" variant="ghost">{temporaryGuest ? t('members.archiveGuest') : t('members.remove')}</Button>
             </div> : null}
           </article>;
         })}</div> : <div className={tableStyles.tableWrap}>
           <table className={tableStyles.table}>
             <thead><tr><th>{t('common.member')}</th><th>{t('members.email')}</th><th>{t('members.roles')}</th>{canManageProtectedRoles ? <th><span className="sr-only">{t('common.action')}</span></th> : null}</tr></thead>
             <tbody>{activeMembers.map((member) => {
-              const managedGuest = isManagedGuest(member);
+              const temporaryGuest = isTemporaryGuest(member);
               const claimPending = claimInvitationMembershipIds.has(member.id);
               return <tr key={member.id}>
-                <td><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /> <span className={styles.memberName}><strong>{member.displayName}</strong>{member.isGuest ? <span className={styles.guestBadge}>{managedGuest ? t('members.managedGuestBadge') : t('members.guestBadge')}</span> : null}</span></span></td>
+                <td><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /> <span className={styles.memberName}><strong>{member.displayName}</strong>{temporaryGuest ? <span className={styles.guestBadge}>{t('members.temporaryGuestBadge')}</span> : null}</span></span></td>
                 <td>{member.email ?? <span className={styles.noLogin}>{t('members.noLogin')}</span>}</td>
-                <td className={styles.roleCell}>{managedGuest ? <span className={styles.managedGuestRole}>{t('members.managedGuestRole')}</span> : <RoleAssignmentPicker canManageGroup={canManageProtectedRoles} canManageRoles={canManageRoles} lockedRoleIds={lockedAdministratorRoleIds(member.roleIds ?? [])} onApply={(roleIds) => applyMemberRoles(member, roleIds)} roleIds={member.roleIds ?? []} roles={roles} subjectName={member.displayName} />}</td>
+                <td className={styles.roleCell}>{temporaryGuest ? <span className={styles.temporaryGuestRole}>{t('members.temporaryGuestRole')}</span> : <RoleAssignmentPicker canManageGroup={canManageProtectedRoles} canManageRoles={canManageRoles} lockedRoleIds={lockedAdministratorRoleIds(member.roleIds ?? [])} onApply={(roleIds) => applyMemberRoles(member, roleIds)} roleIds={member.roleIds ?? []} roles={roles} subjectName={member.displayName} />}</td>
                 {canManageProtectedRoles ? <td><div className={styles.tableActions}>
-                  {managedGuest ? <Button aria-label={t('members.renameGuestFor', { name: member.displayName })} leadingIcon={<Pencil size={16} />} onClick={() => openGuestRename(member)} size="small" variant="ghost">{t('members.renameGuest')}</Button> : null}
-                  {managedGuest ? renderGuestClaimAction(member, claimPending) : null}
-                  <Button aria-label={t('members.removeFor', { name: member.displayName })} leadingIcon={<UserMinus size={16} />} onClick={() => { setSelectedMember(member); setDialog('remove'); }} size="small" variant="ghost">{managedGuest ? t('members.archiveGuest') : t('members.remove')}</Button>
+                  {temporaryGuest ? <Button aria-label={t('members.renameGuestFor', { name: member.displayName })} leadingIcon={<Pencil size={16} />} onClick={() => openGuestRename(member)} size="small" variant="ghost">{t('members.renameGuest')}</Button> : null}
+                  {temporaryGuest ? renderGuestClaimAction(member, claimPending) : null}
+                  <Button aria-label={t('members.removeFor', { name: member.displayName })} leadingIcon={<UserMinus size={16} />} onClick={() => { setSelectedMember(member); setDialog('remove'); }} size="small" variant="ghost">{temporaryGuest ? t('members.archiveGuest') : t('members.remove')}</Button>
                 </div></td> : null}
               </tr>;
             })}</tbody>
@@ -678,7 +681,7 @@ export function MembersPanel() {
         {formerMembers.length === 0 ? <p className={styles.emptySection}>{t('members.noFormerMembers')}</p> : (
           <div className={tableStyles.tableWrap}><table className={tableStyles.table}>
             <thead><tr><th>{t('common.member')}</th><th>{t('members.email')}</th><th><span className="sr-only">{t('common.action')}</span></th></tr></thead>
-            <tbody>{formerMembers.map((member) => <tr key={member.id}><td><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /> <span className={styles.memberName}><strong>{member.displayName}</strong>{member.isGuest ? <span className={styles.guestBadge}>{isManagedGuest(member) ? t('members.managedGuestBadge') : t('members.guestBadge')}</span> : null}</span></span></td><td>{member.email ?? <span className={styles.noLogin}>{t('members.noLogin')}</span>}</td><td>{member.email ? <Button leadingIcon={<MailPlus size={16} />} onClick={() => openInvite(member)} size="small" variant="ghost">{t('members.inviteAgain')}</Button> : null}</td></tr>)}</tbody>
+            <tbody>{formerMembers.map((member) => <tr key={member.id}><td><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /> <span className={styles.memberName}><strong>{member.displayName}</strong>{isTemporaryGuest(member) ? <span className={styles.guestBadge}>{t('members.temporaryGuestBadge')}</span> : null}</span></span></td><td>{member.email ?? <span className={styles.noLogin}>{t('members.noLogin')}</span>}</td><td>{member.email ? <Button leadingIcon={<MailPlus size={16} />} onClick={() => openInvite(member)} size="small" variant="ghost">{t('members.inviteAgain')}</Button> : null}</td></tr>)}</tbody>
           </table></div>
         )}
       </section> : null}
@@ -730,8 +733,8 @@ export function MembersPanel() {
       <Modal onClose={closeDialog} open={dialog === 'rename-guest'} title={t('members.renameGuestTitle')}>
         <form className={styles.form} onSubmit={(event) => { event.preventDefault(); renameGuestMutation.mutate(); }}>
           <p className={styles.expiry}>{t('members.renameGuestDescription')}</p>
-          <Field hint={t('members.renameGuestHint')} htmlFor="managed-guest-display-name" label={t('auth.displayName')}>
-            <TextInput autoComplete="off" id="managed-guest-display-name" maxLength={120} onChange={(event) => { setGuestDisplayName(event.target.value); renameGuestMutation.reset(); }} required value={guestDisplayName} />
+          <Field hint={t('members.renameGuestHint')} htmlFor="temporary-guest-display-name" label={t('auth.displayName')}>
+            <TextInput autoComplete="off" id="temporary-guest-display-name" maxLength={120} onChange={(event) => { setGuestDisplayName(event.target.value); renameGuestMutation.reset(); }} required value={guestDisplayName} />
           </Field>
           {renameGuestMutation.isError ? <p className={styles.error} role="alert">{renameGuestMutation.error.message}</p> : null}
           <div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!guestDisplayName.trim() || guestDisplayName.trim() === selectedMember?.displayName || renameGuestMutation.isPending} type="submit">{renameGuestMutation.isPending ? t('members.renameGuestPending') : t('common.save')}</Button></div>
@@ -748,17 +751,20 @@ export function MembersPanel() {
           <Button fullWidth onClick={closeDialog}>{t('common.done')}</Button>
         </div> : <form className={styles.form} onSubmit={(event) => { event.preventDefault(); claimGuestMutation.mutate(); }}>
           <p className={styles.expiry}>{t('members.claimGuestDescription', { name: selectedMember?.displayName ?? '' })}</p>
-          <Field hint={t('members.claimGuestEmailHint')} htmlFor="managed-guest-claim-email" label={t('auth.email')}>
-            <TextInput autoComplete="email" id="managed-guest-claim-email" onChange={(event) => { setGuestClaimEmail(event.target.value); claimGuestMutation.reset(); }} required type="email" value={guestClaimEmail} />
+          <Field hint={t('members.claimGuestEmailHint')} htmlFor="temporary-guest-claim-email" label={t('auth.email')}>
+            <TextInput autoComplete="email" id="temporary-guest-claim-email" onChange={(event) => { setGuestClaimEmail(event.target.value); claimGuestMutation.reset(); }} required type="email" value={guestClaimEmail} />
           </Field>
+          {canManageRoles ? (
+            <RoleMultiSelect canManageGroup={canManageProtectedRoles} canManageRoles label={t('roleManagement.memberRoles')} onChange={(roleIds) => { setGuestClaimRoleIds(roleIds); claimGuestMutation.reset(); }} roleIds={guestClaimRoleIds} roles={roles} />
+          ) : <p className={styles.claimNotice}>{t('members.claimDefaultRole', { role: defaultRole ? roleDisplayName(defaultRole) : t('members.claimUnavailableNoRole') })}</p>}
           <p className={styles.claimNotice}>{t('members.claimGuestHistoryNotice')}</p>
           {claimGuestMutation.isError ? <p className={styles.error} role="alert">{claimGuestMutation.error.message}</p> : null}
-          <div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!guestClaimEmail.trim() || claimGuestMutation.isPending} type="submit">{claimGuestMutation.isPending ? t('members.claimGuestPending') : t('members.claimGuestCreate')}</Button></div>
+          <div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!guestClaimEmail.trim() || guestClaimRoleIds.length === 0 || claimGuestMutation.isPending} type="submit">{claimGuestMutation.isPending ? t('members.claimGuestPending') : t('members.claimGuestCreate')}</Button></div>
         </form>}
       </Modal>
 
-      <Modal onClose={closeDialog} open={dialog === 'remove'} title={selectedMember && isManagedGuest(selectedMember) ? t('members.archiveGuestTitle') : selectedMember?.userId === session.user.id ? t('members.removeSelfTitle') : t('members.removeTitle')}>
-        <div className={styles.confirmDialog}><p>{selectedMember && isManagedGuest(selectedMember) ? t('members.archiveGuestExplanation', { name: selectedMember.displayName }) : selectedMember?.userId === session.user.id ? t('members.removeSelfExplanation') : t('members.removeExplanation', { name: selectedMember?.displayName ?? '' })}</p>{archiveMutation.isError ? <p className={styles.error} role="alert">{archiveMutation.error.message}</p> : null}<div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={archiveMutation.isPending} onClick={() => archiveMutation.mutate()} variant="danger">{selectedMember && isManagedGuest(selectedMember) ? t('members.archiveGuest') : selectedMember?.userId === session.user.id ? t('members.confirmSelfRemoval') : t('members.remove')}</Button></div></div>
+      <Modal onClose={closeDialog} open={dialog === 'remove'} title={selectedMember && isTemporaryGuest(selectedMember) ? t('members.archiveGuestTitle') : selectedMember?.userId === session.user.id ? t('members.removeSelfTitle') : t('members.removeTitle')}>
+        <div className={styles.confirmDialog}><p>{selectedMember && isTemporaryGuest(selectedMember) ? t('members.archiveGuestExplanation', { name: selectedMember.displayName }) : selectedMember?.userId === session.user.id ? t('members.removeSelfExplanation') : t('members.removeExplanation', { name: selectedMember?.displayName ?? '' })}</p>{archiveMutation.isError ? <p className={styles.error} role="alert">{archiveMutation.error.message}</p> : null}<div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={archiveMutation.isPending} onClick={() => archiveMutation.mutate()} variant="danger">{selectedMember && isTemporaryGuest(selectedMember) ? t('members.archiveGuest') : selectedMember?.userId === session.user.id ? t('members.confirmSelfRemoval') : t('members.remove')}</Button></div></div>
       </Modal>
 
       {dialog === 'import' ? <MemberImportDialog activeGroupId={activeGroupId} defaultRole={defaultRole} onClose={closeDialog} /> : null}

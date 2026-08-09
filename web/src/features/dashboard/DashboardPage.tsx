@@ -87,12 +87,14 @@ export function DashboardPage() {
               <Link className={styles.allActivities} to="/activities">{t('dashboard.allActivities')} <ChevronRight size={18} /></Link>
             </div>
           </section>
-          <section className={styles.monthCard}>
+          <section className={styles.periodSection}>
             <h2>{dashboard.currentPeriod.label}</h2>
-            {dashboard.categoryTotals.map((entry) => {
-              return <div className={styles.totalRow} key={entry.categoryId}><CategoryIcon icon={entry.icon} size={24} /><span>{entry.categoryName}</span><strong>{formatMoney(entry.total)}</strong></div>;
-            })}
-            <div className={styles.sum}><span>{t('dashboard.sum')}</span><strong>{formatMoney({ minorUnits: periodTotal.toString(), currency: dashboard.openBalance.currency })}</strong></div>
+            <div className={styles.monthCard}>
+              {dashboard.categoryTotals.map((entry) => {
+                return <div className={styles.totalRow} key={entry.categoryId}><CategoryIcon icon={entry.icon} size={24} /><span>{entry.categoryName}</span><strong>{formatMoney(entry.total)}</strong></div>;
+              })}
+              <div className={styles.sum}><span>{t('dashboard.sum')}</span><strong>{formatMoney({ minorUnits: periodTotal.toString(), currency: dashboard.openBalance.currency })}</strong></div>
+            </div>
           </section>
         </div>
         {canViewGroupStatistics ? <GroupStatisticsSection currency={dashboard.openBalance.currency} groupTotals={dashboard.groupCategoryTotals} periodLabel={dashboard.currentPeriod.label} /> : null}

@@ -234,15 +234,19 @@ describe('CatalogPanel', () => {
     }));
   });
 
-  it('offers contextual round create actions and preselects their category', async () => {
+  it('offers contextual create tiles and preselects their category', async () => {
     const user = userEvent.setup();
-    const secondCategory: Category = { ...category, id: 'category-b', name: 'Snacks', sortOrder: 3 };
+    const secondProduct: Product = { ...createdProduct, categoryId: 'category-b' };
+    const secondCategory: Category = { ...category, id: 'category-b', name: 'Snacks', sortOrder: 3, products: [secondProduct] };
     apiMock.getCategories.mockResolvedValue([category, secondCategory]);
     renderCatalog();
 
     await screen.findByText(i18n.t('catalog.intro'));
     expect(screen.getByRole('button', { name: i18n.t('catalog.addCategoryAfterList') })).toBeVisible();
-    await user.click(screen.getByRole('button', { name: i18n.t('catalog.addProductToCategory', { name: secondCategory.name }) }));
+    const addProductButton = screen.getByRole('button', { name: i18n.t('catalog.addProductToCategory', { name: secondCategory.name }) });
+    const productCard = screen.getByText(secondProduct.name).closest('article');
+    expect(addProductButton.parentElement?.parentElement).toBe(productCard?.parentElement);
+    await user.click(addProductButton);
 
     expect(screen.getByLabelText(i18n.t('common.category'))).toHaveValue(secondCategory.id);
   });

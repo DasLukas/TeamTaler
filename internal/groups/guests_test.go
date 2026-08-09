@@ -11,7 +11,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/storage"
 )
 
-func TestManagedGuestNameConstraintErrorCanBeResolvedAfterStatementFailure(t *testing.T) {
+func TestTemporaryGuestNameConstraintErrorCanBeResolvedAfterStatementFailure(t *testing.T) {
 	ctx := context.Background()
 	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), "managed-guest-name.db"))
 	if err != nil {
@@ -42,10 +42,10 @@ func TestManagedGuestNameConstraintErrorCanBeResolvedAfterStatementFailure(t *te
 			t.Fatalf("seed managed identity %d: %v", index, err)
 		}
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO memberships(id,group_id,user_id,status,joined_at,managed_guest_name_key) VALUES('managed-member-one',?,'managed-one','ACTIVE',?,'guest one')`, groupID, now); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO memberships(id,group_id,user_id,status,joined_at,temporary_guest_name_key) VALUES('managed-member-one',?,'managed-one','ACTIVE',?,'guest one')`, groupID, now); err != nil {
 		t.Fatalf("seed first managed membership: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO memberships(id,group_id,user_id,status,joined_at,managed_guest_name_key) VALUES('managed-member-two',?,'managed-two','ACTIVE',?,'guest two')`, groupID, now); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO memberships(id,group_id,user_id,status,joined_at,temporary_guest_name_key) VALUES('managed-member-two',?,'managed-two','ACTIVE',?,'guest two')`, groupID, now); err != nil {
 		t.Fatalf("seed second managed membership: %v", err)
 	}
 
@@ -54,12 +54,12 @@ func TestManagedGuestNameConstraintErrorCanBeResolvedAfterStatementFailure(t *te
 		t.Fatalf("begin transaction: %v", err)
 	}
 	defer tx.Rollback()
-	_, constraintErr := tx.ExecContext(ctx, `UPDATE memberships SET managed_guest_name_key='guest two' WHERE id='managed-member-one' AND group_id=?`, groupID)
+	_, constraintErr := tx.ExecContext(ctx, `UPDATE memberships SET temporary_guest_name_key='guest two' WHERE id='managed-member-one' AND group_id=?`, groupID)
 	if constraintErr == nil {
 		t.Fatal("duplicate managed guest name unexpectedly passed")
 	}
-	mapped := mapManagedGuestNameConstraintError(ctx, tx, groupID, "guest two", "managed-member-one", constraintErr)
-	var conflict ManagedGuestNameConflictError
+	mapped := mapTemporaryGuestNameConstraintError(ctx, tx, groupID, "guest two", "managed-member-one", constraintErr)
+	var conflict TemporaryGuestNameConflictError
 	if !errors.As(mapped, &conflict) || conflict.MembershipID != "managed-member-two" {
 		t.Fatalf("mapped conflict=%v (%#v), want managed-member-two", mapped, conflict)
 	}

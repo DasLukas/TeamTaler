@@ -21,7 +21,7 @@ export interface MemberMultiSelectProps {
   onChange: (membershipIds: string[]) => void;
   onAddGuest: (displayName: string) => void;
   onRemoveGuest: (index: number) => void;
-  canCreateManagedGuests: boolean;
+  canBookForGuests: boolean;
   disabled?: boolean;
   placeholder: string;
 }
@@ -29,7 +29,7 @@ export interface MemberMultiSelectProps {
 /**
  * Renders an accessible booking-target picker with grouped members and guests.
  *
- * Managed guest names remain local booking intent until the atomic batch request
+ * Temporary guest names remain local booking intent until the atomic batch request
  * succeeds; this component never creates a membership independently.
  *
  * @param props - Existing targets, pending guest names, labels, and callbacks.
@@ -44,7 +44,7 @@ export function MemberMultiSelect({
   onChange,
   onAddGuest,
   onRemoveGuest,
-  canCreateManagedGuests,
+  canBookForGuests,
   disabled = false,
   placeholder,
 }: MemberMultiSelectProps) {
@@ -56,8 +56,8 @@ export function MemberMultiSelect({
   const [selectionError, setSelectionError] = useState('');
   const selected = new Set(selectedIds);
   const selectedTargets = targets.filter((target) => selected.has(target.membershipId));
-  const regularTargets = targets.filter((target) => !target.isGuest);
-  const guestTargets = targets.filter((target) => target.isGuest);
+  const regularTargets = targets.filter((target) => !target.isTemporaryGuest);
+  const guestTargets = targets.filter((target) => target.isTemporaryGuest);
   const totalTargetCount = selectedIds.length + pendingGuestNames.length;
 
   useEffect(() => {
@@ -129,7 +129,7 @@ export function MemberMultiSelect({
   const renderTarget = (target: BookingTarget) => (
     <label className={styles.option} key={target.membershipId}>
       <input checked={selected.has(target.membershipId)} disabled={!selected.has(target.membershipId) && totalTargetCount >= MAX_BATCH_TARGETS} onChange={(event) => update(target.membershipId, event.target.checked)} type="checkbox" />
-      <span><strong>{target.displayName}</strong>{target.isGuest ? <small>{t('booking.guest')}</small> : null}</span>
+      <span><strong>{target.displayName}</strong>{target.isTemporaryGuest ? <small>{t('booking.guest')}</small> : null}</span>
       {selected.has(target.membershipId) ? <Check aria-hidden="true" size={18} /> : null}
     </label>
   );
@@ -160,7 +160,7 @@ export function MemberMultiSelect({
             <p className={styles.groupLabel} id={`${id}-regular-members-label`}>{t('booking.regularMembers')}</p>
             {regularTargets.map(renderTarget)}
           </div> : null}
-          {guestTargets.length > 0 || pendingGuestNames.length > 0 || canCreateManagedGuests ? <div aria-labelledby={`${id}-guests-label`} className={`${styles.group} ${regularTargets.length > 0 ? styles.guestGroup : ''}`} role="group">
+          {guestTargets.length > 0 || pendingGuestNames.length > 0 || canBookForGuests ? <div aria-labelledby={`${id}-guests-label`} className={`${styles.group} ${regularTargets.length > 0 ? styles.guestGroup : ''}`} role="group">
             <p className={styles.groupLabel} id={`${id}-guests-label`}>{t('booking.guests')}</p>
             {guestTargets.map(renderTarget)}
             {pendingGuestNames.map((name, index) => (
@@ -170,7 +170,7 @@ export function MemberMultiSelect({
                 <Check aria-hidden="true" size={18} />
               </label>
             ))}
-            {canCreateManagedGuests ? <div className={styles.guestCreator}>
+            {canBookForGuests ? <div className={styles.guestCreator}>
               <label htmlFor={`${id}-guest-name`}>{t('booking.addGuest')}</label>
               <div className={styles.guestCreatorRow}>
                 <TextInput

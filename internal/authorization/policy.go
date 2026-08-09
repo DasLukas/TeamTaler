@@ -63,8 +63,12 @@ var permissionDefinitions = []domain.PermissionDefinition{
 	},
 	{
 		Key:                domain.PermissionBookForOthers,
-		Description:        "Create a booking that targets another active membership.",
+		Description:        "Create a reasoned booking that targets another credentialed active membership.",
 		ImpliedPermissions: []domain.PermissionKey{domain.PermissionViewMemberDirectory},
+	},
+	{
+		Key:         domain.PermissionBookForGuests,
+		Description: "Create bookings for existing or newly created temporary guests.",
 	},
 }
 

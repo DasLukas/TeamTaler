@@ -435,11 +435,11 @@ func TestDynamicRoleMigrationBackfillsLegacyAccessAndDropsCategoryGrants(t *test
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM roles WHERE group_id='group-second'`).Scan(&secondRoleCount); err != nil {
 		t.Fatalf("count second roles: %v", err)
 	}
-	if permissionCount != 12 || mainRoleCount != 5 || secondRoleCount != 4 {
-		t.Fatalf("definitions/main roles/second roles = %d/%d/%d, want 12/5/4", permissionCount, mainRoleCount, secondRoleCount)
+	if permissionCount != 13 || mainRoleCount != 5 || secondRoleCount != 4 {
+		t.Fatalf("definitions/main roles/second roles = %d/%d/%d, want 13/5/4", permissionCount, mainRoleCount, secondRoleCount)
 	}
 	wantPresetGrantCounts := map[string]int{
-		"role:GROUP_ADMINISTRATOR:group-main": 12,
+		"role:GROUP_ADMINISTRATOR:group-main": 13,
 		"role:MEMBER:group-main":              5,
 		"role:FINANCE_MANAGER:group-main":     5,
 		"role:CATALOG_MANAGER:group-main":     3,

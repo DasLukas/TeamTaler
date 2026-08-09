@@ -34,21 +34,21 @@ const targets: BookingTarget[] = [
   {
     membershipId: 'member-actor',
     displayName: 'Assigning Member',
-    isGuest: false,
+    isTemporaryGuest: false,
   },
   {
     membershipId: 'member-target',
     displayName: 'Target Member',
-    isGuest: false,
+    isTemporaryGuest: false,
   },
 ];
 
-function renderInspector(selectedProduct: Product = product, canCreateManagedGuests = false): void {
+function renderInspector(selectedProduct: Product = product, canBookForGuests = false): void {
   const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
   render(
     <BookingInspector
-      canCreateManagedGuests={canCreateManagedGuests}
+      canBookForGuests={canBookForGuests}
       currentMembershipId="member-actor"
       groupId="group-a"
       onCancel={vi.fn()}
@@ -143,7 +143,7 @@ describe('BookingInspector category-neutral booking rules', () => {
     });
   });
 
-  it('replaces the untouched self default with a newly named managed guest', async () => {
+  it('replaces the untouched self default with a newly named temporary guest', async () => {
     const user = userEvent.setup();
     apiMock.createBookings.mockResolvedValue([{ id: 'booking-guest' }]);
     renderInspector(product, true);
@@ -151,7 +151,6 @@ describe('BookingInspector category-neutral booking rules', () => {
     await user.click(screen.getByRole('button', { name: i18n.t('booking.forMember') }));
     await user.type(screen.getByLabelText(i18n.t('booking.addGuest')), '  Sam   Beispiel  ');
     await user.click(screen.getByRole('button', { name: i18n.t('booking.addGuestAction') }));
-    await user.type(screen.getByLabelText(i18n.t('booking.reason')), 'Guest purchase');
     await user.click(screen.getByRole('button', { name: i18n.t('booking.submit') }));
 
     await waitFor(() => expect(apiMock.createBookings).toHaveBeenCalledWith('group-a', {
@@ -160,12 +159,12 @@ describe('BookingInspector category-neutral booking rules', () => {
       expectedPeriodId: period.id,
       quantity: 1,
       targetMembershipIds: [],
-      managedGuestDisplayNames: ['Sam Beispiel'],
-      reason: 'Guest purchase',
+      temporaryGuestDisplayNames: ['Sam Beispiel'],
+      reason: undefined,
     }));
   });
 
-  it('appends a managed guest after the member selection was changed explicitly', async () => {
+  it('appends a temporary guest after the member selection was changed explicitly', async () => {
     const user = userEvent.setup();
     apiMock.createBookings.mockResolvedValue([{ id: 'booking-shared' }]);
     renderInspector(product, true);
@@ -179,7 +178,7 @@ describe('BookingInspector category-neutral booking rules', () => {
 
     await waitFor(() => expect(apiMock.createBookings).toHaveBeenCalledWith('group-a', expect.objectContaining({
       targetMembershipIds: ['member-actor', 'member-target'],
-      managedGuestDisplayNames: ['Guest Three'],
+      temporaryGuestDisplayNames: ['Guest Three'],
       reason: 'Group purchase',
     })));
   });

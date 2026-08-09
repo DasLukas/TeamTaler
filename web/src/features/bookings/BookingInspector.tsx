@@ -22,7 +22,7 @@ export interface BookingInspectorProps {
   period: Period;
   targets: BookingTarget[];
   currentMembershipId: string;
-  canCreateManagedGuests: boolean;
+  canBookForGuests: boolean;
   onCancel: () => void;
   onBooked?: () => void;
   compact?: boolean;
@@ -40,7 +40,7 @@ export function BookingInspector({
   period,
   targets,
   currentMembershipId,
-  canCreateManagedGuests,
+  canBookForGuests,
   onCancel,
   onBooked,
   compact = false,
@@ -55,14 +55,15 @@ export function BookingInspector({
   const confirmationTimerRef = useRef<number | undefined>(undefined);
   const targetSelectionTouchedRef = useRef(false);
   const canBookOwn = targets.some((target) => target.membershipId === currentMembershipId);
-  const canAssignOthers = canCreateManagedGuests || targets.some((target) => target.membershipId !== currentMembershipId);
-  const defaultTargetMembershipIds = () => canBookOwn ? [currentMembershipId] : targets[0] ? [targets[0].membershipId] : [];
+  const canAssignOthers = canBookForGuests || targets.some((target) => target.membershipId !== currentMembershipId);
+  const defaultTargetMembershipIds = () => canBookOwn ? [currentMembershipId] : [];
   const [requestedTargetMembershipIds, setRequestedTargetMembershipIds] = useState<string[]>(defaultTargetMembershipIds);
-  const [managedGuestDisplayNames, setManagedGuestDisplayNames] = useState<string[]>([]);
+  const [temporaryGuestDisplayNames, setTemporaryGuestDisplayNames] = useState<string[]>([]);
   const availableTargetIds = new Set(targets.map((target) => target.membershipId));
+  const targetsById = new Map(targets.map((target) => [target.membershipId, target]));
   const targetMembershipIds = requestedTargetMembershipIds.filter((membershipId) => availableTargetIds.has(membershipId));
-  const targetCount = targetMembershipIds.length + managedGuestDisplayNames.length;
-  const isForeignAssignment = managedGuestDisplayNames.length > 0 || targetMembershipIds.some((membershipId) => membershipId !== currentMembershipId);
+  const targetCount = targetMembershipIds.length + temporaryGuestDisplayNames.length;
+  const needsReason = targetMembershipIds.some((membershipId) => membershipId !== currentMembershipId && !targetsById.get(membershipId)?.isTemporaryGuest);
   const userDefinesPrice = product.pricingMode === 'USER_DEFINED';
   const unitPriceValidation = userDefinesPrice ? validatePositiveMajorUnits(unitPriceInput, product.currency) : {};
   const unitPrice = userDefinesPrice
@@ -84,8 +85,8 @@ export function BookingInspector({
         quantity,
         unitPrice: userDefinesPrice ? unitPrice : undefined,
         targetMembershipIds,
-        ...(managedGuestDisplayNames.length > 0 ? { managedGuestDisplayNames } : {}),
-        reason: isForeignAssignment ? reason.trim() : undefined,
+        ...(temporaryGuestDisplayNames.length > 0 ? { temporaryGuestDisplayNames } : {}),
+        reason: needsReason ? reason.trim() : undefined,
       });
     },
     onSuccess: () => {
@@ -96,7 +97,7 @@ export function BookingInspector({
         setUnitPriceInput('');
         setUnitPriceTouched(false);
         setRequestedTargetMembershipIds(defaultTargetMembershipIds());
-        setManagedGuestDisplayNames([]);
+        setTemporaryGuestDisplayNames([]);
         targetSelectionTouchedRef.current = false;
         setReason('');
         setConfirmed(false);
@@ -108,7 +109,7 @@ export function BookingInspector({
         queryClient.invalidateQueries({ queryKey: ['bookings', groupId] }),
         queryClient.invalidateQueries({ queryKey: ['ledger', groupId] }),
         queryClient.invalidateQueries({ queryKey: ['account-summaries', groupId] }),
-        ...(managedGuestDisplayNames.length > 0 ? [queryClient.invalidateQueries({ queryKey: ['members', groupId] })] : []),
+        ...(temporaryGuestDisplayNames.length > 0 ? [queryClient.invalidateQueries({ queryKey: ['members', groupId] })] : []),
       ]);
     },
   });
@@ -123,15 +124,15 @@ export function BookingInspector({
     setRequestedTargetMembershipIds(membershipIds);
   };
 
-  const addManagedGuest = (displayName: string) => {
+  const addTemporaryGuest = (displayName: string) => {
     if (!targetSelectionTouchedRef.current
-      && managedGuestDisplayNames.length === 0
+      && temporaryGuestDisplayNames.length === 0
       && targetMembershipIds.length === 1
       && targetMembershipIds[0] === currentMembershipId) {
       setRequestedTargetMembershipIds([]);
     }
     targetSelectionTouchedRef.current = true;
-    setManagedGuestDisplayNames((current) => [...current, displayName]);
+    setTemporaryGuestDisplayNames((current) => [...current, displayName]);
   };
 
   if (confirmed) {
@@ -141,7 +142,7 @@ export function BookingInspector({
         <h2>{t('booking.successTitle')}</h2>
         <p>{targetCount > 1
           ? t('booking.successMessageMultiple', { product: product.name, count: targetCount })
-          : t('booking.successMessage', { product: product.name, member: selectedTargets[0]?.displayName ?? managedGuestDisplayNames[0] ?? t('common.selectedMemberFallback') })}</p>
+          : t('booking.successMessage', { product: product.name, member: selectedTargets[0]?.displayName ?? temporaryGuestDisplayNames[0] ?? t('common.selectedMemberFallback') })}</p>
       </div>
     );
   }
@@ -162,14 +163,14 @@ export function BookingInspector({
       <Field htmlFor="booking-member" label={t('booking.forMember')}>
         {canAssignOthers ? (
           <MemberMultiSelect
-            canCreateManagedGuests={canCreateManagedGuests}
-            disabled={targets.length === 0 && !canCreateManagedGuests}
+            canBookForGuests={canBookForGuests}
+            disabled={targets.length === 0 && !canBookForGuests}
             id="booking-member"
             label={t('booking.forMember')}
-            onAddGuest={addManagedGuest}
+            onAddGuest={addTemporaryGuest}
             onChange={changeTargets}
-            onRemoveGuest={(index) => { targetSelectionTouchedRef.current = true; setManagedGuestDisplayNames((current) => current.filter((_, itemIndex) => itemIndex !== index)); }}
-            pendingGuestNames={managedGuestDisplayNames}
+            onRemoveGuest={(index) => { targetSelectionTouchedRef.current = true; setTemporaryGuestDisplayNames((current) => current.filter((_, itemIndex) => itemIndex !== index)); }}
+            pendingGuestNames={temporaryGuestDisplayNames}
             placeholder={t('booking.selectMembers')}
             selectedIds={targetMembershipIds}
             targets={targets}
@@ -181,7 +182,7 @@ export function BookingInspector({
         )}
       </Field>
 
-      {isForeignAssignment ? (
+      {needsReason ? (
         <Field error={!reason.trim() && bookingMutation.isError ? t('booking.reasonRequired') : undefined} htmlFor="booking-reason" label={t('booking.reason')}>
           <TextInput id="booking-reason" onChange={(event) => setReason(event.target.value)} placeholder={t('booking.reasonPlaceholder')} required value={reason} />
         </Field>
@@ -203,7 +204,7 @@ export function BookingInspector({
       {bookingMutation.isError ? <p className={styles.error} role="alert">{bookingMutation.error.message}</p> : null}
       <div className={styles.actions}>
         <Button fullWidth onClick={onCancel} size="large" variant="secondary">{t('common.cancel')}</Button>
-        <Button disabled={bookingMutation.isPending || targetCount === 0 || (userDefinesPrice && !unitPrice) || (isForeignAssignment && !reason.trim())} fullWidth size="large" type="submit">
+        <Button disabled={bookingMutation.isPending || targetCount === 0 || (userDefinesPrice && !unitPrice) || (needsReason && !reason.trim())} fullWidth size="large" type="submit">
           {bookingMutation.isPending ? t('booking.pending') : targetCount > 1 ? t('booking.submitMultiple', { count: targetCount }) : t('booking.submit')}
         </Button>
       </div>

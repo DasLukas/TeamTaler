@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
+import MousePointerClick from 'lucide-react/dist/esm/icons/mouse-pointer-click';
 import WalletCards from 'lucide-react/dist/esm/icons/wallet-cards';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -58,7 +59,7 @@ export function BookingPage() {
   if (categoriesQuery.isError || bookingContextQuery.isError || !categoriesQuery.data || !bookingContextQuery.data) {
     return <div className={styles.state}><StatePanel kind="error" message={t('booking.productsError')} /></div>;
   }
-  if (bookingContextQuery.data.targets.length === 0 && !bookingContextQuery.data.canCreateManagedGuests) {
+  if (bookingContextQuery.data.targets.length === 0 && !bookingContextQuery.data.canBookForGuests) {
     return <div className={styles.state}><StatePanel kind="empty" title={t('booking.noAccessTitle')} message={t('booking.noAccessMessage')} /></div>;
   }
   if (!hasBookableProducts) {
@@ -68,7 +69,7 @@ export function BookingPage() {
   const inspector = selectedProduct && selectedCategory ? (
     <BookingInspector
       compact
-      canCreateManagedGuests={bookingContextQuery.data.canCreateManagedGuests}
+      canBookForGuests={bookingContextQuery.data.canBookForGuests}
       currentMembershipId={bookingContextQuery.data.currentMembership.id}
       groupId={activeGroupId}
       key={selectedProduct.id}
@@ -97,7 +98,22 @@ export function BookingPage() {
           selectedProductId={selectedProduct?.id}
         />
       </section>
-      {!compact && selectedProduct && inspector ? <aside className={styles.inspector}><h2>{t('booking.productTitle', { name: selectedProduct.name })}</h2>{inspector}</aside> : null}
+      {!compact ? (
+        <aside
+          aria-label={selectedProduct ? undefined : t('booking.selectProductTitle')}
+          aria-labelledby={selectedProduct ? 'booking-inspector-title' : undefined}
+          className={styles.inspector}
+        >
+          {selectedProduct ? <h2 id="booking-inspector-title">{t('booking.productTitle', { name: selectedProduct.name })}</h2> : null}
+          {inspector ?? (
+            <div className={styles.inspectorEmpty}>
+              <MousePointerClick aria-hidden="true" size={42} strokeWidth={1.6} />
+              <strong>{t('booking.selectProductTitle')}</strong>
+              <p>{t('booking.selectProductMessage')}</p>
+            </div>
+          )}
+        </aside>
+      ) : null}
       {compact && selectedProduct && inspector ? (
         <Modal onClose={clearSelection} open={sheetOpen} title={t('booking.productTitle', { name: selectedProduct.name })} variant="sheet">
           {inspector}

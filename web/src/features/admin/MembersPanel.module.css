@@ -61,13 +61,13 @@
 }
 
 .noLogin,
-.managedGuestRole,
+.temporaryGuestRole,
 .claimPending {
   color: var(--color-muted);
   font-size: var(--font-size-sm);
 }
 
-.managedGuestRole { margin: 0; }
+.temporaryGuestRole { margin: 0; }
 .claimPending { align-self: center; padding: 0 var(--space-2); white-space: nowrap; }
 
 .claimAction {

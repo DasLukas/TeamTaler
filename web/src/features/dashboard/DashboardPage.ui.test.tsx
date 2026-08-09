@@ -41,7 +41,10 @@ describe('DashboardPage information-only overview', () => {
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Lukas');
     expect(screen.getAllByText(/23,40/).length).toBeGreaterThan(0);
     expect(screen.getByText(i18n.t('dashboard.settlement', { label: 'August' }))).toBeVisible();
-    expect(screen.getByText(demoDashboard.currentPeriod.label)).toBeVisible();
+    const periodHeading = screen.getByRole('heading', { name: demoDashboard.currentPeriod.label });
+    expect(periodHeading).toBeVisible();
+    expect(periodHeading.parentElement).toBeInstanceOf(HTMLElement);
+    expect(periodHeading.nextElementSibling?.tagName).toBe('DIV');
     expect(screen.getByText(i18n.t('dashboard.paymentNoteSelf'))).toBeVisible();
     expect(screen.getByRole('button', { name: i18n.t('selfPayment.action') })).toBeVisible();
     expect(screen.getByText(i18n.t('dashboard.allActivities'))).toBeVisible();

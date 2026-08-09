@@ -232,18 +232,13 @@ func (s Service) UpdateRole(ctx context.Context, actor domain.Principal, members
 			return domain.ValidationError{Field: "grants", Message: "must retain GROUP_ADMINISTRATION and ROLE_MANAGEMENT for the reserved administrator role"}
 		}
 		if hasGrant(command.Grants, domain.PermissionGroupAdministration) {
-			var isDefault, isGuestRole bool
-			if err := tx.QueryRowContext(ctx, `SELECT
-				EXISTS(SELECT 1 FROM group_settings WHERE group_id=? AND default_role_id=?),
-				EXISTS(SELECT 1 FROM group_settings WHERE group_id=? AND guest_role_id=?)`,
-				membership.GroupID, roleID, membership.GroupID, roleID).Scan(&isDefault, &isGuestRole); err != nil {
+			var isDefault bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM group_settings WHERE group_id=? AND default_role_id=?)`,
+				membership.GroupID, roleID).Scan(&isDefault); err != nil {
 				return err
 			}
 			if isDefault {
 				return domain.ValidationError{Field: "grants", Message: "the default role must not grant GROUP_ADMINISTRATION"}
-			}
-			if isGuestRole {
-				return domain.ValidationError{Field: "grants", Message: "the configured guest role must not grant GROUP_ADMINISTRATION"}
 			}
 		}
 		if err := validateUniqueRoleName(ctx, tx, membership.GroupID, roleID, command.Name); err != nil {
@@ -306,13 +301,6 @@ func (s Service) DeleteRole(ctx context.Context, actor domain.Principal, members
 		}
 		if isDefault {
 			return fmt.Errorf("%w: default role cannot be deleted", domain.ErrConflict)
-		}
-		var isGuestRole bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM group_settings WHERE group_id=? AND guest_role_id=?)`, membership.GroupID, roleID).Scan(&isGuestRole); err != nil {
-			return err
-		}
-		if isGuestRole {
-			return fmt.Errorf("%w: configured guest role cannot be deleted", domain.ErrConflict)
 		}
 		result, err := tx.ExecContext(ctx, `DELETE FROM roles WHERE id=? AND group_id=? AND version=? AND (preset_key IS NULL OR preset_key!='GROUP_ADMINISTRATOR') AND deletable=1`, roleID, membership.GroupID, expectedVersion)
 		if err != nil {
@@ -429,25 +417,22 @@ func (s Service) replaceAssignedRoles(ctx context.Context, actor domain.Principa
 				return err
 			}
 			if credentialless {
-				return fmt.Errorf("%w: credential-less managed guests do not accept role assignments", domain.ErrConflict)
+				return fmt.Errorf("%w: temporary guests do not accept direct role assignments", domain.ErrConflict)
 			}
 		case domain.RoleAssignmentInvitation:
-			err := tx.QueryRowContext(ctx, `SELECT role_assignments_version FROM invitations WHERE id=? AND group_id=? AND accepted_at IS NULL AND revoked_at IS NULL AND julianday(expires_at)>julianday('now')`, targetID, membership.GroupID).Scan(&currentVersion)
+			var isClaimInvitation bool
+			err := tx.QueryRowContext(ctx, `SELECT role_assignments_version,target_membership_id IS NOT NULL FROM invitations WHERE id=? AND group_id=? AND accepted_at IS NULL AND revoked_at IS NULL AND julianday(expires_at)>julianday('now')`, targetID, membership.GroupID).Scan(&currentVersion, &isClaimInvitation)
 			if errors.Is(err, sql.ErrNoRows) {
 				return domain.ErrNotFound
 			}
 			if err != nil {
 				return err
 			}
+			if isClaimInvitation {
+				return fmt.Errorf("%w: claim invitation roles are fixed when the invitation is created", domain.ErrConflict)
+			}
 		default:
 			return domain.ValidationError{Field: "subjectType", Message: "must be MEMBERSHIP or INVITATION"}
-		}
-		var guestRoleID sql.NullString
-		if err := tx.QueryRowContext(ctx, `SELECT guest_role_id FROM group_settings WHERE group_id=?`, membership.GroupID).Scan(&guestRoleID); err != nil {
-			return err
-		}
-		if guestRoleID.Valid && containsString(roleIDs, guestRoleID.String) && len(roleIDs) != 1 {
-			return domain.ValidationError{Field: "roleIds", Message: "the configured guest role must be assigned exclusively"}
 		}
 		if currentVersion != expectedVersion {
 			return domain.ErrPrecondition
@@ -588,70 +573,6 @@ func replaceRoleGrantsTx(ctx context.Context, tx *sql.Tx, actorUserID, groupID, 
 }
 
 func replaceAssignmentRowsTx(ctx context.Context, tx *sql.Tx, actorUserID, groupID string, targetType domain.RoleAssignmentTargetType, targetID string, previous, next []string, now string) error {
-	var guestRoleID sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT guest_role_id FROM group_settings WHERE group_id=?`, groupID).Scan(&guestRoleID); err != nil {
-		return err
-	}
-	if targetType == domain.RoleAssignmentInvitation {
-		var isClaimInvitation bool
-		if err := tx.QueryRowContext(ctx, `SELECT target_membership_id IS NOT NULL FROM invitations WHERE id=? AND group_id=?`, targetID, groupID).Scan(&isClaimInvitation); err != nil {
-			return err
-		}
-		if isClaimInvitation && (!guestRoleID.Valid || len(next) != 1 || next[0] != guestRoleID.String) {
-			return fmt.Errorf("%w: managed-guest claim invitations must retain the configured guest role exclusively", domain.ErrConflict)
-		}
-	}
-	if guestRoleID.Valid {
-		previousHasGuest := containsString(previous, guestRoleID.String)
-		nextHasGuest := containsString(next, guestRoleID.String)
-		if nextHasGuest && len(next) != 1 {
-			return domain.ValidationError{Field: "roleIds", Message: "the configured guest role must be assigned exclusively"}
-		}
-		if previousHasGuest && len(previous) != 1 {
-			return fmt.Errorf("%w: existing guest-role assignment violates exclusivity", domain.ErrConflict)
-		}
-		if nextHasGuest && !previousHasGuest && len(previous) > 0 {
-			// Keep one assignment alive for the minimum-role trigger, remove all
-			// other normal roles, then convert the final row to the exclusive guest
-			// role without ever exposing an invalid intermediate state.
-			for _, roleID := range previous[1:] {
-				query := `DELETE FROM membership_role_assignments WHERE group_id=? AND membership_id=? AND role_id=?`
-				if targetType == domain.RoleAssignmentInvitation {
-					query = `DELETE FROM invitation_role_assignments WHERE group_id=? AND invitation_id=? AND role_id=?`
-				}
-				if _, err := tx.ExecContext(ctx, query, groupID, targetID, roleID); err != nil {
-					return err
-				}
-			}
-			query := `UPDATE membership_role_assignments SET role_id=?,version=version+1,assigned_at=?,assigned_by=? WHERE group_id=? AND membership_id=? AND role_id=?`
-			if targetType == domain.RoleAssignmentInvitation {
-				query = `UPDATE invitation_role_assignments SET role_id=?,version=version+1,assigned_at=?,assigned_by=? WHERE group_id=? AND invitation_id=? AND role_id=?`
-			}
-			_, err := tx.ExecContext(ctx, query, guestRoleID.String, now, actorUserID, groupID, targetID, previous[0])
-			return err
-		}
-		if previousHasGuest && !nextHasGuest && len(next) > 0 {
-			// Convert the exclusive guest row into the first normal role before
-			// adding any additional roles, preserving both exclusivity and minimum.
-			query := `UPDATE membership_role_assignments SET role_id=?,version=version+1,assigned_at=?,assigned_by=? WHERE group_id=? AND membership_id=? AND role_id=?`
-			if targetType == domain.RoleAssignmentInvitation {
-				query = `UPDATE invitation_role_assignments SET role_id=?,version=version+1,assigned_at=?,assigned_by=? WHERE group_id=? AND invitation_id=? AND role_id=?`
-			}
-			if _, err := tx.ExecContext(ctx, query, next[0], now, actorUserID, groupID, targetID, guestRoleID.String); err != nil {
-				return err
-			}
-			for _, roleID := range next[1:] {
-				query := `INSERT INTO membership_role_assignments(group_id,membership_id,role_id,version,assigned_at,assigned_by) VALUES(?,?,?,1,?,?)`
-				if targetType == domain.RoleAssignmentInvitation {
-					query = `INSERT INTO invitation_role_assignments(group_id,invitation_id,role_id,version,assigned_at,assigned_by) VALUES(?,?,?,1,?,?)`
-				}
-				if _, err := tx.ExecContext(ctx, query, groupID, targetID, roleID, now, actorUserID); err != nil {
-					return err
-				}
-			}
-			return nil
-		}
-	}
 	for _, roleID := range next {
 		if containsString(previous, roleID) {
 			continue

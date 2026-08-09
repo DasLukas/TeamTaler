@@ -253,7 +253,7 @@ func (s Service) AcceptInvitation(ctx context.Context, input InvitationAcceptanc
 		var existingUser, reactivated bool
 		if targetMembershipID.Valid {
 			membershipID = targetMembershipID.String
-			principal, existingUser, err = acceptClaimInvitationIdentityTx(ctx, tx, input, groupID, membershipID, email, invitationCreatedBy, now)
+			principal, existingUser, err = acceptClaimInvitationIdentityTx(ctx, tx, input, groupID, membershipID, email, invitationCreatedBy, now, invitationRoleIDs)
 			if err != nil {
 				return err
 			}
@@ -302,7 +302,7 @@ func (s Service) AcceptInvitation(ctx context.Context, input InvitationAcceptanc
 		membership = domain.Membership{
 			ID: membershipID, GroupID: groupID, UserID: principal.UserID,
 			Email: stringPointer(principal.Email), DisplayName: principal.DisplayName,
-			AvatarURL: principal.AvatarURL, Status: "ACTIVE", IsGuest: targetMembershipID.Valid,
+			AvatarURL: principal.AvatarURL, Status: "ACTIVE", IsTemporaryGuest: false,
 			CategoryGrants: map[string][]domain.CategoryPermission{},
 		}
 		return audit.Record(ctx, tx, groupID, principal.UserID, membershipID, "invitation.accepted", "invitation", invitationID, map[string]any{
@@ -426,33 +426,27 @@ func assignInvitationRolesTx(ctx context.Context, tx *sql.Tx, groupID, membershi
 	return nil
 }
 
-// acceptClaimInvitationIdentityTx upgrades one managed identity in place or
+// acceptClaimInvitationIdentityTx upgrades one temporary identity in place or
 // rebinds its stable membership to an existing credentialed account. Financial
 // rows remain attached to membershipID and are never merged with another group
 // membership.
-func acceptClaimInvitationIdentityTx(ctx context.Context, tx *sql.Tx, input InvitationAcceptance, groupID, membershipID, email, assignedBy, now string) (domain.Principal, bool, error) {
-	var managedUserID, managedDisplayName string
-	var managedAvatarKey sql.NullString
+func acceptClaimInvitationIdentityTx(ctx context.Context, tx *sql.Tx, input InvitationAcceptance, groupID, membershipID, email, assignedBy, now string, roleIDs []string) (domain.Principal, bool, error) {
+	var temporaryUserID, temporaryDisplayName string
+	var temporaryAvatarKey sql.NullString
 	if err := tx.QueryRowContext(ctx, `SELECT user.id,user.display_name,user.avatar_key
 		FROM memberships membership
 		JOIN users user ON user.id=membership.user_id
 		WHERE membership.id=? AND membership.group_id=? AND membership.status='ACTIVE'
 		  AND user.email IS NULL AND user.password_hash IS NULL`, membershipID, groupID).
-		Scan(&managedUserID, &managedDisplayName, &managedAvatarKey); errors.Is(err, sql.ErrNoRows) {
+		Scan(&temporaryUserID, &temporaryDisplayName, &temporaryAvatarKey); errors.Is(err, sql.ErrNoRows) {
 		return domain.Principal{}, false, fmt.Errorf("%w: invitation claim target is no longer available", domain.ErrConflict)
 	} else if err != nil {
 		return domain.Principal{}, false, err
 	}
 
-	var guestRoleID string
-	if err := tx.QueryRowContext(ctx, `SELECT guest_role_id FROM group_settings WHERE group_id=? AND guest_role_id IS NOT NULL`, groupID).Scan(&guestRoleID); errors.Is(err, sql.ErrNoRows) {
-		return domain.Principal{}, false, fmt.Errorf("%w: group has no configured guest role", domain.ErrConflict)
-	} else if err != nil {
-		return domain.Principal{}, false, err
-	}
 	if _, err := tx.ExecContext(ctx, `UPDATE memberships
-		SET managed_guest_name_key=NULL
-		WHERE id=? AND group_id=? AND user_id=?`, membershipID, groupID, managedUserID); err != nil {
+		SET temporary_guest_name_key=NULL
+		WHERE id=? AND group_id=? AND user_id=?`, membershipID, groupID, temporaryUserID); err != nil {
 		return domain.Principal{}, false, err
 	}
 	for _, statement := range []string{
@@ -469,7 +463,7 @@ func acceptClaimInvitationIdentityTx(ctx context.Context, tx *sql.Tx, input Invi
 			return domain.Principal{}, false, err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO membership_role_assignments(group_id,membership_id,role_id,version,assigned_at,assigned_by) VALUES(?,?,?,1,?,?)`, groupID, membershipID, guestRoleID, now, assignedBy); err != nil {
+	if err := assignInvitationRolesTx(ctx, tx, groupID, membershipID, assignedBy, now, roleIDs); err != nil {
 		return domain.Principal{}, false, err
 	}
 
@@ -491,10 +485,10 @@ func acceptClaimInvitationIdentityTx(ctx context.Context, tx *sql.Tx, input Invi
 		if existingMemberships != 0 {
 			return domain.Principal{}, true, fmt.Errorf("%w: account already has a membership in this group", domain.ErrConflict)
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE memberships SET user_id=?,managed_guest_name_key=NULL WHERE id=? AND group_id=? AND user_id=?`, principal.UserID, membershipID, groupID, managedUserID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE memberships SET user_id=?,temporary_guest_name_key=NULL WHERE id=? AND group_id=? AND user_id=?`, principal.UserID, membershipID, groupID, temporaryUserID); err != nil {
 			return domain.Principal{}, true, err
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id=? AND NOT EXISTS (SELECT 1 FROM memberships WHERE user_id=?)`, managedUserID, managedUserID); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id=? AND NOT EXISTS (SELECT 1 FROM memberships WHERE user_id=?)`, temporaryUserID, temporaryUserID); err != nil {
 			return domain.Principal{}, true, err
 		}
 		principal.AvatarURL = media.UserAvatarURL(principal.UserID, avatarKey.String)
@@ -506,7 +500,7 @@ func acceptClaimInvitationIdentityTx(ctx context.Context, tx *sql.Tx, input Invi
 
 	displayName := input.DisplayName
 	if displayName == "" {
-		displayName = managedDisplayName
+		displayName = temporaryDisplayName
 	}
 	passwordHash, err = HashPassword(input.Password)
 	if err != nil {
@@ -514,7 +508,7 @@ func acceptClaimInvitationIdentityTx(ctx context.Context, tx *sql.Tx, input Invi
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE users
 		SET email=?,display_name=?,password_hash=?,updated_at=?
-		WHERE id=? AND email IS NULL AND password_hash IS NULL`, email, displayName, passwordHash, now, managedUserID)
+		WHERE id=? AND email IS NULL AND password_hash IS NULL`, email, displayName, passwordHash, now, temporaryUserID)
 	if err != nil {
 		return domain.Principal{}, false, err
 	}
@@ -523,8 +517,8 @@ func acceptClaimInvitationIdentityTx(ctx context.Context, tx *sql.Tx, input Invi
 		return domain.Principal{}, false, fmt.Errorf("%w: invitation claim target changed concurrently", domain.ErrConflict)
 	}
 	principal = domain.Principal{
-		UserID: managedUserID, Email: email, DisplayName: displayName,
-		AvatarURL: media.UserAvatarURL(managedUserID, managedAvatarKey.String),
+		UserID: temporaryUserID, Email: email, DisplayName: displayName,
+		AvatarURL: media.UserAvatarURL(temporaryUserID, temporaryAvatarKey.String),
 	}
 	return principal, false, nil
 }
@@ -544,19 +538,11 @@ func containsControlCharacter(value string) bool {
 
 func (s Service) hydrateMembershipAuthorization(ctx context.Context, membership *domain.Membership) error {
 	if err := s.DB.QueryRowContext(ctx, `SELECT membership.role_assignments_version,
-		(user.email IS NULL OR EXISTS (
-			SELECT 1
-			FROM group_settings settings
-			JOIN membership_role_assignments assignment
-			  ON assignment.group_id=settings.group_id
-			 AND assignment.membership_id=membership.id
-			 AND assignment.role_id=settings.guest_role_id
-			WHERE settings.group_id=membership.group_id
-		))
+		(user.email IS NULL AND user.password_hash IS NULL)
 		FROM memberships membership
 		JOIN users user ON user.id=membership.user_id
 		WHERE membership.id=? AND membership.group_id=? AND membership.status='ACTIVE'`, membership.ID, membership.GroupID).
-		Scan(&membership.RoleAssignmentsVersion, &membership.IsGuest); err != nil {
+		Scan(&membership.RoleAssignmentsVersion, &membership.IsTemporaryGuest); err != nil {
 		return err
 	}
 	rows, err := s.DB.QueryContext(ctx, `SELECT r.id,coalesce(r.preset_key,'') FROM membership_role_assignments a JOIN roles r ON r.id=a.role_id AND r.group_id=a.group_id WHERE a.group_id=? AND a.membership_id=? ORDER BY r.id`, membership.GroupID, membership.ID)

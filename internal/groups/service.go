@@ -228,9 +228,6 @@ func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, mem
 			if err := validateDefaultRole(ctx, tx, membership.GroupID, *update.DefaultRoleID); err != nil {
 				return err
 			}
-			if previous.GuestsEnabled && previous.GuestRoleID != nil && *previous.GuestRoleID != *update.DefaultRoleID {
-				return domain.ValidationError{Field: "defaultRoleId", Message: "must match guestRoleId while managed guests are enabled"}
-			}
 			next.DefaultRoleID = update.DefaultRoleID
 		}
 		if previous.NotificationEmailsEnabled == next.NotificationEmailsEnabled && nullableStringsEqual(previous.DefaultRoleID, next.DefaultRoleID) {
@@ -266,18 +263,14 @@ type settingsQueryer interface {
 }
 
 func querySettings(ctx context.Context, queryer settingsQueryer, groupID string, settings *domain.GroupSettings) error {
-	var defaultRoleID, guestRoleID sql.NullString
-	if err := queryer.QueryRowContext(ctx, `SELECT notification_emails_enabled,default_role_id,guests_enabled,guest_role_id FROM group_settings WHERE group_id=?`, groupID).
-		Scan(&settings.NotificationEmailsEnabled, &defaultRoleID, &settings.GuestsEnabled, &guestRoleID); err != nil {
+	var defaultRoleID sql.NullString
+	if err := queryer.QueryRowContext(ctx, `SELECT notification_emails_enabled,default_role_id FROM group_settings WHERE group_id=?`, groupID).
+		Scan(&settings.NotificationEmailsEnabled, &defaultRoleID); err != nil {
 		return err
 	}
 	settings.DefaultRoleID = nil
-	settings.GuestRoleID = nil
 	if defaultRoleID.Valid {
 		settings.DefaultRoleID = &defaultRoleID.String
-	}
-	if guestRoleID.Valid {
-		settings.GuestRoleID = &guestRoleID.String
 	}
 	return nil
 }
@@ -409,14 +402,10 @@ func (s Service) hydrateMembershipAuthorization(ctx context.Context, membership 
 		return domain.ValidationError{Field: "membership", Message: "requires an id and group id"}
 	}
 	if err := s.DB.QueryRowContext(ctx, `SELECT m.role_assignments_version,
-		(u.email IS NULL OR (settings.guest_role_id IS NOT NULL AND EXISTS(
-			SELECT 1 FROM membership_role_assignments assignment
-			WHERE assignment.group_id=m.group_id AND assignment.membership_id=m.id AND assignment.role_id=settings.guest_role_id
-		)))
+		(u.email IS NULL AND u.password_hash IS NULL)
 		FROM memberships m JOIN users u ON u.id=m.user_id
-		JOIN group_settings settings ON settings.group_id=m.group_id
 		WHERE m.id=? AND m.group_id=?`, membership.ID, membership.GroupID).
-		Scan(&membership.RoleAssignmentsVersion, &membership.IsGuest); err != nil {
+		Scan(&membership.RoleAssignmentsVersion, &membership.IsTemporaryGuest); err != nil {
 		return err
 	}
 	rows, err := s.DB.QueryContext(ctx, `SELECT r.id,coalesce(r.preset_key,'')
@@ -696,7 +685,7 @@ func (s Service) ArchiveMember(ctx context.Context, actor domain.Principal, acto
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE invitation_email_outbox SET
 			status='CANCELLED',token_ciphertext=NULL,next_attempt_at=NULL,lease_token=NULL,lease_until=NULL,
-			last_error_code='managed_guest_archived',updated_at=?
+			last_error_code='temporary_guest_archived',updated_at=?
 			WHERE group_id=? AND invitation_id IN (SELECT id FROM invitations WHERE group_id=? AND target_membership_id=?)
 			AND status IN ('PENDING','SENDING','FAILED')`, now, targetGroupID, targetGroupID, targetID); err != nil {
 			return err
@@ -874,7 +863,7 @@ type invitationAssignmentAuthorization uint8
 
 const (
 	invitationAssignmentStandard invitationAssignmentAuthorization = iota
-	invitationAssignmentManagedGuestClaim
+	invitationAssignmentTemporaryGuestClaim
 )
 
 // CreateInvitation creates a seven-day, one-time invitation in membership's
@@ -969,18 +958,24 @@ func createInvitationTx(ctx context.Context, tx *sql.Tx, actor domain.Principal,
 		if err := requireAssignmentChangePermissions(ctx, tx, membership, adminRoleID, currentRoleIDs, nextRoleIDs); err != nil {
 			return Invitation{}, err
 		}
-	case invitationAssignmentManagedGuestClaim:
-		var configuredGuestRoleID string
-		if err := tx.QueryRowContext(ctx, `SELECT guest_role_id FROM group_settings WHERE group_id=? AND guest_role_id IS NOT NULL`, membership.GroupID).Scan(&configuredGuestRoleID); errors.Is(err, sql.ErrNoRows) {
-			return Invitation{}, fmt.Errorf("%w: group has no configured guest role", domain.ErrConflict)
+	case invitationAssignmentTemporaryGuestClaim:
+		if err := requireCurrentPermission(ctx, tx, membership, domain.PermissionGroupAdministration); err != nil {
+			return Invitation{}, err
+		}
+		var defaultRoleID string
+		if err := tx.QueryRowContext(ctx, `SELECT default_role_id FROM group_settings WHERE group_id=? AND default_role_id IS NOT NULL`, membership.GroupID).Scan(&defaultRoleID); errors.Is(err, sql.ErrNoRows) {
+			return Invitation{}, domain.ValidationError{Field: "roleIds", Message: "requires a configured default role"}
 		} else if err != nil {
 			return Invitation{}, err
 		}
-		if len(nextRoleIDs) != 1 || nextRoleIDs[0] != configuredGuestRoleID {
-			return Invitation{}, fmt.Errorf("%w: managed-guest claim invitations must use the configured guest role exclusively", domain.ErrConflict)
-		}
-		if err := requireCurrentPermission(ctx, tx, membership, domain.PermissionGroupAdministration); err != nil {
-			return Invitation{}, err
+		if len(nextRoleIDs) != 1 || nextRoleIDs[0] != defaultRoleID {
+			adminRoleID, err := reservedAdministratorRoleID(ctx, tx, membership.GroupID)
+			if err != nil {
+				return Invitation{}, err
+			}
+			if err := requireAssignmentChangePermissions(ctx, tx, membership, adminRoleID, currentRoleIDs, nextRoleIDs); err != nil {
+				return Invitation{}, err
+			}
 		}
 	default:
 		return Invitation{}, errors.New("unsupported invitation assignment authorization mode")

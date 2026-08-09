@@ -26,7 +26,8 @@ export type PermissionKey =
   | 'CREATE_OWN_BOOKING'
   | 'VOID_OWN_BOOKING'
   | 'VOID_ANY_BOOKING'
-  | 'BOOK_FOR_OTHERS';
+  | 'BOOK_FOR_OTHERS'
+  | 'BOOK_FOR_GUESTS';
 
 /** Complete permission-key registry in stable display order. */
 export const PERMISSION_KEYS = [
@@ -42,6 +43,7 @@ export const PERMISSION_KEYS = [
   'VOID_OWN_BOOKING',
   'VOID_ANY_BOOKING',
   'BOOK_FOR_OTHERS',
+  'BOOK_FOR_GUESTS',
 ] as const satisfies readonly PermissionKey[];
 
 /**
@@ -164,8 +166,6 @@ export interface GroupSettings {
   notificationEmailsEnabled: boolean;
   notificationEmailDeliveryAvailable: boolean;
   defaultRoleId: string | null;
-  guestsEnabled: boolean;
-  guestRoleId: string | null;
 }
 
 /**
@@ -174,14 +174,6 @@ export interface GroupSettings {
 export interface GroupSettingsUpdateInput {
   notificationEmailsEnabled?: boolean;
   defaultRoleId?: string;
-}
-
-/** Complete guest-feature update accepted by the dedicated settings endpoint. */
-export interface GuestSettingsUpdateInput {
-  guestsEnabled: boolean;
-  guestRoleId?: string | null;
-  createGuestRole?: boolean;
-  replacementDefaultRoleId?: string;
 }
 
 /** Administrator-visible state of the group's single public join link. */
@@ -306,7 +298,7 @@ export interface Membership {
   email: string | null;
   initials: string;
   avatarUrl?: string;
-  isGuest: boolean;
+  isTemporaryGuest: boolean;
   roles: GroupRole[];
   groupPermissions: GroupPermission[];
   categoryPermissions: CategoryPermission[];
@@ -379,7 +371,7 @@ export interface BookingBatchCommand {
   quantity: number;
   unitPrice?: Money;
   targetMembershipIds?: string[];
-  managedGuestDisplayNames?: string[];
+  temporaryGuestDisplayNames?: string[];
   reason?: string;
 }
 
@@ -388,7 +380,7 @@ export interface BookingTarget {
   membershipId: string;
   displayName: string;
   avatarUrl?: string;
-  isGuest: boolean;
+  isTemporaryGuest: boolean;
 }
 
 /** Permission-filtered read model required by the product booking page. */
@@ -397,7 +389,7 @@ export interface BookingContext {
   ownBalance: Money;
   currentMembership: Membership;
   targets: BookingTarget[];
-  canCreateManagedGuests: boolean;
+  canBookForGuests: boolean;
 }
 
 /** One immutable row in a member account statement. */

@@ -28,10 +28,11 @@ const (
 )
 
 type memberSeed struct {
-	email       string
-	displayName string
-	roles       []domain.Role
-	permissions []domain.PermissionKey
+	email                   string
+	displayName             string
+	roles                   []domain.Role
+	permissions             []domain.PermissionKey
+	replaceStarterWithGrant bool
 }
 
 type seededMember struct {
@@ -144,6 +145,8 @@ func run() error {
 	}
 	lena, err := createMember(ctx, authService, groupService, adminSession.Principal, adminGroup.Membership, memberSeed{
 		email: "lena@example.test", displayName: "Lena Player",
+		permissions:             []domain.PermissionKey{domain.PermissionBookForGuests},
+		replaceStarterWithGrant: true,
 	})
 	if err != nil {
 		return err
@@ -226,9 +229,9 @@ func createFixedProduct(ctx context.Context, service catalog.Service, actor doma
 }
 
 // createMember creates and accepts one invitation with an explicit starter-role
-// selection, then assigns an optional dynamic permission role. Accounts without
-// requested management presets receive the editable member starter role. Every
-// seeded account receives the shared local-only password. It returns the
+// selection, then assigns an optional dynamic permission role. A fixture may
+// replace the starter assignment to exercise an exact permission boundary.
+// Every seeded account receives the shared local-only password. It returns the
 // authenticated principal and active membership or a domain service error.
 func createMember(ctx context.Context, authService auth.Service, groupService groups.Service, actor domain.Principal, actorMembership domain.Membership, seed memberSeed) (seededMember, error) {
 	availableRoles, err := groupService.ListRoles(ctx, actorMembership)
@@ -282,7 +285,10 @@ func createMember(ctx context.Context, authService auth.Service, groupService gr
 		if createErr != nil {
 			return seededMember{}, fmt.Errorf("create dynamic role for %s: %w", seed.email, createErr)
 		}
-		roleIDs := append(append([]string(nil), membership.RoleIDs...), role.ID)
+		roleIDs := []string{role.ID}
+		if !seed.replaceStarterWithGrant {
+			roleIDs = append(append([]string(nil), membership.RoleIDs...), role.ID)
+		}
 		if _, assignErr := groupService.ReplaceMemberRoles(ctx, actor, actorMembership, membership.ID, roleIDs, membership.RoleAssignmentsVersion); assignErr != nil {
 			return seededMember{}, fmt.Errorf("assign dynamic role for %s: %w", seed.email, assignErr)
 		}

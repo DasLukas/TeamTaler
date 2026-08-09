@@ -73,43 +73,37 @@ func TestGuestFeatureMigrationPreservesReferencesAndEnforcesIdentityInvariants(t
 	if _, err := db.ExecContext(ctx, `INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('invalid-user',NULL,'Invalid','hash',?,?)`, now, now); err == nil {
 		t.Fatal("unpaired credentials unexpectedly passed the users constraint")
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('managed-one',NULL,'Managed One',NULL,?,?)`, now, now); err != nil {
-		t.Fatalf("insert managed identity: %v", err)
+	if _, err := db.ExecContext(ctx, `UPDATE users SET email=NULL,password_hash=NULL WHERE id='user-admin'`); err == nil || !strings.Contains(err.Error(), "membership credentials cannot be removed") {
+		t.Fatalf("credential downgrade error=%v, want one-way membership guard", err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO memberships(id,group_id,user_id,status,joined_at,managed_guest_name_key) VALUES('managed-member-one','group-main','managed-one','ACTIVE',?,'managed one')`, now); err != nil {
-		t.Fatalf("insert managed membership: %v", err)
+	if _, err := db.ExecContext(ctx, `INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('temporary-one',NULL,'Temporary One',NULL,?,?)`, now, now); err != nil {
+		t.Fatalf("insert temporary identity: %v", err)
 	}
-	var managedRoleCount int
-	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM membership_role_assignments WHERE membership_id='managed-member-one'`).Scan(&managedRoleCount); err != nil || managedRoleCount != 0 {
-		t.Fatalf("managed role assignments=%d err=%v, want 0", managedRoleCount, err)
+	if _, err := db.ExecContext(ctx, `INSERT INTO memberships(id,group_id,user_id,status,joined_at,temporary_guest_name_key) VALUES('temporary-member-one','group-main','temporary-one','ACTIVE',?,'temporary one')`, now); err != nil {
+		t.Fatalf("insert temporary membership: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO sessions(id_hash,user_id,csrf_hash,expires_at,last_seen_at,created_at) VALUES('managed-session','managed-one','csrf','2099-01-01T00:00:00Z',?,?)`, now, now); err == nil || !strings.Contains(err.Error(), "sessions require an active credentialed user") {
-		t.Fatalf("managed session error=%v, want credential guard", err)
+	var temporaryRoleCount int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM membership_role_assignments WHERE membership_id='temporary-member-one'`).Scan(&temporaryRoleCount); err != nil || temporaryRoleCount != 0 {
+		t.Fatalf("temporary role assignments=%d err=%v, want 0", temporaryRoleCount, err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('managed-two',NULL,'Managed Two',NULL,?,?)`, now, now); err != nil {
-		t.Fatalf("insert second managed identity: %v", err)
+	if _, err := db.ExecContext(ctx, `INSERT INTO sessions(id_hash,user_id,csrf_hash,expires_at,last_seen_at,created_at) VALUES('temporary-session','temporary-one','csrf','2099-01-01T00:00:00Z',?,?)`, now, now); err == nil || !strings.Contains(err.Error(), "sessions require an active credentialed user") {
+		t.Fatalf("temporary session error=%v, want credential guard", err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO memberships(id,group_id,user_id,status,joined_at,managed_guest_name_key) VALUES('managed-member-two','group-main','managed-two','ACTIVE',?,'managed one')`, now); err == nil {
-		t.Fatal("duplicate active managed guest name key unexpectedly passed")
+	if _, err := db.ExecContext(ctx, `INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('temporary-two',NULL,'Temporary Two',NULL,?,?)`, now, now); err != nil {
+		t.Fatalf("insert second temporary identity: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO memberships(id,group_id,user_id,status,joined_at,temporary_guest_name_key) VALUES('temporary-member-two','group-main','temporary-two','ACTIVE',?,'temporary one')`, now); err == nil {
+		t.Fatal("duplicate active temporary guest name key unexpectedly passed")
 	}
 
-	if _, err := db.ExecContext(ctx, `INSERT INTO roles(id,group_id,name,description,created_at,updated_at) VALUES('role-guest','group-main','Guest','Booking-only guest',?,?)`, now, now); err != nil {
-		t.Fatalf("insert guest role: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `UPDATE group_settings SET guests_enabled=1,guest_role_id='role-guest',default_role_id='role-guest',updated_at=? WHERE group_id='group-main'`, now); err != nil {
-		t.Fatalf("configure guest role: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `UPDATE group_settings SET default_role_id='role:MEMBER:group-main' WHERE group_id='group-main'`); err == nil {
-		t.Fatal("enabled guest settings unexpectedly accepted a divergent default role")
-	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO membership_role_assignments(group_id,membership_id,role_id,assigned_at) VALUES('group-main','managed-member-one','role-guest',?)`, now); err == nil || !strings.Contains(err.Error(), "managed memberships cannot receive role assignments") {
-		t.Fatalf("direct managed role assignment error=%v, want managed guard", err)
+	if _, err := db.ExecContext(ctx, `INSERT INTO membership_role_assignments(group_id,membership_id,role_id,assigned_at) VALUES('group-main','temporary-member-one','role:MEMBER:group-main',?)`, now); err == nil || !strings.Contains(err.Error(), "temporary guests can receive only roles prepared by an open claim invitation") {
+		t.Fatalf("direct temporary role assignment error=%v, want claim guard", err)
 	}
 
 	if _, err := db.ExecContext(ctx, `INSERT INTO invitations(id,group_id,email,token_hash,expires_at,created_by,created_at) VALUES('claim-late','group-main','late@example.test','late-token','2099-01-01T00:00:00Z','user-admin',?)`, now); err != nil {
 		t.Fatalf("insert invitation before setting claim target: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE invitations SET target_membership_id='managed-member-one' WHERE id='claim-late'`); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE invitations SET target_membership_id='temporary-member-one' WHERE id='claim-late'`); err != nil {
 		t.Fatalf("set claim target once: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `UPDATE invitations SET target_membership_id=NULL WHERE id='claim-late'`); err == nil || !strings.Contains(err.Error(), "claim target are immutable") {
@@ -119,36 +113,30 @@ func TestGuestFeatureMigrationPreservesReferencesAndEnforcesIdentityInvariants(t
 		t.Fatalf("revoke late-target claim fixture: %v", err)
 	}
 
-	if _, err := db.ExecContext(ctx, `INSERT INTO invitations(id,group_id,email,token_hash,expires_at,created_by,created_at,target_membership_id) VALUES('claim-one','group-main','claimed@example.test','claim-token','2099-01-01T00:00:00Z','user-admin',?,'managed-member-one')`, now); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO invitations(id,group_id,email,token_hash,expires_at,created_by,created_at,target_membership_id) VALUES('claim-one','group-main','claimed@example.test','claim-token','2099-01-01T00:00:00Z','user-admin',?,'temporary-member-one')`, now); err != nil {
 		t.Fatalf("insert claim invitation: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO membership_role_assignments(group_id,membership_id,role_id,assigned_at) VALUES('group-main','managed-member-one','role-guest',?)`, now); err != nil {
-		t.Fatalf("assign guest role during claim transition: %v", err)
+	if _, err := db.ExecContext(ctx, `INSERT INTO invitation_role_assignments(group_id,invitation_id,role_id,assigned_at,assigned_by) VALUES('group-main','claim-one','role:MEMBER:group-main',?,'user-admin')`, now); err != nil {
+		t.Fatalf("prepare claim role: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO membership_role_assignments(group_id,membership_id,role_id,assigned_at) VALUES('group-main','managed-member-one','role:MEMBER:group-main',?)`, now); err == nil {
-		t.Fatal("second role beside configured guest role unexpectedly passed")
+	if _, err := db.ExecContext(ctx, `INSERT INTO membership_role_assignments(group_id,membership_id,role_id,assigned_at) VALUES('group-main','temporary-member-one','role:MEMBER:group-main',?)`, now); err != nil {
+		t.Fatalf("assign prepared role during claim transition: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE memberships SET managed_guest_name_key=NULL WHERE id='managed-member-one'`); err != nil {
-		t.Fatalf("release managed guest name: %v", err)
+	if _, err := db.ExecContext(ctx, `INSERT INTO membership_role_assignments(group_id,membership_id,role_id,assigned_at) VALUES('group-main','temporary-member-one','role-custom',?)`, now); err == nil {
+		t.Fatal("unprepared temporary guest role unexpectedly passed")
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE users SET email='claimed@example.test',password_hash='hash',updated_at=? WHERE id='managed-one'`, now); err != nil {
-		t.Fatalf("upgrade managed credentials: %v", err)
+	if _, err := db.ExecContext(ctx, `UPDATE memberships SET temporary_guest_name_key=NULL WHERE id='temporary-member-one'`); err != nil {
+		t.Fatalf("release temporary guest name: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE membership_role_assignments SET role_id='role:MEMBER:group-main' WHERE membership_id='managed-member-one' AND role_id='role-guest'`); err != nil {
-		t.Fatalf("replace exclusive guest role with normal role: %v", err)
+	if _, err := db.ExecContext(ctx, `UPDATE users SET email='claimed@example.test',password_hash='hash',updated_at=? WHERE id='temporary-one'`, now); err != nil {
+		t.Fatalf("upgrade temporary credentials: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE membership_role_assignments SET role_id='role-guest' WHERE membership_id='managed-member-one' AND role_id='role:MEMBER:group-main'`); err != nil {
-		t.Fatalf("replace sole normal role with exclusive guest role: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO membership_role_assignments(group_id,membership_id,role_id,assigned_at) VALUES('group-main','managed-member-one','role:MEMBER:group-main',?)`, now); err == nil || !strings.Contains(err.Error(), "guest role must be assigned exclusively") {
-		t.Fatalf("role beside credentialed guest role error=%v, want exclusivity guard", err)
-	}
-	if _, err := db.ExecContext(ctx, `DELETE FROM membership_role_assignments WHERE membership_id='managed-member-one' AND role_id='role-guest'`); err == nil || !strings.Contains(err.Error(), "credentialed active memberships must retain at least one role") {
+	if _, err := db.ExecContext(ctx, `DELETE FROM membership_role_assignments WHERE membership_id='temporary-member-one' AND role_id='role:MEMBER:group-main'`); err == nil || !strings.Contains(err.Error(), "credentialed active memberships must retain at least one role") {
 		t.Fatalf("remove credentialed final role error=%v, want minimum-role guard", err)
 	}
 
-	if _, err := db.ExecContext(ctx, `INSERT INTO invitations(id,group_id,email,token_hash,expires_at,created_by,created_at,target_membership_id) VALUES('invalid-claim','group-main','other@example.test','invalid-token','2099-01-01T00:00:00Z','user-admin',?,'member-admin')`, now); err == nil || !strings.Contains(err.Error(), "claim target must be an active managed membership") {
-		t.Fatalf("credentialed claim target error=%v, want managed target guard", err)
+	if _, err := db.ExecContext(ctx, `INSERT INTO invitations(id,group_id,email,token_hash,expires_at,created_by,created_at,target_membership_id) VALUES('invalid-claim','group-main','other@example.test','invalid-token','2099-01-01T00:00:00Z','user-admin',?,'member-admin')`, now); err == nil || !strings.Contains(err.Error(), "claim target must be an active temporary guest") {
+		t.Fatalf("credentialed claim target error=%v, want temporary target guard", err)
 	}
 
 	var readGrantCount int
@@ -158,6 +146,19 @@ func TestGuestFeatureMigrationPreservesReferencesAndEnforcesIdentityInvariants(t
 	var implied string
 	if err := db.QueryRowContext(ctx, `SELECT implied_permissions_json FROM permission_definitions WHERE key='BOOK_FOR_OTHERS'`).Scan(&implied); err != nil || implied != `["VIEW_MEMBER_DIRECTORY"]` {
 		t.Fatalf("BOOK_FOR_OTHERS implications=%q err=%v", implied, err)
+	}
+	var guestBookingAdminGrants, guestBookingCustomGrants int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM role_permission_grants WHERE role_id='role:GROUP_ADMINISTRATOR:group-main' AND permission_key='BOOK_FOR_GUESTS'`).Scan(&guestBookingAdminGrants); err != nil || guestBookingAdminGrants != 1 {
+		t.Fatalf("administrator BOOK_FOR_GUESTS grants=%d err=%v, want 1", guestBookingAdminGrants, err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM role_permission_grants WHERE role_id='role-custom' AND permission_key='BOOK_FOR_GUESTS'`).Scan(&guestBookingCustomGrants); err != nil || guestBookingCustomGrants != 0 {
+		t.Fatalf("custom role BOOK_FOR_GUESTS grants=%d err=%v, want 0", guestBookingCustomGrants, err)
+	}
+	for _, column := range []string{"guests_enabled", "guest_role_id"} {
+		var count int
+		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM pragma_table_info('group_settings') WHERE name=?`, column).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("removed group_settings column %s count=%d err=%v", column, count, err)
+		}
 	}
 
 	rows, err := db.QueryContext(ctx, `PRAGMA foreign_key_check`)

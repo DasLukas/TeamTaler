@@ -34,7 +34,7 @@
   margin-top: var(--space-3);
 }
 
-.balanceCard span,
+.balanceCard > div:first-child > span,
 .period strong { color: var(--color-ink); font-weight: 700; }
 
 .balanceCard > div:first-child strong {
@@ -95,8 +95,6 @@
   padding: var(--space-4);
 }
 
-.monthCard h2 { font-size: var(--font-size-lg); }
-
 .totalRow,
 .sum {
   display: grid;
@@ -133,5 +131,5 @@
   .balanceCard > div:first-child strong { font-size: 2.3rem; }
   .selfPaymentAction { width: 100%; }
   .lower { grid-template-columns: 1fr; }
-  .monthCard { order: -1; }
+  .periodSection { order: -1; }
 }

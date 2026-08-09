@@ -46,7 +46,6 @@ import type {
   LoginCommand,
   GroupSettings,
   GroupSettingsUpdateInput,
-  GuestSettingsUpdateInput,
   Membership,
   Notification,
   NotificationPage,
@@ -342,10 +341,6 @@ export const api = {
     method: 'PATCH',
     body: json(settings),
   })),
-  updateGuestSettings: async (groupId: string, settings: GuestSettingsUpdateInput): Promise<GroupSettings> => adaptGroupSettings(await request<unknown>(groupPath(groupId, 'guest-settings'), {
-    method: 'PUT',
-    body: json(settings),
-  })),
   getPublicJoinLink: async (groupId: string): Promise<PublicJoinLink> => request<PublicJoinLink>(groupPath(groupId, 'public-join-link')),
   updatePublicJoinLink: async (groupId: string, update: PublicJoinLinkUpdate, version: number): Promise<PublicJoinLink> => request<PublicJoinLink>(groupPath(groupId, 'public-join-link'), {
     method: 'PUT',
@@ -370,10 +365,10 @@ export const api = {
     method: 'PATCH',
     body: json({ displayName }),
   })),
-  createGuestClaimInvitation: async (groupId: string, membershipId: string, email: string): Promise<CreatedInvitation> => {
+  createTemporaryGuestClaimInvitation: async (groupId: string, membershipId: string, email: string, roleIds: string[]): Promise<CreatedInvitation> => {
     const response = await request<unknown>(groupPath(groupId, `members/${encodeURIComponent(membershipId)}/claim-invitation`), {
       method: 'POST',
-      body: json({ email }),
+      body: json({ email, roleIds }),
     });
     const source = response as { invitation?: unknown; acceptUrl?: string };
     const invitation = adaptInvitation(source.invitation ?? response);

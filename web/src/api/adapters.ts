@@ -42,7 +42,7 @@ const NOTIFICATION_EVENT_TYPES: Notification['eventType'][] = ['BOOKING_ASSIGNED
  * Adapts administrator-managed group settings and applies safe feature defaults.
  *
  * @param input - Group-settings response from the API.
- * @returns Complete canonical settings, including disabled guest defaults.
+ * @returns Complete canonical settings.
  */
 export function adaptGroupSettings(input: unknown): GroupSettings {
   const source = asRecord(input);
@@ -50,8 +50,6 @@ export function adaptGroupSettings(input: unknown): GroupSettings {
     notificationEmailsEnabled: source.notificationEmailsEnabled === true,
     notificationEmailDeliveryAvailable: source.notificationEmailDeliveryAvailable === true,
     defaultRoleId: typeof source.defaultRoleId === 'string' && source.defaultRoleId ? source.defaultRoleId : null,
-    guestsEnabled: source.guestsEnabled === true,
-    guestRoleId: typeof source.guestRoleId === 'string' && source.guestRoleId ? source.guestRoleId : null,
   };
 }
 
@@ -293,7 +291,7 @@ export function adaptMembership(input: unknown, etag?: string): Membership {
     ...(source as unknown as Membership),
     userId: String(source.userId ?? ''),
     email: typeof source.email === 'string' && source.email ? source.email : null,
-    isGuest: source.isGuest === true,
+    isTemporaryGuest: source.isTemporaryGuest === true,
     groupPermissions: (source.groupPermissions as Membership['groupPermissions'] | undefined) ?? [],
     roleIds: Array.isArray(source.roleIds) ? source.roleIds.map(String) : [],
     effectiveGrants: adaptPermissionGrants(source.effectiveGrants),
@@ -309,7 +307,7 @@ export function adaptMembership(input: unknown, etag?: string): Membership {
     email: typeof source.email === 'string' && source.email ? source.email : null,
     initials: initials(String(source.displayName)),
     avatarUrl: typeof source.avatarUrl === 'string' && source.avatarUrl ? source.avatarUrl : undefined,
-    isGuest: source.isGuest === true,
+    isTemporaryGuest: source.isTemporaryGuest === true,
     roles: [...roles, 'MEMBER'],
     groupPermissions: (source.groupPermissions as Membership['groupPermissions'] | undefined) ?? [],
     categoryPermissions: Object.entries(grants).map(([categoryId, permissions]) => ({
@@ -348,7 +346,7 @@ export function adaptBookingTarget(input: unknown): BookingTarget {
     membershipId: String(source.membershipId ?? source.id ?? ''),
     displayName: String(source.displayName ?? ''),
     avatarUrl: typeof source.avatarUrl === 'string' && source.avatarUrl ? source.avatarUrl : undefined,
-    isGuest: source.isGuest === true,
+    isTemporaryGuest: source.isTemporaryGuest === true,
   };
 }
 
@@ -366,7 +364,7 @@ export function adaptBookingContext(input: unknown, currency: string): BookingCo
     ownBalance: money(source.ownBalanceMinor, currency),
     currentMembership: adaptMembership(source.currentMembership),
     targets: (source.targets as unknown[] ?? []).map(adaptBookingTarget),
-    canCreateManagedGuests: source.canCreateManagedGuests === true,
+    canBookForGuests: source.canBookForGuests === true,
   };
 }
 

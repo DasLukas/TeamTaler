@@ -26,7 +26,7 @@ func TestNotificationPaginationBatchReadAndEmailEnqueue(t *testing.T) {
 		`INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES('grp_a','Group A','EUR','2026-08-04T12:00:00Z','2026-08-04T12:00:00Z')`,
 		`INSERT INTO memberships(id,group_id,user_id,joined_at) VALUES('mem_a','grp_a','usr_a','2026-08-04T12:00:00Z')`,
 		`INSERT INTO memberships(id,group_id,user_id,joined_at) VALUES('mem_b','grp_a','usr_b','2026-08-04T12:00:00Z')`,
-		`INSERT INTO memberships(id,group_id,user_id,joined_at,managed_guest_name_key) VALUES('mem_managed','grp_a','usr_managed','2026-08-04T12:00:00Z','managed guest')`,
+		`INSERT INTO memberships(id,group_id,user_id,joined_at,temporary_guest_name_key) VALUES('mem_managed','grp_a','usr_managed','2026-08-04T12:00:00Z','managed guest')`,
 		`INSERT INTO group_settings(group_id,members_can_view_all_bookings,notification_emails_enabled,updated_at) VALUES('grp_a',0,1,'2026-08-04T12:00:00Z')`,
 	} {
 		if _, err := db.ExecContext(ctx, statement); err != nil {

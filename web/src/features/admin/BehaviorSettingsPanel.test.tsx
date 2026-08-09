@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,7 +12,6 @@ const apiMock = vi.hoisted(() => ({
   getGroupSettings: vi.fn(),
   getRoles: vi.fn(),
   updateGroupSettings: vi.fn(),
-  updateGuestSettings: vi.fn(),
 }));
 
 vi.mock('@/api/client', () => ({ api: apiMock }));
@@ -39,7 +38,7 @@ function renderPanel(): QueryClient {
 describe('BehaviorSettingsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    apiMock.getGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member', guestsEnabled: false, guestRoleId: null });
+    apiMock.getGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
     apiMock.getRoles.mockResolvedValue([{ id: 'role-member', name: 'Member', grants: [], version: 1, memberCount: 0, pendingInvitationCount: 0 }] satisfies Role[]);
   });
 
@@ -58,7 +57,7 @@ describe('BehaviorSettingsPanel', () => {
 
   it('saves notification email delivery only when SMTP is available', async () => {
     const user = userEvent.setup();
-    apiMock.updateGroupSettings.mockResolvedValue({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member', guestsEnabled: false, guestRoleId: null });
+    apiMock.updateGroupSettings.mockResolvedValue({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
     renderPanel();
     const toggle = await screen.findByRole('switch', { name: i18n.t('behaviorSettings.notificationEmailToggle') });
 
@@ -69,7 +68,7 @@ describe('BehaviorSettingsPanel', () => {
   });
 
   it('keeps notification email delivery visible but disabled without SMTP', async () => {
-    apiMock.getGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: false, defaultRoleId: 'role-member', guestsEnabled: false, guestRoleId: null });
+    apiMock.getGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: false, defaultRoleId: 'role-member' });
     renderPanel();
 
     expect(await screen.findByRole('switch', { name: i18n.t('behaviorSettings.notificationEmailToggle') })).toBeDisabled();
@@ -89,7 +88,7 @@ describe('BehaviorSettingsPanel', () => {
       { id: 'role-finance', name: 'Finance', grants: [], version: 1, memberCount: 0, pendingInvitationCount: 0 },
       { id: 'role-admin', name: 'Admin', grants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }], version: 1, memberCount: 1, pendingInvitationCount: 0 },
     ] satisfies Role[]);
-    apiMock.updateGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-finance', guestsEnabled: false, guestRoleId: null });
+    apiMock.updateGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-finance' });
     renderPanel();
 
     const select = await screen.findByLabelText(i18n.t('behaviorSettings.defaultRoleFieldLabel'));
@@ -100,74 +99,9 @@ describe('BehaviorSettingsPanel', () => {
     await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { defaultRoleId: 'role-finance' }));
   });
 
-  it('enables managed guests explicitly without configuring a guest role', async () => {
-    const user = userEvent.setup();
-    apiMock.updateGuestSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member', guestsEnabled: true, guestRoleId: null });
+  it('does not render a separate guest settings region', async () => {
     renderPanel();
-
-    await user.click(await screen.findByRole('switch', { name: i18n.t('behaviorSettings.guestsToggle') }));
-    expect(screen.getByLabelText(i18n.t('behaviorSettings.guestRoleLabel'))).toHaveValue('__no_guest_role__');
-    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
-
-    await waitFor(() => expect(apiMock.updateGuestSettings).toHaveBeenCalledWith('group-a', { guestsEnabled: true, guestRoleId: null }));
-    expect(apiMock.updateGroupSettings).not.toHaveBeenCalled();
-  });
-
-  it('creates and atomically binds a booking-only guest role without a second default-role request', async () => {
-    const user = userEvent.setup();
-    apiMock.updateGuestSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-guest', guestsEnabled: true, guestRoleId: 'role-guest' });
-    renderPanel();
-
-    await user.click(await screen.findByRole('switch', { name: i18n.t('behaviorSettings.guestsToggle') }));
-    await user.selectOptions(screen.getByLabelText(i18n.t('behaviorSettings.guestRoleLabel')), screen.getByRole('option', { name: i18n.t('behaviorSettings.createGuestRole') }));
-    expect(screen.getByText(i18n.t('behaviorSettings.guestRoleDefaultWarning'))).toBeVisible();
-    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
-
-    await waitFor(() => expect(apiMock.updateGuestSettings).toHaveBeenCalledWith('group-a', { guestsEnabled: true, createGuestRole: true }));
-    expect(apiMock.updateGroupSettings).not.toHaveBeenCalled();
-  });
-
-  it('disables broader roles as guest-role candidates', async () => {
-    const user = userEvent.setup();
-    apiMock.getRoles.mockResolvedValue([
-      { id: 'role-member', name: 'Member', grants: [{ permission: 'CREATE_OWN_BOOKING', scope: { type: 'GROUP' } }], version: 1, memberCount: 0, pendingInvitationCount: 0 },
-      { id: 'role-broad', name: 'Broad booking', grants: [{ permission: 'CREATE_OWN_BOOKING', scope: { type: 'GROUP' } }, { permission: 'BOOK_FOR_OTHERS', scope: { type: 'GROUP' } }], version: 1, memberCount: 0, pendingInvitationCount: 0 },
-    ] satisfies Role[]);
-    renderPanel();
-
-    await user.click(await screen.findByRole('switch', { name: i18n.t('behaviorSettings.guestsToggle') }));
-    const guestRoleSelect = screen.getByLabelText(i18n.t('behaviorSettings.guestRoleLabel'));
-    expect(within(guestRoleSelect).getByRole('option', { name: 'Member' })).toBeEnabled();
-    expect(within(guestRoleSelect).getByRole('option', { name: i18n.t('behaviorSettings.ineligibleGuestRoleOption', { role: 'Broad booking' }) })).toBeDisabled();
-  });
-
-  it('retains the configured guest role after administrators add broader grants', async () => {
-    apiMock.getGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-broad', guestsEnabled: true, guestRoleId: 'role-broad' });
-    apiMock.getRoles.mockResolvedValue([
-      { id: 'role-member', name: 'Member', grants: [], version: 1, memberCount: 0, pendingInvitationCount: 0 },
-      { id: 'role-broad', name: 'Configured guest', grants: [{ permission: 'CREATE_OWN_BOOKING', scope: { type: 'GROUP' } }, { permission: 'VIEW_GROUP_STATISTICS', scope: { type: 'GROUP' } }], version: 2, memberCount: 1, pendingInvitationCount: 0 },
-    ] satisfies Role[]);
-    renderPanel();
-
-    const guestRoleSelect = await screen.findByLabelText(i18n.t('behaviorSettings.guestRoleLabel'));
-    expect(guestRoleSelect).toHaveValue('role-broad');
-    expect(within(guestRoleSelect).getByRole('option', { name: 'Configured guest' })).toBeEnabled();
-  });
-
-  it('requires a replacement when disabling a guest role that is also the default', async () => {
-    const user = userEvent.setup();
-    apiMock.getGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-guest', guestsEnabled: true, guestRoleId: 'role-guest' });
-    apiMock.getRoles.mockResolvedValue([
-      { id: 'role-member', name: 'Member', grants: [{ permission: 'CREATE_OWN_BOOKING', scope: { type: 'GROUP' } }], version: 1, memberCount: 0, pendingInvitationCount: 0 },
-      { id: 'role-guest', name: 'Guest', grants: [{ permission: 'CREATE_OWN_BOOKING', scope: { type: 'GROUP' } }], version: 1, memberCount: 0, pendingInvitationCount: 0 },
-    ] satisfies Role[]);
-    apiMock.updateGuestSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member', guestsEnabled: false, guestRoleId: 'role-guest' });
-    renderPanel();
-
-    await user.click(await screen.findByRole('switch', { name: i18n.t('behaviorSettings.guestsToggle') }));
-    expect(screen.getByLabelText(i18n.t('behaviorSettings.guestDefaultReplacementLabel'))).toHaveValue('role-member');
-    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
-
-    await waitFor(() => expect(apiMock.updateGuestSettings).toHaveBeenCalledWith('group-a', { guestsEnabled: false, replacementDefaultRoleId: 'role-member' }));
+    await screen.findByRole('region', { name: i18n.t('behaviorSettings.defaultRoleTitle') });
+    expect(screen.queryByText('Guest role')).not.toBeInTheDocument();
   });
 });

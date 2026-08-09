@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   getBookingContext: vi.fn(),
   getCategories: vi.fn(),
   createBookings: vi.fn(),
+  useMediaQuery: vi.fn(),
   useActiveGroup: vi.fn(),
 }));
 
@@ -24,7 +25,7 @@ vi.mock('@/api/client', () => ({
 }));
 
 vi.mock('@/app/useActiveGroup', () => ({ useActiveGroup: () => mocks.useActiveGroup() }));
-vi.mock('@/hooks/useMediaQuery', () => ({ useMediaQuery: () => true }));
+vi.mock('@/hooks/useMediaQuery', () => ({ useMediaQuery: () => mocks.useMediaQuery() }));
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, to }: { children: ReactNode; to: string }) => <a href={to}>{children}</a>,
 }));
@@ -42,11 +43,31 @@ describe('BookingPage explicit product selection', () => {
       openPeriod: demoDashboard.currentPeriod,
       ownBalance: demoDashboard.openBalance,
       currentMembership: demoMembers[0],
-      targets: demoMembers.map((member) => ({ membershipId: member.id, displayName: member.displayName, avatarUrl: member.avatarUrl, isGuest: member.isGuest })),
-      canCreateManagedGuests: false,
+      targets: demoMembers.map((member) => ({ membershipId: member.id, displayName: member.displayName, avatarUrl: member.avatarUrl, isTemporaryGuest: member.isTemporaryGuest })),
+      canBookForGuests: false,
     } satisfies BookingContext);
     mocks.createBookings.mockResolvedValue([{ id: 'booking-created' }]);
+    mocks.useMediaQuery.mockReturnValue(true);
     mocks.useActiveGroup.mockReturnValue({ activeGroupId: demoSession.activeGroupId, activeGroup: demoSession.groups[0], session: demoSession });
+  });
+
+  it('keeps a friendly desktop inspector visible before a product is selected', async () => {
+    const user = userEvent.setup();
+    mocks.useMediaQuery.mockReturnValue(false);
+    renderBookingPage();
+
+    expect(await screen.findByRole('heading', { name: i18n.t('booking.quickTitle') })).toBeVisible();
+    const emptyInspector = screen.getByRole('complementary', { name: i18n.t('booking.selectProductTitle') });
+    expect(within(emptyInspector).queryByRole('heading')).not.toBeInTheDocument();
+    expect(screen.getByText(i18n.t('booking.selectProductTitle'))).toBeVisible();
+    expect(screen.getByText(i18n.t('booking.selectProductMessage'))).toBeVisible();
+    expect(screen.queryByRole('button', { name: i18n.t('booking.submit') })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Wasser.*1,00/i }));
+
+    expect(screen.getByRole('heading', { name: i18n.t('booking.productTitle', { name: 'Wasser' }) })).toBeVisible();
+    expect(screen.getByRole('button', { name: i18n.t('booking.submit') })).toBeEnabled();
+    expect(screen.queryByText(i18n.t('booking.selectProductTitle'))).not.toBeInTheDocument();
   });
 
   it('starts neutral and completes a fixed-price self-booking in two deliberate interactions', async () => {

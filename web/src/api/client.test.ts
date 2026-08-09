@@ -285,7 +285,7 @@ describe('high-risk API idempotency', () => {
     });
   });
 
-  it('serializes managed guest names even when no existing membership is targeted', async () => {
+  it('serializes temporary guest names even when no existing membership is targeted', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(session('user-a')))
       .mockResolvedValueOnce(jsonResponse([{ ...booking, targetMembershipId: 'member-guest' }], 201));
@@ -295,15 +295,13 @@ describe('high-risk API idempotency', () => {
     await api.createBookings('group-a', {
       ...command,
       targetMembershipIds: [],
-      managedGuestDisplayNames: ['Guest One'],
-      reason: 'Guest purchase',
+      temporaryGuestDisplayNames: ['Guest One'],
     });
 
     expect(requestBody(fetchMock.mock.calls[1])).toEqual({
       ...command,
       targetMembershipIds: [],
-      managedGuestDisplayNames: ['Guest One'],
-      reason: 'Guest purchase',
+      temporaryGuestDisplayNames: ['Guest One'],
     });
   });
 
@@ -312,11 +310,11 @@ describe('high-risk API idempotency', () => {
       openPeriod: { id: 'period-a', label: 'August', status: 'OPEN', startsAt: '2026-08-01T00:00:00Z' },
       ownBalanceMinor: '1250',
       currentMembership: {
-        id: 'member-a', userId: 'user-a', displayName: 'Alex', email: 'alex@example.test', initials: 'A', isGuest: false,
+        id: 'member-a', userId: 'user-a', displayName: 'Alex', email: 'alex@example.test', initials: 'A', isTemporaryGuest: false,
         roles: ['MEMBER'], groupPermissions: [], categoryPermissions: [], active: true,
       },
-      targets: [{ membershipId: 'member-a', displayName: 'Alex', isGuest: false }, { membershipId: 'member-guest', displayName: 'Guest', isGuest: true }],
-      canCreateManagedGuests: true,
+      targets: [{ membershipId: 'member-a', displayName: 'Alex', isTemporaryGuest: false }, { membershipId: 'member-guest', displayName: 'Guest', isTemporaryGuest: true }],
+      canBookForGuests: true,
     };
     const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(context));
     vi.stubGlobal('fetch', fetchMock);
@@ -324,26 +322,14 @@ describe('high-risk API idempotency', () => {
     const result = await api.getBookingContext('group-a', 'EUR');
 
     expect(result.ownBalance).toEqual({ minorUnits: '1250', currency: 'EUR' });
-    expect(result.targets[1]).toEqual({ membershipId: 'member-guest', displayName: 'Guest', isGuest: true, avatarUrl: undefined });
+    expect(result.targets[1]).toEqual({ membershipId: 'member-guest', displayName: 'Guest', isTemporaryGuest: true, avatarUrl: undefined });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group-a/booking-context');
   });
 
-  it('replaces guest settings through the dedicated PUT contract', async () => {
-    const settings = { notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-guest', guestsEnabled: true, guestRoleId: 'role-guest' };
-    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(settings));
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(api.updateGuestSettings('group-a', { guestsEnabled: true, createGuestRole: true })).resolves.toEqual(settings);
-
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group-a/guest-settings');
-    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('PUT');
-    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ guestsEnabled: true, createGuestRole: true });
-  });
-
-  it('renames and creates a claim invitation for a managed guest', async () => {
+  it('renames and creates a claim invitation for a temporary guest', async () => {
     const guest = {
-      id: 'member/guest', userId: 'user-guest', displayName: 'Renamed Guest', email: null, initials: 'RG', isGuest: true,
+      id: 'member/guest', userId: 'user-guest', displayName: 'Renamed Guest', email: null, initials: 'RG', isTemporaryGuest: true,
       roles: ['MEMBER'], groupPermissions: [], categoryPermissions: [], active: true,
     };
     const invitation = {
@@ -354,14 +340,14 @@ describe('high-risk API idempotency', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await api.renameMember('group-a', 'member/guest', 'Renamed Guest');
-    const created = await api.createGuestClaimInvitation('group-a', 'member/guest', 'guest@example.test');
+    const created = await api.createTemporaryGuestClaimInvitation('group-a', 'member/guest', 'guest@example.test', ['role-member']);
 
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group-a/members/member%2Fguest');
     expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('PATCH');
     expect(requestBody(fetchMock.mock.calls[0])).toEqual({ displayName: 'Renamed Guest' });
     expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/groups/group-a/members/member%2Fguest/claim-invitation');
     expect((fetchMock.mock.calls[1][1] as RequestInit).method).toBe('POST');
-    expect(requestBody(fetchMock.mock.calls[1])).toEqual({ email: 'guest@example.test' });
+    expect(requestBody(fetchMock.mock.calls[1])).toEqual({ email: 'guest@example.test', roleIds: ['role-member'] });
     expect(created).toMatchObject({ targetMembershipId: 'member/guest', acceptUrl: 'https://example.test/invite' });
   });
 
@@ -601,8 +587,8 @@ describe('high-risk API idempotency', () => {
       .mockResolvedValueOnce(jsonResponse({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(api.getGroupSettings('group-a')).resolves.toEqual({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member', guestsEnabled: false, guestRoleId: null });
-    await expect(api.updateGroupSettings('group-a', { notificationEmailsEnabled: true })).resolves.toEqual({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member', guestsEnabled: false, guestRoleId: null });
+    await expect(api.getGroupSettings('group-a')).resolves.toEqual({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
+    await expect(api.updateGroupSettings('group-a', { notificationEmailsEnabled: true })).resolves.toEqual({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
 
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group-a/settings');
     expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/groups/group-a/settings');

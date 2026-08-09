@@ -69,33 +69,33 @@ type CreateInput struct {
 // Every target receives an independent immutable booking with the same product,
 // quantity, price, and reason. Target membership IDs must be unique.
 type BatchCreateInput struct {
-	ProductID                string   `json:"productId"`
-	ProductVersion           int64    `json:"productVersion"`
-	ExpectedPeriodID         string   `json:"expectedPeriodId"`
-	Quantity                 int      `json:"quantity"`
-	UnitPriceMinor           *int64   `json:"unitPriceMinor,omitempty"`
-	TargetMembershipIDs      []string `json:"targetMembershipIds"`
-	ManagedGuestDisplayNames []string `json:"managedGuestDisplayNames,omitempty"`
-	Reason                   string   `json:"reason,omitempty"`
+	ProductID                  string   `json:"productId"`
+	ProductVersion             int64    `json:"productVersion"`
+	ExpectedPeriodID           string   `json:"expectedPeriodId"`
+	Quantity                   int      `json:"quantity"`
+	UnitPriceMinor             *int64   `json:"unitPriceMinor,omitempty"`
+	TargetMembershipIDs        []string `json:"targetMembershipIds"`
+	TemporaryGuestDisplayNames []string `json:"temporaryGuestDisplayNames,omitempty"`
+	Reason                     string   `json:"reason,omitempty"`
 }
 
 // BookingTarget is the privacy-minimized active-membership representation used
 // by the booking form. It deliberately omits user IDs, email, roles, and grants.
 type BookingTarget struct {
-	MembershipID string `json:"membershipId"`
-	DisplayName  string `json:"displayName"`
-	AvatarURL    string `json:"avatarUrl,omitempty"`
-	IsGuest      bool   `json:"isGuest"`
+	MembershipID     string `json:"membershipId"`
+	DisplayName      string `json:"displayName"`
+	AvatarURL        string `json:"avatarUrl,omitempty"`
+	IsTemporaryGuest bool   `json:"isTemporaryGuest"`
 }
 
 // BookingContext is the single read model required by the booking page. It
 // combines the current period and own account state with authorized targets.
 type BookingContext struct {
-	OpenPeriod             domain.Period     `json:"openPeriod"`
-	OwnBalanceMinor        int64             `json:"ownBalanceMinor,string"`
-	CurrentMembership      domain.Membership `json:"currentMembership"`
-	Targets                []BookingTarget   `json:"targets"`
-	CanCreateManagedGuests bool              `json:"canCreateManagedGuests"`
+	OpenPeriod        domain.Period     `json:"openPeriod"`
+	OwnBalanceMinor   int64             `json:"ownBalanceMinor,string"`
+	CurrentMembership domain.Membership `json:"currentMembership"`
+	Targets           []BookingTarget   `json:"targets"`
+	CanBookForGuests  bool              `json:"canBookForGuests"`
 }
 
 type bookingDetails struct {
@@ -115,8 +115,8 @@ type bookingQueryer interface {
 }
 
 // Context returns the privacy-minimized read model needed to render a booking
-// form. Members without BOOK_FOR_OTHERS receive only themselves as a target;
-// managed-guest creation additionally requires the group feature to be enabled.
+// form. The three independent booking permissions determine which credential
+// classes are returned.
 //
 // Parameters:
 //   - ctx: Cancellation and deadline context.
@@ -134,7 +134,11 @@ func (s Service) Context(ctx context.Context, membership domain.Membership) (Boo
 	if err != nil {
 		return BookingContext{}, err
 	}
-	if !canBookForOthers && !canBookForSelf {
+	canBookForGuests, err := canPermission(ctx, s.DB, membership, domain.PermissionBookForGuests)
+	if err != nil {
+		return BookingContext{}, err
+	}
+	if !canBookForOthers && !canBookForSelf && !canBookForGuests {
 		return BookingContext{}, domain.ErrForbidden
 	}
 	var result BookingContext
@@ -150,28 +154,19 @@ func (s Service) Context(ctx context.Context, membership domain.Membership) (Boo
 		Scan(&result.OwnBalanceMinor); err != nil {
 		return BookingContext{}, err
 	}
-	if err := s.DB.QueryRowContext(ctx, `SELECT guests_enabled AND ? FROM group_settings WHERE group_id=?`, canBookForOthers, membership.GroupID).
-		Scan(&result.CanCreateManagedGuests); err != nil {
-		return BookingContext{}, err
-	}
+	result.CanBookForGuests = canBookForGuests
 
 	query := `SELECT m.id,m.user_id,u.display_name,coalesce(u.avatar_key,''),
-		(u.email IS NULL OR (settings.guest_role_id IS NOT NULL AND EXISTS(
-			SELECT 1 FROM membership_role_assignments assignment
-			WHERE assignment.group_id=m.group_id AND assignment.membership_id=m.id AND assignment.role_id=settings.guest_role_id
-		))) AS is_guest
+		(u.email IS NULL AND u.password_hash IS NULL) AS is_temporary_guest
 		FROM memberships m JOIN users u ON u.id=m.user_id
-		JOIN group_settings settings ON settings.group_id=m.group_id
-		WHERE m.group_id=? AND m.status='ACTIVE'`
-	args := []any{membership.GroupID}
-	if !canBookForOthers {
-		query += ` AND m.id=?`
-		args = append(args, membership.ID)
-	} else if !canBookForSelf {
-		query += ` AND m.id!=?`
-		args = append(args, membership.ID)
-	}
-	query += ` ORDER BY is_guest,lower(u.display_name),m.id`
+		WHERE m.group_id=? AND m.status='ACTIVE'
+		AND (
+			(m.id=? AND ?)
+			OR (m.id!=? AND u.email IS NOT NULL AND u.password_hash IS NOT NULL AND ?)
+			OR (u.email IS NULL AND u.password_hash IS NULL AND ?)
+		)
+		ORDER BY is_temporary_guest,lower(u.display_name),m.id`
+	args := []any{membership.GroupID, membership.ID, canBookForSelf, membership.ID, canBookForOthers, canBookForGuests}
 	rows, err := s.DB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return BookingContext{}, err
@@ -181,7 +176,7 @@ func (s Service) Context(ctx context.Context, membership domain.Membership) (Boo
 	for rows.Next() {
 		var target BookingTarget
 		var userID, avatarKey string
-		if err := rows.Scan(&target.MembershipID, &userID, &target.DisplayName, &avatarKey, &target.IsGuest); err != nil {
+		if err := rows.Scan(&target.MembershipID, &userID, &target.DisplayName, &avatarKey, &target.IsTemporaryGuest); err != nil {
 			return BookingContext{}, err
 		}
 		target.AvatarURL = media.UserAvatarURL(userID, avatarKey)
@@ -215,11 +210,7 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, membership 
 	if input.TargetMembershipID == "" {
 		input.TargetMembershipID = membership.ID
 	}
-	if input.TargetMembershipID != membership.ID {
-		if err := requirePermission(ctx, s.DB, membership, domain.PermissionBookForOthers); err != nil {
-			return domain.Booking{}, err
-		}
-	} else if err := requirePermission(ctx, s.DB, membership, domain.PermissionCreateOwnBooking); err != nil {
+	if err := authorizeBookingTargets(ctx, s.DB, membership, []string{input.TargetMembershipID}, input.Reason); err != nil {
 		return domain.Booking{}, err
 	}
 	encodedRequest, _ := json.Marshal(input)
@@ -244,9 +235,6 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, membership 
 		}
 
 		if err := authorizeBookingTargets(ctx, tx, membership, []string{input.TargetMembershipID}, input.Reason); err != nil {
-			return err
-		}
-		if err := ensureActiveBookingTargets(ctx, tx, membership.GroupID, []string{input.TargetMembershipID}); err != nil {
 			return err
 		}
 		details, err := loadBookingDetails(ctx, tx, membership.GroupID, input.ProductID, input.ProductVersion, input.ExpectedPeriodID, input.Quantity, input.UnitPriceMinor)
@@ -291,23 +279,20 @@ func (s Service) CreateBatch(ctx context.Context, actor domain.Principal, member
 		return nil, err
 	}
 	input.TargetMembershipIDs = targets
-	guestNames, err := normalizeManagedGuestNames(input.ManagedGuestDisplayNames)
+	guestNames, err := normalizeTemporaryGuestNames(input.TemporaryGuestDisplayNames)
 	if err != nil {
 		return nil, err
 	}
-	input.ManagedGuestDisplayNames = guestNames
+	input.TemporaryGuestDisplayNames = guestNames
 	if len(targets)+len(guestNames) < 1 || len(targets)+len(guestNames) > 100 {
-		return nil, domain.ValidationError{Field: "bookingTargets", Message: "existing memberships and managed guests must contain between 1 and 100 targets combined"}
+		return nil, domain.ValidationError{Field: "bookingTargets", Message: "existing memberships and temporary guests must contain between 1 and 100 targets combined"}
 	}
 	if err := authorizeBookingTargets(ctx, s.DB, membership, targets, input.Reason); err != nil {
 		return nil, err
 	}
 	if len(guestNames) > 0 {
-		if err := requirePermission(ctx, s.DB, membership, domain.PermissionBookForOthers); err != nil {
+		if err := requirePermission(ctx, s.DB, membership, domain.PermissionBookForGuests); err != nil {
 			return nil, err
-		}
-		if input.Reason == "" {
-			return nil, domain.ValidationError{Field: "reason", Message: "is required when assigning a booking to a managed guest"}
 		}
 	}
 	encodedRequest, _ := json.Marshal(input)
@@ -339,15 +324,7 @@ func (s Service) CreateBatch(ctx context.Context, actor domain.Principal, member
 			return err
 		}
 		if len(guestNames) > 0 {
-			if err := requirePermission(ctx, tx, membership, domain.PermissionBookForOthers); err != nil {
-				return err
-			}
-			if input.Reason == "" {
-				return domain.ValidationError{Field: "reason", Message: "is required when assigning a booking to a managed guest"}
-			}
-		}
-		if len(targets) > 0 {
-			if err := ensureActiveBookingTargets(ctx, tx, membership.GroupID, targets); err != nil {
+			if err := requirePermission(ctx, tx, membership, domain.PermissionBookForGuests); err != nil {
 				return err
 			}
 		}
@@ -358,7 +335,7 @@ func (s Service) CreateBatch(ctx context.Context, actor domain.Principal, member
 		nowTime := platform.Now()
 		allTargets := append(make([]string, 0, len(targets)+len(guestNames)), targets...)
 		for _, guestName := range guestNames {
-			guest, err := groups.CreateManagedGuestTx(ctx, tx, actor, membership, guestName, nowTime)
+			guest, err := groups.CreateTemporaryGuestTx(ctx, tx, actor, membership, guestName, nowTime)
 			if err != nil {
 				return err
 			}
@@ -399,16 +376,16 @@ func normalizeBookingTargets(targets []string) ([]string, error) {
 	return normalized, nil
 }
 
-func normalizeManagedGuestNames(names []string) ([]string, error) {
+func normalizeTemporaryGuestNames(names []string) ([]string, error) {
 	normalized := make([]string, 0, len(names))
 	seen := make(map[string]struct{}, len(names))
 	for _, input := range names {
-		displayName, nameKey, err := groups.NormalizeManagedGuestDisplayName(input)
+		displayName, nameKey, err := groups.NormalizeTemporaryGuestDisplayName(input)
 		if err != nil {
 			return nil, err
 		}
 		if _, duplicate := seen[nameKey]; duplicate {
-			return nil, domain.ValidationError{Field: "managedGuestDisplayNames", Message: "must not contain duplicate names ignoring letter case"}
+			return nil, domain.ValidationError{Field: "temporaryGuestDisplayNames", Message: "must not contain duplicate names ignoring letter case"}
 		}
 		seen[nameKey] = struct{}{}
 		normalized = append(normalized, displayName)
@@ -416,14 +393,48 @@ func normalizeManagedGuestNames(names []string) ([]string, error) {
 	return normalized, nil
 }
 
-func authorizeBookingTargets(ctx context.Context, queryer authorization.Queryer, membership domain.Membership, targets []string, reason string) error {
+func authorizeBookingTargets(ctx context.Context, queryer bookingQueryer, membership domain.Membership, targets []string, reason string) error {
 	needsOwnPermission := false
-	needsForeignPermission := false
+	needsOthersPermission := false
+	needsGuestsPermission := false
+	credentialless := make(map[string]bool, len(targets))
+	if len(targets) > 0 {
+		placeholders := make([]string, len(targets))
+		arguments := make([]any, 0, len(targets)+1)
+		arguments = append(arguments, membership.GroupID)
+		for index, target := range targets {
+			placeholders[index] = "?"
+			arguments = append(arguments, target)
+		}
+		rows, err := queryer.QueryContext(ctx, `SELECT m.id,(u.email IS NULL AND u.password_hash IS NULL)
+			FROM memberships m JOIN users u ON u.id=m.user_id
+			WHERE m.group_id=? AND m.status='ACTIVE' AND m.id IN (`+strings.Join(placeholders, ",")+`)`, arguments...)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var membershipID string
+			var isCredentialless bool
+			if err := rows.Scan(&membershipID, &isCredentialless); err != nil {
+				rows.Close()
+				return err
+			}
+			credentialless[membershipID] = isCredentialless
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if len(credentialless) != len(targets) {
+			return domain.ErrNotFound
+		}
+	}
 	for _, target := range targets {
 		if target == membership.ID {
 			needsOwnPermission = true
+		} else if credentialless[target] {
+			needsGuestsPermission = true
 		} else {
-			needsForeignPermission = true
+			needsOthersPermission = true
 		}
 	}
 	if needsOwnPermission {
@@ -431,7 +442,7 @@ func authorizeBookingTargets(ctx context.Context, queryer authorization.Queryer,
 			return err
 		}
 	}
-	if needsForeignPermission {
+	if needsOthersPermission {
 		if err := requirePermission(ctx, queryer, membership, domain.PermissionBookForOthers); err != nil {
 			return err
 		}
@@ -439,24 +450,10 @@ func authorizeBookingTargets(ctx context.Context, queryer authorization.Queryer,
 			return domain.ValidationError{Field: "reason", Message: "is required when assigning a booking to another member"}
 		}
 	}
-	return nil
-}
-
-func ensureActiveBookingTargets(ctx context.Context, queryer bookingQueryer, groupID string, targets []string) error {
-	placeholders := make([]string, len(targets))
-	arguments := make([]any, 0, len(targets)+1)
-	arguments = append(arguments, groupID)
-	for index, target := range targets {
-		placeholders[index] = "?"
-		arguments = append(arguments, target)
-	}
-	var count int
-	query := `SELECT count(*) FROM memberships WHERE group_id=? AND status='ACTIVE' AND id IN (` + strings.Join(placeholders, ",") + `)`
-	if err := queryer.QueryRowContext(ctx, query, arguments...).Scan(&count); err != nil {
-		return err
-	}
-	if count != len(targets) {
-		return domain.ErrNotFound
+	if needsGuestsPermission {
+		if err := requirePermission(ctx, queryer, membership, domain.PermissionBookForGuests); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -82,7 +82,7 @@ func TestNotificationDispatcherTerminatesLegacyJobWithoutRecipientEmail(t *testi
 		`INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('usr_managed',NULL,'Managed Guest',NULL,'2026-08-04T12:00:00Z','2026-08-04T12:00:00Z')`,
 		`INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES('grp_managed','Example Team','EUR','2026-08-04T12:00:00Z','2026-08-04T12:00:00Z')`,
 		`INSERT INTO memberships(id,group_id,user_id,joined_at) VALUES('mem_admin','grp_managed','usr_admin','2026-08-04T12:00:00Z')`,
-		`INSERT INTO memberships(id,group_id,user_id,joined_at,managed_guest_name_key) VALUES('mem_managed','grp_managed','usr_managed','2026-08-04T12:00:00Z','managed guest')`,
+		`INSERT INTO memberships(id,group_id,user_id,joined_at,temporary_guest_name_key) VALUES('mem_managed','grp_managed','usr_managed','2026-08-04T12:00:00Z','managed guest')`,
 		`INSERT INTO notifications(id,group_id,membership_id,type,title,body,context_json,created_at) VALUES('notice_managed','grp_managed','mem_managed','BOOKING_ASSIGNED','New booking','Booking body','{}','2026-08-04T12:00:00Z')`,
 		`INSERT INTO notification_email_outbox(notification_id,group_id,status,attempt_count,next_attempt_at,created_at,updated_at) VALUES('notice_managed','grp_managed','PENDING',0,'2026-08-04T12:00:00Z','2026-08-04T12:00:00Z','2026-08-04T12:00:00Z')`,
 	} {

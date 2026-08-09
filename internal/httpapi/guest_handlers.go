@@ -6,54 +6,12 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/groups"
 )
 
-// handleUpdateGuestSettings applies the complete guest-feature configuration
-// atomically, including optional role creation and default-role replacement.
-func (s *Server) handleUpdateGuestSettings(response http.ResponseWriter, request *http.Request) {
-	principal, membership, err := s.membership(request)
-	if err != nil {
-		writeProblem(response, request, err)
-		return
-	}
-	var input struct {
-		GuestsEnabled            *bool   `json:"guestsEnabled"`
-		GuestRoleID              *string `json:"guestRoleId"`
-		CreateGuestRole          bool    `json:"createGuestRole"`
-		ReplacementDefaultRoleID *string `json:"replacementDefaultRoleId"`
-	}
-	if err := decodeJSON(response, request, &input); err != nil {
-		writeProblem(response, request, err)
-		return
-	}
-	if input.GuestsEnabled == nil {
-		writeProblem(response, request, domain.ValidationError{Field: "guestsEnabled", Message: "is required"})
-		return
-	}
-	settings, err := s.groups.UpdateGuestSettings(request.Context(), principal, membership, groups.GuestSettingsUpdate{
-		GuestsEnabled:            *input.GuestsEnabled,
-		GuestRoleID:              input.GuestRoleID,
-		CreateGuestRole:          input.CreateGuestRole,
-		ReplacementDefaultRoleID: input.ReplacementDefaultRoleID,
-	})
-	if err != nil {
-		writeProblem(response, request, err)
-		return
-	}
-	writeJSON(response, http.StatusOK, map[string]any{
-		"notificationEmailsEnabled":          settings.NotificationEmailsEnabled,
-		"notificationEmailDeliveryAvailable": s.config.SMTP.Enabled,
-		"defaultRoleId":                      settings.DefaultRoleID,
-		"guestsEnabled":                      settings.GuestsEnabled,
-		"guestRoleId":                        settings.GuestRoleID,
-	})
-}
-
-// handleRenameManagedGuest renames an active credential-less guest while
+// handleRenameTemporaryGuest renames an active credential-less guest while
 // preserving membership and financial identifiers.
-func (s *Server) handleRenameManagedGuest(response http.ResponseWriter, request *http.Request) {
+func (s *Server) handleRenameTemporaryGuest(response http.ResponseWriter, request *http.Request) {
 	principal, membership, err := s.membership(request)
 	if err != nil {
 		writeProblem(response, request, err)
@@ -66,7 +24,7 @@ func (s *Server) handleRenameManagedGuest(response http.ResponseWriter, request 
 		writeProblem(response, request, err)
 		return
 	}
-	item, err := s.groups.RenameManagedGuest(request.Context(), principal, membership, request.PathValue("membershipID"), input.DisplayName)
+	item, err := s.groups.RenameTemporaryGuest(request.Context(), principal, membership, request.PathValue("membershipID"), input.DisplayName)
 	if err != nil {
 		writeProblem(response, request, err)
 		return
@@ -74,22 +32,23 @@ func (s *Server) handleRenameManagedGuest(response http.ResponseWriter, request 
 	writeJSON(response, http.StatusOK, item)
 }
 
-// handleCreateGuestClaimInvitation starts an in-place login promotion for one
-// active managed guest and returns the normal secret-free invitation envelope.
-func (s *Server) handleCreateGuestClaimInvitation(response http.ResponseWriter, request *http.Request) {
+// handleCreateTemporaryGuestClaimInvitation starts an in-place login promotion
+// for one temporary guest and returns the normal secret-free invitation envelope.
+func (s *Server) handleCreateTemporaryGuestClaimInvitation(response http.ResponseWriter, request *http.Request) {
 	principal, membership, err := s.membership(request)
 	if err != nil {
 		writeProblem(response, request, err)
 		return
 	}
 	var input struct {
-		Email string `json:"email"`
+		Email   string   `json:"email"`
+		RoleIDs []string `json:"roleIds"`
 	}
 	if err := decodeJSON(response, request, &input); err != nil {
 		writeProblem(response, request, err)
 		return
 	}
-	item, err := s.groups.CreateClaimInvitation(request.Context(), principal, membership, request.PathValue("membershipID"), input.Email)
+	item, err := s.groups.CreateTemporaryGuestClaimInvitation(request.Context(), principal, membership, request.PathValue("membershipID"), input.Email, input.RoleIDs)
 	if err != nil {
 		writeProblem(response, request, err)
 		return
@@ -99,8 +58,8 @@ func (s *Server) handleCreateGuestClaimInvitation(response http.ResponseWriter, 
 	writeJSON(response, http.StatusCreated, map[string]any{"invitation": item, "acceptUrl": acceptURL})
 }
 
-func managedGuestConflictMembershipID(err error) (string, bool) {
-	var conflict groups.ManagedGuestNameConflictError
+func temporaryGuestConflictMembershipID(err error) (string, bool) {
+	var conflict groups.TemporaryGuestNameConflictError
 	if !errors.As(err, &conflict) {
 		return "", false
 	}

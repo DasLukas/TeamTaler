@@ -119,13 +119,12 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}", server.handleUpdateGroup)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/settings", server.handleGetGroupSettings)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/settings", server.handleUpdateGroupSettings)
-	mux.HandleFunc("PUT /api/v1/groups/{groupID}/guest-settings", server.handleUpdateGuestSettings)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/logo", server.handleGroupLogo)
 	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/logo", server.handleRemoveGroupLogo)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/dashboard", server.handleDashboard)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/members", server.handleListMembers)
-	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/members/{membershipID}", server.handleRenameManagedGuest)
-	mux.HandleFunc("POST /api/v1/groups/{groupID}/members/{membershipID}/claim-invitation", server.handleCreateGuestClaimInvitation)
+	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/members/{membershipID}", server.handleRenameTemporaryGuest)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/members/{membershipID}/claim-invitation", server.handleCreateTemporaryGuestClaimInvitation)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/members/{membershipID}/permissions", server.handleUpdatePermissions)
 	mux.HandleFunc("PUT /api/v1/groups/{groupID}/members/{membershipID}/roles", server.handleReplaceMemberRoles)
 	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/members/{membershipID}", server.handleArchiveMember)
@@ -367,7 +366,7 @@ func writeProblem(response http.ResponseWriter, request *http.Request, err error
 		item.MemberCount = &memberCount
 		item.PendingInvitationCount = &invitationCount
 	}
-	if membershipID, ok := managedGuestConflictMembershipID(err); ok {
+	if membershipID, ok := temporaryGuestConflictMembershipID(err); ok {
 		item.ExistingMembershipID = membershipID
 	}
 	_ = json.NewEncoder(response).Encode(item)

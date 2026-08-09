@@ -36,6 +36,7 @@ export const demoPermissionDefinitions: PermissionDefinition[] = [
   { key: 'VOID_OWN_BOOKING' },
   { key: 'VOID_ANY_BOOKING', impliedPermissions: ['VOID_OWN_BOOKING', 'VIEW_ALL_BOOKING_ACTIVITY'] },
   { key: 'BOOK_FOR_OTHERS' },
+  { key: 'BOOK_FOR_GUESTS' },
 ];
 
 /** Group-owned demo roles including one migrated direct-permission role. */
@@ -48,7 +49,7 @@ export const demoRoles: Role[] = [
     description: 'Geschützte Vollzugriffsrolle der Gruppe',
     nameLocked: true,
     deletable: false,
-    grants: grants('GROUP_ADMINISTRATION', 'ROLE_MANAGEMENT', 'FINANCE_MANAGEMENT', 'CATALOG_MANAGEMENT', 'VIEW_MEMBER_DIRECTORY', 'VIEW_GROUP_STATISTICS', 'VIEW_ALL_BOOKING_ACTIVITY', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING', 'VOID_ANY_BOOKING', 'BOOK_FOR_OTHERS'),
+    grants: grants('GROUP_ADMINISTRATION', 'ROLE_MANAGEMENT', 'FINANCE_MANAGEMENT', 'CATALOG_MANAGEMENT', 'VIEW_MEMBER_DIRECTORY', 'VIEW_GROUP_STATISTICS', 'VIEW_ALL_BOOKING_ACTIVITY', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING', 'VOID_ANY_BOOKING', 'BOOK_FOR_OTHERS', 'BOOK_FOR_GUESTS'),
     version: 1,
     memberCount: 1,
     pendingInvitationCount: 0,
@@ -176,7 +177,7 @@ export const demoMembers: Membership[] = [
     displayName: 'Lukas Waschul',
     email: 'lukas@example.test',
     initials: 'LW',
-    isGuest: false,
+    isTemporaryGuest: false,
     roles: ['ADMIN', 'MEMBER'],
     roleIds: ['role-admin', 'role-member'],
     effectiveGrants: demoRoles[0].grants,
@@ -194,7 +195,7 @@ export const demoMembers: Membership[] = [
     displayName: 'Mara Becker',
     email: 'mara@example.test',
     initials: 'MB',
-    isGuest: false,
+    isTemporaryGuest: false,
     roles: ['FINANCE_MANAGER', 'MEMBER'],
     roleIds: ['role-finance', 'role-member'],
     effectiveGrants: grants('FINANCE_MANAGEMENT', 'VIEW_ALL_BOOKING_ACTIVITY', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING'),
@@ -212,7 +213,7 @@ export const demoMembers: Membership[] = [
     displayName: 'Jonas Krüger',
     email: 'jonas@example.test',
     initials: 'JK',
-    isGuest: false,
+    isTemporaryGuest: false,
     roles: ['CATALOG_MANAGER', 'MEMBER'],
     roleIds: ['role-catalog', 'role-member', 'role-self-payment'],
     effectiveGrants: grants('CATALOG_MANAGEMENT', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING'),

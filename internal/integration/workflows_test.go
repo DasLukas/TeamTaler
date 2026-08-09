@@ -320,23 +320,20 @@ func TestRoleManagerListsOnlyOpenInvitations(t *testing.T) {
 	f := newFixture(t)
 	_, roleManager, _ := f.inviteMember("role-manager@example.test", "Role Manager", nil)
 	roleManager = f.assignPermissionRole(roleManager, "Invitation role manager", domain.PermissionRoleManagement)
-	settings, err := f.groups.UpdateGuestSettings(f.ctx, f.admin, f.membership, groups.GuestSettingsUpdate{GuestsEnabled: true, CreateGuestRole: true})
-	if err != nil || settings.GuestRoleID == nil {
-		t.Fatalf("configure managed guests: settings=%#v err=%v", settings, err)
-	}
 	_, product := f.catalogItem("Invitation privacy product", 100)
 	guestBookings, err := f.bookings.CreateBatch(f.ctx, f.admin, f.membership, "invitation-privacy-guest", bookings.BatchCreateInput{
-		ProductID:                product.ID,
-		ProductVersion:           product.Version,
-		ExpectedPeriodID:         f.openPeriodID(),
-		Quantity:                 1,
-		ManagedGuestDisplayNames: []string{"Invitation Privacy Guest"},
-		Reason:                   "Create a managed guest for invitation privacy coverage",
+		ProductID:                  product.ID,
+		ProductVersion:             product.Version,
+		ExpectedPeriodID:           f.openPeriodID(),
+		Quantity:                   1,
+		TemporaryGuestDisplayNames: []string{"Invitation Privacy Guest"},
 	})
 	if err != nil || len(guestBookings) != 1 {
 		t.Fatalf("create invitation privacy guest: bookings=%#v err=%v", guestBookings, err)
 	}
-	claimInvitation, err := f.groups.CreateClaimInvitation(f.ctx, f.admin, f.membership, guestBookings[0].TargetMembershipID, "future-login@example.test")
+	claimInvitation, err := f.groups.CreateTemporaryGuestClaimInvitation(f.ctx, f.admin, f.membership, guestBookings[0].TargetMembershipID, "future-login@example.test", []string{
+		authorization.PresetRoleID(f.membership.GroupID, domain.RolePresetMember),
+	})
 	if err != nil {
 		t.Fatalf("create claim invitation: %v", err)
 	}

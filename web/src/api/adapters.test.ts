@@ -21,7 +21,7 @@ describe('API adapters', () => {
       id: 'member-guest',
       userId: 'user-credentialless',
       displayName: 'Guest One',
-      isGuest: true,
+      isTemporaryGuest: true,
       status: 'ACTIVE',
       roles: [],
       categoryGrants: {},
@@ -31,7 +31,7 @@ describe('API adapters', () => {
       id: 'member-guest',
       userId: 'user-credentialless',
       email: null,
-      isGuest: true,
+      isTemporaryGuest: true,
       active: true,
     });
   });
