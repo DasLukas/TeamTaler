@@ -1,0 +1,98 @@
+.selection {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.legend {
+  margin-bottom: var(--space-2);
+  font-weight: 700;
+}
+
+.search {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  background: var(--color-white);
+  font: inherit;
+}
+
+.search:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--color-teal-600) 26%, transparent);
+  outline-offset: 1px;
+}
+
+.options {
+  display: grid;
+  min-height: 0;
+  gap: var(--space-2);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.option {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 10px var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-white);
+  cursor: pointer;
+}
+
+.option:has(input:checked) {
+  border-color: var(--color-teal-600);
+  background: var(--color-surface-teal);
+}
+
+.optionDisabled {
+  cursor: not-allowed;
+  opacity: 0.68;
+}
+
+.copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.copy small {
+  overflow: hidden;
+  color: var(--color-muted);
+  font-size: var(--font-size-xs);
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.restriction {
+  color: var(--color-teal-700);
+  font-size: var(--font-size-xs);
+  font-style: normal;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.empty {
+  margin: 0;
+  padding: var(--space-3);
+  color: var(--color-muted);
+  text-align: center;
+}
+
+@media (max-width: 767px) {
+  .option { align-items: start; }
+  .copy small { white-space: normal; }
+}

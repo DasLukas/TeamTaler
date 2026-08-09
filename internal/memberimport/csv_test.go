@@ -16,8 +16,8 @@ func TestParseCSVSupportsCommonDelimitersAndBOM(t *testing.T) {
 		name     string
 		document string
 	}{
-		{name: "comma", document: "email,display_name\nADA@Example.test,Ada Lovelace\n"},
-		{name: "semicolon and BOM", document: "\ufeffdisplay_name;email\nAda Lovelace;ADA@Example.test\n"},
+		{name: "comma", document: "email,display_name,roles\nADA@Example.test,Ada Lovelace,Member| Finance manager \n"},
+		{name: "semicolon and BOM", document: "\ufeffdisplay_name;email;roles\nAda Lovelace;ADA@Example.test;\n"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -28,6 +28,9 @@ func TestParseCSVSupportsCommonDelimitersAndBOM(t *testing.T) {
 			}
 			if len(rows) != 1 || rows[0].Email != "ada@example.test" || rows[0].DisplayName != "Ada Lovelace" || rows[0].ValidationCode != "" {
 				t.Fatalf("rows = %#v", rows)
+			}
+			if test.name == "comma" && (len(rows[0].RoleNames) != 2 || rows[0].RoleNames[0] != "Member" || rows[0].RoleNames[1] != "Finance manager") {
+				t.Fatalf("role names = %#v", rows[0].RoleNames)
 			}
 		})
 	}

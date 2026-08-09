@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   getDashboard: vi.fn(),
   getCategories: vi.fn(),
   getMembers: vi.fn(),
-  createBooking: vi.fn(),
+  createBookings: vi.fn(),
   useActiveGroup: vi.fn(),
 }));
 
@@ -21,7 +21,7 @@ vi.mock('@/api/client', () => ({
     getDashboard: mocks.getDashboard,
     getCategories: mocks.getCategories,
     getMembers: mocks.getMembers,
-    createBooking: mocks.createBooking,
+    createBookings: mocks.createBookings,
   },
 }));
 
@@ -42,7 +42,7 @@ describe('BookingPage explicit product selection', () => {
     mocks.getDashboard.mockResolvedValue(demoDashboard);
     mocks.getCategories.mockResolvedValue(demoCategories);
     mocks.getMembers.mockResolvedValue(demoMembers);
-    mocks.createBooking.mockResolvedValue({ id: 'booking-created' });
+    mocks.createBookings.mockResolvedValue([{ id: 'booking-created' }]);
     mocks.useActiveGroup.mockReturnValue({ activeGroupId: demoSession.activeGroupId, session: demoSession });
   });
 
@@ -58,7 +58,7 @@ describe('BookingPage explicit product selection', () => {
     expect(await screen.findByRole('dialog')).toHaveAccessibleName(i18n.t('booking.productTitle', { name: 'Wasser' }));
     await user.click(screen.getByRole('button', { name: i18n.t('booking.submit') }));
 
-    await waitFor(() => expect(mocks.createBooking).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mocks.createBookings).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument(), { timeout: 2_000 });
     expect(water).toHaveAttribute('aria-pressed', 'false');
   });
@@ -91,7 +91,7 @@ describe('BookingPage explicit product selection', () => {
 
   it('does not expose catalog navigation without catalog rights', async () => {
     const groups = demoSession.groups.map((group) => group.id === demoSession.activeGroupId
-      ? { ...group, membership: group.membership ? { ...group.membership, roles: ['MEMBER'] as GroupRole[] } : undefined }
+      ? { ...group, membership: group.membership ? { ...group.membership, roles: ['MEMBER'] as GroupRole[], effectiveGrants: [] } : undefined }
       : group);
     mocks.useActiveGroup.mockReturnValue({ activeGroupId: demoSession.activeGroupId, session: { ...demoSession, groups } });
     mocks.getCategories.mockResolvedValue([]);

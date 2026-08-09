@@ -72,8 +72,10 @@ func (s *Server) handleUserAvatar(response http.ResponseWriter, request *http.Re
 				JOIN memberships subject ON subject.group_id=viewer.group_id
 				WHERE viewer.user_id=? AND viewer.status='ACTIVE' AND subject.user_id=target.id
 				AND (subject.status='ACTIVE' OR EXISTS (
-					SELECT 1 FROM membership_roles role
-					WHERE role.membership_id=viewer.id AND role.role='ADMIN'
+					SELECT 1 FROM membership_role_assignments assignment
+					JOIN role_permission_grants grant ON grant.group_id=assignment.group_id AND grant.role_id=assignment.role_id
+					WHERE assignment.group_id=viewer.group_id AND assignment.membership_id=viewer.id
+					AND grant.permission_key='GROUP_ADMINISTRATION' AND grant.scope_type='GROUP'
 				))
 			)`, targetUserID, principal.UserID).Scan(&currentKey)
 	}

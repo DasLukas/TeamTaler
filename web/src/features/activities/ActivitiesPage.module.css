@@ -1,11 +1,120 @@
+.page {
+  width: 100%;
+  max-width: none;
+  padding-inline: 48px;
+}
+
 .searchControl { position: relative; }
 .searchControl svg { position: absolute; z-index: 1; top: 14px; left: 14px; color: var(--color-muted); }
 .searchControl input { padding-left: 42px; }
-.member { display: inline-flex; align-items: center; gap: var(--space-3); }
-.bookingProduct { display: inline-flex; align-items: center; gap: var(--space-3); }
+.member { display: inline-flex; min-width: 0; align-items: center; gap: var(--space-3); overflow-wrap: anywhere; }
+.bookingProduct { display: inline-flex; min-width: 0; align-items: center; gap: var(--space-3); }
+.bookingProduct > span { min-width: 0; overflow-wrap: anywhere; }
 .bookingProduct > img { width: 40px; height: 40px; flex: 0 0 40px; border-radius: var(--radius-sm); object-fit: cover; background: var(--color-surface-muted); }
-td small { display: block; margin-top: 4px; color: var(--color-muted); }
+.activityList {
+  contain: paint;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.activityTable { min-width: 1200px; table-layout: fixed; }
+.activityTable th,
+.activityTable td { vertical-align: middle; white-space: normal; overflow-wrap: anywhere; }
+.activityTable th { white-space: nowrap; }
+.activityTable th:nth-child(1),
+.activityTable th:nth-child(2) { width: 14%; }
+.activityTable th:nth-child(3) { width: 17%; }
+.activityTable th:nth-child(4) { width: 9%; }
+.activityTable th:nth-child(5) { width: 14%; }
+.activityTable th:nth-child(6) { width: 8%; }
+.activityTable th:nth-child(7) { width: 10%; }
+.activityTable th:nth-child(8) { width: 14%; }
+.activityTable td small { display: block; margin-top: 4px; color: var(--color-muted); }
+.activityTable td:last-child button { white-space: nowrap; }
 .reversalForm { display: grid; gap: var(--space-5); padding: var(--space-4) var(--space-6) var(--space-6); }
 .reversalForm p { margin: 0; color: var(--color-muted); line-height: 1.55; }
 .actions { display: flex; justify-content: flex-end; gap: var(--space-3); }
 .error { color: var(--color-red-600) !important; }
+.reversalForm .windowNotice { padding: var(--space-3); border-radius: var(--radius-md); color: var(--color-teal-700); background: var(--color-surface-teal); font-size: var(--font-size-sm); }
+
+@media (max-width: 599px) {
+  .activityList {
+    margin-inline: 0;
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .activityTable,
+  .activityTable tbody {
+    display: block;
+    width: 100%;
+  }
+
+  .activityTable { min-width: 0; }
+
+  .activityTable thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+
+  .activityTable tbody {
+    display: grid;
+    gap: var(--space-4);
+  }
+
+  .activityTable tr {
+    display: grid;
+    min-width: 0;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--space-4) var(--space-6);
+    padding: var(--space-5);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-white);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .activityTable td {
+    display: grid;
+    min-width: 0;
+    align-content: start;
+    gap: var(--space-2);
+    padding: 0;
+    border: 0;
+    text-align: left !important;
+  }
+
+  .activityTable td::before {
+    color: var(--color-muted);
+    content: attr(data-label);
+    font-size: var(--font-size-xs);
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    line-height: 1.2;
+    text-transform: uppercase;
+  }
+
+  .activityTable td:nth-child(3),
+  .activityTable td:nth-child(8) { grid-column: 1 / -1; }
+  .activityTable td:nth-child(8):empty { display: none; }
+  .activityTable td:nth-child(8)::before { display: none; }
+  .activityTable td:nth-child(8) button { width: 100%; }
+}
+
+@media (max-width: 767px) {
+  .page { padding-inline: var(--space-5); }
+}
+
+@media (max-width: 359px) {
+  .activityTable tr { grid-template-columns: minmax(0, 1fr); }
+
+  .activityTable td {
+    grid-column: 1 !important;
+    grid-row: auto !important;
+  }
+}

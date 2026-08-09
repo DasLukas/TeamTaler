@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { PermissionKey } from '@/api/types';
 import { Sidebar } from './Sidebar';
 
 const mocks = vi.hoisted(() => ({ useActiveGroup: vi.fn() }));
@@ -10,8 +11,8 @@ vi.mock('@tanstack/react-router', () => ({ Link: ({ children, to }: { children: 
 vi.mock('@/components/brand/Brand', () => ({ Brand: () => <div>brand</div> }));
 vi.mock('@/components/auth/LogoutButton', () => ({ LogoutButton: () => <button type="button">logout</button> }));
 
-function useRoles(roles: string[]): void {
-  const group = { id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', roles, groupPermissions: [] } };
+function usePermissions(permissions: PermissionKey[]): void {
+  const group = { id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', effectiveGrants: permissions.map((permission) => ({ permission, scope: { type: 'GROUP' as const } })) } };
   mocks.useActiveGroup.mockReturnValue({ session: { groups: [group] }, activeGroupId: group.id, setActiveGroupId: vi.fn() });
 }
 
@@ -19,14 +20,14 @@ describe('Sidebar role navigation', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('shows finance without administration to a pure finance manager', () => {
-    useRoles(['FINANCE_MANAGER', 'MEMBER']);
+    usePermissions(['FINANCE_MANAGEMENT']);
     render(<Sidebar />);
     expect(screen.getByRole('link', { name: 'Finanzen' })).toHaveAttribute('href', '/finance');
     expect(screen.queryByRole('link', { name: 'Verwaltung' })).not.toBeInTheDocument();
   });
 
   it('shows catalog without administration or finance to a pure catalog manager', () => {
-    useRoles(['CATALOG_MANAGER', 'MEMBER']);
+    usePermissions(['CATALOG_MANAGEMENT']);
     render(<Sidebar />);
     expect(screen.getByRole('link', { name: 'Katalog' })).toHaveAttribute('href', '/catalog');
     expect(screen.queryByRole('link', { name: 'Verwaltung' })).not.toBeInTheDocument();
@@ -34,7 +35,7 @@ describe('Sidebar role navigation', () => {
   });
 
   it('shows catalog and finance before administration to administrators', () => {
-    useRoles(['ADMIN', 'MEMBER']);
+    usePermissions(['CATALOG_MANAGEMENT', 'FINANCE_MANAGEMENT', 'GROUP_ADMINISTRATION']);
     render(<Sidebar />);
     const links = screen.getAllByRole('link').map((link) => link.textContent);
     expect(links.indexOf('Katalog')).toBeLessThan(links.indexOf('Finanzen'));

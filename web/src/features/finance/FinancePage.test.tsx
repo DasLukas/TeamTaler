@@ -14,7 +14,7 @@ vi.mock('./SettlementsPanel', () => ({ SettlementsPanel: () => <div>settlements-
 describe('FinancePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.useActiveGroup.mockReturnValue({ activeGroup: { membership: { roles: ['FINANCE_MANAGER', 'MEMBER'] } } });
+    mocks.useActiveGroup.mockReturnValue({ activeGroup: { membership: { effectiveGrants: [{ permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } }] } } });
   });
 
   it('uses the account overview as the default of three finance tabs', async () => {
@@ -32,7 +32,7 @@ describe('FinancePage', () => {
   });
 
   it('renders no finance child for an unauthorized membership', () => {
-    mocks.useActiveGroup.mockReturnValue({ activeGroup: { membership: { roles: ['MEMBER'] } } });
+    mocks.useActiveGroup.mockReturnValue({ activeGroup: { membership: { effectiveGrants: [] } } });
     render(<FinancePage />);
 
     expect(screen.getByText(i18n.t('financeWorkspace.noAccessTitle'))).toBeVisible();

@@ -8,13 +8,54 @@ import type {
   Membership,
   Notification,
   Payment,
+  PermissionDefinition,
+  PermissionGrant,
+  PermissionKey,
   Period,
+  Role,
   Session,
   Settlement,
 } from '@/api/types';
 import beerImageUrl from './assets/beer.webp';
 import sodaImageUrl from './assets/soda.webp';
 import waterImageUrl from './assets/water.webp';
+
+const grants = (...permissions: PermissionKey[]): PermissionGrant[] => permissions.map((permission) => ({ permission, scope: { type: 'GROUP' } }));
+
+/** Stable permission registry returned by the development transport. */
+export const demoPermissionDefinitions: PermissionDefinition[] = [
+  { key: 'GROUP_ADMINISTRATION' },
+  { key: 'ROLE_MANAGEMENT' },
+  { key: 'FINANCE_MANAGEMENT' },
+  { key: 'CATALOG_MANAGEMENT' },
+  { key: 'VIEW_ALL_BOOKING_ACTIVITY' },
+  { key: 'RECORD_OWN_PAYMENT' },
+  { key: 'CREATE_OWN_BOOKING' },
+  { key: 'VOID_OWN_BOOKING' },
+  { key: 'VOID_ANY_BOOKING', impliedPermissions: ['VOID_OWN_BOOKING', 'VIEW_ALL_BOOKING_ACTIVITY'] },
+  { key: 'BOOK_FOR_OTHERS' },
+];
+
+/** Group-owned demo roles including one migrated direct-permission role. */
+export const demoRoles: Role[] = [
+  {
+    id: 'role-admin',
+    groupId: 'group-sv-adler',
+    presetKey: 'GROUP_ADMINISTRATOR',
+    name: 'Gruppenadministrator',
+    description: 'Geschützte Vollzugriffsrolle der Gruppe',
+    nameLocked: true,
+    deletable: false,
+    grants: grants('GROUP_ADMINISTRATION', 'ROLE_MANAGEMENT', 'FINANCE_MANAGEMENT', 'CATALOG_MANAGEMENT', 'VIEW_ALL_BOOKING_ACTIVITY', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING', 'VOID_ANY_BOOKING', 'BOOK_FOR_OTHERS'),
+    version: 1,
+    memberCount: 1,
+    pendingInvitationCount: 0,
+  },
+  { id: 'role-member', groupId: 'group-sv-adler', presetKey: 'MEMBER', name: 'Mitglied', description: 'Bearbeitbare Startrolle für reguläre Gruppenmitglieder', nameLocked: false, deletable: true, grants: grants('CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING'), version: 1, memberCount: 3, pendingInvitationCount: 0 },
+  { id: 'role-finance', groupId: 'group-sv-adler', presetKey: 'FINANCE_MANAGER', name: 'Finanzverwaltung', description: 'Zahlungen und Abrechnungen verwalten', nameLocked: false, deletable: true, grants: grants('FINANCE_MANAGEMENT', 'VIEW_ALL_BOOKING_ACTIVITY', 'RECORD_OWN_PAYMENT'), version: 1, memberCount: 1, pendingInvitationCount: 0 },
+  { id: 'role-catalog', groupId: 'group-sv-adler', presetKey: 'CATALOG_MANAGER', name: 'Katalogverwaltung', description: 'Kategorien und Produkte verwalten', nameLocked: false, deletable: true, grants: grants('CATALOG_MANAGEMENT'), version: 1, memberCount: 1, pendingInvitationCount: 0 },
+  { id: 'role-self-payment', groupId: 'group-sv-adler', name: 'Eigene Einzahlungen', description: 'Aus dem bisherigen Einzelrecht migriert', nameLocked: false, deletable: true, grants: grants('RECORD_OWN_PAYMENT'), version: 1, memberCount: 1, pendingInvitationCount: 0 },
+];
 
 /** Demo session used only by the development transport. */
 export const demoSession: Session = {
@@ -24,8 +65,8 @@ export const demoSession: Session = {
     email: 'lukas@example.test',
   },
   groups: [
-    { id: 'group-sv-adler', name: 'SV Adler', currency: 'EUR', membership: { id: 'member-lukas', roles: ['ADMIN', 'MEMBER'], groupPermissions: ['SELF_RECORD_PAYMENT'] } },
-    { id: 'group-freunde', name: 'Kegelclub', currency: 'EUR', membership: { id: 'member-lukas-kegelclub', roles: ['MEMBER'], groupPermissions: [] } },
+    { id: 'group-sv-adler', name: 'SV Adler', currency: 'EUR', membership: { id: 'member-lukas', roleIds: ['role-admin', 'role-member'], effectiveGrants: demoRoles[0].grants, roles: ['ADMIN', 'MEMBER'], groupPermissions: ['SELF_RECORD_PAYMENT'] } },
+    { id: 'group-freunde', name: 'Kegelclub', currency: 'EUR', membership: { id: 'member-lukas-kegelclub', roleIds: ['role-member-kegel'], effectiveGrants: grants('CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING'), roles: ['MEMBER'], groupPermissions: [] } },
   ],
   activeGroupId: 'group-sv-adler',
   demo: true,
@@ -134,6 +175,8 @@ export const demoMembers: Membership[] = [
     email: 'lukas@example.test',
     initials: 'LW',
     roles: ['ADMIN', 'MEMBER'],
+    roleIds: ['role-admin', 'role-member'],
+    effectiveGrants: demoRoles[0].grants,
     groupPermissions: ['SELF_RECORD_PAYMENT'],
     categoryPermissions: [
       { categoryId: 'category-drinks', assignToOthers: true, voidBookings: true },
@@ -149,6 +192,8 @@ export const demoMembers: Membership[] = [
     email: 'mara@example.test',
     initials: 'MB',
     roles: ['FINANCE_MANAGER', 'MEMBER'],
+    roleIds: ['role-finance', 'role-member'],
+    effectiveGrants: grants('FINANCE_MANAGEMENT', 'VIEW_ALL_BOOKING_ACTIVITY', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING'),
     groupPermissions: [],
     categoryPermissions: [
       { categoryId: 'category-drinks', assignToOthers: false, voidBookings: false },
@@ -164,6 +209,8 @@ export const demoMembers: Membership[] = [
     email: 'jonas@example.test',
     initials: 'JK',
     roles: ['CATALOG_MANAGER', 'MEMBER'],
+    roleIds: ['role-catalog', 'role-member', 'role-self-payment'],
+    effectiveGrants: grants('CATALOG_MANAGEMENT', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING'),
     groupPermissions: ['SELF_RECORD_PAYMENT'],
     categoryPermissions: [
       { categoryId: 'category-drinks', assignToOthers: false, voidBookings: false },
@@ -189,8 +236,10 @@ export const demoBookings: Booking[] = [
     total: { minorUnits: '200', currency: 'EUR' },
     bookedAt: '2026-08-04T19:45:00+02:00',
     bookedByName: 'Lukas Waschul',
+    bookedByMemberId: 'member-lukas',
     status: 'POSTED',
-    undoUntil: '2026-08-04T19:45:30+02:00',
+    voidWithoutReasonUntil: '2026-08-04T19:45:30+02:00',
+    voidReasonRequired: true,
     canVoid: true,
   },
   {
@@ -206,7 +255,9 @@ export const demoBookings: Booking[] = [
     total: { minorUnits: '150', currency: 'EUR' },
     bookedAt: '2026-08-04T19:10:00+02:00',
     bookedByName: 'Mara Becker',
+    bookedByMemberId: 'member-mara',
     status: 'POSTED',
+    voidReasonRequired: true,
     canVoid: true,
   },
   {
@@ -222,8 +273,10 @@ export const demoBookings: Booking[] = [
     total: { minorUnits: '500', currency: 'EUR' },
     bookedAt: '2026-08-04T18:32:00+02:00',
     bookedByName: 'Mara Becker',
+    bookedByMemberId: 'member-mara',
     reason: '15 Minuten zu spät',
     status: 'POSTED',
+    voidReasonRequired: true,
     canVoid: true,
   },
 ];

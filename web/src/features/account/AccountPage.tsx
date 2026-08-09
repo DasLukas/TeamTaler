@@ -50,9 +50,7 @@ export function AccountPage() {
   if (ledgerQuery.isError || !ledgerQuery.data || !dashboardQuery.data || !settlementsQuery.data) return <Page title={t('account.title')}><StatePanel kind="error" message={t('account.error')} /></Page>;
 
   const balance = dashboardQuery.data.openBalance;
-  const roles = activeGroup.membership?.roles ?? [];
-  const groupPermissions = activeGroup.membership?.groupPermissions ?? [];
-  const canRecordPayment = canRecordOwnPayment(roles, groupPermissions);
+  const canRecordPayment = canRecordOwnPayment(activeGroup.membership?.effectiveGrants);
   const ownSettlements = settlementsQuery.data.filter((settlement) => settlement.membershipId === activeGroup.membership?.id);
   return (
     <Page actions={<><Button leadingIcon={<Download size={18} />} onClick={() => downloadLedger(ledgerQuery.data)} variant="secondary">{t('account.csvExport')}</Button><Button leadingIcon={<Printer size={18} />} onClick={() => window.print()}>{t('common.print')}</Button></>} intro={t('account.intro')} title={t('account.title')} wide>

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/DasLukas/TeamTaler/internal/auth"
+	"github.com/DasLukas/TeamTaler/internal/authorization"
 	"github.com/DasLukas/TeamTaler/internal/bookings"
 	"github.com/DasLukas/TeamTaler/internal/catalog"
 	"github.com/DasLukas/TeamTaler/internal/domain"
@@ -68,7 +69,18 @@ func newFixture(t *testing.T) *fixture {
 
 func (f *fixture) inviteMember(email, name string, roles []domain.Role) (domain.Principal, domain.Membership, string) {
 	f.t.Helper()
-	invitation, err := f.groups.CreateInvitation(f.ctx, f.admin, f.membership, email, name, roles, nil, nil)
+	roleIDs := []string{authorization.PresetRoleID(f.membership.GroupID, domain.RolePresetMember)}
+	for _, role := range roles {
+		switch role {
+		case domain.RoleAdmin:
+			roleIDs = append(roleIDs, authorization.PresetRoleID(f.membership.GroupID, domain.RolePresetGroupAdministrator))
+		case domain.RoleFinanceManager:
+			roleIDs = append(roleIDs, authorization.PresetRoleID(f.membership.GroupID, domain.RolePresetFinanceManager))
+		case domain.RoleCatalogManager:
+			roleIDs = append(roleIDs, authorization.PresetRoleID(f.membership.GroupID, domain.RolePresetCatalogManager))
+		}
+	}
+	invitation, err := f.groups.CreateInvitationWithRoles(f.ctx, f.admin, f.membership, email, name, roleIDs)
 	if err != nil {
 		f.t.Fatalf("create invitation: %v", err)
 	}
@@ -77,6 +89,36 @@ func (f *fixture) inviteMember(email, name string, roles []domain.Role) (domain.
 		f.t.Fatalf("accept invitation: %v", err)
 	}
 	return session.Principal, membership, invitation.Token
+}
+
+func (f *fixture) createStarterInvitation(email, name string) (groups.Invitation, error) {
+	return f.groups.CreateInvitationWithRoles(f.ctx, f.admin, f.membership, email, name, []string{
+		authorization.PresetRoleID(f.membership.GroupID, domain.RolePresetMember),
+	})
+}
+
+func (f *fixture) assignPermissionRole(membership domain.Membership, name string, permissions ...domain.PermissionKey) domain.Membership {
+	f.t.Helper()
+	grants := make([]domain.PermissionGrant, 0, len(permissions))
+	for _, permission := range permissions {
+		grants = append(grants, domain.PermissionGrant{
+			Permission: permission,
+			Scope:      domain.PermissionScope{Type: domain.PermissionScopeGroup},
+		})
+	}
+	role, err := f.groups.CreateRole(f.ctx, f.admin, f.membership, groups.RoleCommand{Name: name, Grants: grants})
+	if err != nil {
+		f.t.Fatalf("create %s role: %v", name, err)
+	}
+	roleIDs := append(append([]string(nil), membership.RoleIDs...), role.ID)
+	if _, err := f.groups.ReplaceMemberRoles(f.ctx, f.admin, f.membership, membership.ID, roleIDs, membership.RoleAssignmentsVersion); err != nil {
+		f.t.Fatalf("assign %s role: %v", name, err)
+	}
+	updated, err := f.groups.MembershipForUser(f.ctx, membership.GroupID, membership.UserID)
+	if err != nil {
+		f.t.Fatalf("reload %s role assignment: %v", name, err)
+	}
+	return updated
 }
 
 func (f *fixture) catalogItem(categoryName string, price int64) (domain.Category, domain.Product) {
@@ -141,7 +183,7 @@ func TestBootstrapLoginInvitationReplayAndTenantRBAC(t *testing.T) {
 	if _, err := f.catalog.CreateCategory(f.ctx, memberPrincipal, member, catalog.CreateCategoryInput{Name: "Forbidden", Icon: domain.CategoryIconOther}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("catalog RBAC error = %v, want forbidden", err)
 	}
-	if err := f.groups.UpdatePermissions(f.ctx, f.admin, f.membership, f.membership.ID, groups.PermissionUpdate{}); !errors.Is(err, domain.ErrConflict) {
+	if _, err := f.groups.UpdatePermissions(f.ctx, f.admin, f.membership, f.membership.ID, groups.PermissionUpdate{}, f.membership.RoleAssignmentsVersion); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("last administrator removal error = %v, want conflict", err)
 	}
 	secondGroup, err := f.groups.Create(f.ctx, f.admin, "Beta Team", "EUR")
@@ -151,8 +193,159 @@ func TestBootstrapLoginInvitationReplayAndTenantRBAC(t *testing.T) {
 	if _, err := f.groups.MembershipForUser(f.ctx, secondGroup.ID, memberPrincipal.UserID); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("cross-tenant membership error = %v, want forbidden", err)
 	}
-	if err := f.groups.UpdatePermissions(f.ctx, f.admin, secondGroup.Membership, member.ID, groups.PermissionUpdate{Roles: []domain.Role{domain.RoleFinanceManager}}); !errors.Is(err, domain.ErrForbidden) {
+	if _, err := f.groups.UpdatePermissions(f.ctx, f.admin, secondGroup.Membership, member.ID, groups.PermissionUpdate{Roles: []domain.Role{domain.RoleFinanceManager}}, member.RoleAssignmentsVersion); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("cross-tenant permission update error = %v, want forbidden", err)
+	}
+}
+
+func TestGroupAdministratorCanTransferOnlyReservedRoleWithoutRoleManagement(t *testing.T) {
+	f := newFixture(t)
+	delegatedPrincipal, delegatedAdministrator, _ := f.inviteMember("delegated-admin@example.test", "Delegated Administrator", nil)
+	delegatedAdministrator = f.assignPermissionRole(delegatedAdministrator, "Delegated group administration", domain.PermissionGroupAdministration)
+	_, transferTarget, _ := f.inviteMember("administrator-target@example.test", "Administrator Target", nil)
+	_, legacyTransferTarget, _ := f.inviteMember("legacy-administrator-target@example.test", "Legacy Administrator Target", nil)
+	nonAdministrativeRole, err := f.groups.CreateRole(f.ctx, f.admin, f.membership, groups.RoleCommand{
+		Name: "Non-administrative assignment",
+		Grants: []domain.PermissionGrant{{
+			Permission: domain.PermissionBookForOthers,
+			Scope:      domain.PermissionScope{Type: domain.PermissionScopeGroup},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("create non-administrative role: %v", err)
+	}
+
+	roles, err := f.groups.ListRoles(f.ctx, delegatedAdministrator)
+	if err != nil {
+		t.Fatalf("group-administrator role list: %v", err)
+	}
+	if _, err := f.groups.ListRoleAssignments(f.ctx, delegatedAdministrator); err != nil {
+		t.Fatalf("group-administrator assignment list: %v", err)
+	}
+	var reservedAdministratorRoleID string
+	for _, role := range roles {
+		if role.PresetKey == domain.RolePresetGroupAdministrator {
+			reservedAdministratorRoleID = role.ID
+			break
+		}
+	}
+	if reservedAdministratorRoleID == "" {
+		t.Fatal("reserved administrator role is missing")
+	}
+
+	if _, err := f.groups.CreateRole(f.ctx, delegatedPrincipal, delegatedAdministrator, groups.RoleCommand{Name: "Forbidden role", Grants: []domain.PermissionGrant{}}); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("group-administrator-only role creation error = %v, want forbidden", err)
+	}
+	if _, err := f.groups.ReplaceMemberRoles(
+		f.ctx,
+		delegatedPrincipal,
+		delegatedAdministrator,
+		delegatedAdministrator.ID,
+		append(append([]string(nil), delegatedAdministrator.RoleIDs...), nonAdministrativeRole.ID),
+		delegatedAdministrator.RoleAssignmentsVersion,
+	); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("group-administrator-only non-administrative assignment error = %v, want forbidden", err)
+	}
+	if _, err := f.groups.UpdatePermissions(
+		f.ctx,
+		delegatedPrincipal,
+		delegatedAdministrator,
+		legacyTransferTarget.ID,
+		groups.PermissionUpdate{Roles: []domain.Role{domain.RoleFinanceManager}},
+		legacyTransferTarget.RoleAssignmentsVersion,
+	); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("group-administrator-only legacy member assignment error = %v, want forbidden", err)
+	}
+	if _, err := f.groups.CreateInvitation(
+		f.ctx,
+		delegatedPrincipal,
+		delegatedAdministrator,
+		"forbidden-legacy-role@example.test",
+		"Forbidden Legacy Role",
+		[]domain.Role{domain.RoleCatalogManager},
+		nil,
+		nil,
+	); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("group-administrator-only legacy invitation creation error = %v, want forbidden", err)
+	}
+	pendingInvitation, err := f.createStarterInvitation("legacy-role-update@example.test", "Legacy Role Update")
+	if err != nil {
+		t.Fatalf("create legacy role update invitation: %v", err)
+	}
+	if _, err := f.groups.UpdateInvitation(
+		f.ctx,
+		delegatedPrincipal,
+		delegatedAdministrator,
+		pendingInvitation.ID,
+		pendingInvitation.DisplayName,
+		[]domain.Role{domain.RoleFinanceManager},
+		nil,
+		nil,
+		pendingInvitation.RoleAssignmentsVersion,
+	); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("group-administrator-only legacy invitation update error = %v, want forbidden", err)
+	}
+	if _, err := f.groups.ReplaceMemberRoles(
+		f.ctx,
+		delegatedPrincipal,
+		delegatedAdministrator,
+		legacyTransferTarget.ID,
+		append(append([]string(nil), legacyTransferTarget.RoleIDs...), reservedAdministratorRoleID),
+		legacyTransferTarget.RoleAssignmentsVersion,
+	); err != nil {
+		t.Fatalf("transfer reserved administrator: %v", err)
+	}
+	legacyTransferTarget, err = f.groups.MembershipForUser(f.ctx, f.group.ID, legacyTransferTarget.UserID)
+	if err != nil || !hasLegacyRole(legacyTransferTarget, domain.RoleAdmin) {
+		t.Fatalf("legacy reserved administrator transfer membership = %#v, err = %v", legacyTransferTarget, err)
+	}
+
+	transferred, err := f.groups.ReplaceMemberRoles(
+		f.ctx,
+		delegatedPrincipal,
+		delegatedAdministrator,
+		transferTarget.ID,
+		append(append([]string(nil), transferTarget.RoleIDs...), reservedAdministratorRoleID),
+		transferTarget.RoleAssignmentsVersion,
+	)
+	if err != nil {
+		t.Fatalf("transfer reserved administrator role: %v", err)
+	}
+	if !containsRoleID(transferred.RoleIDs, reservedAdministratorRoleID) {
+		t.Fatalf("transferred role IDs = %#v", transferred.RoleIDs)
+	}
+}
+
+func TestRoleManagerListsOnlyOpenInvitations(t *testing.T) {
+	f := newFixture(t)
+	_, roleManager, _ := f.inviteMember("role-manager@example.test", "Role Manager", nil)
+	roleManager = f.assignPermissionRole(roleManager, "Invitation role manager", domain.PermissionRoleManagement)
+
+	openInvitation, err := f.createStarterInvitation("open-role-invitation@example.test", "Open Role Invitation")
+	if err != nil {
+		t.Fatalf("create open invitation: %v", err)
+	}
+	revokedInvitation, err := f.createStarterInvitation("revoked-role-invitation@example.test", "Revoked Role Invitation")
+	if err != nil {
+		t.Fatalf("create revoked invitation: %v", err)
+	}
+	if err := f.groups.RevokeInvitation(f.ctx, f.admin, f.membership, revokedInvitation.ID, "No longer needed"); err != nil {
+		t.Fatalf("revoke invitation: %v", err)
+	}
+	expiredInvitation, err := f.createStarterInvitation("expired-role-invitation@example.test", "Expired Role Invitation")
+	if err != nil {
+		t.Fatalf("create expired invitation: %v", err)
+	}
+	if _, err := f.db.ExecContext(f.ctx, `UPDATE invitations SET expires_at='2000-01-01T00:00:00Z' WHERE id=?`, expiredInvitation.ID); err != nil {
+		t.Fatalf("expire invitation: %v", err)
+	}
+
+	visible, err := f.groups.ListInvitations(f.ctx, roleManager)
+	if err != nil {
+		t.Fatalf("list role-manager invitations: %v", err)
+	}
+	if len(visible) != 1 || visible[0].ID != openInvitation.ID {
+		t.Fatalf("role-manager invitations = %#v, want only %s", visible, openInvitation.ID)
 	}
 }
 
@@ -246,14 +439,14 @@ func TestOwnPaymentPermissionPostsOnlyForAuthenticatedMembership(t *testing.T) {
 	if _, err := f.finance.CreateOwnPayment(f.ctx, memberPrincipal, member, "self-payment-denied", input); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("self payment without permission error=%v, want forbidden", err)
 	}
-	if err := f.groups.UpdatePermissions(f.ctx, f.admin, f.membership, member.ID, groups.PermissionUpdate{
+	if _, err := f.groups.UpdatePermissions(f.ctx, f.admin, f.membership, member.ID, groups.PermissionUpdate{
 		GroupPermissions: []domain.GroupPermission{domain.PermissionSelfRecordPayment, domain.PermissionSelfRecordPayment},
-	}); err != nil {
+	}, member.RoleAssignmentsVersion); err != nil {
 		t.Fatalf("grant self payment permission: %v", err)
 	}
-	if err := f.groups.UpdatePermissions(f.ctx, f.admin, f.membership, member.ID, groups.PermissionUpdate{
+	if _, err := f.groups.UpdatePermissions(f.ctx, f.admin, f.membership, member.ID, groups.PermissionUpdate{
 		GroupPermissions: []domain.GroupPermission{domain.GroupPermission("UNSUPPORTED")},
-	}); !errors.Is(err, domain.ErrValidation) {
+	}, member.RoleAssignmentsVersion); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("unsupported group permission error=%v, want validation", err)
 	}
 	member, err := f.groups.MembershipForUser(f.ctx, f.group.ID, member.UserID)
@@ -295,7 +488,8 @@ func TestOwnPaymentPermissionPostsOnlyForAuthenticatedMembership(t *testing.T) {
 	}
 
 	staleAuthorizedMembership := member
-	if err := f.groups.UpdatePermissions(f.ctx, f.admin, f.membership, member.ID, groups.PermissionUpdate{}); err != nil {
+	memberRoleID := authorization.PresetRoleID(member.GroupID, domain.RolePresetMember)
+	if _, err := f.groups.ReplaceMemberRoles(f.ctx, f.admin, f.membership, member.ID, []string{memberRoleID}, member.RoleAssignmentsVersion); err != nil {
 		t.Fatalf("revoke self payment permission: %v", err)
 	}
 	if _, err := f.finance.CreateOwnPayment(f.ctx, memberPrincipal, staleAuthorizedMembership, "self-payment-stale-permission", input); !errors.Is(err, domain.ErrForbidden) {
@@ -534,14 +728,14 @@ func TestCatalogDeletionRequiresArchivalAndPreservesHistory(t *testing.T) {
 	if err := f.catalog.DeleteCategory(f.ctx, f.admin, f.membership, category.ID, category.Version); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("delete active category error=%v, want conflict", err)
 	}
-	if err := f.groups.UpdatePermissions(f.ctx, f.admin, f.membership, regularMembership.ID, groups.PermissionUpdate{
+	if _, err := f.groups.UpdatePermissions(f.ctx, f.admin, f.membership, regularMembership.ID, groups.PermissionUpdate{
 		CategoryGrants: map[string][]domain.CategoryPermission{category.ID: {domain.PermissionAssignToOthers}},
-	}); err != nil {
-		t.Fatalf("grant disposable category permission: %v", err)
+	}, regularMembership.RoleAssignmentsVersion); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("legacy category membership grant error=%v, want validation", err)
 	}
 	if _, err := f.groups.CreateInvitation(f.ctx, f.admin, f.membership, "pending-delete@example.test", "Pending Delete", nil, nil,
-		map[string][]domain.CategoryPermission{category.ID: {domain.PermissionAssignToOthers}}); err != nil {
-		t.Fatalf("create invitation with category grant: %v", err)
+		map[string][]domain.CategoryPermission{category.ID: {domain.PermissionAssignToOthers}}); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("legacy category invitation grant error=%v, want validation", err)
 	}
 	archivedCategory, err := f.catalog.UpdateCategory(f.ctx, f.admin, f.membership, category.ID, catalog.UpdateCategoryInput{
 		Name: category.Name, Icon: category.Icon, Active: false, SortOrder: category.SortOrder, Version: category.Version,
@@ -694,10 +888,150 @@ func TestAuthenticationThrottlesSessionActivityWrites(t *testing.T) {
 	}
 }
 
+func TestBookingCreateReplayRefreshesVoidCapabilitiesAndState(t *testing.T) {
+	f := newFixture(t)
+	memberPrincipal, member, _ := f.inviteMember("booking-replay@example.test", "Booking Replay", nil)
+	_, product := f.catalogItem("Replay capabilities", 275)
+	input := bookings.CreateInput{
+		ProductID:        product.ID,
+		ProductVersion:   product.Version,
+		ExpectedPeriodID: f.openPeriodID(),
+		Quantity:         1,
+	}
+
+	created, err := f.bookings.Create(f.ctx, memberPrincipal, member, "replay-create-one", input)
+	if err != nil || !created.CanVoid || created.VoidReasonRequired || created.VoidWithoutReasonUntil == nil {
+		t.Fatalf("created booking = %#v, err = %v", created, err)
+	}
+	if _, err := f.bookings.Void(f.ctx, memberPrincipal, member, "replay-void-one", created.ID, ""); err != nil {
+		t.Fatalf("void created booking: %v", err)
+	}
+	replayedVoided, err := f.bookings.Create(f.ctx, memberPrincipal, member, "replay-create-one", input)
+	if err != nil || replayedVoided.VoidedAt == nil || replayedVoided.CanVoid || replayedVoided.VoidReasonRequired || replayedVoided.VoidWithoutReasonUntil != nil {
+		t.Fatalf("voided create replay = %#v, err = %v", replayedVoided, err)
+	}
+
+	second, err := f.bookings.Create(f.ctx, memberPrincipal, member, "replay-create-two", input)
+	if err != nil || !second.CanVoid {
+		t.Fatalf("second booking = %#v, err = %v", second, err)
+	}
+	roles, err := f.groups.ListRoles(f.ctx, f.membership)
+	if err != nil {
+		t.Fatalf("list roles: %v", err)
+	}
+	var baseRole groups.ManagedRole
+	for _, role := range roles {
+		if role.PresetKey == domain.RolePresetMember {
+			baseRole = role
+			break
+		}
+	}
+	if baseRole.ID == "" {
+		t.Fatal("base role is missing")
+	}
+	grants := make([]domain.PermissionGrant, 0, len(baseRole.Grants))
+	for _, grant := range baseRole.Grants {
+		if grant.Permission != domain.PermissionVoidOwnBooking {
+			grants = append(grants, grant)
+		}
+	}
+	if _, err := f.groups.UpdateRole(f.ctx, f.admin, f.membership, baseRole.ID, baseRole.Version, groups.RoleCommand{
+		Name: baseRole.Name, Description: baseRole.Description, Grants: grants,
+	}); err != nil {
+		t.Fatalf("revoke base-role booking reversal: %v", err)
+	}
+	replayedRevoked, err := f.bookings.Create(f.ctx, memberPrincipal, member, "replay-create-two", input)
+	if err != nil || replayedRevoked.VoidedAt != nil || replayedRevoked.CanVoid || replayedRevoked.VoidReasonRequired || replayedRevoked.VoidWithoutReasonUntil != nil {
+		t.Fatalf("permission-revoked create replay = %#v, err = %v", replayedRevoked, err)
+	}
+	if _, err := f.bookings.Void(f.ctx, memberPrincipal, member, "replay-void-two", second.ID, "No longer allowed"); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("void after permission revocation error = %v, want forbidden", err)
+	}
+}
+
+func TestBookingBatchCreatesAllTargetsAtomicallyAndReplaysAsOneIntent(t *testing.T) {
+	f := newFixture(t)
+	firstPrincipal, firstTarget, _ := f.inviteMember("batch-first@example.test", "Batch First", nil)
+	_, secondTarget, _ := f.inviteMember("batch-second@example.test", "Batch Second", nil)
+	_, product := f.catalogItem("Batch products", 225)
+	input := bookings.BatchCreateInput{
+		ProductID:           product.ID,
+		ProductVersion:      product.Version,
+		ExpectedPeriodID:    f.openPeriodID(),
+		Quantity:            2,
+		TargetMembershipIDs: []string{f.membership.ID, firstTarget.ID, secondTarget.ID},
+		Reason:              "Shared team order",
+	}
+	withoutReason := input
+	withoutReason.Reason = ""
+	if _, err := f.bookings.CreateBatch(f.ctx, f.admin, f.membership, "batch-booking-no-reason", withoutReason); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("batch without foreign-target reason error = %v, want validation", err)
+	}
+	duplicateTarget := input
+	duplicateTarget.TargetMembershipIDs = []string{firstTarget.ID, firstTarget.ID}
+	if _, err := f.bookings.CreateBatch(f.ctx, f.admin, f.membership, "batch-booking-duplicate", duplicateTarget); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("duplicate target batch error = %v, want validation", err)
+	}
+	unauthorized := input
+	unauthorized.TargetMembershipIDs = []string{firstTarget.ID, secondTarget.ID}
+	if _, err := f.bookings.CreateBatch(f.ctx, firstPrincipal, firstTarget, "batch-booking-forbidden", unauthorized); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("unauthorized foreign target batch error = %v, want forbidden", err)
+	}
+
+	created, err := f.bookings.CreateBatch(f.ctx, f.admin, f.membership, "batch-booking-one", input)
+	if err != nil {
+		t.Fatalf("create booking batch: %v", err)
+	}
+	if len(created) != len(input.TargetMembershipIDs) {
+		t.Fatalf("created bookings = %d, want %d", len(created), len(input.TargetMembershipIDs))
+	}
+	for index, booking := range created {
+		if booking.TargetMembershipID != input.TargetMembershipIDs[index] || booking.Quantity != input.Quantity || booking.TotalMinor != 450 || booking.Reason != input.Reason {
+			t.Fatalf("created booking %d = %#v", index, booking)
+		}
+		var ledgerTotal int64
+		if err := f.db.QueryRowContext(f.ctx, `SELECT sum(amount_minor) FROM ledger_entries WHERE booking_id=?`, booking.ID).Scan(&ledgerTotal); err != nil || ledgerTotal != 0 {
+			t.Fatalf("booking %s ledger sum = %d err=%v, want zero", booking.ID, ledgerTotal, err)
+		}
+	}
+	var notificationCount int
+	if err := f.db.QueryRowContext(f.ctx, `SELECT count(*) FROM notifications WHERE resource_type='booking' AND resource_id IN (?,?)`, created[1].ID, created[2].ID).Scan(&notificationCount); err != nil || notificationCount != 2 {
+		t.Fatalf("batch notifications = %d err=%v, want 2", notificationCount, err)
+	}
+
+	replayed, err := f.bookings.CreateBatch(f.ctx, f.admin, f.membership, "batch-booking-one", input)
+	if err != nil || len(replayed) != len(created) {
+		t.Fatalf("batch replay = %#v err=%v", replayed, err)
+	}
+	for index := range created {
+		if replayed[index].ID != created[index].ID {
+			t.Fatalf("replayed booking %d ID = %s, want %s", index, replayed[index].ID, created[index].ID)
+		}
+	}
+	changed := input
+	changed.TargetMembershipIDs = []string{firstTarget.ID, f.membership.ID, secondTarget.ID}
+	if _, err := f.bookings.CreateBatch(f.ctx, f.admin, f.membership, "batch-booking-one", changed); !errors.Is(err, domain.ErrIdempotencyReuse) {
+		t.Fatalf("changed batch replay error = %v, want idempotency reuse", err)
+	}
+
+	var beforeInvalid int
+	if err := f.db.QueryRowContext(f.ctx, `SELECT count(*) FROM bookings WHERE group_id=?`, f.group.ID).Scan(&beforeInvalid); err != nil {
+		t.Fatalf("count bookings before invalid batch: %v", err)
+	}
+	input.TargetMembershipIDs = []string{firstTarget.ID, "missing-membership"}
+	if _, err := f.bookings.CreateBatch(f.ctx, f.admin, f.membership, "batch-booking-invalid", input); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("invalid batch error = %v, want not found", err)
+	}
+	var afterInvalid int
+	if err := f.db.QueryRowContext(f.ctx, `SELECT count(*) FROM bookings WHERE group_id=?`, f.group.ID).Scan(&afterInvalid); err != nil || afterInvalid != beforeInvalid {
+		t.Fatalf("bookings after invalid batch = %d err=%v, want %d", afterInvalid, err, beforeInvalid)
+	}
+}
+
 func TestBookingUndoAssignmentValidationAndBalancedLedger(t *testing.T) {
 	f := newFixture(t)
 	memberPrincipal, member, _ := f.inviteMember("booker@example.test", "Booker", nil)
-	primaryCategory, primaryProduct := f.catalogItem("Drinks", 125)
+	_, primaryProduct := f.catalogItem("Drinks", 125)
 	_, otherProduct := f.catalogItem("Penalties", 500)
 	periodID := f.openPeriodID()
 	input := bookings.CreateInput{ProductID: primaryProduct.ID, ProductVersion: primaryProduct.Version, ExpectedPeriodID: periodID, Quantity: 2}
@@ -738,16 +1072,43 @@ func TestBookingUndoAssignmentValidationAndBalancedLedger(t *testing.T) {
 	if _, err := f.db.ExecContext(f.ctx, `UPDATE bookings SET created_at='2000-01-01T00:00:00Z' WHERE id=?`, late.ID); err != nil {
 		t.Fatalf("age booking: %v", err)
 	}
-	if _, err := f.bookings.Void(f.ctx, memberPrincipal, member, "void-booking-two", late.ID, ""); !errors.Is(err, domain.ErrForbidden) {
-		t.Fatalf("late self undo error = %v, want forbidden", err)
+	if _, err := f.bookings.Void(f.ctx, memberPrincipal, member, "void-booking-two", late.ID, ""); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("late self undo error = %v, want validation", err)
+	}
+	if _, err := f.bookings.Void(f.ctx, memberPrincipal, member, "void-booking-two-with-reason", late.ID, "Entered after review"); err != nil {
+		t.Fatalf("late self undo with reason: %v", err)
 	}
 	assignmentInput := bookings.CreateInput{ProductID: otherProduct.ID, ProductVersion: otherProduct.Version, ExpectedPeriodID: periodID, Quantity: 2, TargetMembershipID: member.ID}
 	if _, err := f.bookings.Create(f.ctx, f.admin, f.membership, "assignment-no-reason", assignmentInput); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("third-party booking without reason = %v, want validation", err)
 	}
 	assignmentInput.Reason = "Late for training"
-	if _, err := f.bookings.Create(f.ctx, f.admin, f.membership, "assignment-with-reason", assignmentInput); err != nil {
+	receivedBooking, err := f.bookings.Create(f.ctx, f.admin, f.membership, "assignment-with-reason", assignmentInput)
+	if err != nil {
 		t.Fatalf("third-party booking with reason: %v", err)
+	}
+	receivedActivity, err := f.bookings.ListActivity(f.ctx, member, periodID, 200)
+	if err != nil {
+		t.Fatalf("list received booking activity: %v", err)
+	}
+	foundReceivedBooking := false
+	for _, item := range receivedActivity {
+		if item.ID != receivedBooking.ID {
+			continue
+		}
+		foundReceivedBooking = true
+		if !item.CanVoid || !item.VoidReasonRequired || item.VoidWithoutReasonUntil != nil {
+			t.Fatalf("received booking metadata = canVoid:%t reasonRequired:%t deadline:%v", item.CanVoid, item.VoidReasonRequired, item.VoidWithoutReasonUntil)
+		}
+	}
+	if !foundReceivedBooking {
+		t.Fatal("received booking is missing from the affected member's activity")
+	}
+	if _, err := f.bookings.Void(f.ctx, memberPrincipal, member, "void-received-booking-empty", receivedBooking.ID, ""); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("received booking reversal without reason error=%v, want validation", err)
+	}
+	if _, err := f.bookings.Void(f.ctx, memberPrincipal, member, "void-received-booking", receivedBooking.ID, "This booking concerns my account"); err != nil {
+		t.Fatalf("void booking received by the affected member: %v", err)
 	}
 	var notifications int
 	if err := f.db.QueryRowContext(f.ctx, `SELECT count(*) FROM notifications WHERE membership_id=?`, member.ID).Scan(&notifications); err != nil || notifications != 1 {
@@ -756,15 +1117,40 @@ func TestBookingUndoAssignmentValidationAndBalancedLedger(t *testing.T) {
 	if _, err := f.bookings.Create(f.ctx, memberPrincipal, member, "foreign-booking", bookings.CreateInput{ProductID: primaryProduct.ID, ProductVersion: primaryProduct.Version, ExpectedPeriodID: periodID, Quantity: 1, TargetMembershipID: f.membership.ID}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("unauthorized foreign booking = %v, want forbidden", err)
 	}
-	if err := f.groups.UpdatePermissions(f.ctx, f.admin, f.membership, member.ID, groups.PermissionUpdate{CategoryGrants: map[string][]domain.CategoryPermission{primaryCategory.ID: {domain.PermissionAssignToOthers}}}); err != nil {
-		t.Fatalf("grant category assignment permission: %v", err)
-	}
-	member, err = f.groups.MembershipForUser(f.ctx, f.group.ID, memberPrincipal.UserID)
+	member = f.assignPermissionRole(member, "Booking delegates", domain.PermissionBookForOthers, domain.PermissionVoidOwnBooking)
+	roles, err := f.groups.ListRoles(f.ctx, f.membership)
 	if err != nil {
-		t.Fatalf("reload member grants: %v", err)
+		t.Fatalf("list booking delegate role: %v", err)
 	}
-	if _, err := f.bookings.Create(f.ctx, memberPrincipal, member, "foreign-booking-granted", bookings.CreateInput{ProductID: primaryProduct.ID, ProductVersion: primaryProduct.Version, ExpectedPeriodID: periodID, Quantity: 1, TargetMembershipID: f.membership.ID, Reason: "Team purchase"}); err != nil {
-		t.Fatalf("category-granted foreign booking: %v", err)
+	delegateRoleID := ""
+	for _, role := range roles {
+		if role.Name == "Booking delegates" {
+			delegateRoleID = role.ID
+			break
+		}
+	}
+	if delegateRoleID == "" {
+		t.Fatal("booking delegate role is missing")
+	}
+	if _, err := f.groups.ReplaceMemberRoles(f.ctx, f.admin, f.membership, member.ID, []string{delegateRoleID}, member.RoleAssignmentsVersion); err != nil {
+		t.Fatalf("replace member role with booking delegate: %v", err)
+	}
+	member, err = f.groups.MembershipForUser(f.ctx, member.GroupID, member.UserID)
+	if err != nil {
+		t.Fatalf("reload booking delegate membership: %v", err)
+	}
+	if _, err := f.bookings.Create(f.ctx, memberPrincipal, member, "self-booking-without-create-own", bookings.CreateInput{ProductID: primaryProduct.ID, ProductVersion: primaryProduct.Version, ExpectedPeriodID: periodID, Quantity: 1}); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("self booking without CREATE_OWN_BOOKING = %v, want forbidden", err)
+	}
+	delegatedBooking, err := f.bookings.Create(f.ctx, memberPrincipal, member, "foreign-booking-granted", bookings.CreateInput{ProductID: primaryProduct.ID, ProductVersion: primaryProduct.Version, ExpectedPeriodID: periodID, Quantity: 1, TargetMembershipID: f.membership.ID, Reason: "Team purchase"})
+	if err != nil {
+		t.Fatalf("role-granted foreign booking: %v", err)
+	}
+	if !delegatedBooking.CanVoid || delegatedBooking.VoidReasonRequired || delegatedBooking.VoidWithoutReasonUntil == nil {
+		t.Fatalf("self-created foreign-target booking metadata = canVoid:%t reasonRequired:%t deadline:%v", delegatedBooking.CanVoid, delegatedBooking.VoidReasonRequired, delegatedBooking.VoidWithoutReasonUntil)
+	}
+	if _, err := f.bookings.Void(f.ctx, memberPrincipal, member, "void-created-foreign-booking", delegatedBooking.ID, ""); err != nil {
+		t.Fatalf("void self-created foreign-target booking in grace window: %v", err)
 	}
 	adminPrimary, err := f.bookings.Create(f.ctx, f.admin, f.membership, "admin-only-primary", bookings.CreateInput{ProductID: primaryProduct.ID, ProductVersion: primaryProduct.Version, ExpectedPeriodID: periodID, Quantity: 1})
 	if err != nil {
@@ -783,65 +1169,56 @@ func TestBookingUndoAssignmentValidationAndBalancedLedger(t *testing.T) {
 			t.Fatalf("foreign booking %s leaked without void grant", item.ID)
 		}
 	}
-	if err := f.groups.UpdatePermissions(f.ctx, f.admin, f.membership, member.ID, groups.PermissionUpdate{CategoryGrants: map[string][]domain.CategoryPermission{primaryCategory.ID: {domain.PermissionAssignToOthers, domain.PermissionVoidBookings}}}); err != nil {
-		t.Fatalf("grant category void permission: %v", err)
-	}
-	member, err = f.groups.MembershipForUser(f.ctx, f.group.ID, memberPrincipal.UserID)
-	if err != nil {
-		t.Fatalf("reload member void grant: %v", err)
-	}
-	visible, err = f.bookings.List(f.ctx, member, periodID, 200)
-	if err != nil {
-		t.Fatalf("list after void grant: %v", err)
-	}
-	foundPrimary := false
-	for _, item := range visible {
-		if item.ID == adminPrimary.ID {
-			foundPrimary = item.CanVoid
-		}
-		if item.ID == adminOther.ID {
-			t.Fatal("foreign booking from an ungranted category was visible")
-		}
-	}
-	if !foundPrimary {
-		t.Fatal("category void grantee could not discover and manage the foreign booking")
-	}
 	activity, err := f.bookings.ListActivity(f.ctx, member, periodID, 200)
 	if err != nil {
-		t.Fatalf("list activity with disabled group setting: %v", err)
+		t.Fatalf("list activity before global void role: %v", err)
 	}
 	for _, item := range activity {
-		if item.ID == adminOther.ID {
-			t.Fatal("ungranted foreign booking leaked while group-wide visibility was disabled")
+		if item.ID == adminPrimary.ID || item.ID == adminOther.ID {
+			t.Fatalf("unrelated booking %s leaked before global void role", item.ID)
 		}
 	}
-	if _, err := f.groups.UpdateSettings(f.ctx, f.admin, f.membership, domain.GroupSettings{MembersCanViewAllBookings: true}); err != nil {
-		t.Fatalf("enable group-wide booking visibility: %v", err)
-	}
+	member = f.assignPermissionRole(member, "Finance without activity access", domain.PermissionFinanceManagement)
 	activity, err = f.bookings.ListActivity(f.ctx, member, periodID, 200)
 	if err != nil {
-		t.Fatalf("list activity with enabled group setting: %v", err)
+		t.Fatalf("list activity with finance-only role: %v", err)
 	}
-	foundOther := false
 	for _, item := range activity {
-		if item.ID == adminOther.ID {
-			foundOther = true
-			if item.CanVoid {
-				t.Fatal("group-wide read visibility unexpectedly granted void permission")
+		if item.ID == adminPrimary.ID || item.ID == adminOther.ID {
+			t.Fatalf("finance-only role exposed unrelated activity %s", item.ID)
+		}
+	}
+	member = f.assignPermissionRole(member, "Booking auditors", domain.PermissionVoidAnyBooking)
+	activity, err = f.bookings.ListActivity(f.ctx, member, periodID, 200)
+	if err != nil {
+		t.Fatalf("list activity after global void role: %v", err)
+	}
+	foundGlobalBookings := make(map[string]bool)
+	for _, item := range activity {
+		if item.ID == adminPrimary.ID || item.ID == adminOther.ID {
+			foundGlobalBookings[item.ID] = true
+			if !item.CanVoid || !item.VoidReasonRequired {
+				t.Fatalf("global booking metadata for %s = canVoid:%t reasonRequired:%t", item.ID, item.CanVoid, item.VoidReasonRequired)
 			}
 		}
 	}
-	if !foundOther {
-		t.Fatal("group-wide booking visibility did not expose historical foreign booking")
+	if !foundGlobalBookings[adminPrimary.ID] || !foundGlobalBookings[adminOther.ID] {
+		t.Fatalf("VOID_ANY_BOOKING implication did not expose both activity entries: %#v", foundGlobalBookings)
 	}
 	dashboardVisible, err := f.bookings.List(f.ctx, member, periodID, 200)
 	if err != nil {
 		t.Fatalf("list personal dashboard bookings: %v", err)
 	}
 	for _, item := range dashboardVisible {
-		if item.ID == adminOther.ID {
-			t.Fatal("group-wide activity setting changed the personal dashboard booking scope")
+		if item.ID == adminPrimary.ID || item.ID == adminOther.ID {
+			t.Fatal("activity visibility changed the personal dashboard booking scope")
 		}
+	}
+	if _, err := f.bookings.Void(f.ctx, memberPrincipal, member, "void-unrelated-booking-empty", adminOther.ID, ""); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("unrelated reversal without reason error=%v, want validation", err)
+	}
+	if _, err := f.bookings.Void(f.ctx, memberPrincipal, member, "void-unrelated-booking", adminOther.ID, "Reviewed by booking auditor"); err != nil {
+		t.Fatalf("void unrelated booking with VOID_ANY_BOOKING: %v", err)
 	}
 }
 

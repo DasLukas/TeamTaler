@@ -9,13 +9,17 @@ import type {
   LedgerEntry,
   Membership,
   Notification,
+  PermissionDefinition,
+  PermissionGrant,
   Payment,
   Period,
   Product,
+  Role,
+  RoleAssignment,
   Session,
   Settlement,
 } from './types';
-import { isCategoryIcon } from './types';
+import { isCategoryIcon, isPermissionKey } from './types';
 import { formatMoney } from './money';
 import i18n from '@/i18n';
 
@@ -30,6 +34,92 @@ const memberAvatarUrl = (membershipId: string, members?: Membership[]) => member
 const PAYMENT_DESCRIPTION_PREFIX = 'Payment received';
 const REVERSAL_DESCRIPTION_PREFIX = 'Reversal: ';
 const NOTIFICATION_EVENT_TYPES: Notification['eventType'][] = ['BOOKING_ASSIGNED', 'BOOKING_REVERSED', 'PAYMENT_RECORDED', 'PAYMENT_REVERSED', 'SETTLEMENT_CREATED'];
+
+/**
+ * Adapts allow grants and drops unsupported scopes or permission keys.
+ *
+ * @param input - Grant array returned by session, role, or membership endpoints.
+ * @returns Unique, group-scoped permission grants.
+ */
+export function adaptPermissionGrants(input: unknown): PermissionGrant[] {
+  if (!Array.isArray(input)) return [];
+  const permissions = new Set<PermissionGrant['permission']>();
+  for (const entry of input) {
+    if (typeof entry !== 'string' && (!entry || typeof entry !== 'object')) continue;
+    const source = typeof entry === 'string' ? { permission: entry } : asRecord(entry);
+    const permission = source.permission ?? source.permissionKey ?? source.key;
+    const scope = source.scope && typeof source.scope === 'object' ? asRecord(source.scope) : undefined;
+    const scopeType = scope?.type ?? source.scopeType ?? 'GROUP';
+    if (scopeType === 'GROUP' && isPermissionKey(permission)) permissions.add(permission);
+  }
+  return [...permissions].map((permission) => ({ permission, scope: { type: 'GROUP' } }));
+}
+
+/**
+ * Adapts one server-owned permission definition.
+ *
+ * @param input - Permission registry entry from the API.
+ * @returns Canonical metadata for the role editor.
+ * @throws TypeError when the entry contains an unknown permission key.
+ */
+export function adaptPermissionDefinition(input: unknown): PermissionDefinition {
+  const source = asRecord(input);
+  const key = source.key ?? source.permission;
+  if (!isPermissionKey(key)) throw new TypeError(`Unsupported permission definition: ${String(key)}`);
+  const implied = source.impliedPermissions ?? source.implies;
+  const allowedScopes = Array.isArray(source.allowedScopes)
+    ? source.allowedScopes.filter((scope): scope is 'GROUP' | 'CATEGORY' | 'PRODUCT' => scope === 'GROUP' || scope === 'CATEGORY' || scope === 'PRODUCT')
+    : undefined;
+  return {
+    key,
+    name: typeof source.name === 'string' && source.name ? source.name : undefined,
+    description: typeof source.description === 'string' && source.description ? source.description : undefined,
+    impliedPermissions: Array.isArray(implied) ? implied.filter(isPermissionKey) : [],
+    allowedScopes,
+  };
+}
+
+/**
+ * Adapts one group-owned role and its assignment counters.
+ *
+ * @param input - Role response from the API.
+ * @returns Canonical role used by role management.
+ */
+export function adaptRole(input: unknown): Role {
+  const source = asRecord(input);
+  return {
+    id: String(source.id ?? ''),
+    groupId: typeof source.groupId === 'string' ? source.groupId : undefined,
+    presetKey: typeof source.presetKey === 'string' ? source.presetKey as Role['presetKey'] : undefined,
+    name: typeof source.name === 'string' ? source.name : '',
+    description: typeof source.description === 'string' && source.description ? source.description : undefined,
+    nameLocked: typeof source.nameLocked === 'boolean' ? source.nameLocked : undefined,
+    deletable: typeof source.deletable === 'boolean' ? source.deletable : undefined,
+    grants: adaptPermissionGrants(source.grants),
+    version: Number(source.version ?? 1),
+    memberCount: Number(source.memberCount ?? 0),
+    pendingInvitationCount: Number(source.pendingInvitationCount ?? 0),
+    createdAt: typeof source.createdAt === 'string' ? source.createdAt : undefined,
+    updatedAt: typeof source.updatedAt === 'string' ? source.updatedAt : undefined,
+  };
+}
+
+/**
+ * Adapts one role assignment for a member or pending invitation.
+ *
+ * @param input - Assignment response from the API.
+ * @returns Canonical role assignment with optimistic-concurrency metadata.
+ */
+export function adaptRoleAssignment(input: unknown): RoleAssignment {
+  const source = asRecord(input);
+  return {
+    subjectType: source.subjectType === 'INVITATION' ? 'INVITATION' : 'MEMBERSHIP',
+    subjectId: String(source.subjectId ?? source.membershipId ?? source.invitationId ?? ''),
+    roleIds: Array.isArray(source.roleIds) ? source.roleIds.map(String) : [],
+    version: Number(source.version ?? 1),
+    etag: typeof source.etag === 'string' ? source.etag : undefined,
+  };
+}
 
 /**
  * Extracts the user-provided reference from a structured payment description.
@@ -99,6 +189,9 @@ export function adaptSession(input: unknown): Session {
         id: String(membership.id),
         roles: [...(membership.roles as GroupRole[] ?? []), 'MEMBER'],
         groupPermissions: (membership.groupPermissions as Membership['groupPermissions'] | undefined) ?? [],
+        roleIds: Array.isArray(membership.roleIds) ? membership.roleIds.map(String) : [],
+        effectiveGrants: adaptPermissionGrants(membership.effectiveGrants),
+        roleAssignmentsVersion: Number(membership.roleAssignmentsVersion ?? 1),
       } : undefined,
     } satisfies Group;
   });
@@ -174,6 +267,9 @@ export function adaptMembership(input: unknown, etag?: string): Membership {
   if ('categoryPermissions' in source) return {
     ...(source as unknown as Membership),
     groupPermissions: (source.groupPermissions as Membership['groupPermissions'] | undefined) ?? [],
+    roleIds: Array.isArray(source.roleIds) ? source.roleIds.map(String) : [],
+    effectiveGrants: adaptPermissionGrants(source.effectiveGrants),
+    roleAssignmentsVersion: Number(source.roleAssignmentsVersion ?? 1),
     etag: etag ?? source.etag as string | undefined,
   };
   const grants = (source.categoryGrants ?? {}) as Record<string, string[]>;
@@ -192,6 +288,9 @@ export function adaptMembership(input: unknown, etag?: string): Membership {
       assignToOthers: permissions.includes('ASSIGN_TO_OTHERS'),
       voidBookings: permissions.includes('VOID_BOOKINGS'),
     })),
+    roleIds: Array.isArray(source.roleIds) ? source.roleIds.map(String) : [],
+    effectiveGrants: adaptPermissionGrants(source.effectiveGrants),
+    roleAssignmentsVersion: Number(source.roleAssignmentsVersion ?? 1),
     active: source.status ? source.status === 'ACTIVE' : source.active !== false,
     etag,
   };
@@ -253,8 +352,10 @@ export function adaptBooking(input: unknown, members?: Membership[], fallbackMem
     bookedByAvatarUrl: memberAvatarUrl(actorId, members),
     reason: typeof source.reason === 'string' && source.reason ? source.reason : undefined,
     status: source.voidedAt ? 'REVERSED' : 'POSTED',
-    undoUntil: source.canVoid === true ? new Date(new Date(createdAt).getTime() + 30_000).toISOString() : undefined,
+    undoUntil: typeof source.voidWithoutReasonUntil === 'string' ? source.voidWithoutReasonUntil : typeof source.undoUntil === 'string' ? source.undoUntil : undefined,
     canVoid: source.canVoid === true,
+    voidReasonRequired: source.voidReasonRequired === true,
+    voidWithoutReasonUntil: typeof source.voidWithoutReasonUntil === 'string' ? source.voidWithoutReasonUntil : undefined,
   };
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -243,6 +244,9 @@ func TestRemoveCategoryTypeMigrationPreservesExistingRows(t *testing.T) {
 		`CREATE TABLE schema_migrations(version TEXT PRIMARY KEY) STRICT`,
 		`INSERT INTO schema_migrations(version) VALUES('0001_initial.sql')`,
 		`INSERT INTO schema_migrations(version) VALUES('0013_add_paypal_payment_method.sql')`,
+		`INSERT INTO schema_migrations(version) VALUES('0017_dynamic_role_permissions.sql')`,
+		`INSERT INTO schema_migrations(version) VALUES('0018_explicit_role_assignments.sql')`,
+		`INSERT INTO schema_migrations(version) VALUES('0019_default_membership_role.sql')`,
 		`CREATE TABLE users(id TEXT PRIMARY KEY) STRICT`,
 		`CREATE TABLE groups(id TEXT PRIMARY KEY) STRICT`,
 		`CREATE TABLE invitations(id TEXT PRIMARY KEY, group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE) STRICT`,
@@ -374,4 +378,314 @@ func TestOpenPeriodLabelMigrationPreservesCustomAndClosedLabels(t *testing.T) {
 			t.Fatalf("period %s label = %q err=%v, want %q", periodID, label, err, want)
 		}
 	}
+}
+
+func TestDynamicRoleMigrationBackfillsLegacyAccessAndDropsCategoryGrants(t *testing.T) {
+	ctx := context.Background()
+	db := openDatabaseThroughMigration(t, "0016_product_tombstones.sql")
+	defer db.Close()
+
+	now := "2026-08-07T09:00:00Z"
+	statements := []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('user-admin','admin@example.test','Admin','hash',?,?)`, []any{now, now}},
+		{`INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('user-finance','finance@example.test','Finance','hash',?,?)`, []any{now, now}},
+		{`INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('user-member','member@example.test','Member','hash',?,?)`, []any{now, now}},
+		{`INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('user-archived','archived@example.test','Archived','hash',?,?)`, []any{now, now}},
+		{`INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES('group-main','Main','EUR',?,?)`, []any{now, now}},
+		{`INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES('group-second','Second','EUR',?,?)`, []any{now, now}},
+		{`INSERT INTO group_settings(group_id,members_can_view_all_bookings,notification_emails_enabled,updated_at) VALUES('group-main',1,0,?)`, []any{now}},
+		{`INSERT INTO group_settings(group_id,members_can_view_all_bookings,notification_emails_enabled,updated_at) VALUES('group-second',0,0,?)`, []any{now}},
+		{`INSERT INTO memberships(id,group_id,user_id,status,joined_at) VALUES('member-admin','group-main','user-admin','ACTIVE',?)`, []any{now}},
+		{`INSERT INTO memberships(id,group_id,user_id,status,joined_at) VALUES('member-finance','group-main','user-finance','ACTIVE',?)`, []any{now}},
+		{`INSERT INTO memberships(id,group_id,user_id,status,joined_at) VALUES('member-regular','group-main','user-member','ACTIVE',?)`, []any{now}},
+		{`INSERT INTO memberships(id,group_id,user_id,status,joined_at,archived_at) VALUES('member-archived','group-main','user-archived','ARCHIVED',?,?)`, []any{now, now}},
+		{`INSERT INTO memberships(id,group_id,user_id,status,joined_at) VALUES('member-second-admin','group-second','user-admin','ACTIVE',?)`, []any{now}},
+		{`INSERT INTO membership_roles(group_id,membership_id,role,granted_at,granted_by) VALUES('group-main','member-admin','ADMIN',?,'user-admin')`, []any{now}},
+		{`INSERT INTO membership_roles(group_id,membership_id,role,granted_at,granted_by) VALUES('group-main','member-finance','FINANCE_MANAGER',?,'user-admin')`, []any{now}},
+		{`INSERT INTO membership_roles(group_id,membership_id,role,granted_at,granted_by) VALUES('group-main','member-regular','CATALOG_MANAGER',?,'user-admin')`, []any{now}},
+		{`INSERT INTO membership_roles(group_id,membership_id,role,granted_at,granted_by) VALUES('group-main','member-archived','CATALOG_MANAGER',?,'user-admin')`, []any{now}},
+		{`INSERT INTO membership_roles(group_id,membership_id,role,granted_at,granted_by) VALUES('group-second','member-second-admin','ADMIN',?,'user-admin')`, []any{now}},
+		{`INSERT INTO membership_permissions(group_id,membership_id,permission,granted_at,granted_by) VALUES('group-main','member-regular','SELF_RECORD_PAYMENT',?,'user-admin')`, []any{now}},
+		{`INSERT INTO categories(id,group_id,name,icon,active,sort_order,created_at,updated_at) VALUES('category-main','group-main','Main','other',1,0,?,?)`, []any{now, now}},
+		{`INSERT INTO category_permissions(group_id,membership_id,category_id,permission,granted_at,granted_by) VALUES('group-main','member-regular','category-main','ASSIGN_TO_OTHERS',?,'user-admin')`, []any{now}},
+		{`INSERT INTO invitations(id,group_id,email,display_name,token_hash,roles_json,group_permissions_json,category_grants_json,expires_at,created_by,created_at) VALUES('inv-pending','group-main','pending@example.test','Pending','pending-token','["CATALOG_MANAGER"]','["SELF_RECORD_PAYMENT"]','{"category-main":["VOID_BOOKINGS"]}','2099-01-01T00:00:00Z','user-admin',?)`, []any{now}},
+		{`INSERT INTO invitations(id,group_id,email,display_name,token_hash,roles_json,group_permissions_json,category_grants_json,expires_at,created_by,created_at) VALUES('inv-expired','group-main','expired@example.test','Expired','expired-token','["FINANCE_MANAGER"]','[]','{}','2000-01-01T00:00:00Z','user-admin',?)`, []any{now}},
+	}
+	for index, statement := range statements {
+		if _, err := db.ExecContext(ctx, statement.query, statement.args...); err != nil {
+			t.Fatalf("prepare dynamic-role legacy fixture %d: %v", index, err)
+		}
+	}
+
+	if err := Migrate(ctx, db); err != nil {
+		t.Fatalf("apply dynamic-role migration: %v", err)
+	}
+
+	var permissionCount, mainRoleCount, secondRoleCount int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM permission_definitions`).Scan(&permissionCount); err != nil {
+		t.Fatalf("count permission definitions: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM roles WHERE group_id='group-main'`).Scan(&mainRoleCount); err != nil {
+		t.Fatalf("count main roles: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM roles WHERE group_id='group-second'`).Scan(&secondRoleCount); err != nil {
+		t.Fatalf("count second roles: %v", err)
+	}
+	if permissionCount != 10 || mainRoleCount != 5 || secondRoleCount != 4 {
+		t.Fatalf("definitions/main roles/second roles = %d/%d/%d, want 10/5/4", permissionCount, mainRoleCount, secondRoleCount)
+	}
+	wantPresetGrantCounts := map[string]int{
+		"role:GROUP_ADMINISTRATOR:group-main": 10,
+		"role:MEMBER:group-main":              3,
+		"role:FINANCE_MANAGER:group-main":     3,
+		"role:CATALOG_MANAGER:group-main":     1,
+		"role:LEGACY_SELF_PAYMENT:group-main": 1,
+		"role:MEMBER:group-second":            2,
+	}
+	for roleID, want := range wantPresetGrantCounts {
+		var got int
+		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM role_permission_grants WHERE role_id=?`, roleID).Scan(&got); err != nil || got != want {
+			t.Fatalf("role %s grant count = %d, %v, want %d, nil", roleID, got, err, want)
+		}
+	}
+
+	wantMembershipPresets := map[string][]string{
+		"member-admin":        {"GROUP_ADMINISTRATOR", "MEMBER"},
+		"member-finance":      {"FINANCE_MANAGER", "MEMBER"},
+		"member-regular":      {"CATALOG_MANAGER", "MEMBER"},
+		"member-archived":     {},
+		"member-second-admin": {"GROUP_ADMINISTRATOR", "MEMBER"},
+	}
+	for membershipID, want := range wantMembershipPresets {
+		rows, err := db.QueryContext(ctx, `
+			SELECT r.preset_key
+			FROM membership_role_assignments a
+			JOIN roles r ON r.group_id=a.group_id AND r.id=a.role_id
+			WHERE a.membership_id=? AND r.preset_key IS NOT NULL
+			ORDER BY r.preset_key`, membershipID)
+		if err != nil {
+			t.Fatalf("list %s presets: %v", membershipID, err)
+		}
+		var got []string
+		for rows.Next() {
+			var preset string
+			if err := rows.Scan(&preset); err != nil {
+				rows.Close()
+				t.Fatalf("scan %s preset: %v", membershipID, err)
+			}
+			got = append(got, preset)
+		}
+		if err := rows.Close(); err != nil {
+			t.Fatalf("close %s presets: %v", membershipID, err)
+		}
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Fatalf("%s presets = %#v, want %#v", membershipID, got, want)
+		}
+	}
+
+	var regularSelfPaymentRole, pendingRoleCount, expiredRoleCount int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM membership_role_assignments WHERE membership_id='member-regular' AND role_id='role:LEGACY_SELF_PAYMENT:group-main'`).Scan(&regularSelfPaymentRole); err != nil {
+		t.Fatalf("read migrated self-payment membership role: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM invitation_role_assignments WHERE invitation_id='inv-pending'`).Scan(&pendingRoleCount); err != nil {
+		t.Fatalf("count pending invitation roles: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM invitation_role_assignments WHERE invitation_id='inv-expired'`).Scan(&expiredRoleCount); err != nil {
+		t.Fatalf("count expired invitation roles: %v", err)
+	}
+	if regularSelfPaymentRole != 1 || pendingRoleCount != 3 || expiredRoleCount != 0 {
+		t.Fatalf("self-payment/pending/expired assignments = %d/%d/%d, want 1/3/0", regularSelfPaymentRole, pendingRoleCount, expiredRoleCount)
+	}
+
+	var memberViewAllGrant, legacyCategoryGrantCount int
+	var invitationCategoryGrants string
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM role_permission_grants WHERE role_id='role:MEMBER:group-main' AND permission_key='VIEW_ALL_BOOKING_ACTIVITY' AND scope_type='GROUP'`).Scan(&memberViewAllGrant); err != nil {
+		t.Fatalf("read migrated group activity grant: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM category_permissions`).Scan(&legacyCategoryGrantCount); err != nil {
+		t.Fatalf("count discarded membership category grants: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT category_grants_json FROM invitations WHERE id='inv-pending'`).Scan(&invitationCategoryGrants); err != nil {
+		t.Fatalf("read discarded invitation category grants: %v", err)
+	}
+	if memberViewAllGrant != 1 || legacyCategoryGrantCount != 0 || invitationCategoryGrants != "{}" {
+		t.Fatalf("activity/category migration = %d/%d/%q, want 1/0/{}", memberViewAllGrant, legacyCategoryGrantCount, invitationCategoryGrants)
+	}
+
+	if rows, err := db.QueryContext(ctx, `PRAGMA foreign_key_check`); err != nil {
+		t.Fatalf("check dynamic-role migration foreign keys: %v", err)
+	} else {
+		defer rows.Close()
+		if rows.Next() {
+			t.Fatal("dynamic-role migration left a foreign-key violation")
+		}
+	}
+}
+
+func TestDynamicRoleSchemaEnforcesProtectedRoleAndAssignmentInvariants(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(ctx, filepath.Join(t.TempDir(), "dynamic-role-invariants.db"))
+	if err != nil {
+		t.Fatalf("open dynamic-role database: %v", err)
+	}
+	defer db.Close()
+
+	now := "2026-08-07T09:00:00Z"
+	statements := []string{
+		`INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('user-one','one@example.test','One','hash','2026-08-07T09:00:00Z','2026-08-07T09:00:00Z')`,
+		`INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('user-two','two@example.test','Two','hash','2026-08-07T09:00:00Z','2026-08-07T09:00:00Z')`,
+		`INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES('group-one','One','EUR','2026-08-07T09:00:00Z','2026-08-07T09:00:00Z')`,
+		`INSERT INTO memberships(id,group_id,user_id,status,joined_at) VALUES('member-one','group-one','user-one','ACTIVE','2026-08-07T09:00:00Z')`,
+		`INSERT INTO memberships(id,group_id,user_id,status,joined_at) VALUES('member-two','group-one','user-two','ACTIVE','2026-08-07T09:00:00Z')`,
+		`INSERT INTO membership_role_assignments(group_id,membership_id,role_id,assigned_at) VALUES('group-one','member-two','role:MEMBER:group-one','2026-08-07T09:00:00Z')`,
+	}
+	for index, statement := range statements {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("prepare role invariant fixture %d: %v", index, err)
+		}
+	}
+
+	assertRejected := func(name, statement, fragment string) {
+		t.Helper()
+		if _, err := db.ExecContext(ctx, statement); err == nil || !strings.Contains(err.Error(), fragment) {
+			t.Fatalf("%s error = %v, want fragment %q", name, err, fragment)
+		}
+	}
+	assertRejected("rename administrator role", `UPDATE roles SET name='Renamed' WHERE id='role:GROUP_ADMINISTRATOR:group-one'`, "CHECK constraint failed")
+	assertRejected("delete administrator role", `DELETE FROM roles WHERE id='role:GROUP_ADMINISTRATOR:group-one'`, "protected role cannot be deleted")
+	assertRejected("delete assigned member starter role", `DELETE FROM roles WHERE id='role:MEMBER:group-one'`, "assigned role cannot be deleted")
+	assertRejected("remove administrator core permission", `DELETE FROM role_permission_grants WHERE role_id='role:GROUP_ADMINISTRATOR:group-one' AND permission_key='ROLE_MANAGEMENT'`, "administrator core permissions cannot be removed")
+	assertRejected("remove final active member role", `DELETE FROM membership_role_assignments WHERE membership_id='member-two' AND role_id='role:MEMBER:group-one'`, "active memberships must retain at least one role")
+	assertRejected("remove last administrator", `DELETE FROM membership_role_assignments WHERE membership_id='member-one' AND role_id='role:GROUP_ADMINISTRATOR:group-one'`, "group must retain an active group administrator")
+	assertRejected("archive last administrator", `UPDATE memberships SET status='ARCHIVED',archived_at='2026-08-07T10:00:00Z' WHERE id='member-one'`, "group must retain an active group administrator")
+	assertRejected("duplicate case-insensitive role name", `INSERT INTO roles(id,group_id,name,created_at,updated_at) VALUES('role-duplicate','group-one','member','2026-08-07T09:00:00Z','2026-08-07T09:00:00Z')`, "UNIQUE constraint failed")
+	assertRejected("role name control character", "INSERT INTO roles(id,group_id,name,created_at,updated_at) VALUES('role-control','group-one','Bad\nName','2026-08-07T09:00:00Z','2026-08-07T09:00:00Z')", "CHECK constraint failed")
+
+	if _, err := db.ExecContext(ctx, `INSERT INTO membership_role_assignments(group_id,membership_id,role_id,assigned_at,assigned_by) VALUES('group-one','member-two','role:GROUP_ADMINISTRATOR:group-one',?,'user-one')`, now); err != nil {
+		t.Fatalf("assign second administrator: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO membership_role_assignments(group_id,membership_id,role_id,assigned_at,assigned_by) VALUES('group-one','member-one','role:MEMBER:group-one',?,'user-one')`, now); err != nil {
+		t.Fatalf("assign replacement role before administrator transfer: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM membership_role_assignments WHERE membership_id='member-one' AND role_id='role:GROUP_ADMINISTRATOR:group-one'`); err != nil {
+		t.Fatalf("remove administrator when a second remains: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE memberships SET status='ARCHIVED',archived_at=? WHERE id='member-one'`, now); err != nil {
+		t.Fatalf("archive non-administrator membership: %v", err)
+	}
+	var archivedAssignments int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM membership_role_assignments WHERE membership_id='member-one'`).Scan(&archivedAssignments); err != nil || archivedAssignments != 0 {
+		t.Fatalf("archived membership assignments = %d, %v, want 0, nil", archivedAssignments, err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO membership_role_assignments(group_id,membership_id,role_id,assigned_at) VALUES('group-one','member-one','role:CATALOG_MANAGER:group-one',?)`, now); err == nil || !strings.Contains(err.Error(), "roles can only be assigned to active memberships") {
+		t.Fatalf("archived membership assignment error = %v, want active-membership rejection", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `INSERT INTO roles(id,group_id,name,description,created_at,updated_at) VALUES('role-custom','group-one','Custom','Custom role',?,?)`, now, now); err != nil {
+		t.Fatalf("insert custom role: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO membership_role_assignments(group_id,membership_id,role_id,assigned_at) VALUES('group-one','member-two','role-custom',?)`, now); err != nil {
+		t.Fatalf("assign custom role: %v", err)
+	}
+	assertRejected("delete assigned custom role", `DELETE FROM roles WHERE id='role-custom'`, "assigned role cannot be deleted")
+	if _, err := db.ExecContext(ctx, `DELETE FROM membership_role_assignments WHERE membership_id='member-two' AND role_id='role-custom'`); err != nil {
+		t.Fatalf("remove custom membership assignment: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO invitations(id,group_id,email,token_hash,expires_at,created_by,created_at) VALUES('inv-expiring','group-one','expiring@example.test','expiring-token','2099-01-01T00:00:00Z','user-two',?)`, now); err != nil {
+		t.Fatalf("insert expiring invitation: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO invitation_role_assignments(group_id,invitation_id,role_id,assigned_at) VALUES('group-one','inv-expiring','role-custom',?)`, now); err != nil {
+		t.Fatalf("assign custom invitation role: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE invitations SET expires_at='2000-01-01T00:00:00Z' WHERE id='inv-expiring'`); err != nil {
+		t.Fatalf("expire invitation: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM roles WHERE id='role-custom'`); err != nil {
+		t.Fatalf("delete role assigned only to expired invitation: %v", err)
+	}
+}
+
+func TestDynamicRoleGrantScopeSchemaIsTenantSafeAndForwardCompatible(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(ctx, filepath.Join(t.TempDir(), "dynamic-role-scopes.db"))
+	if err != nil {
+		t.Fatalf("open dynamic-role scope database: %v", err)
+	}
+	defer db.Close()
+
+	now := "2026-08-07T09:00:00Z"
+	statements := []string{
+		`INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES('group-one','One','EUR','2026-08-07T09:00:00Z','2026-08-07T09:00:00Z')`,
+		`INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES('group-two','Two','EUR','2026-08-07T09:00:00Z','2026-08-07T09:00:00Z')`,
+		`INSERT INTO categories(id,group_id,name,icon,active,sort_order,created_at,updated_at) VALUES('category-one','group-one','One','other',1,0,'2026-08-07T09:00:00Z','2026-08-07T09:00:00Z')`,
+		`INSERT INTO categories(id,group_id,name,icon,active,sort_order,created_at,updated_at) VALUES('category-two','group-two','Two','other',1,0,'2026-08-07T09:00:00Z','2026-08-07T09:00:00Z')`,
+		`INSERT INTO products(id,group_id,category_id,name,price_minor,pricing_mode,active,sort_order,created_at,updated_at) VALUES('product-one','group-one','category-one','One',100,'FIXED',1,0,'2026-08-07T09:00:00Z','2026-08-07T09:00:00Z')`,
+	}
+	for index, statement := range statements {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("prepare role scope fixture %d: %v", index, err)
+		}
+	}
+
+	insert := `INSERT INTO role_permission_grants(group_id,role_id,permission_key,scope_type,category_id,product_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`
+	if _, err := db.ExecContext(ctx, insert, "group-one", "role:MEMBER:group-one", "BOOK_FOR_OTHERS", "CATEGORY", "category-one", nil, now, now); err != nil {
+		t.Fatalf("insert prepared category grant: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, insert, "group-one", "role:MEMBER:group-one", "BOOK_FOR_OTHERS", "PRODUCT", nil, "product-one", now, now); err != nil {
+		t.Fatalf("insert prepared product grant: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, insert, "group-one", "role:MEMBER:group-one", "FINANCE_MANAGEMENT", "CATEGORY", "category-two", nil, now, now); err == nil {
+		t.Fatal("cross-group category grant unexpectedly passed foreign keys")
+	}
+	if _, err := db.ExecContext(ctx, insert, "group-one", "role:MEMBER:group-one", "FINANCE_MANAGEMENT", "GROUP", "category-one", nil, now, now); err == nil {
+		t.Fatal("malformed group grant unexpectedly passed scope constraint")
+	}
+	if _, err := db.ExecContext(ctx, insert, "group-one", "role:MEMBER:group-two", "FINANCE_MANAGEMENT", "GROUP", nil, nil, now, now); err == nil {
+		t.Fatal("cross-group role grant unexpectedly passed foreign keys")
+	}
+}
+
+func openDatabaseThroughMigration(t *testing.T, lastMigration string) *sql.DB {
+	t.Helper()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "legacy-through-"+lastMigration+".db")
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatalf("open legacy migration database: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TABLE schema_migrations(version TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))) STRICT`); err != nil {
+		db.Close()
+		t.Fatalf("create legacy migration table: %v", err)
+	}
+	entries, err := migrations.Files.ReadDir(".")
+	if err != nil {
+		db.Close()
+		t.Fatalf("read migrations: %v", err)
+	}
+	var names []string
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".sql") && entry.Name() <= lastMigration {
+			names = append(names, entry.Name())
+		}
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		body, err := migrations.Files.ReadFile(name)
+		if err != nil {
+			db.Close()
+			t.Fatalf("read migration %s: %v", name, err)
+		}
+		if _, err := db.ExecContext(ctx, string(body)); err != nil {
+			db.Close()
+			t.Fatalf("apply legacy migration %s: %v", name, err)
+		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO schema_migrations(version) VALUES(?)`, name); err != nil {
+			db.Close()
+			t.Fatalf("mark legacy migration %s: %v", name, err)
+		}
+	}
+	return db
 }

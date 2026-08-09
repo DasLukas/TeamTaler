@@ -57,6 +57,7 @@ function renderActivities(): void {
 describe('ActivitiesPage booking traceability', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    apiMock.reverseBooking.mockResolvedValue(undefined);
     apiMock.getBookings.mockResolvedValue([thirdPartyBooking]);
     apiMock.getCategories.mockResolvedValue([{
       id: thirdPartyBooking.categoryId,
@@ -92,8 +93,58 @@ describe('ActivitiesPage booking traceability', () => {
     expect(row.querySelector('img[src="/avatars/manager.png"]')).toHaveAttribute('alt', '');
     expect(screen.getByRole('columnheader', { name: i18n.t('activities.bookedFor') })).toBeVisible();
     expect(screen.getByRole('columnheader', { name: i18n.t('activities.bookedBy') })).toBeVisible();
+    expect(within(row).getByRole('cell', { name: /Target Member/ })).toHaveAttribute('data-label', i18n.t('activities.bookedFor'));
+    expect(within(row).getByRole('cell', { name: /Assigning Manager/ })).toHaveAttribute('data-label', i18n.t('activities.bookedBy'));
+    expect(within(row).getByRole('cell', { name: thirdPartyBooking.productName })).toHaveAttribute('data-label', i18n.t('activities.booking'));
 
     await user.type(screen.getByLabelText(i18n.t('activities.searchLabel')), thirdPartyBooking.bookedByName);
     expect(await screen.findByRole('row', { name: /Target Member.*Assigning Manager/ })).toBeVisible();
+  });
+
+  it('allows a self-created booking inside the server-provided window without a reason', async () => {
+    const user = userEvent.setup();
+    apiMock.getBookings.mockResolvedValue([{
+      ...thirdPartyBooking,
+      id: 'booking-self-created',
+      memberId: 'member-viewer',
+      memberName: 'Viewer',
+      bookedByMemberId: 'member-viewer',
+      bookedByName: 'Viewer',
+      canVoid: true,
+      voidReasonRequired: false,
+      voidWithoutReasonUntil: '2026-08-07T12:00:30Z',
+    }]);
+    renderActivities();
+
+    await user.click(await screen.findByRole('button', { name: i18n.t('activities.reverse') }));
+    const reason = screen.getByLabelText(i18n.t('finance.reason'));
+    expect(reason).not.toBeRequired();
+    expect(screen.getByText(/ohne Begründung/)).toBeVisible();
+    await user.click(screen.getByRole('button', { name: i18n.t('activities.confirmReverse') }));
+
+    await waitFor(() => expect(apiMock.reverseBooking).toHaveBeenCalledWith('group-a', 'booking-self-created', ''));
+  });
+
+  it('always requires a reason for a received booking created by another member', async () => {
+    const user = userEvent.setup();
+    apiMock.getBookings.mockResolvedValue([{
+      ...thirdPartyBooking,
+      memberId: 'member-viewer',
+      memberName: 'Viewer',
+      canVoid: true,
+      voidReasonRequired: true,
+      voidWithoutReasonUntil: undefined,
+    }]);
+    renderActivities();
+
+    await user.click(await screen.findByRole('button', { name: i18n.t('activities.reverse') }));
+    const reason = screen.getByLabelText(i18n.t('finance.reason'));
+    const submit = screen.getByRole('button', { name: i18n.t('activities.confirmReverse') });
+    expect(reason).toBeRequired();
+    expect(submit).toBeDisabled();
+    await user.type(reason, 'Incorrect assignment');
+    await user.click(submit);
+
+    await waitFor(() => expect(apiMock.reverseBooking).toHaveBeenCalledWith('group-a', thirdPartyBooking.id, 'Incorrect assignment'));
   });
 });

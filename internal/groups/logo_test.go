@@ -47,6 +47,7 @@ func TestUpdateGroupSettings(t *testing.T) {
 		t.Fatalf("group-name audit count = %d err=%v", auditCount, err)
 	}
 	unauthorized := group.Membership
+	unauthorized.ID = "membership_without_group_administration"
 	unauthorized.Roles = nil
 	if _, err := service.UpdateName(ctx, session.Principal, unauthorized, "Forbidden Name"); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("non-admin update name error = %v, want forbidden", err)
