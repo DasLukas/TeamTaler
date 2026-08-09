@@ -69,7 +69,7 @@
 
 .form {
   display: grid;
-  max-width: 840px;
+  width: 100%;
   gap: var(--space-5);
 }
 

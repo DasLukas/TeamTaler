@@ -31,7 +31,9 @@ describe('MemberMultiSelect', () => {
     expect(screen.getByRole('group', { name: i18n.t('booking.regularMembers') })).toBeVisible();
     expect(screen.getByRole('group', { name: i18n.t('booking.guests') })).toBeVisible();
     expect(screen.getByRole('checkbox', { name: /Regular Member/ })).toBeEnabled();
-    expect(screen.getByRole('checkbox', { name: /Existing Guest/ })).toBeDisabled();
+    expect(screen.getByRole('checkbox', { name: 'Existing Guest' })).toBeDisabled();
+    expect(screen.getByPlaceholderText('Anzeigename')).toBeVisible();
+    expect(screen.queryByText('Der Gast wird erst zusammen mit der Buchung angelegt und benötigt kein Login.')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: i18n.t('booking.addGuestAction') })).toBeDisabled();
   });
 

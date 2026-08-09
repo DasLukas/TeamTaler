@@ -2754,11 +2754,15 @@ components:
         createdAt: { type: string, format: date-time }
     AccountSummary:
       type: object
-      required: [membershipId, displayName, status, currency, balanceMinor]
+      required: [membershipId, displayName, isTemporaryGuest, status, currency, balanceMinor]
       properties:
         membershipId: { type: string }
         displayName: { type: string }
         avatarUrl: { type: string }
+        isTemporaryGuest:
+          type: boolean
+          readOnly: true
+          description: True only while the account has no login credentials.
         status: { type: string, enum: [ACTIVE, ARCHIVED] }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         balanceMinor: { $ref: '#/components/schemas/MinorUnits' }

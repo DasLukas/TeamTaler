@@ -129,7 +129,7 @@ export function MemberMultiSelect({
   const renderTarget = (target: BookingTarget) => (
     <label className={styles.option} key={target.membershipId}>
       <input checked={selected.has(target.membershipId)} disabled={!selected.has(target.membershipId) && totalTargetCount >= MAX_BATCH_TARGETS} onChange={(event) => update(target.membershipId, event.target.checked)} type="checkbox" />
-      <span><strong>{target.displayName}</strong>{target.isTemporaryGuest ? <small>{t('booking.guest')}</small> : null}</span>
+      <span><strong>{target.displayName}</strong></span>
       {selected.has(target.membershipId) ? <Check aria-hidden="true" size={18} /> : null}
     </label>
   );
@@ -186,7 +186,6 @@ export function MemberMultiSelect({
                 <Button aria-label={t('booking.addGuestAction')} disabled={!guestName.trim() || totalTargetCount >= MAX_BATCH_TARGETS} onClick={addGuest} size="small" variant="secondary"><Plus size={17} /></Button>
               </div>
               {guestNameError ? <p className={styles.guestError} id={`${id}-guest-name-error`} role="alert">{guestNameError}</p> : null}
-              <p className={styles.guestHint}>{t('booking.guestCreationHint')}</p>
             </div> : null}
           </div> : null}
           {selectionError ? <p className={styles.guestError} role="alert">{selectionError}</p> : null}

@@ -311,10 +311,10 @@ export const demoLedger: LedgerEntry[] = [
 
 /** Consolidated demo account balances for the finance overview. */
 export const demoAccountSummaries: AccountSummary[] = [
-  { membershipId: 'member-lukas', displayName: 'Lukas Waschul', status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '2340', currency: 'EUR' } },
-  { membershipId: 'member-jonas', displayName: 'Jonas Krüger', status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '500', currency: 'EUR' } },
-  { membershipId: 'member-mara', displayName: 'Mara Becker', status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '-250', currency: 'EUR' } },
-  { membershipId: 'member-pia-archived', displayName: 'Pia Lehmann', status: 'ARCHIVED', currency: 'EUR', balance: { minorUnits: '0', currency: 'EUR' } },
+  { membershipId: 'member-lukas', displayName: 'Lukas Waschul', isTemporaryGuest: false, status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '2340', currency: 'EUR' } },
+  { membershipId: 'member-jonas', displayName: 'Jonas Krüger', isTemporaryGuest: false, status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '500', currency: 'EUR' } },
+  { membershipId: 'member-mara', displayName: 'Mara Becker', isTemporaryGuest: false, status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '-250', currency: 'EUR' } },
+  { membershipId: 'member-pia-archived', displayName: 'Pia Lehmann', isTemporaryGuest: false, status: 'ARCHIVED', currency: 'EUR', balance: { minorUnits: '0', currency: 'EUR' } },
 ];
 
 /** Demo payments managed by finance users. */

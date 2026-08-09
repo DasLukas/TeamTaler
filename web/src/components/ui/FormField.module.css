@@ -19,6 +19,10 @@
   font-size: var(--font-size-md);
 }
 
+.control[type='file'] {
+  padding-block: var(--space-2);
+}
+
 .control:hover {
   border-color: var(--color-navy-700);
 }

@@ -12,12 +12,14 @@
 .review dl > div:last-child { border-bottom: 0; }
 .review dt { color: var(--color-muted); }
 .review dd { min-width: 0; margin: 0; overflow-wrap: anywhere; text-align: right; }
+.review .paymentAmount { color: var(--color-green-600); }
 .error { margin: 0; color: var(--color-red-600); }
 .success { display: grid; place-items: center; gap: var(--space-3); padding: var(--space-8) var(--space-6); color: var(--color-green-600); text-align: center; }
 .success h3,
 .success p { margin: 0; }
 .success p { color: var(--color-muted); }
 .success > strong { margin-bottom: var(--space-4); color: var(--color-orange-600); font-size: var(--font-size-2xl); }
+.success > strong.creditBalance { color: var(--color-green-600); }
 
 @media (max-width: 600px) {
   .form,

@@ -307,7 +307,11 @@ describe('MembersPanel invitations', () => {
     renderMembers();
 
     expect(await screen.findByText(i18n.t('members.temporaryGuestBadge'))).toBeVisible();
-    expect(screen.getByText(i18n.t('members.noLogin'))).toBeVisible();
+    const guestRow = screen.getByRole('row', { name: new RegExp(temporaryGuest.displayName) });
+    const guestCells = within(guestRow).getAllByRole('cell');
+    expect(guestCells[1]).toBeEmptyDOMElement();
+    expect(guestCells[2]).toBeEmptyDOMElement();
+    expect(within(guestRow).getByText(i18n.t('members.claimGuest'), { exact: true })).toBeVisible();
     expect(screen.queryByRole('button', { name: i18n.t('roleManagement.editRolesFor', { name: temporaryGuest.displayName }) })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: i18n.t('members.renameGuestFor', { name: temporaryGuest.displayName }) }));

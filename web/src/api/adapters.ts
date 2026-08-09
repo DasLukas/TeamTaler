@@ -513,6 +513,7 @@ export function adaptAccountSummaries(input: unknown): AccountSummary[] {
       membershipId: String(source.membershipId),
       displayName: String(source.displayName),
       avatarUrl: typeof source.avatarUrl === 'string' && source.avatarUrl ? source.avatarUrl : undefined,
+      isTemporaryGuest: source.isTemporaryGuest === true,
       status: source.status === 'ARCHIVED' ? 'ARCHIVED' : 'ACTIVE',
       currency,
       balance: sourceBalance ? money(sourceBalance.minorUnits, sourceBalance.currency || currency) : money(source.balanceMinor, currency),

@@ -137,14 +137,12 @@
 .guestCreatorRow input { min-height: 42px; }
 .guestCreatorRow button { width: 42px; min-width: 42px; padding-inline: 0; }
 
-.guestHint,
 .guestError {
   margin: 0;
   font-size: var(--font-size-xs);
   line-height: 1.45;
 }
 
-.guestHint { color: var(--color-muted); }
 .guestError { color: var(--color-red-600); }
 
 @media (max-width: 767px) {

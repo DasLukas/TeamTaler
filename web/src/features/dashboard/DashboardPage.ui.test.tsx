@@ -48,8 +48,9 @@ describe('DashboardPage information-only overview', () => {
     expect(screen.getByText(i18n.t('dashboard.paymentNoteSelf'))).toBeVisible();
     expect(screen.getByRole('button', { name: i18n.t('selfPayment.action') })).toBeVisible();
     expect(screen.getByText(i18n.t('dashboard.allActivities'))).toBeVisible();
-    expect(screen.getByRole('heading', { name: i18n.t('dashboard.groupStatistics.title') })).toBeVisible();
-    expect(screen.getByText(i18n.t('dashboard.groupStatistics.intro'))).toBeVisible();
+    const groupStatisticsHeading = screen.getByRole('heading', { name: i18n.t('dashboard.groupStatistics.title') });
+    expect(groupStatisticsHeading).toBeVisible();
+    expect(groupStatisticsHeading.parentElement?.querySelector('p')).not.toBeInTheDocument();
     expect(screen.getByText(i18n.t('dashboard.groupStatistics.bookingCount', { count: 42 }))).toBeVisible();
     expect(screen.getByText(i18n.t('dashboard.groupStatistics.bookingCount', { count: 6 }))).toBeVisible();
     expect(screen.getByRole('img', { name: i18n.t('dashboard.groupStatistics.percentageLabel', { category: 'Getränke', percentage: 100 }) })).toBeVisible();
@@ -71,5 +72,14 @@ describe('DashboardPage information-only overview', () => {
     expect(await screen.findByText(i18n.t('dashboard.paymentNote'))).toBeVisible();
     expect(screen.queryByRole('button', { name: i18n.t('selfPayment.action') })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: i18n.t('dashboard.groupStatistics.title') })).not.toBeInTheDocument();
+  });
+
+  it('marks a negative open balance as credit in the member\'s favor', async () => {
+    mocks.getDashboard.mockResolvedValue({ ...demoDashboard, openBalance: { minorUnits: '-250', currency: 'EUR' } });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    render(<QueryClientProvider client={queryClient}><DashboardPage /></QueryClientProvider>);
+
+    expect(await screen.findByText(/-2,50/, { selector: 'strong[data-financial-state="credit"]' })).toBeVisible();
   });
 });

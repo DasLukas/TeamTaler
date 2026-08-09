@@ -217,6 +217,21 @@ export function formatMoney(money: Money, options?: Intl.NumberFormatOptions): s
 }
 
 /**
+ * Reports whether an open balance represents credit available to the member.
+ *
+ * Open balances use the ledger convention: positive values are owed by the
+ * member, while negative values are credit in the member's favor.
+ *
+ * @param money - Canonical open-balance value.
+ * @returns `true` when the balance is credit in the member's favor.
+ * @throws SyntaxError when minor units are not a valid integer string.
+ * @example `isCreditBalance({ minorUnits: '-250', currency: 'EUR' })` returns `true`.
+ */
+export function isCreditBalance(money: Money): boolean {
+  return BigInt(money.minorUnits) < 0n;
+}
+
+/**
  * Multiplies a monetary amount by an integer quantity.
  *
  * @param money - Unit amount.

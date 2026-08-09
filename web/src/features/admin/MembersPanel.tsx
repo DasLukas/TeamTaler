@@ -647,8 +647,8 @@ export function MembersPanel() {
           const temporaryGuest = isTemporaryGuest(member);
           const claimPending = claimInvitationMembershipIds.has(member.id);
           return <article className={styles.mobileCard} key={member.id}>
-            <header className={styles.mobileCardHeader}><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /><span><span className={styles.memberName}><strong>{member.displayName}</strong>{temporaryGuest ? <span className={styles.guestBadge}>{t('members.temporaryGuestBadge')}</span> : null}</span><small>{member.email ?? t('members.noLogin')}</small></span></span></header>
-            {temporaryGuest ? <p className={styles.temporaryGuestRole}>{t('members.temporaryGuestRole')}</p> : <RoleAssignmentPicker canManageGroup={canManageProtectedRoles} canManageRoles={canManageRoles} lockedRoleIds={lockedAdministratorRoleIds(member.roleIds ?? [])} onApply={(roleIds) => applyMemberRoles(member, roleIds)} roleIds={member.roleIds ?? []} roles={roles} subjectName={member.displayName} />}
+            <header className={styles.mobileCardHeader}><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /><span><span className={styles.memberName}><strong>{member.displayName}</strong>{temporaryGuest ? <span className={styles.guestBadge}>{t('members.temporaryGuestBadge')}</span> : null}</span>{member.email ? <small>{member.email}</small> : null}</span></span></header>
+            {!temporaryGuest ? <RoleAssignmentPicker canManageGroup={canManageProtectedRoles} canManageRoles={canManageRoles} lockedRoleIds={lockedAdministratorRoleIds(member.roleIds ?? [])} onApply={(roleIds) => applyMemberRoles(member, roleIds)} roleIds={member.roleIds ?? []} roles={roles} subjectName={member.displayName} /> : null}
             {canManageProtectedRoles ? <div className={styles.mobileActions}>
               {temporaryGuest ? <Button aria-label={t('members.renameGuestFor', { name: member.displayName })} leadingIcon={<Pencil size={16} />} onClick={() => openGuestRename(member)} size="small" variant="ghost">{t('members.renameGuest')}</Button> : null}
               {temporaryGuest ? renderGuestClaimAction(member, claimPending) : null}
@@ -663,8 +663,8 @@ export function MembersPanel() {
               const claimPending = claimInvitationMembershipIds.has(member.id);
               return <tr key={member.id}>
                 <td><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /> <span className={styles.memberName}><strong>{member.displayName}</strong>{temporaryGuest ? <span className={styles.guestBadge}>{t('members.temporaryGuestBadge')}</span> : null}</span></span></td>
-                <td>{member.email ?? <span className={styles.noLogin}>{t('members.noLogin')}</span>}</td>
-                <td className={styles.roleCell}>{temporaryGuest ? <span className={styles.temporaryGuestRole}>{t('members.temporaryGuestRole')}</span> : <RoleAssignmentPicker canManageGroup={canManageProtectedRoles} canManageRoles={canManageRoles} lockedRoleIds={lockedAdministratorRoleIds(member.roleIds ?? [])} onApply={(roleIds) => applyMemberRoles(member, roleIds)} roleIds={member.roleIds ?? []} roles={roles} subjectName={member.displayName} />}</td>
+                <td>{member.email}</td>
+                <td className={styles.roleCell}>{!temporaryGuest ? <RoleAssignmentPicker canManageGroup={canManageProtectedRoles} canManageRoles={canManageRoles} lockedRoleIds={lockedAdministratorRoleIds(member.roleIds ?? [])} onApply={(roleIds) => applyMemberRoles(member, roleIds)} roleIds={member.roleIds ?? []} roles={roles} subjectName={member.displayName} /> : null}</td>
                 {canManageProtectedRoles ? <td><div className={styles.tableActions}>
                   {temporaryGuest ? <Button aria-label={t('members.renameGuestFor', { name: member.displayName })} leadingIcon={<Pencil size={16} />} onClick={() => openGuestRename(member)} size="small" variant="ghost">{t('members.renameGuest')}</Button> : null}
                   {temporaryGuest ? renderGuestClaimAction(member, claimPending) : null}
@@ -681,7 +681,7 @@ export function MembersPanel() {
         {formerMembers.length === 0 ? <p className={styles.emptySection}>{t('members.noFormerMembers')}</p> : (
           <div className={tableStyles.tableWrap}><table className={tableStyles.table}>
             <thead><tr><th>{t('common.member')}</th><th>{t('members.email')}</th><th><span className="sr-only">{t('common.action')}</span></th></tr></thead>
-            <tbody>{formerMembers.map((member) => <tr key={member.id}><td><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /> <span className={styles.memberName}><strong>{member.displayName}</strong>{isTemporaryGuest(member) ? <span className={styles.guestBadge}>{t('members.temporaryGuestBadge')}</span> : null}</span></span></td><td>{member.email ?? <span className={styles.noLogin}>{t('members.noLogin')}</span>}</td><td>{member.email ? <Button leadingIcon={<MailPlus size={16} />} onClick={() => openInvite(member)} size="small" variant="ghost">{t('members.inviteAgain')}</Button> : null}</td></tr>)}</tbody>
+            <tbody>{formerMembers.map((member) => <tr key={member.id}><td><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /> <span className={styles.memberName}><strong>{member.displayName}</strong>{isTemporaryGuest(member) ? <span className={styles.guestBadge}>{t('members.temporaryGuestBadge')}</span> : null}</span></span></td><td>{member.email}</td><td>{member.email ? <Button leadingIcon={<MailPlus size={16} />} onClick={() => openInvite(member)} size="small" variant="ghost">{t('members.inviteAgain')}</Button> : null}</td></tr>)}</tbody>
           </table></div>
         )}
       </section> : null}

@@ -2,8 +2,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Copy from 'lucide-react/dist/esm/icons/copy';
 import LockKeyhole from 'lucide-react/dist/esm/icons/lock-keyhole';
 import Plus from 'lucide-react/dist/esm/icons/plus';
-import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check';
+import Star from 'lucide-react/dist/esm/icons/star';
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
+import UsersRound from 'lucide-react/dist/esm/icons/users-round';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
@@ -157,7 +158,10 @@ export function RightsPanel() {
         <aside className={styles.roleRail}>
           <div className={styles.roleRailHeader}><div><span>{t('roleManagement.title')}</span><strong>{t('roleManagement.roleCount', { count: roles.length })}</strong></div><Button aria-label={t('roleManagement.create')} leadingIcon={<Plus size={17} />} onClick={() => startCreate()} size="small">{t('roleManagement.create')}</Button></div>
           <div className={styles.roleCards}>
-            {roles.map((role) => <button className={!newRoleSeed && role.id === selectedRole?.id ? styles.selectedRole : undefined} key={role.id} onClick={() => selectRole(role.id)} type="button"><span><ShieldCheck aria-hidden="true" size={21} /><strong title={roleDisplayName(role)}>{roleDisplayName(role)}</strong>{role.presetKey === 'GROUP_ADMINISTRATOR' ? <LockKeyhole aria-label={t('roleManagement.preset')} size={15} /> : null}</span><small>{settingsQuery.data?.defaultRoleId === role.id ? t('roleManagement.defaultRole') : t('roleManagement.assignmentCount', { members: role.memberCount, invitations: role.pendingInvitationCount })}</small></button>)}
+            {roles.map((role) => {
+              const isDefaultRole = settingsQuery.data?.defaultRoleId === role.id;
+              return <button className={!newRoleSeed && role.id === selectedRole?.id ? styles.selectedRole : undefined} key={role.id} onClick={() => selectRole(role.id)} type="button"><span><UsersRound aria-hidden="true" size={21} /><strong title={roleDisplayName(role)}>{roleDisplayName(role)}</strong>{isDefaultRole ? <span aria-label={t('roleManagement.defaultRoleIndicator')} className={styles.defaultRoleIcon} role="img" title={t('roleManagement.defaultRoleIndicator')}><Star aria-hidden="true" fill="currentColor" size={16} /></span> : null}{role.presetKey === 'GROUP_ADMINISTRATOR' ? <LockKeyhole aria-label={t('roleManagement.preset')} size={15} /> : null}</span><small>{t('roleManagement.assignmentCount', { members: role.memberCount, invitations: role.pendingInvitationCount })}</small></button>;
+            })}
           </div>
         </aside>
         <div className={styles.roleDetail}>

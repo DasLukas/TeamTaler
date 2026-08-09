@@ -4,7 +4,7 @@ import CircleDollarSign from 'lucide-react/dist/esm/icons/circle-dollar-sign';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
-import { formatMoney, majorUnitsInputPattern, majorUnitsInputValue, majorUnitsPlaceholder, validatePositiveMajorUnits } from '@/api/money';
+import { formatMoney, isCreditBalance, majorUnitsInputPattern, majorUnitsInputValue, majorUnitsPlaceholder, validatePositiveMajorUnits } from '@/api/money';
 import type { Dashboard, Money, Payment, SelfPaymentCommand } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Button } from '@/components/ui/Button';
@@ -126,6 +126,7 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
   };
 
   const paymentMethod = command ? t(paymentMethodLabelKey(command.method)) : '';
+  const updatedBalanceIsCredit = updatedBalance ? isCreditBalance(updatedBalance) : false;
 
   return (
     <>
@@ -154,7 +155,7 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
             <p>{t('selfPayment.reviewIntro')}</p>
             <dl>
               <div><dt>{t('selfPayment.account')}</dt><dd>{session.user.displayName}</dd></div>
-              <div><dt>{t('common.amount')}</dt><dd><strong>{formatMoney(command.amount)}</strong></dd></div>
+              <div><dt>{t('common.amount')}</dt><dd><strong className={styles.paymentAmount} data-financial-state="payment">{formatMoney(command.amount)}</strong></dd></div>
               <div><dt>{t('common.date')}</dt><dd>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(`${receivedAt}T12:00:00`))}</dd></div>
               <div><dt>{t('finance.paymentType')}</dt><dd>{paymentMethod}</dd></div>
               <div><dt>{t('common.reference')}</dt><dd>{command.reference}</dd></div>
@@ -169,7 +170,7 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
             <CheckCircle2 aria-hidden="true" size={44} strokeWidth={1.6} />
             <h3>{t('selfPayment.successHeading', { amount: formatMoney(command.amount) })}</h3>
             <p>{t('selfPayment.updatedBalance')}</p>
-            <strong>{formatMoney(updatedBalance)}</strong>
+            <strong className={updatedBalanceIsCredit ? styles.creditBalance : undefined} data-financial-state={updatedBalanceIsCredit ? 'credit' : 'due'}>{formatMoney(updatedBalance)}</strong>
             <Button fullWidth onClick={closeDialog}>{t('common.done')}</Button>
           </div>
         ) : null}

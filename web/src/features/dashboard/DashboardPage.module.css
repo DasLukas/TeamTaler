@@ -37,11 +37,15 @@
 .balanceCard > div:first-child > span,
 .period strong { color: var(--color-ink); font-weight: 700; }
 
-.balanceCard > div:first-child strong {
+.balanceCard > div:first-child > strong {
   color: var(--color-orange-600);
   font-size: clamp(2.5rem, 5vw, 3.7rem);
   letter-spacing: -0.04em;
   white-space: nowrap;
+}
+
+.balanceCard > div:first-child > strong.creditBalance {
+  color: var(--color-green-600);
 }
 
 .period {
@@ -128,7 +132,7 @@
   .balanceCard { min-height: 110px; grid-template-columns: 1fr; }
   .balanceCard > div:first-child { padding-right: 0; }
   .period { display: none; }
-  .balanceCard > div:first-child strong { font-size: 2.3rem; }
+  .balanceCard > div:first-child > strong { font-size: 2.3rem; }
   .selfPaymentAction { width: 100%; }
   .lower { grid-template-columns: 1fr; }
   .periodSection { order: -1; }

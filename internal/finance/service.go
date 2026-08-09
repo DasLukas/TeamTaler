@@ -68,15 +68,17 @@ type Account struct {
 	RecentEntries      []LedgerEntry       `json:"recentEntries"`
 }
 
-// AccountSummary exposes one group membership's consolidated receivable to
-// authorized finance managers without returning its ledger movements.
+// AccountSummary exposes one group membership's consolidated receivable and
+// credential-derived temporary-guest classification to authorized finance
+// managers without returning credentials or ledger movements.
 type AccountSummary struct {
-	MembershipID string `json:"membershipId"`
-	DisplayName  string `json:"displayName"`
-	AvatarURL    string `json:"avatarUrl,omitempty"`
-	Status       string `json:"status"`
-	Currency     string `json:"currency"`
-	BalanceMinor int64  `json:"balanceMinor,string"`
+	MembershipID     string `json:"membershipId"`
+	DisplayName      string `json:"displayName"`
+	AvatarURL        string `json:"avatarUrl,omitempty"`
+	IsTemporaryGuest bool   `json:"isTemporaryGuest"`
+	Status           string `json:"status"`
+	Currency         string `json:"currency"`
+	BalanceMinor     int64  `json:"balanceMinor,string"`
 }
 
 // LedgerEntry is one immutable movement on a member receivable account. Positive
@@ -212,13 +214,14 @@ func (s Service) ListAccountSummaries(ctx context.Context, membership domain.Mem
 	if err := requirePermission(ctx, s.DB, membership, domain.PermissionFinanceManagement); err != nil {
 		return nil, err
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT m.id,u.id,u.display_name,u.avatar_key,m.status,g.currency,coalesce(sum(le.amount_minor),0)
+	rows, err := s.DB.QueryContext(ctx, `SELECT m.id,u.id,u.display_name,u.avatar_key,
+		(u.email IS NULL AND u.password_hash IS NULL),m.status,g.currency,coalesce(sum(le.amount_minor),0)
 		FROM memberships m
 		JOIN users u ON u.id=m.user_id
 		JOIN groups g ON g.id=m.group_id
 		LEFT JOIN ledger_entries le ON le.group_id=m.group_id AND le.membership_id=m.id AND le.account='MEMBER_RECEIVABLE'
 		WHERE m.group_id=?
-		GROUP BY m.id,u.id,u.display_name,u.avatar_key,m.status,g.currency
+		GROUP BY m.id,u.id,u.display_name,u.avatar_key,u.email,u.password_hash,m.status,g.currency
 		ORDER BY CASE m.status WHEN 'ACTIVE' THEN 0 ELSE 1 END,
 			coalesce(sum(le.amount_minor),0) DESC,lower(u.display_name),m.id`, membership.GroupID)
 	if err != nil {
@@ -230,7 +233,7 @@ func (s Service) ListAccountSummaries(ctx context.Context, membership domain.Mem
 		var item AccountSummary
 		var userID string
 		var avatarKey sql.NullString
-		if err := rows.Scan(&item.MembershipID, &userID, &item.DisplayName, &avatarKey, &item.Status, &item.Currency, &item.BalanceMinor); err != nil {
+		if err := rows.Scan(&item.MembershipID, &userID, &item.DisplayName, &avatarKey, &item.IsTemporaryGuest, &item.Status, &item.Currency, &item.BalanceMinor); err != nil {
 			return nil, err
 		}
 		item.AvatarURL = media.UserAvatarURL(userID, avatarKey.String)

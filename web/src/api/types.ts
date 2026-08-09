@@ -408,6 +408,7 @@ export interface AccountSummary {
   membershipId: string;
   displayName: string;
   avatarUrl?: string;
+  isTemporaryGuest: boolean;
   status: 'ACTIVE' | 'ARCHIVED';
   currency: string;
   balance: Money;

@@ -16,7 +16,6 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import GripVertical from 'lucide-react/dist/esm/icons/grip-vertical';
-import ImagePlus from 'lucide-react/dist/esm/icons/image-plus';
 import Pencil from 'lucide-react/dist/esm/icons/pencil';
 import Plus from 'lucide-react/dist/esm/icons/plus';
 import { useTranslation } from 'react-i18next';
@@ -46,8 +45,8 @@ function SortableProduct({ disabled, product, onEdit }: SortableProductProps) {
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
     >
-      {product.imageUrl ? <img alt="" src={product.imageUrl} /> : <span className={styles.imageFallback}><ImagePlus size={26} /></span>}
-      <div><strong>{product.name}</strong><span>{product.pricingMode === 'FIXED' && product.price ? formatMoney(product.price) : t('catalog.userDefinedPrice')}</span></div>
+      {product.imageUrl ? <img alt="" src={product.imageUrl} /> : <span className={styles.imageFallback}>{product.name.slice(0, 1)}</span>}
+      <div><strong title={product.name}>{product.name}</strong><span>{product.pricingMode === 'FIXED' && product.price ? formatMoney(product.price) : t('catalog.userDefinedPrice')}</span></div>
       <small>{product.active ? t('common.active') : t('common.archived')}</small>
       <IconButton className={styles.productEdit} label={t('catalog.editProduct', { name: product.name })} onClick={() => onEdit(product)} variant="surface"><Pencil size={16} /></IconButton>
       <IconButton

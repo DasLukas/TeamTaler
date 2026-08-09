@@ -4,7 +4,7 @@ import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
-import { formatMoney } from '@/api/money';
+import { formatMoney, isCreditBalance } from '@/api/money';
 import { canRecordOwnPayment } from '@/app/groupCapabilities';
 import { can } from '@/app/permissions';
 import { useActiveGroup } from '@/app/useActiveGroup';
@@ -59,13 +59,14 @@ export function DashboardPage() {
   const greeting = t(`dashboard.${getDashboardGreetingKey(localHour)}`);
   const canRecordPayment = canRecordOwnPayment(activeGroup.membership?.effectiveGrants);
   const canViewGroupStatistics = can(activeGroup.membership?.effectiveGrants, 'VIEW_GROUP_STATISTICS');
+  const hasCreditBalance = isCreditBalance(dashboard.openBalance);
 
   return (
     <div className={styles.dashboard}>
       <section className={styles.content}>
         <h1>{greeting}, {session.user.displayName.split(' ')[0]}</h1>
         <div className={styles.balanceCard}>
-          <div><span>{t('booking.openBalance')}</span><strong>{formatMoney(dashboard.openBalance)}</strong>{canRecordPayment ? <SelfPaymentDialog className={styles.selfPaymentAction} openBalance={dashboard.openBalance} /> : null}</div>
+          <div><span>{t('booking.openBalance')}</span><strong className={hasCreditBalance ? styles.creditBalance : undefined} data-financial-state={hasCreditBalance ? 'credit' : 'due'}>{formatMoney(dashboard.openBalance)}</strong>{canRecordPayment ? <SelfPaymentDialog className={styles.selfPaymentAction} openBalance={dashboard.openBalance} /> : null}</div>
           <div className={styles.period}><strong>{t('dashboard.settlement', { label: dashboard.currentPeriod.label.split(' ')[0] })}</strong><p>{t(canRecordPayment ? 'dashboard.paymentNoteSelf' : 'dashboard.paymentNote')}</p></div>
         </div>
 

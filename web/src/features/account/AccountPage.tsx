@@ -3,7 +3,7 @@ import Download from 'lucide-react/dist/esm/icons/download';
 import Printer from 'lucide-react/dist/esm/icons/printer';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
-import { formatMoney } from '@/api/money';
+import { formatMoney, isCreditBalance } from '@/api/money';
 import type { LedgerEntry } from '@/api/types';
 import { canRecordOwnPayment } from '@/app/groupCapabilities';
 import { useActiveGroup } from '@/app/useActiveGroup';
@@ -50,13 +50,14 @@ export function AccountPage() {
   if (ledgerQuery.isError || !ledgerQuery.data || !dashboardQuery.data || !settlementsQuery.data) return <Page title={t('account.title')}><StatePanel kind="error" message={t('account.error')} /></Page>;
 
   const balance = dashboardQuery.data.openBalance;
+  const hasCreditBalance = isCreditBalance(balance);
   const canRecordPayment = canRecordOwnPayment(activeGroup.membership?.effectiveGrants);
   const ownSettlements = settlementsQuery.data.filter((settlement) => settlement.membershipId === activeGroup.membership?.id);
   return (
     <Page actions={<><Button leadingIcon={<Download size={18} />} onClick={() => downloadLedger(ledgerQuery.data)} variant="secondary">{t('account.csvExport')}</Button><Button leadingIcon={<Printer size={18} />} onClick={() => window.print()}>{t('common.print')}</Button></>} intro={t('account.intro')} title={t('account.title')} wide>
       <ProfileImagePanel />
       <section className={styles.balance}>
-        <div className={styles.balanceValue}><span>{t('account.currentOpenAmount')}</span><strong>{formatMoney(balance)}</strong></div>
+        <div className={styles.balanceValue}><span>{t('account.currentOpenAmount')}</span><strong className={hasCreditBalance ? styles.creditBalance : undefined} data-financial-state={hasCreditBalance ? 'credit' : 'due'}>{formatMoney(balance)}</strong></div>
         {canRecordPayment ? <SelfPaymentDialog className={styles.paymentAction} openBalance={balance} /> : null}
       </section>
       <section className={styles.settlements}>

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -20,8 +20,9 @@ vi.mock('@/app/useActiveGroup', () => ({
 }));
 
 const accounts: AccountSummary[] = [
-  { membershipId: 'member-active', displayName: 'Active Account', status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '0', currency: 'EUR' } },
-  { membershipId: 'member-archived', displayName: 'Archived Account', status: 'ARCHIVED', currency: 'EUR', balance: { minorUnits: '500', currency: 'EUR' } },
+  { membershipId: 'member-active', displayName: 'Active Account', isTemporaryGuest: false, status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '0', currency: 'EUR' } },
+  { membershipId: 'member-guest', displayName: 'Temporary Guest', isTemporaryGuest: true, status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '100', currency: 'EUR' } },
+  { membershipId: 'member-archived', displayName: 'Archived Account', isTemporaryGuest: false, status: 'ARCHIVED', currency: 'EUR', balance: { minorUnits: '500', currency: 'EUR' } },
 ];
 
 function renderPayments(): void {
@@ -44,7 +45,13 @@ describe('PaymentsPanel', () => {
     await waitFor(() => expect(apiMock.getAccountSummaries).toHaveBeenCalledWith('group-a'));
     await user.click((await screen.findAllByRole('button', { name: i18n.t('finance.record') }))[0]);
 
-    expect(screen.getByRole('option', { name: 'Active Account' })).toBeVisible();
+    const accountSelect = screen.getByLabelText(i18n.t('common.member'));
+    const groups = within(accountSelect).getAllByRole('group');
+    expect(groups).toHaveLength(2);
+    expect(groups[0]).toHaveAttribute('label', i18n.t('booking.regularMembers'));
+    expect(within(groups[0]).getByRole('option', { name: 'Active Account' })).toBeVisible();
+    expect(groups[1]).toHaveAttribute('label', i18n.t('booking.guests'));
+    expect(within(groups[1]).getByRole('option', { name: 'Temporary Guest' })).toBeVisible();
     expect(screen.queryByRole('option', { name: 'Archived Account' })).not.toBeInTheDocument();
   });
 });

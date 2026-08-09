@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   getRoleAssignments: vi.fn(),
   getMembers: vi.fn(),
   getInvitations: vi.fn(),
+  getGroupSettings: vi.fn(),
   updateRole: vi.fn(),
   useActiveGroup: vi.fn(),
 }));
@@ -48,6 +49,7 @@ describe('RightsPanel role definitions', () => {
     });
     mocks.getRoles.mockResolvedValue([baseRole]);
     mocks.getPermissionDefinitions.mockResolvedValue([{ key: 'VOID_OWN_BOOKING' }]);
+    mocks.getGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
     mocks.updateRole.mockResolvedValue({ ...baseRole, grants: [], version: 2 });
   });
 
@@ -59,6 +61,19 @@ describe('RightsPanel role definitions', () => {
     expect(mocks.getRoleAssignments).not.toHaveBeenCalled();
     expect(mocks.getMembers).not.toHaveBeenCalled();
     expect(mocks.getInvitations).not.toHaveBeenCalled();
+  });
+
+  it('keeps assignment counts visible and marks the default role with a labelled icon', async () => {
+    mocks.useActiveGroup.mockReturnValue({
+      activeGroupId: 'group-a',
+      activeGroup: { id: 'group-a', membership: { effectiveGrants: [{ permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }] } },
+    });
+    mocks.getRoles.mockResolvedValue([{ ...baseRole, memberCount: 3, pendingInvitationCount: 2 }]);
+    renderPanel();
+
+    const roleButton = await screen.findByRole('button', { name: /Mitglied/ });
+    expect(within(roleButton).getByText('3 Mitglieder · 2 Einladungen')).toBeVisible();
+    expect(within(roleButton).getByRole('img', { name: 'Standardrolle für neue Mitglieder' })).toHaveAttribute('title', 'Standardrolle für neue Mitglieder');
   });
 
   it('localizes an unchanged preset description in the editor', async () => {

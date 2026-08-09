@@ -6,7 +6,6 @@ import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { formatMoney } from '@/api/money';
 import type { Booking } from '@/api/types';
-import { can } from '@/app/permissions';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Page } from '@/components/layout/Page';
 import { Avatar } from '@/components/ui/Avatar';
@@ -24,7 +23,7 @@ import styles from './ActivitiesPage.module.css';
  */
 export function ActivitiesPage() {
   const { t } = useTranslation();
-  const { activeGroupId, activeGroup } = useActiveGroup();
+  const { activeGroupId } = useActiveGroup();
   const queryClient = useQueryClient();
   const bookingsQuery = useQuery({ queryKey: ['bookings', activeGroupId], queryFn: () => api.getBookings(activeGroupId) });
   const categoriesQuery = useQuery({ queryKey: ['categories', activeGroupId], queryFn: () => api.getCategories(activeGroupId) });
@@ -64,10 +63,8 @@ export function ActivitiesPage() {
     action: t('common.action'),
   };
 
-  const canViewAll = can(activeGroup.membership?.effectiveGrants, 'VIEW_ALL_BOOKING_ACTIVITY');
-
   return (
-    <Page className={styles.page} intro={t(canViewAll ? 'activities.introAll' : 'activities.introOwn')} title={t('activities.title')} wide>
+    <Page className={styles.page} title={t('activities.title')} wide>
       <div className={tableStyles.toolbar}>
         <div className={tableStyles.search}>
           <Field htmlFor="activity-search" label={t('activities.searchLabel')}>

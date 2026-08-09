@@ -5,7 +5,7 @@ import WalletCards from 'lucide-react/dist/esm/icons/wallet-cards';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
-import { formatMoney } from '@/api/money';
+import { formatMoney, isCreditBalance } from '@/api/money';
 import type { Product } from '@/api/types';
 import { hasGroupCapability } from '@/app/groupCapabilities';
 import { memberPaths } from '@/app/paths';
@@ -66,6 +66,8 @@ export function BookingPage() {
     return <div className={styles.state}><StatePanel kind="empty" title={t('booking.noProductsTitle')} message={t('booking.noProductsMessage')}>{canManageCatalog ? <Link className={styles.catalogLink} to={memberPaths.catalog}>{t('booking.catalogLink')}</Link> : null}</StatePanel></div>;
   }
 
+  const hasCreditBalance = isCreditBalance(bookingContextQuery.data.ownBalance);
+
   const inspector = selectedProduct && selectedCategory ? (
     <BookingInspector
       compact
@@ -86,7 +88,7 @@ export function BookingPage() {
       <section className={styles.content}>
         <h1>{t('booking.quickTitle')}</h1>
         <div className={styles.balance}>
-          <div><span>{t('booking.openBalance')}</span><strong>{formatMoney(bookingContextQuery.data.ownBalance)}</strong></div>
+          <div><span>{t('booking.openBalance')}</span><strong className={hasCreditBalance ? styles.creditBalance : undefined} data-financial-state={hasCreditBalance ? 'credit' : 'due'}>{formatMoney(bookingContextQuery.data.ownBalance)}</strong></div>
           <WalletCards aria-hidden="true" size={40} strokeWidth={1.8} />
         </div>
         <ProductPicker
@@ -100,11 +102,9 @@ export function BookingPage() {
       </section>
       {!compact ? (
         <aside
-          aria-label={selectedProduct ? undefined : t('booking.selectProductTitle')}
-          aria-labelledby={selectedProduct ? 'booking-inspector-title' : undefined}
+          aria-label={selectedProduct ? t('booking.productTitle', { name: selectedProduct.name }) : t('booking.selectProductTitle')}
           className={styles.inspector}
         >
-          {selectedProduct ? <h2 id="booking-inspector-title">{t('booking.productTitle', { name: selectedProduct.name })}</h2> : null}
           {inspector ?? (
             <div className={styles.inspectorEmpty}>
               <MousePointerClick aria-hidden="true" size={42} strokeWidth={1.6} />

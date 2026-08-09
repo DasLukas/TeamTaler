@@ -154,12 +154,6 @@ export function BookingInspector({
         <div><strong>{product.name}</strong><span>{product.pricingMode === 'FIXED' && product.price ? formatMoney(product.price) : t('booking.enterPrice')}</span></div>
       </div>
 
-      {userDefinesPrice ? (
-        <Field error={unitPriceTouched ? unitPriceValidation.error : undefined} htmlFor="booking-unit-price" label={t('booking.unitPrice', { currency: product.currency })}>
-          <TextInput autoComplete="off" id="booking-unit-price" inputMode="decimal" onBlur={() => setUnitPriceTouched(true)} onChange={(event) => setUnitPriceInput(event.target.value)} pattern={majorUnitsInputPattern(product.currency)} placeholder={majorUnitsPlaceholder(product.currency)} required type="text" value={unitPriceInput} />
-        </Field>
-      ) : null}
-
       <Field htmlFor="booking-member" label={t('booking.forMember')}>
         {canAssignOthers ? (
           <MemberMultiSelect
@@ -182,9 +176,15 @@ export function BookingInspector({
         )}
       </Field>
 
+      {userDefinesPrice ? (
+        <Field error={unitPriceTouched ? unitPriceValidation.error : undefined} htmlFor="booking-unit-price" label={t('booking.unitPrice', { currency: product.currency })}>
+          <TextInput autoComplete="off" id="booking-unit-price" inputMode="decimal" onBlur={() => setUnitPriceTouched(true)} onChange={(event) => setUnitPriceInput(event.target.value)} pattern={majorUnitsInputPattern(product.currency)} placeholder={majorUnitsPlaceholder(product.currency)} required type="text" value={unitPriceInput} />
+        </Field>
+      ) : null}
+
       {needsReason ? (
-        <Field error={!reason.trim() && bookingMutation.isError ? t('booking.reasonRequired') : undefined} htmlFor="booking-reason" label={t('booking.reason')}>
-          <TextInput id="booking-reason" onChange={(event) => setReason(event.target.value)} placeholder={t('booking.reasonPlaceholder')} required value={reason} />
+        <Field error={!reason.trim() && bookingMutation.isError ? t('booking.reasonRequired') : undefined} htmlFor="booking-reason" label={`${t('booking.reason')} *`}>
+          <TextInput id="booking-reason" onChange={(event) => setReason(event.target.value)} required value={reason} />
         </Field>
       ) : null}
 
@@ -197,9 +197,11 @@ export function BookingInspector({
       </Field>
 
       <div className={styles.total}>
-        <span>{targetCount > 1 ? t('booking.combinedTotal', { count: targetCount }) : t('booking.total')}</span>
+        <div className={styles.totalCopy}>
+          <span>{t('booking.total')}</span>
+          {targetCount > 1 && totalPerMember ? <small>{t('booking.totalPerMember', { total: formatMoney(totalPerMember) })}</small> : null}
+        </div>
         <strong>{combinedTotal ? formatMoney(combinedTotal) : '—'}</strong>
-        {targetCount > 1 && totalPerMember ? <small>{t('booking.totalPerMember', { total: formatMoney(totalPerMember) })}</small> : null}
       </div>
       {bookingMutation.isError ? <p className={styles.error} role="alert">{bookingMutation.error.message}</p> : null}
       <div className={styles.actions}>

@@ -13,6 +13,7 @@
 .roleCards button > span > svg { flex: 0 0 auto; color: var(--color-teal-700); }
 .roleCards button > span > svg:last-child { margin-left: auto; color: var(--color-muted); }
 .roleCards button > span > strong { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.defaultRoleIcon { display: inline-flex; flex: 0 0 auto; margin-left: auto; color: var(--color-orange-600); }
 .roleCards small { color: var(--color-muted); line-height: 1.35; }
 .roleDetail { position: relative; min-width: 0; }
 .roleEditor { display: grid; gap: var(--space-6); padding: var(--space-6); }

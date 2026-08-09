@@ -87,13 +87,14 @@ describe('BookingInspector category-neutral booking rules', () => {
     await user.click(screen.getByRole('checkbox', { name: /Target Member/ }));
 
     const submit = screen.getByRole('button', { name: i18n.t('booking.submitMultiple', { count: 2 }) });
-    expect(screen.getByLabelText(i18n.t('booking.reason'))).toBeRequired();
+    const reasonLabel = `${i18n.t('booking.reason')} *`;
+    expect(screen.getByLabelText(reasonLabel)).toBeRequired();
     expect(screen.getByText(i18n.t('booking.quantity'))).toBeVisible();
     expect(submit).toBeDisabled();
 
-    await user.type(screen.getByLabelText(i18n.t('booking.reason')), 'Shared team purchase');
+    await user.type(screen.getByLabelText(reasonLabel), 'Shared team purchase');
     await user.click(screen.getByRole('button', { name: i18n.t('booking.increaseQuantity') }));
-    expect(screen.getByText(i18n.t('booking.combinedTotal', { count: 2 }))).toBeVisible();
+    expect(screen.getByText(i18n.t('booking.total'))).toBeVisible();
     expect(screen.getByText(/2,00.*pro Mitglied/)).toBeVisible();
     await user.click(submit);
 
@@ -120,7 +121,10 @@ describe('BookingInspector category-neutral booking rules', () => {
     renderInspector(customProduct);
 
     const priceInput = screen.getByLabelText(i18n.t('booking.unitPrice', { currency: 'EUR' }));
+    const memberLabel = screen.getByText(i18n.t('booking.forMember'), { selector: 'label' });
+    const priceLabel = screen.getByText(i18n.t('booking.unitPrice', { currency: 'EUR' }), { selector: 'label' });
     const submit = screen.getByRole('button', { name: i18n.t('booking.submit') });
+    expect(memberLabel.compareDocumentPosition(priceLabel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(priceInput).toHaveValue('');
     expect(submit).toBeDisabled();
 
@@ -173,7 +177,7 @@ describe('BookingInspector category-neutral booking rules', () => {
     await user.click(screen.getByRole('checkbox', { name: /Target Member/ }));
     await user.type(screen.getByLabelText(i18n.t('booking.addGuest')), 'Guest Three');
     await user.click(screen.getByRole('button', { name: i18n.t('booking.addGuestAction') }));
-    await user.type(screen.getByLabelText(i18n.t('booking.reason')), 'Group purchase');
+    await user.type(screen.getByLabelText(`${i18n.t('booking.reason')} *`), 'Group purchase');
     await user.click(screen.getByRole('button', { name: i18n.t('booking.submitMultiple', { count: 3 }) }));
 
     await waitFor(() => expect(apiMock.createBookings).toHaveBeenCalledWith('group-a', expect.objectContaining({

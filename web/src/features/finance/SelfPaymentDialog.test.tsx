@@ -69,8 +69,10 @@ describe('SelfPaymentDialog', () => {
     await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.review') }));
 
     expect(screen.getByRole('dialog', { name: i18n.t('selfPayment.reviewTitle') })).toBeVisible();
+    expect(screen.getByText(/23,40/, { selector: 'strong[data-financial-state="payment"]' })).toBeVisible();
     expect(screen.getByText(i18n.t('finance.paypal'))).toBeVisible();
     expect(screen.getByText('Membership fee August')).toBeVisible();
+    queryClient.setQueryData(['dashboard', 'group-a'], { openBalance: { minorUnits: '-250', currency: 'EUR' } });
     await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.confirm', { amount: '23,40 €' }) }));
 
     await waitFor(() => expect(apiMock.createOwnPayment).toHaveBeenCalledOnce());
@@ -81,6 +83,7 @@ describe('SelfPaymentDialog', () => {
     }));
     expect(apiMock.createOwnPayment.mock.calls[0]?.[1]).not.toHaveProperty('membershipId');
     expect(await screen.findByRole('dialog', { name: i18n.t('selfPayment.successTitle') })).toBeVisible();
+    expect(screen.getByText(/-2,50/, { selector: 'strong[data-financial-state="credit"]' })).toBeVisible();
     expect(invalidations).toHaveBeenCalledWith({ queryKey: ['dashboard', 'group-a'] });
     expect(invalidations).toHaveBeenCalledWith({ queryKey: ['ledger', 'group-a'] });
     expect(invalidations).toHaveBeenCalledWith({ queryKey: ['settlements', 'group-a'] });

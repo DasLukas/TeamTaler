@@ -65,7 +65,8 @@ describe('BookingPage explicit product selection', () => {
 
     await user.click(screen.getByRole('button', { name: /Wasser.*1,00/i }));
 
-    expect(screen.getByRole('heading', { name: i18n.t('booking.productTitle', { name: 'Wasser' }) })).toBeVisible();
+    expect(screen.getByRole('complementary', { name: i18n.t('booking.productTitle', { name: 'Wasser' }) })).toBeVisible();
+    expect(screen.queryByRole('heading', { name: i18n.t('booking.productTitle', { name: 'Wasser' }) })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: i18n.t('booking.submit') })).toBeEnabled();
     expect(screen.queryByText(i18n.t('booking.selectProductTitle'))).not.toBeInTheDocument();
   });

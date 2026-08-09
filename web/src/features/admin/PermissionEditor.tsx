@@ -1,4 +1,4 @@
-import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check';
+import KeyRound from 'lucide-react/dist/esm/icons/key-round';
 import { useTranslation } from 'react-i18next';
 import { PERMISSION_KEYS, type PermissionDefinition, type PermissionGrant, type PermissionKey } from '@/api/types';
 import { effectivePermissionKeys } from '@/app/permissions';
@@ -46,7 +46,7 @@ export function PermissionEditor({ definitions, value, onChange, disabled = fals
           const isProtected = protectedSet.has(permission);
           return (
             <div className={styles.permissionCard} key={permission}>
-              <ShieldCheck aria-hidden="true" size={30} strokeWidth={1.5} />
+              <KeyRound aria-hidden="true" size={30} strokeWidth={1.5} />
               <div>
                 <strong>{t(`permissions.${permission}.label`)}</strong>
                 <span>{t(`permissions.${permission}.description`)}</span>

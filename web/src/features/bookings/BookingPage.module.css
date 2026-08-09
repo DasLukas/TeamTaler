@@ -28,25 +28,22 @@
 .balance div { display: grid; gap: var(--space-2); }
 .balance span { color: var(--color-muted); font-size: var(--font-size-lg); }
 .balance strong { color: var(--color-orange-600); font-size: 2.6rem; }
+.balance strong.creditBalance { color: var(--color-green-600); }
 .balance svg { color: var(--color-navy-950); }
 
 .inspector {
+  display: flex;
   min-width: 0;
+  flex-direction: column;
   padding-top: 56px;
   border-left: 1px solid var(--color-border);
   container-name: booking-inspector;
   container-type: inline-size;
 }
 
-.inspector > h2 {
-  margin: 0;
-  padding: 0 var(--space-8) var(--space-5);
-  font-size: 1.75rem;
-  overflow-wrap: anywhere;
-}
-
 .inspectorEmpty {
   display: grid;
+  flex: 1;
   min-height: 420px;
   place-items: center;
   align-content: center;
@@ -70,7 +67,6 @@
 }
 
 @container booking-inspector (max-width: 360px) {
-  .inspector > h2 { padding-inline: var(--space-5); font-size: var(--font-size-xl); }
   .inspectorEmpty { padding-inline: var(--space-5); }
 }
 

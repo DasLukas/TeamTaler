@@ -85,6 +85,8 @@ describe('ActivitiesPage booking traceability', () => {
     const user = userEvent.setup();
     renderActivities();
 
+    const heading = await screen.findByRole('heading', { level: 1, name: i18n.t('activities.title') });
+    expect(heading.parentElement?.querySelector('p')).not.toBeInTheDocument();
     const row = await screen.findByRole('row', { name: /Target Member.*Assigning Manager/ });
     expect(within(row).getByText(thirdPartyBooking.memberName)).toBeVisible();
     expect(within(row).getByText(thirdPartyBooking.bookedByName)).toBeVisible();

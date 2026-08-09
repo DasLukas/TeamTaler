@@ -274,6 +274,20 @@ func TestTemporaryGuestPaymentReversalPeriodCloseAndArchivePreserveHistory(t *te
 		t.Fatalf("mixed temporary guest batch=%#v err=%v", created, err)
 	}
 	guestMembershipID := created[1].TargetMembershipID
+	summaries, err := f.finance.ListAccountSummaries(f.ctx, f.membership)
+	if err != nil {
+		t.Fatalf("list temporary guest account summaries: %v", err)
+	}
+	var guestSummary *finance.AccountSummary
+	for index := range summaries {
+		if summaries[index].MembershipID == guestMembershipID {
+			guestSummary = &summaries[index]
+			break
+		}
+	}
+	if guestSummary == nil || !guestSummary.IsTemporaryGuest {
+		t.Fatalf("temporary guest account summary=%#v", guestSummary)
+	}
 	assertBalance := func(want int64) {
 		t.Helper()
 		account, err := f.finance.Account(f.ctx, f.membership, guestMembershipID)
