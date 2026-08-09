@@ -22,9 +22,11 @@ func TestNotificationPaginationBatchReadAndEmailEnqueue(t *testing.T) {
 	for _, statement := range []string{
 		`INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('usr_a','a@example.test','Member A','hash','2026-08-04T12:00:00Z','2026-08-04T12:00:00Z')`,
 		`INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('usr_b','b@example.test','Member B','hash','2026-08-04T12:00:00Z','2026-08-04T12:00:00Z')`,
+		`INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('usr_managed',NULL,'Managed Guest',NULL,'2026-08-04T12:00:00Z','2026-08-04T12:00:00Z')`,
 		`INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES('grp_a','Group A','EUR','2026-08-04T12:00:00Z','2026-08-04T12:00:00Z')`,
 		`INSERT INTO memberships(id,group_id,user_id,joined_at) VALUES('mem_a','grp_a','usr_a','2026-08-04T12:00:00Z')`,
 		`INSERT INTO memberships(id,group_id,user_id,joined_at) VALUES('mem_b','grp_a','usr_b','2026-08-04T12:00:00Z')`,
+		`INSERT INTO memberships(id,group_id,user_id,joined_at,managed_guest_name_key) VALUES('mem_managed','grp_a','usr_managed','2026-08-04T12:00:00Z','managed guest')`,
 		`INSERT INTO group_settings(group_id,members_can_view_all_bookings,notification_emails_enabled,updated_at) VALUES('grp_a',0,1,'2026-08-04T12:00:00Z')`,
 	} {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
@@ -32,6 +34,17 @@ func TestNotificationPaginationBatchReadAndEmailEnqueue(t *testing.T) {
 		}
 	}
 	service := Service{DB: db, EmailDeliveryAvailable: true}
+	if err := storage.WithTx(ctx, db, func(tx *sql.Tx) error {
+		_, err := service.CreateTx(ctx, tx, CreateInput{
+			GroupID: "grp_a", MembershipID: "mem_managed", Type: TypeBookingAssigned,
+			Title: "New booking", Body: "Booking body", ResourceType: "booking",
+			ResourceID: "booking-managed", CreatedAt: "2026-08-04T12:00:04Z",
+			Context: EventContext{ActorName: "Member B", AmountMinor: 100, Currency: "EUR"},
+		})
+		return err
+	}); err != nil {
+		t.Fatalf("create managed notification: %v", err)
+	}
 	for index, createdAt := range []string{"2026-08-04T12:00:01Z", "2026-08-04T12:00:02Z", "2026-08-04T12:00:03Z"} {
 		err := storage.WithTx(ctx, db, func(tx *sql.Tx) error {
 			_, err := service.CreateTx(ctx, tx, CreateInput{
@@ -69,5 +82,9 @@ func TestNotificationPaginationBatchReadAndEmailEnqueue(t *testing.T) {
 	var outboxCount int
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM notification_email_outbox WHERE group_id='grp_a'`).Scan(&outboxCount); err != nil || outboxCount != 3 {
 		t.Fatalf("notification email jobs=%d err=%v, want 3", outboxCount, err)
+	}
+	var managedNotificationCount int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM notifications WHERE membership_id='mem_managed'`).Scan(&managedNotificationCount); err != nil || managedNotificationCount != 1 {
+		t.Fatalf("managed in-app notifications=%d err=%v, want 1", managedNotificationCount, err)
 	}
 }

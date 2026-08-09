@@ -61,7 +61,7 @@
   left: 0;
   display: grid;
   max-height: min(320px, 45vh);
-  gap: 4px;
+  gap: var(--space-2);
   padding: var(--space-2);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -69,6 +69,26 @@
   box-shadow: var(--shadow-md);
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+.group {
+  display: grid;
+  gap: 4px;
+}
+
+.groupLabel {
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  color: var(--color-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.guestGroup {
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
 }
 
 .option {
@@ -90,6 +110,42 @@
 .option small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .option small { color: var(--color-muted); font-size: var(--font-size-xs); }
 .option svg { color: var(--color-teal-700); }
+
+.pendingChip {
+  color: var(--color-navy-700);
+  background: var(--color-surface-muted);
+}
+
+.guestCreator {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-2) var(--space-2);
+  border-top: 1px dashed var(--color-border-strong);
+}
+
+.guestCreator > label {
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+
+.guestCreatorRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+}
+
+.guestCreatorRow input { min-height: 42px; }
+.guestCreatorRow button { width: 42px; min-width: 42px; padding-inline: 0; }
+
+.guestHint,
+.guestError {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  line-height: 1.45;
+}
+
+.guestHint { color: var(--color-muted); }
+.guestError { color: var(--color-red-600); }
 
 @media (max-width: 767px) {
   .menu {

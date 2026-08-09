@@ -86,6 +86,10 @@ const (
 	PermissionFinanceManagement PermissionKey = "FINANCE_MANAGEMENT"
 	// PermissionCatalogManagement permits category and product management.
 	PermissionCatalogManagement PermissionKey = "CATALOG_MANAGEMENT"
+	// PermissionViewMemberDirectory permits reading the group's member directory.
+	PermissionViewMemberDirectory PermissionKey = "VIEW_MEMBER_DIRECTORY"
+	// PermissionViewGroupStatistics permits reading aggregate group statistics.
+	PermissionViewGroupStatistics PermissionKey = "VIEW_GROUP_STATISTICS"
 	// PermissionViewAllBookingActivity permits viewing every identified group booking in the activity feed.
 	PermissionViewAllBookingActivity PermissionKey = "VIEW_ALL_BOOKING_ACTIVITY"
 	// PermissionRecordOwnPayment permits self-service payment recording for the current member.
@@ -213,10 +217,11 @@ type Membership struct {
 	ID                     string                          `json:"id"`
 	GroupID                string                          `json:"groupId"`
 	UserID                 string                          `json:"userId"`
-	Email                  string                          `json:"email"`
+	Email                  *string                         `json:"email,omitempty"`
 	DisplayName            string                          `json:"displayName"`
 	AvatarURL              string                          `json:"avatarUrl,omitempty"`
 	Status                 string                          `json:"status"`
+	IsGuest                bool                            `json:"isGuest"`
 	Roles                  []Role                          `json:"roles"`
 	GroupPermissions       []GroupPermission               `json:"groupPermissions"`
 	CategoryGrants         map[string][]CategoryPermission `json:"categoryGrants"`
@@ -239,6 +244,8 @@ type Group struct {
 type GroupSettings struct {
 	NotificationEmailsEnabled bool    `json:"notificationEmailsEnabled"`
 	DefaultRoleID             *string `json:"defaultRoleId"`
+	GuestsEnabled             bool    `json:"guestsEnabled"`
+	GuestRoleID               *string `json:"guestRoleId"`
 }
 
 // CategoryIcon identifies one supported visual category marker.
@@ -330,7 +337,9 @@ type Booking struct {
 	CategoryID             string  `json:"categoryId"`
 	ProductID              string  `json:"productId"`
 	ActorMembershipID      string  `json:"actorMembershipId"`
+	ActorDisplayName       string  `json:"actorDisplayName"`
 	TargetMembershipID     string  `json:"targetMembershipId"`
+	TargetDisplayName      string  `json:"targetDisplayName"`
 	Quantity               int     `json:"quantity"`
 	UnitPriceMinor         int64   `json:"unitPriceMinor,string"`
 	TotalMinor             int64   `json:"totalMinor,string"`
@@ -382,16 +391,16 @@ type Period struct {
 
 // Statement is an immutable member snapshot generated when a period closes.
 type Statement struct {
-	ID                       string `json:"id"`
-	PeriodID                 string `json:"periodId"`
-	MembershipID             string `json:"membershipId"`
-	DisplayName              string `json:"displayName"`
-	Email                    string `json:"email"`
-	ChargesMinor             int64  `json:"chargesMinor,string"`
-	PaymentsAllocatedMinor   int64  `json:"paymentsAllocatedMinor,string"`
-	AdjustmentsAppliedMinor  int64  `json:"adjustmentsAppliedMinor,string"`
-	AdjustmentsProvidedMinor int64  `json:"adjustmentsProvidedMinor,string"`
-	AmountDueMinor           int64  `json:"amountDueMinor,string"`
-	Currency                 string `json:"currency"`
-	Status                   string `json:"status"`
+	ID                       string  `json:"id"`
+	PeriodID                 string  `json:"periodId"`
+	MembershipID             string  `json:"membershipId"`
+	DisplayName              string  `json:"displayName"`
+	Email                    *string `json:"email,omitempty"`
+	ChargesMinor             int64   `json:"chargesMinor,string"`
+	PaymentsAllocatedMinor   int64   `json:"paymentsAllocatedMinor,string"`
+	AdjustmentsAppliedMinor  int64   `json:"adjustmentsAppliedMinor,string"`
+	AdjustmentsProvidedMinor int64   `json:"adjustmentsProvidedMinor,string"`
+	AmountDueMinor           int64   `json:"amountDueMinor,string"`
+	Currency                 string  `json:"currency"`
+	Status                   string  `json:"status"`
 }

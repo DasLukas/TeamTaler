@@ -119,10 +119,13 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}", server.handleUpdateGroup)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/settings", server.handleGetGroupSettings)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/settings", server.handleUpdateGroupSettings)
+	mux.HandleFunc("PUT /api/v1/groups/{groupID}/guest-settings", server.handleUpdateGuestSettings)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/logo", server.handleGroupLogo)
 	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/logo", server.handleRemoveGroupLogo)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/dashboard", server.handleDashboard)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/members", server.handleListMembers)
+	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/members/{membershipID}", server.handleRenameManagedGuest)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/members/{membershipID}/claim-invitation", server.handleCreateGuestClaimInvitation)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/members/{membershipID}/permissions", server.handleUpdatePermissions)
 	mux.HandleFunc("PUT /api/v1/groups/{groupID}/members/{membershipID}/roles", server.handleReplaceMemberRoles)
 	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/members/{membershipID}", server.handleArchiveMember)
@@ -154,6 +157,7 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/products/{productID}/image", server.handleProductImage)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/images/{imageKey}", server.handleImage)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/bookings", server.handleListBookings)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/booking-context", server.handleBookingContext)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/bookings", server.handleCreateBooking)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/bookings/batch", server.handleCreateBookingBatch)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/bookings/{bookingID}/void", server.handleVoidBooking)
@@ -325,6 +329,7 @@ type problem struct {
 	Instance               string `json:"instance"`
 	MemberCount            *int64 `json:"memberCount,omitempty"`
 	PendingInvitationCount *int64 `json:"pendingInvitationCount,omitempty"`
+	ExistingMembershipID   string `json:"existingMembershipId,omitempty"`
 }
 
 func writeProblem(response http.ResponseWriter, request *http.Request, err error) {
@@ -361,6 +366,9 @@ func writeProblem(response http.ResponseWriter, request *http.Request, err error
 	if memberCount, invitationCount, ok := roleConflictCounts(err); ok {
 		item.MemberCount = &memberCount
 		item.PendingInvitationCount = &invitationCount
+	}
+	if membershipID, ok := managedGuestConflictMembershipID(err); ok {
+		item.ExistingMembershipID = membershipID
 	}
 	_ = json.NewEncoder(response).Encode(item)
 }

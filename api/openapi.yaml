@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: TeamTaler API
-  version: 0.5.2
+  version: 0.6.0
   description: |
     Same-origin JSON API for TeamTaler. Monetary values use integer minor units:
     response fields are exact decimal strings, while command inputs are bounded
@@ -9,9 +9,10 @@ info:
     State-changing authenticated requests require the `X-CSRF-Token` header.
     Product creation, invitation CSV imports, and financial mutations that
     create or reverse bookings, payments, or periods additionally require an
-    `Idempotency-Key`. Versioned role and assignment replacement or deletion,
-    public join-link updates, and public join-link rotation require a strong
-    `If-Match` ETag.
+    `Idempotency-Key`. A batch-booking idempotency scope includes every managed
+    guest created by that command. Versioned role and assignment replacement
+    or deletion, public join-link updates, and public join-link rotation require
+    a strong `If-Match` ETag.
   license:
     name: AGPL-3.0-only
     identifier: AGPL-3.0-only
@@ -189,6 +190,14 @@ paths:
     post:
       tags: [Authentication]
       summary: Consume an invitation and create or validate an account
+      description: |
+        Ordinary invitations create or reactivate a membership with their
+        explicit role selection. A managed-guest claim invitation instead
+        attaches credentials or an authenticated existing account to its
+        `targetMembershipId`, preserves that membership's accounting identity,
+        and replaces its assignments with the group's current retained guest
+        role. A conflicting existing membership returns `409` rather than
+        merging financial histories.
       security: []
       requestBody:
         required: true
@@ -429,10 +438,61 @@ paths:
               schema: { $ref: '#/components/schemas/GroupSettings' }
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/guest-settings:
+    put:
+      tags: [Groups]
+      summary: Atomically enable, reconfigure, or disable managed guests
+      description: |
+        Requires `GROUP_ADMINISTRATION`. Enabling alone permits roleless managed
+        guest creation. A login-capable claim additionally needs a configured
+        guest role, which may be selected from an existing exactly minimal role,
+        atomically created when `createGuestRole` is true, or reused from the
+        retained `guestRoleId`. When supplied, the selected role must initially
+        have exactly one `GROUP` grant for `CREATE_OWN_BOOKING`; any existing
+        membership or open-invitation assignment of that role must use it
+        exclusively. It becomes both the claim role and the group's global
+        invitation default in the same transaction. The server-owned minimal
+        role template means this endpoint never requires the separately
+        delegated `ROLE_MANAGEMENT` permission.
+        Omitting both role fields reuses a retained role without undoing later
+        deliberate edits made through the normal role API.
+
+        `guestRoleId` and a true `createGuestRole` are mutually exclusive. A
+        configured claim role cannot be replaced while it is assigned to any
+        membership or open invitation; that case returns `409`. Disabling stops
+        new inline guest creation but retains the configured role, existing
+        guests, login-enabled guests, claim invitations, bookings, and all
+        financial history. If the claim role is still `defaultRoleId`, the
+        command must supply a different safe `replacementDefaultRoleId`, which
+        is installed atomically. Nothing is deleted by this operation.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GuestSettingsCommand' }
+      responses:
+        '200':
+          description: Persisted typed group settings after the atomic change
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GroupSettings' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/dashboard:
     get:
       tags: [Groups]
       summary: Read the active member dashboard
+      description: |
+        Returns the authenticated membership's personal account data.
+        `groupCategoryStatistics` is an empty array without
+        `VIEW_GROUP_STATISTICS`. `groupOutstandingMinor` remains independently
+        available only with `FINANCE_MANAGEMENT`; its omission must not be
+        interpreted as a zero group balance.
       parameters:
         - $ref: '#/components/parameters/GroupId'
       responses:
@@ -485,6 +545,11 @@ paths:
     get:
       tags: [Groups]
       summary: List group members and effective permissions
+      description: |
+        Requires `VIEW_MEMBER_DIRECTORY`. `BOOK_FOR_OTHERS` implies that
+        permission. Callers that only need valid booking targets must use the
+        privacy-minimized `/booking-context` read model instead of this
+        administrative directory.
       parameters:
         - $ref: '#/components/parameters/GroupId'
       responses:
@@ -498,6 +563,29 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/Membership' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/booking-context:
+    get:
+      tags: [Bookings]
+      summary: Read the privacy-minimized context required by the booking workspace
+      description: |
+        Requires `CREATE_OWN_BOOKING` or `BOOK_FOR_OTHERS`. The response never
+        includes the group member directory, email addresses, role assignments,
+        effective grants for other memberships, or group statistics. Without
+        `BOOK_FOR_OTHERS`, `targets` contains only the authenticated membership.
+        With it, `targets` contains the active memberships that may be charged,
+        represented only by booking-safe display data. Managed and login-enabled
+        guests sort after regular members; clients render the `isGuest` boundary
+        without deriving guest status from a role name.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Minimal current-period, own-balance, and target context
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BookingContext' }
+        '403': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/public-join-link:
     get:
       tags: [Groups]
@@ -782,9 +870,44 @@ paths:
         '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/members/{membershipId}:
+    patch:
+      tags: [Groups]
+      summary: Rename an active managed guest
+      description: |
+        Requires `GROUP_ADMINISTRATION`. Only an active credentialless managed
+        guest may be renamed through this endpoint. Login-enabled guests and
+        regular users manage their global display name through account flows.
+        The normalized display name is written with an audit event. Repeating
+        the same replacement is naturally idempotent and needs no
+        `Idempotency-Key`.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/MembershipId'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ManagedGuestRenameCommand' }
+      responses:
+        '200':
+          description: Renamed managed guest membership
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Membership' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
     delete:
       tags: [Groups]
       summary: Archive a membership while preserving all historical records
+      description: |
+        Requires `GROUP_ADMINISTRATION`. The same lifecycle applies to regular
+        memberships, managed guests, and login-enabled guests. Archival clears
+        effective access while preserving the stable membership identifier,
+        credentialless identity, bookings, ledger entries, period statements,
+        claim-invitation history, notifications, and audit events.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/MembershipId'
@@ -800,14 +923,55 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/members/{membershipId}/claim-invitation:
+    post:
+      tags: [Groups]
+      summary: Invite an active managed guest to claim login access
+      description: |
+        Requires `GROUP_ADMINISTRATION` and a configured retained guest role.
+        The command creates one seven-day, single-use invitation tied to the
+        active credentialless guest
+        membership and records its email outbox work atomically when SMTP is
+        available. The fallback URL is returned once. The command accepts no
+        `Idempotency-Key`: at most one open claim invitation may target a guest,
+        and a repeated request returns `409` without rotating the token or
+        sending another message.
+
+        Acceptance preserves the target membership identifier and every
+        accounting and audit reference. A new claimant receives credentials on
+        the managed identity; an existing account must authenticate and is
+        linked without creating a second membership. The accepted membership is
+        assigned only the group's current retained guest role, so ordinary
+        invitation defaults and earlier role changes cannot widen access.
+        Claim invitations remain valid when managed guest creation is disabled.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/MembershipId'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ManagedGuestClaimInvitationCommand' }
+      responses:
+        '201':
+          description: Claim invitation created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ManagedGuestClaimInvitationResult' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/invitations:
     get:
       tags: [Groups]
       summary: List invitation metadata without secret tokens
       description: |
         `GROUP_ADMINISTRATION` returns the complete invitation lifecycle.
-        `ROLE_MANAGEMENT` alone returns only currently open invitations needed
-        for role assignment and cannot create, revoke, or resend invitations.
+        `ROLE_MANAGEMENT` alone returns only currently open ordinary invitations
+        needed for role assignment and cannot see managed-guest claim invitations
+        or create, revoke, or resend any invitation.
       parameters:
         - $ref: '#/components/parameters/GroupId'
       responses:
@@ -952,8 +1116,10 @@ paths:
   /groups/{groupId}/invitations/{invitationId}/roles:
     put:
       tags: [Authorization]
-      summary: Replace all role assignments for a pending invitation
+      summary: Replace all role assignments for an ordinary pending invitation
       description: |
+        Managed-guest claim invitations have a server-owned guest-role
+        assignment and return `409` from this operation.
         At least one role must remain assigned. Ordinary role assignments
         require `ROLE_MANAGEMENT`. Changing the reserved
         administrator-role assignment requires `GROUP_ADMINISTRATION`; changing
@@ -1241,7 +1407,7 @@ paths:
     get:
       tags: [Bookings]
       summary: List activity bookings visible to the current member
-      description: Members with `VIEW_ALL_BOOKING_ACTIVITY`, including through the `VOID_ANY_BOOKING` implication, see complete group history. Other active members see actor- and target-relevant activity. This endpoint does not broaden account visibility.
+      description: Members with `VIEW_ALL_BOOKING_ACTIVITY`, including through the `VOID_ANY_BOOKING` implication, see complete group history. Other active members see actor- and target-relevant activity. Each item includes server-resolved actor and target display names so this read does not require `VIEW_MEMBER_DIRECTORY`. This endpoint does not broaden account visibility.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - name: periodId
@@ -1259,7 +1425,11 @@ paths:
     post:
       tags: [Bookings]
       summary: Create an immutable booking and balanced ledger entries
-      description: Active members may book for themselves. A different target requires `BOOK_FOR_OTHERS` and a non-empty reason.
+      description: |
+        `CREATE_OWN_BOOKING` permits charging the authenticated membership. A
+        different existing target requires `BOOK_FOR_OTHERS` and a non-empty
+        reason; inline managed-guest creation is available only through the
+        batch command.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/CSRFToken'
@@ -1390,8 +1560,32 @@ paths:
   /groups/{groupId}/bookings/batch:
     post:
       tags: [Bookings]
-      summary: Atomically create the same booking for multiple members
-      description: Creates one immutable booking and balanced ledger pair per unique active target membership in a single transaction. Selecting the current membership requires `CREATE_OWN_BOOKING`; selecting another membership requires `BOOK_FOR_OTHERS` and a non-empty shared reason. Any invalid target rejects the complete batch.
+      summary: Atomically create the same booking for existing members and new managed guests
+      description: |
+        Creates one immutable booking and balanced ledger pair per unique active
+        target membership in a single transaction. Selecting the current
+        membership requires `CREATE_OWN_BOOKING`; selecting another membership
+        or supplying `managedGuestDisplayNames` requires `BOOK_FOR_OTHERS` and a
+        non-empty shared reason.
+
+        Each managed guest name creates a credentialless user, a deliberately
+        roleless active membership, and its booking inside the same transaction.
+        Inline creation requires enabled guest settings but no configured claim
+        role. Existing target IDs and new
+        names together are limited to 100. Active managed-guest names are
+        case-insensitively unique within the group. Any invalid, duplicate,
+        archived, or
+        cross-group target, unsafe guest configuration, accounting conflict, or
+        notification failure rejects the complete command, including all new
+        identities. A name conflict never merges automatically; its `409`
+        Problem Details includes `existingMembershipId` so the caller may
+        explicitly select that active guest in a later command.
+
+        The idempotency payload includes the normalized names and all booking
+        fields. A replay returns the original bookings and guest membership IDs;
+        reuse of the key with any different payload returns `409`. Responses are
+        ordered by `targetMembershipIds` first and then by
+        `managedGuestDisplayNames`, preserving each request array's order.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/CSRFToken'
@@ -1913,7 +2107,7 @@ components:
     GroupSettings:
       type: object
       additionalProperties: false
-      required: [notificationEmailsEnabled, notificationEmailDeliveryAvailable, defaultRoleId]
+      required: [notificationEmailsEnabled, notificationEmailDeliveryAvailable, defaultRoleId, guestsEnabled, guestRoleId]
       properties:
         notificationEmailsEnabled:
           type: boolean
@@ -1925,6 +2119,12 @@ components:
         defaultRoleId:
           type: [string, 'null']
           description: Group-owned non-administrative role preselected for new invitations and used by CSV rows without roles.
+        guestsEnabled:
+          type: boolean
+          description: Whether BOOK_FOR_OTHERS may create managed guests inline with an atomic batch booking.
+        guestRoleId:
+          type: [string, 'null']
+          description: Retained group-owned exclusive role used for login-claim acceptance and claimed-guest classification; null still permits roleless managed guest creation.
     GroupSettingsUpdate:
       type: object
       additionalProperties: false
@@ -1935,15 +2135,68 @@ components:
           type: string
           minLength: 1
           description: Group-owned role that must not grant GROUP_ADMINISTRATION. It cannot be cleared after being set.
+    GuestSettingsCommand:
+      type: object
+      additionalProperties: false
+      required: [guestsEnabled]
+      properties:
+        guestsEnabled:
+          type: boolean
+          description: Enables or disables future inline managed-guest creation without deleting existing guest data.
+        guestRoleId:
+          type: [string, 'null']
+          minLength: 1
+          description: Existing group-owned role selected while enabling; null is treated as no replacement selection.
+        createGuestRole:
+          type: boolean
+          default: false
+          description: When true, atomically creates the optional login-claim role named Guest with only CREATE_OWN_BOOKING at GROUP scope.
+        replacementDefaultRoleId:
+          type: string
+          minLength: 1
+          description: Safe non-administrative role required while disabling only when the configured guest role is still the global defaultRoleId.
+      allOf:
+        - if:
+            properties:
+              createGuestRole: { const: true }
+            required: [createGuestRole]
+          then:
+            properties:
+              guestsEnabled: { const: true }
+              guestRoleId: { type: 'null' }
+        - if:
+            properties:
+              guestsEnabled: { const: true }
+            required: [guestsEnabled]
+          then:
+            properties:
+              replacementDefaultRoleId: false
+        - if:
+            properties:
+              guestsEnabled: { const: false }
+            required: [guestsEnabled]
+          then:
+            properties:
+              createGuestRole: { const: false }
+              guestRoleId: { type: 'null' }
     Membership:
       type: object
-      required: [id, groupId, userId, email, displayName, status, roleIds, effectiveGrants, roleAssignmentsVersion, roles, groupPermissions, categoryGrants]
+      required: [id, groupId, userId, displayName, isGuest, status, roleIds, effectiveGrants, roleAssignmentsVersion, roles, groupPermissions, categoryGrants]
       properties:
         id: { type: string }
         groupId: { type: string }
-        userId: { type: string }
-        email: { type: string, format: email }
+        userId:
+          type: string
+          description: Required identity reference. A managed guest points to a credentialless user; claiming with an existing account may rebind this field while the membership id and accounting history remain stable.
+        email:
+          type: [string, 'null']
+          format: email
+          description: Omitted or null only for a credentialless managed guest; synthetic addresses are never generated.
         displayName: { type: string }
+        isGuest:
+          type: boolean
+          readOnly: true
+          description: Server-derived from credential state and the configured guest-role assignment; clients must not infer it from role names.
         avatarUrl: { type: string }
         status: { type: string, enum: [ACTIVE, ARCHIVED] }
         roleIds:
@@ -1986,6 +2239,8 @@ components:
         - ROLE_MANAGEMENT
         - FINANCE_MANAGEMENT
         - CATALOG_MANAGEMENT
+        - VIEW_MEMBER_DIRECTORY
+        - VIEW_GROUP_STATISTICS
         - VIEW_ALL_BOOKING_ACTIVITY
         - RECORD_OWN_PAYMENT
         - CREATE_OWN_BOOKING
@@ -2160,6 +2415,31 @@ components:
           items: { $ref: '#/components/schemas/GroupPermission' }
         categoryGrants:
           $ref: '#/components/schemas/LegacyCategoryGrantWrite'
+    ManagedGuestRenameCommand:
+      type: object
+      additionalProperties: false
+      required: [displayName]
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: Trimmed, control-character-free replacement display name.
+    ManagedGuestClaimInvitationCommand:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+    ManagedGuestClaimInvitationResult:
+      type: object
+      additionalProperties: false
+      required: [invitation, acceptUrl]
+      properties:
+        invitation: { $ref: '#/components/schemas/Invitation' }
+        acceptUrl:
+          type: string
+          description: Secret-bearing fallback URL returned only when the conflict-protected claim invitation is created.
     InvitationCommand:
       type: object
       description: "`roleIds` cannot be combined with deprecated `roles`, `groupPermissions`, or non-empty `categoryGrants`."
@@ -2219,6 +2499,10 @@ components:
       properties:
         id: { type: string }
         groupId: { type: string }
+        targetMembershipId:
+          type: string
+          readOnly: true
+          description: Present only for a managed-guest claim invitation; acceptance preserves this membership identity and its history.
         email: { type: string, format: email }
         displayName: { type: string }
         roleIds:
@@ -2411,6 +2695,34 @@ components:
           properties:
             active: { type: boolean }
             version: { type: integer, format: int64, minimum: 1 }
+    BookingTarget:
+      type: object
+      additionalProperties: false
+      required: [membershipId, displayName, isGuest]
+      properties:
+        membershipId: { type: string }
+        displayName: { type: string }
+        avatarUrl: { type: string }
+        isGuest:
+          type: boolean
+          description: Server-derived grouping hint; never infer guest status from a localized role name.
+    BookingContext:
+      type: object
+      additionalProperties: false
+      required: [openPeriod, ownBalanceMinor, currentMembership, targets, canCreateManagedGuests]
+      properties:
+        openPeriod: { $ref: '#/components/schemas/Period' }
+        ownBalanceMinor:
+          $ref: '#/components/schemas/MinorUnits'
+          description: Exact current balance for the authenticated membership only; no group total is included.
+        currentMembership: { $ref: '#/components/schemas/Membership' }
+        targets:
+          type: array
+          description: Booking-safe active targets; contains no email, role, grant, balance, or group-structure fields.
+          items: { $ref: '#/components/schemas/BookingTarget' }
+        canCreateManagedGuests:
+          type: boolean
+          description: True only when BOOK_FOR_OTHERS is effective and managed guest creation is enabled; no guestRoleId is required.
     BookingCommand:
       type: object
       required: [productId, productVersion, expectedPeriodId, quantity]
@@ -2429,7 +2741,8 @@ components:
         reason: { type: string, maxLength: 500 }
     BookingBatchCommand:
       type: object
-      required: [productId, productVersion, expectedPeriodId, quantity, targetMembershipIds]
+      additionalProperties: false
+      required: [productId, productVersion, expectedPeriodId, quantity]
       properties:
         productId: { type: string }
         productVersion: { type: integer, format: int64, minimum: 1 }
@@ -2443,17 +2756,34 @@ components:
           description: Required for USER_DEFINED products and forbidden for FIXED products; interpreted as the unit price applied to every target.
         targetMembershipIds:
           type: array
-          minItems: 1
+          minItems: 0
           maxItems: 100
           uniqueItems: true
           items: { type: string, minLength: 1 }
+        managedGuestDisplayNames:
+          type: array
+          minItems: 1
+          maxItems: 100
+          uniqueItems: true
+          description: |
+            Trimmed, control-character-free names for new credentialless guests.
+            Normalized duplicates within the command are rejected; names never
+            identify or merge existing memberships. Requires BOOK_FOR_OTHERS,
+            enabled guest settings, and a non-empty shared reason.
+          items: { type: string, minLength: 1, maxLength: 120 }
         reason:
           type: string
           maxLength: 500
-          description: Shared reason stored on every created booking; required when any target differs from the actor membership.
+          description: Shared reason stored on every created booking; required when any existing target differs from the actor membership or any managed guest is created.
+      anyOf:
+        - required: [targetMembershipIds]
+          properties:
+            targetMembershipIds: { minItems: 1 }
+        - required: [managedGuestDisplayNames]
+      description: At least one target array must be present and non-empty; the two arrays may be combined but their total item count cannot exceed 100.
     Booking:
       type: object
-      required: [id, groupId, periodId, categoryId, productId, actorMembershipId, targetMembershipId, quantity, unitPriceMinor, totalMinor, currency, productName, categoryName, createdAt, canVoid, voidReasonRequired]
+      required: [id, groupId, periodId, categoryId, productId, actorMembershipId, actorDisplayName, targetMembershipId, targetDisplayName, quantity, unitPriceMinor, totalMinor, currency, productName, categoryName, createdAt, canVoid, voidReasonRequired]
       properties:
         id: { type: string }
         groupId: { type: string }
@@ -2461,7 +2791,13 @@ components:
         categoryId: { type: string }
         productId: { type: string }
         actorMembershipId: { type: string }
+        actorDisplayName:
+          type: string
+          description: Server-resolved actor name so activity clients do not need the member directory.
         targetMembershipId: { type: string }
+        targetDisplayName:
+          type: string
+          description: Server-resolved charged-member name so activity clients do not need the member directory.
         quantity: { type: integer }
         unitPriceMinor: { $ref: '#/components/schemas/MinorUnits' }
         totalMinor: { $ref: '#/components/schemas/MinorUnits' }
@@ -2530,7 +2866,7 @@ components:
           items: { $ref: '#/components/schemas/CategoryStatistic' }
         groupCategoryStatistics:
           type: array
-          description: Anonymous current-period category totals across the group.
+          description: Anonymous current-period category totals across the group; an empty array without VIEW_GROUP_STATISTICS.
           items: { $ref: '#/components/schemas/CategoryStatistic' }
         recentEntries:
           type: array
@@ -2546,7 +2882,9 @@ components:
           type: array
           items: { $ref: '#/components/schemas/Booking' }
         unreadNotificationCount: { type: integer, format: int64 }
-        groupOutstandingMinor: { $ref: '#/components/schemas/MinorUnits' }
+        groupOutstandingMinor:
+          $ref: '#/components/schemas/MinorUnits'
+          description: Group-wide outstanding amount; omitted without FINANCE_MANAGEMENT.
     PaymentCommand:
       type: object
       required: [membershipId, amountMinor, method]
@@ -2610,13 +2948,16 @@ components:
         nextPeriodLabel: { type: string, minLength: 1, maxLength: 120 }
     Statement:
       type: object
-      required: [id, periodId, membershipId, displayName, email, chargesMinor, paymentsAllocatedMinor, adjustmentsAppliedMinor, adjustmentsProvidedMinor, amountDueMinor, currency, status]
+      required: [id, periodId, membershipId, displayName, chargesMinor, paymentsAllocatedMinor, adjustmentsAppliedMinor, adjustmentsProvidedMinor, amountDueMinor, currency, status]
       properties:
         id: { type: string }
         periodId: { type: string }
         membershipId: { type: string }
         displayName: { type: string }
-        email: { type: string, format: email }
+        email:
+          type: [string, 'null']
+          format: email
+          description: Close-time email snapshot; omitted or null for a credentialless managed guest.
         chargesMinor: { $ref: '#/components/schemas/MinorUnits' }
         paymentsAllocatedMinor: { $ref: '#/components/schemas/MinorUnits' }
         adjustmentsAppliedMinor:
@@ -2683,6 +3024,9 @@ components:
         status: { type: integer, minimum: 400, maximum: 599 }
         detail: { type: string }
         instance: { type: string }
+        existingMembershipId:
+          type: string
+          description: Present only on a managed-guest display-name conflict and identifies the active guest that may be explicitly reused.
     RoleConflictProblem:
       allOf:
         - $ref: '#/components/schemas/Problem'

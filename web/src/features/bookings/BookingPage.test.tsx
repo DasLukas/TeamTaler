@@ -3,24 +3,22 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { GroupRole } from '@/api/types';
+import type { BookingContext, GroupRole } from '@/api/types';
 import { demoCategories, demoDashboard, demoMembers, demoSession } from '@/demo/data';
 import i18n from '@/i18n';
 import { BookingPage } from './BookingPage';
 
 const mocks = vi.hoisted(() => ({
-  getDashboard: vi.fn(),
+  getBookingContext: vi.fn(),
   getCategories: vi.fn(),
-  getMembers: vi.fn(),
   createBookings: vi.fn(),
   useActiveGroup: vi.fn(),
 }));
 
 vi.mock('@/api/client', () => ({
   api: {
-    getDashboard: mocks.getDashboard,
+    getBookingContext: mocks.getBookingContext,
     getCategories: mocks.getCategories,
-    getMembers: mocks.getMembers,
     createBookings: mocks.createBookings,
   },
 }));
@@ -39,11 +37,16 @@ function renderBookingPage(): void {
 describe('BookingPage explicit product selection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.getDashboard.mockResolvedValue(demoDashboard);
     mocks.getCategories.mockResolvedValue(demoCategories);
-    mocks.getMembers.mockResolvedValue(demoMembers);
+    mocks.getBookingContext.mockResolvedValue({
+      openPeriod: demoDashboard.currentPeriod,
+      ownBalance: demoDashboard.openBalance,
+      currentMembership: demoMembers[0],
+      targets: demoMembers.map((member) => ({ membershipId: member.id, displayName: member.displayName, avatarUrl: member.avatarUrl, isGuest: member.isGuest })),
+      canCreateManagedGuests: false,
+    } satisfies BookingContext);
     mocks.createBookings.mockResolvedValue([{ id: 'booking-created' }]);
-    mocks.useActiveGroup.mockReturnValue({ activeGroupId: demoSession.activeGroupId, session: demoSession });
+    mocks.useActiveGroup.mockReturnValue({ activeGroupId: demoSession.activeGroupId, activeGroup: demoSession.groups[0], session: demoSession });
   });
 
   it('starts neutral and completes a fixed-price self-booking in two deliberate interactions', async () => {
@@ -51,6 +54,7 @@ describe('BookingPage explicit product selection', () => {
     renderBookingPage();
 
     const water = await screen.findByRole('button', { name: /Wasser.*1,00/i });
+    expect(mocks.getBookingContext).toHaveBeenCalledWith(demoSession.activeGroupId, 'EUR');
     expect(water).toHaveAttribute('aria-pressed', 'false');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 
@@ -93,7 +97,7 @@ describe('BookingPage explicit product selection', () => {
     const groups = demoSession.groups.map((group) => group.id === demoSession.activeGroupId
       ? { ...group, membership: group.membership ? { ...group.membership, roles: ['MEMBER'] as GroupRole[], effectiveGrants: [] } : undefined }
       : group);
-    mocks.useActiveGroup.mockReturnValue({ activeGroupId: demoSession.activeGroupId, session: { ...demoSession, groups } });
+    mocks.useActiveGroup.mockReturnValue({ activeGroupId: demoSession.activeGroupId, activeGroup: groups[0], session: { ...demoSession, groups } });
     mocks.getCategories.mockResolvedValue([]);
     renderBookingPage();
 

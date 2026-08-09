@@ -28,6 +28,8 @@ export const demoPermissionDefinitions: PermissionDefinition[] = [
   { key: 'ROLE_MANAGEMENT' },
   { key: 'FINANCE_MANAGEMENT' },
   { key: 'CATALOG_MANAGEMENT' },
+  { key: 'VIEW_MEMBER_DIRECTORY' },
+  { key: 'VIEW_GROUP_STATISTICS' },
   { key: 'VIEW_ALL_BOOKING_ACTIVITY' },
   { key: 'RECORD_OWN_PAYMENT' },
   { key: 'CREATE_OWN_BOOKING' },
@@ -46,7 +48,7 @@ export const demoRoles: Role[] = [
     description: 'Geschützte Vollzugriffsrolle der Gruppe',
     nameLocked: true,
     deletable: false,
-    grants: grants('GROUP_ADMINISTRATION', 'ROLE_MANAGEMENT', 'FINANCE_MANAGEMENT', 'CATALOG_MANAGEMENT', 'VIEW_ALL_BOOKING_ACTIVITY', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING', 'VOID_ANY_BOOKING', 'BOOK_FOR_OTHERS'),
+    grants: grants('GROUP_ADMINISTRATION', 'ROLE_MANAGEMENT', 'FINANCE_MANAGEMENT', 'CATALOG_MANAGEMENT', 'VIEW_MEMBER_DIRECTORY', 'VIEW_GROUP_STATISTICS', 'VIEW_ALL_BOOKING_ACTIVITY', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING', 'VOID_ANY_BOOKING', 'BOOK_FOR_OTHERS'),
     version: 1,
     memberCount: 1,
     pendingInvitationCount: 0,
@@ -174,6 +176,7 @@ export const demoMembers: Membership[] = [
     displayName: 'Lukas Waschul',
     email: 'lukas@example.test',
     initials: 'LW',
+    isGuest: false,
     roles: ['ADMIN', 'MEMBER'],
     roleIds: ['role-admin', 'role-member'],
     effectiveGrants: demoRoles[0].grants,
@@ -191,6 +194,7 @@ export const demoMembers: Membership[] = [
     displayName: 'Mara Becker',
     email: 'mara@example.test',
     initials: 'MB',
+    isGuest: false,
     roles: ['FINANCE_MANAGER', 'MEMBER'],
     roleIds: ['role-finance', 'role-member'],
     effectiveGrants: grants('FINANCE_MANAGEMENT', 'VIEW_ALL_BOOKING_ACTIVITY', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING'),
@@ -208,6 +212,7 @@ export const demoMembers: Membership[] = [
     displayName: 'Jonas Krüger',
     email: 'jonas@example.test',
     initials: 'JK',
+    isGuest: false,
     roles: ['CATALOG_MANAGER', 'MEMBER'],
     roleIds: ['role-catalog', 'role-member', 'role-self-payment'],
     effectiveGrants: grants('CATALOG_MANAGEMENT', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING'),
@@ -319,8 +324,8 @@ export const demoPayments: Payment[] = [
 
 /** Demo settlements generated from closed periods. */
 export const demoSettlements: Settlement[] = [
-  { id: 'settlement-1', periodId: 'period-july', periodLabel: 'Juli 2026', membershipId: 'member-lukas', memberName: 'Lukas Waschul', amount: { minorUnits: '3200', currency: 'EUR' }, paidAmount: { minorUnits: '2000', currency: 'EUR' }, openAmount: { minorUnits: '1200', currency: 'EUR' }, dueAt: '2026-08-15', status: 'PARTIAL' },
-  { id: 'settlement-2', periodId: 'period-july', periodLabel: 'Juli 2026', membershipId: 'member-mara', memberName: 'Mara Becker', amount: { minorUnits: '1500', currency: 'EUR' }, paidAmount: { minorUnits: '1500', currency: 'EUR' }, openAmount: { minorUnits: '0', currency: 'EUR' }, dueAt: '2026-08-15', status: 'PAID' },
+  { id: 'settlement-1', periodId: 'period-july', periodLabel: 'Juli 2026', membershipId: 'member-lukas', memberName: 'Lukas Waschul', email: 'lukas@example.test', amount: { minorUnits: '3200', currency: 'EUR' }, paidAmount: { minorUnits: '2000', currency: 'EUR' }, openAmount: { minorUnits: '1200', currency: 'EUR' }, dueAt: '2026-08-15', status: 'PARTIAL' },
+  { id: 'settlement-2', periodId: 'period-july', periodLabel: 'Juli 2026', membershipId: 'member-mara', memberName: 'Mara Becker', email: 'mara@example.test', amount: { minorUnits: '1500', currency: 'EUR' }, paidAmount: { minorUnits: '1500', currency: 'EUR' }, openAmount: { minorUnits: '0', currency: 'EUR' }, dueAt: '2026-08-15', status: 'PAID' },
 ];
 
 /** Demo in-app notifications. */

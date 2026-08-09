@@ -66,8 +66,11 @@ interface DemoRoutePolicy {
 
 const DEMO_ROUTE_POLICIES: readonly DemoRoutePolicy[] = [
   { methods: ['GET', 'PATCH'], resource: /^settings$/, anyOf: ['GROUP_ADMINISTRATION'] },
+  { methods: ['PUT'], resource: /^guest-settings$/, anyOf: ['GROUP_ADMINISTRATION'] },
   { methods: ['POST', 'DELETE'], resource: /^logo$/, anyOf: ['GROUP_ADMINISTRATION'] },
-  { methods: ['DELETE'], resource: /^members\/[^/]+$/, anyOf: ['GROUP_ADMINISTRATION'] },
+  { methods: ['GET'], resource: /^members$/, anyOf: ['VIEW_MEMBER_DIRECTORY'] },
+  { methods: ['PATCH', 'DELETE'], resource: /^members\/[^/]+$/, anyOf: ['GROUP_ADMINISTRATION'] },
+  { methods: ['POST'], resource: /^members\/[^/]+\/claim-invitation$/, anyOf: ['GROUP_ADMINISTRATION'] },
   { methods: ['GET', 'PUT'], resource: /^public-join-link$/, anyOf: ['GROUP_ADMINISTRATION'] },
   { methods: ['POST'], resource: /^public-join-link\/rotate$/, anyOf: ['GROUP_ADMINISTRATION'] },
   { methods: ['PATCH'], resource: /^members\/[^/]+\/permissions$/, anyOf: ['GROUP_ADMINISTRATION'] },
@@ -226,7 +229,7 @@ export class DemoTransport {
   private assignmentVersions = new Map<string, number>();
   private invitations: InvitationMetadata[] = [];
   private invitationTokens = new Map<string, string>();
-  private groupSettings: GroupSettings = { notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' };
+  private groupSettings: GroupSettings = { notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member', guestsEnabled: false, guestRoleId: null };
   private publicJoinLink: PublicJoinLink = { enabled: false, expired: false, expiresAt: null, version: 0, emailVerificationAvailable: true };
   private publicJoinToken = '';
 
@@ -320,6 +323,54 @@ export class DemoTransport {
       };
       return clone(this.groupSettings) as T;
     }
+    if (resource === 'guest-settings' && method === 'PUT') {
+      this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
+      const input = body as { guestsEnabled?: boolean; guestRoleId?: string | null; createGuestRole?: boolean; replacementDefaultRoleId?: string };
+      if (typeof input.guestsEnabled !== 'boolean') throw new Error('Guest activation must be a boolean.');
+      if (input.createGuestRole && input.guestRoleId !== undefined) throw new Error('Choose an existing role or create a guest role, not both.');
+      let guestRoleId = this.groupSettings.guestRoleId;
+      if (input.guestsEnabled && input.createGuestRole) {
+        const existingNames = new Set(this.roles.map((role) => role.name.toLocaleLowerCase()));
+        let name = 'Gast';
+        let suffix = 2;
+        while (existingNames.has(name.toLocaleLowerCase())) {
+          name = `Gast ${suffix}`;
+          suffix += 1;
+        }
+        const role: Role = {
+          id: identifier('role-guest'),
+          groupId,
+          name,
+          description: 'Booking-only role for guests',
+          grants: [{ permission: 'CREATE_OWN_BOOKING', scope: { type: 'GROUP' } }],
+          version: 1,
+          memberCount: 0,
+          pendingInvitationCount: 0,
+        };
+        this.roles.push(role);
+        guestRoleId = role.id;
+      } else if (input.guestsEnabled && typeof input.guestRoleId === 'string') {
+        const role = this.roles.find((entry) => entry.id === input.guestRoleId);
+        if (!role || role.id !== this.groupSettings.guestRoleId && (role.grants.length !== 1 || role.grants[0]?.permission !== 'CREATE_OWN_BOOKING' || role.grants[0].scope.type !== 'GROUP')) {
+          throw new Error('The guest role must grant exactly own-booking access.');
+        }
+        guestRoleId = role.id;
+      }
+      if (!input.guestsEnabled && guestRoleId && this.groupSettings.defaultRoleId === guestRoleId) {
+        const replacement = this.roles.find((role) => role.id === input.replacementDefaultRoleId);
+        if (!replacement || replacement.id === guestRoleId || replacement.grants.some((grant) => grant.permission === 'GROUP_ADMINISTRATION')) {
+          throw new Error('A replacement default role is required.');
+        }
+        this.groupSettings.defaultRoleId = replacement.id;
+      }
+      this.groupSettings = {
+        ...this.groupSettings,
+        guestsEnabled: input.guestsEnabled,
+        guestRoleId,
+        ...(input.guestsEnabled && guestRoleId ? { defaultRoleId: guestRoleId } : {}),
+      };
+      return clone(this.groupSettings) as T;
+    }
     if (resource === 'public-join-link' && method === 'GET') return clone(this.publicJoinLink) as T;
     if (resource === 'public-join-link' && method === 'PUT') {
       const input = body as { enabled: boolean; expiresAt: string | null };
@@ -349,6 +400,22 @@ export class DemoTransport {
       return clone(this.publicJoinLink) as T;
     }
     if (resource === 'dashboard') return clone(this.dashboard) as T;
+    if (resource === 'booking-context' && method === 'GET') {
+      const actor = this.currentMembership(groupId);
+      if (!actor) throw new Error(i18n.t('errors.memberNotFound'));
+      const canBookOwn = can(actor.effectiveGrants, 'CREATE_OWN_BOOKING');
+      const canBookOthers = can(actor.effectiveGrants, 'BOOK_FOR_OTHERS');
+      const targets = this.members
+        .filter((member) => member.active && (member.id === actor.id ? canBookOwn : canBookOthers))
+        .map((member) => ({ membershipId: member.id, displayName: member.displayName, avatarUrl: member.avatarUrl, isGuest: member.isGuest }));
+      return clone({
+        openPeriod: this.dashboard.currentPeriod,
+        ownBalanceMinor: this.dashboard.openBalance.minorUnits,
+        currentMembership: actor,
+        targets,
+        canCreateManagedGuests: this.groupSettings.guestsEnabled && canBookOthers,
+      }) as T;
+    }
     if (resource === 'members' && method === 'GET') return clone(this.members) as T;
     if (resource === 'categories' && method === 'GET') return clone(this.categories) as T;
     if (resource === 'bookings' && method === 'GET') return this.listBookings(groupId) as T;
@@ -401,7 +468,33 @@ export class DemoTransport {
     if (permissionMatch && method === 'PATCH') return this.updatePermissions(groupId, permissionMatch[1], body as PermissionUpdate & { categoryGrants?: Record<string, string[]> }, requiredDemoVersion(init.headers)) as T;
     const memberRolesMatch = resource.match(/^members\/([^/]+)\/roles$/);
     if (memberRolesMatch && method === 'PUT') return this.updateRoleAssignment(groupId, 'MEMBERSHIP', memberRolesMatch[1], (body as { roleIds?: string[] }).roleIds ?? [], requiredDemoVersion(init.headers)) as T;
+    const memberClaimMatch = resource.match(/^members\/([^/]+)\/claim-invitation$/);
+    if (memberClaimMatch && method === 'POST') {
+      const member = this.members.find((entry) => entry.id === memberClaimMatch[1] && entry.active && entry.isGuest && entry.email === null);
+      if (!member || !this.groupSettings.guestRoleId) throw new Error('A managed guest and configured guest role are required.');
+      const email = String((body as { email?: string }).email ?? '').trim().toLowerCase();
+      const invitation = this.createInvitation(groupId, {
+        email,
+        displayName: member.displayName,
+        roleIds: [this.groupSettings.guestRoleId],
+        roles: ['MEMBER'],
+        groupPermissions: [],
+        categoryPermissions: [],
+      });
+      invitation.targetMembershipId = member.id;
+      const stored = this.invitations.find((entry) => entry.id === invitation.id);
+      if (stored) stored.targetMembershipId = member.id;
+      return clone(invitation) as T;
+    }
     const memberMatch = resource.match(/^members\/([^/]+)$/);
+    if (memberMatch && method === 'PATCH') {
+      const member = this.members.find((entry) => entry.id === memberMatch[1] && entry.active && entry.isGuest && entry.email === null);
+      const displayName = String((body as { displayName?: string }).displayName ?? '').trim().replace(/\s+/g, ' ');
+      if (!member || !displayName || [...displayName].length > 120 || /\p{Cc}/u.test(displayName)) throw new Error('A valid managed guest display name is required.');
+      member.displayName = displayName;
+      member.initials = displayName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('');
+      return clone(member) as T;
+    }
     if (memberMatch && method === 'DELETE') {
       const confirmSelf = new URL(path, window.location.origin).searchParams.get('confirmSelf') === 'true';
       return this.archiveMember(groupId, memberMatch[1], confirmSelf) as T;
@@ -481,7 +574,7 @@ export class DemoTransport {
     if (invitation) {
       invitation.acceptedAt = new Date().toISOString();
       this.invitationTokens.delete(invitation.id);
-      const archivedMember = this.members.find((member) => !member.active && member.email.toLowerCase() === invitation.email.toLowerCase());
+      const archivedMember = this.members.find((member) => !member.active && member.email?.toLowerCase() === invitation.email.toLowerCase());
       if (archivedMember) {
         archivedMember.active = true;
         archivedMember.roles = invitation.roles;
@@ -500,7 +593,7 @@ export class DemoTransport {
     const invitationId = [...this.invitationTokens].find(([, candidate]) => candidate === token)?.[0];
     const invitation = this.invitations.find((item) => item.id === invitationId && !item.acceptedAt && !item.revokedAt);
     if (!invitation || Date.parse(invitation.expiresAt) <= Date.now()) throw new Error('Invitation is invalid or expired.');
-    const account = this.members.find((member) => member.email.toLowerCase() === invitation.email.toLowerCase());
+    const account = this.members.find((member) => member.email?.toLowerCase() === invitation.email.toLowerCase());
     return { displayName: invitation.displayName ?? account?.displayName ?? '', existingAccount: Boolean(account) };
   }
 
@@ -766,19 +859,45 @@ export class DemoTransport {
   }
 
   private createBookingBatch(groupId: string, command: BookingBatchCommand & { unitPriceMinor?: number }): Booking[] {
-    const targets = command.targetMembershipIds.map((target) => target.trim());
-    if (targets.length < 1 || targets.length > 100 || targets.some((target) => !target) || new Set(targets).size !== targets.length) {
+    const targets = (command.targetMembershipIds ?? []).map((target) => target.trim());
+    const managedGuestNames = (command.managedGuestDisplayNames ?? []).map((name) => name.trim().replace(/\s+/g, ' '));
+    const combinedTargetCount = targets.length + managedGuestNames.length;
+    if (combinedTargetCount < 1
+      || combinedTargetCount > 100
+      || targets.some((target) => !target)
+      || new Set(targets).size !== targets.length
+      || managedGuestNames.some((name) => !name || [...name].length > 120 || /\p{Cc}/u.test(name))) {
       throw new Error(i18n.t('booking.noAvailableTarget'));
     }
     const actor = this.currentMembership(groupId);
     const membersById = new Map(this.members.filter((member) => member.active).map((member) => [member.id, member]));
     if (!actor || targets.some((target) => !membersById.has(target))) throw new Error(i18n.t('errors.missingProductOrMember'));
     const includesOwn = targets.includes(actor.id);
-    const includesOthers = targets.some((target) => target !== actor.id);
+    const includesOthers = managedGuestNames.length > 0 || targets.some((target) => target !== actor.id);
     if (includesOwn && !can(actor.effectiveGrants, 'CREATE_OWN_BOOKING')) throw new Error(i18n.t('admin.noAccessMessage'));
     if (includesOthers && !can(actor.effectiveGrants, 'BOOK_FOR_OTHERS')) throw new Error(i18n.t('admin.noAccessMessage'));
+    if (managedGuestNames.length > 0 && !this.groupSettings.guestsEnabled) throw new Error(i18n.t('admin.noAccessMessage'));
     if (includesOthers && !command.reason?.trim()) throw new Error(i18n.t('booking.reasonRequired'));
-    return targets.map((targetMembershipId) => this.createBooking(groupId, { ...command, targetMembershipId }));
+    const guestMembershipIds = managedGuestNames.map((displayName) => {
+      const membership: Membership = {
+        id: identifier('member-guest'),
+        userId: identifier('user-guest'),
+        displayName,
+        email: null,
+        initials: displayName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join(''),
+        isGuest: true,
+        roles: ['MEMBER'],
+        roleIds: [],
+        effectiveGrants: [],
+        groupPermissions: [],
+        categoryPermissions: [],
+        roleAssignmentsVersion: 1,
+        active: true,
+      };
+      this.members.push(membership);
+      return membership.id;
+    });
+    return [...targets, ...guestMembershipIds].map((targetMembershipId) => this.createBooking(groupId, { ...command, targetMembershipId }));
   }
 
   private listBookings(groupId: string): Booking[] {
@@ -963,7 +1082,7 @@ export class DemoTransport {
   private createInvitation(groupId: string, input: InvitationInput & { categoryGrants?: Record<string, string[]>; expiresInDays?: number }): CreatedInvitation {
     if (input.roleIds !== undefined) this.requirePermission(groupId, 'ROLE_MANAGEMENT');
     const email = input.email.trim().toLowerCase();
-    if (this.members.some((member) => member.active && member.email.toLowerCase() === email)) throw new Error('An active membership already exists for this email address.');
+    if (this.members.some((member) => member.active && member.email?.toLowerCase() === email)) throw new Error('An active membership already exists for this email address.');
     if (this.invitations.some((item) => !item.acceptedAt && !item.revokedAt && Date.parse(item.expiresAt) > Date.now() && item.email.toLowerCase() === email)) throw new Error('An active invitation already exists for this email address.');
     const token = crypto.randomUUID();
     const selectedRoleIds = this.normalizedRoleIds(input.roleIds ?? []);
@@ -1021,7 +1140,7 @@ export class DemoTransport {
   private importInvitations(document: string, roleIds: string[]): InvitationImportResult {
     const normalizedRoleIds = this.normalizedRoleIds(roleIds);
     const candidates = parseDemoMemberCsv(document);
-    const memberEmails = new Set(this.members.filter((member) => member.active).map((member) => member.email.toLowerCase()));
+    const memberEmails = new Set(this.members.filter((member) => member.active).flatMap((member) => member.email ? [member.email.toLowerCase()] : []));
     const existingInvitations = new Map(this.invitations
       .filter((invitation) => !invitation.acceptedAt && !invitation.revokedAt && Date.parse(invitation.expiresAt) > Date.now())
       .map((invitation) => [invitation.email.toLowerCase(), invitation]));

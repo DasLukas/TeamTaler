@@ -179,7 +179,8 @@ func (s Service) Login(ctx context.Context, email, password string) (Session, er
 	var principal domain.Principal
 	var passwordHash string
 	var avatarKey sql.NullString
-	err := s.DB.QueryRowContext(ctx, `SELECT id,email,display_name,password_hash,avatar_key FROM users WHERE email=? AND active=1`, email).
+	err := s.DB.QueryRowContext(ctx, `SELECT id,email,display_name,password_hash,avatar_key FROM users
+		WHERE email=? AND active=1 AND email IS NOT NULL AND password_hash IS NOT NULL`, email).
 		Scan(&principal.UserID, &principal.Email, &principal.DisplayName, &passwordHash, &avatarKey)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return Session{}, err
@@ -216,9 +217,10 @@ func (s Service) AcceptInvitation(ctx context.Context, input InvitationAcceptanc
 	var membership domain.Membership
 	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
 		var invitationID, groupID, email, expiresAt, invitationCreatedBy string
-		err := tx.QueryRowContext(ctx, `SELECT id,group_id,email,expires_at,created_by FROM invitations
+		var targetMembershipID sql.NullString
+		err := tx.QueryRowContext(ctx, `SELECT id,group_id,email,expires_at,created_by,target_membership_id FROM invitations
 			WHERE token_hash=? AND accepted_at IS NULL AND revoked_at IS NULL`, platform.HashSecret(input.Token)).
-			Scan(&invitationID, &groupID, &email, &expiresAt, &invitationCreatedBy)
+			Scan(&invitationID, &groupID, &email, &expiresAt, &invitationCreatedBy, &targetMembershipID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.ErrNotFound
 		}
@@ -245,96 +247,27 @@ func (s Service) AcceptInvitation(ctx context.Context, input InvitationAcceptanc
 		if err := assignmentRows.Close(); err != nil {
 			return err
 		}
-		var principal domain.Principal
-		var passwordHash string
-		var avatarKey sql.NullString
-		existingUser := true
-		err = tx.QueryRowContext(ctx, `SELECT id,email,display_name,password_hash,avatar_key FROM users WHERE email=? AND active=1`, email).
-			Scan(&principal.UserID, &principal.Email, &principal.DisplayName, &passwordHash, &avatarKey)
-		if errors.Is(err, sql.ErrNoRows) {
-			existingUser = false
-			if input.DisplayName == "" {
-				return domain.ValidationError{Field: "displayName", Message: "must contain 1 to 120 characters"}
-			}
-			passwordHash, err = HashPassword(input.Password)
-			if err != nil {
-				return domain.ValidationError{Field: "password", Message: err.Error()}
-			}
-			principal.UserID, _ = platform.NewID("usr")
-			principal.Email = email
-			principal.DisplayName = input.DisplayName
-			now := platform.Timestamp(platform.Now())
-			if _, err := tx.ExecContext(ctx, `INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES(?,?,?,?,?,?)`,
-				principal.UserID, email, input.DisplayName, passwordHash, now, now); err != nil {
-				return err
-			}
-		} else if err != nil {
-			return err
-		} else if !VerifyPassword(passwordHash, input.Password) {
-			return domain.ErrUnauthenticated
-		}
-		principal.AvatarURL = media.UserAvatarURL(principal.UserID, avatarKey.String)
-
-		membershipID := ""
-		var membershipStatus string
-		err = tx.QueryRowContext(ctx, `SELECT id,status FROM memberships WHERE group_id=? AND user_id=?`, groupID, principal.UserID).
-			Scan(&membershipID, &membershipStatus)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if err == nil && membershipStatus == "ACTIVE" {
-			return fmt.Errorf("%w: user is already a group member", domain.ErrConflict)
-		}
-		reactivated := err == nil && membershipStatus == "ARCHIVED"
 		now := platform.Timestamp(platform.Now())
-		if reactivated {
-			if _, err := tx.ExecContext(ctx, `UPDATE memberships SET status='ACTIVE',archived_at=NULL WHERE id=? AND group_id=? AND status='ARCHIVED'`, membershipID, groupID); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, `DELETE FROM membership_roles WHERE membership_id=?`, membershipID); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, `DELETE FROM membership_permissions WHERE membership_id=?`, membershipID); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, `DELETE FROM category_permissions WHERE membership_id=?`, membershipID); err != nil {
+		var principal domain.Principal
+		var membershipID string
+		var existingUser, reactivated bool
+		if targetMembershipID.Valid {
+			membershipID = targetMembershipID.String
+			principal, existingUser, err = acceptClaimInvitationIdentityTx(ctx, tx, input, groupID, membershipID, email, invitationCreatedBy, now)
+			if err != nil {
 				return err
 			}
 		} else {
-			membershipID, _ = platform.NewID("mem")
-			if _, err := tx.ExecContext(ctx, `INSERT INTO memberships(id,group_id,user_id,status,joined_at) VALUES(?,?,?,'ACTIVE',?)`, membershipID, groupID, principal.UserID, now); err != nil {
+			principal, existingUser, err = resolveInvitationIdentityTx(ctx, tx, input, email, now)
+			if err != nil {
 				return err
 			}
-		}
-		if len(invitationRoleIDs) == 0 {
-			return domain.ValidationError{Field: "roleIds", Message: "invitation must contain at least one role"}
-		}
-		seenRoleIDs := make(map[string]struct{}, len(invitationRoleIDs))
-		for _, roleID := range invitationRoleIDs {
-			if _, duplicate := seenRoleIDs[roleID]; duplicate {
-				continue
-			}
-			seenRoleIDs[roleID] = struct{}{}
-			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO membership_role_assignments(group_id,membership_id,role_id,version,assigned_at,assigned_by) VALUES(?,?,?,1,?,?)`, groupID, membershipID, roleID, now, invitationCreatedBy); err != nil {
+			membershipID, reactivated, err = joinInvitationMembershipTx(ctx, tx, groupID, principal.UserID, now)
+			if err != nil {
 				return err
 			}
-			var preset sql.NullString
-			if err := tx.QueryRowContext(ctx, `SELECT preset_key FROM roles WHERE id=? AND group_id=?`, roleID, groupID).Scan(&preset); err != nil {
+			if err := assignInvitationRolesTx(ctx, tx, groupID, membershipID, invitationCreatedBy, now, invitationRoleIDs); err != nil {
 				return err
-			}
-			legacyRole := domain.Role("")
-			switch domain.RolePresetKey(preset.String) {
-			case domain.RolePresetGroupAdministrator:
-				legacyRole = domain.RoleAdmin
-			case domain.RolePresetFinanceManager:
-				legacyRole = domain.RoleFinanceManager
-			case domain.RolePresetCatalogManager:
-				legacyRole = domain.RoleCatalogManager
-			}
-			if legacyRole != "" {
-				if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO membership_roles(group_id,membership_id,role,granted_at,granted_by) VALUES(?,?,?,?,?)`, groupID, membershipID, legacyRole, now, invitationCreatedBy); err != nil {
-					return err
-				}
 			}
 		}
 		accepted, err := tx.ExecContext(ctx, `UPDATE invitations SET accepted_at=? WHERE id=? AND accepted_at IS NULL`, now, invitationID)
@@ -366,13 +299,238 @@ func (s Service) AcceptInvitation(ctx context.Context, input InvitationAcceptanc
 		principal.SessionHash = platform.HashSecret(token)
 		principal.CSRFToken = csrf
 		session = Session{Token: token, CSRFToken: csrf, ExpiresAt: sessionExpires, Principal: principal}
-		membership = domain.Membership{ID: membershipID, GroupID: groupID, UserID: principal.UserID, Email: principal.Email, DisplayName: principal.DisplayName, AvatarURL: principal.AvatarURL, Status: "ACTIVE", CategoryGrants: map[string][]domain.CategoryPermission{}}
-		return audit.Record(ctx, tx, groupID, principal.UserID, membershipID, "invitation.accepted", "invitation", invitationID, map[string]any{"existingUser": existingUser, "reactivated": reactivated})
+		membership = domain.Membership{
+			ID: membershipID, GroupID: groupID, UserID: principal.UserID,
+			Email: stringPointer(principal.Email), DisplayName: principal.DisplayName,
+			AvatarURL: principal.AvatarURL, Status: "ACTIVE", IsGuest: targetMembershipID.Valid,
+			CategoryGrants: map[string][]domain.CategoryPermission{},
+		}
+		return audit.Record(ctx, tx, groupID, principal.UserID, membershipID, "invitation.accepted", "invitation", invitationID, map[string]any{
+			"existingUser": existingUser,
+			"reactivated":  reactivated,
+			"claimed":      targetMembershipID.Valid,
+		})
 	})
 	if err == nil {
 		err = s.hydrateMembershipAuthorization(ctx, &membership)
 	}
 	return session, membership, err
+}
+
+// resolveInvitationIdentityTx verifies an existing credentialed account or
+// creates a new one for a standard invitation. The caller owns tx and has
+// already validated the invitation token and password shape.
+func resolveInvitationIdentityTx(ctx context.Context, tx *sql.Tx, input InvitationAcceptance, email, now string) (domain.Principal, bool, error) {
+	var principal domain.Principal
+	var passwordHash string
+	var avatarKey sql.NullString
+	err := tx.QueryRowContext(ctx, `SELECT id,email,display_name,password_hash,avatar_key
+		FROM users
+		WHERE email=? AND active=1 AND email IS NOT NULL AND password_hash IS NOT NULL`, email).
+		Scan(&principal.UserID, &principal.Email, &principal.DisplayName, &passwordHash, &avatarKey)
+	if errors.Is(err, sql.ErrNoRows) {
+		if input.DisplayName == "" {
+			return domain.Principal{}, false, domain.ValidationError{Field: "displayName", Message: "must contain 1 to 120 characters"}
+		}
+		passwordHash, err = HashPassword(input.Password)
+		if err != nil {
+			return domain.Principal{}, false, domain.ValidationError{Field: "password", Message: err.Error()}
+		}
+		principal.UserID, _ = platform.NewID("usr")
+		principal.Email = email
+		principal.DisplayName = input.DisplayName
+		if _, err := tx.ExecContext(ctx, `INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES(?,?,?,?,?,?)`,
+			principal.UserID, email, input.DisplayName, passwordHash, now, now); err != nil {
+			return domain.Principal{}, false, err
+		}
+		return principal, false, nil
+	}
+	if err != nil {
+		return domain.Principal{}, false, err
+	}
+	if !VerifyPassword(passwordHash, input.Password) {
+		return domain.Principal{}, true, domain.ErrUnauthenticated
+	}
+	principal.AvatarURL = media.UserAvatarURL(principal.UserID, avatarKey.String)
+	return principal, true, nil
+}
+
+// joinInvitationMembershipTx creates or reactivates the standard invitation
+// membership while retaining its stable identifier on reactivation.
+func joinInvitationMembershipTx(ctx context.Context, tx *sql.Tx, groupID, userID, now string) (string, bool, error) {
+	var membershipID, membershipStatus string
+	err := tx.QueryRowContext(ctx, `SELECT id,status FROM memberships WHERE group_id=? AND user_id=?`, groupID, userID).
+		Scan(&membershipID, &membershipStatus)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", false, err
+	}
+	if err == nil && membershipStatus == "ACTIVE" {
+		return "", false, fmt.Errorf("%w: user is already a group member", domain.ErrConflict)
+	}
+	if err == nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE memberships SET status='ACTIVE',archived_at=NULL WHERE id=? AND group_id=? AND status='ARCHIVED'`, membershipID, groupID); err != nil {
+			return "", false, err
+		}
+		for _, statement := range []string{
+			`DELETE FROM membership_roles WHERE membership_id=?`,
+			`DELETE FROM membership_permissions WHERE membership_id=?`,
+			`DELETE FROM category_permissions WHERE membership_id=?`,
+		} {
+			if _, err := tx.ExecContext(ctx, statement, membershipID); err != nil {
+				return "", false, err
+			}
+		}
+		return membershipID, true, nil
+	}
+	membershipID, _ = platform.NewID("mem")
+	if _, err := tx.ExecContext(ctx, `INSERT INTO memberships(id,group_id,user_id,status,joined_at) VALUES(?,?,?,'ACTIVE',?)`, membershipID, groupID, userID, now); err != nil {
+		return "", false, err
+	}
+	return membershipID, false, nil
+}
+
+// assignInvitationRolesTx copies one standard invitation's explicit role set
+// to its active membership and maintains the deprecated preset-role mirror.
+func assignInvitationRolesTx(ctx context.Context, tx *sql.Tx, groupID, membershipID, assignedBy, now string, roleIDs []string) error {
+	if len(roleIDs) == 0 {
+		return domain.ValidationError{Field: "roleIds", Message: "invitation must contain at least one role"}
+	}
+	seenRoleIDs := make(map[string]struct{}, len(roleIDs))
+	for _, roleID := range roleIDs {
+		if _, duplicate := seenRoleIDs[roleID]; duplicate {
+			continue
+		}
+		seenRoleIDs[roleID] = struct{}{}
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO membership_role_assignments(group_id,membership_id,role_id,version,assigned_at,assigned_by) VALUES(?,?,?,1,?,?)`, groupID, membershipID, roleID, now, assignedBy); err != nil {
+			return err
+		}
+		var preset sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT preset_key FROM roles WHERE id=? AND group_id=?`, roleID, groupID).Scan(&preset); err != nil {
+			return err
+		}
+		legacyRole := domain.Role("")
+		switch domain.RolePresetKey(preset.String) {
+		case domain.RolePresetGroupAdministrator:
+			legacyRole = domain.RoleAdmin
+		case domain.RolePresetFinanceManager:
+			legacyRole = domain.RoleFinanceManager
+		case domain.RolePresetCatalogManager:
+			legacyRole = domain.RoleCatalogManager
+		}
+		if legacyRole != "" {
+			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO membership_roles(group_id,membership_id,role,granted_at,granted_by) VALUES(?,?,?,?,?)`, groupID, membershipID, legacyRole, now, assignedBy); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// acceptClaimInvitationIdentityTx upgrades one managed identity in place or
+// rebinds its stable membership to an existing credentialed account. Financial
+// rows remain attached to membershipID and are never merged with another group
+// membership.
+func acceptClaimInvitationIdentityTx(ctx context.Context, tx *sql.Tx, input InvitationAcceptance, groupID, membershipID, email, assignedBy, now string) (domain.Principal, bool, error) {
+	var managedUserID, managedDisplayName string
+	var managedAvatarKey sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT user.id,user.display_name,user.avatar_key
+		FROM memberships membership
+		JOIN users user ON user.id=membership.user_id
+		WHERE membership.id=? AND membership.group_id=? AND membership.status='ACTIVE'
+		  AND user.email IS NULL AND user.password_hash IS NULL`, membershipID, groupID).
+		Scan(&managedUserID, &managedDisplayName, &managedAvatarKey); errors.Is(err, sql.ErrNoRows) {
+		return domain.Principal{}, false, fmt.Errorf("%w: invitation claim target is no longer available", domain.ErrConflict)
+	} else if err != nil {
+		return domain.Principal{}, false, err
+	}
+
+	var guestRoleID string
+	if err := tx.QueryRowContext(ctx, `SELECT guest_role_id FROM group_settings WHERE group_id=? AND guest_role_id IS NOT NULL`, groupID).Scan(&guestRoleID); errors.Is(err, sql.ErrNoRows) {
+		return domain.Principal{}, false, fmt.Errorf("%w: group has no configured guest role", domain.ErrConflict)
+	} else if err != nil {
+		return domain.Principal{}, false, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE memberships
+		SET managed_guest_name_key=NULL
+		WHERE id=? AND group_id=? AND user_id=?`, membershipID, groupID, managedUserID); err != nil {
+		return domain.Principal{}, false, err
+	}
+	for _, statement := range []string{
+		`DELETE FROM membership_roles WHERE membership_id=?`,
+		`DELETE FROM membership_permissions WHERE membership_id=?`,
+		`DELETE FROM category_permissions WHERE membership_id=?`,
+		`DELETE FROM membership_role_assignments WHERE group_id=? AND membership_id=?`,
+	} {
+		arguments := []any{membershipID}
+		if strings.Contains(statement, "group_id") {
+			arguments = []any{groupID, membershipID}
+		}
+		if _, err := tx.ExecContext(ctx, statement, arguments...); err != nil {
+			return domain.Principal{}, false, err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO membership_role_assignments(group_id,membership_id,role_id,version,assigned_at,assigned_by) VALUES(?,?,?,1,?,?)`, groupID, membershipID, guestRoleID, now, assignedBy); err != nil {
+		return domain.Principal{}, false, err
+	}
+
+	var principal domain.Principal
+	var passwordHash string
+	var avatarKey sql.NullString
+	err := tx.QueryRowContext(ctx, `SELECT id,email,display_name,password_hash,avatar_key
+		FROM users
+		WHERE email=? AND active=1 AND email IS NOT NULL AND password_hash IS NOT NULL`, email).
+		Scan(&principal.UserID, &principal.Email, &principal.DisplayName, &passwordHash, &avatarKey)
+	if err == nil {
+		if !VerifyPassword(passwordHash, input.Password) {
+			return domain.Principal{}, true, domain.ErrUnauthenticated
+		}
+		var existingMemberships int
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM memberships WHERE group_id=? AND user_id=?`, groupID, principal.UserID).Scan(&existingMemberships); err != nil {
+			return domain.Principal{}, true, err
+		}
+		if existingMemberships != 0 {
+			return domain.Principal{}, true, fmt.Errorf("%w: account already has a membership in this group", domain.ErrConflict)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE memberships SET user_id=?,managed_guest_name_key=NULL WHERE id=? AND group_id=? AND user_id=?`, principal.UserID, membershipID, groupID, managedUserID); err != nil {
+			return domain.Principal{}, true, err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id=? AND NOT EXISTS (SELECT 1 FROM memberships WHERE user_id=?)`, managedUserID, managedUserID); err != nil {
+			return domain.Principal{}, true, err
+		}
+		principal.AvatarURL = media.UserAvatarURL(principal.UserID, avatarKey.String)
+		return principal, true, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return domain.Principal{}, false, err
+	}
+
+	displayName := input.DisplayName
+	if displayName == "" {
+		displayName = managedDisplayName
+	}
+	passwordHash, err = HashPassword(input.Password)
+	if err != nil {
+		return domain.Principal{}, false, domain.ValidationError{Field: "password", Message: err.Error()}
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE users
+		SET email=?,display_name=?,password_hash=?,updated_at=?
+		WHERE id=? AND email IS NULL AND password_hash IS NULL`, email, displayName, passwordHash, now, managedUserID)
+	if err != nil {
+		return domain.Principal{}, false, err
+	}
+	changed, _ := result.RowsAffected()
+	if changed != 1 {
+		return domain.Principal{}, false, fmt.Errorf("%w: invitation claim target changed concurrently", domain.ErrConflict)
+	}
+	principal = domain.Principal{
+		UserID: managedUserID, Email: email, DisplayName: displayName,
+		AvatarURL: media.UserAvatarURL(managedUserID, managedAvatarKey.String),
+	}
+	return principal, false, nil
+}
+
+func stringPointer(value string) *string {
+	return &value
 }
 
 func containsControlCharacter(value string) bool {
@@ -385,7 +543,20 @@ func containsControlCharacter(value string) bool {
 }
 
 func (s Service) hydrateMembershipAuthorization(ctx context.Context, membership *domain.Membership) error {
-	if err := s.DB.QueryRowContext(ctx, `SELECT role_assignments_version FROM memberships WHERE id=? AND group_id=? AND status='ACTIVE'`, membership.ID, membership.GroupID).Scan(&membership.RoleAssignmentsVersion); err != nil {
+	if err := s.DB.QueryRowContext(ctx, `SELECT membership.role_assignments_version,
+		(user.email IS NULL OR EXISTS (
+			SELECT 1
+			FROM group_settings settings
+			JOIN membership_role_assignments assignment
+			  ON assignment.group_id=settings.group_id
+			 AND assignment.membership_id=membership.id
+			 AND assignment.role_id=settings.guest_role_id
+			WHERE settings.group_id=membership.group_id
+		))
+		FROM memberships membership
+		JOIN users user ON user.id=membership.user_id
+		WHERE membership.id=? AND membership.group_id=? AND membership.status='ACTIVE'`, membership.ID, membership.GroupID).
+		Scan(&membership.RoleAssignmentsVersion, &membership.IsGuest); err != nil {
 		return err
 	}
 	rows, err := s.DB.QueryContext(ctx, `SELECT r.id,coalesce(r.preset_key,'') FROM membership_role_assignments a JOIN roles r ON r.id=a.role_id AND r.group_id=a.group_id WHERE a.group_id=? AND a.membership_id=? ORDER BY r.id`, membership.GroupID, membership.ID)
@@ -473,7 +644,7 @@ func (s Service) Authenticate(ctx context.Context, token, csrfToken string) (dom
 	principal.SessionHash = platform.HashSecret(token)
 	err := s.DB.QueryRowContext(ctx, `SELECT u.id,u.email,u.display_name,u.avatar_key,s.csrf_hash,s.expires_at,s.last_seen_at
 		FROM sessions s JOIN users u ON u.id=s.user_id
-		WHERE s.id_hash=? AND u.active=1`, principal.SessionHash).
+		WHERE s.id_hash=? AND u.active=1 AND u.email IS NOT NULL AND u.password_hash IS NOT NULL`, principal.SessionHash).
 		Scan(&principal.UserID, &principal.Email, &principal.DisplayName, &avatarKey, &csrfHash, &expiresAt, &lastSeenAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Principal{}, domain.ErrUnauthenticated

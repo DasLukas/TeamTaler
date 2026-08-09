@@ -88,7 +88,7 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, name, curre
 		return domain.Group{}, fmt.Errorf("create group: %w", err)
 	}
 	group := domain.Group{ID: groupID, Name: name, Currency: currency, Membership: domain.Membership{
-		ID: membershipID, GroupID: groupID, UserID: actor.UserID, Email: actor.Email, DisplayName: actor.DisplayName, AvatarURL: actor.AvatarURL, Status: "ACTIVE", Roles: []domain.Role{domain.RoleAdmin}, GroupPermissions: []domain.GroupPermission{}, CategoryGrants: map[string][]domain.CategoryPermission{},
+		ID: membershipID, GroupID: groupID, UserID: actor.UserID, Email: &actor.Email, DisplayName: actor.DisplayName, AvatarURL: actor.AvatarURL, Status: "ACTIVE", Roles: []domain.Role{domain.RoleAdmin}, GroupPermissions: []domain.GroupPermission{}, CategoryGrants: map[string][]domain.CategoryPermission{},
 	}}
 	if err := s.hydrateMembershipAuthorization(ctx, &group.Membership); err != nil {
 		return domain.Group{}, err
@@ -228,6 +228,9 @@ func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, mem
 			if err := validateDefaultRole(ctx, tx, membership.GroupID, *update.DefaultRoleID); err != nil {
 				return err
 			}
+			if previous.GuestsEnabled && previous.GuestRoleID != nil && *previous.GuestRoleID != *update.DefaultRoleID {
+				return domain.ValidationError{Field: "defaultRoleId", Message: "must match guestRoleId while managed guests are enabled"}
+			}
 			next.DefaultRoleID = update.DefaultRoleID
 		}
 		if previous.NotificationEmailsEnabled == next.NotificationEmailsEnabled && nullableStringsEqual(previous.DefaultRoleID, next.DefaultRoleID) {
@@ -263,13 +266,18 @@ type settingsQueryer interface {
 }
 
 func querySettings(ctx context.Context, queryer settingsQueryer, groupID string, settings *domain.GroupSettings) error {
-	var defaultRoleID sql.NullString
-	if err := queryer.QueryRowContext(ctx, `SELECT notification_emails_enabled,default_role_id FROM group_settings WHERE group_id=?`, groupID).
-		Scan(&settings.NotificationEmailsEnabled, &defaultRoleID); err != nil {
+	var defaultRoleID, guestRoleID sql.NullString
+	if err := queryer.QueryRowContext(ctx, `SELECT notification_emails_enabled,default_role_id,guests_enabled,guest_role_id FROM group_settings WHERE group_id=?`, groupID).
+		Scan(&settings.NotificationEmailsEnabled, &defaultRoleID, &settings.GuestsEnabled, &guestRoleID); err != nil {
 		return err
 	}
+	settings.DefaultRoleID = nil
+	settings.GuestRoleID = nil
 	if defaultRoleID.Valid {
 		settings.DefaultRoleID = &defaultRoleID.String
+	}
+	if guestRoleID.Valid {
+		settings.GuestRoleID = &guestRoleID.String
 	}
 	return nil
 }
@@ -400,7 +408,15 @@ func (s Service) hydrateMembershipAuthorization(ctx context.Context, membership 
 	if membership == nil || membership.ID == "" || membership.GroupID == "" {
 		return domain.ValidationError{Field: "membership", Message: "requires an id and group id"}
 	}
-	if err := s.DB.QueryRowContext(ctx, `SELECT role_assignments_version FROM memberships WHERE id=? AND group_id=?`, membership.ID, membership.GroupID).Scan(&membership.RoleAssignmentsVersion); err != nil {
+	if err := s.DB.QueryRowContext(ctx, `SELECT m.role_assignments_version,
+		(u.email IS NULL OR (settings.guest_role_id IS NOT NULL AND EXISTS(
+			SELECT 1 FROM membership_role_assignments assignment
+			WHERE assignment.group_id=m.group_id AND assignment.membership_id=m.id AND assignment.role_id=settings.guest_role_id
+		)))
+		FROM memberships m JOIN users u ON u.id=m.user_id
+		JOIN group_settings settings ON settings.group_id=m.group_id
+		WHERE m.id=? AND m.group_id=?`, membership.ID, membership.GroupID).
+		Scan(&membership.RoleAssignmentsVersion, &membership.IsGuest); err != nil {
 		return err
 	}
 	rows, err := s.DB.QueryContext(ctx, `SELECT r.id,coalesce(r.preset_key,'')
@@ -464,10 +480,14 @@ func grantKey(grant domain.PermissionGrant) string {
 	return string(grant.Permission) + "\x00" + string(grant.Scope.Type) + "\x00" + grant.Scope.CategoryID + "\x00" + grant.Scope.ProductID
 }
 
-// ListMembers returns all members and effective permissions for groupID. ctx
-// bounds the query. Non-finance callers may use this identity-only result for
-// permitted assignment because it contains no balance data; SQL errors propagate.
-func (s Service) ListMembers(ctx context.Context, groupID string) ([]domain.Membership, error) {
+// ListMembers returns all members and effective permissions in the caller's
+// group. VIEW_MEMBER_DIRECTORY is required and rechecked against current role
+// grants; callers cannot widen the tenant scope. SQL errors propagate.
+func (s Service) ListMembers(ctx context.Context, membership domain.Membership) ([]domain.Membership, error) {
+	if err := requireCurrentPermission(ctx, s.DB, membership, domain.PermissionViewMemberDirectory); err != nil {
+		return nil, err
+	}
+	groupID := membership.GroupID
 	rows, err := s.DB.QueryContext(ctx, `SELECT m.id,m.group_id,m.user_id,u.email,u.display_name,u.avatar_key,m.status
 		FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.group_id=? ORDER BY m.status,lower(u.display_name)`, groupID)
 	if err != nil {
@@ -668,6 +688,19 @@ func (s Service) ArchiveMember(ctx context.Context, actor domain.Principal, acto
 				return fmt.Errorf("%w: the last active administrator cannot be removed", domain.ErrConflict)
 			}
 		}
+		if _, err := tx.ExecContext(ctx, `UPDATE invitations
+			SET revoked_at=?,token_hash='revoked:' || id || ':' || ?
+			WHERE group_id=? AND target_membership_id=? AND accepted_at IS NULL AND revoked_at IS NULL`,
+			now, now, targetGroupID, targetID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE invitation_email_outbox SET
+			status='CANCELLED',token_ciphertext=NULL,next_attempt_at=NULL,lease_token=NULL,lease_until=NULL,
+			last_error_code='managed_guest_archived',updated_at=?
+			WHERE group_id=? AND invitation_id IN (SELECT id FROM invitations WHERE group_id=? AND target_membership_id=?)
+			AND status IN ('PENDING','SENDING','FAILED')`, now, targetGroupID, targetGroupID, targetID); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM membership_roles WHERE membership_id=?`, targetID); err != nil {
 			return err
 		}
@@ -820,6 +853,7 @@ func legacyAssignmentRoleIDs(ctx context.Context, queryer roleQueryer, groupID s
 type Invitation struct {
 	ID                     string                                 `json:"id"`
 	GroupID                string                                 `json:"groupId"`
+	TargetMembershipID     *string                                `json:"targetMembershipId,omitempty"`
 	Email                  string                                 `json:"email"`
 	DisplayName            string                                 `json:"displayName,omitempty"`
 	Roles                  []domain.Role                          `json:"roles"`
@@ -835,6 +869,13 @@ type Invitation struct {
 	EmailFailureCode       string                                 `json:"emailFailureCode,omitempty"`
 	Token                  string                                 `json:"token,omitempty"`
 }
+
+type invitationAssignmentAuthorization uint8
+
+const (
+	invitationAssignmentStandard invitationAssignmentAuthorization = iota
+	invitationAssignmentManagedGuestClaim
+)
 
 // CreateInvitation creates a seven-day, one-time invitation in membership's
 // group. When TokenSealer is configured, the same transaction also queues an
@@ -883,7 +924,7 @@ func (s Service) createInvitation(ctx context.Context, actor domain.Principal, m
 		if err := requireCurrentPermission(ctx, tx, membership, domain.PermissionGroupAdministration); err != nil {
 			return err
 		}
-		item, err = createInvitationTx(ctx, tx, actor, membership, email, displayName, roles, groupPermissions, categoryGrants, roleIDs, now)
+		item, err = createInvitationTx(ctx, tx, actor, membership, email, displayName, roles, groupPermissions, categoryGrants, roleIDs, now, invitationAssignmentStandard)
 		if err != nil || s.TokenSealer == nil {
 			return err
 		}
@@ -896,7 +937,7 @@ func (s Service) createInvitation(ctx context.Context, actor domain.Principal, m
 	return item, err
 }
 
-func createInvitationTx(ctx context.Context, tx *sql.Tx, actor domain.Principal, membership domain.Membership, email, displayName string, roles []domain.Role, groupPermissions []domain.GroupPermission, categoryGrants map[string][]domain.CategoryPermission, roleIDs []string, now time.Time) (Invitation, error) {
+func createInvitationTx(ctx context.Context, tx *sql.Tx, actor domain.Principal, membership domain.Membership, email, displayName string, roles []domain.Role, groupPermissions []domain.GroupPermission, categoryGrants map[string][]domain.CategoryPermission, roleIDs []string, now time.Time, assignmentAuthorization invitationAssignmentAuthorization) (Invitation, error) {
 	dynamicRoleCommand := roleIDs != nil
 	if roles == nil {
 		roles = []domain.Role{}
@@ -908,12 +949,9 @@ func createInvitationTx(ctx context.Context, tx *sql.Tx, actor domain.Principal,
 		categoryGrants = map[string][]domain.CategoryPermission{}
 	}
 	nowText := platform.Timestamp(now)
-	adminRoleID, err := reservedAdministratorRoleID(ctx, tx, membership.GroupID)
-	if err != nil {
-		return Invitation{}, err
-	}
 	currentRoleIDs := []string{}
 	var nextRoleIDs []string
+	var err error
 	if dynamicRoleCommand {
 		nextRoleIDs = normalizeRoleIDs(roleIDs)
 	} else {
@@ -922,8 +960,30 @@ func createInvitationTx(ctx context.Context, tx *sql.Tx, actor domain.Principal,
 			return Invitation{}, err
 		}
 	}
-	if err := requireAssignmentChangePermissions(ctx, tx, membership, adminRoleID, currentRoleIDs, nextRoleIDs); err != nil {
-		return Invitation{}, err
+	switch assignmentAuthorization {
+	case invitationAssignmentStandard:
+		adminRoleID, err := reservedAdministratorRoleID(ctx, tx, membership.GroupID)
+		if err != nil {
+			return Invitation{}, err
+		}
+		if err := requireAssignmentChangePermissions(ctx, tx, membership, adminRoleID, currentRoleIDs, nextRoleIDs); err != nil {
+			return Invitation{}, err
+		}
+	case invitationAssignmentManagedGuestClaim:
+		var configuredGuestRoleID string
+		if err := tx.QueryRowContext(ctx, `SELECT guest_role_id FROM group_settings WHERE group_id=? AND guest_role_id IS NOT NULL`, membership.GroupID).Scan(&configuredGuestRoleID); errors.Is(err, sql.ErrNoRows) {
+			return Invitation{}, fmt.Errorf("%w: group has no configured guest role", domain.ErrConflict)
+		} else if err != nil {
+			return Invitation{}, err
+		}
+		if len(nextRoleIDs) != 1 || nextRoleIDs[0] != configuredGuestRoleID {
+			return Invitation{}, fmt.Errorf("%w: managed-guest claim invitations must use the configured guest role exclusively", domain.ErrConflict)
+		}
+		if err := requireCurrentPermission(ctx, tx, membership, domain.PermissionGroupAdministration); err != nil {
+			return Invitation{}, err
+		}
+	default:
+		return Invitation{}, errors.New("unsupported invitation assignment authorization mode")
 	}
 	if containsGroupPermission(groupPermissions, domain.PermissionSelfRecordPayment) {
 		if err := ensureLegacySelfPaymentRoleTx(ctx, tx, membership.GroupID, actor.UserID, nowText); err != nil {
@@ -1060,11 +1120,11 @@ func (s Service) UpdateInvitation(ctx context.Context, actor domain.Principal, m
 		}
 		var acceptedAt, revokedAt sql.NullString
 		var encodedRoles, encodedPermissions, encodedGrants string
-		err := tx.QueryRowContext(ctx, `SELECT i.id,i.group_id,i.email,coalesce(i.display_name,''),i.roles_json,i.group_permissions_json,i.category_grants_json,i.role_assignments_version,
+		err := tx.QueryRowContext(ctx, `SELECT i.id,i.group_id,i.target_membership_id,i.email,coalesce(i.display_name,''),i.roles_json,i.group_permissions_json,i.category_grants_json,i.role_assignments_version,
 			i.expires_at,i.accepted_at,i.revoked_at,coalesce(o.status,'NOT_REQUESTED'),o.sent_at,coalesce(o.last_error_code,'')
 			FROM invitations i LEFT JOIN invitation_email_outbox o ON o.invitation_id=i.id
 			WHERE i.id=? AND i.group_id=?`, invitationID, membership.GroupID).
-			Scan(&item.ID, &item.GroupID, &item.Email, &item.DisplayName, &encodedRoles, &encodedPermissions, &encodedGrants, &item.RoleAssignmentsVersion, &item.ExpiresAt, &acceptedAt, &revokedAt, &item.EmailDeliveryStatus, &item.EmailSentAt, &item.EmailFailureCode)
+			Scan(&item.ID, &item.GroupID, &item.TargetMembershipID, &item.Email, &item.DisplayName, &encodedRoles, &encodedPermissions, &encodedGrants, &item.RoleAssignmentsVersion, &item.ExpiresAt, &acceptedAt, &revokedAt, &item.EmailDeliveryStatus, &item.EmailSentAt, &item.EmailFailureCode)
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.ErrNotFound
 		}
@@ -1167,8 +1227,8 @@ func (s Service) UpdateInvitationWithRoles(ctx context.Context, actor domain.Pri
 			return err
 		}
 		var acceptedAt, revokedAt sql.NullString
-		if err := tx.QueryRowContext(ctx, `SELECT i.id,i.group_id,i.email,coalesce(i.display_name,''),i.role_assignments_version,i.expires_at,i.accepted_at,i.revoked_at,coalesce(o.status,'NOT_REQUESTED'),o.sent_at,coalesce(o.last_error_code,'') FROM invitations i LEFT JOIN invitation_email_outbox o ON o.invitation_id=i.id WHERE i.id=? AND i.group_id=?`, invitationID, membership.GroupID).
-			Scan(&item.ID, &item.GroupID, &item.Email, &item.DisplayName, &item.RoleAssignmentsVersion, &item.ExpiresAt, &acceptedAt, &revokedAt, &item.EmailDeliveryStatus, &item.EmailSentAt, &item.EmailFailureCode); errors.Is(err, sql.ErrNoRows) {
+		if err := tx.QueryRowContext(ctx, `SELECT i.id,i.group_id,i.target_membership_id,i.email,coalesce(i.display_name,''),i.role_assignments_version,i.expires_at,i.accepted_at,i.revoked_at,coalesce(o.status,'NOT_REQUESTED'),o.sent_at,coalesce(o.last_error_code,'') FROM invitations i LEFT JOIN invitation_email_outbox o ON o.invitation_id=i.id WHERE i.id=? AND i.group_id=?`, invitationID, membership.GroupID).
+			Scan(&item.ID, &item.GroupID, &item.TargetMembershipID, &item.Email, &item.DisplayName, &item.RoleAssignmentsVersion, &item.ExpiresAt, &acceptedAt, &revokedAt, &item.EmailDeliveryStatus, &item.EmailSentAt, &item.EmailFailureCode); errors.Is(err, sql.ErrNoRows) {
 			return domain.ErrNotFound
 		} else if err != nil {
 			return err
@@ -1277,9 +1337,11 @@ func (s Service) RevokeInvitation(ctx context.Context, actor domain.Principal, m
 
 // ListInvitations returns newest-first invitations without bearer tokens.
 // GROUP_ADMINISTRATION can read the complete invitation lifecycle;
-// ROLE_MANAGEMENT alone receives only currently open invitations needed for
-// assignments. ctx bounds the query; it returns ErrForbidden or SQL errors when
-// the result cannot be produced.
+// ROLE_MANAGEMENT alone receives only currently open, ordinary invitations
+// needed for assignments. Managed-guest claim invitations remain visible only
+// to group administrators because they link a membership to a future login
+// identity. ctx bounds the query; it returns ErrForbidden or SQL errors when the
+// result cannot be produced.
 func (s Service) ListInvitations(ctx context.Context, membership domain.Membership) ([]Invitation, error) {
 	canAdmin, err := hasCurrentPermission(ctx, s.DB, membership, domain.PermissionGroupAdministration)
 	if err != nil {
@@ -1292,12 +1354,14 @@ func (s Service) ListInvitations(ctx context.Context, membership domain.Membersh
 	if !canAdmin && !canManageRoles {
 		return nil, domain.ErrForbidden
 	}
-	query := `SELECT i.id,i.group_id,i.email,coalesce(i.display_name,''),i.roles_json,i.group_permissions_json,i.category_grants_json,i.role_assignments_version,
+	query := `SELECT i.id,i.group_id,i.target_membership_id,i.email,coalesce(i.display_name,''),i.roles_json,i.group_permissions_json,i.category_grants_json,i.role_assignments_version,
 		i.expires_at,i.accepted_at,i.revoked_at,coalesce(o.status,'NOT_REQUESTED'),o.sent_at,coalesce(o.last_error_code,'')
 		FROM invitations i LEFT JOIN invitation_email_outbox o ON o.invitation_id=i.id
 		WHERE i.group_id=?`
 	if !canAdmin {
-		query += ` AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND julianday(i.expires_at)>julianday('now')`
+		query += ` AND i.target_membership_id IS NULL
+			AND i.accepted_at IS NULL AND i.revoked_at IS NULL
+			AND julianday(i.expires_at)>julianday('now')`
 	}
 	query += ` ORDER BY i.created_at DESC`
 	rows, err := s.DB.QueryContext(ctx, query, membership.GroupID)
@@ -1309,7 +1373,7 @@ func (s Service) ListInvitations(ctx context.Context, membership domain.Membersh
 	for rows.Next() {
 		var item Invitation
 		var encodedRoles, encodedPermissions, encodedGrants string
-		if err := rows.Scan(&item.ID, &item.GroupID, &item.Email, &item.DisplayName, &encodedRoles, &encodedPermissions, &encodedGrants, &item.RoleAssignmentsVersion, &item.ExpiresAt, &item.AcceptedAt, &item.RevokedAt, &item.EmailDeliveryStatus, &item.EmailSentAt, &item.EmailFailureCode); err != nil {
+		if err := rows.Scan(&item.ID, &item.GroupID, &item.TargetMembershipID, &item.Email, &item.DisplayName, &encodedRoles, &encodedPermissions, &encodedGrants, &item.RoleAssignmentsVersion, &item.ExpiresAt, &item.AcceptedAt, &item.RevokedAt, &item.EmailDeliveryStatus, &item.EmailSentAt, &item.EmailFailureCode); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(encodedRoles), &item.Roles); err != nil {

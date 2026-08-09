@@ -38,7 +38,7 @@ import { PublicJoinLinkDialog } from './PublicJoinLinkDialog';
 import { roleDisplayName } from './roleDisplayName';
 import styles from './MembersPanel.module.css';
 
-type MembersDialog = 'invite' | 'import' | 'edit' | 'revoke' | 'resend' | 'remove' | null;
+type MembersDialog = 'invite' | 'import' | 'edit' | 'revoke' | 'resend' | 'remove' | 'rename-guest' | 'claim-guest' | null;
 
 interface MemberImportDialogProps {
   activeGroupId: string;
@@ -55,6 +55,16 @@ interface DeliverySummary {
 const MAX_CSV_BYTES = 256 * 1024;
 const DELIVERY_POLL_INTERVAL_MS = 1_200;
 const ACTIVE_DELIVERY_STATUSES = new Set<EmailDeliveryStatus>(['PENDING', 'SENDING']);
+
+/**
+ * Determines whether a guest membership is still managed without login data.
+ *
+ * @param member - Membership returned by the administrator directory.
+ * @returns Whether the guest has no claimable account email yet.
+ */
+function isManagedGuest(member: Membership): boolean {
+  return member.isGuest && member.email === null;
+}
 
 const INVITATION_STATUS_KEYS: Record<InvitationImportStatus, string> = {
   CREATED: 'members.csvImport.invitationStatus.created',
@@ -381,6 +391,9 @@ export function MembersPanel() {
   const [selectedInvitation, setSelectedInvitation] = useState<InvitationMetadata | null>(null);
   const [selectedMember, setSelectedMember] = useState<Membership | null>(null);
   const [resendResult, setResendResult] = useState<{ acceptUrl: string; expiresAt: string } | null>(null);
+  const [guestDisplayName, setGuestDisplayName] = useState('');
+  const [guestClaimEmail, setGuestClaimEmail] = useState('');
+  const [guestClaimInvitation, setGuestClaimInvitation] = useState<CreatedInvitation | null>(null);
 
   const createMutation = useMutation({
     mutationFn: () => api.createInvitation(activeGroupId, { ...draft, email: draft.email.trim(), displayName: draft.displayName.trim(), roleIds: draft.roleIds ?? [] }),
@@ -432,8 +445,36 @@ export function MembersPanel() {
       const selfRemoval = selectedMember?.userId === session.user.id;
       setDialog(null);
       setSelectedMember(null);
-      await queryClient.invalidateQueries({ queryKey: membersQueryKey });
-      if (selfRemoval) await queryClient.invalidateQueries({ queryKey: ['session'] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: membersQueryKey }),
+        queryClient.invalidateQueries({ queryKey: invitationQueryKey }),
+        ...(selfRemoval ? [queryClient.invalidateQueries({ queryKey: ['session'] })] : []),
+      ]);
+    },
+  });
+  const renameGuestMutation = useMutation({
+    mutationFn: () => selectedMember
+      ? api.renameMember(activeGroupId, selectedMember.id, guestDisplayName.trim())
+      : Promise.reject(new Error(t('members.noMemberSelected'))),
+    onSuccess: async () => {
+      setDialog(null);
+      setSelectedMember(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: membersQueryKey }),
+        queryClient.invalidateQueries({ queryKey: ['booking-context', activeGroupId] }),
+      ]);
+    },
+  });
+  const claimGuestMutation = useMutation({
+    mutationFn: () => selectedMember
+      ? api.createGuestClaimInvitation(activeGroupId, selectedMember.id, guestClaimEmail.trim())
+      : Promise.reject(new Error(t('members.noMemberSelected'))),
+    onSuccess: async (invitation) => {
+      setGuestClaimInvitation(invitation);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: invitationQueryKey }),
+        queryClient.invalidateQueries({ queryKey: membersQueryKey }),
+      ]);
     },
   });
 
@@ -471,6 +512,7 @@ export function MembersPanel() {
   const activeMembers = membersQuery.data.filter((member) => member.active);
   const formerMembers = membersQuery.data.filter((member) => !member.active);
   const openInvitations = invitationsQuery.data.filter((invitation) => !invitation.acceptedAt && !invitation.revokedAt);
+  const claimInvitationMembershipIds = new Set(openInvitations.flatMap((invitation) => invitation.targetMembershipId && Date.parse(invitation.expiresAt) > invitationsQuery.dataUpdatedAt ? [invitation.targetMembershipId] : []));
   const invitationDeliveryStatus = createdInvitation
     ? invitationsQuery.data.find((item) => item.id === createdInvitation.id)?.emailDeliveryStatus ?? createdInvitation.emailDeliveryStatus
     : null;
@@ -481,11 +523,16 @@ export function MembersPanel() {
     setSelectedInvitation(null);
     setSelectedMember(null);
     setResendResult(null);
+    setGuestDisplayName('');
+    setGuestClaimEmail('');
+    setGuestClaimInvitation(null);
     createMutation.reset();
     updateMutation.reset();
     revokeMutation.reset();
     resendMutation.reset();
     archiveMutation.reset();
+    renameGuestMutation.reset();
+    claimGuestMutation.reset();
   };
   const openInvite = (member?: Membership) => {
     setDraft({ ...emptyInvitationInput(), email: member?.email ?? '', displayName: member?.displayName ?? '', roleIds: settingsQuery.data?.defaultRoleId ? [settingsQuery.data.defaultRoleId] : [] });
@@ -496,14 +543,43 @@ export function MembersPanel() {
     setDraft({ email: invitation.email, displayName: invitation.displayName ?? '', roleIds: invitation.roleIds ?? [], roles: invitation.roles, groupPermissions: invitation.groupPermissions, categoryPermissions: invitation.categoryPermissions });
     setDialog('edit');
   };
+  const openGuestRename = (member: Membership) => {
+    setSelectedMember(member);
+    setGuestDisplayName(member.displayName);
+    setDialog('rename-guest');
+  };
+  const openGuestClaim = (member: Membership) => {
+    setSelectedMember(member);
+    setGuestClaimEmail('');
+    setGuestClaimInvitation(null);
+    setDialog('claim-guest');
+  };
   const roles = rolesQuery.data ?? [];
   const defaultRole = roles.find((role) => role.id === settingsQuery.data?.defaultRoleId);
+  const guestClaimRoleConfigured = Boolean(settingsQuery.data?.guestRoleId);
   const reservedAdminRole = roles.find((role) => role.presetKey === 'GROUP_ADMINISTRATOR');
   const lockedAdministratorRoleIds = (roleIds: readonly string[]) => reservedAdminRole
     && reservedAdminRole.memberCount <= 1
     && roleIds.includes(reservedAdminRole.id)
     ? [reservedAdminRole.id]
     : [];
+  const renderGuestClaimAction = (member: Membership, claimPending: boolean) => {
+    if (claimPending) return <span className={styles.claimPending}>{t('members.claimPending')}</span>;
+    const descriptionId = `claim-unavailable-${member.id}`;
+    return <span className={styles.claimAction}>
+      <Button
+        aria-describedby={guestClaimRoleConfigured ? undefined : descriptionId}
+        aria-label={t('members.claimGuestFor', { name: member.displayName })}
+        disabled={!guestClaimRoleConfigured}
+        leadingIcon={<MailPlus size={16} />}
+        onClick={() => openGuestClaim(member)}
+        size="small"
+        title={guestClaimRoleConfigured ? undefined : t('members.claimUnavailableNoRole')}
+        variant="ghost"
+      >{t('members.claimGuest')}</Button>
+      {!guestClaimRoleConfigured ? <span className={styles.claimUnavailable} id={descriptionId}>{t('members.claimUnavailableNoRole')}</span> : null}
+    </span>;
+  };
 
   return (
     <div className={styles.content}>
@@ -524,12 +600,13 @@ export function MembersPanel() {
           compact ? <div className={styles.mobileCards}>{openInvitations.map((item) => {
             const expired = Date.parse(item.expiresAt) <= invitationsQuery.dataUpdatedAt;
             const resendBlocked = ACTIVE_DELIVERY_STATUSES.has(item.emailDeliveryStatus);
+            const claimInvitation = Boolean(item.targetMembershipId);
             return <article className={styles.mobileCard} key={item.id}>
               <header className={styles.mobileCardHeader}><div><strong>{item.displayName || item.email}</strong><small>{item.email}</small></div><span className={deliveryBadgeClass(item.emailDeliveryStatus)}>{t(DELIVERY_STATUS_KEYS[item.emailDeliveryStatus])}</span></header>
               <p className={expired ? styles.expired : styles.mobileMetadata}>{expired ? t('members.expired') : t('members.validUntilDate', { date: new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(item.expiresAt)) })}</p>
-              <RoleAssignmentPicker canManageGroup={canManageProtectedRoles} canManageRoles={canManageRoles} onApply={(roleIds) => applyInvitationRoles(item, roleIds)} roleIds={item.roleIds ?? []} roles={roles} subjectName={item.displayName || item.email} />
+              {claimInvitation ? <p className={styles.managedGuestRole}>{t('members.claimInvitationRoleLocked')}</p> : <RoleAssignmentPicker canManageGroup={canManageProtectedRoles} canManageRoles={canManageRoles} onApply={(roleIds) => applyInvitationRoles(item, roleIds)} roleIds={item.roleIds ?? []} roles={roles} subjectName={item.displayName || item.email} />}
               {canManageProtectedRoles ? <div className={styles.mobileActions}>
-                <Button aria-label={t('members.editInvitationFor', { email: item.email })} leadingIcon={<Pencil size={16} />} onClick={() => openEdit(item)} size="small" variant="ghost">{t('common.edit')}</Button>
+                {!claimInvitation ? <Button aria-label={t('members.editInvitationFor', { email: item.email })} leadingIcon={<Pencil size={16} />} onClick={() => openEdit(item)} size="small" variant="ghost">{t('common.edit')}</Button> : null}
                 <Button aria-label={t('members.resendFor', { email: item.email })} disabled={resendBlocked} leadingIcon={<RotateCcw size={16} />} onClick={() => { setSelectedInvitation(item); setResendResult(null); setDialog('resend'); }} size="small" variant="ghost">{t('members.resend')}</Button>
                 <Button aria-label={t('members.deleteInvitationFor', { email: item.email })} leadingIcon={<Trash2 size={16} />} onClick={() => { setSelectedInvitation(item); setDialog('revoke'); }} size="small" variant="ghost">{t('common.delete')}</Button>
               </div> : null}
@@ -540,15 +617,16 @@ export function MembersPanel() {
               <tbody>{openInvitations.map((item) => {
                 const expired = Date.parse(item.expiresAt) <= invitationsQuery.dataUpdatedAt;
                 const resendBlocked = ACTIVE_DELIVERY_STATUSES.has(item.emailDeliveryStatus);
+                const claimInvitation = Boolean(item.targetMembershipId);
                 return (
                   <tr key={item.id}>
-                    <td>{canManageProtectedRoles ? <button className={styles.rowLink} onClick={() => openEdit(item)} type="button"><strong>{item.email}</strong></button> : <strong>{item.email}</strong>}</td>
+                    <td>{canManageProtectedRoles && !claimInvitation ? <button className={styles.rowLink} onClick={() => openEdit(item)} type="button"><strong>{item.email}</strong></button> : <strong>{item.email}</strong>}</td>
                     <td>{item.displayName || '–'}</td>
-                    <td className={styles.roleCell}><RoleAssignmentPicker canManageGroup={canManageProtectedRoles} canManageRoles={canManageRoles} onApply={(roleIds) => applyInvitationRoles(item, roleIds)} roleIds={item.roleIds ?? []} roles={roles} subjectName={item.displayName || item.email} /></td>
+                    <td className={styles.roleCell}>{claimInvitation ? <span className={styles.managedGuestRole}>{t('members.claimInvitationRoleLocked')}</span> : <RoleAssignmentPicker canManageGroup={canManageProtectedRoles} canManageRoles={canManageRoles} onApply={(roleIds) => applyInvitationRoles(item, roleIds)} roleIds={item.roleIds ?? []} roles={roles} subjectName={item.displayName || item.email} />}</td>
                     <td><span className={deliveryBadgeClass(item.emailDeliveryStatus)}>{t(DELIVERY_STATUS_KEYS[item.emailDeliveryStatus])}</span></td>
                     <td><span className={expired ? styles.expired : ''}>{expired ? t('members.expired') : new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(item.expiresAt))}</span></td>
                     {canManageProtectedRoles ? <td><div className={styles.tableActions}>
-                      <Button aria-label={t('members.editInvitationFor', { email: item.email })} leadingIcon={<Pencil size={16} />} onClick={() => openEdit(item)} size="small" variant="ghost">{t('common.edit')}</Button>
+                      {!claimInvitation ? <Button aria-label={t('members.editInvitationFor', { email: item.email })} leadingIcon={<Pencil size={16} />} onClick={() => openEdit(item)} size="small" variant="ghost">{t('common.edit')}</Button> : null}
                       <Button aria-label={t('members.resendFor', { email: item.email })} disabled={resendBlocked} leadingIcon={<RotateCcw size={16} />} onClick={() => { setSelectedInvitation(item); setResendResult(null); setDialog('resend'); }} size="small" variant="ghost">{t('members.resend')}</Button>
                       <Button aria-label={t('members.deleteInvitationFor', { email: item.email })} leadingIcon={<Trash2 size={16} />} onClick={() => { setSelectedInvitation(item); setDialog('revoke'); }} size="small" variant="ghost">{t('common.delete')}</Button>
                     </div></td> : null}
@@ -562,18 +640,35 @@ export function MembersPanel() {
 
       <section className={styles.section}>
         <div className={styles.sectionHeading}><h3>{t('members.activeMembers')}</h3><span>{activeMembers.length}</span></div>
-        {compact ? <div className={styles.mobileCards}>{activeMembers.map((member) => <article className={styles.mobileCard} key={member.id}>
-          <header className={styles.mobileCardHeader}><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /><span><strong>{member.displayName}</strong><small>{member.email}</small></span></span></header>
-          <RoleAssignmentPicker canManageGroup={canManageProtectedRoles} canManageRoles={canManageRoles} lockedRoleIds={lockedAdministratorRoleIds(member.roleIds ?? [])} onApply={(roleIds) => applyMemberRoles(member, roleIds)} roleIds={member.roleIds ?? []} roles={roles} subjectName={member.displayName} />
-          {canManageProtectedRoles ? <div className={styles.mobileActions}><Button aria-label={t('members.removeFor', { name: member.displayName })} leadingIcon={<UserMinus size={16} />} onClick={() => { setSelectedMember(member); setDialog('remove'); }} size="small" variant="ghost">{t('members.remove')}</Button></div> : null}
-        </article>)}</div> : <div className={tableStyles.tableWrap}>
+        {compact ? <div className={styles.mobileCards}>{activeMembers.map((member) => {
+          const managedGuest = isManagedGuest(member);
+          const claimPending = claimInvitationMembershipIds.has(member.id);
+          return <article className={styles.mobileCard} key={member.id}>
+            <header className={styles.mobileCardHeader}><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /><span><span className={styles.memberName}><strong>{member.displayName}</strong>{member.isGuest ? <span className={styles.guestBadge}>{managedGuest ? t('members.managedGuestBadge') : t('members.guestBadge')}</span> : null}</span><small>{member.email ?? t('members.noLogin')}</small></span></span></header>
+            {managedGuest ? <p className={styles.managedGuestRole}>{t('members.managedGuestRole')}</p> : <RoleAssignmentPicker canManageGroup={canManageProtectedRoles} canManageRoles={canManageRoles} lockedRoleIds={lockedAdministratorRoleIds(member.roleIds ?? [])} onApply={(roleIds) => applyMemberRoles(member, roleIds)} roleIds={member.roleIds ?? []} roles={roles} subjectName={member.displayName} />}
+            {canManageProtectedRoles ? <div className={styles.mobileActions}>
+              {managedGuest ? <Button aria-label={t('members.renameGuestFor', { name: member.displayName })} leadingIcon={<Pencil size={16} />} onClick={() => openGuestRename(member)} size="small" variant="ghost">{t('members.renameGuest')}</Button> : null}
+              {managedGuest ? renderGuestClaimAction(member, claimPending) : null}
+              <Button aria-label={t('members.removeFor', { name: member.displayName })} leadingIcon={<UserMinus size={16} />} onClick={() => { setSelectedMember(member); setDialog('remove'); }} size="small" variant="ghost">{managedGuest ? t('members.archiveGuest') : t('members.remove')}</Button>
+            </div> : null}
+          </article>;
+        })}</div> : <div className={tableStyles.tableWrap}>
           <table className={tableStyles.table}>
             <thead><tr><th>{t('common.member')}</th><th>{t('members.email')}</th><th>{t('members.roles')}</th>{canManageProtectedRoles ? <th><span className="sr-only">{t('common.action')}</span></th> : null}</tr></thead>
-            <tbody>{activeMembers.map((member) => <tr key={member.id}>
-              <td><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /> <strong>{member.displayName}</strong></span></td>
-              <td>{member.email}</td><td className={styles.roleCell}><RoleAssignmentPicker canManageGroup={canManageProtectedRoles} canManageRoles={canManageRoles} lockedRoleIds={lockedAdministratorRoleIds(member.roleIds ?? [])} onApply={(roleIds) => applyMemberRoles(member, roleIds)} roleIds={member.roleIds ?? []} roles={roles} subjectName={member.displayName} /></td>
-              {canManageProtectedRoles ? <td><Button aria-label={t('members.removeFor', { name: member.displayName })} leadingIcon={<UserMinus size={16} />} onClick={() => { setSelectedMember(member); setDialog('remove'); }} size="small" variant="ghost">{t('members.remove')}</Button></td> : null}
-            </tr>)}</tbody>
+            <tbody>{activeMembers.map((member) => {
+              const managedGuest = isManagedGuest(member);
+              const claimPending = claimInvitationMembershipIds.has(member.id);
+              return <tr key={member.id}>
+                <td><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /> <span className={styles.memberName}><strong>{member.displayName}</strong>{member.isGuest ? <span className={styles.guestBadge}>{managedGuest ? t('members.managedGuestBadge') : t('members.guestBadge')}</span> : null}</span></span></td>
+                <td>{member.email ?? <span className={styles.noLogin}>{t('members.noLogin')}</span>}</td>
+                <td className={styles.roleCell}>{managedGuest ? <span className={styles.managedGuestRole}>{t('members.managedGuestRole')}</span> : <RoleAssignmentPicker canManageGroup={canManageProtectedRoles} canManageRoles={canManageRoles} lockedRoleIds={lockedAdministratorRoleIds(member.roleIds ?? [])} onApply={(roleIds) => applyMemberRoles(member, roleIds)} roleIds={member.roleIds ?? []} roles={roles} subjectName={member.displayName} />}</td>
+                {canManageProtectedRoles ? <td><div className={styles.tableActions}>
+                  {managedGuest ? <Button aria-label={t('members.renameGuestFor', { name: member.displayName })} leadingIcon={<Pencil size={16} />} onClick={() => openGuestRename(member)} size="small" variant="ghost">{t('members.renameGuest')}</Button> : null}
+                  {managedGuest ? renderGuestClaimAction(member, claimPending) : null}
+                  <Button aria-label={t('members.removeFor', { name: member.displayName })} leadingIcon={<UserMinus size={16} />} onClick={() => { setSelectedMember(member); setDialog('remove'); }} size="small" variant="ghost">{managedGuest ? t('members.archiveGuest') : t('members.remove')}</Button>
+                </div></td> : null}
+              </tr>;
+            })}</tbody>
           </table>
         </div>}
       </section>
@@ -583,7 +678,7 @@ export function MembersPanel() {
         {formerMembers.length === 0 ? <p className={styles.emptySection}>{t('members.noFormerMembers')}</p> : (
           <div className={tableStyles.tableWrap}><table className={tableStyles.table}>
             <thead><tr><th>{t('common.member')}</th><th>{t('members.email')}</th><th><span className="sr-only">{t('common.action')}</span></th></tr></thead>
-            <tbody>{formerMembers.map((member) => <tr key={member.id}><td><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /> <strong>{member.displayName}</strong></span></td><td>{member.email}</td><td><Button leadingIcon={<MailPlus size={16} />} onClick={() => openInvite(member)} size="small" variant="ghost">{t('members.inviteAgain')}</Button></td></tr>)}</tbody>
+            <tbody>{formerMembers.map((member) => <tr key={member.id}><td><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /> <span className={styles.memberName}><strong>{member.displayName}</strong>{member.isGuest ? <span className={styles.guestBadge}>{isManagedGuest(member) ? t('members.managedGuestBadge') : t('members.guestBadge')}</span> : null}</span></span></td><td>{member.email ?? <span className={styles.noLogin}>{t('members.noLogin')}</span>}</td><td>{member.email ? <Button leadingIcon={<MailPlus size={16} />} onClick={() => openInvite(member)} size="small" variant="ghost">{t('members.inviteAgain')}</Button> : null}</td></tr>)}</tbody>
           </table></div>
         )}
       </section> : null}
@@ -632,8 +727,38 @@ export function MembersPanel() {
         </div>
       </Modal>
 
-      <Modal onClose={closeDialog} open={dialog === 'remove'} title={selectedMember?.userId === session.user.id ? t('members.removeSelfTitle') : t('members.removeTitle')}>
-        <div className={styles.confirmDialog}><p>{selectedMember?.userId === session.user.id ? t('members.removeSelfExplanation') : t('members.removeExplanation', { name: selectedMember?.displayName ?? '' })}</p>{archiveMutation.isError ? <p className={styles.error} role="alert">{archiveMutation.error.message}</p> : null}<div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={archiveMutation.isPending} onClick={() => archiveMutation.mutate()} variant="danger">{selectedMember?.userId === session.user.id ? t('members.confirmSelfRemoval') : t('members.remove')}</Button></div></div>
+      <Modal onClose={closeDialog} open={dialog === 'rename-guest'} title={t('members.renameGuestTitle')}>
+        <form className={styles.form} onSubmit={(event) => { event.preventDefault(); renameGuestMutation.mutate(); }}>
+          <p className={styles.expiry}>{t('members.renameGuestDescription')}</p>
+          <Field hint={t('members.renameGuestHint')} htmlFor="managed-guest-display-name" label={t('auth.displayName')}>
+            <TextInput autoComplete="off" id="managed-guest-display-name" maxLength={120} onChange={(event) => { setGuestDisplayName(event.target.value); renameGuestMutation.reset(); }} required value={guestDisplayName} />
+          </Field>
+          {renameGuestMutation.isError ? <p className={styles.error} role="alert">{renameGuestMutation.error.message}</p> : null}
+          <div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!guestDisplayName.trim() || guestDisplayName.trim() === selectedMember?.displayName || renameGuestMutation.isPending} type="submit">{renameGuestMutation.isPending ? t('members.renameGuestPending') : t('common.save')}</Button></div>
+        </form>
+      </Modal>
+
+      <Modal onClose={closeDialog} open={dialog === 'claim-guest'} title={t('members.claimGuestTitle')}>
+        {guestClaimInvitation ? <div className={styles.invitationReady}>
+          <MailPlus aria-hidden="true" size={38} />
+          <h3>{t('members.claimGuestReadyTitle')}</h3>
+          <p>{t('members.claimGuestReadyDescription', { name: selectedMember?.displayName ?? '', email: guestClaimInvitation.email })}</p>
+          <p>{t('members.invitationExpiry', { date: new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(guestClaimInvitation.expiresAt)) })}</p>
+          {guestClaimInvitation.acceptUrl ? <div className={styles.fallbackLink}><p>{t('members.fallbackHint')}</p><div className={styles.copyRow}><TextInput aria-label={t('members.invitationLink')} readOnly value={guestClaimInvitation.acceptUrl} /><Button leadingIcon={<Copy size={17} />} onClick={() => void navigator.clipboard.writeText(guestClaimInvitation.acceptUrl)} variant="secondary">{t('common.copy')}</Button></div></div> : null}
+          <Button fullWidth onClick={closeDialog}>{t('common.done')}</Button>
+        </div> : <form className={styles.form} onSubmit={(event) => { event.preventDefault(); claimGuestMutation.mutate(); }}>
+          <p className={styles.expiry}>{t('members.claimGuestDescription', { name: selectedMember?.displayName ?? '' })}</p>
+          <Field hint={t('members.claimGuestEmailHint')} htmlFor="managed-guest-claim-email" label={t('auth.email')}>
+            <TextInput autoComplete="email" id="managed-guest-claim-email" onChange={(event) => { setGuestClaimEmail(event.target.value); claimGuestMutation.reset(); }} required type="email" value={guestClaimEmail} />
+          </Field>
+          <p className={styles.claimNotice}>{t('members.claimGuestHistoryNotice')}</p>
+          {claimGuestMutation.isError ? <p className={styles.error} role="alert">{claimGuestMutation.error.message}</p> : null}
+          <div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!guestClaimEmail.trim() || claimGuestMutation.isPending} type="submit">{claimGuestMutation.isPending ? t('members.claimGuestPending') : t('members.claimGuestCreate')}</Button></div>
+        </form>}
+      </Modal>
+
+      <Modal onClose={closeDialog} open={dialog === 'remove'} title={selectedMember && isManagedGuest(selectedMember) ? t('members.archiveGuestTitle') : selectedMember?.userId === session.user.id ? t('members.removeSelfTitle') : t('members.removeTitle')}>
+        <div className={styles.confirmDialog}><p>{selectedMember && isManagedGuest(selectedMember) ? t('members.archiveGuestExplanation', { name: selectedMember.displayName }) : selectedMember?.userId === session.user.id ? t('members.removeSelfExplanation') : t('members.removeExplanation', { name: selectedMember?.displayName ?? '' })}</p>{archiveMutation.isError ? <p className={styles.error} role="alert">{archiveMutation.error.message}</p> : null}<div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={archiveMutation.isPending} onClick={() => archiveMutation.mutate()} variant="danger">{selectedMember && isManagedGuest(selectedMember) ? t('members.archiveGuest') : selectedMember?.userId === session.user.id ? t('members.confirmSelfRemoval') : t('members.remove')}</Button></div></div>
       </Modal>
 
       {dialog === 'import' ? <MemberImportDialog activeGroupId={activeGroupId} defaultRole={defaultRole} onClose={closeDialog} /> : null}

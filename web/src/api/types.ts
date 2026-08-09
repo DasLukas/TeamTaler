@@ -19,6 +19,8 @@ export type PermissionKey =
   | 'ROLE_MANAGEMENT'
   | 'FINANCE_MANAGEMENT'
   | 'CATALOG_MANAGEMENT'
+  | 'VIEW_MEMBER_DIRECTORY'
+  | 'VIEW_GROUP_STATISTICS'
   | 'VIEW_ALL_BOOKING_ACTIVITY'
   | 'RECORD_OWN_PAYMENT'
   | 'CREATE_OWN_BOOKING'
@@ -32,6 +34,8 @@ export const PERMISSION_KEYS = [
   'ROLE_MANAGEMENT',
   'FINANCE_MANAGEMENT',
   'CATALOG_MANAGEMENT',
+  'VIEW_MEMBER_DIRECTORY',
+  'VIEW_GROUP_STATISTICS',
   'VIEW_ALL_BOOKING_ACTIVITY',
   'RECORD_OWN_PAYMENT',
   'CREATE_OWN_BOOKING',
@@ -160,6 +164,8 @@ export interface GroupSettings {
   notificationEmailsEnabled: boolean;
   notificationEmailDeliveryAvailable: boolean;
   defaultRoleId: string | null;
+  guestsEnabled: boolean;
+  guestRoleId: string | null;
 }
 
 /**
@@ -168,6 +174,14 @@ export interface GroupSettings {
 export interface GroupSettingsUpdateInput {
   notificationEmailsEnabled?: boolean;
   defaultRoleId?: string;
+}
+
+/** Complete guest-feature update accepted by the dedicated settings endpoint. */
+export interface GuestSettingsUpdateInput {
+  guestsEnabled: boolean;
+  guestRoleId?: string | null;
+  createGuestRole?: boolean;
+  replacementDefaultRoleId?: string;
 }
 
 /** Administrator-visible state of the group's single public join link. */
@@ -289,9 +303,10 @@ export interface Membership {
   id: string;
   userId: string;
   displayName: string;
-  email: string;
+  email: string | null;
   initials: string;
   avatarUrl?: string;
+  isGuest: boolean;
   roles: GroupRole[];
   groupPermissions: GroupPermission[];
   categoryPermissions: CategoryPermission[];
@@ -363,8 +378,26 @@ export interface BookingBatchCommand {
   expectedPeriodId: string;
   quantity: number;
   unitPrice?: Money;
-  targetMembershipIds: string[];
+  targetMembershipIds?: string[];
+  managedGuestDisplayNames?: string[];
   reason?: string;
+}
+
+/** Minimal member identity exposed as a selectable booking target. */
+export interface BookingTarget {
+  membershipId: string;
+  displayName: string;
+  avatarUrl?: string;
+  isGuest: boolean;
+}
+
+/** Permission-filtered read model required by the product booking page. */
+export interface BookingContext {
+  openPeriod: Period;
+  ownBalance: Money;
+  currentMembership: Membership;
+  targets: BookingTarget[];
+  canCreateManagedGuests: boolean;
 }
 
 /** One immutable row in a member account statement. */
@@ -436,6 +469,7 @@ export interface Settlement {
   periodLabel: string;
   membershipId: string;
   memberName: string;
+  email: string | null;
   amount: Money;
   paidAmount: Money;
   openAmount?: Money;
@@ -544,6 +578,7 @@ export interface InvitationMetadata {
   emailDeliveryStatus: EmailDeliveryStatus;
   emailSentAt?: string;
   emailFailureCode?: string;
+  targetMembershipId?: string;
 }
 
 /** A newly created one-time invitation including its one-time acceptance URL. */
@@ -559,6 +594,7 @@ export interface CreatedInvitation {
   expiresAt: string;
   acceptUrl: string;
   emailDeliveryStatus: EmailDeliveryStatus;
+  targetMembershipId?: string;
 }
 
 /** Editable defaults assigned to a manual group invitation. */
@@ -642,5 +678,6 @@ export interface ProblemDetails {
   status: number;
   detail?: string;
   instance?: string;
+  existingMembershipId?: string;
   errors?: Record<string, string[]>;
 }

@@ -24,25 +24,21 @@ import styles from './BookingPage.module.css';
  */
 export function BookingPage() {
   const { t } = useTranslation();
-  const { activeGroupId, session } = useActiveGroup();
-  const dashboardQuery = useQuery({ queryKey: ['dashboard', activeGroupId], queryFn: () => api.getDashboard(activeGroupId) });
+  const { activeGroupId, activeGroup } = useActiveGroup();
   const categoriesQuery = useQuery({ queryKey: ['categories', activeGroupId], queryFn: () => api.getCategories(activeGroupId) });
-  const membersQuery = useQuery({ queryKey: ['members', activeGroupId], queryFn: () => api.getMembers(activeGroupId) });
+  const bookingContextQuery = useQuery({ queryKey: ['booking-context', activeGroupId], queryFn: () => api.getBookingContext(activeGroupId, activeGroup.currency) });
   const compact = useMediaQuery('(max-width: 1023px)');
   const [categoryId, setCategoryId] = useState('');
   const [selectedProductId, setSelectedProductId] = useState('');
   const [sheetOpen, setSheetOpen] = useState(false);
-  const activeMembers = useMemo(() => membersQuery.data?.filter((member) => member.active) ?? [], [membersQuery.data]);
   const bookableCategories = useMemo(() => getBookableCategories(categoriesQuery.data ?? []), [categoriesQuery.data]);
   const selectedProduct = useMemo(() => {
     const products = bookableCategories.flatMap((category) => category.products);
     return products.find((product) => product.id === selectedProductId);
   }, [bookableCategories, selectedProductId]);
   const selectedCategory = bookableCategories.find((category) => category.id === selectedProduct?.categoryId);
-  const currentMembership = activeMembers.find((member) => member.userId === session.user.id) ?? activeMembers[0];
   const hasBookableProducts = bookableCategories.some((category) => category.products.length > 0);
-  const activeGrants = session.groups.find((group) => group.id === activeGroupId)?.membership?.effectiveGrants;
-  const canManageCatalog = hasGroupCapability(activeGrants, 'catalog');
+  const canManageCatalog = hasGroupCapability(activeGroup.membership?.effectiveGrants, 'catalog');
 
   const clearSelection = () => {
     setSelectedProductId('');
@@ -58,9 +54,12 @@ export function BookingPage() {
     clearSelection();
   };
 
-  if (dashboardQuery.isLoading || categoriesQuery.isLoading || membersQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
-  if (!dashboardQuery.data || !categoriesQuery.data || !membersQuery.data || !currentMembership) {
+  if (categoriesQuery.isLoading || bookingContextQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
+  if (categoriesQuery.isError || bookingContextQuery.isError || !categoriesQuery.data || !bookingContextQuery.data) {
     return <div className={styles.state}><StatePanel kind="error" message={t('booking.productsError')} /></div>;
+  }
+  if (bookingContextQuery.data.targets.length === 0 && !bookingContextQuery.data.canCreateManagedGuests) {
+    return <div className={styles.state}><StatePanel kind="empty" title={t('booking.noAccessTitle')} message={t('booking.noAccessMessage')} /></div>;
   }
   if (!hasBookableProducts) {
     return <div className={styles.state}><StatePanel kind="empty" title={t('booking.noProductsTitle')} message={t('booking.noProductsMessage')}>{canManageCatalog ? <Link className={styles.catalogLink} to={memberPaths.catalog}>{t('booking.catalogLink')}</Link> : null}</StatePanel></div>;
@@ -69,14 +68,15 @@ export function BookingPage() {
   const inspector = selectedProduct && selectedCategory ? (
     <BookingInspector
       compact
-      currentMembershipId={currentMembership.id}
+      canCreateManagedGuests={bookingContextQuery.data.canCreateManagedGuests}
+      currentMembershipId={bookingContextQuery.data.currentMembership.id}
       groupId={activeGroupId}
       key={selectedProduct.id}
-      members={activeMembers}
       onBooked={clearSelection}
       onCancel={clearSelection}
-      period={dashboardQuery.data.currentPeriod}
+      period={bookingContextQuery.data.openPeriod}
       product={selectedProduct}
+      targets={bookingContextQuery.data.targets}
     />
   ) : null;
 
@@ -85,7 +85,7 @@ export function BookingPage() {
       <section className={styles.content}>
         <h1>{t('booking.quickTitle')}</h1>
         <div className={styles.balance}>
-          <div><span>{t('booking.openBalance')}</span><strong>{formatMoney(dashboardQuery.data.openBalance)}</strong></div>
+          <div><span>{t('booking.openBalance')}</span><strong>{formatMoney(bookingContextQuery.data.ownBalance)}</strong></div>
           <WalletCards aria-hidden="true" size={40} strokeWidth={1.8} />
         </div>
         <ProductPicker

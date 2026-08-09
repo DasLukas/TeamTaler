@@ -3,13 +3,12 @@ import { render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GroupRole } from '@/api/types';
-import { demoDashboard, demoMembers, demoSession } from '@/demo/data';
+import { demoDashboard, demoSession } from '@/demo/data';
 import i18n from '@/i18n';
 import { DashboardPage } from './DashboardPage';
 
 const mocks = vi.hoisted(() => ({
   getDashboard: vi.fn(),
-  getMembers: vi.fn(),
   getCategories: vi.fn(),
   useActiveGroup: vi.fn(),
 }));
@@ -17,7 +16,6 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/api/client', () => ({
   api: {
     getDashboard: mocks.getDashboard,
-    getMembers: mocks.getMembers,
     getCategories: mocks.getCategories,
     createOwnPayment: vi.fn(),
   },
@@ -32,7 +30,6 @@ describe('DashboardPage information-only overview', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getDashboard.mockResolvedValue(demoDashboard);
-    mocks.getMembers.mockResolvedValue(demoMembers);
     mocks.useActiveGroup.mockReturnValue({ activeGroupId: demoSession.activeGroupId, activeGroup: demoSession.groups[0], session: demoSession });
   });
 
@@ -70,5 +67,6 @@ describe('DashboardPage information-only overview', () => {
 
     expect(await screen.findByText(i18n.t('dashboard.paymentNote'))).toBeVisible();
     expect(screen.queryByRole('button', { name: i18n.t('selfPayment.action') })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: i18n.t('dashboard.groupStatistics.title') })).not.toBeInTheDocument();
   });
 });

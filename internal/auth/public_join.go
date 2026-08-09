@@ -468,11 +468,19 @@ func hydrateJoinedMembership(ctx context.Context, queryer publicJoinQueryer, pri
 	membership.ID = membershipID
 	membership.GroupID = groupID
 	membership.UserID = principal.UserID
-	membership.Email = principal.Email
+	membership.Email = stringPointer(principal.Email)
 	membership.DisplayName = principal.DisplayName
 	membership.AvatarURL = media.UserAvatarURL(principal.UserID, "")
 	membership.Status = "ACTIVE"
-	return nil
+	return queryer.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1
+		FROM group_settings settings
+		JOIN membership_role_assignments assignment
+		  ON assignment.group_id=settings.group_id
+		 AND assignment.membership_id=?
+		 AND assignment.role_id=settings.guest_role_id
+		WHERE settings.group_id=?
+	)`, membershipID, groupID).Scan(&membership.IsGuest)
 }
 
 func createSessionTx(ctx context.Context, tx *sql.Tx, principal domain.Principal, lifetime time.Duration, now time.Time) (Session, error) {

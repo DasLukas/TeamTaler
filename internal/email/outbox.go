@@ -65,6 +65,9 @@ const (
 	FailureCodeEmailUnavailable FailureCode = "email_unavailable"
 	// FailureCodeDeliveryFailed safely classifies every SMTP or sender failure.
 	FailureCodeDeliveryFailed FailureCode = "delivery_failed"
+	// FailureCodeRecipientUnavailable means a queued notification no longer has
+	// an email-capable recipient.
+	FailureCodeRecipientUnavailable FailureCode = "recipient_unavailable"
 	// FailureCodeDeliveryInterrupted means the final worker lease expired before acknowledgement.
 	FailureCodeDeliveryInterrupted FailureCode = "delivery_interrupted"
 	// FailureCodePublicJoinInvalidated means link rotation, disabling, or a newer registration invalidated the job.

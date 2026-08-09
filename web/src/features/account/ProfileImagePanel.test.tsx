@@ -29,6 +29,7 @@ function renderProfileImage(session: Session = baseSession): QueryClient {
     displayName: session.user.displayName,
     email: session.user.email,
     initials: 'AM',
+    isGuest: false,
     roles: ['MEMBER'],
     groupPermissions: [],
     categoryPermissions: [],

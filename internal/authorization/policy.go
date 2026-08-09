@@ -33,6 +33,14 @@ var permissionDefinitions = []domain.PermissionDefinition{
 		Description: "Manage categories, products, sorting, and product images.",
 	},
 	{
+		Key:         domain.PermissionViewMemberDirectory,
+		Description: "View the active member directory without administrative account details.",
+	},
+	{
+		Key:         domain.PermissionViewGroupStatistics,
+		Description: "View aggregate group booking and financial statistics.",
+	},
+	{
 		Key:         domain.PermissionViewAllBookingActivity,
 		Description: "View identified booking activity for every member in the group activity feed.",
 	},
@@ -54,8 +62,9 @@ var permissionDefinitions = []domain.PermissionDefinition{
 		ImpliedPermissions: []domain.PermissionKey{domain.PermissionVoidOwnBooking, domain.PermissionViewAllBookingActivity},
 	},
 	{
-		Key:         domain.PermissionBookForOthers,
-		Description: "Create a booking that targets another active membership.",
+		Key:                domain.PermissionBookForOthers,
+		Description:        "Create a booking that targets another active membership.",
+		ImpliedPermissions: []domain.PermissionKey{domain.PermissionViewMemberDirectory},
 	},
 }
 
@@ -148,8 +157,8 @@ func IsKnownPermission(permission domain.PermissionKey) bool {
 }
 
 // ExpandPermissions returns the deterministic union of permissions and all
-// calculated implications. Duplicate inputs are removed. VOID_ANY_BOOKING adds
-// VOID_OWN_BOOKING and VIEW_ALL_BOOKING_ACTIVITY without persisting extra grants.
+// calculated implications. Duplicate inputs are removed and transitive
+// implications are expanded without persisting extra grants.
 //
 // Parameters:
 //   - permissions: Direct permission keys collected from any number of roles.
@@ -161,12 +170,19 @@ func IsKnownPermission(permission domain.PermissionKey) bool {
 // discards caller data; policy entry points reject unknown requested keys.
 func ExpandPermissions(permissions []domain.PermissionKey) []domain.PermissionKey {
 	effective := make(map[domain.PermissionKey]struct{}, len(permissions)+2)
-	for _, permission := range permissions {
-		effective[permission] = struct{}{}
-		if permission == domain.PermissionVoidAnyBooking {
-			effective[domain.PermissionVoidOwnBooking] = struct{}{}
-			effective[domain.PermissionViewAllBookingActivity] = struct{}{}
+	implications := make(map[domain.PermissionKey][]domain.PermissionKey, len(permissionDefinitions))
+	for _, definition := range permissionDefinitions {
+		implications[definition.Key] = definition.ImpliedPermissions
+	}
+	queue := append(make([]domain.PermissionKey, 0, len(permissions)), permissions...)
+	for len(queue) > 0 {
+		permission := queue[0]
+		queue = queue[1:]
+		if _, seen := effective[permission]; seen {
+			continue
 		}
+		effective[permission] = struct{}{}
+		queue = append(queue, implications[permission]...)
 	}
 	result := make([]domain.PermissionKey, 0, len(effective))
 	for permission := range effective {
@@ -461,13 +477,24 @@ func SeedGroupRoles(ctx context.Context, tx *sql.Tx, groupID, actorUserID, admin
 
 	grantsByPreset := map[domain.RolePresetKey][]domain.PermissionKey{
 		domain.RolePresetGroupAdministrator: directPermissionKeys(),
-		domain.RolePresetMember:             {domain.PermissionCreateOwnBooking, domain.PermissionVoidOwnBooking},
+		domain.RolePresetMember: {
+			domain.PermissionViewMemberDirectory,
+			domain.PermissionViewGroupStatistics,
+			domain.PermissionCreateOwnBooking,
+			domain.PermissionVoidOwnBooking,
+		},
 		domain.RolePresetFinanceManager: {
 			domain.PermissionFinanceManagement,
+			domain.PermissionViewMemberDirectory,
+			domain.PermissionViewGroupStatistics,
 			domain.PermissionViewAllBookingActivity,
 			domain.PermissionRecordOwnPayment,
 		},
-		domain.RolePresetCatalogManager: {domain.PermissionCatalogManagement},
+		domain.RolePresetCatalogManager: {
+			domain.PermissionCatalogManagement,
+			domain.PermissionViewMemberDirectory,
+			domain.PermissionViewGroupStatistics,
+		},
 	}
 	for _, seed := range roleSeeds {
 		for _, permission := range grantsByPreset[seed.preset] {

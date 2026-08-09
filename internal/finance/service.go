@@ -103,8 +103,9 @@ type Dashboard struct {
 }
 
 // Account returns targetMembershipID's consolidated balance, current-period
-// statistics, anonymous group aggregates, and recent ledger entries. An empty
-// target selects membership itself; finance privileges are required for others.
+// statistics, permission-gated group aggregates, and recent ledger entries. An
+// empty target selects membership itself; FINANCE_MANAGEMENT is required for a
+// different target and VIEW_GROUP_STATISTICS controls the aggregate section.
 // ctx bounds queries. It returns the Account or forbidden, not-found, and SQL errors.
 func (s Service) Account(ctx context.Context, membership domain.Membership, targetMembershipID string) (Account, error) {
 	if targetMembershipID == "" {
@@ -157,27 +158,33 @@ func (s Service) Account(ctx context.Context, membership domain.Membership, targ
 	if err := rows.Err(); err != nil {
 		return Account{}, err
 	}
-	groupStats, err := s.DB.QueryContext(ctx, `SELECT c.id,c.name,c.icon,
+	account.GroupCategoryStats = make([]CategoryStatistic, 0)
+	canViewGroupStatistics, err := authorization.NewPolicy(s.DB).Can(ctx, membership.GroupID, membership.ID, domain.PermissionViewGroupStatistics, authorization.GroupResource(membership.GroupID))
+	if err != nil {
+		return Account{}, err
+	}
+	if canViewGroupStatistics {
+		groupStats, err := s.DB.QueryContext(ctx, `SELECT c.id,c.name,c.icon,
 		coalesce((SELECT sum(b.quantity) FROM bookings b WHERE b.category_id=c.id AND b.period_id=? AND b.voided_at IS NULL),0),
 		coalesce((SELECT sum(b.total_minor) FROM bookings b WHERE b.category_id=c.id AND b.period_id=?),0),
 		coalesce(-(SELECT sum(le.amount_minor) FROM ledger_entries le WHERE le.category_id=c.id AND le.period_id=? AND le.account='MEMBER_RECEIVABLE' AND le.reversal_of IS NOT NULL AND le.amount_minor<0),0),
 		coalesce((SELECT sum(le.amount_minor) FROM ledger_entries le WHERE le.category_id=c.id AND le.period_id=? AND le.account='MEMBER_RECEIVABLE' AND le.payment_id IS NULL),0)
 		FROM categories c WHERE c.group_id=? ORDER BY c.sort_order,lower(c.name)`,
-		account.OpenPeriodID, account.OpenPeriodID, account.OpenPeriodID, account.OpenPeriodID, membership.GroupID)
-	if err != nil {
-		return Account{}, err
-	}
-	account.GroupCategoryStats = make([]CategoryStatistic, 0)
-	for groupStats.Next() {
-		var statistic CategoryStatistic
-		if err := groupStats.Scan(&statistic.CategoryID, &statistic.CategoryName, &statistic.Icon, &statistic.Quantity, &statistic.GrossMinor, &statistic.VoidedMinor, &statistic.NetMinor); err != nil {
-			groupStats.Close()
+			account.OpenPeriodID, account.OpenPeriodID, account.OpenPeriodID, account.OpenPeriodID, membership.GroupID)
+		if err != nil {
 			return Account{}, err
 		}
-		account.GroupCategoryStats = append(account.GroupCategoryStats, statistic)
-	}
-	if err := groupStats.Close(); err != nil {
-		return Account{}, err
+		for groupStats.Next() {
+			var statistic CategoryStatistic
+			if err := groupStats.Scan(&statistic.CategoryID, &statistic.CategoryName, &statistic.Icon, &statistic.Quantity, &statistic.GrossMinor, &statistic.VoidedMinor, &statistic.NetMinor); err != nil {
+				groupStats.Close()
+				return Account{}, err
+			}
+			account.GroupCategoryStats = append(account.GroupCategoryStats, statistic)
+		}
+		if err := groupStats.Close(); err != nil {
+			return Account{}, err
+		}
 	}
 	entries, err := s.DB.QueryContext(ctx, `SELECT id,period_id,booking_id,payment_id,reversal_of,amount_minor,description,created_at
 		FROM ledger_entries WHERE group_id=? AND membership_id=? AND account='MEMBER_RECEIVABLE'

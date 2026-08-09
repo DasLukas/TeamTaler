@@ -41,3 +41,17 @@ func TestGroupSettingsExposeOnlyNotificationDelivery(t *testing.T) {
 		t.Fatalf("deprecated setting status = %d, body = %s", unsupportedResponse.Code, unsupportedResponse.Body.String())
 	}
 }
+
+func TestGuestSettingsRequireGuestsEnabled(t *testing.T) {
+	t.Parallel()
+	server, principal, administrator := invitationImportServer(t, false)
+
+	for _, body := range []string{`{}`, `{"guestsEnabled":null}`} {
+		request := roleHandlerRequest(principal, administrator.GroupID, http.MethodPut, body)
+		response := httptest.NewRecorder()
+		server.handleUpdateGuestSettings(response, request)
+		if response.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("guest settings body %s status = %d, response = %s", body, response.Code, response.Body.String())
+		}
+	}
+}

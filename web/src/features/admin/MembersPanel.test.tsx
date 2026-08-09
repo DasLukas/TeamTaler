@@ -18,6 +18,8 @@ const apiMock = vi.hoisted(() => ({
   revokeInvitation: vi.fn(),
   resendInvitationEmail: vi.fn(),
   archiveMember: vi.fn(),
+  renameMember: vi.fn(),
+  createGuestClaimInvitation: vi.fn(),
   importInvitations: vi.fn(),
   getInvitations: vi.fn(),
   retryInvitationEmail: vi.fn(),
@@ -51,6 +53,7 @@ const members: Membership[] = [{
   displayName: 'Admin',
   email: 'admin@example.test',
   initials: 'A',
+  isGuest: false,
   roles: ['ADMIN', 'MEMBER'],
   roleIds: ['role-admin', 'role-member'],
   roleAssignmentsVersion: 1,
@@ -58,6 +61,19 @@ const members: Membership[] = [{
   categoryPermissions: [],
   active: true,
 }];
+
+const managedGuest: Membership = {
+  ...members[0],
+  id: 'member-guest',
+  userId: 'user-guest-credentialless',
+  displayName: 'Managed Guest',
+  email: null,
+  initials: 'MG',
+  isGuest: true,
+  roles: ['MEMBER'],
+  roleIds: [],
+  effectiveGrants: [],
+};
 
 const roles: Role[] = [
   { id: 'role-admin', presetKey: 'GROUP_ADMINISTRATOR', name: 'Gruppenadministrator', grants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }], version: 1, memberCount: 1, pendingInvitationCount: 0 },
@@ -112,7 +128,7 @@ describe('MembersPanel invitations', () => {
     vi.clearAllMocks();
     apiMock.getMembers.mockResolvedValue(members);
     apiMock.getRoles.mockResolvedValue(roles);
-    apiMock.getGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
+    apiMock.getGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member', guestsEnabled: false, guestRoleId: null });
     apiMock.getPublicJoinLink.mockResolvedValue({ enabled: false, expired: false, expiresAt: null, version: 0, emailVerificationAvailable: true });
   apiMock.getCategories.mockResolvedValue([]);
     apiMock.createInvitation.mockResolvedValue({
@@ -133,6 +149,21 @@ describe('MembersPanel invitations', () => {
   apiMock.revokeInvitation.mockResolvedValue(undefined);
   apiMock.resendInvitationEmail.mockResolvedValue({ invitationId: 'invitation-new', emailDeliveryStatus: 'PENDING', expiresAt: '2026-08-12T12:00:00Z', acceptUrl: 'https://teamtaler.example/invite#token=rotated' });
   apiMock.archiveMember.mockResolvedValue(undefined);
+  apiMock.renameMember.mockImplementation((_groupId: string, _membershipId: string, displayName: string) => Promise.resolve({ ...members[0], displayName }));
+  apiMock.createGuestClaimInvitation.mockResolvedValue({
+    id: 'invitation-claim',
+    email: 'guest@example.test',
+    displayName: 'Managed Guest',
+    roles: ['MEMBER'],
+    roleIds: ['role-member'],
+    roleAssignmentsVersion: 1,
+    groupPermissions: [],
+    categoryPermissions: [],
+    expiresAt: '2026-08-11T12:00:00Z',
+    acceptUrl: 'https://teamtaler.example/invite#token=claim-token',
+    emailDeliveryStatus: 'PENDING',
+    targetMembershipId: 'member-guest',
+  });
   apiMock.updateMemberRoles.mockResolvedValue({ subjectType: 'MEMBERSHIP', subjectId: 'member-admin', roleIds: ['role-admin', 'role-member', 'role-finance'], version: 2 });
   apiMock.updateInvitationRoles.mockResolvedValue({ subjectType: 'INVITATION', subjectId: 'invitation-new', roleIds: ['role-member', 'role-finance'], version: 4 });
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:member-import-template') });
@@ -268,6 +299,86 @@ describe('MembersPanel invitations', () => {
     const removeDialog = screen.getByRole('dialog', { name: i18n.t('members.removeSelfTitle') });
     await user.click(within(removeDialog).getByRole('button', { name: i18n.t('members.confirmSelfRemoval') }));
     await waitFor(() => expect(apiMock.archiveMember).toHaveBeenCalledWith('group-a', 'member-admin', true));
+  });
+
+  it('manages a credentialless guest without exposing login or role controls', async () => {
+    const user = userEvent.setup();
+    apiMock.getMembers.mockResolvedValue([...members, managedGuest]);
+    apiMock.getGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member', guestsEnabled: true, guestRoleId: 'role-member' });
+    renderMembers();
+
+    expect(await screen.findByText(i18n.t('members.managedGuestBadge'))).toBeVisible();
+    expect(screen.getByText(i18n.t('members.noLogin'))).toBeVisible();
+    expect(screen.queryByRole('button', { name: i18n.t('roleManagement.editRolesFor', { name: managedGuest.displayName }) })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: i18n.t('members.renameGuestFor', { name: managedGuest.displayName }) }));
+    const nameInput = screen.getByLabelText(i18n.t('auth.displayName'));
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Renamed Guest');
+    await user.click(screen.getByRole('button', { name: i18n.t('common.save') }));
+    await waitFor(() => expect(apiMock.renameMember).toHaveBeenCalledWith('group-a', managedGuest.id, 'Renamed Guest'));
+
+    await user.click(screen.getByRole('button', { name: i18n.t('members.claimGuestFor', { name: managedGuest.displayName }) }));
+    await user.type(screen.getByLabelText(i18n.t('auth.email')), 'guest@example.test');
+    await user.click(screen.getByRole('button', { name: i18n.t('members.claimGuestCreate') }));
+    await waitFor(() => expect(apiMock.createGuestClaimInvitation).toHaveBeenCalledWith('group-a', managedGuest.id, 'guest@example.test'));
+    expect(await screen.findByLabelText(i18n.t('members.invitationLink'))).toHaveValue('https://teamtaler.example/invite#token=claim-token');
+    await user.click(screen.getByRole('button', { name: i18n.t('common.done') }));
+
+    apiMock.getInvitations.mockClear();
+    await user.click(screen.getByRole('button', { name: i18n.t('members.removeFor', { name: managedGuest.displayName }) }));
+    const archiveDialog = screen.getByRole('dialog', { name: i18n.t('members.archiveGuestTitle') });
+    await user.click(within(archiveDialog).getByRole('button', { name: i18n.t('members.archiveGuest') }));
+    await waitFor(() => expect(apiMock.archiveMember).toHaveBeenCalledWith('group-a', managedGuest.id, false));
+    await waitFor(() => expect(apiMock.getInvitations).toHaveBeenCalledWith('group-a'));
+  });
+
+  it('explains why a credentialless guest cannot be claimed before a guest role is configured', async () => {
+    apiMock.getMembers.mockResolvedValue([...members, managedGuest]);
+    renderMembers();
+
+    const claimButton = await screen.findByRole('button', { name: i18n.t('members.claimGuestFor', { name: managedGuest.displayName }) });
+    expect(claimButton).toBeDisabled();
+    expect(claimButton).toHaveAttribute('title', i18n.t('members.claimUnavailableNoRole'));
+    expect(screen.getByText(i18n.t('members.claimUnavailableNoRole'))).toBeVisible();
+    expect(apiMock.createGuestClaimInvitation).not.toHaveBeenCalled();
+  });
+
+  it('keeps claim-invitation roles locked while retaining resend and revoke actions', async () => {
+    const claimInvitation: InvitationMetadata = {
+      ...invitationMetadata[0],
+      id: 'invitation-claim',
+      email: 'guest@example.test',
+      displayName: managedGuest.displayName,
+      targetMembershipId: managedGuest.id,
+    };
+    apiMock.getInvitations.mockResolvedValue([claimInvitation]);
+    renderMembers();
+
+    expect(await screen.findByText(i18n.t('members.claimInvitationRoleLocked'))).toBeVisible();
+    expect(screen.queryByRole('button', { name: i18n.t('members.editInvitationFor', { email: claimInvitation.email }) })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: i18n.t('roleManagement.editRolesFor', { name: managedGuest.displayName }) })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: i18n.t('members.resendFor', { email: claimInvitation.email }) })).toBeVisible();
+    expect(screen.getByRole('button', { name: i18n.t('members.deleteInvitationFor', { email: claimInvitation.email }) })).toBeVisible();
+  });
+
+  it('allows a new claim after the previous claim invitation expired', async () => {
+    const expiredClaim: InvitationMetadata = {
+      ...invitationMetadata[0],
+      id: 'invitation-expired-claim',
+      email: 'expired-guest@example.test',
+      displayName: managedGuest.displayName,
+      expiresAt: '2020-01-01T00:00:00Z',
+      targetMembershipId: managedGuest.id,
+    };
+    apiMock.getMembers.mockResolvedValue([...members, managedGuest]);
+    apiMock.getInvitations.mockResolvedValue([expiredClaim]);
+    apiMock.getGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member', guestsEnabled: true, guestRoleId: 'role-member' });
+    renderMembers();
+
+    expect(await screen.findByText(i18n.t('members.expired'))).toBeVisible();
+    expect(screen.queryByText(i18n.t('members.claimPending'))).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: i18n.t('members.claimGuestFor', { name: managedGuest.displayName }) })).toBeEnabled();
   });
 
   it('explains link-only fallback when SMTP delivery is not configured', async () => {

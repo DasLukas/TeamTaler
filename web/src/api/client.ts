@@ -3,9 +3,12 @@ import {
   adaptAccountSummaries,
   adaptAuditEntry,
   adaptBooking,
+  adaptBookingContext,
   adaptCategories,
   adaptDashboard,
+  adaptGroupSettings,
   adaptLedger,
+  adaptMembership,
   adaptMemberships,
   adaptNotification,
   adaptPermissionDefinition,
@@ -23,6 +26,7 @@ import type {
   Booking,
   BookingBatchCommand,
   BookingCommand,
+  BookingContext,
   CatalogOrderCommand,
   Category,
   CategoryCreateCommand,
@@ -42,6 +46,7 @@ import type {
   LoginCommand,
   GroupSettings,
   GroupSettingsUpdateInput,
+  GuestSettingsUpdateInput,
   Membership,
   Notification,
   NotificationPage,
@@ -202,6 +207,7 @@ function adaptInvitation(input: unknown): InvitationMetadata {
     emailDeliveryStatus: (source.emailDeliveryStatus as EmailDeliveryStatus | undefined) ?? 'NOT_REQUESTED',
     emailSentAt: typeof source.emailSentAt === 'string' ? source.emailSentAt : undefined,
     ...(typeof source.emailFailureCode === 'string' && source.emailFailureCode ? { emailFailureCode: source.emailFailureCode } : {}),
+    ...(typeof source.targetMembershipId === 'string' && source.targetMembershipId ? { targetMembershipId: source.targetMembershipId } : {}),
   };
 }
 
@@ -331,11 +337,15 @@ export const api = {
     return idempotentRequest<InvitationEmailResendResult>(groupId, 'invitation.email.resend', path, { invitationId }, { method: 'POST' });
   },
   updateGroupName: async (groupId: string, name: string): Promise<{ name: string }> => request<{ name: string }>(groupRootPath(groupId), { method: 'PATCH', body: json({ name }) }),
-  getGroupSettings: async (groupId: string): Promise<GroupSettings> => request<GroupSettings>(groupPath(groupId, 'settings')),
-  updateGroupSettings: async (groupId: string, settings: GroupSettingsUpdateInput): Promise<GroupSettings> => request<GroupSettings>(groupPath(groupId, 'settings'), {
+  getGroupSettings: async (groupId: string): Promise<GroupSettings> => adaptGroupSettings(await request<unknown>(groupPath(groupId, 'settings'))),
+  updateGroupSettings: async (groupId: string, settings: GroupSettingsUpdateInput): Promise<GroupSettings> => adaptGroupSettings(await request<unknown>(groupPath(groupId, 'settings'), {
     method: 'PATCH',
     body: json(settings),
-  }),
+  })),
+  updateGuestSettings: async (groupId: string, settings: GuestSettingsUpdateInput): Promise<GroupSettings> => adaptGroupSettings(await request<unknown>(groupPath(groupId, 'guest-settings'), {
+    method: 'PUT',
+    body: json(settings),
+  })),
   getPublicJoinLink: async (groupId: string): Promise<PublicJoinLink> => request<PublicJoinLink>(groupPath(groupId, 'public-join-link')),
   updatePublicJoinLink: async (groupId: string, update: PublicJoinLinkUpdate, version: number): Promise<PublicJoinLink> => request<PublicJoinLink>(groupPath(groupId, 'public-join-link'), {
     method: 'PUT',
@@ -353,14 +363,24 @@ export const api = {
   },
   removeGroupLogo: async (groupId: string): Promise<void> => request<void>(groupPath(groupId, 'logo'), { method: 'DELETE' }),
   getDashboard: async (groupId: string): Promise<Dashboard> => adaptDashboard(await request<unknown>(groupPath(groupId, 'dashboard'))),
+  getBookingContext: async (groupId: string, currency: string): Promise<BookingContext> => adaptBookingContext(await request<unknown>(groupPath(groupId, 'booking-context')), currency),
   getCategories: async (groupId: string): Promise<Category[]> => adaptCategories(await request<unknown>(groupPath(groupId, 'categories'))),
   getMembers: async (groupId: string): Promise<Membership[]> => adaptMemberships(await request<unknown>(groupPath(groupId, 'members'))),
-  archiveMember: async (groupId: string, membershipId: string, confirmSelf: boolean): Promise<void> => request<void>(`${groupPath(groupId, `members/${encodeURIComponent(membershipId)}`)}${confirmSelf ? '?confirmSelf=true' : ''}`, { method: 'DELETE' }),
-  getBookings: async (groupId: string): Promise<Booking[]> => {
-    const [bookings, members] = await Promise.all([request<unknown>(groupPath(groupId, 'bookings')), request<unknown>(groupPath(groupId, 'members'))]);
-    const adaptedMembers = adaptMemberships(members);
-    return (bookings as unknown[]).map((booking) => adaptBooking(booking, adaptedMembers));
+  renameMember: async (groupId: string, membershipId: string, displayName: string): Promise<Membership> => adaptMembership(await request<unknown>(groupPath(groupId, `members/${encodeURIComponent(membershipId)}`), {
+    method: 'PATCH',
+    body: json({ displayName }),
+  })),
+  createGuestClaimInvitation: async (groupId: string, membershipId: string, email: string): Promise<CreatedInvitation> => {
+    const response = await request<unknown>(groupPath(groupId, `members/${encodeURIComponent(membershipId)}/claim-invitation`), {
+      method: 'POST',
+      body: json({ email }),
+    });
+    const source = response as { invitation?: unknown; acceptUrl?: string };
+    const invitation = adaptInvitation(source.invitation ?? response);
+    return { ...invitation, email: invitation.email || email, acceptUrl: source.acceptUrl ?? '' };
   },
+  archiveMember: async (groupId: string, membershipId: string, confirmSelf: boolean): Promise<void> => request<void>(`${groupPath(groupId, `members/${encodeURIComponent(membershipId)}`)}${confirmSelf ? '?confirmSelf=true' : ''}`, { method: 'DELETE' }),
+  getBookings: async (groupId: string): Promise<Booking[]> => (await request<unknown[]>(groupPath(groupId, 'bookings'))).map((booking) => adaptBooking(booking)),
   createBooking: async (groupId: string, command: BookingCommand): Promise<Booking> => {
     const path = groupPath(groupId, 'bookings');
     const payload = {

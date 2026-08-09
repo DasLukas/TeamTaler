@@ -94,6 +94,8 @@ func (s *Server) handleGetGroupSettings(response http.ResponseWriter, request *h
 		"notificationEmailsEnabled":          settings.NotificationEmailsEnabled,
 		"notificationEmailDeliveryAvailable": s.config.SMTP.Enabled,
 		"defaultRoleId":                      settings.DefaultRoleID,
+		"guestsEnabled":                      settings.GuestsEnabled,
+		"guestRoleId":                        settings.GuestRoleID,
 	})
 }
 
@@ -135,6 +137,8 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		"notificationEmailsEnabled":          settings.NotificationEmailsEnabled,
 		"notificationEmailDeliveryAvailable": s.config.SMTP.Enabled,
 		"defaultRoleId":                      settings.DefaultRoleID,
+		"guestsEnabled":                      settings.GuestsEnabled,
+		"guestRoleId":                        settings.GuestRoleID,
 	})
 }
 
@@ -188,7 +192,7 @@ func (s *Server) handleListMembers(response http.ResponseWriter, request *http.R
 		writeProblem(response, request, err)
 		return
 	}
-	items, err := s.groups.ListMembers(request.Context(), membership.GroupID)
+	items, err := s.groups.ListMembers(request.Context(), membership)
 	if err != nil {
 		writeProblem(response, request, err)
 		return

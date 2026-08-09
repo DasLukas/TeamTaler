@@ -15,7 +15,7 @@ vi.mock('./RightsPanel', () => ({ RightsPanel: () => <div>rights-panel</div> }))
 describe('AdminPage workspace separation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.useActiveGroup.mockReturnValue({ activeGroup: { membership: { effectiveGrants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }] } } });
+    mocks.useActiveGroup.mockReturnValue({ activeGroup: { membership: { effectiveGrants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'VIEW_MEMBER_DIRECTORY', scope: { type: 'GROUP' } }] } } });
   });
 
   it('contains neither catalog nor finance tabs', () => {
@@ -68,20 +68,29 @@ describe('AdminPage workspace separation', () => {
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
   });
 
-  it('mounts members and role definitions for a role manager without group administration', () => {
+  it('does not mount the protected member directory for a role manager without directory access', () => {
     mocks.useActiveGroup.mockReturnValue({ activeGroup: { membership: { effectiveGrants: [{ permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }] } } });
+
+    render(<AdminPage />);
+
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Rollen & Rechte']);
+    expect(screen.getByText('rights-panel')).toBeVisible();
+    expect(screen.queryByText('members-panel')).not.toBeInTheDocument();
+    expect(screen.queryByText('settings-panel')).not.toBeInTheDocument();
+    expect(screen.queryByText('audit-panel')).not.toBeInTheDocument();
+  });
+
+  it('mounts members and role definitions for a role manager with directory access', () => {
+    mocks.useActiveGroup.mockReturnValue({ activeGroup: { membership: { effectiveGrants: [{ permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'VIEW_MEMBER_DIRECTORY', scope: { type: 'GROUP' } }] } } });
 
     render(<AdminPage />);
 
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Mitglieder', 'Rollen & Rechte']);
     expect(screen.getByText('members-panel')).toBeVisible();
-    expect(screen.queryByText('rights-panel')).not.toBeInTheDocument();
-    expect(screen.queryByText('settings-panel')).not.toBeInTheDocument();
-    expect(screen.queryByText('audit-panel')).not.toBeInTheDocument();
   });
 
   it('keeps member lifecycle and administrator transfer available without role management', () => {
-    mocks.useActiveGroup.mockReturnValue({ activeGroup: { membership: { effectiveGrants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }] } } });
+    mocks.useActiveGroup.mockReturnValue({ activeGroup: { membership: { effectiveGrants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'VIEW_MEMBER_DIRECTORY', scope: { type: 'GROUP' } }] } } });
 
     render(<AdminPage />);
 

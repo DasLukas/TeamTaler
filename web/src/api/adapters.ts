@@ -2,9 +2,12 @@ import type {
   AccountSummary,
   AuditEntry,
   Booking,
+  BookingContext,
+  BookingTarget,
   Category,
   Dashboard,
   Group,
+  GroupSettings,
   GroupRole,
   LedgerEntry,
   Membership,
@@ -36,6 +39,23 @@ const REVERSAL_DESCRIPTION_PREFIX = 'Reversal: ';
 const NOTIFICATION_EVENT_TYPES: Notification['eventType'][] = ['BOOKING_ASSIGNED', 'BOOKING_REVERSED', 'PAYMENT_RECORDED', 'PAYMENT_REVERSED', 'SETTLEMENT_CREATED'];
 
 /**
+ * Adapts administrator-managed group settings and applies safe feature defaults.
+ *
+ * @param input - Group-settings response from the API.
+ * @returns Complete canonical settings, including disabled guest defaults.
+ */
+export function adaptGroupSettings(input: unknown): GroupSettings {
+  const source = asRecord(input);
+  return {
+    notificationEmailsEnabled: source.notificationEmailsEnabled === true,
+    notificationEmailDeliveryAvailable: source.notificationEmailDeliveryAvailable === true,
+    defaultRoleId: typeof source.defaultRoleId === 'string' && source.defaultRoleId ? source.defaultRoleId : null,
+    guestsEnabled: source.guestsEnabled === true,
+    guestRoleId: typeof source.guestRoleId === 'string' && source.guestRoleId ? source.guestRoleId : null,
+  };
+}
+
+/**
  * Adapts allow grants and drops unsupported scopes or permission keys.
  *
  * @param input - Grant array returned by session, role, or membership endpoints.
@@ -50,7 +70,12 @@ export function adaptPermissionGrants(input: unknown): PermissionGrant[] {
     const permission = source.permission ?? source.permissionKey ?? source.key;
     const scope = source.scope && typeof source.scope === 'object' ? asRecord(source.scope) : undefined;
     const scopeType = scope?.type ?? source.scopeType ?? 'GROUP';
-    if (scopeType === 'GROUP' && isPermissionKey(permission)) permissions.add(permission);
+    if (scopeType === 'GROUP'
+      && source.categoryId === undefined
+      && source.productId === undefined
+      && scope?.categoryId === undefined
+      && scope?.productId === undefined
+      && isPermissionKey(permission)) permissions.add(permission);
   }
   return [...permissions].map((permission) => ({ permission, scope: { type: 'GROUP' } }));
 }
@@ -266,6 +291,9 @@ export function adaptMembership(input: unknown, etag?: string): Membership {
   const source = asRecord(input);
   if ('categoryPermissions' in source) return {
     ...(source as unknown as Membership),
+    userId: String(source.userId ?? ''),
+    email: typeof source.email === 'string' && source.email ? source.email : null,
+    isGuest: source.isGuest === true,
     groupPermissions: (source.groupPermissions as Membership['groupPermissions'] | undefined) ?? [],
     roleIds: Array.isArray(source.roleIds) ? source.roleIds.map(String) : [],
     effectiveGrants: adaptPermissionGrants(source.effectiveGrants),
@@ -276,11 +304,12 @@ export function adaptMembership(input: unknown, etag?: string): Membership {
   const roles = (source.roles as GroupRole[] ?? []).filter((role) => role !== 'MEMBER');
   return {
     id: String(source.id),
-    userId: String(source.userId),
+    userId: String(source.userId ?? ''),
     displayName: String(source.displayName),
-    email: String(source.email),
+    email: typeof source.email === 'string' && source.email ? source.email : null,
     initials: initials(String(source.displayName)),
     avatarUrl: typeof source.avatarUrl === 'string' && source.avatarUrl ? source.avatarUrl : undefined,
+    isGuest: source.isGuest === true,
     roles: [...roles, 'MEMBER'],
     groupPermissions: (source.groupPermissions as Membership['groupPermissions'] | undefined) ?? [],
     categoryPermissions: Object.entries(grants).map(([categoryId, permissions]) => ({
@@ -305,6 +334,40 @@ export function adaptMembership(input: unknown, etag?: string): Membership {
  */
 export function adaptMemberships(input: unknown, etag?: string): Membership[] {
   return (input as unknown[] ?? []).map((entry) => adaptMembership(entry, etag));
+}
+
+/**
+ * Adapts one privacy-reduced booking target.
+ *
+ * @param input - Target returned by the booking-context endpoint.
+ * @returns Stable booking-target identity without member-directory details.
+ */
+export function adaptBookingTarget(input: unknown): BookingTarget {
+  const source = asRecord(input);
+  return {
+    membershipId: String(source.membershipId ?? source.id ?? ''),
+    displayName: String(source.displayName ?? ''),
+    avatarUrl: typeof source.avatarUrl === 'string' && source.avatarUrl ? source.avatarUrl : undefined,
+    isGuest: source.isGuest === true,
+  };
+}
+
+/**
+ * Adapts the permission-filtered data required to create product bookings.
+ *
+ * @param input - Booking-context response from the active group.
+ * @param currency - Active group currency used for its minor-unit balance.
+ * @returns Canonical booking context with normalized period, balance, and targets.
+ */
+export function adaptBookingContext(input: unknown, currency: string): BookingContext {
+  const source = asRecord(input);
+  return {
+    openPeriod: adaptPeriod(source.openPeriod),
+    ownBalance: money(source.ownBalanceMinor, currency),
+    currentMembership: adaptMembership(source.currentMembership),
+    targets: (source.targets as unknown[] ?? []).map(adaptBookingTarget),
+    canCreateManagedGuests: source.canCreateManagedGuests === true,
+  };
 }
 
 /**
@@ -337,7 +400,9 @@ export function adaptBooking(input: unknown, members?: Membership[], fallbackMem
   return {
     id: String(source.id),
     memberId: targetId,
-    memberName: memberName(targetId, members, fallbackMemberName),
+    memberName: typeof source.targetDisplayName === 'string' && source.targetDisplayName
+      ? source.targetDisplayName
+      : memberName(targetId, members, fallbackMemberName),
     memberAvatarUrl: memberAvatarUrl(targetId, members),
     productId: String(source.productId),
     productName: String(source.productName),
@@ -347,7 +412,9 @@ export function adaptBooking(input: unknown, members?: Membership[], fallbackMem
     unitPrice: money(source.unitPriceMinor, source.currency),
     total: money(source.totalMinor, source.currency),
     bookedAt: createdAt,
-    bookedByName: memberName(actorId, members, actorId === targetId ? fallbackMemberName : i18n.t('common.member')),
+    bookedByName: typeof source.actorDisplayName === 'string' && source.actorDisplayName
+      ? source.actorDisplayName
+      : memberName(actorId, members, actorId === targetId ? fallbackMemberName : i18n.t('common.member')),
     bookedByMemberId: actorId || undefined,
     bookedByAvatarUrl: memberAvatarUrl(actorId, members),
     reason: typeof source.reason === 'string' && source.reason ? source.reason : undefined,
@@ -486,7 +553,10 @@ export function adaptPayment(input: unknown): Payment {
  */
 export function adaptSettlement(input: unknown, periods: Period[]): Settlement {
   const source = asRecord(input);
-  if ('periodLabel' in source) return source as unknown as Settlement;
+  if ('periodLabel' in source) return {
+    ...source as unknown as Settlement,
+    email: typeof source.email === 'string' ? source.email : null,
+  };
   const period = periods.find((entry) => entry.id === source.periodId);
   const obligationMinor = (BigInt(String(source.chargesMinor ?? 0)) + BigInt(String(source.adjustmentsProvidedMinor ?? 0))).toString();
   const settledMinor = (BigInt(String(source.paymentsAllocatedMinor ?? 0)) + BigInt(String(source.adjustmentsAppliedMinor ?? 0))).toString();
@@ -496,6 +566,7 @@ export function adaptSettlement(input: unknown, periods: Period[]): Settlement {
     periodLabel: period?.label ?? i18n.t('common.settlementFallback'),
     membershipId: String(source.membershipId),
     memberName: String(source.displayName ?? i18n.t('common.member')),
+    email: typeof source.email === 'string' ? source.email : null,
     amount: money(obligationMinor, source.currency),
     paidAmount: money(settledMinor, source.currency),
     openAmount: money(source.amountDueMinor, source.currency),

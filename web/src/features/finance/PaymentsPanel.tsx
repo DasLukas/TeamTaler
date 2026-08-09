@@ -26,7 +26,7 @@ export function PaymentsPanel() {
   const { activeGroupId, activeGroup } = useActiveGroup();
   const queryClient = useQueryClient();
   const paymentsQuery = useQuery({ queryKey: ['payments', activeGroupId], queryFn: () => api.getPayments(activeGroupId) });
-  const membersQuery = useQuery({ queryKey: ['members', activeGroupId], queryFn: () => api.getMembers(activeGroupId) });
+  const accountsQuery = useQuery({ queryKey: ['account-summaries', activeGroupId], queryFn: () => api.getAccountSummaries(activeGroupId) });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [membershipId, setMembershipId] = useState('');
   const [amount, setAmount] = useState('');
@@ -35,7 +35,7 @@ export function PaymentsPanel() {
   const [reference, setReference] = useState('');
   const [paymentToReverse, setPaymentToReverse] = useState<Payment | null>(null);
   const [reversalReason, setReversalReason] = useState('');
-  const activeMembers = membersQuery.data?.filter((member) => member.active) ?? [];
+  const activeAccounts = accountsQuery.data?.filter((account) => account.status === 'ACTIVE') ?? [];
   const invalidateFinancialReads = async () => Promise.all([
     queryClient.invalidateQueries({ queryKey: ['payments', activeGroupId] }),
     queryClient.invalidateQueries({ queryKey: ['account-summaries', activeGroupId] }),
@@ -44,7 +44,7 @@ export function PaymentsPanel() {
     queryClient.invalidateQueries({ queryKey: ['dashboard', activeGroupId] }),
   ]);
   const paymentMutation = useMutation({
-    mutationFn: () => api.createPayment(activeGroupId, { membershipId: membershipId || activeMembers[0]?.id || '', amount: { minorUnits: parseMajorUnits(amount, activeGroup.currency), currency: activeGroup.currency }, receivedAt, method, reference: reference.trim() || undefined }),
+    mutationFn: () => api.createPayment(activeGroupId, { membershipId: membershipId || activeAccounts[0]?.membershipId || '', amount: { minorUnits: parseMajorUnits(amount, activeGroup.currency), currency: activeGroup.currency }, receivedAt, method, reference: reference.trim() || undefined }),
     onSuccess: async () => {
       setDialogOpen(false);
       setAmount('');
@@ -61,8 +61,8 @@ export function PaymentsPanel() {
     },
   });
 
-  if (paymentsQuery.isLoading || membersQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
-  if (!paymentsQuery.data || !membersQuery.data) return <div className={styles.state}><StatePanel kind="error" message={t('finance.error')} /></div>;
+  if (paymentsQuery.isLoading || accountsQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
+  if (!paymentsQuery.data || !accountsQuery.data) return <div className={styles.state}><StatePanel kind="error" message={t('finance.error')} /></div>;
 
   const total = paymentsQuery.data.filter((payment) => payment.status === 'POSTED').reduce((sum, payment) => sum + BigInt(payment.amount.minorUnits), 0n);
   return (
@@ -76,7 +76,7 @@ export function PaymentsPanel() {
       )}
       <Modal onClose={() => setDialogOpen(false)} open={dialogOpen} title={t('finance.record')}>
         <form className={styles.form} onSubmit={(event) => { event.preventDefault(); paymentMutation.mutate(); }}>
-          <Field htmlFor="payment-member" label={t('common.member')}><SelectInput id="payment-member" onChange={(event) => setMembershipId(event.target.value)} value={membershipId || activeMembers[0]?.id}>{activeMembers.map((member) => <option key={member.id} value={member.id}>{member.displayName}</option>)}</SelectInput></Field>
+          <Field htmlFor="payment-member" label={t('common.member')}><SelectInput id="payment-member" onChange={(event) => setMembershipId(event.target.value)} value={membershipId || activeAccounts[0]?.membershipId}>{activeAccounts.map((account) => <option key={account.membershipId} value={account.membershipId}>{account.displayName}</option>)}</SelectInput></Field>
           <div className={styles.formRow}><Field htmlFor="payment-amount" label={t('finance.amountIn', { currency: activeGroup.currency })}><TextInput id="payment-amount" inputMode="decimal" onChange={(event) => setAmount(event.target.value)} pattern={majorUnitsInputPattern(activeGroup.currency)} placeholder={majorUnitsPlaceholder(activeGroup.currency)} required type="text" value={amount} /></Field><Field htmlFor="payment-date" label={t('finance.receivedDate')}><TextInput id="payment-date" onChange={(event) => setReceivedAt(event.target.value)} required type="date" value={receivedAt} /></Field></div>
           <Field htmlFor="payment-method" label={t('finance.paymentType')}><SelectInput id="payment-method" onChange={(event) => setMethod(event.target.value as Payment['method'])} value={method}>{PAYMENT_METHOD_OPTIONS.map((option) => <option key={option.value} value={option.value}>{t(option.labelKey)}</option>)}</SelectInput></Field>
           <Field htmlFor="payment-reference" label={t('common.reference')}><TextInput id="payment-reference" onChange={(event) => setReference(event.target.value)} placeholder={t('finance.referencePlaceholder')} value={reference} /></Field>

@@ -247,6 +247,7 @@ func TestRemoveCategoryTypeMigrationPreservesExistingRows(t *testing.T) {
 		`INSERT INTO schema_migrations(version) VALUES('0017_dynamic_role_permissions.sql')`,
 		`INSERT INTO schema_migrations(version) VALUES('0018_explicit_role_assignments.sql')`,
 		`INSERT INTO schema_migrations(version) VALUES('0019_default_membership_role.sql')`,
+		`INSERT INTO schema_migrations(version) VALUES('0021_guest_feature.sql')`,
 		`CREATE TABLE users(id TEXT PRIMARY KEY) STRICT`,
 		`CREATE TABLE groups(id TEXT PRIMARY KEY) STRICT`,
 		`CREATE TABLE invitations(id TEXT PRIMARY KEY, group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE) STRICT`,
@@ -434,16 +435,16 @@ func TestDynamicRoleMigrationBackfillsLegacyAccessAndDropsCategoryGrants(t *test
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM roles WHERE group_id='group-second'`).Scan(&secondRoleCount); err != nil {
 		t.Fatalf("count second roles: %v", err)
 	}
-	if permissionCount != 10 || mainRoleCount != 5 || secondRoleCount != 4 {
-		t.Fatalf("definitions/main roles/second roles = %d/%d/%d, want 10/5/4", permissionCount, mainRoleCount, secondRoleCount)
+	if permissionCount != 12 || mainRoleCount != 5 || secondRoleCount != 4 {
+		t.Fatalf("definitions/main roles/second roles = %d/%d/%d, want 12/5/4", permissionCount, mainRoleCount, secondRoleCount)
 	}
 	wantPresetGrantCounts := map[string]int{
-		"role:GROUP_ADMINISTRATOR:group-main": 10,
-		"role:MEMBER:group-main":              3,
-		"role:FINANCE_MANAGER:group-main":     3,
-		"role:CATALOG_MANAGER:group-main":     1,
-		"role:LEGACY_SELF_PAYMENT:group-main": 1,
-		"role:MEMBER:group-second":            2,
+		"role:GROUP_ADMINISTRATOR:group-main": 12,
+		"role:MEMBER:group-main":              5,
+		"role:FINANCE_MANAGER:group-main":     5,
+		"role:CATALOG_MANAGER:group-main":     3,
+		"role:LEGACY_SELF_PAYMENT:group-main": 3,
+		"role:MEMBER:group-second":            4,
 	}
 	for roleID, want := range wantPresetGrantCounts {
 		var got int
@@ -558,7 +559,7 @@ func TestDynamicRoleSchemaEnforcesProtectedRoleAndAssignmentInvariants(t *testin
 	assertRejected("delete administrator role", `DELETE FROM roles WHERE id='role:GROUP_ADMINISTRATOR:group-one'`, "protected role cannot be deleted")
 	assertRejected("delete assigned member starter role", `DELETE FROM roles WHERE id='role:MEMBER:group-one'`, "assigned role cannot be deleted")
 	assertRejected("remove administrator core permission", `DELETE FROM role_permission_grants WHERE role_id='role:GROUP_ADMINISTRATOR:group-one' AND permission_key='ROLE_MANAGEMENT'`, "administrator core permissions cannot be removed")
-	assertRejected("remove final active member role", `DELETE FROM membership_role_assignments WHERE membership_id='member-two' AND role_id='role:MEMBER:group-one'`, "active memberships must retain at least one role")
+	assertRejected("remove final active member role", `DELETE FROM membership_role_assignments WHERE membership_id='member-two' AND role_id='role:MEMBER:group-one'`, "credentialed active memberships must retain at least one role")
 	assertRejected("remove last administrator", `DELETE FROM membership_role_assignments WHERE membership_id='member-one' AND role_id='role:GROUP_ADMINISTRATOR:group-one'`, "group must retain an active group administrator")
 	assertRejected("archive last administrator", `UPDATE memberships SET status='ARCHIVED',archived_at='2026-08-07T10:00:00Z' WHERE id='member-one'`, "group must retain an active group administrator")
 	assertRejected("duplicate case-insensitive role name", `INSERT INTO roles(id,group_id,name,created_at,updated_at) VALUES('role-duplicate','group-one','member','2026-08-07T09:00:00Z','2026-08-07T09:00:00Z')`, "UNIQUE constraint failed")

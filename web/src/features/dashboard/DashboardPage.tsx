@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { formatMoney } from '@/api/money';
 import { canRecordOwnPayment } from '@/app/groupCapabilities';
+import { can } from '@/app/permissions';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Avatar } from '@/components/ui/Avatar';
 import { StatePanel } from '@/components/ui/StatePanel';
@@ -45,32 +46,19 @@ export function DashboardPage() {
   const { t } = useTranslation();
   const { activeGroupId, activeGroup, session } = useActiveGroup();
   const dashboardQuery = useQuery({ queryKey: ['dashboard', activeGroupId], queryFn: () => api.getDashboard(activeGroupId) });
-  const membersQuery = useQuery({ queryKey: ['members', activeGroupId], queryFn: () => api.getMembers(activeGroupId) });
   const localHour = useLocalHour();
-  const loading = dashboardQuery.isLoading || membersQuery.isLoading;
-  const error = dashboardQuery.error ?? membersQuery.error;
 
-  if (loading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
-  if (error || !dashboardQuery.data || !membersQuery.data) {
+  if (dashboardQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
+  if (dashboardQuery.error || !dashboardQuery.data) {
     return <div className={styles.state}><StatePanel kind="error" message={t('dashboard.error')} /></div>;
   }
 
   const dashboard = dashboardQuery.data;
-  const membersByID = new Map(membersQuery.data.map((member) => [member.id, member]));
-  const recentBookings = dashboard.recentBookings.map((booking) => {
-    const target = membersByID.get(booking.memberId);
-    const actor = booking.bookedByMemberId ? membersByID.get(booking.bookedByMemberId) : undefined;
-    return {
-      ...booking,
-      memberName: target?.displayName ?? booking.memberName,
-      memberAvatarUrl: target?.avatarUrl ?? booking.memberAvatarUrl,
-      bookedByName: actor?.displayName ?? booking.bookedByName,
-      bookedByAvatarUrl: actor?.avatarUrl ?? booking.bookedByAvatarUrl,
-    };
-  });
+  const recentBookings = dashboard.recentBookings;
   const periodTotal = dashboard.categoryTotals.reduce((sum, entry) => sum + BigInt(entry.total.minorUnits), 0n);
   const greeting = t(`dashboard.${getDashboardGreetingKey(localHour)}`);
   const canRecordPayment = canRecordOwnPayment(activeGroup.membership?.effectiveGrants);
+  const canViewGroupStatistics = can(activeGroup.membership?.effectiveGrants, 'VIEW_GROUP_STATISTICS');
 
   return (
     <div className={styles.dashboard}>
@@ -107,7 +95,7 @@ export function DashboardPage() {
             <div className={styles.sum}><span>{t('dashboard.sum')}</span><strong>{formatMoney({ minorUnits: periodTotal.toString(), currency: dashboard.openBalance.currency })}</strong></div>
           </section>
         </div>
-        <GroupStatisticsSection currency={dashboard.openBalance.currency} groupTotals={dashboard.groupCategoryTotals} periodLabel={dashboard.currentPeriod.label} />
+        {canViewGroupStatistics ? <GroupStatisticsSection currency={dashboard.openBalance.currency} groupTotals={dashboard.groupCategoryTotals} periodLabel={dashboard.currentPeriod.label} /> : null}
       </section>
     </div>
   );
