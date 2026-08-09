@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: TeamTaler API
-  version: 0.5.2
+  version: 0.6.0
   description: |
     Same-origin JSON API for TeamTaler. Monetary values use integer minor units:
     response fields are exact decimal strings, while command inputs are bounded

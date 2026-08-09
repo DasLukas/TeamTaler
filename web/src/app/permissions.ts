@@ -67,4 +67,3 @@ export function canAny(grants: readonly PermissionGrant[] | undefined, permissio
   const effective = effectivePermissionKeys(grants);
   return permissions.some((permission) => effective.has(permission));
 }
-
