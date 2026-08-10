@@ -44,6 +44,13 @@ describe('authentication form policies', () => {
     mocks.navigate.mockResolvedValue(undefined);
   });
 
+  it('presents the product with a concise benefit-led slogan', () => {
+    renderPage(<LoginPage />);
+
+    expect(screen.getByRole('heading', { name: /Mehr Miteinander.*Weniger Rechnerei/ })).toBeVisible();
+    expect(screen.getByText('TeamTaler macht gemeinsame Ausgaben fair, klar und entspannt.')).toBeVisible();
+  });
+
   it('does not enforce a local minimum length during login', async () => {
     const user = userEvent.setup();
     renderPage(<LoginPage />);

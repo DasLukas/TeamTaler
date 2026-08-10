@@ -45,7 +45,6 @@ function GroupNameForm({ groupId, currentName }: { groupId: string; currentName:
       <div className={styles.controls}>
         <div>
           <h3>{t('groupSettings.nameTitle')}</h3>
-          <p>{t('groupSettings.nameDescription')}</p>
         </div>
         <Field htmlFor="group-name" label={t('groupSettings.nameLabel')}>
           <TextInput autoComplete="organization" id="group-name" maxLength={120} onChange={(event) => { setName(event.target.value); nameMutation.reset(); }} required value={name} />
@@ -135,7 +134,6 @@ export function GroupSettingsPanel() {
           <div className={styles.controls}>
             <div>
               <h3>{t('groupSettings.logoTitle')}</h3>
-              <p>{t('groupSettings.logoDescription')}</p>
             </div>
             <Field error={fileError || undefined} hint={t('groupSettings.imageHint')} htmlFor="group-logo" label={t('groupSettings.imageLabel')}>
               <TextInput accept="image/jpeg,image/png,image/webp" id="group-logo" key={fileInputKey} onChange={(event) => selectFile(event.target.files?.[0])} type="file" />

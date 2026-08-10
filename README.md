@@ -239,6 +239,8 @@ All seeded accounts use the password `TeamTaler-Test-2026!`:
 
 The server binds only to loopback. Stopping the action terminates both processes and removes that run's disposable database. Generated binaries remain below the ignored `tmp/test-server` directory so later starts can reuse Go's build cache.
 
+Optional SMTP delivery for this disposable server is read from the ignored `.env.test-server.local` file. The file accepts only the documented SMTP variables and is never sourced as shell code. When username or password is empty, the action starts normally with email delivery disabled. For IONOS, use `smtp.ionos.de` on port `587` with `starttls`; the authenticated mailbox is also used as the sender unless `TEAMTALER_SMTP_FROM_ADDRESS` is set explicitly. Restart the action after changing the file.
+
 ## Verification, build, and run
 
 Run formatting checks, static analysis, backend and frontend tests, and production builds:

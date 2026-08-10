@@ -52,7 +52,9 @@ describe('BehaviorSettingsPanel', () => {
     renderPanel();
 
     expect(await screen.findByRole('region', { name: i18n.t('behaviorSettings.notificationEmailTitle') })).toBeVisible();
-    expect(screen.getByRole('region', { name: i18n.t('behaviorSettings.defaultRoleTitle') })).toBeVisible();
+    const defaultRoleRegion = screen.getByRole('region', { name: i18n.t('behaviorSettings.defaultRoleTitle') });
+    expect(defaultRoleRegion).toBeVisible();
+    expect(defaultRoleRegion.querySelector('span')).toBeNull();
   });
 
   it('saves notification email delivery only when SMTP is available', async () => {

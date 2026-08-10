@@ -56,7 +56,7 @@ The packages are internal implementation boundaries, not separately deployable s
 
 ### Development test runtime
 
-`.codex/environments/environment.toml` exposes the **Start test server** action through `make test-server`. `scripts/test-server.sh` builds the backend and fixture binaries, creates a permission-restricted temporary data directory below the ignored `tmp/test-server` path, seeds it through domain services, starts the backend on loopback port 8080, and starts Vite on loopback port 5173 with demo transport explicitly disabled. Vite proxies `/api` to the real backend. Signal handling terminates both child processes and deletes only the action-owned temporary database, so every run begins from the same logical fixture without touching operator data in `data/`.
+`.codex/environments/environment.toml` exposes the **Start test server** action through `make test-server`. `scripts/test-server.sh` reads only an allowlisted SMTP variable set from the ignored `.env.test-server.local` file without evaluating it as shell code, builds the backend and fixture binaries, creates a permission-restricted temporary data directory below the ignored `tmp/test-server` path, seeds it through domain services, starts the backend on loopback port 8080, and starts Vite on loopback port 5173 with demo transport explicitly disabled. Incomplete local SMTP credentials disable email delivery without blocking the server. Vite proxies `/api` to the real backend. Signal handling terminates both child processes and deletes only the action-owned temporary database, so every run begins from the same logical fixture without touching operator data in `data/`.
 
 ### Schema and API
 

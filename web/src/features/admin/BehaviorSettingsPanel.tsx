@@ -68,7 +68,7 @@ function SettingsForm({ groupId, settings, roles }: SettingsFormProps) {
 
       <section aria-labelledby="default-role-setting-title" className={styles.card}>
         <h3 className={styles.cardTitle} id="default-role-setting-title">{t('behaviorSettings.defaultRoleTitle')}</h3>
-        <Field hint={settings.defaultRoleId ? t('behaviorSettings.defaultRoleHint') : t('behaviorSettings.defaultRoleMissing')} htmlFor="default-membership-role" label={t('behaviorSettings.defaultRoleFieldLabel')}>
+        <Field hint={!settings.defaultRoleId ? t('behaviorSettings.defaultRoleMissing') : undefined} htmlFor="default-membership-role" label={t('behaviorSettings.defaultRoleFieldLabel')}>
           <SelectInput id="default-membership-role" onChange={(event) => { setDefaultRoleId(event.target.value); mutation.reset(); }} value={defaultRoleId}>
             <option disabled value="">{t('behaviorSettings.defaultRolePlaceholder')}</option>
             {defaultRoleCandidates.map((role) => <option key={role.id} value={role.id}>{roleDisplayName(role)}</option>)}

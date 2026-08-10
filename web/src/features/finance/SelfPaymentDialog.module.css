@@ -1,9 +1,6 @@
 .dialog { width: min(100%, 620px); }
 .form,
 .review { display: grid; gap: var(--space-5); padding: var(--space-4) var(--space-6) var(--space-6); }
-.account { display: grid; gap: 3px; padding: var(--space-4); border-radius: var(--radius-md); background: var(--color-surface-muted); }
-.account span,
-.account small { color: var(--color-muted); }
 .formRow { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
 .actions { display: flex; justify-content: flex-end; gap: var(--space-3); }
 .review > p { margin: 0; color: var(--color-muted); line-height: 1.55; }

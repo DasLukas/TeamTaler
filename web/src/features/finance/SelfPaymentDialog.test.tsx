@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -60,12 +60,14 @@ describe('SelfPaymentDialog', () => {
     });
 
     await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.action') }));
-    expect(screen.getByRole('dialog', { name: i18n.t('selfPayment.entryTitle') })).toBeVisible();
-    expect(screen.getByText('Alex Member')).toBeVisible();
+    const entryDialog = screen.getByRole('dialog', { name: i18n.t('selfPayment.entryTitle') });
+    expect(entryDialog).toBeVisible();
+    expect(within(entryDialog).queryByText(i18n.t('selfPayment.account'))).not.toBeInTheDocument();
+    expect(within(entryDialog).queryByText('Group A')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.useOpenBalance', { amount: '23,40 €' }) }));
     expect(screen.getByLabelText(i18n.t('finance.amountIn', { currency: 'EUR' }))).toHaveValue('23,40');
     await user.selectOptions(screen.getByLabelText(i18n.t('finance.paymentType')), 'PAYPAL');
-    await user.type(screen.getByLabelText(i18n.t('common.reference')), 'Membership fee August');
+    await user.type(screen.getByLabelText(`${i18n.t('common.reference')} *`), 'Membership fee August');
     await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.review') }));
 
     expect(screen.getByRole('dialog', { name: i18n.t('selfPayment.reviewTitle') })).toBeVisible();
@@ -96,14 +98,14 @@ describe('SelfPaymentDialog', () => {
 
     await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.action') }));
     await user.type(screen.getByLabelText(i18n.t('finance.amountIn', { currency: 'EUR' })), '12,50');
-    await user.type(screen.getByLabelText(i18n.t('common.reference')), 'Transfer reference');
+    await user.type(screen.getByLabelText(`${i18n.t('common.reference')} *`), 'Transfer reference');
     await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.review') }));
     await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.confirm', { amount: '12,50 €' }) }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Network unavailable');
     await user.click(screen.getByRole('button', { name: i18n.t('common.back') }));
     expect(screen.getByLabelText(i18n.t('finance.amountIn', { currency: 'EUR' }))).toHaveValue('12,50');
-    expect(screen.getByLabelText(i18n.t('common.reference'))).toHaveValue('Transfer reference');
+    expect(screen.getByLabelText(`${i18n.t('common.reference')} *`)).toHaveValue('Transfer reference');
   });
 
   it('keeps the entry step open when the required reference is blank', async () => {
@@ -112,7 +114,7 @@ describe('SelfPaymentDialog', () => {
 
     await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.action') }));
     await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.useOpenBalance', { amount: '23,40 €' }) }));
-    await user.type(screen.getByLabelText(i18n.t('common.reference')), '   ');
+    await user.type(screen.getByLabelText(`${i18n.t('common.reference')} *`), '   ');
     await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.review') }));
 
     expect(screen.getByRole('dialog', { name: i18n.t('selfPayment.entryTitle') })).toBeVisible();

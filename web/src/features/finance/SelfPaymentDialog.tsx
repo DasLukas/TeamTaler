@@ -136,7 +136,6 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
       <Modal className={styles.dialog} onClose={closeDialog} open={open} title={t(`selfPayment.${step}Title`)} variant={compact ? 'sheet' : 'dialog'}>
         {step === 'entry' ? (
           <form className={styles.form} onSubmit={(event) => { event.preventDefault(); prepareReview(); }}>
-            <div className={styles.account}><span>{t('selfPayment.account')}</span><strong>{session.user.displayName}</strong><small>{activeGroup.name}</small></div>
             <Field error={amountError || undefined} htmlFor="self-payment-amount" label={t('finance.amountIn', { currency: activeGroup.currency })}>
               <TextInput id="self-payment-amount" inputMode="decimal" onChange={(event) => { setAmount(event.target.value); setAmountError(''); }} pattern={majorUnitsInputPattern(activeGroup.currency)} placeholder={majorUnitsPlaceholder(activeGroup.currency)} required type="text" value={amount} />
             </Field>
@@ -145,7 +144,7 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
               <Field htmlFor="self-payment-date" label={t('finance.receivedDate')}><TextInput id="self-payment-date" onChange={(event) => setReceivedAt(event.target.value)} required type="date" value={receivedAt} /></Field>
               <Field htmlFor="self-payment-method" label={t('finance.paymentType')}><SelectInput id="self-payment-method" onChange={(event) => setMethod(event.target.value as Payment['method'])} value={method}>{PAYMENT_METHOD_OPTIONS.map((option) => <option key={option.value} value={option.value}>{t(option.labelKey)}</option>)}</SelectInput></Field>
             </div>
-            <Field error={referenceError || undefined} htmlFor="self-payment-reference" label={t('common.reference')}><TextInput id="self-payment-reference" maxLength={120} onChange={(event) => { setReference(event.target.value); setReferenceError(''); }} placeholder={t('finance.referencePlaceholder')} required value={reference} /></Field>
+            <Field error={referenceError || undefined} htmlFor="self-payment-reference" label={`${t('common.reference')} *`}><TextInput id="self-payment-reference" maxLength={120} onChange={(event) => { setReference(event.target.value); setReferenceError(''); }} placeholder={t('finance.referencePlaceholder')} required value={reference} /></Field>
             <div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button type="submit">{t('selfPayment.review')}</Button></div>
           </form>
         ) : null}

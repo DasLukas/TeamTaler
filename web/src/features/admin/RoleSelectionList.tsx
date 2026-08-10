@@ -84,8 +84,7 @@ export function RoleSelectionList({
           const isLocked = locked.has(role.id);
           const assignable = canAssignRole(role, canManageRoles, canManageGroup);
           const optionDisabled = disabled || isLocked || !assignable;
-          const restriction = isLocked ? t('roleManagement.lastAdministratorRequired')
-              : !assignable ? t('roleManagement.protectedAssignment') : '';
+          const restriction = !assignable ? t('roleManagement.protectedAssignment') : '';
           return (
             <label className={`${styles.option} ${optionDisabled ? styles.optionDisabled : ''}`} key={role.id}>
               <input

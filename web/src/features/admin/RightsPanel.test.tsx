@@ -83,6 +83,25 @@ describe('RightsPanel role definitions', () => {
     expect(screen.queryByText('Vordefiniert')).not.toBeInTheDocument();
   });
 
+  it('uses concise descriptions for booking and balance permissions', async () => {
+    mocks.getPermissionDefinitions.mockResolvedValue([
+      { key: 'VIEW_GROUP_STATISTICS' },
+      { key: 'RECORD_OWN_PAYMENT' },
+      { key: 'CREATE_OWN_BOOKING' },
+      { key: 'VOID_OWN_BOOKING' },
+      { key: 'BOOK_FOR_OTHERS' },
+      { key: 'BOOK_FOR_GUESTS' },
+    ]);
+    renderPanel();
+
+    expect(await screen.findByText('Zeigt die Buchungssummen der Gruppe.')).toBeVisible();
+    expect(screen.getByText('Erlaubt Einzahlungen auf das eigene Konto.')).toBeVisible();
+    expect(screen.getByText('Erlaubt Buchungen auf das eigene Konto.')).toBeVisible();
+    expect(screen.getByText('Erlaubt Stornos von selbst erstellten oder dem eigenen Konto zugewiesenen Buchungen.')).toBeVisible();
+    expect(screen.getByText('Buchungen für andere Mitglieder.')).toBeVisible();
+    expect(screen.getByText('Buchungen für Gäste ohne eigenes Konto.')).toBeVisible();
+  });
+
   it('starts a copied role from the duplicate action in the editor title row', async () => {
     const user = userEvent.setup();
     renderPanel();
