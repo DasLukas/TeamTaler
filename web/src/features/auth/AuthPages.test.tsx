@@ -6,16 +6,24 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '@/i18n';
 import { InvitationPage } from './InvitationPage';
 import { LoginPage } from './LoginPage';
+import { ForgotPasswordPage } from './ForgotPasswordPage';
+import { ResetPasswordPage } from './ResetPasswordPage';
+import { EmailChangeConfirmationPage } from './EmailChangeConfirmationPage';
 
 const mocks = vi.hoisted(() => ({
   login: vi.fn(),
   previewInvitation: vi.fn(),
   acceptInvitation: vi.fn(),
+  getAuthenticationCapabilities: vi.fn(),
+  requestPasswordReset: vi.fn(),
+  confirmPasswordReset: vi.fn(),
+  confirmEmailChange: vi.fn(),
   navigate: vi.fn(),
 }));
 
 vi.mock('@/api/client', () => ({
-  api: { login: mocks.login, previewInvitation: mocks.previewInvitation, acceptInvitation: mocks.acceptInvitation },
+  api: { login: mocks.login, previewInvitation: mocks.previewInvitation, acceptInvitation: mocks.acceptInvitation, getAuthenticationCapabilities: mocks.getAuthenticationCapabilities, requestPasswordReset: mocks.requestPasswordReset, confirmPasswordReset: mocks.confirmPasswordReset, confirmEmailChange: mocks.confirmEmailChange },
+  clearAuthenticatedClientState: vi.fn(),
   isDevelopmentDemoEnabled: false,
 }));
 
@@ -30,17 +38,22 @@ const session = {
   activeGroupId: 'group-a',
 };
 
-function renderPage(page: ReactNode): void {
+function renderPage(page: ReactNode): QueryClient {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   render(<QueryClientProvider client={queryClient}>{page}</QueryClientProvider>);
+  return queryClient;
 }
 
 describe('authentication form policies', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.login.mockResolvedValue(session);
-  mocks.previewInvitation.mockResolvedValue({ displayName: '', existingAccount: false });
+    mocks.previewInvitation.mockResolvedValue({ displayName: '', existingAccount: false });
     mocks.acceptInvitation.mockResolvedValue(session);
+    mocks.getAuthenticationCapabilities.mockResolvedValue({ passwordResetAvailable: true, emailChangeAvailable: true });
+    mocks.requestPasswordReset.mockResolvedValue(undefined);
+    mocks.confirmPasswordReset.mockResolvedValue(undefined);
+    mocks.confirmEmailChange.mockResolvedValue(undefined);
     mocks.navigate.mockResolvedValue(undefined);
   });
 
@@ -60,6 +73,48 @@ describe('authentication form policies', () => {
     await waitFor(() => expect(mocks.login).toHaveBeenCalled());
     expect(mocks.login.mock.calls[0]?.[0]).toEqual({ email: 'alex@example.test', password: 'short' });
     await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith({ to: '/book' }));
+  });
+
+  it('hides password recovery when the deployment capability is unavailable', async () => {
+    mocks.getAuthenticationCapabilities.mockResolvedValue({ passwordResetAvailable: false, emailChangeAvailable: false });
+    renderPage(<LoginPage />);
+
+    await waitFor(() => expect(mocks.getAuthenticationCapabilities).toHaveBeenCalled());
+    expect(screen.queryByRole('link', { name: i18n.t('auth.forgotPassword') })).not.toBeInTheDocument();
+  });
+
+  it('requests a reset without exposing account existence', async () => {
+    const user = userEvent.setup();
+    renderPage(<ForgotPasswordPage />);
+    await user.type(await screen.findByLabelText(i18n.t('auth.email')), 'alex@example.test');
+    await user.click(screen.getByRole('button', { name: i18n.t('auth.sendResetLink') }));
+
+    await waitFor(() => expect(mocks.requestPasswordReset).toHaveBeenCalledWith('alex@example.test'));
+    expect(await screen.findByText(i18n.t('auth.resetRequestedMessage'))).toBeVisible();
+  });
+
+  it('captures and removes the reset fragment before submitting a new password', async () => {
+    window.history.replaceState(null, '', '/reset-password#token=reset-secret');
+    const user = userEvent.setup();
+    renderPage(<ResetPasswordPage />);
+
+    expect(window.location.hash).toBe('');
+    await user.type(screen.getByLabelText(i18n.t('auth.newPassword')), 'new-passphrase');
+    await user.type(screen.getByLabelText(i18n.t('auth.passwordConfirmation')), 'new-passphrase');
+    await user.click(screen.getByRole('button', { name: i18n.t('auth.savePassword') }));
+
+    await waitFor(() => expect(mocks.confirmPasswordReset).toHaveBeenCalledWith('reset-secret', 'new-passphrase'));
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith({ to: '/login', replace: true }));
+  });
+
+  it('confirms an email change once and removes its fragment immediately', async () => {
+    window.history.replaceState(null, '', '/email-change/confirm#token=email-secret');
+    renderPage(<EmailChangeConfirmationPage />);
+
+    expect(window.location.hash).toBe('');
+    await waitFor(() => expect(mocks.confirmEmailChange).toHaveBeenCalledTimes(1));
+    expect(mocks.confirmEmailChange).toHaveBeenCalledWith('email-secret');
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith({ to: '/login', replace: true }));
   });
 
   it('requires 12 characters for a new account and uses a neutral acceptance action', async () => {

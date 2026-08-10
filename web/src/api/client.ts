@@ -19,9 +19,11 @@ import {
   adaptRoleAssignment,
   adaptSession,
   adaptSettlement,
+  adaptUser,
 } from './adapters';
 import type {
   AccountSummary,
+  AuthenticationCapabilities,
   AuditEntry,
   Booking,
   BookingBatchCommand,
@@ -34,6 +36,7 @@ import type {
   CreatedInvitation,
   Dashboard,
   EmailDeliveryStatus,
+  EmailChangeRequestResult,
   InvitationEmailRetryResult,
   InvitationEmailResendResult,
   InvitationCommand,
@@ -70,6 +73,7 @@ import type {
   RoleInput,
   Session,
   Settlement,
+  User,
 } from './types';
 import i18n from '@/i18n';
 import { IdempotencyReservationManager, type IdempotencyReservation } from './idempotency';
@@ -155,7 +159,8 @@ async function requestWithMetadata<T>(path: string, init: RequestInit = {}): Pro
       throw new ApiError(await parseProblem(response));
     }
     if (response.status === 204) return { data: undefined as T, headers: response.headers };
-    return { data: normalizeApiValue(await response.json()) as T, headers: response.headers };
+    const text = await response.text();
+    return { data: (text ? normalizeApiValue(JSON.parse(text)) : undefined) as T, headers: response.headers };
   } catch (error) {
     if (DEMO_ENABLED && !(error instanceof ApiError)) {
       return { data: await requestDevelopmentDemo<T>(path, init), headers: new Headers() };
@@ -171,6 +176,11 @@ const json = (value: unknown) => JSON.stringify(value);
 function setSessionActor(session: Session): Session {
   idempotencyReservations.setActor(session.user.id);
   return session;
+}
+
+/** Clears browser-owned state that must never cross authenticated sessions. */
+export function clearAuthenticatedClientState(): void {
+  idempotencyReservations.clearAll();
 }
 
 function invitationCategoryGrants(categoryPermissions: InvitationInput['categoryPermissions']): Record<string, string[]> {
@@ -250,6 +260,22 @@ async function idempotentRequest<T>(groupId: string, operation: string, path: st
  */
 export const api = {
   getSession: async (): Promise<Session> => setSessionActor(adaptSession(await request<unknown>('/session'))),
+  getAuthenticationCapabilities: async (): Promise<AuthenticationCapabilities> => request<AuthenticationCapabilities>('/auth/capabilities'),
+  requestPasswordReset: async (email: string): Promise<void> => request<void>('/auth/password-reset/request', { method: 'POST', body: json({ email }) }),
+  confirmPasswordReset: async (token: string, newPassword: string): Promise<void> => {
+    await request<void>('/auth/password-reset/confirm', { method: 'POST', body: json({ token, newPassword }) });
+    clearAuthenticatedClientState();
+  },
+  confirmEmailChange: async (token: string): Promise<void> => {
+    await request<void>('/auth/email-change/confirm', { method: 'POST', body: json({ token }) });
+    clearAuthenticatedClientState();
+  },
+  updateProfile: async (displayName: string): Promise<User> => adaptUser(await request<unknown>('/me/profile', { method: 'PATCH', body: json({ displayName }) })),
+  changePassword: async (currentPassword: string, newPassword: string): Promise<void> => {
+    await request<void>('/me/password', { method: 'PUT', body: json({ currentPassword, newPassword }) });
+    clearAuthenticatedClientState();
+  },
+  requestEmailChange: async (newEmail: string, currentPassword: string): Promise<EmailChangeRequestResult> => request<EmailChangeRequestResult>('/me/email-change', { method: 'POST', body: json({ newEmail, currentPassword }) }),
   uploadProfileAvatar: async (image: File): Promise<{ avatarUrl: string }> => {
     const form = new FormData();
     form.set('image', image);
@@ -261,7 +287,7 @@ export const api = {
     try {
       await request('/auth/logout', { method: 'POST' });
     } finally {
-      idempotencyReservations.clearAll();
+      clearAuthenticatedClientState();
     }
   },
   previewInvitation: async (token: string): Promise<InvitationPreview> => request<InvitationPreview>('/invitations/preview', { method: 'POST', body: json({ token }) }),

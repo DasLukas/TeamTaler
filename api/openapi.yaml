@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: TeamTaler API
-  version: 0.6.0
+  version: 0.7.0
   description: |
     Same-origin JSON API for TeamTaler. Monetary values use integer minor units:
     response fields are exact decimal strings, while command inputs are bounded
@@ -52,6 +52,91 @@ paths:
               schema:
                 $ref: '#/components/schemas/Session'
         '401': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+  /auth/capabilities:
+    get:
+      tags: [Authentication]
+      summary: Read public account-recovery capabilities
+      description: |
+        Reports which email-dependent account actions are available in the
+        current deployment. The values are derived from complete SMTP and
+        authenticated token-encryption configuration; clients may use them to
+        hide unavailable entry points. They are capability hints only and do
+        not replace server-side checks on later commands.
+      security: []
+      responses:
+        '200':
+          description: Current public authentication capabilities
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationCapabilities'
+  /auth/password-reset/request:
+    post:
+      tags: [Authentication]
+      summary: Request a password-reset email
+      description: |
+        Returns the same empty `202` response for known and unknown addresses.
+        For an eligible account, the service creates a one-hour, single-use
+        request and queues its encrypted token for transactional email
+        delivery. The email URL carries the plaintext token only in its
+        fragment; the client submits it in the confirmation request body.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequest'
+      responses:
+        '202': { description: Request accepted without disclosing account existence }
+        '422': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /auth/password-reset/confirm:
+    post:
+      tags: [Authentication]
+      summary: Consume a password-reset token
+      description: |
+        Replaces the password for the token's account, consumes the token once,
+        cancels every other open account-action request, and revokes all
+        sessions for that user. The token must come from the reset page URL
+        fragment and must never be placed in a request path or query string.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetConfirmation'
+      responses:
+        '204': { description: Password replaced and all sessions revoked }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+  /auth/email-change/confirm:
+    post:
+      tags: [Authentication]
+      summary: Consume an email-change token
+      description: |
+        Replaces the account email only after the mailbox token is verified,
+        consumes that token once, cancels every other open account-action
+        request, and revokes all sessions for the user. User, membership,
+        balance, statement, and audit identifiers remain unchanged. The token
+        must come from the confirmation page URL fragment.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountActionTokenCommand'
+      responses:
+        '204': { description: Email replaced and all sessions revoked }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
         '429': { $ref: '#/components/responses/Problem' }
   /auth/logout:
     post:
@@ -106,6 +191,80 @@ paths:
               schema:
                 $ref: '#/components/schemas/Session'
         '401': { $ref: '#/components/responses/Problem' }
+  /me/profile:
+    patch:
+      tags: [Authentication]
+      summary: Update the current user's display name
+      description: Updates the global account name without changing memberships, accounting history, or sessions.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileUpdate'
+      responses:
+        '200':
+          description: Updated current user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /me/password:
+    put:
+      tags: [Authentication]
+      summary: Replace the current user's password
+      description: |
+        Requires the current password. On success every session for the user,
+        including the current session, is revoked.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordUpdate'
+      responses:
+        '204': { description: Password replaced and all sessions revoked }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+  /me/email-change:
+    post:
+      tags: [Authentication]
+      summary: Request a verified email-address change
+      description: |
+        Requires the current password. The current address remains active until
+        a one-hour, single-use token sent to `newEmail` is confirmed. Complete
+        SMTP and authenticated token-encryption configuration is required. The
+        accepted response does not reveal whether another account already uses
+        the requested address; in that case no action or email is created.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailChangeRequest'
+      responses:
+        '202':
+          description: Verification email queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationRequired'
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
   /me/avatar:
     post:
       tags: [Authentication]
@@ -1914,10 +2073,71 @@ components:
       examples: ['1250']
     LoginCommand:
       type: object
+      additionalProperties: false
       required: [email, password]
       properties:
         email: { type: string, format: email, maxLength: 254 }
         password: { type: string, format: password, minLength: 12, maxLength: 1024 }
+    AuthenticationCapabilities:
+      type: object
+      additionalProperties: false
+      required: [passwordResetAvailable, emailChangeAvailable]
+      properties:
+        passwordResetAvailable:
+          type: boolean
+          readOnly: true
+          description: Whether password-reset email delivery is currently configured.
+        emailChangeAvailable:
+          type: boolean
+          readOnly: true
+          description: Whether verified email-address changes are currently configured.
+    PasswordResetRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+    PasswordResetConfirmation:
+      type: object
+      additionalProperties: false
+      required: [token, newPassword]
+      properties:
+        token:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: One-time token read by the client from the reset URL fragment.
+        newPassword: { type: string, format: password, minLength: 12, maxLength: 1024 }
+    AccountActionTokenCommand:
+      type: object
+      additionalProperties: false
+      required: [token]
+      properties:
+        token:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: One-time token read by the client from the confirmation URL fragment.
+    ProfileUpdate:
+      type: object
+      additionalProperties: false
+      required: [displayName]
+      properties:
+        displayName: { type: string, minLength: 1, maxLength: 120 }
+    PasswordUpdate:
+      type: object
+      additionalProperties: false
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword: { type: string, format: password, minLength: 1, maxLength: 1024 }
+        newPassword: { type: string, format: password, minLength: 12, maxLength: 1024 }
+    EmailChangeRequest:
+      type: object
+      additionalProperties: false
+      required: [newEmail, currentPassword]
+      properties:
+        newEmail: { type: string, format: email, maxLength: 254 }
+        currentPassword: { type: string, format: password, minLength: 1, maxLength: 1024 }
     InvitationAcceptance:
       type: object
       required: [token, password]

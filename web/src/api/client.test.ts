@@ -635,6 +635,70 @@ describe('high-risk API idempotency', () => {
   });
 });
 
+describe('account security API contract', () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('accepts an empty password-reset request response', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.requestPasswordReset('alex@example.test')).resolves.toBeUndefined();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/auth/password-reset/request');
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).method).toBe('POST');
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ email: 'alex@example.test' });
+  });
+
+  it('uses the exact reset and email confirmation payloads', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.confirmPasswordReset('reset-token', 'new-passphrase');
+    await api.confirmEmailChange('email-token');
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/auth/password-reset/confirm');
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ token: 'reset-token', newPassword: 'new-passphrase' });
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/v1/auth/email-change/confirm');
+    expect(requestBody(fetchMock.mock.calls[1])).toEqual({ token: 'email-token' });
+  });
+
+  it('updates profile, password, and email using their dedicated methods', async () => {
+    const user = { id: 'user-a', displayName: 'Alex Changed', email: 'alex@example.test' };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(user))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(jsonResponse({ verificationRequired: true }, 202));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.updateProfile('Alex Changed')).resolves.toEqual(user);
+    await api.changePassword('current-passphrase', 'new-passphrase');
+    await expect(api.requestEmailChange('new@example.test', 'current-passphrase')).resolves.toEqual({ verificationRequired: true });
+
+    expect(fetchMock.mock.calls.map((call) => [(call[1] as RequestInit).method, call[0]])).toEqual([
+      ['PATCH', '/api/v1/me/profile'],
+      ['PUT', '/api/v1/me/password'],
+      ['POST', '/api/v1/me/email-change'],
+    ]);
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ displayName: 'Alex Changed' });
+    expect(requestBody(fetchMock.mock.calls[1])).toEqual({ currentPassword: 'current-passphrase', newPassword: 'new-passphrase' });
+    expect(requestBody(fetchMock.mock.calls[2])).toEqual({ newEmail: 'new@example.test', currentPassword: 'current-passphrase' });
+  });
+
+  it('loads account capabilities without authentication state', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ passwordResetAvailable: true, emailChangeAvailable: false }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.getAuthenticationCapabilities()).resolves.toEqual({ passwordResetAvailable: true, emailChangeAvailable: false });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/auth/capabilities');
+  });
+});
+
 describe('finance account summaries', () => {
   beforeEach(() => {
     vi.restoreAllMocks();

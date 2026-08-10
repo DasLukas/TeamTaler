@@ -145,6 +145,17 @@ export interface User {
   avatarUrl?: string;
 }
 
+/** Public availability of account-recovery features for the current deployment. */
+export interface AuthenticationCapabilities {
+  passwordResetAvailable: boolean;
+  emailChangeAvailable: boolean;
+}
+
+/** Confirmation returned after an email-change request has been accepted. */
+export interface EmailChangeRequestResult {
+  verificationRequired: true;
+}
+
 /** A group available to the signed-in user. */
 export interface Group {
   id: string;

@@ -6,6 +6,8 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ### Added
 
+- Self-service display-name, password, and verified email-address changes, plus enumeration-resistant password reset and public authentication capability discovery.
+- One-hour, single-use account-security actions with hashed proofs and a leased encrypted email outbox for password-reset and email-change delivery.
 - Group-owned, many-to-many roles with stable identifiers, cumulative permission grants, multiple roles per membership or pending invitation, four seeded starter roles, and a role-centered administration workflow.
 - Thirteen stable group permission keys covering group administration, role management, finance, catalog, complete booking activity, own-account payments, own booking creation, own or arbitrary booking reversal, booking for other members, booking for temporary guests, member-directory visibility, and anonymous group-statistic visibility.
 - Additive v1 role, permission-definition, and role-assignment endpoints with optimistic ETag concurrency control and tenant-bound identifiers.
@@ -20,6 +22,8 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ### Changed
 
+- Revoke every session after a password replacement, password-reset confirmation, or email-change confirmation, while preserving the existing user, membership, balance, statement, and audit identities during an email change.
+- Keep display-name and authenticated password changes available without SMTP, while password reset and verified email-change entry points report unavailable and fail closed until complete SMTP and token-encryption configuration is present.
 - Moved role assignment from the role-definition workspace into responsive member and pending-invitation directories with compact multi-select triggers, explicit draft confirmation, optimistic-conflict refresh, and protected last-administrator controls. Unchanged preset descriptions are localized in the German interface without overwriting stored canonical values.
 - Made `MEMBER`, `FINANCE_MANAGER`, and `CATALOG_MANAGER` ordinary editable and deletable starter roles, removed implicit member-role assignment, and require every login-enabled active membership and pending invitation to retain at least one explicit role. Credentialless temporary guests are the sole roleless exception.
 - Added independent `CREATE_OWN_BOOKING`, `BOOK_FOR_OTHERS`, and `BOOK_FOR_GUESTS` target classes. Booking navigation and target choices reflect their union, while permission-less finance or catalog roles remain possible.
@@ -47,6 +51,7 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ### Security
 
+- Keep password-reset requests account-enumeration resistant, require the current password for authenticated credential changes, carry account-action secrets only in URL fragments and JSON bodies, and remove encrypted outbox secrets after relay acceptance or cancellation.
 - Protected the reserved group-administrator role, its fixed identity, and its non-removable core grants, and require every group to retain at least one active assignment of that exact role.
 - Revalidate permissions and last-administrator invariants inside serialized SQLite write transactions so revocation is immediate and concurrent demotions or archival cannot lock a group out.
 - Prevent default roles from being deleted or receiving `GROUP_ADMINISTRATION`, avoiding accidental administrative access through invitation defaults or CSV imports.

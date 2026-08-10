@@ -21,6 +21,7 @@ import type {
   RoleAssignment,
   Session,
   Settlement,
+  User,
 } from './types';
 import { isCategoryIcon, isPermissionKey } from './types';
 import { formatMoney } from './money';
@@ -199,7 +200,6 @@ function ledgerDescription(wire: JsonRecord): string {
  */
 export function adaptSession(input: unknown): Session {
   const source = asRecord(input);
-  const user = asRecord(source.user);
   const groups = (source.groups as unknown[] ?? []).map((entry) => {
     const group = asRecord(entry);
     const membership = group.membership && typeof group.membership === 'object' ? asRecord(group.membership) : undefined;
@@ -219,15 +219,26 @@ export function adaptSession(input: unknown): Session {
     } satisfies Group;
   });
   return {
-    user: {
-      id: String(user.id),
-      displayName: String(user.displayName),
-      email: String(user.email),
-      avatarUrl: typeof user.avatarUrl === 'string' && user.avatarUrl ? user.avatarUrl : undefined,
-    },
+    user: adaptUser(source.user),
     groups,
     activeGroupId: typeof source.activeGroupId === 'string' ? source.activeGroupId : groups[0]?.id ?? '',
     demo: source.demo === true,
+  };
+}
+
+/**
+ * Adapts a signed-in user returned by profile and session endpoints.
+ *
+ * @param input - Untrusted user response from the API.
+ * @returns A canonical user with optional avatar metadata.
+ */
+export function adaptUser(input: unknown): User {
+  const source = asRecord(input);
+  return {
+    id: String(source.id),
+    displayName: String(source.displayName),
+    email: String(source.email),
+    avatarUrl: typeof source.avatarUrl === 'string' && source.avatarUrl ? source.avatarUrl : undefined,
   };
 }
 

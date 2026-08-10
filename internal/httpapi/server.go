@@ -101,8 +101,15 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /health/ready", server.handleReady)
 	mux.HandleFunc("POST /api/v1/auth/login", server.handleLogin)
 	mux.HandleFunc("POST /api/v1/auth/logout", server.handleLogout)
+	mux.HandleFunc("GET /api/v1/auth/capabilities", server.handleAccountCapabilities)
+	mux.HandleFunc("POST /api/v1/auth/password-reset/request", server.handlePasswordResetRequest)
+	mux.HandleFunc("POST /api/v1/auth/password-reset/confirm", server.handlePasswordResetConfirm)
+	mux.HandleFunc("POST /api/v1/auth/email-change/confirm", server.handleEmailChangeConfirm)
 	mux.HandleFunc("GET /api/v1/session", server.handleSession)
 	mux.HandleFunc("GET /api/v1/me", server.handleSession)
+	mux.HandleFunc("PATCH /api/v1/me/profile", server.handleUpdateProfile)
+	mux.HandleFunc("PUT /api/v1/me/password", server.handleChangePassword)
+	mux.HandleFunc("POST /api/v1/me/email-change", server.handleStartEmailChange)
 	mux.HandleFunc("GET /api/v1/permission-definitions", server.handlePermissionDefinitions)
 	mux.HandleFunc("POST /api/v1/me/avatar", server.handleProfileAvatar)
 	mux.HandleFunc("DELETE /api/v1/me/avatar", server.handleRemoveProfileAvatar)
@@ -220,7 +227,7 @@ func (s *Server) sessionContext(next http.Handler) http.Handler {
 
 func (s *Server) csrfCheck(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if request.Method == http.MethodGet || request.Method == http.MethodHead || request.Method == http.MethodOptions || request.URL.Path == "/api/v1/auth/login" || request.URL.Path == "/api/v1/invitations/preview" || request.URL.Path == "/api/v1/invitations/accept" || request.URL.Path == "/api/v1/public-join-links/preview" || request.URL.Path == "/api/v1/public-join-links/registrations" || request.URL.Path == "/api/v1/public-join-links/registrations/resend" || request.URL.Path == "/api/v1/public-join-links/registrations/confirm" {
+		if request.Method == http.MethodGet || request.Method == http.MethodHead || request.Method == http.MethodOptions || isPublicMutation(request.URL.Path) {
 			next.ServeHTTP(response, request)
 			return
 		}
@@ -236,6 +243,24 @@ func (s *Server) csrfCheck(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(response, request)
 	})
+}
+
+func isPublicMutation(requestPath string) bool {
+	switch requestPath {
+	case "/api/v1/auth/login",
+		"/api/v1/auth/password-reset/request",
+		"/api/v1/auth/password-reset/confirm",
+		"/api/v1/auth/email-change/confirm",
+		"/api/v1/invitations/preview",
+		"/api/v1/invitations/accept",
+		"/api/v1/public-join-links/preview",
+		"/api/v1/public-join-links/registrations",
+		"/api/v1/public-join-links/registrations/resend",
+		"/api/v1/public-join-links/registrations/confirm":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Server) originCheck(next http.Handler) http.Handler {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AccountSummary, Booking, Category, CreatedInvitation, Dashboard, Group, GroupSettings, InvitationImportResult, InvitationMetadata, LedgerEntry, Membership, Payment, PermissionDefinition, Product, PublicJoinLink, PublicJoinPreview, Role, RoleAssignment, Session } from '@/api/types';
+import type { AccountSummary, AuthenticationCapabilities, Booking, Category, CreatedInvitation, Dashboard, Group, GroupSettings, InvitationImportResult, InvitationMetadata, LedgerEntry, Membership, Payment, PermissionDefinition, Product, PublicJoinLink, PublicJoinPreview, Role, RoleAssignment, Session, User } from '@/api/types';
 import i18n from '@/i18n';
 import { DemoTransport } from './transport';
 
@@ -7,6 +7,17 @@ const jsonRequest = (method: string, body: unknown = {}): RequestInit => ({
   method,
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(body),
+});
+
+describe('DemoTransport account security', () => {
+  it('fails closed for mail features while supporting local name and password changes', async () => {
+    const transport = new DemoTransport();
+
+    await expect(transport.request<AuthenticationCapabilities>('/auth/capabilities')).resolves.toEqual({ passwordResetAvailable: false, emailChangeAvailable: false });
+    await expect(transport.request<User>('/me/profile', jsonRequest('PATCH', { displayName: 'Demo Changed' }))).resolves.toMatchObject({ displayName: 'Demo Changed' });
+    await expect(transport.request<void>('/me/password', jsonRequest('PUT', { currentPassword: 'teamtaler-demo', newPassword: 'changed-passphrase' }))).resolves.toBeUndefined();
+    await expect(transport.request<Session>('/session')).resolves.toMatchObject({ user: { displayName: 'Demo Changed' } });
+  });
 });
 
 async function demoteCurrentAdministrator(transport: DemoTransport, replacementRoleIds: string[] = ['role-member']): Promise<void> {

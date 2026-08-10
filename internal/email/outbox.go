@@ -74,6 +74,13 @@ const (
 	FailureCodePublicJoinInvalidated FailureCode = "public_join_invalidated"
 	// FailureCodePublicJoinExpired means the registration or parent join link expired before delivery.
 	FailureCodePublicJoinExpired FailureCode = "public_join_expired"
+	// FailureCodeAccountActionInvalidated means a newer security action or an
+	// account change invalidated the queued message.
+	FailureCodeAccountActionInvalidated FailureCode = "account_action_invalidated"
+	// FailureCodeAccountActionExpired means the one-time account action expired.
+	FailureCodeAccountActionExpired FailureCode = "account_action_expired"
+	// FailureCodeAccountActionInvalid means persisted action metadata is unusable.
+	FailureCodeAccountActionInvalid FailureCode = "account_action_invalid"
 )
 
 // TokenOpener decrypts one persisted invitation-token ciphertext. Implementations

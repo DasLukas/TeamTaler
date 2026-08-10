@@ -1,6 +1,5 @@
 .card {
   display: grid;
-  max-width: 840px;
   align-items: start;
   margin-bottom: var(--space-8);
   padding: var(--space-6);

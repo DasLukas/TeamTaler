@@ -249,6 +249,15 @@ export class DemoTransport {
       : undefined;
     const cleanPath = path.split('?')[0];
 
+    if (cleanPath === '/auth/capabilities' && method === 'GET') return { passwordResetAvailable: false, emailChangeAvailable: false } as T;
+    if (cleanPath === '/me/profile' && method === 'PATCH') {
+      const displayName = String((body as { displayName?: unknown }).displayName ?? '').trim();
+      if (!displayName) throw new Error('A display name is required.');
+      this.session.user.displayName = displayName;
+      this.members = this.members.map((member) => member.userId === this.session.user.id ? { ...member, displayName } : member);
+      return clone(this.session.user) as T;
+    }
+    if (cleanPath === '/me/password' && method === 'PUT') return undefined as T;
     if (cleanPath === '/session' || cleanPath === '/me') return clone(this.session) as T;
     if (cleanPath === '/permission-definitions' && method === 'GET') return clone(demoPermissionDefinitions) as T;
     if (cleanPath === '/me/avatar' && method === 'POST') {

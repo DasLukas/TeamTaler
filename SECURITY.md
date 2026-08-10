@@ -32,7 +32,7 @@ TeamTaler treats the following as security boundaries:
 - Stable permission-key enforcement for group administration, role management, finance, catalog, booking activity, own-account payments, own booking creation, booking reversal, third-party booking, member-directory reads, and group-statistic reads.
 - Credentialless temporary-guest identity, privacy-minimized booking data, and history-preserving login claim boundaries.
 - Protected role administration and the invariant that every group retains an active assignment of its reserved group-administrator role.
-- Authentication sessions, invitation links, public join links, verified registrations, and CSRF protection.
+- Authentication sessions, password reset, verified email changes, invitation links, public join links, verified registrations, and CSRF protection.
 - Append-only financial corrections and auditable administrative changes.
 - Image parsing and local file storage.
 - Trusted reverse proxy headers and canonical origin validation.
@@ -60,6 +60,12 @@ One reusable public join link may be enabled per group only by `GROUP_ADMINISTRA
 
 Existing accounts must authenticate before a public join. New accounts receive a one-hour, single-use mailbox proof through the leased encrypted outbox; no membership is created before successful verification. Start and resend responses do not reveal whether an email address already belongs to an account or registration. Acceptance assigns the group's current safe default role rather than any role encoded by the link or client. Archived memberships are reactivated only after their former role set is replaced by that default, preventing retained privilege from an earlier membership.
 
+Password-reset requests are account-enumeration resistant: a syntactically valid request receives the same empty `202` response whether the normalized address belongs to an eligible account or to no account. Password-reset and email-change tokens contain 256 bits of randomness, expire after one hour, are stored as SHA-256 hashes for lookup, and are consumed once. Plaintext exists at rest only as AES-256-GCM ciphertext in a leased email outbox until the relay accepts or the job is cancelled. Public browser URLs carry these secrets only in fragments, and clients submit them in JSON bodies; paths, query strings, API responses, logs, audit metadata, and safe outbox errors never contain them.
+
+An authenticated password or email-change request requires the current password and CSRF protection. A new email address is normalized and checked against the database's case-insensitive uniqueness boundary, but the accepted start response does not reveal whether another account already uses it. The current address remains authoritative until mailbox confirmation succeeds. Password changes, password-reset confirmation, and email-change confirmation revoke every session for the affected user, including the session that initiated an authenticated change. Email confirmation mutates the existing user row instead of replacing the identity, preserving membership, financial, statement, and audit references. Consumed, cancelled, expired, or superseded tokens cannot be replayed.
+
+When SMTP or authenticated token encryption is unavailable, public authentication capabilities report password reset and email change as unavailable, and both email-start commands fail closed with `503`. Hiding their controls is a usability measure only. Display-name updates and authenticated password changes do not depend on SMTP, while confirmation of an already delivered proof remains governed by its persisted expiry and one-time state.
+
 Role and assignment mutations use strong version ETags. Services reload effective permissions and enforce the last-administrator invariant within the same serialized SQLite write transaction as the mutation, preventing stale sessions and concurrent demotions from creating a lockout. Permission results are not cached across requests. Frontend route guards and hidden controls are usability measures only and are never authorization boundaries.
 
 ## Operational guidance
@@ -74,4 +80,5 @@ Role and assignment mutations use strong version ETags. Services reload effectiv
 - Before migration `0021`, verify a backup and update strict API consumers for nullable membership/statement email and the `isTemporaryGuest` field. The migration grants the two new read permissions to every existing role solely to preserve prior access and grants `BOOK_FOR_GUESTS` only to existing administrator roles; review and narrow those grants deliberately after rollout if needed.
 - Treat `BOOK_FOR_GUESTS` as authority to create persistent accounting identities. Review audit events and revoke it from roles that do not need temporary-guest booking.
 - Prefer finite public join-link lifetimes, rotate a link after broad or unintended distribution, and disable it as soon as open enrollment ends.
+- Preserve `TEAMTALER_EMAIL_TOKEN_KEY` while an account-action email may still be pending. Rotating or losing the key makes its encrypted proof undeliverable; it does not expose the plaintext token.
 - Do not log or share session cookies, invitation URLs, public join URLs, mailbox verification URLs, password reset material, or data archives.

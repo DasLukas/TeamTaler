@@ -25,11 +25,12 @@ import (
 type Service struct {
 	DB              *sql.DB
 	SessionLifetime time.Duration
-	// TokenSealer encrypts public-join verification tokens before they enter the
-	// durable email outbox. It is nil when email delivery is unavailable.
+	// TokenSealer encrypts public-join verification and account-security tokens
+	// before they enter durable email outboxes. It is nil when email delivery is
+	// unavailable.
 	TokenSealer SecretSealer
-	// EmailDeliveryAvailable gates public registration, which requires proof of
-	// mailbox ownership before a membership is created.
+	// EmailDeliveryAvailable gates public registration, password recovery, and
+	// email changes that require proof of mailbox ownership.
 	EmailDeliveryAvailable bool
 }
 

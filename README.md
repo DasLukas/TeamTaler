@@ -7,7 +7,7 @@ The application combines a responsive German-language React interface, a Go HTTP
 ## Implemented features
 
 - Multiple isolated groups per installation and multiple group memberships per user.
-- Local accounts, seven-day single-use invitation links, administrator-managed public join links with local QR codes and mandatory email verification for new accounts, automatic email delivery for individual and CSV invitations, idempotent CSV invitation imports, and server-side sessions.
+- Local accounts with self-service name, password, and verified email changes; enumeration-resistant password reset; seven-day single-use invitation links; administrator-managed public join links with local QR codes and mandatory email verification for new accounts; automatic email delivery for individual and CSV invitations; idempotent CSV invitation imports; and server-side sessions.
 - Temporary guests for one-off purchases, represented by credentialless local identities with stable membership and accounting history; administrators can rename, archive, or send a claim invitation that upgrades the same membership to a regular account.
 - Self-service profile images shown consistently in member administration, role assignment, booking activity, dashboards, and account surfaces.
 - Group-owned roles with stable identifiers, multiple roles per member or pending invitation, and cumulative permissions. Effective access is the union of all assigned role grants; roles never deny access granted by another role.
@@ -110,7 +110,7 @@ For local development:
 
 3. Set `TEAMTALER_PUBLIC_URL` to the exact external origin and restrict `TEAMTALER_TRUSTED_PROXY_CIDRS` to the addresses from which the proxy connects. The public URL must use HTTPS for secure production cookies.
 
-   To enable automatic invitation, verified public joining, and optional notification email, configure the complete SMTP block from `.env.example` and generate the email-token encryption key once:
+   To enable automatic invitations, verified public joining, password reset, verified email changes, and optional notification email, configure the complete SMTP block from `.env.example` and generate the email-token encryption key once:
 
    ```sh
    openssl rand -base64 32
@@ -159,7 +159,7 @@ The default Compose file binds the application port to host loopback, runs the p
 | `TEAMTALER_SMTP_FROM_ADDRESS` | With email | none | Single ASCII envelope and message sender mailbox. |
 | `TEAMTALER_SMTP_FROM_NAME` | No | empty | Optional sender display name. |
 | `TEAMTALER_SMTP_TLS_MODE` | With email | `starttls` | Mandatory transport mode: `starttls` or `tls`; plaintext SMTP is unsupported. |
-| `TEAMTALER_EMAIL_TOKEN_KEY` | With email | none | Standard-base64 encoding of exactly 32 random bytes used to encrypt queued invitation, public-join, and verification tokens. |
+| `TEAMTALER_EMAIL_TOKEN_KEY` | With email | none | Standard-base64 encoding of exactly 32 random bytes used to encrypt queued invitation, public-join, account-action, and verification tokens. |
 
 The application trusts forwarded client addresses only when the direct peer is inside a configured trusted CIDR. Keep both proxy and application request limits compatible; product-image and group-logo input is limited to 5 MiB before normalization.
 
@@ -168,6 +168,8 @@ SMTP configuration is fail-fast: supplying only part of the required block preve
 ## Email delivery
 
 When SMTP is configured, creating an individual invitation atomically stores the invitation and its encrypted outbox job. The group-administration dialog follows the delivery state until the relay accepts the message or delivery reaches a terminal failure, and it always displays the one-time acceptance link as a fallback. Without SMTP, individual invitations remain available as manually shareable links and are marked accordingly in the interface.
+
+Password reset and verified email changes are available only when the complete SMTP block and `TEAMTALER_EMAIL_TOKEN_KEY` are configured. `GET /api/v1/auth/capabilities` exposes that runtime availability without account information so clients can hide only the unavailable email-dependent actions; local display-name and authenticated password changes remain available. Password-reset requests return the same empty `202` response for known and unknown addresses. Reset and email-change proofs expire after one hour, are consumed once, and are delivered in URL fragments such as `/reset-password#token=...` and `/email-change/confirm#token=...`; they never belong in request paths or query strings. A password change, successful reset, or confirmed email change revokes every session for the account, including the session that initiated an authenticated change. Email confirmation updates the existing user identity in place, so memberships, balances, statements, and audit history remain attached to their existing identifiers.
 
 A member with `GROUP_ADMINISTRATION` can create one active public join link from the Members workspace and share either its URL or its locally generated QR code. The administrator chooses one hour, six hours, one day, seven days, 30 days, a custom duration between one hour and 365 days, or unlimited availability. Lifetime changes preserve the current token; rotation replaces the URL and QR code, while deactivation removes the stored token. Both operations invalidate pending registrations immediately. Existing accounts authenticate before joining. New accounts receive a one-hour, one-time mailbox-verification message and become members only after successful verification. The role assigned at acceptance is always the group's then-current safe default role, including when an archived membership is reactivated. SMTP and `TEAMTALER_EMAIL_TOKEN_KEY` are therefore mandatory before a public link can be enabled.
 
