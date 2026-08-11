@@ -477,8 +477,10 @@ func (s Service) ListMembers(ctx context.Context, membership domain.Membership) 
 		return nil, err
 	}
 	groupID := membership.GroupID
-	rows, err := s.DB.QueryContext(ctx, `SELECT m.id,m.group_id,m.user_id,u.email,u.display_name,u.avatar_key,m.status
-		FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.group_id=? ORDER BY m.status,lower(u.display_name)`, groupID)
+	rows, err := s.DB.QueryContext(ctx, `SELECT m.id,m.group_id,m.user_id,u.email,u.display_name,u.avatar_key,m.status,
+		(u.email IS NULL AND u.password_hash IS NULL)
+		FROM memberships m JOIN users u ON u.id=m.user_id
+		WHERE m.group_id=? AND m.deleted_at IS NULL ORDER BY m.status,lower(u.display_name)`, groupID)
 	if err != nil {
 		return nil, err
 	}
@@ -487,7 +489,7 @@ func (s Service) ListMembers(ctx context.Context, membership domain.Membership) 
 	for rows.Next() {
 		var item domain.Membership
 		var avatarKey sql.NullString
-		if err := rows.Scan(&item.ID, &item.GroupID, &item.UserID, &item.Email, &item.DisplayName, &avatarKey, &item.Status); err != nil {
+		if err := rows.Scan(&item.ID, &item.GroupID, &item.UserID, &item.Email, &item.DisplayName, &avatarKey, &item.Status, &item.IsTemporaryGuest); err != nil {
 			return nil, err
 		}
 		item.AvatarURL = media.UserAvatarURL(item.UserID, avatarKey.String)
@@ -677,26 +679,10 @@ func (s Service) ArchiveMember(ctx context.Context, actor domain.Principal, acto
 				return fmt.Errorf("%w: the last active administrator cannot be removed", domain.ErrConflict)
 			}
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE invitations
-			SET revoked_at=?,token_hash='revoked:' || id || ':' || ?
-			WHERE group_id=? AND target_membership_id=? AND accepted_at IS NULL AND revoked_at IS NULL`,
-			now, now, targetGroupID, targetID); err != nil {
+		if err := revokeMemberClaimInvitationsTx(ctx, tx, targetGroupID, targetID, now, "membership_archived"); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE invitation_email_outbox SET
-			status='CANCELLED',token_ciphertext=NULL,next_attempt_at=NULL,lease_token=NULL,lease_until=NULL,
-			last_error_code='temporary_guest_archived',updated_at=?
-			WHERE group_id=? AND invitation_id IN (SELECT id FROM invitations WHERE group_id=? AND target_membership_id=?)
-			AND status IN ('PENDING','SENDING','FAILED')`, now, targetGroupID, targetGroupID, targetID); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM membership_roles WHERE membership_id=?`, targetID); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM membership_permissions WHERE membership_id=?`, targetID); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM category_permissions WHERE membership_id=?`, targetID); err != nil {
+		if err := clearMemberLegacyAuthorizationTx(ctx, tx, targetID); err != nil {
 			return err
 		}
 		result, err := tx.ExecContext(ctx, `UPDATE memberships SET status='ARCHIVED',archived_at=? WHERE id=? AND group_id=? AND status='ACTIVE'`, now, targetID, targetGroupID)

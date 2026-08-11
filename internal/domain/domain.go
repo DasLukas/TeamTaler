@@ -232,6 +232,15 @@ type Membership struct {
 	RoleAssignmentsVersion int64                           `json:"roleAssignmentsVersion"`
 }
 
+const (
+	// MembershipStatusActive identifies a membership that can access the group.
+	MembershipStatusActive = "ACTIVE"
+	// MembershipStatusArchived identifies a reversible inactive membership.
+	MembershipStatusArchived = "ARCHIVED"
+	// MembershipStatusDeleted identifies a history-only financial tombstone.
+	MembershipStatusDeleted = "DELETED"
+)
+
 // Group is the top-level isolation and accounting boundary.
 type Group struct {
 	ID         string     `json:"id"`
@@ -338,8 +347,10 @@ type Booking struct {
 	ProductID              string  `json:"productId"`
 	ActorMembershipID      string  `json:"actorMembershipId"`
 	ActorDisplayName       string  `json:"actorDisplayName"`
+	ActorMembershipStatus  string  `json:"actorMembershipStatus"`
 	TargetMembershipID     string  `json:"targetMembershipId"`
 	TargetDisplayName      string  `json:"targetDisplayName"`
+	TargetMembershipStatus string  `json:"targetMembershipStatus"`
 	Quantity               int     `json:"quantity"`
 	UnitPriceMinor         int64   `json:"unitPriceMinor,string"`
 	TotalMinor             int64   `json:"totalMinor,string"`
@@ -361,6 +372,7 @@ type Payment struct {
 	GroupID      string              `json:"groupId"`
 	MembershipID string              `json:"membershipId"`
 	MemberName   string              `json:"memberName"`
+	MemberStatus string              `json:"membershipStatus"`
 	AmountMinor  int64               `json:"amountMinor,string"`
 	Currency     string              `json:"currency"`
 	ReceivedAt   string              `json:"receivedAt"`

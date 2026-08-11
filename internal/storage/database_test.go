@@ -248,6 +248,7 @@ func TestRemoveCategoryTypeMigrationPreservesExistingRows(t *testing.T) {
 		`INSERT INTO schema_migrations(version) VALUES('0018_explicit_role_assignments.sql')`,
 		`INSERT INTO schema_migrations(version) VALUES('0019_default_membership_role.sql')`,
 		`INSERT INTO schema_migrations(version) VALUES('0021_guest_feature.sql')`,
+		`INSERT INTO schema_migrations(version) VALUES('0023_membership_lifecycle.sql')`,
 		`CREATE TABLE users(id TEXT PRIMARY KEY) STRICT`,
 		`CREATE TABLE groups(id TEXT PRIMARY KEY) STRICT`,
 		`CREATE TABLE invitations(id TEXT PRIMARY KEY, group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE) STRICT`,

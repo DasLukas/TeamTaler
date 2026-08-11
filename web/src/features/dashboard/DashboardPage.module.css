@@ -92,6 +92,7 @@
 .activityCopy span,
 .activityCopy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .activityCopy small { color: var(--color-muted); }
+.deletedBadge { margin-left: 6px; padding: 2px 6px; border-radius: 999px; color: var(--color-muted); background: var(--color-surface-muted); font-size: var(--font-size-xs); font-style: normal; font-weight: 700; }
 .activity time { color: var(--color-muted); }
 .allActivities { display: flex; min-height: 48px; align-items: center; justify-content: space-between; padding: 0 var(--space-4); color: var(--color-teal-700); font-size: var(--font-size-xs); }
 

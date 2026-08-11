@@ -186,6 +186,7 @@ export const demoMembers: Membership[] = [
       { categoryId: 'category-drinks', assignToOthers: true, voidBookings: true },
       { categoryId: 'category-penalties', assignToOthers: true, voidBookings: true },
     ],
+    status: 'ACTIVE',
     active: true,
     etag: '"member-lukas-v1"',
   },
@@ -204,6 +205,7 @@ export const demoMembers: Membership[] = [
       { categoryId: 'category-drinks', assignToOthers: false, voidBookings: false },
       { categoryId: 'category-penalties', assignToOthers: true, voidBookings: true },
     ],
+    status: 'ACTIVE',
     active: true,
     etag: '"member-mara-v1"',
   },
@@ -222,6 +224,7 @@ export const demoMembers: Membership[] = [
       { categoryId: 'category-drinks', assignToOthers: false, voidBookings: false },
       { categoryId: 'category-penalties', assignToOthers: true, voidBookings: false },
     ],
+    status: 'ACTIVE',
     active: true,
     etag: '"member-jonas-v1"',
   },
@@ -233,6 +236,7 @@ export const demoBookings: Booking[] = [
     id: 'booking-1',
     memberId: 'member-lukas',
     memberName: 'Lukas Waschul',
+    memberStatus: 'ACTIVE',
     productId: 'product-beer',
     productName: 'Bier',
     categoryId: 'category-drinks',
@@ -242,6 +246,7 @@ export const demoBookings: Booking[] = [
     total: { minorUnits: '200', currency: 'EUR' },
     bookedAt: '2026-08-04T19:45:00+02:00',
     bookedByName: 'Lukas Waschul',
+    bookedByStatus: 'ACTIVE',
     bookedByMemberId: 'member-lukas',
     status: 'POSTED',
     voidWithoutReasonUntil: '2026-08-04T19:45:30+02:00',
@@ -252,6 +257,7 @@ export const demoBookings: Booking[] = [
     id: 'booking-2',
     memberId: 'member-mara',
     memberName: 'Mara Becker',
+    memberStatus: 'ACTIVE',
     productId: 'product-spezi',
     productName: 'Spezi',
     categoryId: 'category-drinks',
@@ -261,6 +267,7 @@ export const demoBookings: Booking[] = [
     total: { minorUnits: '150', currency: 'EUR' },
     bookedAt: '2026-08-04T19:10:00+02:00',
     bookedByName: 'Mara Becker',
+    bookedByStatus: 'ACTIVE',
     bookedByMemberId: 'member-mara',
     status: 'POSTED',
     voidReasonRequired: true,
@@ -270,6 +277,7 @@ export const demoBookings: Booking[] = [
     id: 'booking-3',
     memberId: 'member-jonas',
     memberName: 'Jonas Krüger',
+    memberStatus: 'ACTIVE',
     productId: 'product-late',
     productName: 'Zu spät zum Training',
     categoryId: 'category-penalties',
@@ -279,6 +287,7 @@ export const demoBookings: Booking[] = [
     total: { minorUnits: '500', currency: 'EUR' },
     bookedAt: '2026-08-04T18:32:00+02:00',
     bookedByName: 'Mara Becker',
+    bookedByStatus: 'ACTIVE',
     bookedByMemberId: 'member-mara',
     reason: '15 Minuten zu spät',
     status: 'POSTED',
@@ -319,8 +328,8 @@ export const demoAccountSummaries: AccountSummary[] = [
 
 /** Demo payments managed by finance users. */
 export const demoPayments: Payment[] = [
-  { id: 'payment-1', membershipId: 'member-lukas', memberName: 'Lukas Waschul', amount: { minorUnits: '2000', currency: 'EUR' }, receivedAt: '2026-08-01', method: 'BANK_TRANSFER', reference: 'Juli', status: 'POSTED' },
-  { id: 'payment-2', membershipId: 'member-mara', memberName: 'Mara Becker', amount: { minorUnits: '1500', currency: 'EUR' }, receivedAt: '2026-07-30', method: 'CASH', status: 'POSTED' },
+  { id: 'payment-1', membershipId: 'member-lukas', memberName: 'Lukas Waschul', membershipStatus: 'ACTIVE', amount: { minorUnits: '2000', currency: 'EUR' }, receivedAt: '2026-08-01', method: 'BANK_TRANSFER', reference: 'Juli', status: 'POSTED' },
+  { id: 'payment-2', membershipId: 'member-mara', memberName: 'Mara Becker', membershipStatus: 'ACTIVE', amount: { minorUnits: '1500', currency: 'EUR' }, receivedAt: '2026-07-30', method: 'CASH', status: 'POSTED' },
 ];
 
 /** Demo settlements generated from closed periods. */

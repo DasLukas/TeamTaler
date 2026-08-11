@@ -41,3 +41,17 @@ func TestGroupSettingsExposeOnlyNotificationDelivery(t *testing.T) {
 		t.Fatalf("deprecated setting status = %d, body = %s", unsupportedResponse.Code, unsupportedResponse.Body.String())
 	}
 }
+
+func TestMemberReactivationRejectsUnknownFields(t *testing.T) {
+	t.Parallel()
+	server, principal, administrator := invitationImportServer(t, false)
+	request := roleHandlerRequest(principal, administrator.GroupID, http.MethodPost, `{"roleIds":[],"unexpected":true}`)
+	request.SetPathValue("membershipID", "membership-archived")
+	response := httptest.NewRecorder()
+
+	server.handleReactivateMember(response, request)
+
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("reactivation with unknown field status = %d, body = %s", response.Code, response.Body.String())
+	}
+}

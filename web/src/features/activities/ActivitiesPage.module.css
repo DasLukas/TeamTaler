@@ -13,6 +13,7 @@
 .searchControl svg { position: absolute; z-index: 1; top: 14px; left: 14px; color: var(--color-muted); }
 .searchControl input { padding-left: 42px; }
 .member { display: inline-flex; min-width: 0; align-items: center; gap: var(--space-3); overflow-wrap: anywhere; }
+.deletedBadge { padding: 2px 7px; border-radius: 999px; color: var(--color-muted); background: var(--color-surface-muted); font-size: var(--font-size-xs); font-weight: 700; }
 .bookingProduct { display: inline-flex; min-width: 0; align-items: center; gap: var(--space-3); }
 .bookingProduct > span { min-width: 0; overflow-wrap: anywhere; }
 .bookingProduct > img { width: 40px; height: 40px; flex: 0 0 40px; border-radius: var(--radius-sm); object-fit: cover; background: var(--color-surface-muted); }

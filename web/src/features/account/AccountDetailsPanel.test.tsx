@@ -27,7 +27,7 @@ const session: Session = {
 
 function renderPanel(): QueryClient {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  const member: Membership = { id: 'member-a', userId: 'user-a', displayName: 'Alex Member', email: 'alex@example.test', initials: 'AM', isTemporaryGuest: false, roles: ['MEMBER'], groupPermissions: [], categoryPermissions: [], active: true };
+  const member: Membership = { id: 'member-a', userId: 'user-a', displayName: 'Alex Member', email: 'alex@example.test', initials: 'AM', isTemporaryGuest: false, roles: ['MEMBER'], groupPermissions: [], categoryPermissions: [], status: 'ACTIVE', active: true };
   queryClient.setQueryData(['session'], session);
   queryClient.setQueryData(['members', 'group-a'], [member]);
   const wrapper = ({ children }: { children: ReactNode }) => (

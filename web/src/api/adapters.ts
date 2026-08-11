@@ -298,6 +298,7 @@ export function adaptCategories(input: unknown): Category[] {
  */
 export function adaptMembership(input: unknown, etag?: string): Membership {
   const source = asRecord(input);
+  const status = source.status === 'ARCHIVED' || source.status === 'DELETED' ? source.status : 'ACTIVE';
   if ('categoryPermissions' in source) return {
     ...(source as unknown as Membership),
     userId: String(source.userId ?? ''),
@@ -307,6 +308,8 @@ export function adaptMembership(input: unknown, etag?: string): Membership {
     roleIds: Array.isArray(source.roleIds) ? source.roleIds.map(String) : [],
     effectiveGrants: adaptPermissionGrants(source.effectiveGrants),
     roleAssignmentsVersion: Number(source.roleAssignmentsVersion ?? 1),
+    status,
+    active: status === 'ACTIVE',
     etag: etag ?? source.etag as string | undefined,
   };
   const grants = (source.categoryGrants ?? {}) as Record<string, string[]>;
@@ -329,7 +332,8 @@ export function adaptMembership(input: unknown, etag?: string): Membership {
     roleIds: Array.isArray(source.roleIds) ? source.roleIds.map(String) : [],
     effectiveGrants: adaptPermissionGrants(source.effectiveGrants),
     roleAssignmentsVersion: Number(source.roleAssignmentsVersion ?? 1),
-    active: source.status ? source.status === 'ACTIVE' : source.active !== false,
+    status,
+    active: status === 'ACTIVE',
     etag,
   };
 }
@@ -412,6 +416,7 @@ export function adaptBooking(input: unknown, members?: Membership[], fallbackMem
     memberName: typeof source.targetDisplayName === 'string' && source.targetDisplayName
       ? source.targetDisplayName
       : memberName(targetId, members, fallbackMemberName),
+    memberStatus: source.targetMembershipStatus === 'ARCHIVED' || source.targetMembershipStatus === 'DELETED' ? source.targetMembershipStatus : 'ACTIVE',
     memberAvatarUrl: memberAvatarUrl(targetId, members),
     productId: String(source.productId),
     productName: String(source.productName),
@@ -424,6 +429,7 @@ export function adaptBooking(input: unknown, members?: Membership[], fallbackMem
     bookedByName: typeof source.actorDisplayName === 'string' && source.actorDisplayName
       ? source.actorDisplayName
       : memberName(actorId, members, actorId === targetId ? fallbackMemberName : i18n.t('common.member')),
+    bookedByStatus: source.actorMembershipStatus === 'ARCHIVED' || source.actorMembershipStatus === 'DELETED' ? source.actorMembershipStatus : 'ACTIVE',
     bookedByMemberId: actorId || undefined,
     bookedByAvatarUrl: memberAvatarUrl(actorId, members),
     reason: typeof source.reason === 'string' && source.reason ? source.reason : undefined,
@@ -525,7 +531,7 @@ export function adaptAccountSummaries(input: unknown): AccountSummary[] {
       displayName: String(source.displayName),
       avatarUrl: typeof source.avatarUrl === 'string' && source.avatarUrl ? source.avatarUrl : undefined,
       isTemporaryGuest: source.isTemporaryGuest === true,
-      status: source.status === 'ARCHIVED' ? 'ARCHIVED' : 'ACTIVE',
+      status: source.status === 'ARCHIVED' || source.status === 'DELETED' ? source.status : 'ACTIVE',
       currency,
       balance: sourceBalance ? money(sourceBalance.minorUnits, sourceBalance.currency || currency) : money(source.balanceMinor, currency),
     };
@@ -545,6 +551,7 @@ export function adaptPayment(input: unknown): Payment {
     id: String(source.id),
     membershipId: String(source.membershipId),
     memberName: String(source.memberName ?? i18n.t('common.member')),
+    membershipStatus: source.membershipStatus === 'ARCHIVED' || source.membershipStatus === 'DELETED' ? source.membershipStatus : 'ACTIVE',
     amount: money(source.amountMinor, source.currency),
     receivedAt: String(source.receivedAt),
     method: source.method as Payment['method'],

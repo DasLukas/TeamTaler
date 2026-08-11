@@ -26,6 +26,7 @@ const thirdPartyBooking: Booking = {
   id: 'booking-third-party',
   memberId: 'member-target',
   memberName: 'Target Member',
+  memberStatus: 'ACTIVE',
   memberAvatarUrl: '/avatars/target.png',
   productId: 'product-penalty',
   productName: 'Late arrival',
@@ -36,6 +37,7 @@ const thirdPartyBooking: Booking = {
   total: { minorUnits: '500', currency: 'EUR' },
   bookedAt: '2026-08-04T12:00:00Z',
   bookedByName: 'Assigning Manager',
+  bookedByStatus: 'ACTIVE',
   bookedByMemberId: 'member-manager',
   bookedByAvatarUrl: '/avatars/manager.png',
   status: 'POSTED',
@@ -148,5 +150,21 @@ describe('ActivitiesPage booking traceability', () => {
     await user.click(submit);
 
     await waitFor(() => expect(apiMock.reverseBooking).toHaveBeenCalledWith('group-a', thirdPartyBooking.id, 'Incorrect assignment'));
+  });
+
+  it('marks deleted historical actors and targets without exposing prior avatars', async () => {
+    apiMock.getBookings.mockResolvedValue([{
+      ...thirdPartyBooking,
+      memberStatus: 'DELETED',
+      memberAvatarUrl: undefined,
+      bookedByStatus: 'DELETED',
+      bookedByAvatarUrl: undefined,
+    }]);
+    renderActivities();
+
+    const row = await screen.findByRole('row', { name: /Target Member.*Gelöscht.*Assigning Manager.*Gelöscht/ });
+    expect(within(row).getAllByText(i18n.t('common.deleted'))).toHaveLength(2);
+    expect(row.querySelector('img[src="/avatars/target.png"]')).not.toBeInTheDocument();
+    expect(row.querySelector('img[src="/avatars/manager.png"]')).not.toBeInTheDocument();
   });
 });

@@ -50,6 +50,7 @@ import type {
   GroupSettings,
   GroupSettingsUpdateInput,
   Membership,
+  MemberReactivationCommand,
   Notification,
   NotificationPage,
   NotificationReadResult,
@@ -401,6 +402,11 @@ export const api = {
     return { ...invitation, email: invitation.email || email, acceptUrl: source.acceptUrl ?? '' };
   },
   archiveMember: async (groupId: string, membershipId: string, confirmSelf: boolean): Promise<void> => request<void>(`${groupPath(groupId, `members/${encodeURIComponent(membershipId)}`)}${confirmSelf ? '?confirmSelf=true' : ''}`, { method: 'DELETE' }),
+  reactivateMember: async (groupId: string, membershipId: string, command: MemberReactivationCommand): Promise<Membership> => adaptMembership(await request<unknown>(groupPath(groupId, `members/${encodeURIComponent(membershipId)}/reactivate`), {
+    method: 'POST',
+    body: json(command),
+  })),
+  permanentlyDeleteMember: async (groupId: string, membershipId: string): Promise<void> => request<void>(groupPath(groupId, `members/${encodeURIComponent(membershipId)}/permanent`), { method: 'DELETE' }),
   getBookings: async (groupId: string): Promise<Booking[]> => (await request<unknown[]>(groupPath(groupId, 'bookings'))).map((booking) => adaptBooking(booking)),
   createBooking: async (groupId: string, command: BookingCommand): Promise<Booking> => {
     const path = groupPath(groupId, 'bookings');

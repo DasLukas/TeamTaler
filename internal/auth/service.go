@@ -360,7 +360,7 @@ func resolveInvitationIdentityTx(ctx context.Context, tx *sql.Tx, input Invitati
 // membership while retaining its stable identifier on reactivation.
 func joinInvitationMembershipTx(ctx context.Context, tx *sql.Tx, groupID, userID, now string) (string, bool, error) {
 	var membershipID, membershipStatus string
-	err := tx.QueryRowContext(ctx, `SELECT id,status FROM memberships WHERE group_id=? AND user_id=?`, groupID, userID).
+	err := tx.QueryRowContext(ctx, `SELECT id,status FROM memberships WHERE group_id=? AND user_id=? AND deleted_at IS NULL`, groupID, userID).
 		Scan(&membershipID, &membershipStatus)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return "", false, err
@@ -369,7 +369,7 @@ func joinInvitationMembershipTx(ctx context.Context, tx *sql.Tx, groupID, userID
 		return "", false, fmt.Errorf("%w: user is already a group member", domain.ErrConflict)
 	}
 	if err == nil {
-		if _, err := tx.ExecContext(ctx, `UPDATE memberships SET status='ACTIVE',archived_at=NULL WHERE id=? AND group_id=? AND status='ARCHIVED'`, membershipID, groupID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE memberships SET status='ACTIVE',archived_at=NULL WHERE id=? AND group_id=? AND status='ARCHIVED' AND deleted_at IS NULL`, membershipID, groupID); err != nil {
 			return "", false, err
 		}
 		for _, statement := range []string{

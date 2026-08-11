@@ -78,8 +78,8 @@ export function DashboardPage() {
                 <Link className={styles.activity} key={booking.id} to="/activities">
                   <Avatar name={booking.memberName} size="small" src={booking.memberAvatarUrl} />
                   <div className={styles.activityCopy}>
-                    <span><strong>{booking.memberName.split(' ')[0]}</strong> · {booking.productName} · {formatMoney(booking.total)}</span>
-                    {booking.bookedByName !== booking.memberName ? <small>{t('activities.bookedByCue', { name: booking.bookedByName })}</small> : null}
+                    <span><strong>{booking.memberName.split(' ')[0]}</strong>{booking.memberStatus === 'DELETED' ? <em className={styles.deletedBadge}>{t('common.deleted')}</em> : null} · {booking.productName} · {formatMoney(booking.total)}</span>
+                    {booking.bookedByName !== booking.memberName ? <small>{t('activities.bookedByCue', { name: booking.bookedByName })}{booking.bookedByStatus === 'DELETED' ? <em className={styles.deletedBadge}>{t('common.deleted')}</em> : null}</small> : null}
                   </div>
                   <time>{new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' }).format(new Date(booking.bookedAt))}</time>
                   <ChevronRight aria-hidden="true" size={18} />

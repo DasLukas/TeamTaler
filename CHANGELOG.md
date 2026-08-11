@@ -19,6 +19,8 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Temporary guests for one-off bookings, with credentialless identities and stable memberships, inline atomic creation by display name, first-class accounting history, administrator rename/archive controls, and history-preserving login claim invitations.
 - `BOOK_FOR_GUESTS` as an independent capability for selecting existing temporary guests and creating new ones inline without exposing the member directory.
 - A privacy-minimized booking-context endpoint containing only the open period, own balance, current membership, booking-safe targets, and server-derived guest-creation capability.
+- A unified two-stage membership lifecycle: reversible archival and reactivation for regular members and temporary guests, followed by zero-balance permanent removal through a history-preserving tombstone.
+- Additive membership reactivation and permanent-removal endpoints plus migration `0023` lifecycle state, indexes, and database guards.
 
 ### Changed
 
@@ -29,7 +31,8 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Added independent `CREATE_OWN_BOOKING`, `BOOK_FOR_OTHERS`, and `BOOK_FOR_GUESTS` target classes. Booking navigation and target choices reflect their union, while permission-less finance or catalog roles remain possible.
 - Kept manual invitation roles explicit while preselecting the configured default. CSV imports now accept case-insensitive role names per row, use `|` for multiple roles, and fall back to the safe group default; the former shared `roleId` parameter remains compatible.
 - Users with `BOOK_FOR_OTHERS` can select credentialed foreign members, while users with `BOOK_FOR_GUESTS` can select existing temporary guests or add new names. Their own membership remains the default only when `CREATE_OWN_BOOKING` is effective. Existing IDs and new names share one 1-to-100 target limit and one idempotent all-or-nothing transaction.
-- Grouped finance payment targets into regular members and temporary guests without querying the protected member directory.
+- Grouped finance payment targets into regular members, temporary guests, archived accounts, and deleted accounts with a non-zero balance without querying the protected member directory.
+- Unified active-member actions under Archive, renamed former members to archived members, and added lifecycle-aware Reactivate and Delete actions with retained historical Deleted badges.
 - Protected member email, role, and grant listings with `VIEW_MEMBER_DIRECTORY`, protected anonymous category totals with `VIEW_GROUP_STATISTICS`, made `BOOK_FOR_OTHERS` imply directory access, and preserved upgraded behavior by granting both reads to every existing role.
 - Skip period statements and close notifications for idle credentialless guests while retaining nullable-email statements for guests with financial activity.
 - Added server-resolved actor and target display names to booking responses so activity clients no longer require the protected member directory. `Membership.userId` remains required, while temporary-guest membership and statement emails can be null and `isTemporaryGuest` is derived only from missing credentials.
@@ -60,6 +63,7 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Couple nullable guest email and password-hash state at the database boundary, exclude credentialless identities from authentication, forbid synthetic credentials, and suppress notification email jobs without a real address.
 - Recheck claim, rename, archive, selected regular roles, and inline temporary-guest creation inside serialized transactions. Claim acceptance preserves the membership and ledger history while applying exactly the invitation's roles.
 - Keep group statistics, member-directory fields, and other members' balances out of the booking context; frontend guest grouping and route guards remain presentation controls rather than authorization boundaries.
+- Recheck tenant ownership, lifecycle state, roles, and the exact zero balance inside serialized archive, reactivation, and permanent-removal transactions. Permanent removal strips access and personal projections while retaining an immutable membership tombstone and last display name for finance, booking, statement, and audit history.
 
 ## [0.5.2] - 2026-08-07
 

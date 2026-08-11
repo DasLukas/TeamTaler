@@ -539,7 +539,8 @@ func (s Service) createBookingForTargetTx(ctx context.Context, tx *sql.Tx, actor
 		return domain.Booking{}, err
 	}
 	booking := domain.Booking{ID: bookingID, GroupID: membership.GroupID, PeriodID: details.periodID, CategoryID: details.categoryID, ProductID: productID,
-		ActorMembershipID: membership.ID, ActorDisplayName: membership.DisplayName, TargetMembershipID: targetID, TargetDisplayName: targetDisplayName, Quantity: quantity, UnitPriceMinor: details.unitPriceMinor,
+		ActorMembershipID: membership.ID, ActorDisplayName: membership.DisplayName, ActorMembershipStatus: domain.MembershipStatusActive,
+		TargetMembershipID: targetID, TargetDisplayName: targetDisplayName, TargetMembershipStatus: domain.MembershipStatusActive, Quantity: quantity, UnitPriceMinor: details.unitPriceMinor,
 		TotalMinor: details.totalMinor, Currency: details.currency, ProductName: details.productName, CategoryName: details.categoryName, Reason: reason,
 		CreatedAt: now}
 	if err := applyCurrentVoidMetadata(ctx, tx, &booking, membership, nowTime); err != nil {
@@ -553,14 +554,16 @@ func (s Service) createBookingForTargetTx(ctx context.Context, tx *sql.Tx, actor
 
 func refreshBookingState(ctx context.Context, tx *sql.Tx, booking *domain.Booking, membership domain.Membership) error {
 	var voidedAt sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT b.voided_at,coalesce(b.void_reason,''),actor_user.display_name,target_user.display_name
+	if err := tx.QueryRowContext(ctx, `SELECT b.voided_at,coalesce(b.void_reason,''),actor_user.display_name,
+		CASE WHEN actor_member.deleted_at IS NOT NULL THEN 'DELETED' ELSE actor_member.status END,
+		target_user.display_name,CASE WHEN target_member.deleted_at IS NOT NULL THEN 'DELETED' ELSE target_member.status END
 		FROM bookings b
 		JOIN memberships actor_member ON actor_member.id=b.actor_membership_id AND actor_member.group_id=b.group_id
 		JOIN users actor_user ON actor_user.id=actor_member.user_id
 		JOIN memberships target_member ON target_member.id=b.target_membership_id AND target_member.group_id=b.group_id
 		JOIN users target_user ON target_user.id=target_member.user_id
 		WHERE b.id=? AND b.group_id=?`, booking.ID, membership.GroupID).
-		Scan(&voidedAt, &booking.VoidReason, &booking.ActorDisplayName, &booking.TargetDisplayName); err != nil {
+		Scan(&voidedAt, &booking.VoidReason, &booking.ActorDisplayName, &booking.ActorMembershipStatus, &booking.TargetDisplayName, &booking.TargetMembershipStatus); err != nil {
 		return err
 	}
 	booking.VoidedAt = nil
@@ -595,7 +598,9 @@ func (s Service) list(ctx context.Context, membership domain.Membership, periodI
 	if limit < 1 || limit > 200 {
 		limit = 100
 	}
-	query := `SELECT b.id,b.group_id,b.period_id,b.category_id,b.product_id,b.actor_membership_id,actor_user.display_name,b.target_membership_id,target_user.display_name,b.quantity,
+	query := `SELECT b.id,b.group_id,b.period_id,b.category_id,b.product_id,b.actor_membership_id,actor_user.display_name,
+		CASE WHEN actor_member.deleted_at IS NOT NULL THEN 'DELETED' ELSE actor_member.status END,
+		b.target_membership_id,target_user.display_name,CASE WHEN target_member.deleted_at IS NOT NULL THEN 'DELETED' ELSE target_member.status END,b.quantity,
 		b.unit_price_minor,b.total_minor,g.currency,b.product_name,b.category_name,coalesce(b.reason,''),b.created_at,b.voided_at,coalesce(b.void_reason,'')
 		FROM bookings b JOIN groups g ON g.id=b.group_id
 		JOIN memberships actor_member ON actor_member.id=b.actor_membership_id AND actor_member.group_id=b.group_id
@@ -630,7 +635,7 @@ func (s Service) list(ctx context.Context, membership domain.Membership, periodI
 	items := make([]domain.Booking, 0)
 	for rows.Next() {
 		var item domain.Booking
-		if err := rows.Scan(&item.ID, &item.GroupID, &item.PeriodID, &item.CategoryID, &item.ProductID, &item.ActorMembershipID, &item.ActorDisplayName, &item.TargetMembershipID, &item.TargetDisplayName,
+		if err := rows.Scan(&item.ID, &item.GroupID, &item.PeriodID, &item.CategoryID, &item.ProductID, &item.ActorMembershipID, &item.ActorDisplayName, &item.ActorMembershipStatus, &item.TargetMembershipID, &item.TargetDisplayName, &item.TargetMembershipStatus,
 			&item.Quantity, &item.UnitPriceMinor, &item.TotalMinor, &item.Currency, &item.ProductName, &item.CategoryName, &item.Reason,
 			&item.CreatedAt, &item.VoidedAt, &item.VoidReason); err != nil {
 			return nil, err
@@ -668,7 +673,9 @@ func (s Service) Void(ctx context.Context, actor domain.Principal, membership do
 			return refreshBookingState(ctx, tx, &booking, membership)
 		}
 		var voided sql.NullString
-		err = tx.QueryRowContext(ctx, `SELECT b.id,b.group_id,b.period_id,b.category_id,b.product_id,b.actor_membership_id,actor_user.display_name,b.target_membership_id,target_user.display_name,b.quantity,
+		err = tx.QueryRowContext(ctx, `SELECT b.id,b.group_id,b.period_id,b.category_id,b.product_id,b.actor_membership_id,actor_user.display_name,
+			CASE WHEN actor_member.deleted_at IS NOT NULL THEN 'DELETED' ELSE actor_member.status END,
+			b.target_membership_id,target_user.display_name,CASE WHEN target_member.deleted_at IS NOT NULL THEN 'DELETED' ELSE target_member.status END,b.quantity,
 			b.unit_price_minor,b.total_minor,g.currency,b.product_name,b.category_name,coalesce(b.reason,''),b.created_at,b.voided_at
 			FROM bookings b JOIN groups g ON g.id=b.group_id
 			JOIN memberships actor_member ON actor_member.id=b.actor_membership_id AND actor_member.group_id=b.group_id
@@ -676,7 +683,7 @@ func (s Service) Void(ctx context.Context, actor domain.Principal, membership do
 			JOIN memberships target_member ON target_member.id=b.target_membership_id AND target_member.group_id=b.group_id
 			JOIN users target_user ON target_user.id=target_member.user_id
 			WHERE b.id=? AND b.group_id=?`, bookingID, membership.GroupID).
-			Scan(&booking.ID, &booking.GroupID, &booking.PeriodID, &booking.CategoryID, &booking.ProductID, &booking.ActorMembershipID, &booking.ActorDisplayName, &booking.TargetMembershipID, &booking.TargetDisplayName,
+			Scan(&booking.ID, &booking.GroupID, &booking.PeriodID, &booking.CategoryID, &booking.ProductID, &booking.ActorMembershipID, &booking.ActorDisplayName, &booking.ActorMembershipStatus, &booking.TargetMembershipID, &booking.TargetDisplayName, &booking.TargetMembershipStatus,
 				&booking.Quantity, &booking.UnitPriceMinor, &booking.TotalMinor, &booking.Currency, &booking.ProductName, &booking.CategoryName,
 				&booking.Reason, &booking.CreatedAt, &voided)
 		if errors.Is(err, sql.ErrNoRows) {

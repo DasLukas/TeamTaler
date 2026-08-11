@@ -256,6 +256,46 @@ func (s *Server) handleArchiveMember(response http.ResponseWriter, request *http
 	response.WriteHeader(http.StatusNoContent)
 }
 
+// handleReactivateMember restores one archived member or temporary guest.
+// response receives the active Membership or Problem Details; request supplies
+// the authenticated tenant scope and strict role/name command. The method
+// returns no Go value.
+func (s *Server) handleReactivateMember(response http.ResponseWriter, request *http.Request) {
+	principal, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	var input groups.ReactivateMemberInput
+	if err := decodeJSON(response, request, &input); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	item, err := s.groups.ReactivateMember(request.Context(), principal, membership, request.PathValue("membershipID"), input)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, item)
+}
+
+// handlePermanentlyDeleteMember removes one archived membership from
+// operational group views while retaining its historical tombstone. response
+// receives 204 or Problem Details; request supplies authenticated tenant and
+// membership identifiers. The method returns no Go value.
+func (s *Server) handlePermanentlyDeleteMember(response http.ResponseWriter, request *http.Request) {
+	principal, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	if err := s.groups.PermanentlyDeleteMember(request.Context(), principal, membership, request.PathValue("membershipID")); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleListInvitations(response http.ResponseWriter, request *http.Request) {
 	_, membership, err := s.membership(request)
 	if err != nil {

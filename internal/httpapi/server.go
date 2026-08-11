@@ -135,6 +135,8 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/members/{membershipID}/permissions", server.handleUpdatePermissions)
 	mux.HandleFunc("PUT /api/v1/groups/{groupID}/members/{membershipID}/roles", server.handleReplaceMemberRoles)
 	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/members/{membershipID}", server.handleArchiveMember)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/members/{membershipID}/reactivate", server.handleReactivateMember)
+	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/members/{membershipID}/permanent", server.handlePermanentlyDeleteMember)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/public-join-link", server.handleGetPublicJoinLink)
 	mux.HandleFunc("PUT /api/v1/groups/{groupID}/public-join-link", server.handlePutPublicJoinLink)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/public-join-link/rotate", server.handleRotatePublicJoinLink)

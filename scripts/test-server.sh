@@ -71,7 +71,12 @@ load_local_environment() {
   done <"${local_env_file}"
 }
 
-if [[ -f "${local_env_file}" ]]; then
+if [[ "${TEAMTALER_TEST_DISABLE_SMTP:-false}" == "true" ]]; then
+  unset TEAMTALER_SMTP_HOST TEAMTALER_SMTP_PORT TEAMTALER_SMTP_USERNAME \
+    TEAMTALER_SMTP_PASSWORD TEAMTALER_SMTP_FROM_ADDRESS TEAMTALER_SMTP_FROM_NAME \
+    TEAMTALER_SMTP_TLS_MODE TEAMTALER_EMAIL_TOKEN_KEY
+  echo "Local SMTP delivery is disabled for this test run."
+elif [[ -f "${local_env_file}" ]]; then
   load_local_environment
   if [[ -n "${TEAMTALER_SMTP_USERNAME:-}" && -n "${TEAMTALER_SMTP_PASSWORD:-}" ]]; then
     export TEAMTALER_SMTP_FROM_ADDRESS="${TEAMTALER_SMTP_FROM_ADDRESS:-${TEAMTALER_SMTP_USERNAME}}"
@@ -160,7 +165,10 @@ fi
 echo
 echo "TeamTaler test server is ready at http://127.0.0.1:5173"
 echo "Shared password: TeamTaler-Test-2026!"
-echo "Accounts: admin@example.test, marie@example.test, jonas@example.test, lena@example.test"
+echo "Groups: TeamTaler Demo Club, TeamTaler Weekend Club"
+echo "Accounts: admin@example.test, marie@example.test, jonas@example.test, lena@example.test, noah@example.test"
+echo "Second-group-only account: noah@example.test"
+echo "Second-group catalog: Refreshments / Club Coffee (EUR 1.80)"
 echo "Stop the action to remove its disposable database."
 
 while true; do

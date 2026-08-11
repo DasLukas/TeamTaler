@@ -38,7 +38,7 @@ import { PublicJoinLinkDialog } from './PublicJoinLinkDialog';
 import { roleDisplayName } from './roleDisplayName';
 import styles from './MembersPanel.module.css';
 
-type MembersDialog = 'invite' | 'import' | 'edit' | 'revoke' | 'resend' | 'remove' | 'rename-guest' | 'claim-guest' | null;
+type MembersDialog = 'invite' | 'import' | 'edit' | 'revoke' | 'resend' | 'archive' | 'reactivate' | 'permanent-delete' | 'rename-guest' | 'claim-guest' | null;
 
 interface MemberImportDialogProps {
   activeGroupId: string;
@@ -360,8 +360,8 @@ function MemberImportDialog({ activeGroupId, defaultRole, onClose }: MemberImpor
 const emptyInvitationInput = (): InvitationInput => ({ email: '', displayName: '', roleIds: [], roles: ['MEMBER'], groupPermissions: [], categoryPermissions: [] });
 
 /**
- * Renders open invitations, active members, former members, and all associated
- * lifecycle dialogs and versioned role assignment controls.
+ * Renders open invitations, active members, archived members, and all
+ * reversible or permanent lifecycle controls.
  *
  * @returns A localized member and invitation administration workspace.
  */
@@ -395,6 +395,8 @@ export function MembersPanel() {
   const [guestClaimEmail, setGuestClaimEmail] = useState('');
   const [guestClaimRoleIds, setGuestClaimRoleIds] = useState<string[]>([]);
   const [guestClaimInvitation, setGuestClaimInvitation] = useState<CreatedInvitation | null>(null);
+  const [reactivationRoleIds, setReactivationRoleIds] = useState<string[]>([]);
+  const [reactivationDisplayName, setReactivationDisplayName] = useState('');
 
   const createMutation = useMutation({
     mutationFn: () => api.createInvitation(activeGroupId, { ...draft, email: draft.email.trim(), displayName: draft.displayName.trim(), roleIds: draft.roleIds ?? [] }),
@@ -453,6 +455,29 @@ export function MembersPanel() {
       ]);
     },
   });
+  const reactivateMutation = useMutation({
+    mutationFn: () => selectedMember
+      ? api.reactivateMember(activeGroupId, selectedMember.id, {
+        displayName: isTemporaryGuest(selectedMember) ? reactivationDisplayName.trim() : undefined,
+        roleIds: isTemporaryGuest(selectedMember) ? [] : reactivationRoleIds,
+      })
+      : Promise.reject(new Error(t('members.noMemberSelected'))),
+    onSuccess: async () => {
+      setDialog(null);
+      setSelectedMember(null);
+      await invalidateMemberLifecycleData();
+    },
+  });
+  const permanentDeleteMutation = useMutation({
+    mutationFn: () => selectedMember
+      ? api.permanentlyDeleteMember(activeGroupId, selectedMember.id)
+      : Promise.reject(new Error(t('members.noMemberSelected'))),
+    onSuccess: async () => {
+      setDialog(null);
+      setSelectedMember(null);
+      await invalidateMemberLifecycleData();
+    },
+  });
   const renameGuestMutation = useMutation({
     mutationFn: () => selectedMember
       ? api.renameMember(activeGroupId, selectedMember.id, guestDisplayName.trim())
@@ -488,6 +513,19 @@ export function MembersPanel() {
       queryClient.invalidateQueries({ queryKey: ['session'] }),
     ]);
   };
+  async function invalidateMemberLifecycleData() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: membersQueryKey }),
+      queryClient.invalidateQueries({ queryKey: invitationQueryKey }),
+      queryClient.invalidateQueries({ queryKey: rolesQueryKey }),
+      queryClient.invalidateQueries({ queryKey: ['role-assignments', activeGroupId] }),
+      queryClient.invalidateQueries({ queryKey: ['account-summaries', activeGroupId] }),
+      queryClient.invalidateQueries({ queryKey: ['payments', activeGroupId] }),
+      queryClient.invalidateQueries({ queryKey: ['bookings', activeGroupId] }),
+      queryClient.invalidateQueries({ queryKey: ['activity-bookings', activeGroupId] }),
+      queryClient.invalidateQueries({ queryKey: ['session'] }),
+    ]);
+  }
   const applyMemberRoles = async (member: Membership, roleIds: string[]) => {
     try {
       await api.updateMemberRoles(activeGroupId, member.id, roleIds, member.roleAssignmentsVersion ?? 1);
@@ -528,11 +566,15 @@ export function MembersPanel() {
     setGuestClaimEmail('');
     setGuestClaimRoleIds([]);
     setGuestClaimInvitation(null);
+    setReactivationRoleIds([]);
+    setReactivationDisplayName('');
     createMutation.reset();
     updateMutation.reset();
     revokeMutation.reset();
     resendMutation.reset();
     archiveMutation.reset();
+    reactivateMutation.reset();
+    permanentDeleteMutation.reset();
     renameGuestMutation.reset();
     claimGuestMutation.reset();
   };
@@ -556,6 +598,12 @@ export function MembersPanel() {
     setGuestClaimRoleIds(settingsQuery.data?.defaultRoleId ? [settingsQuery.data.defaultRoleId] : []);
     setGuestClaimInvitation(null);
     setDialog('claim-guest');
+  };
+  const openReactivation = (member: Membership) => {
+    setSelectedMember(member);
+    setReactivationDisplayName(member.displayName);
+    setReactivationRoleIds(isTemporaryGuest(member) ? [] : settingsQuery.data?.defaultRoleId ? [settingsQuery.data.defaultRoleId] : []);
+    setDialog('reactivate');
   };
   const roles = rolesQuery.data ?? [];
   const defaultRole = roles.find((role) => role.id === settingsQuery.data?.defaultRoleId);
@@ -652,7 +700,7 @@ export function MembersPanel() {
             {canManageProtectedRoles ? <div className={styles.mobileActions}>
               {temporaryGuest ? <Button aria-label={t('members.renameGuestFor', { name: member.displayName })} leadingIcon={<Pencil size={16} />} onClick={() => openGuestRename(member)} size="small" variant="ghost">{t('members.renameGuest')}</Button> : null}
               {temporaryGuest ? renderGuestClaimAction(member, claimPending) : null}
-              <Button aria-label={t('members.removeFor', { name: member.displayName })} leadingIcon={<UserMinus size={16} />} onClick={() => { setSelectedMember(member); setDialog('remove'); }} size="small" variant="ghost">{temporaryGuest ? t('members.archiveGuest') : t('members.remove')}</Button>
+              <Button aria-label={t('members.archiveFor', { name: member.displayName })} leadingIcon={<UserMinus size={16} />} onClick={() => { setSelectedMember(member); setDialog('archive'); }} size="small" variant="ghost">{t('members.archive')}</Button>
             </div> : null}
           </article>;
         })}</div> : <div className={tableStyles.tableWrap}>
@@ -668,7 +716,7 @@ export function MembersPanel() {
                 {canManageProtectedRoles ? <td><div className={styles.tableActions}>
                   {temporaryGuest ? <Button aria-label={t('members.renameGuestFor', { name: member.displayName })} leadingIcon={<Pencil size={16} />} onClick={() => openGuestRename(member)} size="small" variant="ghost">{t('members.renameGuest')}</Button> : null}
                   {temporaryGuest ? renderGuestClaimAction(member, claimPending) : null}
-                  <Button aria-label={t('members.removeFor', { name: member.displayName })} leadingIcon={<UserMinus size={16} />} onClick={() => { setSelectedMember(member); setDialog('remove'); }} size="small" variant="ghost">{temporaryGuest ? t('members.archiveGuest') : t('members.remove')}</Button>
+                  <Button aria-label={t('members.archiveFor', { name: member.displayName })} leadingIcon={<UserMinus size={16} />} onClick={() => { setSelectedMember(member); setDialog('archive'); }} size="small" variant="ghost">{t('members.archive')}</Button>
                 </div></td> : null}
               </tr>;
             })}</tbody>
@@ -677,11 +725,22 @@ export function MembersPanel() {
       </section>
 
       {canManageProtectedRoles ? <section className={styles.section}>
-        <div className={styles.sectionHeading}><h3>{t('members.formerMembers')}</h3><span>{formerMembers.length}</span></div>
-        {formerMembers.length === 0 ? <p className={styles.emptySection}>{t('members.noFormerMembers')}</p> : (
+        <div className={styles.sectionHeading}><h3>{t('members.archivedMembers')}</h3><span>{formerMembers.length}</span></div>
+        {formerMembers.length === 0 ? <p className={styles.emptySection}>{t('members.noArchivedMembers')}</p> : compact ? <div className={styles.mobileCards}>{formerMembers.map((member) => (
+          <article className={styles.mobileCard} key={member.id}>
+            <header className={styles.mobileCardHeader}><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /><span><span className={styles.memberName}><strong>{member.displayName}</strong>{isTemporaryGuest(member) ? <span className={styles.guestBadge}>{t('members.temporaryGuestBadge')}</span> : null}</span>{member.email ? <small>{member.email}</small> : null}</span></span></header>
+            <div className={styles.mobileActions}>
+              <Button leadingIcon={<RotateCcw size={16} />} onClick={() => openReactivation(member)} size="small" variant="ghost">{t('members.reactivate')}</Button>
+              <Button leadingIcon={<Trash2 size={16} />} onClick={() => { setSelectedMember(member); setDialog('permanent-delete'); }} size="small" variant="ghost">{t('common.delete')}</Button>
+            </div>
+          </article>
+        ))}</div> : (
           <div className={tableStyles.tableWrap}><table className={tableStyles.table}>
             <thead><tr><th>{t('common.member')}</th><th>{t('members.email')}</th><th><span className="sr-only">{t('common.action')}</span></th></tr></thead>
-            <tbody>{formerMembers.map((member) => <tr key={member.id}><td><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /> <span className={styles.memberName}><strong>{member.displayName}</strong>{isTemporaryGuest(member) ? <span className={styles.guestBadge}>{t('members.temporaryGuestBadge')}</span> : null}</span></span></td><td>{member.email}</td><td>{member.email ? <Button leadingIcon={<MailPlus size={16} />} onClick={() => openInvite(member)} size="small" variant="ghost">{t('members.inviteAgain')}</Button> : null}</td></tr>)}</tbody>
+            <tbody>{formerMembers.map((member) => <tr key={member.id}><td><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /> <span className={styles.memberName}><strong>{member.displayName}</strong>{isTemporaryGuest(member) ? <span className={styles.guestBadge}>{t('members.temporaryGuestBadge')}</span> : null}</span></span></td><td>{member.email}</td><td><div className={styles.tableActions}>
+              <Button leadingIcon={<RotateCcw size={16} />} onClick={() => openReactivation(member)} size="small" variant="ghost">{t('members.reactivate')}</Button>
+              <Button leadingIcon={<Trash2 size={16} />} onClick={() => { setSelectedMember(member); setDialog('permanent-delete'); }} size="small" variant="ghost">{t('common.delete')}</Button>
+            </div></td></tr>)}</tbody>
           </table></div>
         )}
       </section> : null}
@@ -763,8 +822,27 @@ export function MembersPanel() {
         </form>}
       </Modal>
 
-      <Modal onClose={closeDialog} open={dialog === 'remove'} title={selectedMember && isTemporaryGuest(selectedMember) ? t('members.archiveGuestTitle') : selectedMember?.userId === session.user.id ? t('members.removeSelfTitle') : t('members.removeTitle')}>
-        <div className={styles.confirmDialog}><p>{selectedMember && isTemporaryGuest(selectedMember) ? t('members.archiveGuestExplanation', { name: selectedMember.displayName }) : selectedMember?.userId === session.user.id ? t('members.removeSelfExplanation') : t('members.removeExplanation', { name: selectedMember?.displayName ?? '' })}</p>{archiveMutation.isError ? <p className={styles.error} role="alert">{archiveMutation.error.message}</p> : null}<div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={archiveMutation.isPending} onClick={() => archiveMutation.mutate()} variant="danger">{selectedMember && isTemporaryGuest(selectedMember) ? t('members.archiveGuest') : selectedMember?.userId === session.user.id ? t('members.confirmSelfRemoval') : t('members.remove')}</Button></div></div>
+      <Modal onClose={closeDialog} open={dialog === 'archive'} title={t('members.archiveTitle')}>
+        <div className={styles.confirmDialog}><p>{selectedMember?.userId === session.user.id ? t('members.archiveSelfExplanation') : t('members.archiveExplanation', { name: selectedMember?.displayName ?? '' })}</p>{archiveMutation.isError ? <p className={styles.error} role="alert">{archiveMutation.error.message}</p> : null}<div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={archiveMutation.isPending} onClick={() => archiveMutation.mutate()} variant="danger">{t('members.archive')}</Button></div></div>
+      </Modal>
+
+      <Modal onClose={closeDialog} open={dialog === 'reactivate'} title={t('members.reactivateTitle')}>
+        <form className={styles.form} onSubmit={(event) => { event.preventDefault(); reactivateMutation.mutate(); }}>
+          <p className={styles.expiry}>{t('members.reactivateExplanation', { name: selectedMember?.displayName ?? '' })}</p>
+          {selectedMember && isTemporaryGuest(selectedMember) ? <Field htmlFor="reactivation-display-name" label={t('auth.displayName')}>
+            <TextInput id="reactivation-display-name" maxLength={120} onChange={(event) => { setReactivationDisplayName(event.target.value); reactivateMutation.reset(); }} required value={reactivationDisplayName} />
+          </Field> : canManageRoles ? <RoleMultiSelect canManageGroup={canManageProtectedRoles} canManageRoles label={t('roleManagement.memberRoles')} onChange={(roleIds) => { setReactivationRoleIds(roleIds); reactivateMutation.reset(); }} roleIds={reactivationRoleIds} roles={roles} /> : <p className={styles.claimNotice}>{t('members.reactivateDefaultRole', { role: defaultRole ? roleDisplayName(defaultRole) : '–' })}</p>}
+          {reactivateMutation.isError ? <p className={styles.error} role="alert">{reactivateMutation.error.message}</p> : null}
+          <div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={reactivateMutation.isPending || (selectedMember && isTemporaryGuest(selectedMember) ? !reactivationDisplayName.trim() : reactivationRoleIds.length === 0)} type="submit">{t('members.reactivate')}</Button></div>
+        </form>
+      </Modal>
+
+      <Modal onClose={closeDialog} open={dialog === 'permanent-delete'} title={t('members.permanentDeleteTitle')}>
+        <div className={styles.confirmDialog}>
+          <p>{t('members.permanentDeleteExplanation', { name: selectedMember?.displayName ?? '' })}</p>
+          {permanentDeleteMutation.isError ? <p className={styles.error} role="alert">{permanentDeleteMutation.error instanceof ApiError && permanentDeleteMutation.error.problem.status === 409 ? t('members.permanentDeleteBalanceConflict') : permanentDeleteMutation.error.message}</p> : null}
+          <div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={permanentDeleteMutation.isPending} onClick={() => permanentDeleteMutation.mutate()} variant="danger">{t('common.delete')}</Button></div>
+        </div>
       </Modal>
 
       {dialog === 'import' ? <MemberImportDialog activeGroupId={activeGroupId} defaultRole={defaultRole} onClose={closeDialog} /> : null}

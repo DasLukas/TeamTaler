@@ -33,6 +33,7 @@ function renderProfileImage(session: Session = baseSession): QueryClient {
     roles: ['MEMBER'],
     groupPermissions: [],
     categoryPermissions: [],
+    status: 'ACTIVE',
     active: true,
   };
   queryClient.setQueryData(['session'], session);

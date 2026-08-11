@@ -80,8 +80,8 @@ export function ActivitiesPage() {
               {filtered.map((booking) => {
                 const productImageUrl = productImages.get(booking.productId);
                 return <tr key={booking.id}>
-                  <td data-label={columnLabels.bookedFor}><span className={styles.member}><Avatar name={booking.memberName} size="small" src={booking.memberAvatarUrl} />{booking.memberName}</span></td>
-                  <td data-label={columnLabels.bookedBy}><span className={styles.member}><Avatar name={booking.bookedByName} size="small" src={booking.bookedByAvatarUrl} />{booking.bookedByName}</span></td>
+                  <td data-label={columnLabels.bookedFor}><span className={styles.member}><Avatar name={booking.memberName} size="small" src={booking.memberAvatarUrl} />{booking.memberName}{booking.memberStatus === 'DELETED' ? <span className={styles.deletedBadge}>{t('common.deleted')}</span> : null}</span></td>
+                  <td data-label={columnLabels.bookedBy}><span className={styles.member}><Avatar name={booking.bookedByName} size="small" src={booking.bookedByAvatarUrl} />{booking.bookedByName}{booking.bookedByStatus === 'DELETED' ? <span className={styles.deletedBadge}>{t('common.deleted')}</span> : null}</span></td>
                   <td data-label={columnLabels.booking}>
                     <span className={styles.bookingProduct}>
                       {productImageUrl ? <img alt="" decoding="async" loading="lazy" src={productImageUrl} /> : null}

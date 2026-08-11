@@ -16,6 +16,7 @@ import type {
   InvitationPreview,
   LoginCommand,
   GroupSettings,
+  MemberReactivationCommand,
   Membership,
   Notification,
   Payment,
@@ -69,6 +70,8 @@ const DEMO_ROUTE_POLICIES: readonly DemoRoutePolicy[] = [
   { methods: ['POST', 'DELETE'], resource: /^logo$/, anyOf: ['GROUP_ADMINISTRATION'] },
   { methods: ['GET'], resource: /^members$/, anyOf: ['VIEW_MEMBER_DIRECTORY'] },
   { methods: ['PATCH', 'DELETE'], resource: /^members\/[^/]+$/, anyOf: ['GROUP_ADMINISTRATION'] },
+  { methods: ['POST'], resource: /^members\/[^/]+\/reactivate$/, anyOf: ['GROUP_ADMINISTRATION'] },
+  { methods: ['DELETE'], resource: /^members\/[^/]+\/permanent$/, anyOf: ['GROUP_ADMINISTRATION'] },
   { methods: ['POST'], resource: /^members\/[^/]+\/claim-invitation$/, anyOf: ['GROUP_ADMINISTRATION'] },
   { methods: ['GET', 'PUT'], resource: /^public-join-link$/, anyOf: ['GROUP_ADMINISTRATION'] },
   { methods: ['POST'], resource: /^public-join-link\/rotate$/, anyOf: ['GROUP_ADMINISTRATION'] },
@@ -377,13 +380,13 @@ export class DemoTransport {
         canBookForGuests,
       }) as T;
     }
-    if (resource === 'members' && method === 'GET') return clone(this.members) as T;
+    if (resource === 'members' && method === 'GET') return clone(this.members.filter((member) => member.status !== 'DELETED')) as T;
     if (resource === 'categories' && method === 'GET') return clone(this.categories) as T;
     if (resource === 'bookings' && method === 'GET') return this.listBookings(groupId) as T;
     if (resource === 'bookings' && method === 'POST') return this.createBooking(groupId, body as BookingCommand) as T;
     if (resource === 'bookings/batch' && method === 'POST') return this.createBookingBatch(groupId, body as BookingBatchCommand & { unitPriceMinor?: number }) as T;
     if (resource === 'accounts/me') return clone(this.ledger) as T;
-    if (resource === 'accounts' && method === 'GET') return clone(this.accountSummaries) as T;
+    if (resource === 'accounts' && method === 'GET') return clone(this.accountSummaries.filter((account) => account.status !== 'DELETED' || BigInt(account.balance.minorUnits) !== 0n)) as T;
     if (resource === 'payments' && method === 'GET') return clone(this.payments) as T;
     if (resource === 'payments' && method === 'POST') return this.createPayment(body as PaymentCommand) as T;
     if (resource === 'payments/self' && method === 'POST') return this.createOwnPayment(groupId, body as SelfPaymentCommand & { amountMinor?: number }) as T;
@@ -449,6 +452,14 @@ export class DemoTransport {
       const stored = this.invitations.find((entry) => entry.id === invitation.id);
       if (stored) stored.targetMembershipId = member.id;
       return clone(invitation) as T;
+    }
+    const memberReactivateMatch = resource.match(/^members\/([^/]+)\/reactivate$/);
+    if (memberReactivateMatch && method === 'POST') {
+      return this.reactivateMember(groupId, memberReactivateMatch[1], body as MemberReactivationCommand) as T;
+    }
+    const memberPermanentMatch = resource.match(/^members\/([^/]+)\/permanent$/);
+    if (memberPermanentMatch && method === 'DELETE') {
+      return this.permanentlyDeleteMember(memberPermanentMatch[1]) as T;
     }
     const memberMatch = resource.match(/^members\/([^/]+)$/);
     if (memberMatch && method === 'PATCH') {
@@ -818,6 +829,8 @@ export class DemoTransport {
       bookedAt: new Date().toISOString(),
       bookedByName: this.session.user.displayName,
       bookedByMemberId: actor.id,
+      memberStatus: target.status,
+      bookedByStatus: actor.status,
       reason: command.reason?.trim() || undefined,
       status: 'POSTED',
       voidWithoutReasonUntil: new Date(Date.now() + 30_000).toISOString(),
@@ -874,6 +887,7 @@ export class DemoTransport {
         groupPermissions: [],
         categoryPermissions: [],
         roleAssignmentsVersion: 1,
+        status: 'ACTIVE',
         active: true,
       };
       this.members.push(membership);
@@ -939,6 +953,7 @@ export class DemoTransport {
       throw new Error('The last active administrator cannot be removed.');
     }
     member.active = false;
+    member.status = 'ARCHIVED';
     member.roles = ['MEMBER'];
     member.roleIds = [];
     member.effectiveGrants = [];
@@ -948,6 +963,61 @@ export class DemoTransport {
       this.session.groups = this.session.groups.filter((group) => group.id !== groupId);
       this.session.activeGroupId = this.session.groups[0]?.id ?? '';
     }
+  }
+
+  /** Restores one archived demo membership using the production role rules. */
+  private reactivateMember(groupId: string, id: string, input: MemberReactivationCommand): Membership {
+    const member = this.members.find((entry) => entry.id === id && entry.status === 'ARCHIVED');
+    if (!member) throw new Error(i18n.t('errors.memberNotFound'));
+    if (member.isTemporaryGuest) {
+      const displayName = input.displayName?.trim().replace(/\s+/g, ' ') || member.displayName;
+      if (!displayName || [...displayName].length > 120 || /\p{Cc}/u.test(displayName)) throw new Error(i18n.t('errors.requestFailed'));
+      const conflict = this.members.some((entry) => entry.id !== member.id && entry.active && entry.isTemporaryGuest && entry.displayName.localeCompare(displayName, undefined, { sensitivity: 'accent' }) === 0);
+      if (conflict) throw new Error(i18n.t('members.temporaryGuestNameConflict'));
+      member.displayName = displayName;
+      member.initials = displayName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('');
+      member.roleIds = [];
+    } else {
+      const roleIds = this.normalizedRoleIds(input.roleIds);
+      if (roleIds.length === 0) throw new Error(i18n.t('members.reactivationRoleRequired'));
+      const defaultRoleIds = this.groupSettings.defaultRoleId ? [this.groupSettings.defaultRoleId] : [];
+      const differsFromDefault = roleIds.length !== defaultRoleIds.length || roleIds.some((roleId) => !defaultRoleIds.includes(roleId));
+      if (differsFromDefault) this.requirePermission(groupId, 'ROLE_MANAGEMENT');
+      member.roleIds = roleIds;
+    }
+    member.status = 'ACTIVE';
+    member.active = true;
+    this.syncMemberPermissions(member);
+    return clone(member);
+  }
+
+  /** Permanently removes one zero-balance archived demo membership from administration views. */
+  private permanentlyDeleteMember(id: string): void {
+    const member = this.members.find((entry) => entry.id === id && entry.status === 'ARCHIVED');
+    const account = this.accountSummaries.find((entry) => entry.membershipId === id);
+    if (!member) throw new Error(i18n.t('errors.memberNotFound'));
+    if (account && BigInt(account.balance.minorUnits) !== 0n) throw new Error(i18n.t('members.permanentDeleteBalanceConflict'));
+    member.status = 'DELETED';
+    member.active = false;
+    member.email = null;
+    delete member.avatarUrl;
+    member.roles = [];
+    member.roleIds = [];
+    member.effectiveGrants = [];
+    member.groupPermissions = [];
+    member.categoryPermissions = [];
+    if (account) {
+      account.status = 'DELETED';
+      account.isTemporaryGuest = false;
+      delete account.avatarUrl;
+    }
+    this.bookings.forEach((booking) => {
+      if (booking.memberId === id) booking.memberStatus = 'DELETED';
+      if (booking.bookedByMemberId === id) booking.bookedByStatus = 'DELETED';
+    });
+    this.payments.forEach((payment) => {
+      if (payment.membershipId === id) payment.membershipStatus = 'DELETED';
+    });
   }
 
   private activeAdministratorCount(): number {
@@ -1290,6 +1360,7 @@ export class DemoTransport {
     const payment: Payment = {
       id: identifier('payment'),
       memberName: member.displayName,
+      membershipStatus: member.status,
       status: 'POSTED',
       ...command,
       amount: command.amount ?? { minorUnits: String(command.amountMinor ?? 0), currency: 'EUR' },

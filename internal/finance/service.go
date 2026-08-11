@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -206,23 +207,28 @@ func (s Service) Account(ctx context.Context, membership domain.Membership, targ
 	return account, entries.Err()
 }
 
-// ListAccountSummaries returns every active or archived membership with its
-// consolidated receivable balance. The caller must have finance-manager
-// privileges in the requested group. Results are grouped by membership status,
-// then ordered by descending balance and display name.
+// ListAccountSummaries returns every operational membership and each deleted
+// tombstone that currently has a non-zero consolidated receivable balance. The
+// caller must have finance-manager privileges in the requested group. Results
+// are grouped by lifecycle status, then ordered by descending balance and
+// display name.
 func (s Service) ListAccountSummaries(ctx context.Context, membership domain.Membership) ([]AccountSummary, error) {
 	if err := requirePermission(ctx, s.DB, membership, domain.PermissionFinanceManagement); err != nil {
 		return nil, err
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT m.id,u.id,u.display_name,u.avatar_key,
-		(u.email IS NULL AND u.password_hash IS NULL),m.status,g.currency,coalesce(sum(le.amount_minor),0)
+	rows, err := s.DB.QueryContext(ctx, `SELECT m.id,u.id,u.display_name,
+		CASE WHEN m.deleted_at IS NULL THEN u.avatar_key ELSE NULL END,
+		(m.deleted_at IS NULL AND u.email IS NULL AND u.password_hash IS NULL),
+		CASE WHEN m.deleted_at IS NOT NULL THEN 'DELETED' ELSE m.status END,
+		g.currency,coalesce(sum(le.amount_minor),0)
 		FROM memberships m
 		JOIN users u ON u.id=m.user_id
 		JOIN groups g ON g.id=m.group_id
 		LEFT JOIN ledger_entries le ON le.group_id=m.group_id AND le.membership_id=m.id AND le.account='MEMBER_RECEIVABLE'
 		WHERE m.group_id=?
-		GROUP BY m.id,u.id,u.display_name,u.avatar_key,u.email,u.password_hash,m.status,g.currency
-		ORDER BY CASE m.status WHEN 'ACTIVE' THEN 0 ELSE 1 END,
+		GROUP BY m.id,u.id,u.display_name,u.avatar_key,u.email,u.password_hash,m.status,m.deleted_at,g.currency
+		HAVING m.deleted_at IS NULL OR coalesce(sum(le.amount_minor),0) != 0
+		ORDER BY CASE WHEN m.deleted_at IS NOT NULL THEN 2 WHEN m.status='ACTIVE' THEN 0 ELSE 1 END,
 			coalesce(sum(le.amount_minor),0) DESC,lower(u.display_name),m.id`, membership.GroupID)
 	if err != nil {
 		return nil, err
@@ -357,21 +363,34 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 			if storedHash != requestHash {
 				return domain.ErrIdempotencyReuse
 			}
-			return json.Unmarshal([]byte(storedResponse), &payment)
+			if err := json.Unmarshal([]byte(storedResponse), &payment); err != nil {
+				return err
+			}
+			return refreshPaymentMemberStateTx(ctx, tx, &payment)
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		var currency, memberName string
-		var targetExists int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM memberships WHERE id=? AND group_id=? AND status='ACTIVE'`, input.MembershipID, membership.GroupID).Scan(&targetExists); err != nil {
+		var currency, memberName, memberStatus string
+		var deletedAt sql.NullString
+		var currentBalance int64
+		if err := tx.QueryRowContext(ctx, `SELECT u.display_name,m.status,m.deleted_at,
+			coalesce((SELECT sum(le.amount_minor) FROM ledger_entries le
+				WHERE le.group_id=m.group_id AND le.membership_id=m.id AND le.account='MEMBER_RECEIVABLE'),0)
+			FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.id=? AND m.group_id=?`, input.MembershipID, membership.GroupID).
+			Scan(&memberName, &memberStatus, &deletedAt, &currentBalance); errors.Is(err, sql.ErrNoRows) {
+			return domain.ErrNotFound
+		} else if err != nil {
 			return err
 		}
-		if targetExists == 0 {
+		if source == paymentSourceSelfService && (memberStatus != domain.MembershipStatusActive || deletedAt.Valid) {
 			return domain.ErrNotFound
 		}
-		if err := tx.QueryRowContext(ctx, `SELECT u.display_name FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.id=?`, input.MembershipID).Scan(&memberName); err != nil {
-			return err
+		if deletedAt.Valid {
+			memberStatus = domain.MembershipStatusDeleted
+			if currentBalance <= 0 || input.AmountMinor > currentBalance {
+				return fmt.Errorf("%w: deleted accounts accept only payments that settle their open balance", domain.ErrConflict)
+			}
 		}
 		if err := tx.QueryRowContext(ctx, `SELECT currency FROM groups WHERE id=?`, membership.GroupID).Scan(&currency); err != nil {
 			return err
@@ -386,7 +405,7 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 		if input.Reference != "" {
 			ledgerDescription += ": " + input.Reference
 		}
-		payment = domain.Payment{ID: paymentID, GroupID: membership.GroupID, MembershipID: input.MembershipID, MemberName: memberName, AmountMinor: input.AmountMinor,
+		payment = domain.Payment{ID: paymentID, GroupID: membership.GroupID, MembershipID: input.MembershipID, MemberName: memberName, MemberStatus: memberStatus, AmountMinor: input.AmountMinor,
 			Currency: currency, ReceivedAt: platform.Timestamp(receivedAt), Method: input.Method, Reference: input.Reference, Note: input.Note, Status: "POSTED", Allocations: []domain.PaymentAllocation{}}
 		_, err = tx.ExecContext(ctx, `INSERT INTO payments(id,group_id,membership_id,amount_minor,received_at,method,reference,note,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,
 			paymentID, membership.GroupID, input.MembershipID, input.AmountMinor, payment.ReceivedAt, input.Method, nullable(input.Reference), nullable(input.Note), membership.ID, now)
@@ -417,7 +436,7 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 		if err := allocationRows.Close(); err != nil {
 			return err
 		}
-		if notifyTarget && membership.ID != input.MembershipID {
+		if notifyTarget && membership.ID != input.MembershipID && memberStatus != domain.MembershipStatusDeleted {
 			if _, err := s.Notifications.CreateTx(ctx, tx, notifications.CreateInput{
 				GroupID: membership.GroupID, MembershipID: input.MembershipID,
 				Type: notifications.TypePaymentRecorded, Title: "Payment recorded", Body: "A payment was added to your account.",
@@ -448,7 +467,9 @@ func (s Service) ListPayments(ctx context.Context, membership domain.Membership,
 	if limit < 1 || limit > 200 {
 		limit = 100
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT p.id,p.group_id,p.membership_id,u.display_name,p.amount_minor,g.currency,p.received_at,p.method,coalesce(p.reference,''),coalesce(p.note,''),p.reversed_at
+	rows, err := s.DB.QueryContext(ctx, `SELECT p.id,p.group_id,p.membership_id,u.display_name,
+		CASE WHEN m.deleted_at IS NOT NULL THEN 'DELETED' ELSE m.status END,
+		p.amount_minor,g.currency,p.received_at,p.method,coalesce(p.reference,''),coalesce(p.note,''),p.reversed_at
 		FROM payments p JOIN groups g ON g.id=p.group_id JOIN memberships m ON m.id=p.membership_id JOIN users u ON u.id=m.user_id
 		WHERE p.group_id=? ORDER BY p.received_at DESC LIMIT ?`, membership.GroupID, limit)
 	if err != nil {
@@ -458,7 +479,7 @@ func (s Service) ListPayments(ctx context.Context, membership domain.Membership,
 	result := make([]domain.Payment, 0)
 	for rows.Next() {
 		var item domain.Payment
-		if err := rows.Scan(&item.ID, &item.GroupID, &item.MembershipID, &item.MemberName, &item.AmountMinor, &item.Currency, &item.ReceivedAt, &item.Method, &item.Reference, &item.Note, &item.ReversedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.GroupID, &item.MembershipID, &item.MemberName, &item.MemberStatus, &item.AmountMinor, &item.Currency, &item.ReceivedAt, &item.Method, &item.Reference, &item.Note, &item.ReversedAt); err != nil {
 			return nil, err
 		}
 		item.Status = "POSTED"
@@ -525,8 +546,11 @@ func (s Service) ReversePayment(ctx context.Context, actor domain.Principal, mem
 		}
 		var reversed sql.NullString
 		var targetMembershipID, currency string
+		var targetDeletedAt sql.NullString
 		var amountMinor int64
-		if err := tx.QueryRowContext(ctx, `SELECT p.reversed_at,p.membership_id,p.amount_minor,g.currency FROM payments p JOIN groups g ON g.id=p.group_id WHERE p.id=? AND p.group_id=?`, paymentID, membership.GroupID).Scan(&reversed, &targetMembershipID, &amountMinor, &currency); errors.Is(err, sql.ErrNoRows) {
+		if err := tx.QueryRowContext(ctx, `SELECT p.reversed_at,p.membership_id,p.amount_minor,g.currency,m.deleted_at
+			FROM payments p JOIN groups g ON g.id=p.group_id JOIN memberships m ON m.id=p.membership_id
+			WHERE p.id=? AND p.group_id=?`, paymentID, membership.GroupID).Scan(&reversed, &targetMembershipID, &amountMinor, &currency, &targetDeletedAt); errors.Is(err, sql.ErrNoRows) {
 			return domain.ErrNotFound
 		} else if err != nil {
 			return err
@@ -575,7 +599,7 @@ func (s Service) ReversePayment(ctx context.Context, actor domain.Principal, mem
 		if err := ledger.RebuildPaymentAllocations(ctx, tx, membership.GroupID, targetMembershipID); err != nil {
 			return err
 		}
-		if membership.ID != targetMembershipID {
+		if membership.ID != targetMembershipID && !targetDeletedAt.Valid {
 			if _, err := s.Notifications.CreateTx(ctx, tx, notifications.CreateInput{
 				GroupID: membership.GroupID, MembershipID: targetMembershipID,
 				Type: notifications.TypePaymentReversed, Title: "Payment reversed", Body: "A payment on your account was reversed.",
@@ -590,6 +614,15 @@ func (s Service) ReversePayment(ctx context.Context, actor domain.Principal, mem
 		}
 		return idempotency.Store(ctx, tx, membership.GroupID, actor.UserID, idempotencyKey, requestHash, 204, map[string]any{"paymentId": paymentID, "status": "REVERSED"})
 	})
+}
+
+func refreshPaymentMemberStateTx(ctx context.Context, tx *sql.Tx, payment *domain.Payment) error {
+	if payment == nil || payment.MembershipID == "" {
+		return domain.ValidationError{Field: "payment", Message: "requires a membership id"}
+	}
+	return tx.QueryRowContext(ctx, `SELECT u.display_name,CASE WHEN m.deleted_at IS NOT NULL THEN 'DELETED' ELSE m.status END
+		FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.id=?`, payment.MembershipID).
+		Scan(&payment.MemberName, &payment.MemberStatus)
 }
 
 func insertLedger(ctx context.Context, tx *sql.Tx, groupID, periodID, membershipID, paymentID, reversalOf, account string, amount int64, description, createdAt string) error {

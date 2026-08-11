@@ -23,6 +23,8 @@ const accounts: AccountSummary[] = [
   { membershipId: 'member-active', displayName: 'Active Account', isTemporaryGuest: false, status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '0', currency: 'EUR' } },
   { membershipId: 'member-guest', displayName: 'Temporary Guest', isTemporaryGuest: true, status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '100', currency: 'EUR' } },
   { membershipId: 'member-archived', displayName: 'Archived Account', isTemporaryGuest: false, status: 'ARCHIVED', currency: 'EUR', balance: { minorUnits: '500', currency: 'EUR' } },
+  { membershipId: 'member-deleted', displayName: 'Deleted Account', isTemporaryGuest: false, status: 'DELETED', currency: 'EUR', balance: { minorUnits: '250', currency: 'EUR' } },
+  { membershipId: 'member-deleted-credit', displayName: 'Deleted Credit', isTemporaryGuest: false, status: 'DELETED', currency: 'EUR', balance: { minorUnits: '-100', currency: 'EUR' } },
 ];
 
 function renderPayments(): void {
@@ -47,11 +49,15 @@ describe('PaymentsPanel', () => {
 
     const accountSelect = screen.getByLabelText(i18n.t('common.member'));
     const groups = within(accountSelect).getAllByRole('group');
-    expect(groups).toHaveLength(2);
+    expect(groups).toHaveLength(4);
     expect(groups[0]).toHaveAttribute('label', i18n.t('booking.regularMembers'));
     expect(within(groups[0]).getByRole('option', { name: 'Active Account' })).toBeVisible();
     expect(groups[1]).toHaveAttribute('label', i18n.t('booking.guests'));
     expect(within(groups[1]).getByRole('option', { name: 'Temporary Guest' })).toBeVisible();
-    expect(screen.queryByRole('option', { name: 'Archived Account' })).not.toBeInTheDocument();
+    expect(groups[2]).toHaveAttribute('label', i18n.t('financeWorkspace.archivedMembers'));
+    expect(within(groups[2]).getByRole('option', { name: 'Archived Account' })).toBeVisible();
+    expect(groups[3]).toHaveAttribute('label', i18n.t('financeWorkspace.deletedAccounts'));
+    expect(within(groups[3]).getByRole('option', { name: 'Deleted Account' })).toBeVisible();
+    expect(screen.queryByRole('option', { name: 'Deleted Credit' })).not.toBeInTheDocument();
   });
 });

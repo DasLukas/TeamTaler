@@ -23,8 +23,12 @@ import (
 )
 
 const (
-	testPassword = "TeamTaler-Test-2026!"
-	adminEmail   = "admin@example.test"
+	testPassword         = "TeamTaler-Test-2026!"
+	adminEmail           = "admin@example.test"
+	secondaryGroupName   = "TeamTaler Weekend Club"
+	secondaryMemberEmail = "noah@example.test"
+	secondaryCategory    = "Refreshments"
+	secondaryProduct     = "Club Coffee"
 )
 
 type memberSeed struct {
@@ -194,11 +198,43 @@ func run() error {
 	}); err != nil {
 		return fmt.Errorf("create Marie payment: %w", err)
 	}
+	if err := seedSecondaryGroup(ctx, authService, groupService, catalogService, adminSession.Principal); err != nil {
+		return err
+	}
 
 	if _, err := db.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
 		return fmt.Errorf("checkpoint test database: %w", err)
 	}
 	fmt.Println("Development test data created.")
+	return nil
+}
+
+// seedSecondaryGroup creates a second disposable group with one catalog item
+// for testing group switching and data isolation. The administrator and Lena
+// reuse their existing accounts, while Noah is created exclusively for the new
+// group. It returns a contextualized group, invitation, or catalog error.
+func seedSecondaryGroup(ctx context.Context, authService auth.Service, groupService groups.Service, catalogService catalog.Service, administrator domain.Principal) error {
+	secondaryGroup, err := groupService.Create(ctx, administrator, secondaryGroupName, "EUR")
+	if err != nil {
+		return fmt.Errorf("create secondary test group: %w", err)
+	}
+	category, err := catalogService.CreateCategory(ctx, administrator, secondaryGroup.Membership, catalog.CreateCategoryInput{
+		Name: secondaryCategory, Icon: domain.CategoryIconDrink, SortOrder: 10,
+	})
+	if err != nil {
+		return fmt.Errorf("create secondary test category: %w", err)
+	}
+	if _, err := createFixedProduct(ctx, catalogService, administrator, secondaryGroup.Membership, category.ID, "seed-secondary-product-coffee", secondaryProduct, 180, 10); err != nil {
+		return fmt.Errorf("create secondary test product: %w", err)
+	}
+	for _, seed := range []memberSeed{
+		{email: "lena@example.test", displayName: "Lena Player"},
+		{email: secondaryMemberEmail, displayName: "Noah Newcomer"},
+	} {
+		if _, err := createMember(ctx, authService, groupService, administrator, secondaryGroup.Membership, seed); err != nil {
+			return fmt.Errorf("seed secondary group member %s: %w", seed.email, err)
+		}
+	}
 	return nil
 }
 

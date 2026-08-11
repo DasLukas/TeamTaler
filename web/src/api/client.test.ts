@@ -13,6 +13,7 @@ const booking: Booking = {
   id: 'booking-a',
   memberId: 'member-a',
   memberName: 'Alex',
+  memberStatus: 'ACTIVE',
   productId: 'product-a',
   productName: 'Water',
   categoryId: 'category-a',
@@ -22,6 +23,7 @@ const booking: Booking = {
   total: { minorUnits: '100', currency: 'EUR' },
   bookedAt: '2026-08-04T12:00:00Z',
   bookedByName: 'Alex',
+  bookedByStatus: 'ACTIVE',
   status: 'POSTED',
 };
 
@@ -349,6 +351,26 @@ describe('high-risk API idempotency', () => {
     expect((fetchMock.mock.calls[1][1] as RequestInit).method).toBe('POST');
     expect(requestBody(fetchMock.mock.calls[1])).toEqual({ email: 'guest@example.test', roleIds: ['role-member'] });
     expect(created).toMatchObject({ targetMembershipId: 'member/guest', acceptUrl: 'https://example.test/invite' });
+  });
+
+  it('reactivates and permanently deletes memberships through explicit lifecycle endpoints', async () => {
+    const restored = {
+      id: 'member/former', userId: 'user-former', displayName: 'Former Member', email: 'former@example.test', initials: 'FM',
+      isTemporaryGuest: false, status: 'ACTIVE', roles: ['MEMBER'], roleIds: ['role-member'], groupPermissions: [], categoryPermissions: [], active: true,
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(restored))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.reactivateMember('group-a', 'member/former', { roleIds: ['role-member'] })).resolves.toMatchObject({ id: 'member/former', status: 'ACTIVE' });
+    await api.permanentlyDeleteMember('group-a', 'member/former');
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group-a/members/member%2Fformer/reactivate');
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('POST');
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ roleIds: ['role-member'] });
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/groups/group-a/members/member%2Fformer/permanent');
+    expect((fetchMock.mock.calls[1][1] as RequestInit).method).toBe('DELETE');
   });
 
   it('uses display-name snapshots from bookings without fetching members', async () => {

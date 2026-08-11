@@ -137,6 +137,9 @@ export type PeriodStatus = 'OPEN' | 'CLOSED';
 /** Settlement payment status. */
 export type SettlementStatus = 'OPEN' | 'PARTIAL' | 'PAID' | 'CREDIT';
 
+/** Operational lifecycle state of one group membership. */
+export type MembershipStatus = 'ACTIVE' | 'ARCHIVED' | 'DELETED';
+
 /** A signed-in user account. */
 export interface User {
   id: string;
@@ -316,6 +319,7 @@ export interface Membership {
   roleIds?: string[];
   effectiveGrants?: PermissionGrant[];
   roleAssignmentsVersion?: number;
+  status: MembershipStatus;
   active: boolean;
   etag?: string;
 }
@@ -325,6 +329,7 @@ export interface Booking {
   id: string;
   memberId: string;
   memberName: string;
+  memberStatus: MembershipStatus;
   memberAvatarUrl?: string;
   productId: string;
   productName: string;
@@ -335,6 +340,7 @@ export interface Booking {
   total: Money;
   bookedAt: string;
   bookedByName: string;
+  bookedByStatus: MembershipStatus;
   bookedByMemberId?: string;
   bookedByAvatarUrl?: string;
   reason?: string;
@@ -414,13 +420,13 @@ export interface LedgerEntry {
   referenceId: string;
 }
 
-/** Consolidated group account balance for one active or archived membership. */
+/** Consolidated group account balance for one operational or non-zero deleted membership. */
 export interface AccountSummary {
   membershipId: string;
   displayName: string;
   avatarUrl?: string;
   isTemporaryGuest: boolean;
-  status: 'ACTIVE' | 'ARCHIVED';
+  status: MembershipStatus;
   currency: string;
   balance: Money;
 }
@@ -430,12 +436,19 @@ export interface Payment {
   id: string;
   membershipId: string;
   memberName: string;
+  membershipStatus: MembershipStatus;
   amount: Money;
   receivedAt: string;
   method: 'CASH' | 'BANK_TRANSFER' | 'PAYPAL' | 'OTHER';
   reference?: string;
   note?: string;
   status: 'POSTED' | 'REVERSED';
+}
+
+/** Complete command for restoring one archived group membership. */
+export interface MemberReactivationCommand {
+  displayName?: string;
+  roleIds: string[];
 }
 
 /** Command used by finance managers to record an incoming payment. */

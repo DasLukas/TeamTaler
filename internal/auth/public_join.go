@@ -313,7 +313,7 @@ func (s Service) AcceptPublicJoinLink(ctx context.Context, principal domain.Prin
 			return err
 		}
 		var membershipID, status string
-		err = tx.QueryRowContext(ctx, `SELECT id,status FROM memberships WHERE group_id=? AND user_id=?`, link.GroupID, principal.UserID).Scan(&membershipID, &status)
+		err = tx.QueryRowContext(ctx, `SELECT id,status FROM memberships WHERE group_id=? AND user_id=? AND deleted_at IS NULL`, link.GroupID, principal.UserID).Scan(&membershipID, &status)
 		if err == nil && status == "ACTIVE" {
 			return hydrateJoinedMembership(ctx, tx, principal, membershipID, link.GroupID, &membership)
 		}
@@ -329,7 +329,7 @@ func (s Service) AcceptPublicJoinLink(ctx context.Context, principal domain.Prin
 			if _, err := tx.ExecContext(ctx, `DELETE FROM membership_roles WHERE group_id=? AND membership_id=?`, link.GroupID, membershipID); err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx, `UPDATE memberships SET status='ACTIVE',archived_at=NULL WHERE group_id=? AND id=? AND status='ARCHIVED'`, link.GroupID, membershipID); err != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE memberships SET status='ACTIVE',archived_at=NULL WHERE group_id=? AND id=? AND status='ARCHIVED' AND deleted_at IS NULL`, link.GroupID, membershipID); err != nil {
 				return err
 			}
 		} else {

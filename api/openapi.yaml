@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: TeamTaler API
-  version: 0.7.0
+  version: 0.8.0
   description: |
     Same-origin JSON API for TeamTaler. Monetary values use integer minor units:
     response fields are exact decimal strings, while command inputs are bounded
@@ -1038,6 +1038,55 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/members/{membershipId}/reactivate:
+    post:
+      tags: [Groups]
+      summary: Reactivate an archived membership
+      description: |
+        Requires `GROUP_ADMINISTRATION`. Credentialed memberships must receive
+        at least one role. Without `ROLE_MANAGEMENT`, the only accepted role set
+        is the group's current default role. Temporary guests remain roleless
+        and may provide a conflict-free replacement display name. Permanently
+        deleted memberships cannot be reactivated.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/MembershipId'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MemberReactivationCommand' }
+      responses:
+        '200':
+          description: Reactivated membership
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Membership' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/members/{membershipId}/permanent:
+    delete:
+      tags: [Groups]
+      summary: Permanently remove an archived membership from administration
+      description: |
+        Requires `GROUP_ADMINISTRATION` and an exact zero consolidated balance.
+        The membership identifier and its last display name remain as a
+        credentialless tombstone for bookings, payments, ledger entries,
+        statements, and audit history. The original account and memberships in
+        other groups remain unchanged. Later financial corrections and booking
+        reversals may create a new balance on the deleted tombstone account.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/MembershipId'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204': { description: Membership removed from administration; historical tombstone retained }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/members/{membershipId}/claim-invitation:
     post:
       tags: [Groups]
@@ -2324,7 +2373,10 @@ components:
           readOnly: true
           description: Server-derived only from missing email and password credentials.
         avatarUrl: { type: string }
-        status: { type: string, enum: [ACTIVE, ARCHIVED] }
+        status:
+          type: string
+          enum: [ACTIVE, ARCHIVED, DELETED]
+          description: DELETED is a retained historical tombstone that is excluded from the member directory.
         roleIds:
           type: array
           uniqueItems: true
@@ -2552,6 +2604,21 @@ components:
           minLength: 1
           maxLength: 120
           description: Trimmed, control-character-free replacement display name.
+    MemberReactivationCommand:
+      type: object
+      additionalProperties: false
+      required: [roleIds]
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: Optional replacement name for an archived temporary guest; ignored for credentialed memberships.
+        roleIds:
+          type: array
+          uniqueItems: true
+          description: Complete role set for a credentialed membership. Temporary guests must provide an empty array.
+          items: { type: string, minLength: 1 }
     TemporaryGuestClaimInvitationCommand:
       type: object
       additionalProperties: false
@@ -2914,7 +2981,7 @@ components:
       description: At least one target array must be present and non-empty; the two arrays may be combined but their total item count cannot exceed 100.
     Booking:
       type: object
-      required: [id, groupId, periodId, categoryId, productId, actorMembershipId, actorDisplayName, targetMembershipId, targetDisplayName, quantity, unitPriceMinor, totalMinor, currency, productName, categoryName, createdAt, canVoid, voidReasonRequired]
+      required: [id, groupId, periodId, categoryId, productId, actorMembershipId, actorDisplayName, actorMembershipStatus, targetMembershipId, targetDisplayName, targetMembershipStatus, quantity, unitPriceMinor, totalMinor, currency, productName, categoryName, createdAt, canVoid, voidReasonRequired]
       properties:
         id: { type: string }
         groupId: { type: string }
@@ -2925,10 +2992,18 @@ components:
         actorDisplayName:
           type: string
           description: Server-resolved actor name so activity clients do not need the member directory.
+        actorMembershipStatus:
+          type: string
+          enum: [ACTIVE, ARCHIVED, DELETED]
+          description: Current lifecycle state used to mark retained historical actors.
         targetMembershipId: { type: string }
         targetDisplayName:
           type: string
           description: Server-resolved charged-member name so activity clients do not need the member directory.
+        targetMembershipStatus:
+          type: string
+          enum: [ACTIVE, ARCHIVED, DELETED]
+          description: Current lifecycle state used to mark retained historical booking targets.
         quantity: { type: integer }
         unitPriceMinor: { $ref: '#/components/schemas/MinorUnits' }
         totalMinor: { $ref: '#/components/schemas/MinorUnits' }
@@ -2983,7 +3058,7 @@ components:
           type: boolean
           readOnly: true
           description: True only while the account has no login credentials.
-        status: { type: string, enum: [ACTIVE, ARCHIVED] }
+        status: { type: string, enum: [ACTIVE, ARCHIVED, DELETED] }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         balanceMinor: { $ref: '#/components/schemas/MinorUnits' }
     Account:
@@ -3041,12 +3116,16 @@ components:
         reference: { type: string, minLength: 1, maxLength: 120 }
     Payment:
       type: object
-      required: [id, groupId, membershipId, memberName, amountMinor, currency, receivedAt, method, status, allocations]
+      required: [id, groupId, membershipId, memberName, membershipStatus, amountMinor, currency, receivedAt, method, status, allocations]
       properties:
         id: { type: string }
         groupId: { type: string }
         membershipId: { type: string }
         memberName: { type: string }
+        membershipStatus:
+          type: string
+          enum: [ACTIVE, ARCHIVED, DELETED]
+          description: Current lifecycle state used to mark retained historical payment accounts.
         amountMinor: { $ref: '#/components/schemas/MinorUnits' }
         currency: { type: string }
         receivedAt: { type: string, format: date-time }
