@@ -49,7 +49,7 @@ export function ConfigurableListEditor({ items, label, addLabel, emptyLabel, min
     <h4>{label}</h4>
     <div className={styles.addRow}>
       <TextInput aria-label={addLabel} maxLength={120} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); add(); } }} value={draft} />
-      <Button disabled={!draft.trim()} leadingIcon={<Plus size={16} />} onClick={add} size="small" type="button" variant="secondary">{addLabel}</Button>
+      <Button aria-label={addLabel} className={styles.addButton} disabled={!draft.trim()} onClick={add} size="small" title={addLabel} type="button" variant="secondary"><Plus aria-hidden="true" size={18} /></Button>
     </div>
     {items.length === 0 ? <p className={styles.empty}>{emptyLabel}</p> : <ol className={styles.list}>
       {items.map((item, index) => <li className={styles.item} key={item.id}>

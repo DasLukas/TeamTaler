@@ -392,7 +392,6 @@ export const de = {
     noAccessTitle: 'Kein Zugriff',
     noAccessMessage: 'Für diesen Bereich fehlen dir die benötigten Rechte.',
     tabs: {
-      group: 'Gruppe',
       settings: 'Einstellungen',
       members: 'Mitglieder',
       rights: 'Rollen & Rechte',
@@ -426,6 +425,8 @@ export const de = {
   behaviorSettings: {
     title: 'Einstellungen',
     loadError: 'Die Gruppeneinstellungen konnten nicht geladen werden.',
+    groupSectionTitle: 'Gruppeneinstellungen',
+    rolesMembersSectionTitle: 'Rollen, Rechte, Mitglieder',
     bookingVisibilityTitle: 'Alle Buchungen für Mitglieder sichtbar',
     bookingVisibilityDescription: 'Zeigt allen Mitgliedern die vollständige Buchungshistorie dieser Gruppe in den Aktivitäten.',
     bookingVisibilityNotice: 'Dabei werden auch Namen, belastete Mitglieder und Buchungsbegründungen sichtbar. Persönliche Salden, Statistiken und die Dashboard-Vorschau bleiben unverändert.',

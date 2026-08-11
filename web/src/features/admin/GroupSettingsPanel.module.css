@@ -2,13 +2,18 @@
   padding: var(--space-8) 0;
 }
 
+.embedded {
+  width: 100%;
+}
+
 .header {
   margin-bottom: var(--space-6);
 }
 
 .header h2,
 .header p,
-.controls h3 {
+.controls h3,
+.controls h4 {
   margin: 0;
 }
 

@@ -8,7 +8,6 @@ const mocks = vi.hoisted(() => ({ useActiveGroup: vi.fn() }));
 vi.mock('@/app/useActiveGroup', () => ({ useActiveGroup: () => mocks.useActiveGroup() }));
 vi.mock('./AuditPanel', () => ({ AuditPanel: () => <div>audit-panel</div> }));
 vi.mock('./BehaviorSettingsPanel', () => ({ BehaviorSettingsPanel: () => <div>settings-panel</div> }));
-vi.mock('./GroupSettingsPanel', () => ({ GroupSettingsPanel: () => <div>group-panel</div> }));
 vi.mock('./MembersPanel', () => ({ MembersPanel: () => <div>members-panel</div> }));
 vi.mock('./RightsPanel', () => ({ RightsPanel: () => <div>rights-panel</div> }));
 
@@ -20,7 +19,7 @@ describe('AdminPage workspace separation', () => {
 
   it('contains neither catalog nor finance tabs', () => {
     render(<AdminPage />);
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Gruppe', 'Einstellungen', 'Mitglieder', 'Rollen & Rechte', 'Audit']);
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Einstellungen', 'Mitglieder', 'Rollen & Rechte', 'Audit']);
     expect(screen.queryByRole('tab', { name: 'Katalog' })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Finanzen' })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Abrechnungen' })).not.toBeInTheDocument();
@@ -29,27 +28,28 @@ describe('AdminPage workspace separation', () => {
   it('implements automatic ARIA tab activation with roving keyboard focus', async () => {
     const user = userEvent.setup();
     render(<AdminPage />);
-    const groupTab = screen.getByRole('tab', { name: 'Gruppe' });
     const settingsTab = screen.getByRole('tab', { name: 'Einstellungen' });
+    const membersTab = screen.getByRole('tab', { name: 'Mitglieder' });
     const auditTab = screen.getByRole('tab', { name: 'Audit' });
 
-    expect(groupTab).toHaveAttribute('tabindex', '0');
-    expect(settingsTab).toHaveAttribute('tabindex', '-1');
-    expect(groupTab).toHaveAttribute('aria-controls', screen.getByRole('tabpanel').id);
-    groupTab.focus();
+    expect(settingsTab).toHaveAttribute('tabindex', '0');
+    expect(membersTab).toHaveAttribute('tabindex', '-1');
+    expect(settingsTab).toHaveAttribute('aria-controls', screen.getByRole('tabpanel').id);
+    settingsTab.focus();
     await user.keyboard('{ArrowRight}');
 
-    expect(settingsTab).toHaveFocus();
-    expect(settingsTab).toHaveAttribute('aria-selected', 'true');
-    expect(settingsTab).toHaveAttribute('tabindex', '0');
-    expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', settingsTab.id);
-    expect(screen.getByText('settings-panel')).toBeVisible();
+    expect(membersTab).toHaveFocus();
+    expect(membersTab).toHaveAttribute('aria-selected', 'true');
+    expect(membersTab).toHaveAttribute('tabindex', '0');
+    expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', membersTab.id);
+    expect(screen.getByText('members-panel')).toBeVisible();
 
     await user.keyboard('{End}');
     expect(auditTab).toHaveFocus();
     expect(screen.getByText('audit-panel')).toBeVisible();
     await user.keyboard('{Home}');
-    expect(groupTab).toHaveFocus();
+    expect(settingsTab).toHaveFocus();
+    expect(screen.getByText('settings-panel')).toBeVisible();
     await user.keyboard('{ArrowLeft}');
     expect(auditTab).toHaveFocus();
   });
@@ -94,7 +94,7 @@ describe('AdminPage workspace separation', () => {
 
     render(<AdminPage />);
 
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Gruppe', 'Einstellungen', 'Mitglieder', 'Audit']);
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Einstellungen', 'Mitglieder', 'Audit']);
     expect(screen.queryByRole('tab', { name: 'Rollen & Rechte' })).not.toBeInTheDocument();
   });
 });

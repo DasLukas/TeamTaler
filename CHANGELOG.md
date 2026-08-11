@@ -6,6 +6,8 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ### Added
 
+- Group-level booking and payment settings for conditional reasons, ordered editable payment methods, and separate freely editable booking and payment reason suggestions.
+- Migration `0024` seeds the four existing payment methods for every group and preserves immutable payment-method label snapshots after later configuration changes.
 - Self-service display-name, password, and verified email-address changes, plus enumeration-resistant password reset and public authentication capability discovery.
 - One-hour, single-use account-security actions with hashed proofs and a leased encrypted email outbox for password-reset and email-change delivery.
 - Group-owned, many-to-many roles with stable identifiers, cumulative permission grants, multiple roles per membership or pending invitation, four seeded starter roles, and a role-centered administration workflow.
@@ -24,6 +26,9 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ### Changed
 
+- Consolidated group identity, branding, email notification, default-role, and transaction controls into one structured administration Settings tab.
+
+- Booking and payment reason requirements are now enforced from current group settings inside their write transactions; payment forms use the first configured method as their default and retain at least one method.
 - Revoke every session after a password replacement, password-reset confirmation, or email-change confirmation, while preserving the existing user, membership, balance, statement, and audit identities during an email change.
 - Keep display-name and authenticated password changes available without SMTP, while password reset and verified email-change entry points report unavailable and fail closed until complete SMTP and token-encryption configuration is present.
 - Moved role assignment from the role-definition workspace into responsive member and pending-invitation directories with compact multi-select triggers, explicit draft confirmation, optimistic-conflict refresh, and protected last-administrator controls. Unchanged preset descriptions are localized in the German interface without overwriting stored canonical values.

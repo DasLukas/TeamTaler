@@ -43,6 +43,10 @@ export function PaymentsPanel() {
   const defaultAccount = regularAccounts[0] ?? temporaryGuestAccounts[0] ?? archivedAccounts[0] ?? deletedAccounts[0];
   const selectedMembershipId = membershipId || defaultAccount?.membershipId || '';
   const reasonRequired = transactionSettingsQuery.data?.otherPaymentReasonRequired === true;
+  const openRecordDialog = () => {
+    setMethod(transactionSettingsQuery.data?.paymentMethods[0]?.id ?? '');
+    setDialogOpen(true);
+  };
   const invalidateFinancialReads = async () => Promise.all([
     queryClient.invalidateQueries({ queryKey: ['payments', activeGroupId] }),
     queryClient.invalidateQueries({ queryKey: ['account-summaries', activeGroupId] }),
@@ -74,9 +78,9 @@ export function PaymentsPanel() {
   const total = paymentsQuery.data.filter((payment) => payment.status === 'POSTED').reduce((sum, payment) => sum + BigInt(payment.amount.minorUnits), 0n);
   return (
     <div className={styles.content}>
-      <header className={styles.header}><div><h2>{t('finance.title')}</h2><p>{t('finance.intro')}</p></div><Button leadingIcon={<Plus size={18} />} onClick={() => { setMethod(transactionSettingsQuery.data.paymentMethods[0]?.id ?? ''); setDialogOpen(true); }}>{t('finance.record')}</Button></header>
+      <header className={styles.header}><div><h2>{t('finance.title')}</h2><p>{t('finance.intro')}</p></div><Button leadingIcon={<Plus size={18} />} onClick={openRecordDialog}>{t('finance.record')}</Button></header>
       <section className={styles.summary}><CircleDollarSign aria-hidden="true" size={28} /><div><span>{t('finance.recorded')}</span><strong>{formatMoney({ minorUnits: total.toString(), currency: activeGroup.currency })}</strong></div><small>{t('finance.transactionCount', { count: paymentsQuery.data.length })}</small></section>
-      {paymentsQuery.data.length === 0 ? <StatePanel actionLabel={t('finance.record')} kind="empty" message={t('finance.empty')} onAction={() => setDialogOpen(true)} /> : (
+      {paymentsQuery.data.length === 0 ? <StatePanel actionLabel={t('finance.record')} kind="empty" message={t('finance.empty')} onAction={openRecordDialog} /> : (
         <div className={tableStyles.tableWrap}>
           <table className={tableStyles.table}><thead><tr><th>{t('common.date')}</th><th>{t('common.member')}</th><th>{t('finance.paymentType')}</th><th>{t('finance.reason')}</th><th className={tableStyles.number}>{t('common.amount')}</th><th>{t('common.status')}</th><th><span className="sr-only">{t('common.action')}</span></th></tr></thead><tbody>{paymentsQuery.data.map((payment) => <tr key={payment.id}><td>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(payment.receivedAt))}</td><td><strong>{payment.memberName}</strong>{payment.membershipStatus === 'DELETED' ? <span className={tableStyles.status}>{t('common.deleted')}</span> : null}</td><td>{payment.methodLabel}</td><td>{payment.reference ?? '–'}</td><td className={tableStyles.number}>{formatMoney(payment.amount)}</td><td><span className={`${tableStyles.status} ${payment.status === 'REVERSED' ? tableStyles.statusMuted : ''}`}>{payment.status === 'POSTED' ? t('common.booked') : t('common.reversed')}</span></td><td>{payment.status === 'POSTED' ? <Button leadingIcon={<RotateCcw size={16} />} onClick={() => setPaymentToReverse(payment)} size="small" variant="ghost">{t('finance.reverse')}</Button> : null}</td></tr>)}</tbody></table>
         </div>

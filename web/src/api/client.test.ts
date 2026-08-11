@@ -609,8 +609,23 @@ describe('high-risk API idempotency', () => {
       .mockResolvedValueOnce(jsonResponse({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(api.getGroupSettings('group-a')).resolves.toEqual({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
-    await expect(api.updateGroupSettings('group-a', { notificationEmailsEnabled: true })).resolves.toEqual({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
+    await expect(api.getGroupSettings('group-a')).resolves.toMatchObject({
+      notificationEmailsEnabled: false,
+      notificationEmailDeliveryAvailable: true,
+      defaultRoleId: 'role-member',
+      paymentMethods: [
+        { id: 'BANK_TRANSFER', label: 'Überweisung' },
+        { id: 'CASH', label: 'Bar' },
+        { id: 'PAYPAL', label: 'PayPal' },
+        { id: 'OTHER', label: 'Sonstige' },
+      ],
+    });
+    await expect(api.updateGroupSettings('group-a', { notificationEmailsEnabled: true })).resolves.toMatchObject({
+      notificationEmailsEnabled: true,
+      notificationEmailDeliveryAvailable: true,
+      defaultRoleId: 'role-member',
+      paymentMethods: expect.any(Array),
+    });
 
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group-a/settings');
     expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/groups/group-a/settings');

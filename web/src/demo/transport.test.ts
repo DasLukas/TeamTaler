@@ -389,17 +389,27 @@ describe('DemoTransport group settings', () => {
 
   it('persists typed behavior settings', async () => {
     const transport = new DemoTransport();
-    await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings')).resolves.toEqual({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
+    await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings')).resolves.toMatchObject({
+      notificationEmailsEnabled: false,
+      notificationEmailDeliveryAvailable: true,
+      defaultRoleId: 'role-member',
+      paymentMethods: [
+        { id: 'BANK_TRANSFER', label: 'Bank transfer' },
+        { id: 'CASH', label: 'Cash' },
+        { id: 'PAYPAL', label: 'PayPal' },
+        { id: 'OTHER', label: 'Other' },
+      ],
+    });
     await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ notificationEmailsEnabled: true }),
-    })).resolves.toEqual({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
+    })).resolves.toMatchObject({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
     await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ defaultRoleId: 'role-finance' }),
-    })).resolves.toEqual({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-finance' });
+    })).resolves.toMatchObject({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-finance' });
     await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -410,7 +420,7 @@ describe('DemoTransport group settings', () => {
       headers: { 'Content-Type': 'application/json', 'If-Match': '"v1"' },
       body: JSON.stringify({ membersCanViewAllBookings: true }),
     })).rejects.toThrow();
-    await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings')).resolves.toEqual({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-finance' });
+    await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings')).resolves.toMatchObject({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-finance' });
   });
 });
 

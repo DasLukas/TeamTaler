@@ -9,6 +9,7 @@ import { Field, SelectInput } from '@/components/ui/FormField';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { Toggle } from '@/components/ui/Toggle';
 import { ConfigurableListEditor } from './ConfigurableListEditor';
+import { GroupSettingsPanel } from './GroupSettingsPanel';
 import { roleDisplayName } from './roleDisplayName';
 import styles from './BehaviorSettingsPanel.module.css';
 
@@ -20,7 +21,7 @@ interface SettingsFormProps {
 }
 
 /**
- * Renders notification and default-role settings for one group.
+ * Renders grouped identity, notification, role-policy, and transaction settings for one group.
  *
  * @param props - Group identifier, persisted settings, and available roles.
  * @returns An accessible settings form with explicit save feedback.
@@ -78,26 +79,33 @@ function SettingsForm({ groupId, settings, roles }: SettingsFormProps) {
   });
 
   return (
-    <form className={styles.form} onSubmit={(event) => { event.preventDefault(); mutation.mutate(); }}>
-      <section aria-labelledby="notification-email-setting-title" className={styles.card}>
-        <div className={styles.settingRow}>
-          <div>
-            <h3 id="notification-email-setting-title">{t('behaviorSettings.notificationEmailTitle')}</h3>
-            <p>{t('behaviorSettings.notificationEmailDescription')}</p>
+    <div className={styles.form}>
+      <section aria-labelledby="group-settings-section-title" className={styles.settingsSection}>
+        <header><h3 id="group-settings-section-title">{t('behaviorSettings.groupSectionTitle')}</h3></header>
+        <GroupSettingsPanel embedded />
+        <section aria-labelledby="notification-email-setting-title" className={styles.card}>
+          <div className={styles.settingRow}>
+            <div>
+              <h4 id="notification-email-setting-title">{t('behaviorSettings.notificationEmailTitle')}</h4>
+              <p>{t('behaviorSettings.notificationEmailDescription')}</p>
+            </div>
+            <Toggle checked={notificationEmailsEnabled} disabled={mutation.isPending || !settings.notificationEmailDeliveryAvailable} label={t('behaviorSettings.notificationEmailToggle')} onChange={(checked) => { setNotificationEmailsEnabled(checked); mutation.reset(); }} />
           </div>
-          <Toggle checked={notificationEmailsEnabled} disabled={mutation.isPending || !settings.notificationEmailDeliveryAvailable} label={t('behaviorSettings.notificationEmailToggle')} onChange={(checked) => { setNotificationEmailsEnabled(checked); mutation.reset(); }} />
-        </div>
-        <p className={styles.notice}>{settings.notificationEmailDeliveryAvailable ? t('behaviorSettings.notificationEmailNotice') : settings.notificationEmailsEnabled ? t('behaviorSettings.notificationEmailTemporarilyUnavailable') : t('behaviorSettings.notificationEmailUnavailable')}</p>
+          <p className={styles.notice}>{settings.notificationEmailDeliveryAvailable ? t('behaviorSettings.notificationEmailNotice') : settings.notificationEmailsEnabled ? t('behaviorSettings.notificationEmailTemporarilyUnavailable') : t('behaviorSettings.notificationEmailUnavailable')}</p>
+        </section>
       </section>
 
-      <section aria-labelledby="default-role-setting-title" className={styles.card}>
-        <h3 className={styles.cardTitle} id="default-role-setting-title">{t('behaviorSettings.defaultRoleTitle')}</h3>
-        <Field hint={!settings.defaultRoleId ? t('behaviorSettings.defaultRoleMissing') : undefined} htmlFor="default-membership-role" label={t('behaviorSettings.defaultRoleFieldLabel')}>
-          <SelectInput id="default-membership-role" onChange={(event) => { setDefaultRoleId(event.target.value); mutation.reset(); }} value={defaultRoleId}>
-            <option disabled value="">{t('behaviorSettings.defaultRolePlaceholder')}</option>
-            {defaultRoleCandidates.map((role) => <option key={role.id} value={role.id}>{roleDisplayName(role)}</option>)}
-          </SelectInput>
-        </Field>
+      <section aria-labelledby="roles-members-settings-title" className={styles.settingsSection}>
+        <header><h3 id="roles-members-settings-title">{t('behaviorSettings.rolesMembersSectionTitle')}</h3></header>
+        <section aria-labelledby="default-role-setting-title" className={styles.card}>
+          <h4 className={styles.cardTitle} id="default-role-setting-title">{t('behaviorSettings.defaultRoleTitle')}</h4>
+          <Field hint={!settings.defaultRoleId ? t('behaviorSettings.defaultRoleMissing') : undefined} htmlFor="default-membership-role" label={t('behaviorSettings.defaultRoleFieldLabel')}>
+            <SelectInput id="default-membership-role" onChange={(event) => { setDefaultRoleId(event.target.value); mutation.reset(); }} value={defaultRoleId}>
+              <option disabled value="">{t('behaviorSettings.defaultRolePlaceholder')}</option>
+              {defaultRoleCandidates.map((role) => <option key={role.id} value={role.id}>{roleDisplayName(role)}</option>)}
+            </SelectInput>
+          </Field>
+        </section>
       </section>
 
       <section aria-labelledby="booking-settings-title" className={styles.bookingSection}>
@@ -126,9 +134,9 @@ function SettingsForm({ groupId, settings, roles }: SettingsFormProps) {
           {mutation.isError ? <p className={styles.error} role="alert">{t('behaviorSettings.saveError')} {mutation.error.message}</p> : null}
           {mutation.isSuccess ? <p className={styles.success} role="status">{t('behaviorSettings.saved')}</p> : null}
         </div>
-        <div className={styles.actions}><Button disabled={!changed || configurationInvalid || mutation.isPending} type="submit">{mutation.isPending ? t('behaviorSettings.saving') : t('behaviorSettings.save')}</Button></div>
+        <div className={styles.actions}><Button disabled={!changed || configurationInvalid || mutation.isPending} onClick={() => mutation.mutate()} type="button">{mutation.isPending ? t('behaviorSettings.saving') : t('behaviorSettings.save')}</Button></div>
       </div>
-    </form>
+    </div>
   );
 }
 

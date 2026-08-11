@@ -12,6 +12,7 @@ const apiMock = vi.hoisted(() => ({
   getAccountSummaries: vi.fn(),
   createPayment: vi.fn(),
   reversePayment: vi.fn(),
+  getTransactionSettings: vi.fn(),
 }));
 
 vi.mock('@/api/client', () => ({ api: apiMock }));
@@ -38,6 +39,14 @@ describe('PaymentsPanel', () => {
     vi.clearAllMocks();
     apiMock.getPayments.mockResolvedValue([]);
     apiMock.getAccountSummaries.mockResolvedValue(accounts);
+    apiMock.getTransactionSettings.mockResolvedValue({
+      foreignBookingReasonRequired: true,
+      ownPaymentReasonRequired: true,
+      otherPaymentReasonRequired: false,
+      paymentMethods: [{ id: 'CASH', label: 'Bar' }, { id: 'PAYPAL', label: 'PayPal' }],
+      bookingReasons: [],
+      paymentReasons: [{ id: 'CORRECTION', label: 'Korrektur' }],
+    });
   });
 
   it('uses finance account summaries without requesting the protected member directory', async () => {
@@ -68,7 +77,26 @@ describe('PaymentsPanel', () => {
     await user.click((await screen.findAllByRole('button', { name: i18n.t('finance.record') }))[0]);
 
     expect(screen.getByLabelText(`${i18n.t('finance.amountIn', { currency: 'EUR' })} *`)).toBeRequired();
-    expect(screen.getByLabelText(i18n.t('common.reference'))).not.toBeRequired();
-    expect(screen.queryByLabelText(`${i18n.t('common.reference')} *`)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(i18n.t('finance.reason'))).not.toBeRequired();
+    expect(screen.queryByLabelText(`${i18n.t('finance.reason')} *`)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(i18n.t('finance.paymentType'))).toHaveValue('CASH');
+  });
+
+  it('requires a reason for managed payments when configured', async () => {
+    const user = userEvent.setup();
+    apiMock.getTransactionSettings.mockResolvedValue({
+      foreignBookingReasonRequired: true,
+      ownPaymentReasonRequired: false,
+      otherPaymentReasonRequired: true,
+      paymentMethods: [{ id: 'CASH', label: 'Bar' }],
+      bookingReasons: [],
+      paymentReasons: [{ id: 'CORRECTION', label: 'Korrektur' }],
+    });
+    renderPayments();
+    await user.click((await screen.findAllByRole('button', { name: i18n.t('finance.record') }))[0]);
+
+    const reason = screen.getByLabelText(`${i18n.t('finance.reason')} *`);
+    expect(reason).toBeRequired();
+    expect(reason).toHaveAttribute('list', 'payment-reason-suggestions');
   });
 });

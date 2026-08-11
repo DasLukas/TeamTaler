@@ -132,7 +132,7 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
 
   return (
     <>
-      <Button className={className} fullWidth={fullWidth} leadingIcon={<CircleDollarSign size={18} />} onClick={openDialog}>
+      <Button className={className} disabled={!transactionSettingsQuery.data?.paymentMethods.length} fullWidth={fullWidth} leadingIcon={<CircleDollarSign size={18} />} onClick={openDialog}>
         {t('selfPayment.action')}
       </Button>
       <Modal className={styles.dialog} onClose={closeDialog} open={open} title={t(`selfPayment.${step}Title`)} variant={compact ? 'sheet' : 'dialog'}>

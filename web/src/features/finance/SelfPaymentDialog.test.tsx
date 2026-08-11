@@ -8,7 +8,7 @@ import { ActiveGroupContext } from '@/app/active-group-context';
 import i18n from '@/i18n';
 import { SelfPaymentDialog } from './SelfPaymentDialog';
 
-const apiMock = vi.hoisted(() => ({ createOwnPayment: vi.fn() }));
+const apiMock = vi.hoisted(() => ({ createOwnPayment: vi.fn(), getTransactionSettings: vi.fn() }));
 
 vi.mock('@/api/client', () => ({ api: apiMock }));
 
@@ -42,7 +42,17 @@ function renderDialog(): QueryClient {
 }
 
 describe('SelfPaymentDialog', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    apiMock.getTransactionSettings.mockResolvedValue({
+      foreignBookingReasonRequired: true,
+      ownPaymentReasonRequired: true,
+      otherPaymentReasonRequired: false,
+      paymentMethods: [{ id: 'PAYPAL', label: 'PayPal' }, { id: 'CASH', label: 'Bar' }],
+      bookingReasons: [],
+      paymentReasons: [{ id: 'MEMBERSHIP', label: 'Membership fee August' }],
+    });
+  });
 
   it('reviews and records the open balance without a membership identifier', async () => {
     const user = userEvent.setup();
@@ -59,15 +69,17 @@ describe('SelfPaymentDialog', () => {
       status: 'POSTED',
     });
 
+    await waitFor(() => expect(screen.getByRole('button', { name: i18n.t('selfPayment.action') })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.action') }));
     const entryDialog = screen.getByRole('dialog', { name: i18n.t('selfPayment.entryTitle') });
     expect(entryDialog).toBeVisible();
     expect(within(entryDialog).queryByText(i18n.t('selfPayment.account'))).not.toBeInTheDocument();
     expect(within(entryDialog).queryByText('Group A')).not.toBeInTheDocument();
+    expect(screen.getByLabelText(i18n.t('finance.paymentType'))).toHaveValue('PAYPAL');
     await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.useOpenBalance', { amount: '23,40 €' }) }));
     expect(screen.getByLabelText(i18n.t('finance.amountIn', { currency: 'EUR' }))).toHaveValue('23,40');
     await user.selectOptions(screen.getByLabelText(i18n.t('finance.paymentType')), 'PAYPAL');
-    await user.type(screen.getByLabelText(`${i18n.t('common.reference')} *`), 'Membership fee August');
+    await user.type(screen.getByLabelText(`${i18n.t('finance.reason')} *`), 'Membership fee August');
     await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.review') }));
 
     expect(screen.getByRole('dialog', { name: i18n.t('selfPayment.reviewTitle') })).toBeVisible();
@@ -96,29 +108,51 @@ describe('SelfPaymentDialog', () => {
     apiMock.createOwnPayment.mockRejectedValue(new Error('Network unavailable'));
     renderDialog();
 
+    await waitFor(() => expect(screen.getByRole('button', { name: i18n.t('selfPayment.action') })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.action') }));
     await user.type(screen.getByLabelText(i18n.t('finance.amountIn', { currency: 'EUR' })), '12,50');
-    await user.type(screen.getByLabelText(`${i18n.t('common.reference')} *`), 'Transfer reference');
+    await user.type(screen.getByLabelText(`${i18n.t('finance.reason')} *`), 'Transfer reference');
     await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.review') }));
     await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.confirm', { amount: '12,50 €' }) }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Network unavailable');
     await user.click(screen.getByRole('button', { name: i18n.t('common.back') }));
     expect(screen.getByLabelText(i18n.t('finance.amountIn', { currency: 'EUR' }))).toHaveValue('12,50');
-    expect(screen.getByLabelText(`${i18n.t('common.reference')} *`)).toHaveValue('Transfer reference');
+    expect(screen.getByLabelText(`${i18n.t('finance.reason')} *`)).toHaveValue('Transfer reference');
   });
 
   it('keeps the entry step open when the required reference is blank', async () => {
     const user = userEvent.setup();
     renderDialog();
 
+    await waitFor(() => expect(screen.getByRole('button', { name: i18n.t('selfPayment.action') })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.action') }));
     await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.useOpenBalance', { amount: '23,40 €' }) }));
-    await user.type(screen.getByLabelText(`${i18n.t('common.reference')} *`), '   ');
+    await user.type(screen.getByLabelText(`${i18n.t('finance.reason')} *`), '   ');
     await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.review') }));
 
     expect(screen.getByRole('dialog', { name: i18n.t('selfPayment.entryTitle') })).toBeVisible();
     expect(screen.getByRole('alert')).toHaveTextContent(i18n.t('selfPayment.referenceRequired'));
     expect(apiMock.createOwnPayment).not.toHaveBeenCalled();
+  });
+
+  it('keeps an optional reason editable and offers configured suggestions', async () => {
+    const user = userEvent.setup();
+    apiMock.getTransactionSettings.mockResolvedValue({
+      foreignBookingReasonRequired: true,
+      ownPaymentReasonRequired: false,
+      otherPaymentReasonRequired: false,
+      paymentMethods: [{ id: 'CASH', label: 'Bar' }],
+      bookingReasons: [],
+      paymentReasons: [{ id: 'MONTHLY', label: 'Monatsausgleich' }],
+    });
+    renderDialog();
+    await waitFor(() => expect(screen.getByRole('button', { name: i18n.t('selfPayment.action') })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.action') }));
+
+    const reason = screen.getByLabelText(i18n.t('finance.reason'));
+    expect(reason).not.toBeRequired();
+    expect(reason).toHaveAttribute('list', 'self-payment-reason-suggestions');
+    expect(document.querySelector('option[value="Monatsausgleich"]')).toBeInTheDocument();
   });
 });
