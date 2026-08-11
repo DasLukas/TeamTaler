@@ -264,7 +264,6 @@ export function CatalogPanel() {
   return (
     <div className={styles.content}>
       <header className={styles.header}>
-        <div><p>{t('catalog.intro')}</p><p className={styles.reorderHint}>{t('catalog.reorderHint')}</p></div>
         <div>
           <Button leadingIcon={<Plus size={18} />} onClick={openNewCategory} variant="secondary">{t('catalog.categoryAction')}</Button>
           <Button disabled={categoriesQuery.data.length === 0} leadingIcon={<Plus size={18} />} onClick={() => openNewProduct()}>{t('catalog.productAction')}</Button>

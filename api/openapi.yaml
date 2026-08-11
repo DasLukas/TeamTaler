@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: TeamTaler API
-  version: 0.6.0
+  version: 0.9.0
   description: |
     Same-origin JSON API for TeamTaler. Monetary values use integer minor units:
     response fields are exact decimal strings, while command inputs are bounded
@@ -9,9 +9,10 @@ info:
     State-changing authenticated requests require the `X-CSRF-Token` header.
     Product creation, invitation CSV imports, and financial mutations that
     create or reverse bookings, payments, or periods additionally require an
-    `Idempotency-Key`. Versioned role and assignment replacement or deletion,
-    public join-link updates, and public join-link rotation require a strong
-    `If-Match` ETag.
+    `Idempotency-Key`. A batch-booking idempotency scope includes every managed
+    guest created by that command. Versioned role and assignment replacement
+    or deletion, public join-link updates, and public join-link rotation require
+    a strong `If-Match` ETag.
   license:
     name: AGPL-3.0-only
     identifier: AGPL-3.0-only
@@ -51,6 +52,91 @@ paths:
               schema:
                 $ref: '#/components/schemas/Session'
         '401': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+  /auth/capabilities:
+    get:
+      tags: [Authentication]
+      summary: Read public account-recovery capabilities
+      description: |
+        Reports which email-dependent account actions are available in the
+        current deployment. The values are derived from complete SMTP and
+        authenticated token-encryption configuration; clients may use them to
+        hide unavailable entry points. They are capability hints only and do
+        not replace server-side checks on later commands.
+      security: []
+      responses:
+        '200':
+          description: Current public authentication capabilities
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationCapabilities'
+  /auth/password-reset/request:
+    post:
+      tags: [Authentication]
+      summary: Request a password-reset email
+      description: |
+        Returns the same empty `202` response for known and unknown addresses.
+        For an eligible account, the service creates a one-hour, single-use
+        request and queues its encrypted token for transactional email
+        delivery. The email URL carries the plaintext token only in its
+        fragment; the client submits it in the confirmation request body.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequest'
+      responses:
+        '202': { description: Request accepted without disclosing account existence }
+        '422': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /auth/password-reset/confirm:
+    post:
+      tags: [Authentication]
+      summary: Consume a password-reset token
+      description: |
+        Replaces the password for the token's account, consumes the token once,
+        cancels every other open account-action request, and revokes all
+        sessions for that user. The token must come from the reset page URL
+        fragment and must never be placed in a request path or query string.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetConfirmation'
+      responses:
+        '204': { description: Password replaced and all sessions revoked }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+  /auth/email-change/confirm:
+    post:
+      tags: [Authentication]
+      summary: Consume an email-change token
+      description: |
+        Replaces the account email only after the mailbox token is verified,
+        consumes that token once, cancels every other open account-action
+        request, and revokes all sessions for the user. User, membership,
+        balance, statement, and audit identifiers remain unchanged. The token
+        must come from the confirmation page URL fragment.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountActionTokenCommand'
+      responses:
+        '204': { description: Email replaced and all sessions revoked }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
         '429': { $ref: '#/components/responses/Problem' }
   /auth/logout:
     post:
@@ -105,6 +191,80 @@ paths:
               schema:
                 $ref: '#/components/schemas/Session'
         '401': { $ref: '#/components/responses/Problem' }
+  /me/profile:
+    patch:
+      tags: [Authentication]
+      summary: Update the current user's display name
+      description: Updates the global account name without changing memberships, accounting history, or sessions.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileUpdate'
+      responses:
+        '200':
+          description: Updated current user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /me/password:
+    put:
+      tags: [Authentication]
+      summary: Replace the current user's password
+      description: |
+        Requires the current password. On success every session for the user,
+        including the current session, is revoked.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordUpdate'
+      responses:
+        '204': { description: Password replaced and all sessions revoked }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+  /me/email-change:
+    post:
+      tags: [Authentication]
+      summary: Request a verified email-address change
+      description: |
+        Requires the current password. The current address remains active until
+        a one-hour, single-use token sent to `newEmail` is confirmed. Complete
+        SMTP and authenticated token-encryption configuration is required. The
+        accepted response does not reveal whether another account already uses
+        the requested address; in that case no action or email is created.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailChangeRequest'
+      responses:
+        '202':
+          description: Verification email queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationRequired'
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
   /me/avatar:
     post:
       tags: [Authentication]
@@ -189,6 +349,14 @@ paths:
     post:
       tags: [Authentication]
       summary: Consume an invitation and create or validate an account
+      description: |
+        Ordinary invitations create or reactivate a membership with their
+        explicit role selection. A temporary-guest claim invitation instead
+        attaches credentials or an authenticated existing account to its
+        `targetMembershipId`, preserves that membership's accounting identity,
+        and applies exactly the invitation's stored roles. A conflicting
+        existing membership returns `409` rather than
+        merging financial histories.
       security: []
       requestBody:
         required: true
@@ -412,7 +580,7 @@ paths:
     patch:
       tags: [Groups]
       summary: Partially update GROUP_ADMINISTRATION-managed group behavior settings
-      description: Updates notification-email delivery behavior for the group.
+      description: Updates notification delivery, default role, and transaction-form behavior for the group.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/CSRFToken'
@@ -429,10 +597,30 @@ paths:
               schema: { $ref: '#/components/schemas/GroupSettings' }
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/transaction-settings:
+    get:
+      tags: [Groups]
+      summary: Read ordered payment methods, reason suggestions, and reason requirements
+      description: Returns only the non-sensitive form configuration needed by an active group member.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Current transaction-form settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransactionSettings' }
+        '403': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/dashboard:
     get:
       tags: [Groups]
       summary: Read the active member dashboard
+      description: |
+        Returns the authenticated membership's personal account data.
+        `groupCategoryStatistics` is an empty array without
+        `VIEW_GROUP_STATISTICS`. `groupOutstandingMinor` remains independently
+        available only with `FINANCE_MANAGEMENT`; its omission must not be
+        interpreted as a zero group balance.
       parameters:
         - $ref: '#/components/parameters/GroupId'
       responses:
@@ -485,6 +673,11 @@ paths:
     get:
       tags: [Groups]
       summary: List group members and effective permissions
+      description: |
+        Requires `VIEW_MEMBER_DIRECTORY`. `BOOK_FOR_OTHERS` implies that
+        permission. Callers that only need valid booking targets must use the
+        privacy-minimized `/booking-context` read model instead of this
+        administrative directory.
       parameters:
         - $ref: '#/components/parameters/GroupId'
       responses:
@@ -498,6 +691,30 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/Membership' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/booking-context:
+    get:
+      tags: [Bookings]
+      summary: Read the privacy-minimized context required by the booking workspace
+      description: |
+        Requires `CREATE_OWN_BOOKING`, `BOOK_FOR_OTHERS`, or `BOOK_FOR_GUESTS`.
+        The response never
+        includes the group member directory, email addresses, role assignments,
+        effective grants for other memberships, or group statistics. Targets
+        are filtered independently: own access needs
+        `CREATE_OWN_BOOKING`, credentialed members need `BOOK_FOR_OTHERS`, and
+        credentialless temporary guests need `BOOK_FOR_GUESTS`. Temporary guests
+        sort after credentialed members. `canBookForGuests` also controls inline
+        temporary-guest creation.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Minimal current-period, own-balance, and target context
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BookingContext' }
+        '403': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/public-join-link:
     get:
       tags: [Groups]
@@ -782,9 +999,44 @@ paths:
         '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/members/{membershipId}:
+    patch:
+      tags: [Groups]
+      summary: Rename an active temporary guest
+      description: |
+        Requires `GROUP_ADMINISTRATION`. Only an active credentialless temporary
+        guest may be renamed through this endpoint. Credentialed members manage
+        their global display name through account flows.
+        The normalized display name is written with an audit event. Repeating
+        the same replacement is naturally idempotent and needs no
+        `Idempotency-Key`.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/MembershipId'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TemporaryGuestRenameCommand' }
+      responses:
+        '200':
+          description: Renamed temporary guest membership
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Membership' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
     delete:
       tags: [Groups]
       summary: Archive a membership while preserving all historical records
+      description: |
+        Requires `GROUP_ADMINISTRATION`. The same lifecycle applies to regular
+        memberships and temporary guests. Archival clears
+        effective access while preserving the stable membership identifier,
+        credentialless identity, bookings, ledger entries, period statements,
+        claim-invitation history, notifications, and audit events.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/MembershipId'
@@ -800,14 +1052,103 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/members/{membershipId}/reactivate:
+    post:
+      tags: [Groups]
+      summary: Reactivate an archived membership
+      description: |
+        Requires `GROUP_ADMINISTRATION`. Credentialed memberships must receive
+        at least one role. Without `ROLE_MANAGEMENT`, the only accepted role set
+        is the group's current default role. Temporary guests remain roleless
+        and may provide a conflict-free replacement display name. Permanently
+        deleted memberships cannot be reactivated.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/MembershipId'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MemberReactivationCommand' }
+      responses:
+        '200':
+          description: Reactivated membership
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Membership' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/members/{membershipId}/permanent:
+    delete:
+      tags: [Groups]
+      summary: Permanently remove an archived membership from administration
+      description: |
+        Requires `GROUP_ADMINISTRATION` and an exact zero consolidated balance.
+        The membership identifier and its last display name remain as a
+        credentialless tombstone for bookings, payments, ledger entries,
+        statements, and audit history. The original account and memberships in
+        other groups remain unchanged. Later financial corrections and booking
+        reversals may create a new balance on the deleted tombstone account.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/MembershipId'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204': { description: Membership removed from administration; historical tombstone retained }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/members/{membershipId}/claim-invitation:
+    post:
+      tags: [Groups]
+      summary: Invite an active temporary guest to claim login access
+      description: |
+        Requires `GROUP_ADMINISTRATION`. The command creates one seven-day,
+        single-use invitation tied to the active credentialless membership and
+        records its email outbox work atomically when SMTP is available. The
+        fallback URL is returned once. The command accepts no
+        `Idempotency-Key`: at most one open claim invitation may target a guest,
+        and a repeated request returns `409` without rotating the token or
+        sending another message.
+
+        Acceptance preserves the target membership identifier and every
+        accounting and audit reference. A new claimant receives credentials on
+        the temporary identity; an existing account must authenticate and is
+        linked without creating a second membership. At least one role is stored
+        with the invitation and applied exactly on acceptance. Without
+        `ROLE_MANAGEMENT`, only the current default role is accepted; other role
+        sets require `ROLE_MANAGEMENT`, and protected-role rules still apply.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/MembershipId'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TemporaryGuestClaimInvitationCommand' }
+      responses:
+        '201':
+          description: Claim invitation created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TemporaryGuestClaimInvitationResult' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/invitations:
     get:
       tags: [Groups]
       summary: List invitation metadata without secret tokens
       description: |
         `GROUP_ADMINISTRATION` returns the complete invitation lifecycle.
-        `ROLE_MANAGEMENT` alone returns only currently open invitations needed
-        for role assignment and cannot create, revoke, or resend invitations.
+        `ROLE_MANAGEMENT` alone returns only currently open ordinary invitations
+        needed for role assignment and cannot see temporary-guest claim invitations
+        or create, revoke, or resend any invitation.
       parameters:
         - $ref: '#/components/parameters/GroupId'
       responses:
@@ -952,8 +1293,10 @@ paths:
   /groups/{groupId}/invitations/{invitationId}/roles:
     put:
       tags: [Authorization]
-      summary: Replace all role assignments for a pending invitation
+      summary: Replace all role assignments for an ordinary pending invitation
       description: |
+        Managed-guest claim invitations have a server-owned guest-role
+        assignment and return `409` from this operation.
         At least one role must remain assigned. Ordinary role assignments
         require `ROLE_MANAGEMENT`. Changing the reserved
         administrator-role assignment requires `GROUP_ADMINISTRATION`; changing
@@ -1241,7 +1584,7 @@ paths:
     get:
       tags: [Bookings]
       summary: List activity bookings visible to the current member
-      description: Members with `VIEW_ALL_BOOKING_ACTIVITY`, including through the `VOID_ANY_BOOKING` implication, see complete group history. Other active members see actor- and target-relevant activity. This endpoint does not broaden account visibility.
+      description: Members with `VIEW_ALL_BOOKING_ACTIVITY`, including through the `VOID_ANY_BOOKING` implication, see complete group history. Other active members see actor- and target-relevant activity. Each item includes server-resolved actor and target display names so this read does not require `VIEW_MEMBER_DIRECTORY`. This endpoint does not broaden account visibility.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - name: periodId
@@ -1259,7 +1602,12 @@ paths:
     post:
       tags: [Bookings]
       summary: Create an immutable booking and balanced ledger entries
-      description: Active members may book for themselves. A different target requires `BOOK_FOR_OTHERS` and a non-empty reason.
+      description: |
+        `CREATE_OWN_BOOKING` permits charging the authenticated membership. A
+        different credentialed target requires `BOOK_FOR_OTHERS` and a non-empty
+        reason. An existing temporary guest requires `BOOK_FOR_GUESTS` and no
+        reason. Inline temporary-guest creation is available through the batch
+        command.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/CSRFToken'
@@ -1390,8 +1738,32 @@ paths:
   /groups/{groupId}/bookings/batch:
     post:
       tags: [Bookings]
-      summary: Atomically create the same booking for multiple members
-      description: Creates one immutable booking and balanced ledger pair per unique active target membership in a single transaction. Selecting the current membership requires `CREATE_OWN_BOOKING`; selecting another membership requires `BOOK_FOR_OTHERS` and a non-empty shared reason. Any invalid target rejects the complete batch.
+      summary: Atomically create the same booking for existing members and new temporary guests
+      description: |
+        Creates one immutable booking and balanced ledger pair per unique active
+        target membership in a single transaction. Selecting the current
+        membership requires `CREATE_OWN_BOOKING`; selecting another credentialed
+        membership requires `BOOK_FOR_OTHERS` and a non-empty shared reason.
+        Selecting an existing temporary guest or supplying
+        `temporaryGuestDisplayNames` requires `BOOK_FOR_GUESTS` and no reason.
+
+        Each temporary guest name creates a credentialless user, a deliberately
+        roleless active membership, and its booking inside the same transaction.
+        Existing target IDs and new names together are limited to 100. Active
+        temporary-guest names are
+        case-insensitively unique within the group. Any invalid, duplicate,
+        archived, or
+        cross-group target, unsafe guest configuration, accounting conflict, or
+        notification failure rejects the complete command, including all new
+        identities. A name conflict never merges automatically; its `409`
+        Problem Details includes `existingMembershipId` so the caller may
+        explicitly select that active guest in a later command.
+
+        The idempotency payload includes the normalized names and all booking
+        fields. A replay returns the original bookings and guest membership IDs;
+        reuse of the key with any different payload returns `409`. Responses are
+        ordered by `targetMembershipIds` first and then by
+        `temporaryGuestDisplayNames`, preserving each request array's order.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/CSRFToken'
@@ -1764,10 +2136,71 @@ components:
       examples: ['1250']
     LoginCommand:
       type: object
+      additionalProperties: false
       required: [email, password]
       properties:
         email: { type: string, format: email, maxLength: 254 }
         password: { type: string, format: password, minLength: 12, maxLength: 1024 }
+    AuthenticationCapabilities:
+      type: object
+      additionalProperties: false
+      required: [passwordResetAvailable, emailChangeAvailable]
+      properties:
+        passwordResetAvailable:
+          type: boolean
+          readOnly: true
+          description: Whether password-reset email delivery is currently configured.
+        emailChangeAvailable:
+          type: boolean
+          readOnly: true
+          description: Whether verified email-address changes are currently configured.
+    PasswordResetRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+    PasswordResetConfirmation:
+      type: object
+      additionalProperties: false
+      required: [token, newPassword]
+      properties:
+        token:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: One-time token read by the client from the reset URL fragment.
+        newPassword: { type: string, format: password, minLength: 12, maxLength: 1024 }
+    AccountActionTokenCommand:
+      type: object
+      additionalProperties: false
+      required: [token]
+      properties:
+        token:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: One-time token read by the client from the confirmation URL fragment.
+    ProfileUpdate:
+      type: object
+      additionalProperties: false
+      required: [displayName]
+      properties:
+        displayName: { type: string, minLength: 1, maxLength: 120 }
+    PasswordUpdate:
+      type: object
+      additionalProperties: false
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword: { type: string, format: password, minLength: 1, maxLength: 1024 }
+        newPassword: { type: string, format: password, minLength: 12, maxLength: 1024 }
+    EmailChangeRequest:
+      type: object
+      additionalProperties: false
+      required: [newEmail, currentPassword]
+      properties:
+        newEmail: { type: string, format: email, maxLength: 254 }
+        currentPassword: { type: string, format: password, minLength: 1, maxLength: 1024 }
     InvitationAcceptance:
       type: object
       required: [token, password]
@@ -1913,7 +2346,7 @@ components:
     GroupSettings:
       type: object
       additionalProperties: false
-      required: [notificationEmailsEnabled, notificationEmailDeliveryAvailable, defaultRoleId]
+      required: [notificationEmailsEnabled, notificationEmailDeliveryAvailable, defaultRoleId, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
       properties:
         notificationEmailsEnabled:
           type: boolean
@@ -1925,6 +2358,28 @@ components:
         defaultRoleId:
           type: [string, 'null']
           description: Group-owned non-administrative role preselected for new invitations and used by CSV rows without roles.
+        foreignBookingReasonRequired:
+          type: boolean
+          description: Whether bookings for another credentialed member require a reason.
+        ownPaymentReasonRequired:
+          type: boolean
+          description: Whether self-service payments require a reason.
+        otherPaymentReasonRequired:
+          type: boolean
+          description: Whether finance-managed payments require a reason.
+        paymentMethods:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items: { $ref: '#/components/schemas/ConfigurableItem' }
+        bookingReasons:
+          type: array
+          maxItems: 50
+          items: { $ref: '#/components/schemas/ConfigurableItem' }
+        paymentReasons:
+          type: array
+          maxItems: 50
+          items: { $ref: '#/components/schemas/ConfigurableItem' }
     GroupSettingsUpdate:
       type: object
       additionalProperties: false
@@ -1935,17 +2390,73 @@ components:
           type: string
           minLength: 1
           description: Group-owned role that must not grant GROUP_ADMINISTRATION. It cannot be cleared after being set.
+        foreignBookingReasonRequired: { type: boolean }
+        ownPaymentReasonRequired: { type: boolean }
+        otherPaymentReasonRequired: { type: boolean }
+        paymentMethods:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items: { $ref: '#/components/schemas/ConfigurableItem' }
+        bookingReasons:
+          type: array
+          maxItems: 50
+          items: { $ref: '#/components/schemas/ConfigurableItem' }
+        paymentReasons:
+          type: array
+          maxItems: 50
+          items: { $ref: '#/components/schemas/ConfigurableItem' }
+    ConfigurableItem:
+      type: object
+      additionalProperties: false
+      required: [id, label]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 120 }
+        label: { type: string, minLength: 1, maxLength: 120 }
+    TransactionSettings:
+      type: object
+      additionalProperties: false
+      required: [foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
+      properties:
+        foreignBookingReasonRequired: { type: boolean }
+        ownPaymentReasonRequired: { type: boolean }
+        otherPaymentReasonRequired: { type: boolean }
+        paymentMethods:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items: { $ref: '#/components/schemas/ConfigurableItem' }
+        bookingReasons:
+          type: array
+          maxItems: 50
+          items: { $ref: '#/components/schemas/ConfigurableItem' }
+        paymentReasons:
+          type: array
+          maxItems: 50
+          items: { $ref: '#/components/schemas/ConfigurableItem' }
     Membership:
       type: object
-      required: [id, groupId, userId, email, displayName, status, roleIds, effectiveGrants, roleAssignmentsVersion, roles, groupPermissions, categoryGrants]
+      required: [id, groupId, userId, displayName, isTemporaryGuest, status, roleIds, effectiveGrants, roleAssignmentsVersion, roles, groupPermissions, categoryGrants]
       properties:
         id: { type: string }
         groupId: { type: string }
-        userId: { type: string }
-        email: { type: string, format: email }
+        userId:
+          type: string
+          description: Required identity reference. A temporary guest points to a credentialless user; claiming with an existing account may rebind this field while the membership id and accounting history remain stable.
+        email:
+          type: [string, 'null']
+          format: email
+          description: Omitted or null only for a credentialless temporary guest; synthetic addresses are never generated.
         displayName: { type: string }
+        isTemporaryGuest:
+          type: boolean
+          readOnly: true
+          description: Server-derived only from missing email and password credentials.
         avatarUrl: { type: string }
-        status: { type: string, enum: [ACTIVE, ARCHIVED] }
+        status:
+          type: string
+          enum: [ACTIVE, ARCHIVED, DELETED]
+          description: DELETED is a retained historical tombstone that is excluded from the member directory.
         roleIds:
           type: array
           uniqueItems: true
@@ -1986,12 +2497,15 @@ components:
         - ROLE_MANAGEMENT
         - FINANCE_MANAGEMENT
         - CATALOG_MANAGEMENT
+        - VIEW_MEMBER_DIRECTORY
+        - VIEW_GROUP_STATISTICS
         - VIEW_ALL_BOOKING_ACTIVITY
         - RECORD_OWN_PAYMENT
         - CREATE_OWN_BOOKING
         - VOID_OWN_BOOKING
         - VOID_ANY_BOOKING
         - BOOK_FOR_OTHERS
+        - BOOK_FOR_GUESTS
     PermissionScopeType:
       type: string
       enum: [GROUP, CATEGORY, PRODUCT]
@@ -2160,6 +2674,51 @@ components:
           items: { $ref: '#/components/schemas/GroupPermission' }
         categoryGrants:
           $ref: '#/components/schemas/LegacyCategoryGrantWrite'
+    TemporaryGuestRenameCommand:
+      type: object
+      additionalProperties: false
+      required: [displayName]
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: Trimmed, control-character-free replacement display name.
+    MemberReactivationCommand:
+      type: object
+      additionalProperties: false
+      required: [roleIds]
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: Optional replacement name for an archived temporary guest; ignored for credentialed memberships.
+        roleIds:
+          type: array
+          uniqueItems: true
+          description: Complete role set for a credentialed membership. Temporary guests must provide an empty array.
+          items: { type: string, minLength: 1 }
+    TemporaryGuestClaimInvitationCommand:
+      type: object
+      additionalProperties: false
+      required: [email, roleIds]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        roleIds:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { type: string, minLength: 1 }
+    TemporaryGuestClaimInvitationResult:
+      type: object
+      additionalProperties: false
+      required: [invitation, acceptUrl]
+      properties:
+        invitation: { $ref: '#/components/schemas/Invitation' }
+        acceptUrl:
+          type: string
+          description: Secret-bearing fallback URL returned only when the conflict-protected claim invitation is created.
     InvitationCommand:
       type: object
       description: "`roleIds` cannot be combined with deprecated `roles`, `groupPermissions`, or non-empty `categoryGrants`."
@@ -2219,6 +2778,10 @@ components:
       properties:
         id: { type: string }
         groupId: { type: string }
+        targetMembershipId:
+          type: string
+          readOnly: true
+          description: Present only for a temporary-guest claim invitation; acceptance preserves this membership identity and its history.
         email: { type: string, format: email }
         displayName: { type: string }
         roleIds:
@@ -2411,6 +2974,41 @@ components:
           properties:
             active: { type: boolean }
             version: { type: integer, format: int64, minimum: 1 }
+    BookingTarget:
+      type: object
+      additionalProperties: false
+      required: [membershipId, displayName, isTemporaryGuest]
+      properties:
+        membershipId: { type: string }
+        displayName: { type: string }
+        avatarUrl: { type: string }
+        isTemporaryGuest:
+          type: boolean
+          description: True only when the target has no login credentials.
+    BookingContext:
+      type: object
+      additionalProperties: false
+      required: [openPeriod, ownBalanceMinor, currentMembership, targets, canBookForGuests, foreignBookingReasonRequired, bookingReasons]
+      properties:
+        openPeriod: { $ref: '#/components/schemas/Period' }
+        ownBalanceMinor:
+          $ref: '#/components/schemas/MinorUnits'
+          description: Exact current balance for the authenticated membership only; no group total is included.
+        currentMembership: { $ref: '#/components/schemas/Membership' }
+        targets:
+          type: array
+          description: Booking-safe active targets; contains no email, role, grant, balance, or group-structure fields.
+          items: { $ref: '#/components/schemas/BookingTarget' }
+        canBookForGuests:
+          type: boolean
+          description: True only when BOOK_FOR_GUESTS is effective; controls inline temporary-guest creation.
+        foreignBookingReasonRequired:
+          type: boolean
+          description: Whether the current group requires a reason for credentialed foreign targets.
+        bookingReasons:
+          type: array
+          description: Ordered suggestions; clients must keep the reason field freely editable.
+          items: { $ref: '#/components/schemas/ConfigurableItem' }
     BookingCommand:
       type: object
       required: [productId, productVersion, expectedPeriodId, quantity]
@@ -2429,7 +3027,8 @@ components:
         reason: { type: string, maxLength: 500 }
     BookingBatchCommand:
       type: object
-      required: [productId, productVersion, expectedPeriodId, quantity, targetMembershipIds]
+      additionalProperties: false
+      required: [productId, productVersion, expectedPeriodId, quantity]
       properties:
         productId: { type: string }
         productVersion: { type: integer, format: int64, minimum: 1 }
@@ -2443,17 +3042,33 @@ components:
           description: Required for USER_DEFINED products and forbidden for FIXED products; interpreted as the unit price applied to every target.
         targetMembershipIds:
           type: array
-          minItems: 1
+          minItems: 0
           maxItems: 100
           uniqueItems: true
           items: { type: string, minLength: 1 }
+        temporaryGuestDisplayNames:
+          type: array
+          minItems: 1
+          maxItems: 100
+          uniqueItems: true
+          description: |
+            Trimmed, control-character-free names for new credentialless guests.
+            Normalized duplicates within the command are rejected; names never
+            identify or merge existing memberships. Requires BOOK_FOR_GUESTS.
+          items: { type: string, minLength: 1, maxLength: 120 }
         reason:
           type: string
           maxLength: 500
-          description: Shared reason stored on every created booking; required when any target differs from the actor membership.
+          description: Shared reason stored on every created booking; required only when at least one target is another credentialed membership.
+      anyOf:
+        - required: [targetMembershipIds]
+          properties:
+            targetMembershipIds: { minItems: 1 }
+        - required: [temporaryGuestDisplayNames]
+      description: At least one target array must be present and non-empty; the two arrays may be combined but their total item count cannot exceed 100.
     Booking:
       type: object
-      required: [id, groupId, periodId, categoryId, productId, actorMembershipId, targetMembershipId, quantity, unitPriceMinor, totalMinor, currency, productName, categoryName, createdAt, canVoid, voidReasonRequired]
+      required: [id, groupId, periodId, categoryId, productId, actorMembershipId, actorDisplayName, actorMembershipStatus, targetMembershipId, targetDisplayName, targetMembershipStatus, quantity, unitPriceMinor, totalMinor, currency, productName, categoryName, createdAt, canVoid, voidReasonRequired]
       properties:
         id: { type: string }
         groupId: { type: string }
@@ -2461,7 +3076,21 @@ components:
         categoryId: { type: string }
         productId: { type: string }
         actorMembershipId: { type: string }
+        actorDisplayName:
+          type: string
+          description: Server-resolved actor name so activity clients do not need the member directory.
+        actorMembershipStatus:
+          type: string
+          enum: [ACTIVE, ARCHIVED, DELETED]
+          description: Current lifecycle state used to mark retained historical actors.
         targetMembershipId: { type: string }
+        targetDisplayName:
+          type: string
+          description: Server-resolved charged-member name so activity clients do not need the member directory.
+        targetMembershipStatus:
+          type: string
+          enum: [ACTIVE, ARCHIVED, DELETED]
+          description: Current lifecycle state used to mark retained historical booking targets.
         quantity: { type: integer }
         unitPriceMinor: { $ref: '#/components/schemas/MinorUnits' }
         totalMinor: { $ref: '#/components/schemas/MinorUnits' }
@@ -2507,12 +3136,16 @@ components:
         createdAt: { type: string, format: date-time }
     AccountSummary:
       type: object
-      required: [membershipId, displayName, status, currency, balanceMinor]
+      required: [membershipId, displayName, isTemporaryGuest, status, currency, balanceMinor]
       properties:
         membershipId: { type: string }
         displayName: { type: string }
         avatarUrl: { type: string }
-        status: { type: string, enum: [ACTIVE, ARCHIVED] }
+        isTemporaryGuest:
+          type: boolean
+          readOnly: true
+          description: True only while the account has no login credentials.
+        status: { type: string, enum: [ACTIVE, ARCHIVED, DELETED] }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         balanceMinor: { $ref: '#/components/schemas/MinorUnits' }
     Account:
@@ -2530,7 +3163,7 @@ components:
           items: { $ref: '#/components/schemas/CategoryStatistic' }
         groupCategoryStatistics:
           type: array
-          description: Anonymous current-period category totals across the group.
+          description: Anonymous current-period category totals across the group; an empty array without VIEW_GROUP_STATISTICS.
           items: { $ref: '#/components/schemas/CategoryStatistic' }
         recentEntries:
           type: array
@@ -2546,38 +3179,48 @@ components:
           type: array
           items: { $ref: '#/components/schemas/Booking' }
         unreadNotificationCount: { type: integer, format: int64 }
-        groupOutstandingMinor: { $ref: '#/components/schemas/MinorUnits' }
+        groupOutstandingMinor:
+          $ref: '#/components/schemas/MinorUnits'
+          description: Group-wide outstanding amount; omitted without FINANCE_MANAGEMENT.
     PaymentCommand:
       type: object
+      additionalProperties: false
       required: [membershipId, amountMinor, method]
       properties:
         membershipId: { type: string }
         amountMinor: { type: integer, format: int64, minimum: 1 }
         receivedAt: { type: string, format: date-time }
-        method: { type: string, enum: [CASH, BANK_TRANSFER, PAYPAL, OTHER] }
-        reference: { type: string, maxLength: 120 }
+        method: { type: string, minLength: 1, maxLength: 120, description: Stable identifier of a currently configured group payment method. }
+        reference: { type: string, maxLength: 120, description: Required only when finance-managed payment reasons are enabled for the group. }
         note: { type: string, maxLength: 1000 }
     SelfPaymentCommand:
       type: object
-      required: [amountMinor, receivedAt, method, reference]
+      required: [amountMinor, receivedAt, method]
       additionalProperties: false
       properties:
         amountMinor: { type: integer, format: int64, minimum: 1, maximum: 100000000000 }
         receivedAt: { type: string, format: date-time }
-        method: { type: string, enum: [CASH, BANK_TRANSFER, PAYPAL, OTHER] }
-        reference: { type: string, minLength: 1, maxLength: 120 }
+        method: { type: string, minLength: 1, maxLength: 120, description: Stable identifier of a currently configured group payment method. }
+        reference: { type: string, maxLength: 120, description: Required only when self-service payment reasons are enabled for the group. }
     Payment:
       type: object
-      required: [id, groupId, membershipId, memberName, amountMinor, currency, receivedAt, method, status, allocations]
+      required: [id, groupId, membershipId, memberName, membershipStatus, amountMinor, currency, receivedAt, method, methodLabel, status, allocations]
       properties:
         id: { type: string }
         groupId: { type: string }
         membershipId: { type: string }
         memberName: { type: string }
+        membershipStatus:
+          type: string
+          enum: [ACTIVE, ARCHIVED, DELETED]
+          description: Current lifecycle state used to mark retained historical payment accounts.
         amountMinor: { $ref: '#/components/schemas/MinorUnits' }
         currency: { type: string }
         receivedAt: { type: string, format: date-time }
-        method: { type: string, enum: [CASH, BANK_TRANSFER, PAYPAL, OTHER] }
+        method: { type: string, minLength: 1, maxLength: 120 }
+        methodLabel:
+          type: string
+          description: Immutable display-label snapshot preserved when the configured payment method is renamed or removed.
         reference: { type: string }
         note: { type: string }
         status: { type: string, enum: [POSTED, REVERSED] }
@@ -2610,13 +3253,16 @@ components:
         nextPeriodLabel: { type: string, minLength: 1, maxLength: 120 }
     Statement:
       type: object
-      required: [id, periodId, membershipId, displayName, email, chargesMinor, paymentsAllocatedMinor, adjustmentsAppliedMinor, adjustmentsProvidedMinor, amountDueMinor, currency, status]
+      required: [id, periodId, membershipId, displayName, chargesMinor, paymentsAllocatedMinor, adjustmentsAppliedMinor, adjustmentsProvidedMinor, amountDueMinor, currency, status]
       properties:
         id: { type: string }
         periodId: { type: string }
         membershipId: { type: string }
         displayName: { type: string }
-        email: { type: string, format: email }
+        email:
+          type: [string, 'null']
+          format: email
+          description: Close-time email snapshot; omitted or null for a credentialless temporary guest.
         chargesMinor: { $ref: '#/components/schemas/MinorUnits' }
         paymentsAllocatedMinor: { $ref: '#/components/schemas/MinorUnits' }
         adjustmentsAppliedMinor:
@@ -2683,6 +3329,9 @@ components:
         status: { type: integer, minimum: 400, maximum: 599 }
         detail: { type: string }
         instance: { type: string }
+        existingMembershipId:
+          type: string
+          description: Present only on a temporary-guest display-name conflict and identifies the active guest that may be explicitly reused.
     RoleConflictProblem:
       allOf:
         - $ref: '#/components/schemas/Problem'

@@ -3,6 +3,35 @@
   gap: var(--space-5);
 }
 
+.status,
+.result,
+.result p { margin: 0; }
+
+.result {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.result h2 { margin: 0; }
+
+.secondaryLink {
+  margin-top: calc(var(--space-3) * -1);
+  color: var(--color-teal-700);
+  font-size: var(--font-size-sm);
+  text-align: right;
+}
+
+.primaryLink {
+  display: inline-flex;
+  width: fit-content;
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-md);
+  color: var(--color-white);
+  background: var(--color-teal-700);
+  font-weight: 700;
+  text-decoration: none;
+}
+
 .error,
 .warning {
   margin: 0;

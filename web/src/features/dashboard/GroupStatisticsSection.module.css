@@ -13,13 +13,6 @@
   font-size: 1.75rem;
 }
 
-.heading p {
-  max-width: 720px;
-  margin: var(--space-2) 0 0;
-  color: var(--color-muted);
-  line-height: 1.5;
-}
-
 .summary {
   display: flex;
   min-height: 126px;

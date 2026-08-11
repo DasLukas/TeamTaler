@@ -233,7 +233,8 @@ func (s Service) UpdateRole(ctx context.Context, actor domain.Principal, members
 		}
 		if hasGrant(command.Grants, domain.PermissionGroupAdministration) {
 			var isDefault bool
-			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM group_settings WHERE group_id=? AND default_role_id=?)`, membership.GroupID, roleID).Scan(&isDefault); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM group_settings WHERE group_id=? AND default_role_id=?)`,
+				membership.GroupID, roleID).Scan(&isDefault); err != nil {
 				return err
 			}
 			if isDefault {
@@ -405,20 +406,30 @@ func (s Service) replaceAssignedRoles(ctx context.Context, actor domain.Principa
 		var currentVersion int64
 		switch targetType {
 		case domain.RoleAssignmentMembership:
-			err := tx.QueryRowContext(ctx, `SELECT role_assignments_version FROM memberships WHERE id=? AND group_id=? AND status='ACTIVE'`, targetID, membership.GroupID).Scan(&currentVersion)
+			var credentialless bool
+			err := tx.QueryRowContext(ctx, `SELECT m.role_assignments_version,(u.email IS NULL AND u.password_hash IS NULL)
+				FROM memberships m JOIN users u ON u.id=m.user_id
+				WHERE m.id=? AND m.group_id=? AND m.status='ACTIVE'`, targetID, membership.GroupID).Scan(&currentVersion, &credentialless)
 			if errors.Is(err, sql.ErrNoRows) {
 				return domain.ErrNotFound
 			}
 			if err != nil {
 				return err
+			}
+			if credentialless {
+				return fmt.Errorf("%w: temporary guests do not accept direct role assignments", domain.ErrConflict)
 			}
 		case domain.RoleAssignmentInvitation:
-			err := tx.QueryRowContext(ctx, `SELECT role_assignments_version FROM invitations WHERE id=? AND group_id=? AND accepted_at IS NULL AND revoked_at IS NULL AND julianday(expires_at)>julianday('now')`, targetID, membership.GroupID).Scan(&currentVersion)
+			var isClaimInvitation bool
+			err := tx.QueryRowContext(ctx, `SELECT role_assignments_version,target_membership_id IS NOT NULL FROM invitations WHERE id=? AND group_id=? AND accepted_at IS NULL AND revoked_at IS NULL AND julianday(expires_at)>julianday('now')`, targetID, membership.GroupID).Scan(&currentVersion, &isClaimInvitation)
 			if errors.Is(err, sql.ErrNoRows) {
 				return domain.ErrNotFound
 			}
 			if err != nil {
 				return err
+			}
+			if isClaimInvitation {
+				return fmt.Errorf("%w: claim invitation roles are fixed when the invitation is created", domain.ErrConflict)
 			}
 		default:
 			return domain.ValidationError{Field: "subjectType", Message: "must be MEMBERSHIP or INVITATION"}

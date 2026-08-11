@@ -3,11 +3,11 @@ import type { AccountSummary } from '@/api/types';
 import { deriveAccountOverview } from './accountOverview';
 
 const accounts: AccountSummary[] = [
-  { membershipId: 'archived', displayName: 'Former Member', status: 'ARCHIVED', currency: 'EUR', balance: { minorUnits: '75', currency: 'EUR' } },
-  { membershipId: 'credit', displayName: 'Credit Member', status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '-250', currency: 'EUR' } },
-  { membershipId: 'zero-z', displayName: 'Zeta Member', status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '0', currency: 'EUR' } },
-  { membershipId: 'large', displayName: 'Large Member', status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '9007199254740993', currency: 'EUR' } },
-  { membershipId: 'zero-a', displayName: 'Alpha Member', status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '0', currency: 'EUR' } },
+  { membershipId: 'archived', displayName: 'Former Member', isTemporaryGuest: false, status: 'ARCHIVED', currency: 'EUR', balance: { minorUnits: '75', currency: 'EUR' } },
+  { membershipId: 'credit', displayName: 'Credit Member', isTemporaryGuest: false, status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '-250', currency: 'EUR' } },
+  { membershipId: 'zero-z', displayName: 'Zeta Member', isTemporaryGuest: false, status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '0', currency: 'EUR' } },
+  { membershipId: 'large', displayName: 'Large Member', isTemporaryGuest: false, status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '9007199254740993', currency: 'EUR' } },
+  { membershipId: 'zero-a', displayName: 'Alpha Member', isTemporaryGuest: false, status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '0', currency: 'EUR' } },
 ];
 
 describe('deriveAccountOverview', () => {

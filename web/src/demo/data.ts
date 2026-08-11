@@ -28,12 +28,15 @@ export const demoPermissionDefinitions: PermissionDefinition[] = [
   { key: 'ROLE_MANAGEMENT' },
   { key: 'FINANCE_MANAGEMENT' },
   { key: 'CATALOG_MANAGEMENT' },
+  { key: 'VIEW_MEMBER_DIRECTORY' },
+  { key: 'VIEW_GROUP_STATISTICS' },
   { key: 'VIEW_ALL_BOOKING_ACTIVITY' },
   { key: 'RECORD_OWN_PAYMENT' },
   { key: 'CREATE_OWN_BOOKING' },
   { key: 'VOID_OWN_BOOKING' },
   { key: 'VOID_ANY_BOOKING', impliedPermissions: ['VOID_OWN_BOOKING', 'VIEW_ALL_BOOKING_ACTIVITY'] },
   { key: 'BOOK_FOR_OTHERS' },
+  { key: 'BOOK_FOR_GUESTS' },
 ];
 
 /** Group-owned demo roles including one migrated direct-permission role. */
@@ -46,7 +49,7 @@ export const demoRoles: Role[] = [
     description: 'Geschützte Vollzugriffsrolle der Gruppe',
     nameLocked: true,
     deletable: false,
-    grants: grants('GROUP_ADMINISTRATION', 'ROLE_MANAGEMENT', 'FINANCE_MANAGEMENT', 'CATALOG_MANAGEMENT', 'VIEW_ALL_BOOKING_ACTIVITY', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING', 'VOID_ANY_BOOKING', 'BOOK_FOR_OTHERS'),
+    grants: grants('GROUP_ADMINISTRATION', 'ROLE_MANAGEMENT', 'FINANCE_MANAGEMENT', 'CATALOG_MANAGEMENT', 'VIEW_MEMBER_DIRECTORY', 'VIEW_GROUP_STATISTICS', 'VIEW_ALL_BOOKING_ACTIVITY', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING', 'VOID_ANY_BOOKING', 'BOOK_FOR_OTHERS', 'BOOK_FOR_GUESTS'),
     version: 1,
     memberCount: 1,
     pendingInvitationCount: 0,
@@ -174,6 +177,7 @@ export const demoMembers: Membership[] = [
     displayName: 'Lukas Waschul',
     email: 'lukas@example.test',
     initials: 'LW',
+    isTemporaryGuest: false,
     roles: ['ADMIN', 'MEMBER'],
     roleIds: ['role-admin', 'role-member'],
     effectiveGrants: demoRoles[0].grants,
@@ -182,6 +186,7 @@ export const demoMembers: Membership[] = [
       { categoryId: 'category-drinks', assignToOthers: true, voidBookings: true },
       { categoryId: 'category-penalties', assignToOthers: true, voidBookings: true },
     ],
+    status: 'ACTIVE',
     active: true,
     etag: '"member-lukas-v1"',
   },
@@ -191,6 +196,7 @@ export const demoMembers: Membership[] = [
     displayName: 'Mara Becker',
     email: 'mara@example.test',
     initials: 'MB',
+    isTemporaryGuest: false,
     roles: ['FINANCE_MANAGER', 'MEMBER'],
     roleIds: ['role-finance', 'role-member'],
     effectiveGrants: grants('FINANCE_MANAGEMENT', 'VIEW_ALL_BOOKING_ACTIVITY', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING'),
@@ -199,6 +205,7 @@ export const demoMembers: Membership[] = [
       { categoryId: 'category-drinks', assignToOthers: false, voidBookings: false },
       { categoryId: 'category-penalties', assignToOthers: true, voidBookings: true },
     ],
+    status: 'ACTIVE',
     active: true,
     etag: '"member-mara-v1"',
   },
@@ -208,6 +215,7 @@ export const demoMembers: Membership[] = [
     displayName: 'Jonas Krüger',
     email: 'jonas@example.test',
     initials: 'JK',
+    isTemporaryGuest: false,
     roles: ['CATALOG_MANAGER', 'MEMBER'],
     roleIds: ['role-catalog', 'role-member', 'role-self-payment'],
     effectiveGrants: grants('CATALOG_MANAGEMENT', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING'),
@@ -216,6 +224,7 @@ export const demoMembers: Membership[] = [
       { categoryId: 'category-drinks', assignToOthers: false, voidBookings: false },
       { categoryId: 'category-penalties', assignToOthers: true, voidBookings: false },
     ],
+    status: 'ACTIVE',
     active: true,
     etag: '"member-jonas-v1"',
   },
@@ -227,6 +236,7 @@ export const demoBookings: Booking[] = [
     id: 'booking-1',
     memberId: 'member-lukas',
     memberName: 'Lukas Waschul',
+    memberStatus: 'ACTIVE',
     productId: 'product-beer',
     productName: 'Bier',
     categoryId: 'category-drinks',
@@ -236,6 +246,7 @@ export const demoBookings: Booking[] = [
     total: { minorUnits: '200', currency: 'EUR' },
     bookedAt: '2026-08-04T19:45:00+02:00',
     bookedByName: 'Lukas Waschul',
+    bookedByStatus: 'ACTIVE',
     bookedByMemberId: 'member-lukas',
     status: 'POSTED',
     voidWithoutReasonUntil: '2026-08-04T19:45:30+02:00',
@@ -246,6 +257,7 @@ export const demoBookings: Booking[] = [
     id: 'booking-2',
     memberId: 'member-mara',
     memberName: 'Mara Becker',
+    memberStatus: 'ACTIVE',
     productId: 'product-spezi',
     productName: 'Spezi',
     categoryId: 'category-drinks',
@@ -255,6 +267,7 @@ export const demoBookings: Booking[] = [
     total: { minorUnits: '150', currency: 'EUR' },
     bookedAt: '2026-08-04T19:10:00+02:00',
     bookedByName: 'Mara Becker',
+    bookedByStatus: 'ACTIVE',
     bookedByMemberId: 'member-mara',
     status: 'POSTED',
     voidReasonRequired: true,
@@ -264,6 +277,7 @@ export const demoBookings: Booking[] = [
     id: 'booking-3',
     memberId: 'member-jonas',
     memberName: 'Jonas Krüger',
+    memberStatus: 'ACTIVE',
     productId: 'product-late',
     productName: 'Zu spät zum Training',
     categoryId: 'category-penalties',
@@ -273,6 +287,7 @@ export const demoBookings: Booking[] = [
     total: { minorUnits: '500', currency: 'EUR' },
     bookedAt: '2026-08-04T18:32:00+02:00',
     bookedByName: 'Mara Becker',
+    bookedByStatus: 'ACTIVE',
     bookedByMemberId: 'member-mara',
     reason: '15 Minuten zu spät',
     status: 'POSTED',
@@ -305,22 +320,22 @@ export const demoLedger: LedgerEntry[] = [
 
 /** Consolidated demo account balances for the finance overview. */
 export const demoAccountSummaries: AccountSummary[] = [
-  { membershipId: 'member-lukas', displayName: 'Lukas Waschul', status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '2340', currency: 'EUR' } },
-  { membershipId: 'member-jonas', displayName: 'Jonas Krüger', status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '500', currency: 'EUR' } },
-  { membershipId: 'member-mara', displayName: 'Mara Becker', status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '-250', currency: 'EUR' } },
-  { membershipId: 'member-pia-archived', displayName: 'Pia Lehmann', status: 'ARCHIVED', currency: 'EUR', balance: { minorUnits: '0', currency: 'EUR' } },
+  { membershipId: 'member-lukas', displayName: 'Lukas Waschul', isTemporaryGuest: false, status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '2340', currency: 'EUR' } },
+  { membershipId: 'member-jonas', displayName: 'Jonas Krüger', isTemporaryGuest: false, status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '500', currency: 'EUR' } },
+  { membershipId: 'member-mara', displayName: 'Mara Becker', isTemporaryGuest: false, status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '-250', currency: 'EUR' } },
+  { membershipId: 'member-pia-archived', displayName: 'Pia Lehmann', isTemporaryGuest: false, status: 'ARCHIVED', currency: 'EUR', balance: { minorUnits: '0', currency: 'EUR' } },
 ];
 
 /** Demo payments managed by finance users. */
 export const demoPayments: Payment[] = [
-  { id: 'payment-1', membershipId: 'member-lukas', memberName: 'Lukas Waschul', amount: { minorUnits: '2000', currency: 'EUR' }, receivedAt: '2026-08-01', method: 'BANK_TRANSFER', reference: 'Juli', status: 'POSTED' },
-  { id: 'payment-2', membershipId: 'member-mara', memberName: 'Mara Becker', amount: { minorUnits: '1500', currency: 'EUR' }, receivedAt: '2026-07-30', method: 'CASH', status: 'POSTED' },
+  { id: 'payment-1', membershipId: 'member-lukas', memberName: 'Lukas Waschul', membershipStatus: 'ACTIVE', amount: { minorUnits: '2000', currency: 'EUR' }, receivedAt: '2026-08-01', method: 'BANK_TRANSFER', methodLabel: 'Bank transfer', reference: 'Juli', status: 'POSTED' },
+  { id: 'payment-2', membershipId: 'member-mara', memberName: 'Mara Becker', membershipStatus: 'ACTIVE', amount: { minorUnits: '1500', currency: 'EUR' }, receivedAt: '2026-07-30', method: 'CASH', methodLabel: 'Cash', status: 'POSTED' },
 ];
 
 /** Demo settlements generated from closed periods. */
 export const demoSettlements: Settlement[] = [
-  { id: 'settlement-1', periodId: 'period-july', periodLabel: 'Juli 2026', membershipId: 'member-lukas', memberName: 'Lukas Waschul', amount: { minorUnits: '3200', currency: 'EUR' }, paidAmount: { minorUnits: '2000', currency: 'EUR' }, openAmount: { minorUnits: '1200', currency: 'EUR' }, dueAt: '2026-08-15', status: 'PARTIAL' },
-  { id: 'settlement-2', periodId: 'period-july', periodLabel: 'Juli 2026', membershipId: 'member-mara', memberName: 'Mara Becker', amount: { minorUnits: '1500', currency: 'EUR' }, paidAmount: { minorUnits: '1500', currency: 'EUR' }, openAmount: { minorUnits: '0', currency: 'EUR' }, dueAt: '2026-08-15', status: 'PAID' },
+  { id: 'settlement-1', periodId: 'period-july', periodLabel: 'Juli 2026', membershipId: 'member-lukas', memberName: 'Lukas Waschul', email: 'lukas@example.test', amount: { minorUnits: '3200', currency: 'EUR' }, paidAmount: { minorUnits: '2000', currency: 'EUR' }, openAmount: { minorUnits: '1200', currency: 'EUR' }, dueAt: '2026-08-15', status: 'PARTIAL' },
+  { id: 'settlement-2', periodId: 'period-july', periodLabel: 'Juli 2026', membershipId: 'member-mara', memberName: 'Mara Becker', email: 'mara@example.test', amount: { minorUnits: '1500', currency: 'EUR' }, paidAmount: { minorUnits: '1500', currency: 'EUR' }, openAmount: { minorUnits: '0', currency: 'EUR' }, dueAt: '2026-08-15', status: 'PAID' },
 ];
 
 /** Demo in-app notifications. */

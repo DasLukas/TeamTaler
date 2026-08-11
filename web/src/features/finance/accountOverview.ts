@@ -7,6 +7,7 @@ export interface AccountOverview {
   net: Money;
   active: AccountSummary[];
   archived: AccountSummary[];
+  deleted: AccountSummary[];
 }
 
 function compareAccounts(left: AccountSummary, right: AccountSummary): number {
@@ -21,7 +22,7 @@ function compareAccounts(left: AccountSummary, right: AccountSummary): number {
  *
  * @param accounts - Consolidated balances from the group account endpoint.
  * @param currency - Active group currency used when the collection is empty.
- * @returns Exact totals plus sorted active and archived account collections.
+ * @returns Exact totals plus sorted active, archived, and deleted collections.
  */
 export function deriveAccountOverview(accounts: AccountSummary[], currency: string): AccountOverview {
   let receivables = 0n;
@@ -40,5 +41,6 @@ export function deriveAccountOverview(accounts: AccountSummary[], currency: stri
     net: { minorUnits: net.toString(), currency },
     active: sorted.filter((account) => account.status === 'ACTIVE'),
     archived: sorted.filter((account) => account.status === 'ARCHIVED'),
+    deleted: sorted.filter((account) => account.status === 'DELETED'),
   };
 }

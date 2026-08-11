@@ -6,6 +6,7 @@ import type { PermissionDefinition, PermissionGrant, Role } from '@/api/types';
 import i18n from '@/i18n';
 import { PermissionEditor } from './PermissionEditor';
 import { RoleMultiSelect } from './RoleMultiSelect';
+import { RoleSelectionList } from './RoleSelectionList';
 
 const definitions: PermissionDefinition[] = [
   { key: 'VOID_OWN_BOOKING' },
@@ -63,5 +64,21 @@ describe('dynamic role controls', () => {
     await user.click(reservedAdministrator);
 
     expect(onChange).toHaveBeenCalledWith(['role-admin', 'role-member']);
+  });
+
+  it('keeps the last administrator role locked without showing a redundant label', () => {
+    render(
+      <RoleSelectionList
+        canManageGroup
+        label="Roles"
+        lockedRoleIds={['role-admin']}
+        onChange={vi.fn()}
+        roleIds={['role-admin']}
+        roles={roles}
+      />,
+    );
+
+    expect(screen.getByRole('checkbox', { name: /Gruppenadministrator/i })).toBeDisabled();
+    expect(screen.queryByText('Letzter Administrator')).not.toBeInTheDocument();
   });
 });

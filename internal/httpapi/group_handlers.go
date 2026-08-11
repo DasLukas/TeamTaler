@@ -94,7 +94,29 @@ func (s *Server) handleGetGroupSettings(response http.ResponseWriter, request *h
 		"notificationEmailsEnabled":          settings.NotificationEmailsEnabled,
 		"notificationEmailDeliveryAvailable": s.config.SMTP.Enabled,
 		"defaultRoleId":                      settings.DefaultRoleID,
+		"foreignBookingReasonRequired":       settings.ForeignBookingReasonRequired,
+		"ownPaymentReasonRequired":           settings.OwnPaymentReasonRequired,
+		"otherPaymentReasonRequired":         settings.OtherPaymentReasonRequired,
+		"paymentMethods":                     settings.PaymentMethods,
+		"bookingReasons":                     settings.BookingReasons,
+		"paymentReasons":                     settings.PaymentReasons,
 	})
+}
+
+// handleGetTransactionSettings returns non-sensitive ordered form options for
+// the current active group member.
+func (s *Server) handleGetTransactionSettings(response http.ResponseWriter, request *http.Request) {
+	_, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	settings, err := s.groups.TransactionSettings(request.Context(), membership)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, settings)
 }
 
 // handleUpdateGroupSettings validates and persists a partial settings document.
@@ -108,14 +130,22 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		return
 	}
 	var input struct {
-		NotificationEmailsEnabled *bool   `json:"notificationEmailsEnabled"`
-		DefaultRoleID             *string `json:"defaultRoleId"`
+		NotificationEmailsEnabled    *bool                      `json:"notificationEmailsEnabled"`
+		DefaultRoleID                *string                    `json:"defaultRoleId"`
+		ForeignBookingReasonRequired *bool                      `json:"foreignBookingReasonRequired"`
+		OwnPaymentReasonRequired     *bool                      `json:"ownPaymentReasonRequired"`
+		OtherPaymentReasonRequired   *bool                      `json:"otherPaymentReasonRequired"`
+		PaymentMethods               *[]domain.ConfigurableItem `json:"paymentMethods"`
+		BookingReasons               *[]domain.ConfigurableItem `json:"bookingReasons"`
+		PaymentReasons               *[]domain.ConfigurableItem `json:"paymentReasons"`
 	}
 	if err := decodeJSON(response, request, &input); err != nil {
 		writeProblem(response, request, err)
 		return
 	}
-	if input.NotificationEmailsEnabled == nil && input.DefaultRoleID == nil {
+	if input.NotificationEmailsEnabled == nil && input.DefaultRoleID == nil && input.ForeignBookingReasonRequired == nil &&
+		input.OwnPaymentReasonRequired == nil && input.OtherPaymentReasonRequired == nil && input.PaymentMethods == nil &&
+		input.BookingReasons == nil && input.PaymentReasons == nil {
 		writeProblem(response, request, domain.ValidationError{Field: "settings", Message: "must contain at least one supported field"})
 		return
 	}
@@ -124,8 +154,14 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		return
 	}
 	settings, err := s.groups.UpdateSettings(request.Context(), principal, membership, groups.SettingsUpdate{
-		NotificationEmailsEnabled: input.NotificationEmailsEnabled,
-		DefaultRoleID:             input.DefaultRoleID,
+		NotificationEmailsEnabled:    input.NotificationEmailsEnabled,
+		DefaultRoleID:                input.DefaultRoleID,
+		ForeignBookingReasonRequired: input.ForeignBookingReasonRequired,
+		OwnPaymentReasonRequired:     input.OwnPaymentReasonRequired,
+		OtherPaymentReasonRequired:   input.OtherPaymentReasonRequired,
+		PaymentMethods:               input.PaymentMethods,
+		BookingReasons:               input.BookingReasons,
+		PaymentReasons:               input.PaymentReasons,
 	})
 	if err != nil {
 		writeProblem(response, request, err)
@@ -135,6 +171,12 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		"notificationEmailsEnabled":          settings.NotificationEmailsEnabled,
 		"notificationEmailDeliveryAvailable": s.config.SMTP.Enabled,
 		"defaultRoleId":                      settings.DefaultRoleID,
+		"foreignBookingReasonRequired":       settings.ForeignBookingReasonRequired,
+		"ownPaymentReasonRequired":           settings.OwnPaymentReasonRequired,
+		"otherPaymentReasonRequired":         settings.OtherPaymentReasonRequired,
+		"paymentMethods":                     settings.PaymentMethods,
+		"bookingReasons":                     settings.BookingReasons,
+		"paymentReasons":                     settings.PaymentReasons,
 	})
 }
 
@@ -188,7 +230,7 @@ func (s *Server) handleListMembers(response http.ResponseWriter, request *http.R
 		writeProblem(response, request, err)
 		return
 	}
-	items, err := s.groups.ListMembers(request.Context(), membership.GroupID)
+	items, err := s.groups.ListMembers(request.Context(), membership)
 	if err != nil {
 		writeProblem(response, request, err)
 		return
@@ -250,6 +292,46 @@ func (s *Server) handleArchiveMember(response http.ResponseWriter, request *http
 	}
 	confirmSelf := request.URL.Query().Get("confirmSelf") == "true"
 	if err := s.groups.ArchiveMember(request.Context(), principal, membership, request.PathValue("membershipID"), confirmSelf); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
+// handleReactivateMember restores one archived member or temporary guest.
+// response receives the active Membership or Problem Details; request supplies
+// the authenticated tenant scope and strict role/name command. The method
+// returns no Go value.
+func (s *Server) handleReactivateMember(response http.ResponseWriter, request *http.Request) {
+	principal, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	var input groups.ReactivateMemberInput
+	if err := decodeJSON(response, request, &input); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	item, err := s.groups.ReactivateMember(request.Context(), principal, membership, request.PathValue("membershipID"), input)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, item)
+}
+
+// handlePermanentlyDeleteMember removes one archived membership from
+// operational group views while retaining its historical tombstone. response
+// receives 204 or Problem Details; request supplies authenticated tenant and
+// membership identifiers. The method returns no Go value.
+func (s *Server) handlePermanentlyDeleteMember(response http.ResponseWriter, request *http.Request) {
+	principal, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	if err := s.groups.PermanentlyDeleteMember(request.Context(), principal, membership, request.PathValue("membershipID")); err != nil {
 		writeProblem(response, request, err)
 		return
 	}

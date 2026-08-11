@@ -75,16 +75,27 @@ describe('CatalogPanel', () => {
     apiMock.deleteProduct.mockResolvedValue(undefined);
   });
 
+  it('shows the product initial when no image is available', async () => {
+    apiMock.getCategories.mockResolvedValue([{ ...category, products: [createdProduct] }]);
+    renderCatalog();
+
+    expect(await screen.findByText('W')).toBeVisible();
+    expect(screen.getByText(createdProduct.name)).toHaveAttribute('title', createdProduct.name);
+  });
+
   it('creates a category with a selected icon', async () => {
     const user = userEvent.setup();
     renderCatalog();
 
-    await screen.findByText(i18n.t('catalog.intro'));
+    await screen.findByRole('button', { name: i18n.t('catalog.categoryAction') });
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.categoryAction') }));
 
     expect(within(screen.getByRole('dialog')).queryByRole('combobox')).not.toBeInTheDocument();
     await user.type(screen.getByLabelText(i18n.t('common.name')), 'Team events');
-    await user.click(screen.getByRole('button', { name: i18n.t('catalog.categoryIcons.event') }));
+    const eventIconButton = screen.getByRole('button', { name: i18n.t('catalog.categoryIcons.event') });
+    expect(eventIconButton).toHaveAttribute('title', i18n.t('catalog.categoryIcons.event'));
+    expect(eventIconButton).not.toHaveTextContent(i18n.t('catalog.categoryIcons.event'));
+    await user.click(eventIconButton);
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.createCategoryAction') }));
 
     await waitFor(() => expect(apiMock.createCategory).toHaveBeenCalledWith('group-a', { name: 'Team events', icon: 'event' }));
@@ -99,7 +110,7 @@ describe('CatalogPanel', () => {
       .mockResolvedValueOnce({ imageUrl: '/api/v1/groups/group-a/products/product-created/image' });
     renderCatalog();
 
-    await screen.findByText(i18n.t('catalog.intro'));
+    await screen.findByRole('button', { name: i18n.t('catalog.categoryAction') });
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.productAction') }));
     await user.type(screen.getByLabelText(i18n.t('catalog.productName')), createdProduct.name);
     await user.type(screen.getByLabelText(i18n.t('catalog.price', { currency: 'EUR' })), '1,00');
@@ -125,7 +136,7 @@ describe('CatalogPanel', () => {
     const image = new File(['selected'], 'selected.png', { type: 'image/png' });
     renderCatalog();
 
-    await screen.findByText(i18n.t('catalog.intro'));
+    await screen.findByRole('button', { name: i18n.t('catalog.categoryAction') });
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.productAction') }));
     await user.upload(screen.getByLabelText(i18n.t('catalog.image')), image);
 
@@ -148,7 +159,7 @@ describe('CatalogPanel', () => {
     apiMock.uploadProductImage.mockResolvedValue({ imageUrl: '/api/v1/groups/group-a/products/product-created/image' });
     renderCatalog();
 
-    await screen.findByText(i18n.t('catalog.intro'));
+    await screen.findByRole('button', { name: i18n.t('catalog.categoryAction') });
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.productAction') }));
     await user.type(screen.getByLabelText(i18n.t('catalog.productName')), createdProduct.name);
     await user.type(screen.getByLabelText(i18n.t('catalog.price', { currency: 'EUR' })), '1,00');
@@ -168,7 +179,7 @@ describe('CatalogPanel', () => {
     apiMock.createProduct.mockResolvedValue({ ...createdProduct, pricingMode: 'USER_DEFINED', price: undefined });
     renderCatalog();
 
-    await screen.findByText(i18n.t('catalog.intro'));
+    await screen.findByRole('button', { name: i18n.t('catalog.categoryAction') });
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.productAction') }));
     await user.type(screen.getByLabelText(i18n.t('catalog.productName')), 'Donation');
     await user.selectOptions(screen.getByLabelText(i18n.t('catalog.pricingMode')), 'USER_DEFINED');
@@ -188,7 +199,7 @@ describe('CatalogPanel', () => {
     const user = userEvent.setup();
     renderCatalog();
 
-    await screen.findByText(i18n.t('catalog.intro'));
+    await screen.findByRole('button', { name: i18n.t('catalog.categoryAction') });
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.editCategory', { name: category.name }) }));
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByRole('button', { name: i18n.t('catalog.categoryIcons.drink') })).toHaveAttribute('aria-pressed', 'true');
@@ -234,15 +245,19 @@ describe('CatalogPanel', () => {
     }));
   });
 
-  it('offers contextual round create actions and preselects their category', async () => {
+  it('offers contextual create tiles and preselects their category', async () => {
     const user = userEvent.setup();
-    const secondCategory: Category = { ...category, id: 'category-b', name: 'Snacks', sortOrder: 3 };
+    const secondProduct: Product = { ...createdProduct, categoryId: 'category-b' };
+    const secondCategory: Category = { ...category, id: 'category-b', name: 'Snacks', sortOrder: 3, products: [secondProduct] };
     apiMock.getCategories.mockResolvedValue([category, secondCategory]);
     renderCatalog();
 
-    await screen.findByText(i18n.t('catalog.intro'));
+    await screen.findByRole('button', { name: i18n.t('catalog.categoryAction') });
     expect(screen.getByRole('button', { name: i18n.t('catalog.addCategoryAfterList') })).toBeVisible();
-    await user.click(screen.getByRole('button', { name: i18n.t('catalog.addProductToCategory', { name: secondCategory.name }) }));
+    const addProductButton = screen.getByRole('button', { name: i18n.t('catalog.addProductToCategory', { name: secondCategory.name }) });
+    const productCard = screen.getByText(secondProduct.name).closest('article');
+    expect(addProductButton.parentElement?.parentElement).toBe(productCard?.parentElement);
+    await user.click(addProductButton);
 
     expect(screen.getByLabelText(i18n.t('common.category'))).toHaveValue(secondCategory.id);
   });

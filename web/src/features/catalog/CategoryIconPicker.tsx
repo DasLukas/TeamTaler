@@ -24,9 +24,8 @@ export function CategoryIconPicker({ value, onChange }: CategoryIconPickerProps)
         {CATEGORY_ICON_VALUES.map((icon) => {
           const label = t(`catalog.categoryIcons.${icon}`);
           return (
-            <button aria-label={label} aria-pressed={value === icon} key={icon} onClick={() => onChange(icon)} type="button">
+            <button aria-label={label} aria-pressed={value === icon} key={icon} onClick={() => onChange(icon)} title={label} type="button">
               <CategoryIcon icon={icon} size={22} />
-              <span>{label}</span>
             </button>
           );
         })}

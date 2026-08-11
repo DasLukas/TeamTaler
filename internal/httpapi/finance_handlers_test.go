@@ -3,7 +3,9 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -58,7 +60,7 @@ func TestHandleCreateOwnPaymentDerivesAuthenticatedMembershipAndRejectsTargetFie
 func ownPaymentRequest(principal domain.Principal, groupID, body string) *http.Request {
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+groupID+"/payments/self", bytes.NewBufferString(body))
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Idempotency-Key", "self-payment-http-test")
+	request.Header.Set("Idempotency-Key", fmt.Sprintf("self-payment-http-test-%x", sha256.Sum256([]byte(body)))[:48])
 	request.SetPathValue("groupID", groupID)
 	return request.WithContext(context.WithValue(request.Context(), principalKey, principal))
 }

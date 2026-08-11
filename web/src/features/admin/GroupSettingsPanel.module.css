@@ -2,6 +2,10 @@
   padding: var(--space-8) 0;
 }
 
+.embedded {
+  width: 100%;
+}
+
 .header {
   margin-bottom: var(--space-6);
 }
@@ -9,12 +13,11 @@
 .header h2,
 .header p,
 .controls h3,
-.controls p {
+.controls h4 {
   margin: 0;
 }
 
-.header p,
-.controls > div:first-child p {
+.header p {
   margin-top: var(--space-2);
   color: var(--color-muted);
 }
@@ -26,7 +29,7 @@
 
 .card {
   display: grid;
-  max-width: 840px;
+  width: 100%;
   padding: var(--space-6);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);

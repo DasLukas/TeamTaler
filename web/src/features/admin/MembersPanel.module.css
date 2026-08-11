@@ -39,6 +39,49 @@
   gap: var(--space-3);
 }
 
+.memberName {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.guestBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 7px;
+  border-radius: var(--radius-full);
+  color: var(--color-teal-700);
+  background: var(--color-surface-teal);
+  font-size: var(--font-size-xs);
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.temporaryGuestRole,
+.claimPending {
+  color: var(--color-muted);
+  font-size: var(--font-size-sm);
+}
+
+.temporaryGuestRole { margin: 0; }
+.claimPending { align-self: center; padding: 0 var(--space-2); white-space: nowrap; }
+
+.claimAction {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.claimUnavailable {
+  max-width: 22rem;
+  color: var(--color-muted);
+  font-size: var(--font-size-xs);
+}
+
 .section { display: grid; gap: var(--space-3); margin-top: var(--space-8); }
 
 .sectionHeading {
@@ -125,7 +168,7 @@
 .mobileMetadata { margin: calc(var(--space-2) * -1) 0 0; color: var(--color-muted); font-size: var(--font-size-sm); }
 .mobileActions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-1); padding-top: var(--space-2); border-top: 1px solid var(--color-border); }
 
-.tableActions { display: flex; justify-content: flex-end; gap: var(--space-1); }
+.tableActions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-1); }
 .expired { color: var(--color-red-600); font-weight: 700; }
 
 .form,
@@ -148,6 +191,17 @@
 .confirmDialog { display: grid; gap: var(--space-5); padding: var(--space-4) var(--space-6) var(--space-6); }
 .confirmDialog p { margin: 0; line-height: 1.55; }
 .warning { color: var(--color-red-600); font-weight: 700; }
+
+.claimNotice {
+  margin: 0;
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  color: var(--color-teal-700);
+  background: var(--color-surface-teal);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  line-height: 1.5;
+}
 
 .error { color: var(--color-red-600); }
 

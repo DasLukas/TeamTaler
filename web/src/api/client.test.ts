@@ -13,6 +13,7 @@ const booking: Booking = {
   id: 'booking-a',
   memberId: 'member-a',
   memberName: 'Alex',
+  memberStatus: 'ACTIVE',
   productId: 'product-a',
   productName: 'Water',
   categoryId: 'category-a',
@@ -22,6 +23,7 @@ const booking: Booking = {
   total: { minorUnits: '100', currency: 'EUR' },
   bookedAt: '2026-08-04T12:00:00Z',
   bookedByName: 'Alex',
+  bookedByStatus: 'ACTIVE',
   status: 'POSTED',
 };
 
@@ -285,6 +287,108 @@ describe('high-risk API idempotency', () => {
     });
   });
 
+  it('serializes temporary guest names even when no existing membership is targeted', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(session('user-a')))
+      .mockResolvedValueOnce(jsonResponse([{ ...booking, targetMembershipId: 'member-guest' }], 201));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.getSession();
+    await api.createBookings('group-a', {
+      ...command,
+      targetMembershipIds: [],
+      temporaryGuestDisplayNames: ['Guest One'],
+    });
+
+    expect(requestBody(fetchMock.mock.calls[1])).toEqual({
+      ...command,
+      targetMembershipIds: [],
+      temporaryGuestDisplayNames: ['Guest One'],
+    });
+  });
+
+  it('loads the minimal booking context without requesting the member directory', async () => {
+    const context = {
+      openPeriod: { id: 'period-a', label: 'August', status: 'OPEN', startsAt: '2026-08-01T00:00:00Z' },
+      ownBalanceMinor: '1250',
+      currentMembership: {
+        id: 'member-a', userId: 'user-a', displayName: 'Alex', email: 'alex@example.test', initials: 'A', isTemporaryGuest: false,
+        roles: ['MEMBER'], groupPermissions: [], categoryPermissions: [], active: true,
+      },
+      targets: [{ membershipId: 'member-a', displayName: 'Alex', isTemporaryGuest: false }, { membershipId: 'member-guest', displayName: 'Guest', isTemporaryGuest: true }],
+      canBookForGuests: true,
+    };
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(context));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await api.getBookingContext('group-a', 'EUR');
+
+    expect(result.ownBalance).toEqual({ minorUnits: '1250', currency: 'EUR' });
+    expect(result.targets[1]).toEqual({ membershipId: 'member-guest', displayName: 'Guest', isTemporaryGuest: true, avatarUrl: undefined });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group-a/booking-context');
+  });
+
+  it('renames and creates a claim invitation for a temporary guest', async () => {
+    const guest = {
+      id: 'member/guest', userId: 'user-guest', displayName: 'Renamed Guest', email: null, initials: 'RG', isTemporaryGuest: true,
+      roles: ['MEMBER'], groupPermissions: [], categoryPermissions: [], active: true,
+    };
+    const invitation = {
+      id: 'invitation-a', email: 'guest@example.test', displayName: 'Renamed Guest', roles: ['MEMBER'], groupPermissions: [], categoryPermissions: [],
+      roleAssignmentsVersion: 1, expiresAt: '2026-08-11T12:00:00Z', emailDeliveryStatus: 'PENDING', targetMembershipId: 'member/guest', acceptUrl: 'https://example.test/invite',
+    };
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(guest)).mockResolvedValueOnce(jsonResponse(invitation));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.renameMember('group-a', 'member/guest', 'Renamed Guest');
+    const created = await api.createTemporaryGuestClaimInvitation('group-a', 'member/guest', 'guest@example.test', ['role-member']);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group-a/members/member%2Fguest');
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('PATCH');
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ displayName: 'Renamed Guest' });
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/groups/group-a/members/member%2Fguest/claim-invitation');
+    expect((fetchMock.mock.calls[1][1] as RequestInit).method).toBe('POST');
+    expect(requestBody(fetchMock.mock.calls[1])).toEqual({ email: 'guest@example.test', roleIds: ['role-member'] });
+    expect(created).toMatchObject({ targetMembershipId: 'member/guest', acceptUrl: 'https://example.test/invite' });
+  });
+
+  it('reactivates and permanently deletes memberships through explicit lifecycle endpoints', async () => {
+    const restored = {
+      id: 'member/former', userId: 'user-former', displayName: 'Former Member', email: 'former@example.test', initials: 'FM',
+      isTemporaryGuest: false, status: 'ACTIVE', roles: ['MEMBER'], roleIds: ['role-member'], groupPermissions: [], categoryPermissions: [], active: true,
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(restored))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.reactivateMember('group-a', 'member/former', { roleIds: ['role-member'] })).resolves.toMatchObject({ id: 'member/former', status: 'ACTIVE' });
+    await api.permanentlyDeleteMember('group-a', 'member/former');
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group-a/members/member%2Fformer/reactivate');
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('POST');
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ roleIds: ['role-member'] });
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/groups/group-a/members/member%2Fformer/permanent');
+    expect((fetchMock.mock.calls[1][1] as RequestInit).method).toBe('DELETE');
+  });
+
+  it('uses display-name snapshots from bookings without fetching members', async () => {
+    const wireBooking = {
+      id: 'booking-a', targetMembershipId: 'member-target', targetDisplayName: 'Target Guest', actorMembershipId: 'member-actor', actorDisplayName: 'Booking Member',
+      productId: 'product-a', productName: 'Water', categoryId: 'category-a', categoryName: 'Drinks', quantity: 1, unitPriceMinor: 100, totalMinor: 100,
+      currency: 'EUR', createdAt: '2026-08-04T12:00:00Z', status: 'POSTED',
+    };
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse([wireBooking]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await api.getBookings('group-a');
+
+    expect(result[0]).toMatchObject({ memberName: 'Target Guest', bookedByName: 'Booking Member' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group-a/bookings');
+  });
+
   it('records an own payment without exposing a target membership identifier', async () => {
     const payment = {
       id: 'payment-self',
@@ -505,8 +609,23 @@ describe('high-risk API idempotency', () => {
       .mockResolvedValueOnce(jsonResponse({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(api.getGroupSettings('group-a')).resolves.toEqual({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
-    await expect(api.updateGroupSettings('group-a', { notificationEmailsEnabled: true })).resolves.toEqual({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
+    await expect(api.getGroupSettings('group-a')).resolves.toMatchObject({
+      notificationEmailsEnabled: false,
+      notificationEmailDeliveryAvailable: true,
+      defaultRoleId: 'role-member',
+      paymentMethods: [
+        { id: 'BANK_TRANSFER', label: 'Überweisung' },
+        { id: 'CASH', label: 'Bar' },
+        { id: 'PAYPAL', label: 'PayPal' },
+        { id: 'OTHER', label: 'Sonstige' },
+      ],
+    });
+    await expect(api.updateGroupSettings('group-a', { notificationEmailsEnabled: true })).resolves.toMatchObject({
+      notificationEmailsEnabled: true,
+      notificationEmailDeliveryAvailable: true,
+      defaultRoleId: 'role-member',
+      paymentMethods: expect.any(Array),
+    });
 
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group-a/settings');
     expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/groups/group-a/settings');
@@ -550,6 +669,70 @@ describe('high-risk API idempotency', () => {
       dueAt: '2026-09-14',
       nextPeriodLabel: 'Aktueller Zeitraum',
     });
+  });
+});
+
+describe('account security API contract', () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('accepts an empty password-reset request response', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.requestPasswordReset('alex@example.test')).resolves.toBeUndefined();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/auth/password-reset/request');
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).method).toBe('POST');
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ email: 'alex@example.test' });
+  });
+
+  it('uses the exact reset and email confirmation payloads', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.confirmPasswordReset('reset-token', 'new-passphrase');
+    await api.confirmEmailChange('email-token');
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/auth/password-reset/confirm');
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ token: 'reset-token', newPassword: 'new-passphrase' });
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/v1/auth/email-change/confirm');
+    expect(requestBody(fetchMock.mock.calls[1])).toEqual({ token: 'email-token' });
+  });
+
+  it('updates profile, password, and email using their dedicated methods', async () => {
+    const user = { id: 'user-a', displayName: 'Alex Changed', email: 'alex@example.test' };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(user))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(jsonResponse({ verificationRequired: true }, 202));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.updateProfile('Alex Changed')).resolves.toEqual(user);
+    await api.changePassword('current-passphrase', 'new-passphrase');
+    await expect(api.requestEmailChange('new@example.test', 'current-passphrase')).resolves.toEqual({ verificationRequired: true });
+
+    expect(fetchMock.mock.calls.map((call) => [(call[1] as RequestInit).method, call[0]])).toEqual([
+      ['PATCH', '/api/v1/me/profile'],
+      ['PUT', '/api/v1/me/password'],
+      ['POST', '/api/v1/me/email-change'],
+    ]);
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ displayName: 'Alex Changed' });
+    expect(requestBody(fetchMock.mock.calls[1])).toEqual({ currentPassword: 'current-passphrase', newPassword: 'new-passphrase' });
+    expect(requestBody(fetchMock.mock.calls[2])).toEqual({ newEmail: 'new@example.test', currentPassword: 'current-passphrase' });
+  });
+
+  it('loads account capabilities without authentication state', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ passwordResetAvailable: true, emailChangeAvailable: false }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.getAuthenticationCapabilities()).resolves.toEqual({ passwordResetAvailable: true, emailChangeAvailable: false });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/auth/capabilities');
   });
 });
 

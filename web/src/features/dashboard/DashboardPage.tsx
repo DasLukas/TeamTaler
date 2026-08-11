@@ -4,8 +4,9 @@ import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
-import { formatMoney } from '@/api/money';
+import { formatMoney, isCreditBalance } from '@/api/money';
 import { canRecordOwnPayment } from '@/app/groupCapabilities';
+import { can } from '@/app/permissions';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Avatar } from '@/components/ui/Avatar';
 import { StatePanel } from '@/components/ui/StatePanel';
@@ -45,39 +46,27 @@ export function DashboardPage() {
   const { t } = useTranslation();
   const { activeGroupId, activeGroup, session } = useActiveGroup();
   const dashboardQuery = useQuery({ queryKey: ['dashboard', activeGroupId], queryFn: () => api.getDashboard(activeGroupId) });
-  const membersQuery = useQuery({ queryKey: ['members', activeGroupId], queryFn: () => api.getMembers(activeGroupId) });
   const localHour = useLocalHour();
-  const loading = dashboardQuery.isLoading || membersQuery.isLoading;
-  const error = dashboardQuery.error ?? membersQuery.error;
 
-  if (loading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
-  if (error || !dashboardQuery.data || !membersQuery.data) {
+  if (dashboardQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
+  if (dashboardQuery.error || !dashboardQuery.data) {
     return <div className={styles.state}><StatePanel kind="error" message={t('dashboard.error')} /></div>;
   }
 
   const dashboard = dashboardQuery.data;
-  const membersByID = new Map(membersQuery.data.map((member) => [member.id, member]));
-  const recentBookings = dashboard.recentBookings.map((booking) => {
-    const target = membersByID.get(booking.memberId);
-    const actor = booking.bookedByMemberId ? membersByID.get(booking.bookedByMemberId) : undefined;
-    return {
-      ...booking,
-      memberName: target?.displayName ?? booking.memberName,
-      memberAvatarUrl: target?.avatarUrl ?? booking.memberAvatarUrl,
-      bookedByName: actor?.displayName ?? booking.bookedByName,
-      bookedByAvatarUrl: actor?.avatarUrl ?? booking.bookedByAvatarUrl,
-    };
-  });
+  const recentBookings = dashboard.recentBookings;
   const periodTotal = dashboard.categoryTotals.reduce((sum, entry) => sum + BigInt(entry.total.minorUnits), 0n);
   const greeting = t(`dashboard.${getDashboardGreetingKey(localHour)}`);
   const canRecordPayment = canRecordOwnPayment(activeGroup.membership?.effectiveGrants);
+  const canViewGroupStatistics = can(activeGroup.membership?.effectiveGrants, 'VIEW_GROUP_STATISTICS');
+  const hasCreditBalance = isCreditBalance(dashboard.openBalance);
 
   return (
     <div className={styles.dashboard}>
       <section className={styles.content}>
         <h1>{greeting}, {session.user.displayName.split(' ')[0]}</h1>
         <div className={styles.balanceCard}>
-          <div><span>{t('booking.openBalance')}</span><strong>{formatMoney(dashboard.openBalance)}</strong>{canRecordPayment ? <SelfPaymentDialog className={styles.selfPaymentAction} openBalance={dashboard.openBalance} /> : null}</div>
+          <div><span>{t('booking.openBalance')}</span><strong className={hasCreditBalance ? styles.creditBalance : undefined} data-financial-state={hasCreditBalance ? 'credit' : 'due'}>{formatMoney(dashboard.openBalance)}</strong>{canRecordPayment ? <SelfPaymentDialog className={styles.selfPaymentAction} openBalance={dashboard.openBalance} /> : null}</div>
           <div className={styles.period}><strong>{t('dashboard.settlement', { label: dashboard.currentPeriod.label.split(' ')[0] })}</strong><p>{t(canRecordPayment ? 'dashboard.paymentNoteSelf' : 'dashboard.paymentNote')}</p></div>
         </div>
 
@@ -89,8 +78,8 @@ export function DashboardPage() {
                 <Link className={styles.activity} key={booking.id} to="/activities">
                   <Avatar name={booking.memberName} size="small" src={booking.memberAvatarUrl} />
                   <div className={styles.activityCopy}>
-                    <span><strong>{booking.memberName.split(' ')[0]}</strong> · {booking.productName} · {formatMoney(booking.total)}</span>
-                    {booking.bookedByName !== booking.memberName ? <small>{t('activities.bookedByCue', { name: booking.bookedByName })}</small> : null}
+                    <span><strong>{booking.memberName.split(' ')[0]}</strong>{booking.memberStatus === 'DELETED' ? <em className={styles.deletedBadge}>{t('common.deleted')}</em> : null} · {booking.productName} · {formatMoney(booking.total)}</span>
+                    {booking.bookedByName !== booking.memberName ? <small>{t('activities.bookedByCue', { name: booking.bookedByName })}{booking.bookedByStatus === 'DELETED' ? <em className={styles.deletedBadge}>{t('common.deleted')}</em> : null}</small> : null}
                   </div>
                   <time>{new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' }).format(new Date(booking.bookedAt))}</time>
                   <ChevronRight aria-hidden="true" size={18} />
@@ -99,15 +88,17 @@ export function DashboardPage() {
               <Link className={styles.allActivities} to="/activities">{t('dashboard.allActivities')} <ChevronRight size={18} /></Link>
             </div>
           </section>
-          <section className={styles.monthCard}>
+          <section className={styles.periodSection}>
             <h2>{dashboard.currentPeriod.label}</h2>
-            {dashboard.categoryTotals.map((entry) => {
-              return <div className={styles.totalRow} key={entry.categoryId}><CategoryIcon icon={entry.icon} size={24} /><span>{entry.categoryName}</span><strong>{formatMoney(entry.total)}</strong></div>;
-            })}
-            <div className={styles.sum}><span>{t('dashboard.sum')}</span><strong>{formatMoney({ minorUnits: periodTotal.toString(), currency: dashboard.openBalance.currency })}</strong></div>
+            <div className={styles.monthCard}>
+              {dashboard.categoryTotals.map((entry) => {
+                return <div className={styles.totalRow} key={entry.categoryId}><CategoryIcon icon={entry.icon} size={24} /><span>{entry.categoryName}</span><strong>{formatMoney(entry.total)}</strong></div>;
+              })}
+              <div className={styles.sum}><span>{t('dashboard.sum')}</span><strong>{formatMoney({ minorUnits: periodTotal.toString(), currency: dashboard.openBalance.currency })}</strong></div>
+            </div>
           </section>
         </div>
-        <GroupStatisticsSection currency={dashboard.openBalance.currency} groupTotals={dashboard.groupCategoryTotals} periodLabel={dashboard.currentPeriod.label} />
+        {canViewGroupStatistics ? <GroupStatisticsSection currency={dashboard.openBalance.currency} groupTotals={dashboard.groupCategoryTotals} periodLabel={dashboard.currentPeriod.label} /> : null}
       </section>
     </div>
   );

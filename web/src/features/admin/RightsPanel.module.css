@@ -13,6 +13,7 @@
 .roleCards button > span > svg { flex: 0 0 auto; color: var(--color-teal-700); }
 .roleCards button > span > svg:last-child { margin-left: auto; color: var(--color-muted); }
 .roleCards button > span > strong { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.defaultRoleIcon { display: inline-flex; flex: 0 0 auto; margin-left: auto; color: var(--color-orange-600); }
 .roleCards small { color: var(--color-muted); line-height: 1.35; }
 .roleDetail { position: relative; min-width: 0; }
 .roleEditor { display: grid; gap: var(--space-6); padding: var(--space-6); }
@@ -32,7 +33,7 @@
 .permissionCard span { color: var(--color-muted); font-size: var(--font-size-sm); line-height: 1.4; }
 .permissionCard .implied { width: max-content; padding: 3px 7px; border-radius: 999px; color: var(--color-teal-700); background: var(--color-surface-teal); font-size: var(--font-size-xs); font-style: normal; font-weight: 700; }
 .warning { margin: 0; padding: var(--space-4); border: 1px solid #e3b65e; border-radius: var(--radius-md); color: var(--color-navy-800); background: #fff8e7; }
-.editorActions { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding-top: var(--space-4); border-top: 1px solid var(--color-border); }
+.editorActions { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding-top: var(--space-4); }
 .error { color: var(--color-red-600); }
 
 .roleSelect { min-width: 0; margin: 0; padding: 0; border: 0; }
@@ -59,11 +60,11 @@
 }
 
 @media (max-width: 767px) {
-  .workspace { padding-top: var(--space-4); }
+  .workspace { padding: var(--space-4) 0 0; }
   .rolesWorkspace { margin-inline: calc(var(--space-5) * -1); border-right: 0; border-left: 0; border-radius: 0; }
-  .roleEditor { padding: var(--space-5); }
+  .roleEditor { padding: var(--space-5); padding-bottom: 0; }
   .roleEditorTitleRow { gap: var(--space-2); }
   .roleEditorTitleRow > button svg { display: none; }
   .permissionCard { grid-template-columns: 34px minmax(0, 1fr) 52px; padding-inline: var(--space-4); }
-  .editorActions { position: sticky; z-index: 3; bottom: var(--bottom-nav-height); margin-inline: calc(var(--space-5) * -1); padding: var(--space-4) var(--space-5); background: var(--color-white); }
+  .editorActions { margin-inline: calc(var(--space-5) * -1); padding: var(--space-4) var(--space-5); background: var(--color-white); }
 }

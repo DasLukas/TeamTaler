@@ -2,9 +2,13 @@ import type {
   AccountSummary,
   AuditEntry,
   Booking,
+  BookingContext,
+  BookingTarget,
   Category,
+  ConfigurableItem,
   Dashboard,
   Group,
+  GroupSettings,
   GroupRole,
   LedgerEntry,
   Membership,
@@ -18,10 +22,13 @@ import type {
   RoleAssignment,
   Session,
   Settlement,
+  TransactionSettings,
+  User,
 } from './types';
 import { isCategoryIcon, isPermissionKey } from './types';
 import { formatMoney } from './money';
 import i18n from '@/i18n';
+import { defaultPaymentMethods, historicalPaymentMethodLabel, localizedPaymentMethodLabel } from '@/features/finance/paymentMethods';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -34,6 +41,53 @@ const memberAvatarUrl = (membershipId: string, members?: Membership[]) => member
 const PAYMENT_DESCRIPTION_PREFIX = 'Payment received';
 const REVERSAL_DESCRIPTION_PREFIX = 'Reversal: ';
 const NOTIFICATION_EVENT_TYPES: Notification['eventType'][] = ['BOOKING_ASSIGNED', 'BOOKING_REVERSED', 'PAYMENT_RECORDED', 'PAYMENT_REVERSED', 'SETTLEMENT_CREATED'];
+
+/**
+ * Adapts administrator-managed group settings and applies safe feature defaults.
+ *
+ * @param input - Group-settings response from the API.
+ * @returns Complete canonical settings.
+ */
+export function adaptGroupSettings(input: unknown): GroupSettings {
+  const source = asRecord(input);
+  const paymentMethods = adaptConfigurableItems(source.paymentMethods, true);
+  return {
+    notificationEmailsEnabled: source.notificationEmailsEnabled === true,
+    notificationEmailDeliveryAvailable: source.notificationEmailDeliveryAvailable === true,
+    defaultRoleId: typeof source.defaultRoleId === 'string' && source.defaultRoleId ? source.defaultRoleId : null,
+    foreignBookingReasonRequired: source.foreignBookingReasonRequired !== false,
+    ownPaymentReasonRequired: source.ownPaymentReasonRequired !== false,
+    otherPaymentReasonRequired: source.otherPaymentReasonRequired === true,
+    paymentMethods: paymentMethods.length > 0 ? paymentMethods : defaultPaymentMethods(),
+    bookingReasons: adaptConfigurableItems(source.bookingReasons),
+    paymentReasons: adaptConfigurableItems(source.paymentReasons),
+  };
+}
+
+/** Adapts one ordered configurable option collection. */
+export function adaptConfigurableItems(input: unknown, localizePaymentMethods = false): ConfigurableItem[] {
+  if (!Array.isArray(input)) return [];
+  return input.flatMap((entry) => {
+    const source = asRecord(entry);
+    return typeof source.id === 'string' && typeof source.label === 'string' && source.id && source.label
+      ? [{ id: source.id, label: localizePaymentMethods ? localizedPaymentMethodLabel(source.id, source.label) : source.label }]
+      : [];
+  });
+}
+
+/** Adapts non-sensitive transaction settings for operational forms. */
+export function adaptTransactionSettings(input: unknown): TransactionSettings {
+  const source = asRecord(input);
+  const paymentMethods = adaptConfigurableItems(source.paymentMethods, true);
+  return {
+    foreignBookingReasonRequired: source.foreignBookingReasonRequired !== false,
+    ownPaymentReasonRequired: source.ownPaymentReasonRequired !== false,
+    otherPaymentReasonRequired: source.otherPaymentReasonRequired === true,
+    paymentMethods: paymentMethods.length > 0 ? paymentMethods : defaultPaymentMethods(),
+    bookingReasons: adaptConfigurableItems(source.bookingReasons),
+    paymentReasons: adaptConfigurableItems(source.paymentReasons),
+  };
+}
 
 /**
  * Adapts allow grants and drops unsupported scopes or permission keys.
@@ -50,7 +104,12 @@ export function adaptPermissionGrants(input: unknown): PermissionGrant[] {
     const permission = source.permission ?? source.permissionKey ?? source.key;
     const scope = source.scope && typeof source.scope === 'object' ? asRecord(source.scope) : undefined;
     const scopeType = scope?.type ?? source.scopeType ?? 'GROUP';
-    if (scopeType === 'GROUP' && isPermissionKey(permission)) permissions.add(permission);
+    if (scopeType === 'GROUP'
+      && source.categoryId === undefined
+      && source.productId === undefined
+      && scope?.categoryId === undefined
+      && scope?.productId === undefined
+      && isPermissionKey(permission)) permissions.add(permission);
   }
   return [...permissions].map((permission) => ({ permission, scope: { type: 'GROUP' } }));
 }
@@ -176,7 +235,6 @@ function ledgerDescription(wire: JsonRecord): string {
  */
 export function adaptSession(input: unknown): Session {
   const source = asRecord(input);
-  const user = asRecord(source.user);
   const groups = (source.groups as unknown[] ?? []).map((entry) => {
     const group = asRecord(entry);
     const membership = group.membership && typeof group.membership === 'object' ? asRecord(group.membership) : undefined;
@@ -196,15 +254,26 @@ export function adaptSession(input: unknown): Session {
     } satisfies Group;
   });
   return {
-    user: {
-      id: String(user.id),
-      displayName: String(user.displayName),
-      email: String(user.email),
-      avatarUrl: typeof user.avatarUrl === 'string' && user.avatarUrl ? user.avatarUrl : undefined,
-    },
+    user: adaptUser(source.user),
     groups,
     activeGroupId: typeof source.activeGroupId === 'string' ? source.activeGroupId : groups[0]?.id ?? '',
     demo: source.demo === true,
+  };
+}
+
+/**
+ * Adapts a signed-in user returned by profile and session endpoints.
+ *
+ * @param input - Untrusted user response from the API.
+ * @returns A canonical user with optional avatar metadata.
+ */
+export function adaptUser(input: unknown): User {
+  const source = asRecord(input);
+  return {
+    id: String(source.id),
+    displayName: String(source.displayName),
+    email: String(source.email),
+    avatarUrl: typeof source.avatarUrl === 'string' && source.avatarUrl ? source.avatarUrl : undefined,
   };
 }
 
@@ -264,23 +333,30 @@ export function adaptCategories(input: unknown): Category[] {
  */
 export function adaptMembership(input: unknown, etag?: string): Membership {
   const source = asRecord(input);
+  const status = source.status === 'ARCHIVED' || source.status === 'DELETED' ? source.status : 'ACTIVE';
   if ('categoryPermissions' in source) return {
     ...(source as unknown as Membership),
+    userId: String(source.userId ?? ''),
+    email: typeof source.email === 'string' && source.email ? source.email : null,
+    isTemporaryGuest: source.isTemporaryGuest === true,
     groupPermissions: (source.groupPermissions as Membership['groupPermissions'] | undefined) ?? [],
     roleIds: Array.isArray(source.roleIds) ? source.roleIds.map(String) : [],
     effectiveGrants: adaptPermissionGrants(source.effectiveGrants),
     roleAssignmentsVersion: Number(source.roleAssignmentsVersion ?? 1),
+    status,
+    active: status === 'ACTIVE',
     etag: etag ?? source.etag as string | undefined,
   };
   const grants = (source.categoryGrants ?? {}) as Record<string, string[]>;
   const roles = (source.roles as GroupRole[] ?? []).filter((role) => role !== 'MEMBER');
   return {
     id: String(source.id),
-    userId: String(source.userId),
+    userId: String(source.userId ?? ''),
     displayName: String(source.displayName),
-    email: String(source.email),
+    email: typeof source.email === 'string' && source.email ? source.email : null,
     initials: initials(String(source.displayName)),
     avatarUrl: typeof source.avatarUrl === 'string' && source.avatarUrl ? source.avatarUrl : undefined,
+    isTemporaryGuest: source.isTemporaryGuest === true,
     roles: [...roles, 'MEMBER'],
     groupPermissions: (source.groupPermissions as Membership['groupPermissions'] | undefined) ?? [],
     categoryPermissions: Object.entries(grants).map(([categoryId, permissions]) => ({
@@ -291,7 +367,8 @@ export function adaptMembership(input: unknown, etag?: string): Membership {
     roleIds: Array.isArray(source.roleIds) ? source.roleIds.map(String) : [],
     effectiveGrants: adaptPermissionGrants(source.effectiveGrants),
     roleAssignmentsVersion: Number(source.roleAssignmentsVersion ?? 1),
-    active: source.status ? source.status === 'ACTIVE' : source.active !== false,
+    status,
+    active: status === 'ACTIVE',
     etag,
   };
 }
@@ -305,6 +382,42 @@ export function adaptMembership(input: unknown, etag?: string): Membership {
  */
 export function adaptMemberships(input: unknown, etag?: string): Membership[] {
   return (input as unknown[] ?? []).map((entry) => adaptMembership(entry, etag));
+}
+
+/**
+ * Adapts one privacy-reduced booking target.
+ *
+ * @param input - Target returned by the booking-context endpoint.
+ * @returns Stable booking-target identity without member-directory details.
+ */
+export function adaptBookingTarget(input: unknown): BookingTarget {
+  const source = asRecord(input);
+  return {
+    membershipId: String(source.membershipId ?? source.id ?? ''),
+    displayName: String(source.displayName ?? ''),
+    avatarUrl: typeof source.avatarUrl === 'string' && source.avatarUrl ? source.avatarUrl : undefined,
+    isTemporaryGuest: source.isTemporaryGuest === true,
+  };
+}
+
+/**
+ * Adapts the permission-filtered data required to create product bookings.
+ *
+ * @param input - Booking-context response from the active group.
+ * @param currency - Active group currency used for its minor-unit balance.
+ * @returns Canonical booking context with normalized period, balance, and targets.
+ */
+export function adaptBookingContext(input: unknown, currency: string): BookingContext {
+  const source = asRecord(input);
+  return {
+    openPeriod: adaptPeriod(source.openPeriod),
+    ownBalance: money(source.ownBalanceMinor, currency),
+    currentMembership: adaptMembership(source.currentMembership),
+    targets: (source.targets as unknown[] ?? []).map(adaptBookingTarget),
+    canBookForGuests: source.canBookForGuests === true,
+    foreignBookingReasonRequired: source.foreignBookingReasonRequired !== false,
+    bookingReasons: adaptConfigurableItems(source.bookingReasons),
+  };
 }
 
 /**
@@ -337,7 +450,10 @@ export function adaptBooking(input: unknown, members?: Membership[], fallbackMem
   return {
     id: String(source.id),
     memberId: targetId,
-    memberName: memberName(targetId, members, fallbackMemberName),
+    memberName: typeof source.targetDisplayName === 'string' && source.targetDisplayName
+      ? source.targetDisplayName
+      : memberName(targetId, members, fallbackMemberName),
+    memberStatus: source.targetMembershipStatus === 'ARCHIVED' || source.targetMembershipStatus === 'DELETED' ? source.targetMembershipStatus : 'ACTIVE',
     memberAvatarUrl: memberAvatarUrl(targetId, members),
     productId: String(source.productId),
     productName: String(source.productName),
@@ -347,7 +463,10 @@ export function adaptBooking(input: unknown, members?: Membership[], fallbackMem
     unitPrice: money(source.unitPriceMinor, source.currency),
     total: money(source.totalMinor, source.currency),
     bookedAt: createdAt,
-    bookedByName: memberName(actorId, members, actorId === targetId ? fallbackMemberName : i18n.t('common.member')),
+    bookedByName: typeof source.actorDisplayName === 'string' && source.actorDisplayName
+      ? source.actorDisplayName
+      : memberName(actorId, members, actorId === targetId ? fallbackMemberName : i18n.t('common.member')),
+    bookedByStatus: source.actorMembershipStatus === 'ARCHIVED' || source.actorMembershipStatus === 'DELETED' ? source.actorMembershipStatus : 'ACTIVE',
     bookedByMemberId: actorId || undefined,
     bookedByAvatarUrl: memberAvatarUrl(actorId, members),
     reason: typeof source.reason === 'string' && source.reason ? source.reason : undefined,
@@ -448,7 +567,8 @@ export function adaptAccountSummaries(input: unknown): AccountSummary[] {
       membershipId: String(source.membershipId),
       displayName: String(source.displayName),
       avatarUrl: typeof source.avatarUrl === 'string' && source.avatarUrl ? source.avatarUrl : undefined,
-      status: source.status === 'ARCHIVED' ? 'ARCHIVED' : 'ACTIVE',
+      isTemporaryGuest: source.isTemporaryGuest === true,
+      status: source.status === 'ARCHIVED' || source.status === 'DELETED' ? source.status : 'ACTIVE',
       currency,
       balance: sourceBalance ? money(sourceBalance.minorUnits, sourceBalance.currency || currency) : money(source.balanceMinor, currency),
     };
@@ -468,9 +588,14 @@ export function adaptPayment(input: unknown): Payment {
     id: String(source.id),
     membershipId: String(source.membershipId),
     memberName: String(source.memberName ?? i18n.t('common.member')),
+    membershipStatus: source.membershipStatus === 'ARCHIVED' || source.membershipStatus === 'DELETED' ? source.membershipStatus : 'ACTIVE',
     amount: money(source.amountMinor, source.currency),
     receivedAt: String(source.receivedAt),
     method: source.method as Payment['method'],
+    methodLabel: historicalPaymentMethodLabel(
+      String(source.method),
+      typeof source.methodLabel === 'string' && source.methodLabel ? source.methodLabel : undefined,
+    ),
     reference: typeof source.reference === 'string' && source.reference ? source.reference : undefined,
     note: typeof source.note === 'string' && source.note ? source.note : undefined,
     status: source.status === 'REVERSED' || source.reversedAt ? 'REVERSED' : 'POSTED',
@@ -486,7 +611,10 @@ export function adaptPayment(input: unknown): Payment {
  */
 export function adaptSettlement(input: unknown, periods: Period[]): Settlement {
   const source = asRecord(input);
-  if ('periodLabel' in source) return source as unknown as Settlement;
+  if ('periodLabel' in source) return {
+    ...source as unknown as Settlement,
+    email: typeof source.email === 'string' ? source.email : null,
+  };
   const period = periods.find((entry) => entry.id === source.periodId);
   const obligationMinor = (BigInt(String(source.chargesMinor ?? 0)) + BigInt(String(source.adjustmentsProvidedMinor ?? 0))).toString();
   const settledMinor = (BigInt(String(source.paymentsAllocatedMinor ?? 0)) + BigInt(String(source.adjustmentsAppliedMinor ?? 0))).toString();
@@ -496,6 +624,7 @@ export function adaptSettlement(input: unknown, periods: Period[]): Settlement {
     periodLabel: period?.label ?? i18n.t('common.settlementFallback'),
     membershipId: String(source.membershipId),
     memberName: String(source.displayName ?? i18n.t('common.member')),
+    email: typeof source.email === 'string' ? source.email : null,
     amount: money(obligationMinor, source.currency),
     paidAmount: money(settledMinor, source.currency),
     openAmount: money(source.amountDueMinor, source.currency),

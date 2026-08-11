@@ -30,7 +30,6 @@ export function GroupStatisticsSection({ groupTotals, periodLabel, currency }: G
     <section aria-labelledby={titleId} className={styles.section}>
       <header className={styles.heading}>
         <h2 id={titleId}>{t('dashboard.groupStatistics.title')}</h2>
-        <p>{t('dashboard.groupStatistics.intro')}</p>
       </header>
       <div className={styles.summary}>
         <TrendingUp aria-hidden="true" size={28} />

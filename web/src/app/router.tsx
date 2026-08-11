@@ -5,6 +5,9 @@ import { ActivitiesPage } from '@/features/activities/ActivitiesPage';
 import { AdminPage } from '@/features/admin/AdminPage';
 import { InvitationPage } from '@/features/auth/InvitationPage';
 import { LoginPage } from '@/features/auth/LoginPage';
+import { ForgotPasswordPage } from '@/features/auth/ForgotPasswordPage';
+import { ResetPasswordPage } from '@/features/auth/ResetPasswordPage';
+import { EmailChangeConfirmationPage } from '@/features/auth/EmailChangeConfirmationPage';
 import { PublicJoinPage } from '@/features/auth/PublicJoinPage';
 import { PublicJoinVerificationPage } from '@/features/auth/PublicJoinVerificationPage';
 import { CatalogPage } from '@/features/catalog/CatalogPage';
@@ -39,6 +42,9 @@ const notificationsRoute = createRoute({ getParentRoute: () => authenticatedRout
 const accountRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: '/account', component: AccountPage });
 const moreRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: '/more', component: MorePage });
 const loginRoute = createRoute({ getParentRoute: () => rootRoute, path: '/login', component: LoginPage });
+const forgotPasswordRoute = createRoute({ getParentRoute: () => rootRoute, path: '/forgot-password', component: ForgotPasswordPage });
+const resetPasswordRoute = createRoute({ getParentRoute: () => rootRoute, path: '/reset-password', component: ResetPasswordPage });
+const emailChangeConfirmationRoute = createRoute({ getParentRoute: () => rootRoute, path: '/email-change/confirm', component: EmailChangeConfirmationPage });
 const inviteRoute = createRoute({ getParentRoute: () => rootRoute, path: '/invite', component: InvitationPage });
 const publicJoinRoute = createRoute({ getParentRoute: () => rootRoute, path: '/join', component: PublicJoinPage });
 const publicJoinVerificationRoute = createRoute({ getParentRoute: () => rootRoute, path: '/join/verify', component: PublicJoinVerificationPage });
@@ -46,6 +52,9 @@ const publicJoinVerificationRoute = createRoute({ getParentRoute: () => rootRout
 const routeTree = rootRoute.addChildren([
   authenticatedRoute.addChildren([landingRoute, dashboardRoute, bookingRoute, legacyReportsRoute, activitiesRoute, catalogRoute, financeRoute, adminRoute, notificationsRoute, accountRoute, moreRoute]),
   loginRoute,
+  forgotPasswordRoute,
+  resetPasswordRoute,
+  emailChangeConfirmationRoute,
   inviteRoute,
   publicJoinRoute,
   publicJoinVerificationRoute,

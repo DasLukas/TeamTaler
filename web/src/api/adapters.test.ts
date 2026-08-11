@@ -8,9 +8,32 @@ describe('API adapters', () => {
       { permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } },
       { permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } },
       { permission: 'CATALOG_MANAGEMENT', scope: { type: 'CATEGORY' }, categoryId: 'category-a' },
+      { permission: 'CREATE_OWN_BOOKING', scope: { type: 'GROUP' }, categoryId: 'category-a' },
+      { permission: 'CREATE_OWN_BOOKING', scope: { type: 'GROUP', categoryId: 'category-a' } },
+      { permission: 'CREATE_OWN_BOOKING', scope: { type: 'GROUP', productId: 'product-a' } },
       { permission: 'UNSUPPORTED', scope: { type: 'GROUP' } },
       null,
     ])).toEqual([{ permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } }]);
+  });
+
+  it('normalizes managed guest identity without inventing an email address', () => {
+    const guest = adaptMembership({
+      id: 'member-guest',
+      userId: 'user-credentialless',
+      displayName: 'Guest One',
+      isTemporaryGuest: true,
+      status: 'ACTIVE',
+      roles: [],
+      categoryGrants: {},
+    });
+
+    expect(guest).toMatchObject({
+      id: 'member-guest',
+      userId: 'user-credentialless',
+      email: null,
+      isTemporaryGuest: true,
+      active: true,
+    });
   });
 
   it('adapts permission registry aliases and protected role metadata', () => {
@@ -122,6 +145,7 @@ describe('API adapters', () => {
       membershipId: 'member-large',
       displayName: 'Large Balance',
       avatarUrl: '/api/v1/users/user-large/avatar/hash.png',
+      isTemporaryGuest: true,
       status: 'ARCHIVED',
       currency: 'EUR',
       balanceMinor: '9007199254740993123',
@@ -131,6 +155,7 @@ describe('API adapters', () => {
       membershipId: 'member-large',
       displayName: 'Large Balance',
       avatarUrl: '/api/v1/users/user-large/avatar/hash.png',
+      isTemporaryGuest: true,
       status: 'ARCHIVED',
       currency: 'EUR',
       balance: { minorUnits: '9007199254740993123', currency: 'EUR' },
@@ -214,5 +239,6 @@ describe('API adapters', () => {
     expect(settlement.amount.minorUnits).toBe('200');
     expect(settlement.paidAmount.minorUnits).toBe('100');
     expect(settlement.openAmount?.minorUnits).toBe('100');
+    expect(settlement.email).toBeNull();
   });
 });

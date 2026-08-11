@@ -320,6 +320,23 @@ func TestRoleManagerListsOnlyOpenInvitations(t *testing.T) {
 	f := newFixture(t)
 	_, roleManager, _ := f.inviteMember("role-manager@example.test", "Role Manager", nil)
 	roleManager = f.assignPermissionRole(roleManager, "Invitation role manager", domain.PermissionRoleManagement)
+	_, product := f.catalogItem("Invitation privacy product", 100)
+	guestBookings, err := f.bookings.CreateBatch(f.ctx, f.admin, f.membership, "invitation-privacy-guest", bookings.BatchCreateInput{
+		ProductID:                  product.ID,
+		ProductVersion:             product.Version,
+		ExpectedPeriodID:           f.openPeriodID(),
+		Quantity:                   1,
+		TemporaryGuestDisplayNames: []string{"Invitation Privacy Guest"},
+	})
+	if err != nil || len(guestBookings) != 1 {
+		t.Fatalf("create invitation privacy guest: bookings=%#v err=%v", guestBookings, err)
+	}
+	claimInvitation, err := f.groups.CreateTemporaryGuestClaimInvitation(f.ctx, f.admin, f.membership, guestBookings[0].TargetMembershipID, "future-login@example.test", []string{
+		authorization.PresetRoleID(f.membership.GroupID, domain.RolePresetMember),
+	})
+	if err != nil {
+		t.Fatalf("create claim invitation: %v", err)
+	}
 
 	openInvitation, err := f.createStarterInvitation("open-role-invitation@example.test", "Open Role Invitation")
 	if err != nil {
@@ -346,6 +363,19 @@ func TestRoleManagerListsOnlyOpenInvitations(t *testing.T) {
 	}
 	if len(visible) != 1 || visible[0].ID != openInvitation.ID {
 		t.Fatalf("role-manager invitations = %#v, want only %s", visible, openInvitation.ID)
+	}
+	adminVisible, err := f.groups.ListInvitations(f.ctx, f.membership)
+	if err != nil {
+		t.Fatalf("list administrator invitations: %v", err)
+	}
+	claimVisible := false
+	for _, invitation := range adminVisible {
+		if invitation.ID == claimInvitation.ID {
+			claimVisible = invitation.TargetMembershipID != nil && *invitation.TargetMembershipID == guestBookings[0].TargetMembershipID
+		}
+	}
+	if !claimVisible {
+		t.Fatalf("administrator invitations = %#v, want claim invitation %s with target", adminVisible, claimInvitation.ID)
 	}
 }
 
@@ -906,8 +936,18 @@ func TestBookingCreateReplayRefreshesVoidCapabilitiesAndState(t *testing.T) {
 	if _, err := f.bookings.Void(f.ctx, memberPrincipal, member, "replay-void-one", created.ID, ""); err != nil {
 		t.Fatalf("void created booking: %v", err)
 	}
+	const renamedMember = "Booking Replay Renamed"
+	if _, err := f.db.ExecContext(f.ctx, `UPDATE users SET display_name=? WHERE id=?`, renamedMember, member.UserID); err != nil {
+		t.Fatalf("rename booking replay member: %v", err)
+	}
+	member.DisplayName = renamedMember
+	memberPrincipal.DisplayName = renamedMember
+	replayedVoid, err := f.bookings.Void(f.ctx, memberPrincipal, member, "replay-void-one", created.ID, "")
+	if err != nil || replayedVoid.ActorDisplayName != renamedMember || replayedVoid.TargetDisplayName != renamedMember {
+		t.Fatalf("void replay with refreshed identities = %#v, err = %v", replayedVoid, err)
+	}
 	replayedVoided, err := f.bookings.Create(f.ctx, memberPrincipal, member, "replay-create-one", input)
-	if err != nil || replayedVoided.VoidedAt == nil || replayedVoided.CanVoid || replayedVoided.VoidReasonRequired || replayedVoided.VoidWithoutReasonUntil != nil {
+	if err != nil || replayedVoided.VoidedAt == nil || replayedVoided.CanVoid || replayedVoided.VoidReasonRequired || replayedVoided.VoidWithoutReasonUntil != nil || replayedVoided.ActorDisplayName != renamedMember || replayedVoided.TargetDisplayName != renamedMember {
 		t.Fatalf("voided create replay = %#v, err = %v", replayedVoided, err)
 	}
 

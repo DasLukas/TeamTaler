@@ -1,11 +1,13 @@
 .form {
   display: grid;
+  min-width: 0;
   gap: var(--space-8);
   padding: var(--space-4) var(--space-8) var(--space-8);
 }
 
 .product {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: var(--space-5);
 }
@@ -29,12 +31,14 @@
 
 .product div {
   display: grid;
+  min-width: 0;
   gap: var(--space-3);
 }
 
 .product strong {
   color: var(--color-ink);
   font-size: var(--font-size-2xl);
+  overflow-wrap: anywhere;
 }
 
 .product span {
@@ -44,7 +48,7 @@
 .stepper {
   display: grid;
   height: 60px;
-  grid-template-columns: 92px 1fr 92px;
+  grid-template-columns: minmax(54px, 1fr) minmax(52px, 1.15fr) minmax(54px, 1fr);
   align-items: center;
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-md);
@@ -63,10 +67,10 @@
 
 .total {
   display: grid;
-  min-height: 86px;
+  min-height: 72px;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: var(--space-1) var(--space-4);
+  gap: var(--space-4);
   padding: 0 var(--space-5);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -75,16 +79,24 @@
   font-weight: 700;
 }
 
+.totalCopy {
+  display: grid;
+  gap: 2px;
+  align-content: center;
+}
+
 .total small {
-  grid-column: 1 / -1;
   color: var(--color-muted);
   font-size: var(--font-size-xs);
   font-weight: 500;
+  line-height: 1.25;
 }
 
 .total strong {
+  align-self: center;
   color: var(--color-teal-700);
   font-size: 2.25rem;
+  line-height: 1;
 }
 
 .actions {
@@ -93,6 +105,8 @@
   gap: var(--space-4);
   margin-top: auto;
 }
+
+.actions > * { min-width: 0; }
 
 .note {
   display: flex;
@@ -135,6 +149,28 @@
 .compact .imageFallback {
   width: 136px;
   height: 128px;
+}
+
+@container booking-inspector (max-width: 360px) {
+  .form {
+    gap: var(--space-6);
+    padding-inline: var(--space-5);
+  }
+
+  .product {
+    gap: var(--space-3);
+  }
+
+  .product img,
+  .imageFallback {
+    width: 96px;
+    height: 96px;
+  }
+
+  .product strong { font-size: var(--font-size-xl); }
+  .product span { font-size: var(--font-size-md); }
+  .total strong { font-size: 1.75rem; }
+  .actions { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 767px) {
