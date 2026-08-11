@@ -5,6 +5,7 @@ import type {
   BookingContext,
   BookingTarget,
   Category,
+  ConfigurableItem,
   Dashboard,
   Group,
   GroupSettings,
@@ -21,11 +22,13 @@ import type {
   RoleAssignment,
   Session,
   Settlement,
+  TransactionSettings,
   User,
 } from './types';
 import { isCategoryIcon, isPermissionKey } from './types';
 import { formatMoney } from './money';
 import i18n from '@/i18n';
+import { defaultPaymentMethods, historicalPaymentMethodLabel, localizedPaymentMethodLabel } from '@/features/finance/paymentMethods';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -47,10 +50,42 @@ const NOTIFICATION_EVENT_TYPES: Notification['eventType'][] = ['BOOKING_ASSIGNED
  */
 export function adaptGroupSettings(input: unknown): GroupSettings {
   const source = asRecord(input);
+  const paymentMethods = adaptConfigurableItems(source.paymentMethods, true);
   return {
     notificationEmailsEnabled: source.notificationEmailsEnabled === true,
     notificationEmailDeliveryAvailable: source.notificationEmailDeliveryAvailable === true,
     defaultRoleId: typeof source.defaultRoleId === 'string' && source.defaultRoleId ? source.defaultRoleId : null,
+    foreignBookingReasonRequired: source.foreignBookingReasonRequired !== false,
+    ownPaymentReasonRequired: source.ownPaymentReasonRequired !== false,
+    otherPaymentReasonRequired: source.otherPaymentReasonRequired === true,
+    paymentMethods: paymentMethods.length > 0 ? paymentMethods : defaultPaymentMethods(),
+    bookingReasons: adaptConfigurableItems(source.bookingReasons),
+    paymentReasons: adaptConfigurableItems(source.paymentReasons),
+  };
+}
+
+/** Adapts one ordered configurable option collection. */
+export function adaptConfigurableItems(input: unknown, localizePaymentMethods = false): ConfigurableItem[] {
+  if (!Array.isArray(input)) return [];
+  return input.flatMap((entry) => {
+    const source = asRecord(entry);
+    return typeof source.id === 'string' && typeof source.label === 'string' && source.id && source.label
+      ? [{ id: source.id, label: localizePaymentMethods ? localizedPaymentMethodLabel(source.id, source.label) : source.label }]
+      : [];
+  });
+}
+
+/** Adapts non-sensitive transaction settings for operational forms. */
+export function adaptTransactionSettings(input: unknown): TransactionSettings {
+  const source = asRecord(input);
+  const paymentMethods = adaptConfigurableItems(source.paymentMethods, true);
+  return {
+    foreignBookingReasonRequired: source.foreignBookingReasonRequired !== false,
+    ownPaymentReasonRequired: source.ownPaymentReasonRequired !== false,
+    otherPaymentReasonRequired: source.otherPaymentReasonRequired === true,
+    paymentMethods: paymentMethods.length > 0 ? paymentMethods : defaultPaymentMethods(),
+    bookingReasons: adaptConfigurableItems(source.bookingReasons),
+    paymentReasons: adaptConfigurableItems(source.paymentReasons),
   };
 }
 
@@ -380,6 +415,8 @@ export function adaptBookingContext(input: unknown, currency: string): BookingCo
     currentMembership: adaptMembership(source.currentMembership),
     targets: (source.targets as unknown[] ?? []).map(adaptBookingTarget),
     canBookForGuests: source.canBookForGuests === true,
+    foreignBookingReasonRequired: source.foreignBookingReasonRequired !== false,
+    bookingReasons: adaptConfigurableItems(source.bookingReasons),
   };
 }
 
@@ -555,6 +592,10 @@ export function adaptPayment(input: unknown): Payment {
     amount: money(source.amountMinor, source.currency),
     receivedAt: String(source.receivedAt),
     method: source.method as Payment['method'],
+    methodLabel: historicalPaymentMethodLabel(
+      String(source.method),
+      typeof source.methodLabel === 'string' && source.methodLabel ? source.methodLabel : undefined,
+    ),
     reference: typeof source.reference === 'string' && source.reference ? source.reference : undefined,
     note: typeof source.note === 'string' && source.note ? source.note : undefined,
     status: source.status === 'REVERSED' || source.reversedAt ? 'REVERSED' : 'POSTED',

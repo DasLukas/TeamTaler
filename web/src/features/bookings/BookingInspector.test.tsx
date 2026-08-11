@@ -49,7 +49,9 @@ function renderInspector(selectedProduct: Product = product, canBookForGuests = 
   render(
     <BookingInspector
       canBookForGuests={canBookForGuests}
+      bookingReasons={[]}
       currentMembershipId="member-actor"
+      foreignBookingReasonRequired
       groupId="group-a"
       onCancel={vi.fn()}
       period={period}

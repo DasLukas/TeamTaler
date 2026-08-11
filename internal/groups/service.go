@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/DasLukas/TeamTaler/internal/audit"
 	"github.com/DasLukas/TeamTaler/internal/authorization"
@@ -186,8 +188,14 @@ func (s Service) Settings(ctx context.Context, membership domain.Membership) (do
 
 // SettingsUpdate describes a partial change to group behavior.
 type SettingsUpdate struct {
-	NotificationEmailsEnabled *bool
-	DefaultRoleID             *string
+	NotificationEmailsEnabled    *bool
+	DefaultRoleID                *string
+	ForeignBookingReasonRequired *bool
+	OwnPaymentReasonRequired     *bool
+	OtherPaymentReasonRequired   *bool
+	PaymentMethods               *[]domain.ConfigurableItem
+	BookingReasons               *[]domain.ConfigurableItem
+	PaymentReasons               *[]domain.ConfigurableItem
 }
 
 // UpdateSettings atomically applies the supplied group-wide behavior changes.
@@ -196,7 +204,10 @@ type SettingsUpdate struct {
 // the persisted settings or validation, forbidden, not-found, audit, and SQL
 // errors.
 func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, membership domain.Membership, update SettingsUpdate) (domain.GroupSettings, error) {
-	if update.NotificationEmailsEnabled == nil && update.DefaultRoleID == nil {
+	if update.NotificationEmailsEnabled == nil && update.DefaultRoleID == nil &&
+		update.ForeignBookingReasonRequired == nil && update.OwnPaymentReasonRequired == nil &&
+		update.OtherPaymentReasonRequired == nil && update.PaymentMethods == nil &&
+		update.BookingReasons == nil && update.PaymentReasons == nil {
 		return domain.GroupSettings{}, domain.ValidationError{Field: "settings", Message: "must contain at least one supported field"}
 	}
 	if update.DefaultRoleID != nil {
@@ -230,17 +241,69 @@ func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, mem
 			}
 			next.DefaultRoleID = update.DefaultRoleID
 		}
-		if previous.NotificationEmailsEnabled == next.NotificationEmailsEnabled && nullableStringsEqual(previous.DefaultRoleID, next.DefaultRoleID) {
+		if update.ForeignBookingReasonRequired != nil {
+			next.ForeignBookingReasonRequired = *update.ForeignBookingReasonRequired
+		}
+		if update.OwnPaymentReasonRequired != nil {
+			next.OwnPaymentReasonRequired = *update.OwnPaymentReasonRequired
+		}
+		if update.OtherPaymentReasonRequired != nil {
+			next.OtherPaymentReasonRequired = *update.OtherPaymentReasonRequired
+		}
+		var err error
+		if update.PaymentMethods != nil {
+			next.PaymentMethods, err = normalizeConfigurableItems(*update.PaymentMethods, "paymentMethods", 1, 20)
+			if err != nil {
+				return err
+			}
+		}
+		if update.BookingReasons != nil {
+			next.BookingReasons, err = normalizeConfigurableItems(*update.BookingReasons, "bookingReasons", 0, 50)
+			if err != nil {
+				return err
+			}
+		}
+		if update.PaymentReasons != nil {
+			next.PaymentReasons, err = normalizeConfigurableItems(*update.PaymentReasons, "paymentReasons", 0, 50)
+			if err != nil {
+				return err
+			}
+		}
+		if groupSettingsEqual(previous, next) {
 			persisted = previous
 			return nil
 		}
 		now := platform.Timestamp(platform.Now())
-		if _, err := tx.ExecContext(ctx, `UPDATE group_settings SET notification_emails_enabled=?,default_role_id=?,updated_at=? WHERE group_id=?`, next.NotificationEmailsEnabled, nullableText(next.DefaultRoleID), now, membership.GroupID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE group_settings SET notification_emails_enabled=?,default_role_id=?,
+			foreign_booking_reason_required=?,own_payment_reason_required=?,other_payment_reason_required=?,updated_at=? WHERE group_id=?`,
+			next.NotificationEmailsEnabled, nullableText(next.DefaultRoleID), next.ForeignBookingReasonRequired,
+			next.OwnPaymentReasonRequired, next.OtherPaymentReasonRequired, now, membership.GroupID); err != nil {
 			return err
+		}
+		if update.PaymentMethods != nil {
+			if err := replaceConfiguredItems(ctx, tx, membership.GroupID, "PAYMENT_METHOD", next.PaymentMethods, now); err != nil {
+				return err
+			}
+		}
+		if update.BookingReasons != nil {
+			if err := replaceConfiguredItems(ctx, tx, membership.GroupID, "BOOKING", next.BookingReasons, now); err != nil {
+				return err
+			}
+		}
+		if update.PaymentReasons != nil {
+			if err := replaceConfiguredItems(ctx, tx, membership.GroupID, "PAYMENT", next.PaymentReasons, now); err != nil {
+				return err
+			}
 		}
 		if err := audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "group.settings.updated", "group", membership.GroupID, map[string]any{
 			"notificationEmailsEnabled": map[string]bool{"previous": previous.NotificationEmailsEnabled, "current": next.NotificationEmailsEnabled},
 			"defaultRoleId":             map[string]any{"previous": previous.DefaultRoleID, "current": next.DefaultRoleID},
+			"transactionSettings": map[string]any{
+				"foreignBookingReasonRequired": next.ForeignBookingReasonRequired,
+				"ownPaymentReasonRequired":     next.OwnPaymentReasonRequired,
+				"otherPaymentReasonRequired":   next.OtherPaymentReasonRequired,
+				"paymentMethodCount":           len(next.PaymentMethods), "bookingReasonCount": len(next.BookingReasons), "paymentReasonCount": len(next.PaymentReasons),
+			},
 		}); err != nil {
 			return err
 		}
@@ -260,19 +323,149 @@ func (s Service) settingsForGroup(ctx context.Context, groupID string) (domain.G
 
 type settingsQueryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
 func querySettings(ctx context.Context, queryer settingsQueryer, groupID string, settings *domain.GroupSettings) error {
 	var defaultRoleID sql.NullString
-	if err := queryer.QueryRowContext(ctx, `SELECT notification_emails_enabled,default_role_id FROM group_settings WHERE group_id=?`, groupID).
-		Scan(&settings.NotificationEmailsEnabled, &defaultRoleID); err != nil {
+	if err := queryer.QueryRowContext(ctx, `SELECT notification_emails_enabled,default_role_id,
+		foreign_booking_reason_required,own_payment_reason_required,other_payment_reason_required
+		FROM group_settings WHERE group_id=?`, groupID).
+		Scan(&settings.NotificationEmailsEnabled, &defaultRoleID, &settings.ForeignBookingReasonRequired,
+			&settings.OwnPaymentReasonRequired, &settings.OtherPaymentReasonRequired); err != nil {
 		return err
 	}
 	settings.DefaultRoleID = nil
 	if defaultRoleID.Valid {
 		settings.DefaultRoleID = &defaultRoleID.String
 	}
+	var err error
+	if settings.PaymentMethods, err = queryConfiguredItems(ctx, queryer, groupID, "PAYMENT_METHOD"); err != nil {
+		return err
+	}
+	if settings.BookingReasons, err = queryConfiguredItems(ctx, queryer, groupID, "BOOKING"); err != nil {
+		return err
+	}
+	if settings.PaymentReasons, err = queryConfiguredItems(ctx, queryer, groupID, "PAYMENT"); err != nil {
+		return err
+	}
 	return nil
+}
+
+// TransactionSettings returns non-sensitive booking and payment form options
+// for an active group member.
+func (s Service) TransactionSettings(ctx context.Context, membership domain.Membership) (domain.TransactionSettings, error) {
+	var active bool
+	if err := s.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM memberships WHERE group_id=? AND id=? AND status='ACTIVE' AND deleted_at IS NULL)`, membership.GroupID, membership.ID).Scan(&active); err != nil {
+		return domain.TransactionSettings{}, err
+	}
+	if !active {
+		return domain.TransactionSettings{}, domain.ErrForbidden
+	}
+	settings, err := s.settingsForGroup(ctx, membership.GroupID)
+	if err != nil {
+		return domain.TransactionSettings{}, err
+	}
+	return transactionSettingsFromGroup(settings), nil
+}
+
+func transactionSettingsFromGroup(settings domain.GroupSettings) domain.TransactionSettings {
+	return domain.TransactionSettings{
+		ForeignBookingReasonRequired: settings.ForeignBookingReasonRequired,
+		OwnPaymentReasonRequired:     settings.OwnPaymentReasonRequired,
+		OtherPaymentReasonRequired:   settings.OtherPaymentReasonRequired,
+		PaymentMethods:               settings.PaymentMethods,
+		BookingReasons:               settings.BookingReasons,
+		PaymentReasons:               settings.PaymentReasons,
+	}
+}
+
+func queryConfiguredItems(ctx context.Context, queryer settingsQueryer, groupID, kind string) ([]domain.ConfigurableItem, error) {
+	query := `SELECT id,label FROM group_reason_suggestions WHERE group_id=? AND kind=? ORDER BY sort_order,id`
+	args := []any{groupID, kind}
+	if kind == "PAYMENT_METHOD" {
+		query = `SELECT id,label FROM group_payment_methods WHERE group_id=? ORDER BY sort_order,id`
+		args = []any{groupID}
+	}
+	rows, err := queryer.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.ConfigurableItem, 0)
+	for rows.Next() {
+		var item domain.ConfigurableItem
+		if err := rows.Scan(&item.ID, &item.Label); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func normalizeConfigurableItems(items []domain.ConfigurableItem, field string, minimum, maximum int) ([]domain.ConfigurableItem, error) {
+	if len(items) < minimum || len(items) > maximum {
+		return nil, domain.ValidationError{Field: field, Message: fmt.Sprintf("must contain between %d and %d items", minimum, maximum)}
+	}
+	result := make([]domain.ConfigurableItem, 0, len(items))
+	ids, labels := map[string]struct{}{}, map[string]struct{}{}
+	for _, item := range items {
+		item.ID, item.Label = strings.TrimSpace(item.ID), strings.TrimSpace(item.Label)
+		if item.ID == "" {
+			item.ID, _ = platform.NewID("opt")
+		}
+		if len(item.ID) > 120 || containsControlCharacter(item.ID) {
+			return nil, domain.ValidationError{Field: field, Message: "contains an invalid identifier"}
+		}
+		if utf8.RuneCountInString(item.Label) < 1 || utf8.RuneCountInString(item.Label) > 120 || containsControlCharacter(item.Label) {
+			return nil, domain.ValidationError{Field: field, Message: "contains a label outside 1 to 120 characters"}
+		}
+		labelKey := strings.ToLower(item.Label)
+		if _, exists := ids[item.ID]; exists {
+			return nil, domain.ValidationError{Field: field, Message: "contains duplicate identifiers"}
+		}
+		if _, exists := labels[labelKey]; exists {
+			return nil, domain.ValidationError{Field: field, Message: "contains duplicate labels ignoring letter case"}
+		}
+		ids[item.ID], labels[labelKey] = struct{}{}, struct{}{}
+		result = append(result, item)
+	}
+	return result, nil
+}
+
+type settingsExecutor interface {
+	settingsQueryer
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func replaceConfiguredItems(ctx context.Context, queryer settingsExecutor, groupID, kind string, items []domain.ConfigurableItem, now string) error {
+	if kind == "PAYMENT_METHOD" {
+		if _, err := queryer.ExecContext(ctx, `DELETE FROM group_payment_methods WHERE group_id=?`, groupID); err != nil {
+			return err
+		}
+		for index, item := range items {
+			if _, err := queryer.ExecContext(ctx, `INSERT INTO group_payment_methods(group_id,id,label,sort_order,created_at) VALUES(?,?,?,?,?)`, groupID, item.ID, item.Label, index, now); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if _, err := queryer.ExecContext(ctx, `DELETE FROM group_reason_suggestions WHERE group_id=? AND kind=?`, groupID, kind); err != nil {
+		return err
+	}
+	for index, item := range items {
+		if _, err := queryer.ExecContext(ctx, `INSERT INTO group_reason_suggestions(group_id,id,kind,label,sort_order,created_at) VALUES(?,?,?,?,?,?)`, groupID, item.ID, kind, item.Label, index, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func groupSettingsEqual(left, right domain.GroupSettings) bool {
+	return left.NotificationEmailsEnabled == right.NotificationEmailsEnabled && nullableStringsEqual(left.DefaultRoleID, right.DefaultRoleID) &&
+		left.ForeignBookingReasonRequired == right.ForeignBookingReasonRequired && left.OwnPaymentReasonRequired == right.OwnPaymentReasonRequired &&
+		left.OtherPaymentReasonRequired == right.OtherPaymentReasonRequired && reflect.DeepEqual(left.PaymentMethods, right.PaymentMethods) &&
+		reflect.DeepEqual(left.BookingReasons, right.BookingReasons) && reflect.DeepEqual(left.PaymentReasons, right.PaymentReasons)
 }
 
 func validateDefaultRole(ctx context.Context, queryer settingsQueryer, groupID, roleID string) error {

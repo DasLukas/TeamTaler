@@ -72,6 +72,8 @@ export function BookingPage() {
     <BookingInspector
       compact
       canBookForGuests={bookingContextQuery.data.canBookForGuests}
+      foreignBookingReasonRequired={bookingContextQuery.data.foreignBookingReasonRequired}
+      bookingReasons={bookingContextQuery.data.bookingReasons}
       currentMembershipId={bookingContextQuery.data.currentMembership.id}
       groupId={activeGroupId}
       key={selectedProduct.id}

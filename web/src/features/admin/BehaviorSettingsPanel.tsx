@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { Field, SelectInput } from '@/components/ui/FormField';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { Toggle } from '@/components/ui/Toggle';
+import { ConfigurableListEditor } from './ConfigurableListEditor';
 import { roleDisplayName } from './roleDisplayName';
 import styles from './BehaviorSettingsPanel.module.css';
 
@@ -30,14 +31,37 @@ function SettingsForm({ groupId, settings, roles }: SettingsFormProps) {
   const defaultRoleCandidates = roles.filter((role) => !role.grants.some((grant) => grant.permission === 'GROUP_ADMINISTRATION'));
   const [notificationEmailsEnabled, setNotificationEmailsEnabled] = useState(settings.notificationEmailsEnabled);
   const [defaultRoleId, setDefaultRoleId] = useState(settings.defaultRoleId ?? '');
+  const [foreignBookingReasonRequired, setForeignBookingReasonRequired] = useState(settings.foreignBookingReasonRequired);
+  const [ownPaymentReasonRequired, setOwnPaymentReasonRequired] = useState(settings.ownPaymentReasonRequired);
+  const [otherPaymentReasonRequired, setOtherPaymentReasonRequired] = useState(settings.otherPaymentReasonRequired);
+  const [paymentMethods, setPaymentMethods] = useState(settings.paymentMethods);
+  const [bookingReasons, setBookingReasons] = useState(settings.bookingReasons);
+  const [paymentReasons, setPaymentReasons] = useState(settings.paymentReasons);
+  const configurableCollections = [paymentMethods, bookingReasons, paymentReasons];
+  const configurationInvalid = paymentMethods.length === 0 || configurableCollections.some((items) => {
+    const labels = items.map((item) => item.label.trim().toLocaleLowerCase());
+    return labels.some((label) => !label) || new Set(labels).size !== labels.length;
+  });
   const changed = notificationEmailsEnabled !== settings.notificationEmailsEnabled
-    || Boolean(defaultRoleId && defaultRoleId !== settings.defaultRoleId);
+    || Boolean(defaultRoleId && defaultRoleId !== settings.defaultRoleId)
+    || foreignBookingReasonRequired !== settings.foreignBookingReasonRequired
+    || ownPaymentReasonRequired !== settings.ownPaymentReasonRequired
+    || otherPaymentReasonRequired !== settings.otherPaymentReasonRequired
+    || JSON.stringify(paymentMethods) !== JSON.stringify(settings.paymentMethods)
+    || JSON.stringify(bookingReasons) !== JSON.stringify(settings.bookingReasons)
+    || JSON.stringify(paymentReasons) !== JSON.stringify(settings.paymentReasons);
 
   const mutation = useMutation({
     mutationFn: () => {
       const update: GroupSettingsUpdateInput = {
         ...(notificationEmailsEnabled !== settings.notificationEmailsEnabled ? { notificationEmailsEnabled } : {}),
         ...(defaultRoleId && defaultRoleId !== settings.defaultRoleId ? { defaultRoleId } : {}),
+        ...(foreignBookingReasonRequired !== settings.foreignBookingReasonRequired ? { foreignBookingReasonRequired } : {}),
+        ...(ownPaymentReasonRequired !== settings.ownPaymentReasonRequired ? { ownPaymentReasonRequired } : {}),
+        ...(otherPaymentReasonRequired !== settings.otherPaymentReasonRequired ? { otherPaymentReasonRequired } : {}),
+        ...(JSON.stringify(paymentMethods) !== JSON.stringify(settings.paymentMethods) ? { paymentMethods } : {}),
+        ...(JSON.stringify(bookingReasons) !== JSON.stringify(settings.bookingReasons) ? { bookingReasons } : {}),
+        ...(JSON.stringify(paymentReasons) !== JSON.stringify(settings.paymentReasons) ? { paymentReasons } : {}),
       };
       return api.updateGroupSettings(groupId, update);
     },
@@ -76,12 +100,33 @@ function SettingsForm({ groupId, settings, roles }: SettingsFormProps) {
         </Field>
       </section>
 
+      <section aria-labelledby="booking-settings-title" className={styles.bookingSection}>
+        <header><h3 id="booking-settings-title">{t('behaviorSettings.bookingTitle')}</h3></header>
+        <section className={styles.card}>
+          <h4 className={styles.cardTitle}>{t('behaviorSettings.reasonRulesTitle')}</h4>
+          <div className={styles.ruleList}>
+            <div className={styles.settingRow}><span>{t('behaviorSettings.foreignBookingReason')}</span><Toggle checked={foreignBookingReasonRequired} label={t('behaviorSettings.foreignBookingReason')} onChange={(value) => { setForeignBookingReasonRequired(value); mutation.reset(); }} /></div>
+            <div className={styles.settingRow}><span>{t('behaviorSettings.ownPaymentReason')}</span><Toggle checked={ownPaymentReasonRequired} label={t('behaviorSettings.ownPaymentReason')} onChange={(value) => { setOwnPaymentReasonRequired(value); mutation.reset(); }} /></div>
+            <div className={styles.settingRow}><span>{t('behaviorSettings.otherPaymentReason')}</span><Toggle checked={otherPaymentReasonRequired} label={t('behaviorSettings.otherPaymentReason')} onChange={(value) => { setOtherPaymentReasonRequired(value); mutation.reset(); }} /></div>
+          </div>
+        </section>
+        <section className={styles.card}>
+          <ConfigurableListEditor addLabel={t('behaviorSettings.addPaymentMethod')} emptyLabel={t('behaviorSettings.paymentMethodRequired')} items={paymentMethods} label={t('behaviorSettings.paymentMethods')} minimumItems={1} onChange={(items) => { setPaymentMethods(items); mutation.reset(); }} />
+        </section>
+        <section className={styles.card}>
+          <ConfigurableListEditor addLabel={t('behaviorSettings.addBookingReason')} emptyLabel={t('behaviorSettings.noReasonSuggestions')} items={bookingReasons} label={t('behaviorSettings.bookingReasons')} onChange={(items) => { setBookingReasons(items); mutation.reset(); }} />
+        </section>
+        <section className={styles.card}>
+          <ConfigurableListEditor addLabel={t('behaviorSettings.addPaymentReason')} emptyLabel={t('behaviorSettings.noReasonSuggestions')} items={paymentReasons} label={t('behaviorSettings.paymentReasons')} onChange={(items) => { setPaymentReasons(items); mutation.reset(); }} />
+        </section>
+      </section>
+
       <div className={styles.formFooter}>
         <div className={styles.feedback}>
           {mutation.isError ? <p className={styles.error} role="alert">{t('behaviorSettings.saveError')} {mutation.error.message}</p> : null}
           {mutation.isSuccess ? <p className={styles.success} role="status">{t('behaviorSettings.saved')}</p> : null}
         </div>
-        <div className={styles.actions}><Button disabled={!changed || mutation.isPending} type="submit">{mutation.isPending ? t('behaviorSettings.saving') : t('behaviorSettings.save')}</Button></div>
+        <div className={styles.actions}><Button disabled={!changed || configurationInvalid || mutation.isPending} type="submit">{mutation.isPending ? t('behaviorSettings.saving') : t('behaviorSettings.save')}</Button></div>
       </div>
     </form>
   );
@@ -103,6 +148,6 @@ export function BehaviorSettingsPanel() {
 
   return <div className={styles.content}>
     <header className={styles.header}><h2>{t('behaviorSettings.title')}</h2></header>
-    <SettingsForm groupId={activeGroupId} key={`${activeGroupId}:${settingsQuery.data.defaultRoleId ?? 'none'}`} roles={rolesQuery.data} settings={settingsQuery.data} />
+    <SettingsForm groupId={activeGroupId} key={`${activeGroupId}:${JSON.stringify(settingsQuery.data)}`} roles={rolesQuery.data} settings={settingsQuery.data} />
   </div>;
 }

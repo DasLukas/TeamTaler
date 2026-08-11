@@ -7,6 +7,7 @@ import {
   adaptCategories,
   adaptDashboard,
   adaptGroupSettings,
+  adaptTransactionSettings,
   adaptLedger,
   adaptMembership,
   adaptMemberships,
@@ -49,6 +50,7 @@ import type {
   LoginCommand,
   GroupSettings,
   GroupSettingsUpdateInput,
+  TransactionSettings,
   Membership,
   MemberReactivationCommand,
   Notification,
@@ -364,6 +366,7 @@ export const api = {
   },
   updateGroupName: async (groupId: string, name: string): Promise<{ name: string }> => request<{ name: string }>(groupRootPath(groupId), { method: 'PATCH', body: json({ name }) }),
   getGroupSettings: async (groupId: string): Promise<GroupSettings> => adaptGroupSettings(await request<unknown>(groupPath(groupId, 'settings'))),
+  getTransactionSettings: async (groupId: string): Promise<TransactionSettings> => adaptTransactionSettings(await request<unknown>(groupPath(groupId, 'transaction-settings'))),
   updateGroupSettings: async (groupId: string, settings: GroupSettingsUpdateInput): Promise<GroupSettings> => adaptGroupSettings(await request<unknown>(groupPath(groupId, 'settings'), {
     method: 'PATCH',
     body: json(settings),

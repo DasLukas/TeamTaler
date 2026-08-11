@@ -91,11 +91,13 @@ type BookingTarget struct {
 // BookingContext is the single read model required by the booking page. It
 // combines the current period and own account state with authorized targets.
 type BookingContext struct {
-	OpenPeriod        domain.Period     `json:"openPeriod"`
-	OwnBalanceMinor   int64             `json:"ownBalanceMinor,string"`
-	CurrentMembership domain.Membership `json:"currentMembership"`
-	Targets           []BookingTarget   `json:"targets"`
-	CanBookForGuests  bool              `json:"canBookForGuests"`
+	OpenPeriod                   domain.Period             `json:"openPeriod"`
+	OwnBalanceMinor              int64                     `json:"ownBalanceMinor,string"`
+	CurrentMembership            domain.Membership         `json:"currentMembership"`
+	Targets                      []BookingTarget           `json:"targets"`
+	CanBookForGuests             bool                      `json:"canBookForGuests"`
+	ForeignBookingReasonRequired bool                      `json:"foreignBookingReasonRequired"`
+	BookingReasons               []domain.ConfigurableItem `json:"bookingReasons"`
 }
 
 type bookingDetails struct {
@@ -155,6 +157,12 @@ func (s Service) Context(ctx context.Context, membership domain.Membership) (Boo
 		return BookingContext{}, err
 	}
 	result.CanBookForGuests = canBookForGuests
+	transactionSettings, err := s.Groups.TransactionSettings(ctx, membership)
+	if err != nil {
+		return BookingContext{}, err
+	}
+	result.ForeignBookingReasonRequired = transactionSettings.ForeignBookingReasonRequired
+	result.BookingReasons = transactionSettings.BookingReasons
 
 	query := `SELECT m.id,m.user_id,u.display_name,coalesce(u.avatar_key,''),
 		(u.email IS NULL AND u.password_hash IS NULL) AS is_temporary_guest
@@ -446,7 +454,11 @@ func authorizeBookingTargets(ctx context.Context, queryer bookingQueryer, member
 		if err := requirePermission(ctx, queryer, membership, domain.PermissionBookForOthers); err != nil {
 			return err
 		}
-		if reason == "" {
+		var reasonRequired bool
+		if err := queryer.QueryRowContext(ctx, `SELECT foreign_booking_reason_required FROM group_settings WHERE group_id=?`, membership.GroupID).Scan(&reasonRequired); err != nil {
+			return err
+		}
+		if reasonRequired && reason == "" {
 			return domain.ValidationError{Field: "reason", Message: "is required when assigning a booking to another member"}
 		}
 	}

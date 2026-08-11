@@ -253,8 +253,32 @@ type Group struct {
 // GroupSettings contains administrator-managed behavior shared by every member
 // of one group.
 type GroupSettings struct {
-	NotificationEmailsEnabled bool    `json:"notificationEmailsEnabled"`
-	DefaultRoleID             *string `json:"defaultRoleId"`
+	NotificationEmailsEnabled    bool               `json:"notificationEmailsEnabled"`
+	DefaultRoleID                *string            `json:"defaultRoleId"`
+	ForeignBookingReasonRequired bool               `json:"foreignBookingReasonRequired"`
+	OwnPaymentReasonRequired     bool               `json:"ownPaymentReasonRequired"`
+	OtherPaymentReasonRequired   bool               `json:"otherPaymentReasonRequired"`
+	PaymentMethods               []ConfigurableItem `json:"paymentMethods"`
+	BookingReasons               []ConfigurableItem `json:"bookingReasons"`
+	PaymentReasons               []ConfigurableItem `json:"paymentReasons"`
+}
+
+// ConfigurableItem is one administrator-managed, ordered option used by
+// transaction forms. ID is stable inside one group and Label is user-visible.
+type ConfigurableItem struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// TransactionSettings contains the non-sensitive transaction behavior that
+// active members need to render booking and payment forms.
+type TransactionSettings struct {
+	ForeignBookingReasonRequired bool               `json:"foreignBookingReasonRequired"`
+	OwnPaymentReasonRequired     bool               `json:"ownPaymentReasonRequired"`
+	OtherPaymentReasonRequired   bool               `json:"otherPaymentReasonRequired"`
+	PaymentMethods               []ConfigurableItem `json:"paymentMethods"`
+	BookingReasons               []ConfigurableItem `json:"bookingReasons"`
+	PaymentReasons               []ConfigurableItem `json:"paymentReasons"`
 }
 
 // CategoryIcon identifies one supported visual category marker.
@@ -377,6 +401,7 @@ type Payment struct {
 	Currency     string              `json:"currency"`
 	ReceivedAt   string              `json:"receivedAt"`
 	Method       string              `json:"method"`
+	MethodLabel  string              `json:"methodLabel"`
 	Reference    string              `json:"reference,omitempty"`
 	Note         string              `json:"note,omitempty"`
 	ReversedAt   *string             `json:"reversedAt,omitempty"`

@@ -60,4 +60,15 @@ describe('PaymentsPanel', () => {
     expect(within(groups[3]).getByRole('option', { name: 'Deleted Account' })).toBeVisible();
     expect(screen.queryByRole('option', { name: 'Deleted Credit' })).not.toBeInTheDocument();
   });
+
+  it('marks the amount as required while keeping the optional reference unmarked', async () => {
+    const user = userEvent.setup();
+    renderPayments();
+
+    await user.click((await screen.findAllByRole('button', { name: i18n.t('finance.record') }))[0]);
+
+    expect(screen.getByLabelText(`${i18n.t('finance.amountIn', { currency: 'EUR' })} *`)).toBeRequired();
+    expect(screen.getByLabelText(i18n.t('common.reference'))).not.toBeRequired();
+    expect(screen.queryByLabelText(`${i18n.t('common.reference')} *`)).not.toBeInTheDocument();
+  });
 });

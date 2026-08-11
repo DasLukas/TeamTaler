@@ -300,9 +300,6 @@ func (s Service) CreateOwnPayment(ctx context.Context, actor domain.Principal, m
 		return domain.Payment{}, domain.ValidationError{Field: "receivedAt", Message: "is required"}
 	}
 	input.Reference = strings.TrimSpace(input.Reference)
-	if input.Reference == "" {
-		return domain.Payment{}, domain.ValidationError{Field: "reference", Message: "is required"}
-	}
 	return s.createPayment(ctx, actor, membership, idempotencyKey, CreatePaymentInput{
 		MembershipID: membership.ID,
 		AmountMinor:  input.AmountMinor,
@@ -321,7 +318,7 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 		storedIdempotencyKey = "self:" + idempotencyKey
 	}
 	input.MembershipID = strings.TrimSpace(input.MembershipID)
-	input.Method = strings.ToUpper(strings.TrimSpace(input.Method))
+	input.Method = strings.TrimSpace(input.Method)
 	input.Reference = strings.TrimSpace(input.Reference)
 	input.Note = strings.TrimSpace(input.Note)
 	if len(input.Reference) > 120 {
@@ -333,8 +330,8 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 	if input.AmountMinor <= 0 || input.AmountMinor > 100_000_000_000 {
 		return domain.Payment{}, domain.ValidationError{Field: "amountMinor", Message: "must be a positive, reasonable integer"}
 	}
-	if input.Method != "CASH" && input.Method != "BANK_TRANSFER" && input.Method != "PAYPAL" && input.Method != "OTHER" {
-		return domain.Payment{}, domain.ValidationError{Field: "method", Message: "must be CASH, BANK_TRANSFER, PAYPAL, or OTHER"}
+	if input.Method == "" || len(input.Method) > 120 {
+		return domain.Payment{}, domain.ValidationError{Field: "method", Message: "must identify a configured payment method"}
 	}
 	receivedAt := platform.Now()
 	if input.ReceivedAt != "" {
@@ -371,6 +368,22 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
+		if err := tx.QueryRowContext(ctx, `SELECT label FROM group_payment_methods WHERE group_id=? AND id=?`, membership.GroupID, input.Method).Scan(&payment.MethodLabel); errors.Is(err, sql.ErrNoRows) {
+			return domain.ValidationError{Field: "method", Message: "is not configured for this group"}
+		} else if err != nil {
+			return err
+		}
+		var ownReasonRequired, otherReasonRequired bool
+		if err := tx.QueryRowContext(ctx, `SELECT own_payment_reason_required,other_payment_reason_required FROM group_settings WHERE group_id=?`, membership.GroupID).Scan(&ownReasonRequired, &otherReasonRequired); err != nil {
+			return err
+		}
+		reasonRequired := source == paymentSourceSelfService && ownReasonRequired
+		if source == paymentSourceFinanceWorkspace {
+			reasonRequired = otherReasonRequired
+		}
+		if reasonRequired && input.Reference == "" {
+			return domain.ValidationError{Field: "reference", Message: "is required"}
+		}
 		var currency, memberName, memberStatus string
 		var deletedAt sql.NullString
 		var currentBalance int64
@@ -406,9 +419,9 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 			ledgerDescription += ": " + input.Reference
 		}
 		payment = domain.Payment{ID: paymentID, GroupID: membership.GroupID, MembershipID: input.MembershipID, MemberName: memberName, MemberStatus: memberStatus, AmountMinor: input.AmountMinor,
-			Currency: currency, ReceivedAt: platform.Timestamp(receivedAt), Method: input.Method, Reference: input.Reference, Note: input.Note, Status: "POSTED", Allocations: []domain.PaymentAllocation{}}
-		_, err = tx.ExecContext(ctx, `INSERT INTO payments(id,group_id,membership_id,amount_minor,received_at,method,reference,note,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,
-			paymentID, membership.GroupID, input.MembershipID, input.AmountMinor, payment.ReceivedAt, input.Method, nullable(input.Reference), nullable(input.Note), membership.ID, now)
+			Currency: currency, ReceivedAt: platform.Timestamp(receivedAt), Method: input.Method, MethodLabel: payment.MethodLabel, Reference: input.Reference, Note: input.Note, Status: "POSTED", Allocations: []domain.PaymentAllocation{}}
+		_, err = tx.ExecContext(ctx, `INSERT INTO payments(id,group_id,membership_id,amount_minor,received_at,method,method_label,reference,note,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+			paymentID, membership.GroupID, input.MembershipID, input.AmountMinor, payment.ReceivedAt, input.Method, payment.MethodLabel, nullable(input.Reference), nullable(input.Note), membership.ID, now)
 		if err != nil {
 			return err
 		}
@@ -469,7 +482,7 @@ func (s Service) ListPayments(ctx context.Context, membership domain.Membership,
 	}
 	rows, err := s.DB.QueryContext(ctx, `SELECT p.id,p.group_id,p.membership_id,u.display_name,
 		CASE WHEN m.deleted_at IS NOT NULL THEN 'DELETED' ELSE m.status END,
-		p.amount_minor,g.currency,p.received_at,p.method,coalesce(p.reference,''),coalesce(p.note,''),p.reversed_at
+		p.amount_minor,g.currency,p.received_at,p.method,coalesce(p.method_label,''),coalesce(p.reference,''),coalesce(p.note,''),p.reversed_at
 		FROM payments p JOIN groups g ON g.id=p.group_id JOIN memberships m ON m.id=p.membership_id JOIN users u ON u.id=m.user_id
 		WHERE p.group_id=? ORDER BY p.received_at DESC LIMIT ?`, membership.GroupID, limit)
 	if err != nil {
@@ -479,7 +492,7 @@ func (s Service) ListPayments(ctx context.Context, membership domain.Membership,
 	result := make([]domain.Payment, 0)
 	for rows.Next() {
 		var item domain.Payment
-		if err := rows.Scan(&item.ID, &item.GroupID, &item.MembershipID, &item.MemberName, &item.MemberStatus, &item.AmountMinor, &item.Currency, &item.ReceivedAt, &item.Method, &item.Reference, &item.Note, &item.ReversedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.GroupID, &item.MembershipID, &item.MemberName, &item.MemberStatus, &item.AmountMinor, &item.Currency, &item.ReceivedAt, &item.Method, &item.MethodLabel, &item.Reference, &item.Note, &item.ReversedAt); err != nil {
 			return nil, err
 		}
 		item.Status = "POSTED"

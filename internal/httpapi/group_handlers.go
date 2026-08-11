@@ -94,7 +94,29 @@ func (s *Server) handleGetGroupSettings(response http.ResponseWriter, request *h
 		"notificationEmailsEnabled":          settings.NotificationEmailsEnabled,
 		"notificationEmailDeliveryAvailable": s.config.SMTP.Enabled,
 		"defaultRoleId":                      settings.DefaultRoleID,
+		"foreignBookingReasonRequired":       settings.ForeignBookingReasonRequired,
+		"ownPaymentReasonRequired":           settings.OwnPaymentReasonRequired,
+		"otherPaymentReasonRequired":         settings.OtherPaymentReasonRequired,
+		"paymentMethods":                     settings.PaymentMethods,
+		"bookingReasons":                     settings.BookingReasons,
+		"paymentReasons":                     settings.PaymentReasons,
 	})
+}
+
+// handleGetTransactionSettings returns non-sensitive ordered form options for
+// the current active group member.
+func (s *Server) handleGetTransactionSettings(response http.ResponseWriter, request *http.Request) {
+	_, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	settings, err := s.groups.TransactionSettings(request.Context(), membership)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, settings)
 }
 
 // handleUpdateGroupSettings validates and persists a partial settings document.
@@ -108,14 +130,22 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		return
 	}
 	var input struct {
-		NotificationEmailsEnabled *bool   `json:"notificationEmailsEnabled"`
-		DefaultRoleID             *string `json:"defaultRoleId"`
+		NotificationEmailsEnabled    *bool                      `json:"notificationEmailsEnabled"`
+		DefaultRoleID                *string                    `json:"defaultRoleId"`
+		ForeignBookingReasonRequired *bool                      `json:"foreignBookingReasonRequired"`
+		OwnPaymentReasonRequired     *bool                      `json:"ownPaymentReasonRequired"`
+		OtherPaymentReasonRequired   *bool                      `json:"otherPaymentReasonRequired"`
+		PaymentMethods               *[]domain.ConfigurableItem `json:"paymentMethods"`
+		BookingReasons               *[]domain.ConfigurableItem `json:"bookingReasons"`
+		PaymentReasons               *[]domain.ConfigurableItem `json:"paymentReasons"`
 	}
 	if err := decodeJSON(response, request, &input); err != nil {
 		writeProblem(response, request, err)
 		return
 	}
-	if input.NotificationEmailsEnabled == nil && input.DefaultRoleID == nil {
+	if input.NotificationEmailsEnabled == nil && input.DefaultRoleID == nil && input.ForeignBookingReasonRequired == nil &&
+		input.OwnPaymentReasonRequired == nil && input.OtherPaymentReasonRequired == nil && input.PaymentMethods == nil &&
+		input.BookingReasons == nil && input.PaymentReasons == nil {
 		writeProblem(response, request, domain.ValidationError{Field: "settings", Message: "must contain at least one supported field"})
 		return
 	}
@@ -124,8 +154,14 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		return
 	}
 	settings, err := s.groups.UpdateSettings(request.Context(), principal, membership, groups.SettingsUpdate{
-		NotificationEmailsEnabled: input.NotificationEmailsEnabled,
-		DefaultRoleID:             input.DefaultRoleID,
+		NotificationEmailsEnabled:    input.NotificationEmailsEnabled,
+		DefaultRoleID:                input.DefaultRoleID,
+		ForeignBookingReasonRequired: input.ForeignBookingReasonRequired,
+		OwnPaymentReasonRequired:     input.OwnPaymentReasonRequired,
+		OtherPaymentReasonRequired:   input.OtherPaymentReasonRequired,
+		PaymentMethods:               input.PaymentMethods,
+		BookingReasons:               input.BookingReasons,
+		PaymentReasons:               input.PaymentReasons,
 	})
 	if err != nil {
 		writeProblem(response, request, err)
@@ -135,6 +171,12 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		"notificationEmailsEnabled":          settings.NotificationEmailsEnabled,
 		"notificationEmailDeliveryAvailable": s.config.SMTP.Enabled,
 		"defaultRoleId":                      settings.DefaultRoleID,
+		"foreignBookingReasonRequired":       settings.ForeignBookingReasonRequired,
+		"ownPaymentReasonRequired":           settings.OwnPaymentReasonRequired,
+		"otherPaymentReasonRequired":         settings.OtherPaymentReasonRequired,
+		"paymentMethods":                     settings.PaymentMethods,
+		"bookingReasons":                     settings.BookingReasons,
+		"paymentReasons":                     settings.PaymentReasons,
 	})
 }
 

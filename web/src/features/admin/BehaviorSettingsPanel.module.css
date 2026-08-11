@@ -73,6 +73,11 @@
   gap: var(--space-5);
 }
 
+.bookingSection { display: grid; gap: var(--space-5); padding-top: var(--space-3); }
+.bookingSection > header h3 { margin: 0; font-size: var(--font-size-xl); }
+.ruleList { display: grid; gap: var(--space-4); }
+.ruleList .settingRow + .settingRow { padding-top: var(--space-4); border-top: 1px solid var(--color-border); }
+
 .card {
   display: grid;
   padding: var(--space-6);

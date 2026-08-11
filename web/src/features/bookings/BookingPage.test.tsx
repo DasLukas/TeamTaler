@@ -45,6 +45,8 @@ describe('BookingPage explicit product selection', () => {
       currentMembership: demoMembers[0],
       targets: demoMembers.map((member) => ({ membershipId: member.id, displayName: member.displayName, avatarUrl: member.avatarUrl, isTemporaryGuest: member.isTemporaryGuest })),
       canBookForGuests: false,
+      foreignBookingReasonRequired: true,
+      bookingReasons: [],
     } satisfies BookingContext);
     mocks.createBookings.mockResolvedValue([{ id: 'booking-created' }]);
     mocks.useMediaQuery.mockReturnValue(true);

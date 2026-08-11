@@ -328,8 +328,8 @@ export const demoAccountSummaries: AccountSummary[] = [
 
 /** Demo payments managed by finance users. */
 export const demoPayments: Payment[] = [
-  { id: 'payment-1', membershipId: 'member-lukas', memberName: 'Lukas Waschul', membershipStatus: 'ACTIVE', amount: { minorUnits: '2000', currency: 'EUR' }, receivedAt: '2026-08-01', method: 'BANK_TRANSFER', reference: 'Juli', status: 'POSTED' },
-  { id: 'payment-2', membershipId: 'member-mara', memberName: 'Mara Becker', membershipStatus: 'ACTIVE', amount: { minorUnits: '1500', currency: 'EUR' }, receivedAt: '2026-07-30', method: 'CASH', status: 'POSTED' },
+  { id: 'payment-1', membershipId: 'member-lukas', memberName: 'Lukas Waschul', membershipStatus: 'ACTIVE', amount: { minorUnits: '2000', currency: 'EUR' }, receivedAt: '2026-08-01', method: 'BANK_TRANSFER', methodLabel: 'Bank transfer', reference: 'Juli', status: 'POSTED' },
+  { id: 'payment-2', membershipId: 'member-mara', memberName: 'Mara Becker', membershipStatus: 'ACTIVE', amount: { minorUnits: '1500', currency: 'EUR' }, receivedAt: '2026-07-30', method: 'CASH', methodLabel: 'Cash', status: 'POSTED' },
 ];
 
 /** Demo settlements generated from closed periods. */

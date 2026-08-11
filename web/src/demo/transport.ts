@@ -231,7 +231,22 @@ export class DemoTransport {
   private assignmentVersions = new Map<string, number>();
   private invitations: InvitationMetadata[] = [];
   private invitationTokens = new Map<string, string>();
-  private groupSettings: GroupSettings = { notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' };
+  private groupSettings: GroupSettings = {
+    notificationEmailsEnabled: false,
+    notificationEmailDeliveryAvailable: true,
+    defaultRoleId: 'role-member',
+    foreignBookingReasonRequired: true,
+    ownPaymentReasonRequired: true,
+    otherPaymentReasonRequired: false,
+    paymentMethods: [
+      { id: 'BANK_TRANSFER', label: 'Bank transfer' },
+      { id: 'CASH', label: 'Cash' },
+      { id: 'PAYPAL', label: 'PayPal' },
+      { id: 'OTHER', label: 'Other' },
+    ],
+    bookingReasons: [],
+    paymentReasons: [],
+  };
   private publicJoinLink: PublicJoinLink = { enabled: false, expired: false, expiresAt: null, version: 0, emailVerificationAvailable: true };
   private publicJoinToken = '';
 
@@ -320,7 +335,13 @@ export class DemoTransport {
       const update = body as Partial<GroupSettings>;
       const updatesNotificationEmails = update.notificationEmailsEnabled !== undefined;
       const updatesDefaultRole = update.defaultRoleId !== undefined;
-      if (!updatesNotificationEmails && !updatesDefaultRole) throw new Error('At least one group setting is required.');
+      const updatesTransactionSettings = update.foreignBookingReasonRequired !== undefined
+        || update.ownPaymentReasonRequired !== undefined
+        || update.otherPaymentReasonRequired !== undefined
+        || update.paymentMethods !== undefined
+        || update.bookingReasons !== undefined
+        || update.paymentReasons !== undefined;
+      if (!updatesNotificationEmails && !updatesDefaultRole && !updatesTransactionSettings) throw new Error('At least one group setting is required.');
       if (updatesNotificationEmails && typeof update.notificationEmailsEnabled !== 'boolean') throw new Error('Notification email delivery must be a boolean.');
       if (updatesDefaultRole) {
         const defaultRole = this.roles.find((role) => role.id === update.defaultRoleId);
@@ -331,6 +352,12 @@ export class DemoTransport {
         ...this.groupSettings,
         ...(updatesNotificationEmails ? { notificationEmailsEnabled: update.notificationEmailsEnabled as boolean } : {}),
         ...(updatesDefaultRole ? { defaultRoleId: update.defaultRoleId as string } : {}),
+        ...(update.foreignBookingReasonRequired !== undefined ? { foreignBookingReasonRequired: update.foreignBookingReasonRequired } : {}),
+        ...(update.ownPaymentReasonRequired !== undefined ? { ownPaymentReasonRequired: update.ownPaymentReasonRequired } : {}),
+        ...(update.otherPaymentReasonRequired !== undefined ? { otherPaymentReasonRequired: update.otherPaymentReasonRequired } : {}),
+        ...(update.paymentMethods !== undefined ? { paymentMethods: clone(update.paymentMethods) } : {}),
+        ...(update.bookingReasons !== undefined ? { bookingReasons: clone(update.bookingReasons) } : {}),
+        ...(update.paymentReasons !== undefined ? { paymentReasons: clone(update.paymentReasons) } : {}),
       };
       return clone(this.groupSettings) as T;
     }
@@ -363,6 +390,14 @@ export class DemoTransport {
       return clone(this.publicJoinLink) as T;
     }
     if (resource === 'dashboard') return clone(this.dashboard) as T;
+    if (resource === 'transaction-settings' && method === 'GET') return clone({
+      foreignBookingReasonRequired: this.groupSettings.foreignBookingReasonRequired,
+      ownPaymentReasonRequired: this.groupSettings.ownPaymentReasonRequired,
+      otherPaymentReasonRequired: this.groupSettings.otherPaymentReasonRequired,
+      paymentMethods: this.groupSettings.paymentMethods,
+      bookingReasons: this.groupSettings.bookingReasons,
+      paymentReasons: this.groupSettings.paymentReasons,
+    }) as T;
     if (resource === 'booking-context' && method === 'GET') {
       const actor = this.currentMembership(groupId);
       if (!actor) throw new Error(i18n.t('errors.memberNotFound'));
@@ -378,6 +413,8 @@ export class DemoTransport {
         currentMembership: actor,
         targets,
         canBookForGuests,
+        foreignBookingReasonRequired: this.groupSettings.foreignBookingReasonRequired,
+        bookingReasons: this.groupSettings.bookingReasons,
       }) as T;
     }
     if (resource === 'members' && method === 'GET') return clone(this.members.filter((member) => member.status !== 'DELETED')) as T;
@@ -1364,6 +1401,7 @@ export class DemoTransport {
       status: 'POSTED',
       ...command,
       amount: command.amount ?? { minorUnits: String(command.amountMinor ?? 0), currency: 'EUR' },
+      methodLabel: this.groupSettings.paymentMethods.find((entry) => entry.id === command.method)?.label ?? command.method,
     };
     this.payments.unshift(payment);
     const paymentMinor = BigInt(payment.amount.minorUnits);

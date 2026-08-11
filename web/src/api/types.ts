@@ -175,11 +175,33 @@ export interface Group {
   };
 }
 
-/** Administrator-managed notification behavior shared by one group. */
+/** One stable, ordered, administrator-managed transaction form option. */
+export interface ConfigurableItem {
+  id: string;
+  label: string;
+}
+
+/** Non-sensitive transaction behavior used by booking and payment forms. */
+export interface TransactionSettings {
+  foreignBookingReasonRequired: boolean;
+  ownPaymentReasonRequired: boolean;
+  otherPaymentReasonRequired: boolean;
+  paymentMethods: ConfigurableItem[];
+  bookingReasons: ConfigurableItem[];
+  paymentReasons: ConfigurableItem[];
+}
+
+/** Administrator-managed group behavior shared by one group. */
 export interface GroupSettings {
   notificationEmailsEnabled: boolean;
   notificationEmailDeliveryAvailable: boolean;
   defaultRoleId: string | null;
+  foreignBookingReasonRequired: boolean;
+  ownPaymentReasonRequired: boolean;
+  otherPaymentReasonRequired: boolean;
+  paymentMethods: ConfigurableItem[];
+  bookingReasons: ConfigurableItem[];
+  paymentReasons: ConfigurableItem[];
 }
 
 /**
@@ -188,6 +210,12 @@ export interface GroupSettings {
 export interface GroupSettingsUpdateInput {
   notificationEmailsEnabled?: boolean;
   defaultRoleId?: string;
+  foreignBookingReasonRequired?: boolean;
+  ownPaymentReasonRequired?: boolean;
+  otherPaymentReasonRequired?: boolean;
+  paymentMethods?: ConfigurableItem[];
+  bookingReasons?: ConfigurableItem[];
+  paymentReasons?: ConfigurableItem[];
 }
 
 /** Administrator-visible state of the group's single public join link. */
@@ -407,6 +435,8 @@ export interface BookingContext {
   currentMembership: Membership;
   targets: BookingTarget[];
   canBookForGuests: boolean;
+  foreignBookingReasonRequired: boolean;
+  bookingReasons: ConfigurableItem[];
 }
 
 /** One immutable row in a member account statement. */
@@ -439,7 +469,8 @@ export interface Payment {
   membershipStatus: MembershipStatus;
   amount: Money;
   receivedAt: string;
-  method: 'CASH' | 'BANK_TRANSFER' | 'PAYPAL' | 'OTHER';
+  method: string;
+  methodLabel: string;
   reference?: string;
   note?: string;
   status: 'POSTED' | 'REVERSED';
@@ -466,7 +497,7 @@ export interface SelfPaymentCommand {
   amount: Money;
   receivedAt: string;
   method: Payment['method'];
-  reference: string;
+  reference?: string;
 }
 
 /** An accounting period that groups bookings and payments. */

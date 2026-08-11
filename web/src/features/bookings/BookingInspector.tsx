@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { formatMoney, majorUnitsInputPattern, majorUnitsPlaceholder, multiplyMoney, validatePositiveMajorUnits } from '@/api/money';
-import type { BookingTarget, Period, Product } from '@/api/types';
+import type { BookingTarget, ConfigurableItem, Period, Product } from '@/api/types';
 import { Button } from '@/components/ui/Button';
 import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { IconButton } from '@/components/ui/IconButton';
@@ -23,6 +23,8 @@ export interface BookingInspectorProps {
   targets: BookingTarget[];
   currentMembershipId: string;
   canBookForGuests: boolean;
+  foreignBookingReasonRequired: boolean;
+  bookingReasons: ConfigurableItem[];
   onCancel: () => void;
   onBooked?: () => void;
   compact?: boolean;
@@ -41,6 +43,8 @@ export function BookingInspector({
   targets,
   currentMembershipId,
   canBookForGuests,
+  foreignBookingReasonRequired,
+  bookingReasons,
   onCancel,
   onBooked,
   compact = false,
@@ -63,7 +67,8 @@ export function BookingInspector({
   const targetsById = new Map(targets.map((target) => [target.membershipId, target]));
   const targetMembershipIds = requestedTargetMembershipIds.filter((membershipId) => availableTargetIds.has(membershipId));
   const targetCount = targetMembershipIds.length + temporaryGuestDisplayNames.length;
-  const needsReason = targetMembershipIds.some((membershipId) => membershipId !== currentMembershipId && !targetsById.get(membershipId)?.isTemporaryGuest);
+  const hasForeignBooking = targetMembershipIds.some((membershipId) => membershipId !== currentMembershipId && !targetsById.get(membershipId)?.isTemporaryGuest);
+  const needsReason = hasForeignBooking && foreignBookingReasonRequired;
   const userDefinesPrice = product.pricingMode === 'USER_DEFINED';
   const unitPriceValidation = userDefinesPrice ? validatePositiveMajorUnits(unitPriceInput, product.currency) : {};
   const unitPrice = userDefinesPrice
@@ -86,7 +91,7 @@ export function BookingInspector({
         unitPrice: userDefinesPrice ? unitPrice : undefined,
         targetMembershipIds,
         ...(temporaryGuestDisplayNames.length > 0 ? { temporaryGuestDisplayNames } : {}),
-        reason: needsReason ? reason.trim() : undefined,
+        reason: reason.trim() || undefined,
       });
     },
     onSuccess: () => {
@@ -182,9 +187,10 @@ export function BookingInspector({
         </Field>
       ) : null}
 
-      {needsReason ? (
-        <Field error={!reason.trim() && bookingMutation.isError ? t('booking.reasonRequired') : undefined} htmlFor="booking-reason" label={`${t('booking.reason')} *`}>
-          <TextInput id="booking-reason" onChange={(event) => setReason(event.target.value)} required value={reason} />
+      {hasForeignBooking ? (
+        <Field error={needsReason && !reason.trim() && bookingMutation.isError ? t('booking.reasonRequired') : undefined} htmlFor="booking-reason" label={`${t('booking.reason')}${needsReason ? ' *' : ''}`}>
+          <TextInput id="booking-reason" list="booking-reason-suggestions" maxLength={500} onChange={(event) => setReason(event.target.value)} required={needsReason} value={reason} />
+          <datalist id="booking-reason-suggestions">{bookingReasons.map((item) => <option key={item.id} value={item.label} />)}</datalist>
         </Field>
       ) : null}
 
