@@ -34,14 +34,18 @@
   margin-top: var(--space-3);
 }
 
-.balanceCard span,
+.balanceCard > div:first-child > span,
 .period strong { color: var(--color-ink); font-weight: 700; }
 
-.balanceCard > div:first-child strong {
+.balanceCard > div:first-child > strong {
   color: var(--color-orange-600);
   font-size: clamp(2.5rem, 5vw, 3.7rem);
   letter-spacing: -0.04em;
   white-space: nowrap;
+}
+
+.balanceCard > div:first-child > strong.creditBalance {
+  color: var(--color-green-600);
 }
 
 .period {
@@ -88,14 +92,13 @@
 .activityCopy span,
 .activityCopy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .activityCopy small { color: var(--color-muted); }
+.deletedBadge { margin-left: 6px; padding: 2px 6px; border-radius: 999px; color: var(--color-muted); background: var(--color-surface-muted); font-size: var(--font-size-xs); font-style: normal; font-weight: 700; }
 .activity time { color: var(--color-muted); }
 .allActivities { display: flex; min-height: 48px; align-items: center; justify-content: space-between; padding: 0 var(--space-4); color: var(--color-teal-700); font-size: var(--font-size-xs); }
 
 .monthCard {
   padding: var(--space-4);
 }
-
-.monthCard h2 { font-size: var(--font-size-lg); }
 
 .totalRow,
 .sum {
@@ -130,8 +133,8 @@
   .balanceCard { min-height: 110px; grid-template-columns: 1fr; }
   .balanceCard > div:first-child { padding-right: 0; }
   .period { display: none; }
-  .balanceCard > div:first-child strong { font-size: 2.3rem; }
+  .balanceCard > div:first-child > strong { font-size: 2.3rem; }
   .selfPaymentAction { width: 100%; }
   .lower { grid-template-columns: 1fr; }
-  .monthCard { order: -1; }
+  .periodSection { order: -1; }
 }

@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { GroupRole } from '@/api/types';
+import type { PermissionKey } from '@/api/types';
 import { MorePage } from './MorePage';
 import { NotificationSummaryContext } from '@/features/notifications/NotificationSummaryContext';
 
@@ -12,10 +12,10 @@ vi.mock('@tanstack/react-router', () => ({ Link: ({ children, to }: { children: 
 vi.mock('@/components/ui/Avatar', () => ({ Avatar: () => <div>avatar</div> }));
 vi.mock('@/components/auth/LogoutButton', () => ({ LogoutButton: () => <button type="button">Abmelden</button> }));
 
-function useRoles(roles: GroupRole[]): void {
+function usePermissions(permissions: PermissionKey[]): void {
   mocks.useActiveGroup.mockReturnValue({
     session: { user: { displayName: 'Alex', email: 'alex@example.test' } },
-    activeGroup: { name: 'Group A', membership: { roles } },
+    activeGroup: { name: 'Group A', membership: { effectiveGrants: permissions.map((permission) => ({ permission, scope: { type: 'GROUP' as const } })) } },
   });
 }
 
@@ -28,7 +28,7 @@ describe('MorePage role navigation', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('uses the requested complete order for administrators', () => {
-    useRoles(['ADMIN', 'MEMBER']);
+    usePermissions(['FINANCE_MANAGEMENT', 'CATALOG_MANAGEMENT', 'GROUP_ADMINISTRATION']);
     render(<MorePage />);
 
     expect(menuItems()).toEqual(['Benachrichtigungen', 'Finanzen', 'Katalog', 'Verwaltung', 'Mein Konto', 'Abmelden']);
@@ -36,18 +36,18 @@ describe('MorePage role navigation', () => {
   });
 
   it.each([
-    { roles: ['FINANCE_MANAGER', 'MEMBER'] as GroupRole[], expected: ['Benachrichtigungen', 'Finanzen', 'Mein Konto', 'Abmelden'] },
-    { roles: ['CATALOG_MANAGER', 'MEMBER'] as GroupRole[], expected: ['Benachrichtigungen', 'Katalog', 'Mein Konto', 'Abmelden'] },
-    { roles: ['MEMBER'] as GroupRole[], expected: ['Benachrichtigungen', 'Mein Konto', 'Abmelden'] },
-  ])('filters unavailable workspaces for $roles', ({ roles, expected }) => {
-    useRoles(roles);
+    { permissions: ['FINANCE_MANAGEMENT'] as PermissionKey[], expected: ['Benachrichtigungen', 'Finanzen', 'Mein Konto', 'Abmelden'] },
+    { permissions: ['CATALOG_MANAGEMENT'] as PermissionKey[], expected: ['Benachrichtigungen', 'Katalog', 'Mein Konto', 'Abmelden'] },
+    { permissions: [] as PermissionKey[], expected: ['Benachrichtigungen', 'Mein Konto', 'Abmelden'] },
+  ])('filters unavailable workspaces for $permissions', ({ permissions, expected }) => {
+    usePermissions(permissions);
     render(<MorePage />);
 
     expect(menuItems()).toEqual(expected);
   });
 
   it('shows the exact unread count on the notification menu item', () => {
-    useRoles(['MEMBER']);
+    usePermissions([]);
     render(<NotificationSummaryContext.Provider value={7}><MorePage /></NotificationSummaryContext.Provider>);
     expect(screen.getByLabelText('7 ungelesene Benachrichtigungen')).toHaveTextContent('7');
   });

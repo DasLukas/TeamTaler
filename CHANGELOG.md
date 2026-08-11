@@ -4,6 +4,79 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-09
+
+### Added
+
+- Group-level booking and payment settings for conditional reasons, ordered editable payment methods, and separate freely editable booking and payment reason suggestions.
+- Migration `0024` seeds the four existing payment methods for every group and preserves immutable payment-method label snapshots after later configuration changes.
+- Self-service display-name, password, and verified email-address changes, plus enumeration-resistant password reset and public authentication capability discovery.
+- One-hour, single-use account-security actions with hashed proofs and a leased encrypted email outbox for password-reset and email-change delivery.
+- Group-owned, many-to-many roles with stable identifiers, cumulative permission grants, multiple roles per membership or pending invitation, four seeded starter roles, and a role-centered administration workflow.
+- Thirteen stable group permission keys covering group administration, role management, finance, catalog, complete booking activity, own-account payments, own booking creation, own or arbitrary booking reversal, booking for other members, booking for temporary guests, member-directory visibility, and anonymous group-statistic visibility.
+- Additive v1 role, permission-definition, and role-assignment endpoints with optimistic ETag concurrency control and tenant-bound identifiers.
+- A scope-aware permission-grant contract that stores `GROUP`, `CATEGORY`, and `PRODUCT` scope shapes while accepting only group-wide grants in v1.
+- A group-owned default role that preselects manual invitations and safely supplies CSV rows without an explicit role value.
+- Administrator-managed public join links with configurable finite or unlimited lifetime, local QR generation and download, copy support, immediate disable, and token rotation.
+- Email-verified public registration for new accounts plus authenticated direct joining and archived-membership reactivation for existing accounts.
+- An accessible multi-choice booking target dropdown plus an additive atomic batch-booking endpoint for applying one product, quantity, price, and reason to multiple members.
+- Temporary guests for one-off bookings, with credentialless identities and stable memberships, inline atomic creation by display name, first-class accounting history, administrator rename/archive controls, and history-preserving login claim invitations.
+- `BOOK_FOR_GUESTS` as an independent capability for selecting existing temporary guests and creating new ones inline without exposing the member directory.
+- A privacy-minimized booking-context endpoint containing only the open period, own balance, current membership, booking-safe targets, and server-derived guest-creation capability.
+- A unified two-stage membership lifecycle: reversible archival and reactivation for regular members and temporary guests, followed by zero-balance permanent removal through a history-preserving tombstone.
+- Additive membership reactivation and permanent-removal endpoints plus migration `0023` lifecycle state, indexes, and database guards.
+
+### Changed
+
+- Consolidated group identity, branding, email notification, default-role, and transaction controls into one structured administration Settings tab.
+
+- Booking and payment reason requirements are now enforced from current group settings inside their write transactions; payment forms use the first configured method as their default and retain at least one method.
+- Revoke every session after a password replacement, password-reset confirmation, or email-change confirmation, while preserving the existing user, membership, balance, statement, and audit identities during an email change.
+- Keep display-name and authenticated password changes available without SMTP, while password reset and verified email-change entry points report unavailable and fail closed until complete SMTP and token-encryption configuration is present.
+- Moved role assignment from the role-definition workspace into responsive member and pending-invitation directories with compact multi-select triggers, explicit draft confirmation, optimistic-conflict refresh, and protected last-administrator controls. Unchanged preset descriptions are localized in the German interface without overwriting stored canonical values.
+- Made `MEMBER`, `FINANCE_MANAGER`, and `CATALOG_MANAGER` ordinary editable and deletable starter roles, removed implicit member-role assignment, and require every login-enabled active membership and pending invitation to retain at least one explicit role. Credentialless temporary guests are the sole roleless exception.
+- Added independent `CREATE_OWN_BOOKING`, `BOOK_FOR_OTHERS`, and `BOOK_FOR_GUESTS` target classes. Booking navigation and target choices reflect their union, while permission-less finance or catalog roles remain possible.
+- Kept manual invitation roles explicit while preselecting the configured default. CSV imports now accept case-insensitive role names per row, use `|` for multiple roles, and fall back to the safe group default; the former shared `roleId` parameter remains compatible.
+- Users with `BOOK_FOR_OTHERS` can select credentialed foreign members, while users with `BOOK_FOR_GUESTS` can select existing temporary guests or add new names. Their own membership remains the default only when `CREATE_OWN_BOOKING` is effective. Existing IDs and new names share one 1-to-100 target limit and one idempotent all-or-nothing transaction.
+- Grouped finance payment targets into regular members, temporary guests, archived accounts, and deleted accounts with a non-zero balance without querying the protected member directory.
+- Unified active-member actions under Archive, renamed former members to archived members, and added lifecycle-aware Reactivate and Delete actions with retained historical Deleted badges.
+- Protected member email, role, and grant listings with `VIEW_MEMBER_DIRECTORY`, protected anonymous category totals with `VIEW_GROUP_STATISTICS`, made `BOOK_FOR_OTHERS` imply directory access, and preserved upgraded behavior by granting both reads to every existing role.
+- Skip period statements and close notifications for idle credentialless guests while retaining nullable-email statements for guests with financial activity.
+- Added server-resolved actor and target display names to booking responses so activity clients no longer require the protected member directory. `Membership.userId` remains required, while temporary-guest membership and statement emails can be null and `isTemporaryGuest` is derived only from missing credentials.
+- Added deterministic permission-aware landing routes and documented that overview information and actions are filtered by effective permissions.
+- Removed the deprecated booking-activity group-settings adapter and its base-role version field; activity visibility is managed only through role grants.
+- Simplified role editing to one direct Save action and removed implementation-specific scope guidance from the user interface.
+- Kept role-assignment actions visible while constraining overflow to the role list in desktop popovers and mobile sheets.
+- Stacked the role selector above the permission editor on medium-width displays so editor controls remain readable and unclipped.
+- Constrained long role titles to their own selector card with accessible hover text instead of allowing them to overlap adjacent roles.
+- Replaced redundant preset and locked-name labels with a clearly disabled visual state for immutable role-name fields.
+- Reduced the permission editor heading to its essential label by removing redundant scope and role-union helper text.
+- Removed the redundant explanatory badge from the arbitrary-booking-reversal permission while retaining computed permission implications.
+- Aligned the duplicate-role action with the role title across desktop, medium-width, and mobile editor layouts.
+- Removed non-interactive information icons from permission rows and reclaimed their unused layout column.
+- Replaced authorization decisions based on legacy role names, direct group permissions, and category grants with a centralized effective-permission policy. Effective permissions are the union of assigned role grants; `VOID_ANY_BOOKING` implies `VOID_OWN_BOOKING` and `VIEW_ALL_BOOKING_ACTIVITY`.
+- Preserved legacy v1 role and self-payment fields as deprecated adapters. Legacy preset writes leave custom roles intact, while non-empty legacy category-grant writes now fail validation instead of silently widening access.
+- Booking responses now expose whether the current member may reverse a booking, whether a reason is required, and the optional end of the actor-only 30-second reason-free window. `VOID_OWN_BOOKING` covers both actor- and target-related bookings, while an incoming third-party booking always requires a reversal reason.
+- Migration `0017` maps existing administrator, finance, catalog, self-payment, activity-visibility, active-membership, and open-invitation state into roles. Legacy membership and invitation category grants are intentionally removed rather than converted to unsafe group-wide access.
+
+### Security
+
+- Keep password-reset requests account-enumeration resistant, require the current password for authenticated credential changes, carry account-action secrets only in URL fragments and JSON bodies, and remove encrypted outbox secrets after relay acceptance or cancellation.
+- Protected the reserved group-administrator role, its fixed identity, and its non-removable core grants, and require every group to retain at least one active assignment of that exact role.
+- Revalidate permissions and last-administrator invariants inside serialized SQLite write transactions so revocation is immediate and concurrent demotions or archival cannot lock a group out.
+- Prevent default roles from being deleted or receiving `GROUP_ADMINISTRATION`, avoiding accidental administrative access through invitation defaults or CSV imports.
+- Store reusable public join tokens as hashes plus authenticated ciphertext, keep them in URL fragments, require mailbox verification for new accounts, return enumeration-resistant registration responses, and invalidate pending proofs atomically on rotation or disable.
+- Validate every multi-booking target and permission before writing, and commit all booking, ledger, allocation, notification, audit, and idempotency rows atomically.
+- Couple nullable guest email and password-hash state at the database boundary, exclude credentialless identities from authentication, forbid synthetic credentials, and suppress notification email jobs without a real address.
+- Recheck claim, rename, archive, selected regular roles, and inline temporary-guest creation inside serialized transactions. Claim acceptance preserves the membership and ledger history while applying exactly the invitation's roles.
+- Keep group statistics, member-directory fields, and other members' balances out of the booking context; frontend guest grouping and route guards remain presentation controls rather than authorization boundaries.
+- Recheck tenant ownership, lifecycle state, roles, and the exact zero balance inside serialized archive, reactivation, and permanent-removal transactions. Permanent removal strips access and personal projections while retaining an immutable membership tombstone and last display name for finance, booking, statement, and audit history.
+
+### Fixed
+
+- Reworked booking activities into labelled responsive cards on narrow phone widths, preventing page-level horizontal overflow and keeping mobile navigation viewport-attached while scrolling.
+- Expanded the desktop activity workspace to the available content width and retained the booking table on tablet, split-view, and desktop widths with horizontal overflow contained inside the table viewport.
+
 ## [0.5.1] - 2026-08-07
 
 ### Fixed
@@ -100,7 +173,8 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Explicit acting and charged membership display for every booking, including searchable third-party-assignment cues.
 - Canonical backup-entry allowlisting, target-width Argon2 parameter parsing, and directory-confined SPA asset serving with traversal regression coverage.
 
-[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/DasLukas/TeamTaler/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/DasLukas/TeamTaler/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/DasLukas/TeamTaler/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/DasLukas/TeamTaler/compare/v0.3.0...v0.4.0

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/DasLukas/TeamTaler/internal/audit"
+	"github.com/DasLukas/TeamTaler/internal/authorization"
 	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/finance"
 	"github.com/DasLukas/TeamTaler/internal/groups"
@@ -90,16 +91,38 @@ func (s *Server) handleGetGroupSettings(response http.ResponseWriter, request *h
 		return
 	}
 	writeJSON(response, http.StatusOK, map[string]any{
-		"membersCanViewAllBookings":          settings.MembersCanViewAllBookings,
 		"notificationEmailsEnabled":          settings.NotificationEmailsEnabled,
 		"notificationEmailDeliveryAvailable": s.config.SMTP.Enabled,
+		"defaultRoleId":                      settings.DefaultRoleID,
+		"foreignBookingReasonRequired":       settings.ForeignBookingReasonRequired,
+		"ownPaymentReasonRequired":           settings.OwnPaymentReasonRequired,
+		"otherPaymentReasonRequired":         settings.OtherPaymentReasonRequired,
+		"paymentMethods":                     settings.PaymentMethods,
+		"bookingReasons":                     settings.BookingReasons,
+		"paymentReasons":                     settings.PaymentReasons,
 	})
 }
 
-// handleUpdateGroupSettings validates and persists one complete supported
-// settings document. response receives the persisted GroupSettings or Problem
-// Details; request supplies administrator identity, group scope, and JSON input.
-// The method returns no Go value.
+// handleGetTransactionSettings returns non-sensitive ordered form options for
+// the current active group member.
+func (s *Server) handleGetTransactionSettings(response http.ResponseWriter, request *http.Request) {
+	_, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	settings, err := s.groups.TransactionSettings(request.Context(), membership)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, settings)
+}
+
+// handleUpdateGroupSettings validates and persists a partial settings document.
+// response receives the persisted GroupSettings or Problem Details; request
+// supplies administrator identity, group scope, and JSON input. The method
+// returns no Go value.
 func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request *http.Request) {
 	principal, membership, err := s.membership(request)
 	if err != nil {
@@ -107,37 +130,53 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		return
 	}
 	var input struct {
-		MembersCanViewAllBookings *bool `json:"membersCanViewAllBookings"`
-		NotificationEmailsEnabled *bool `json:"notificationEmailsEnabled"`
+		NotificationEmailsEnabled    *bool                      `json:"notificationEmailsEnabled"`
+		DefaultRoleID                *string                    `json:"defaultRoleId"`
+		ForeignBookingReasonRequired *bool                      `json:"foreignBookingReasonRequired"`
+		OwnPaymentReasonRequired     *bool                      `json:"ownPaymentReasonRequired"`
+		OtherPaymentReasonRequired   *bool                      `json:"otherPaymentReasonRequired"`
+		PaymentMethods               *[]domain.ConfigurableItem `json:"paymentMethods"`
+		BookingReasons               *[]domain.ConfigurableItem `json:"bookingReasons"`
+		PaymentReasons               *[]domain.ConfigurableItem `json:"paymentReasons"`
 	}
 	if err := decodeJSON(response, request, &input); err != nil {
 		writeProblem(response, request, err)
 		return
 	}
-	if input.MembersCanViewAllBookings == nil {
-		writeProblem(response, request, domain.ValidationError{Field: "membersCanViewAllBookings", Message: "is required"})
+	if input.NotificationEmailsEnabled == nil && input.DefaultRoleID == nil && input.ForeignBookingReasonRequired == nil &&
+		input.OwnPaymentReasonRequired == nil && input.OtherPaymentReasonRequired == nil && input.PaymentMethods == nil &&
+		input.BookingReasons == nil && input.PaymentReasons == nil {
+		writeProblem(response, request, domain.ValidationError{Field: "settings", Message: "must contain at least one supported field"})
 		return
 	}
-	if input.NotificationEmailsEnabled == nil {
-		writeProblem(response, request, domain.ValidationError{Field: "notificationEmailsEnabled", Message: "is required"})
-		return
-	}
-	if *input.NotificationEmailsEnabled && !s.config.SMTP.Enabled {
+	if input.NotificationEmailsEnabled != nil && *input.NotificationEmailsEnabled && !s.config.SMTP.Enabled {
 		writeProblem(response, request, domain.ValidationError{Field: "notificationEmailsEnabled", Message: "requires configured SMTP delivery"})
 		return
 	}
-	settings, err := s.groups.UpdateSettings(request.Context(), principal, membership, domain.GroupSettings{
-		MembersCanViewAllBookings: *input.MembersCanViewAllBookings,
-		NotificationEmailsEnabled: *input.NotificationEmailsEnabled,
+	settings, err := s.groups.UpdateSettings(request.Context(), principal, membership, groups.SettingsUpdate{
+		NotificationEmailsEnabled:    input.NotificationEmailsEnabled,
+		DefaultRoleID:                input.DefaultRoleID,
+		ForeignBookingReasonRequired: input.ForeignBookingReasonRequired,
+		OwnPaymentReasonRequired:     input.OwnPaymentReasonRequired,
+		OtherPaymentReasonRequired:   input.OtherPaymentReasonRequired,
+		PaymentMethods:               input.PaymentMethods,
+		BookingReasons:               input.BookingReasons,
+		PaymentReasons:               input.PaymentReasons,
 	})
 	if err != nil {
 		writeProblem(response, request, err)
 		return
 	}
 	writeJSON(response, http.StatusOK, map[string]any{
-		"membersCanViewAllBookings":          settings.MembersCanViewAllBookings,
 		"notificationEmailsEnabled":          settings.NotificationEmailsEnabled,
 		"notificationEmailDeliveryAvailable": s.config.SMTP.Enabled,
+		"defaultRoleId":                      settings.DefaultRoleID,
+		"foreignBookingReasonRequired":       settings.ForeignBookingReasonRequired,
+		"ownPaymentReasonRequired":           settings.OwnPaymentReasonRequired,
+		"otherPaymentReasonRequired":         settings.OtherPaymentReasonRequired,
+		"paymentMethods":                     settings.PaymentMethods,
+		"bookingReasons":                     settings.BookingReasons,
+		"paymentReasons":                     settings.PaymentReasons,
 	})
 }
 
@@ -151,8 +190,8 @@ func (s *Server) handleGroupLogo(response http.ResponseWriter, request *http.Req
 		writeProblem(response, request, err)
 		return
 	}
-	if !groups.HasRole(membership, domain.RoleAdmin) {
-		writeProblem(response, request, domain.ErrForbidden)
+	if err := authorization.Require(request.Context(), s.db, membership.GroupID, membership.ID, domain.PermissionGroupAdministration, authorization.GroupResource(membership.GroupID)); err != nil {
+		writeProblem(response, request, err)
 		return
 	}
 	imageKey, err := s.storeUploadedImage(response, request)
@@ -191,12 +230,17 @@ func (s *Server) handleListMembers(response http.ResponseWriter, request *http.R
 		writeProblem(response, request, err)
 		return
 	}
-	items, err := s.groups.ListMembers(request.Context(), membership.GroupID)
+	items, err := s.groups.ListMembers(request.Context(), membership)
 	if err != nil {
 		writeProblem(response, request, err)
 		return
 	}
-	if !groups.HasRole(membership, domain.RoleAdmin) {
+	canAdmin, permissionErr := authorization.NewPolicy(s.db).Can(request.Context(), membership.GroupID, membership.ID, domain.PermissionGroupAdministration, authorization.GroupResource(membership.GroupID))
+	if permissionErr != nil {
+		writeProblem(response, request, permissionErr)
+		return
+	}
+	if !canAdmin {
 		activeItems := items[:0]
 		for _, item := range items {
 			if item.Status == "ACTIVE" {
@@ -217,15 +261,22 @@ func (s *Server) handleUpdatePermissions(response http.ResponseWriter, request *
 		writeProblem(response, request, err)
 		return
 	}
+	expectedVersion, err := requiredIfMatchVersion(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
 	var input groups.PermissionUpdate
 	if err := decodeJSON(response, request, &input); err != nil {
 		writeProblem(response, request, err)
 		return
 	}
-	if err := s.groups.UpdatePermissions(request.Context(), principal, membership, request.PathValue("membershipID"), input); err != nil {
+	version, err := s.groups.UpdatePermissions(request.Context(), principal, membership, request.PathValue("membershipID"), input, expectedVersion)
+	if err != nil {
 		writeProblem(response, request, err)
 		return
 	}
+	response.Header().Set("ETag", versionETag(version))
 	response.WriteHeader(http.StatusNoContent)
 }
 
@@ -241,6 +292,46 @@ func (s *Server) handleArchiveMember(response http.ResponseWriter, request *http
 	}
 	confirmSelf := request.URL.Query().Get("confirmSelf") == "true"
 	if err := s.groups.ArchiveMember(request.Context(), principal, membership, request.PathValue("membershipID"), confirmSelf); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
+// handleReactivateMember restores one archived member or temporary guest.
+// response receives the active Membership or Problem Details; request supplies
+// the authenticated tenant scope and strict role/name command. The method
+// returns no Go value.
+func (s *Server) handleReactivateMember(response http.ResponseWriter, request *http.Request) {
+	principal, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	var input groups.ReactivateMemberInput
+	if err := decodeJSON(response, request, &input); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	item, err := s.groups.ReactivateMember(request.Context(), principal, membership, request.PathValue("membershipID"), input)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, item)
+}
+
+// handlePermanentlyDeleteMember removes one archived membership from
+// operational group views while retaining its historical tombstone. response
+// receives 204 or Problem Details; request supplies authenticated tenant and
+// membership identifiers. The method returns no Go value.
+func (s *Server) handlePermanentlyDeleteMember(response http.ResponseWriter, request *http.Request) {
+	principal, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	if err := s.groups.PermanentlyDeleteMember(request.Context(), principal, membership, request.PathValue("membershipID")); err != nil {
 		writeProblem(response, request, err)
 		return
 	}
@@ -273,12 +364,22 @@ func (s *Server) handleCreateInvitation(response http.ResponseWriter, request *h
 		Roles            []domain.Role                          `json:"roles"`
 		GroupPermissions []domain.GroupPermission               `json:"groupPermissions"`
 		CategoryGrants   map[string][]domain.CategoryPermission `json:"categoryGrants"`
+		RoleIDs          []string                               `json:"roleIds"`
 	}
 	if err := decodeJSON(response, request, &input); err != nil {
 		writeProblem(response, request, err)
 		return
 	}
-	item, err := s.groups.CreateInvitation(request.Context(), principal, membership, input.Email, input.DisplayName, input.Roles, input.GroupPermissions, input.CategoryGrants)
+	var item groups.Invitation
+	if input.RoleIDs != nil {
+		if len(input.Roles) > 0 || len(input.GroupPermissions) > 0 || len(input.CategoryGrants) > 0 {
+			writeProblem(response, request, domain.ValidationError{Field: "roleIds", Message: "cannot be combined with deprecated roles, groupPermissions, or categoryGrants"})
+			return
+		}
+		item, err = s.groups.CreateInvitationWithRoles(request.Context(), principal, membership, input.Email, input.DisplayName, input.RoleIDs)
+	} else {
+		item, err = s.groups.CreateInvitation(request.Context(), principal, membership, input.Email, input.DisplayName, input.Roles, input.GroupPermissions, input.CategoryGrants)
+	}
 	if err != nil {
 		writeProblem(response, request, err)
 		return
@@ -303,15 +404,33 @@ func (s *Server) handleUpdateInvitation(response http.ResponseWriter, request *h
 		Roles            []domain.Role                          `json:"roles"`
 		GroupPermissions []domain.GroupPermission               `json:"groupPermissions"`
 		CategoryGrants   map[string][]domain.CategoryPermission `json:"categoryGrants"`
+		RoleIDs          []string                               `json:"roleIds"`
 	}
 	if err := decodeJSON(response, request, &input); err != nil {
 		writeProblem(response, request, err)
 		return
 	}
-	item, err := s.groups.UpdateInvitation(request.Context(), principal, membership, request.PathValue("invitationID"), input.DisplayName, input.Roles, input.GroupPermissions, input.CategoryGrants)
+	expectedVersion, versionErr := requiredIfMatchVersion(request)
+	if versionErr != nil {
+		writeProblem(response, request, versionErr)
+		return
+	}
+	var item groups.Invitation
+	if input.RoleIDs != nil {
+		if len(input.Roles) > 0 || len(input.GroupPermissions) > 0 || len(input.CategoryGrants) > 0 {
+			writeProblem(response, request, domain.ValidationError{Field: "roleIds", Message: "cannot be combined with deprecated roles, groupPermissions, or categoryGrants"})
+			return
+		}
+		item, err = s.groups.UpdateInvitationWithRoles(request.Context(), principal, membership, request.PathValue("invitationID"), input.DisplayName, input.RoleIDs, expectedVersion)
+	} else {
+		item, err = s.groups.UpdateInvitation(request.Context(), principal, membership, request.PathValue("invitationID"), input.DisplayName, input.Roles, input.GroupPermissions, input.CategoryGrants, expectedVersion)
+	}
 	if err != nil {
 		writeProblem(response, request, err)
 		return
+	}
+	if item.RoleAssignmentsVersion > 0 {
+		response.Header().Set("ETag", versionETag(item.RoleAssignmentsVersion))
 	}
 	writeJSON(response, http.StatusOK, item)
 }
@@ -364,7 +483,12 @@ func (s *Server) handleDashboard(response http.ResponseWriter, request *http.Req
 	var unread int64
 	_ = s.db.QueryRowContext(request.Context(), `SELECT count(*) FROM notifications WHERE group_id=? AND membership_id=? AND read_at IS NULL`, membership.GroupID, membership.ID).Scan(&unread)
 	dashboard := finance.Dashboard{Account: account, OpenPeriod: openPeriod, RecentBookings: recent, UnreadCount: unread}
-	if groups.HasRole(membership, domain.RoleFinanceManager) {
+	canManageFinance, permissionErr := authorization.NewPolicy(s.db).Can(request.Context(), membership.GroupID, membership.ID, domain.PermissionFinanceManagement, authorization.GroupResource(membership.GroupID))
+	if permissionErr != nil {
+		writeProblem(response, request, permissionErr)
+		return
+	}
+	if canManageFinance {
 		var outstanding int64
 		_ = s.db.QueryRowContext(request.Context(), `SELECT coalesce(sum(amount_minor),0) FROM ledger_entries WHERE group_id=? AND account='MEMBER_RECEIVABLE'`, membership.GroupID).Scan(&outstanding)
 		dashboard.GroupOutstanding = &outstanding
@@ -378,8 +502,8 @@ func (s *Server) handleAudit(response http.ResponseWriter, request *http.Request
 		writeProblem(response, request, err)
 		return
 	}
-	if !groups.HasRole(membership, domain.RoleAdmin) {
-		writeProblem(response, request, domain.ErrForbidden)
+	if err := authorization.Require(request.Context(), s.db, membership.GroupID, membership.ID, domain.PermissionGroupAdministration, authorization.GroupResource(membership.GroupID)); err != nil {
+		writeProblem(response, request, err)
 		return
 	}
 	items, err := audit.List(request.Context(), s.db, membership.GroupID, queryLimit(request))

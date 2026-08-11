@@ -1,13 +1,13 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import type { Membership, Period, Product } from '@/api/types';
+import type { BookingTarget, Period, Product } from '@/api/types';
 import i18n from '@/i18n';
 import { BookingInspector } from './BookingInspector';
 
-const apiMock = vi.hoisted(() => ({ createBooking: vi.fn() }));
+const apiMock = vi.hoisted(() => ({ createBookings: vi.fn() }));
 
 vi.mock('@/api/client', () => ({ api: apiMock }));
 
@@ -30,42 +30,33 @@ const period: Period = {
   startsAt: '2026-08-01T00:00:00Z',
 };
 
-const members: Membership[] = [
+const targets: BookingTarget[] = [
   {
-    id: 'member-actor',
-    userId: 'user-actor',
+    membershipId: 'member-actor',
     displayName: 'Assigning Member',
-    email: 'actor@example.test',
-    initials: 'AM',
-    roles: ['MEMBER'],
-    groupPermissions: [],
-    categoryPermissions: [{ categoryId: product.categoryId, assignToOthers: true, voidBookings: false }],
-    active: true,
+    isTemporaryGuest: false,
   },
   {
-    id: 'member-target',
-    userId: 'user-target',
+    membershipId: 'member-target',
     displayName: 'Target Member',
-    email: 'target@example.test',
-    initials: 'TM',
-    roles: ['MEMBER'],
-    groupPermissions: [],
-    categoryPermissions: [],
-    active: true,
+    isTemporaryGuest: false,
   },
 ];
 
-function renderInspector(selectedProduct: Product = product): void {
+function renderInspector(selectedProduct: Product = product, canBookForGuests = false): void {
   const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
   render(
     <BookingInspector
+      canBookForGuests={canBookForGuests}
+      bookingReasons={[]}
       currentMembershipId="member-actor"
+      foreignBookingReasonRequired
       groupId="group-a"
-      members={members}
       onCancel={vi.fn()}
       period={period}
       product={selectedProduct}
+      targets={targets}
     />,
     { wrapper },
   );
@@ -74,7 +65,7 @@ function renderInspector(selectedProduct: Product = product): void {
 describe('BookingInspector category-neutral booking rules', () => {
   it('releases the selected product for another booking after showing confirmation', async () => {
     const user = userEvent.setup();
-    apiMock.createBooking.mockResolvedValue({ id: 'booking-created' });
+    apiMock.createBookings.mockResolvedValue([{ id: 'booking-created' }]);
     renderInspector();
 
     await user.click(screen.getByRole('button', { name: i18n.t('booking.increaseQuantity') }));
@@ -86,31 +77,35 @@ describe('BookingInspector category-neutral booking rules', () => {
     expect(screen.getByRole('status')).toHaveTextContent('1');
 
     await user.click(releasedSubmit);
-    expect(apiMock.createBooking).toHaveBeenCalledTimes(2);
+    expect(apiMock.createBookings).toHaveBeenCalledTimes(2);
   });
 
   it('requires a reason for every third-party booking while retaining quantity', async () => {
     const user = userEvent.setup();
-    apiMock.createBooking.mockResolvedValue({ id: 'booking-created' });
+    apiMock.createBookings.mockResolvedValue([{ id: 'booking-created' }]);
     renderInspector();
 
-    await user.selectOptions(screen.getByLabelText(i18n.t('booking.forMember')), 'member-target');
+    await user.click(screen.getByRole('button', { name: i18n.t('booking.forMember') }));
+    await user.click(screen.getByRole('checkbox', { name: /Target Member/ }));
 
-    const submit = screen.getByRole('button', { name: i18n.t('booking.submit') });
-    expect(screen.getByLabelText(i18n.t('booking.reason'))).toBeRequired();
+    const submit = screen.getByRole('button', { name: i18n.t('booking.submitMultiple', { count: 2 }) });
+    const reasonLabel = `${i18n.t('booking.reason')} *`;
+    expect(screen.getByLabelText(reasonLabel)).toBeRequired();
     expect(screen.getByText(i18n.t('booking.quantity'))).toBeVisible();
     expect(submit).toBeDisabled();
 
-    await user.type(screen.getByLabelText(i18n.t('booking.reason')), 'Shared team purchase');
+    await user.type(screen.getByLabelText(reasonLabel), 'Shared team purchase');
     await user.click(screen.getByRole('button', { name: i18n.t('booking.increaseQuantity') }));
+    expect(screen.getByText(i18n.t('booking.total'))).toBeVisible();
+    expect(screen.getByText(/2,00.*pro Mitglied/)).toBeVisible();
     await user.click(submit);
 
-    expect(apiMock.createBooking).toHaveBeenCalledWith('group-a', {
+    expect(apiMock.createBookings).toHaveBeenCalledWith('group-a', {
       productId: product.id,
       productVersion: product.version,
       expectedPeriodId: period.id,
       quantity: 2,
-      targetMembershipId: 'member-target',
+      targetMembershipIds: ['member-actor', 'member-target'],
       reason: 'Shared team purchase',
     });
   });
@@ -124,11 +119,14 @@ describe('BookingInspector category-neutral booking rules', () => {
       pricingMode: 'USER_DEFINED',
       price: undefined,
     };
-    apiMock.createBooking.mockResolvedValue({ id: 'booking-created' });
+    apiMock.createBookings.mockResolvedValue([{ id: 'booking-created' }]);
     renderInspector(customProduct);
 
     const priceInput = screen.getByLabelText(i18n.t('booking.unitPrice', { currency: 'EUR' }));
+    const memberLabel = screen.getByText(i18n.t('booking.forMember'), { selector: 'label' });
+    const priceLabel = screen.getByText(i18n.t('booking.unitPrice', { currency: 'EUR' }), { selector: 'label' });
     const submit = screen.getByRole('button', { name: i18n.t('booking.submit') });
+    expect(memberLabel.compareDocumentPosition(priceLabel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(priceInput).toHaveValue('');
     expect(submit).toBeDisabled();
 
@@ -140,14 +138,54 @@ describe('BookingInspector category-neutral booking rules', () => {
     await user.click(screen.getByRole('button', { name: i18n.t('booking.increaseQuantity') }));
     await user.click(submit);
 
-    expect(apiMock.createBooking).toHaveBeenCalledWith('group-a', {
+    expect(apiMock.createBookings).toHaveBeenCalledWith('group-a', {
       productId: customProduct.id,
       productVersion: customProduct.version,
       expectedPeriodId: period.id,
       quantity: 2,
       unitPrice: { minorUnits: '250', currency: 'EUR' },
-      targetMembershipId: undefined,
+      targetMembershipIds: ['member-actor'],
       reason: undefined,
     });
+  });
+
+  it('replaces the untouched self default with a newly named temporary guest', async () => {
+    const user = userEvent.setup();
+    apiMock.createBookings.mockResolvedValue([{ id: 'booking-guest' }]);
+    renderInspector(product, true);
+
+    await user.click(screen.getByRole('button', { name: i18n.t('booking.forMember') }));
+    await user.type(screen.getByLabelText(i18n.t('booking.addGuest')), '  Sam   Beispiel  ');
+    await user.click(screen.getByRole('button', { name: i18n.t('booking.addGuestAction') }));
+    await user.click(screen.getByRole('button', { name: i18n.t('booking.submit') }));
+
+    await waitFor(() => expect(apiMock.createBookings).toHaveBeenCalledWith('group-a', {
+      productId: product.id,
+      productVersion: product.version,
+      expectedPeriodId: period.id,
+      quantity: 1,
+      targetMembershipIds: [],
+      temporaryGuestDisplayNames: ['Sam Beispiel'],
+      reason: undefined,
+    }));
+  });
+
+  it('appends a temporary guest after the member selection was changed explicitly', async () => {
+    const user = userEvent.setup();
+    apiMock.createBookings.mockResolvedValue([{ id: 'booking-shared' }]);
+    renderInspector(product, true);
+
+    await user.click(screen.getByRole('button', { name: i18n.t('booking.forMember') }));
+    await user.click(screen.getByRole('checkbox', { name: /Target Member/ }));
+    await user.type(screen.getByLabelText(i18n.t('booking.addGuest')), 'Guest Three');
+    await user.click(screen.getByRole('button', { name: i18n.t('booking.addGuestAction') }));
+    await user.type(screen.getByLabelText(`${i18n.t('booking.reason')} *`), 'Group purchase');
+    await user.click(screen.getByRole('button', { name: i18n.t('booking.submitMultiple', { count: 3 }) }));
+
+    await waitFor(() => expect(apiMock.createBookings).toHaveBeenCalledWith('group-a', expect.objectContaining({
+      targetMembershipIds: ['member-actor', 'member-target'],
+      temporaryGuestDisplayNames: ['Guest Three'],
+      reason: 'Group purchase',
+    })));
   });
 });

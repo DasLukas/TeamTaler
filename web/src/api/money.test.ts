@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import i18n from '@/i18n';
-import { currencyExponent, formatMoney, majorUnitsInputPattern, majorUnitsInputValue, minorUnitsToSafeNumber, multiplyMoney, normalizeMoney, parseMajorUnits, parsePositiveMajorUnits, validatePositiveMajorUnits } from './money';
+import { currencyExponent, formatMoney, isCreditBalance, majorUnitsInputPattern, majorUnitsInputValue, minorUnitsToSafeNumber, multiplyMoney, normalizeMoney, parseMajorUnits, parsePositiveMajorUnits, validatePositiveMajorUnits } from './money';
 
 describe('money utilities', () => {
   it('normalizes primitive major-unit values', () => {
@@ -53,6 +53,12 @@ describe('money utilities', () => {
     const total = multiplyMoney({ minorUnits: '150', currency: 'EUR' }, 3);
     expect(total).toEqual({ minorUnits: '450', currency: 'EUR' });
     expect(formatMoney(total)).toContain('4,50');
+  });
+
+  it('recognizes member credit from the open-balance ledger sign', () => {
+    expect(isCreditBalance({ minorUnits: '-250', currency: 'EUR' })).toBe(true);
+    expect(isCreditBalance({ minorUnits: '0', currency: 'EUR' })).toBe(false);
+    expect(isCreditBalance({ minorUnits: '250', currency: 'EUR' })).toBe(false);
   });
 
   it('range-checks the final JSON integer boundary', () => {

@@ -101,18 +101,37 @@ func serve(arguments []string) error {
 		if err != nil {
 			return err
 		}
+		publicJoinDispatcher, err := email.NewPublicJoinDispatcher(db, sender, tokenBox, cfg.PublicURL, slog.Default())
+		if err != nil {
+			return err
+		}
+		accountSecurityDispatcher, err := email.NewAccountSecurityDispatcher(db, sender, tokenBox, cfg.PublicURL, slog.Default())
+		if err != nil {
+			return err
+		}
 		workerErrors := make(chan error, 1)
 		emailWorkerErrors = workerErrors
 		go func() {
 			dispatchContext, cancelDispatch := context.WithCancel(processContext)
 			defer cancelDispatch()
-			results := make(chan error, 2)
-			go func() { results <- dispatcher.Run(dispatchContext) }()
-			go func() { results <- notificationDispatcher.Run(dispatchContext) }()
-			first := <-results
+			runners := []func(context.Context) error{
+				dispatcher.Run,
+				notificationDispatcher.Run,
+				publicJoinDispatcher.Run,
+				accountSecurityDispatcher.Run,
+			}
+			results := make(chan error, len(runners))
+			for _, runDispatcher := range runners {
+				runDispatcher := runDispatcher
+				go func() { results <- runDispatcher(dispatchContext) }()
+			}
+			dispatchErrors := make([]error, 0, len(runners))
+			dispatchErrors = append(dispatchErrors, <-results)
 			cancelDispatch()
-			second := <-results
-			workerErrors <- errors.Join(first, second)
+			for index := 1; index < len(runners); index++ {
+				dispatchErrors = append(dispatchErrors, <-results)
+			}
+			workerErrors <- errors.Join(dispatchErrors...)
 		}()
 	}
 	server := &http.Server{

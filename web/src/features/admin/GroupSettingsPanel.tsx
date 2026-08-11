@@ -15,6 +15,12 @@ const ACCEPTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 type LogoChange = { kind: 'upload'; file: File } | { kind: 'remove' };
 
+/** Properties for group identity controls embedded in another settings surface. */
+interface GroupSettingsPanelProps {
+  /** Removes the standalone title and uses nested heading levels. */
+  embedded?: boolean;
+}
+
 /**
  * Renders the administrator-only group-name form and synchronizes successful
  * updates into the shared session cache.
@@ -22,7 +28,7 @@ type LogoChange = { kind: 'upload'; file: File } | { kind: 'remove' };
  * @param props - Stable group identity and the currently persisted name.
  * @returns A validated group-name form with mutation feedback.
  */
-function GroupNameForm({ groupId, currentName }: { groupId: string; currentName: string }) {
+function GroupNameForm({ groupId, currentName, embedded }: { groupId: string; currentName: string; embedded: boolean }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [name, setName] = useState(currentName);
@@ -44,8 +50,7 @@ function GroupNameForm({ groupId, currentName }: { groupId: string; currentName:
     <form className={`${styles.card} ${styles.nameCard}`} onSubmit={(event) => { event.preventDefault(); nameMutation.mutate(); }}>
       <div className={styles.controls}>
         <div>
-          <h3>{t('groupSettings.nameTitle')}</h3>
-          <p>{t('groupSettings.nameDescription')}</p>
+          {embedded ? <h4>{t('groupSettings.nameTitle')}</h4> : <h3>{t('groupSettings.nameTitle')}</h3>}
         </div>
         <Field htmlFor="group-name" label={t('groupSettings.nameLabel')}>
           <TextInput autoComplete="organization" id="group-name" maxLength={120} onChange={(event) => { setName(event.target.value); nameMutation.reset(); }} required value={name} />
@@ -69,9 +74,10 @@ function GroupNameForm({ groupId, currentName }: { groupId: string; currentName:
  * update the shared session cache so every active brand surface changes without
  * a page reload.
  *
+ * @param props - Optional embedding behavior for the combined settings workspace.
  * @returns Group-name settings, a group-logo preview, and update actions.
  */
-export function GroupSettingsPanel() {
+export function GroupSettingsPanel({ embedded = false }: GroupSettingsPanelProps) {
   const { t } = useTranslation();
   const { activeGroup, activeGroupId } = useActiveGroup();
   const queryClient = useQueryClient();
@@ -121,21 +127,20 @@ export function GroupSettingsPanel() {
   const currentPreview = activeGroup.logoUrl || '/brand/teamtaler-mark.png';
 
   return (
-    <div className={styles.content}>
-      <header className={styles.header}>
+    <div className={embedded ? styles.embedded : styles.content}>
+      {!embedded ? <header className={styles.header}>
         <h2>{t('groupSettings.title')}</h2>
         <p>{t('groupSettings.intro')}</p>
-      </header>
+      </header> : null}
       <div className={styles.cards}>
-        <GroupNameForm currentName={activeGroup.name} groupId={activeGroupId} key={activeGroupId} />
+        <GroupNameForm currentName={activeGroup.name} embedded={embedded} groupId={activeGroupId} key={activeGroupId} />
         <section className={styles.card}>
           <div className={styles.preview}>
             <img alt={t('groupSettings.previewAlt', { group: activeGroup.name })} src={currentPreview} />
           </div>
           <div className={styles.controls}>
             <div>
-              <h3>{t('groupSettings.logoTitle')}</h3>
-              <p>{t('groupSettings.logoDescription')}</p>
+              {embedded ? <h4>{t('groupSettings.logoTitle')}</h4> : <h3>{t('groupSettings.logoTitle')}</h3>}
             </div>
             <Field error={fileError || undefined} hint={t('groupSettings.imageHint')} htmlFor="group-logo" label={t('groupSettings.imageLabel')}>
               <TextInput accept="image/jpeg,image/png,image/webp" id="group-logo" key={fileInputKey} onChange={(event) => selectFile(event.target.files?.[0])} type="file" />

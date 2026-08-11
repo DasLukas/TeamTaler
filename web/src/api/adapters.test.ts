@@ -1,8 +1,74 @@
 import { describe, expect, it } from 'vitest';
 import i18n from '@/i18n';
-import { adaptAccountSummaries, adaptBooking, adaptCategories, adaptDashboard, adaptLedger, adaptMembership, adaptNotification, adaptProduct, adaptSession, adaptSettlement } from './adapters';
+import { adaptAccountSummaries, adaptBooking, adaptCategories, adaptDashboard, adaptLedger, adaptMembership, adaptNotification, adaptPermissionDefinition, adaptPermissionGrants, adaptProduct, adaptRole, adaptSession, adaptSettlement } from './adapters';
 
 describe('API adapters', () => {
+  it('accepts stable group grants and rejects unknown keys or disabled scopes', () => {
+    expect(adaptPermissionGrants([
+      { permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } },
+      { permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } },
+      { permission: 'CATALOG_MANAGEMENT', scope: { type: 'CATEGORY' }, categoryId: 'category-a' },
+      { permission: 'CREATE_OWN_BOOKING', scope: { type: 'GROUP' }, categoryId: 'category-a' },
+      { permission: 'CREATE_OWN_BOOKING', scope: { type: 'GROUP', categoryId: 'category-a' } },
+      { permission: 'CREATE_OWN_BOOKING', scope: { type: 'GROUP', productId: 'product-a' } },
+      { permission: 'UNSUPPORTED', scope: { type: 'GROUP' } },
+      null,
+    ])).toEqual([{ permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } }]);
+  });
+
+  it('normalizes managed guest identity without inventing an email address', () => {
+    const guest = adaptMembership({
+      id: 'member-guest',
+      userId: 'user-credentialless',
+      displayName: 'Guest One',
+      isTemporaryGuest: true,
+      status: 'ACTIVE',
+      roles: [],
+      categoryGrants: {},
+    });
+
+    expect(guest).toMatchObject({
+      id: 'member-guest',
+      userId: 'user-credentialless',
+      email: null,
+      isTemporaryGuest: true,
+      active: true,
+    });
+  });
+
+  it('adapts permission registry aliases and protected role metadata', () => {
+    expect(adaptPermissionDefinition({
+      key: 'VOID_ANY_BOOKING',
+      allowedScopes: ['GROUP', 'CATEGORY', 'UNSUPPORTED'],
+      implies: ['VOID_OWN_BOOKING', 'VIEW_ALL_BOOKING_ACTIVITY', 'UNSUPPORTED'],
+    })).toEqual({
+      key: 'VOID_ANY_BOOKING',
+      allowedScopes: ['GROUP', 'CATEGORY'],
+      impliedPermissions: ['VOID_OWN_BOOKING', 'VIEW_ALL_BOOKING_ACTIVITY'],
+    });
+    expect(adaptRole({
+      id: 'role-admin',
+      groupId: 'group-a',
+      presetKey: 'GROUP_ADMINISTRATOR',
+      name: 'Group administrator',
+      nameLocked: true,
+      deletable: false,
+      version: 4,
+      memberCount: 1,
+      pendingInvitationCount: 0,
+      createdAt: '2026-08-07T12:00:00Z',
+      updatedAt: '2026-08-07T13:00:00Z',
+      grants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }],
+    })).toMatchObject({
+      id: 'role-admin',
+      groupId: 'group-a',
+      nameLocked: true,
+      deletable: false,
+      version: 4,
+      grants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }],
+    });
+  });
+
   it('propagates protected profile-image URLs through sessions, memberships, and bookings', () => {
     const avatarUrl = '/api/v1/users/user-a/avatar/hash.png';
     const session = adaptSession({
@@ -79,6 +145,7 @@ describe('API adapters', () => {
       membershipId: 'member-large',
       displayName: 'Large Balance',
       avatarUrl: '/api/v1/users/user-large/avatar/hash.png',
+      isTemporaryGuest: true,
       status: 'ARCHIVED',
       currency: 'EUR',
       balanceMinor: '9007199254740993123',
@@ -88,6 +155,7 @@ describe('API adapters', () => {
       membershipId: 'member-large',
       displayName: 'Large Balance',
       avatarUrl: '/api/v1/users/user-large/avatar/hash.png',
+      isTemporaryGuest: true,
       status: 'ARCHIVED',
       currency: 'EUR',
       balance: { minorUnits: '9007199254740993123', currency: 'EUR' },
@@ -171,5 +239,6 @@ describe('API adapters', () => {
     expect(settlement.amount.minorUnits).toBe('200');
     expect(settlement.paidAmount.minorUnits).toBe('100');
     expect(settlement.openAmount?.minorUnits).toBe('100');
+    expect(settlement.email).toBeNull();
   });
 });

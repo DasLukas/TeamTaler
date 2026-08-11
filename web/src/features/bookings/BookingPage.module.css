@@ -1,11 +1,15 @@
 .layout {
   display: grid;
+  width: 100%;
+  max-width: 100%;
   min-height: 100vh;
-  grid-template-columns: minmax(540px, 1fr) 430px;
+  grid-template-columns: minmax(0, 1fr) clamp(300px, 38%, 430px);
 }
 
 .content {
-  width: min(100%, 850px);
+  width: 100%;
+  max-width: 850px;
+  min-width: 0;
   margin: 0 auto;
   padding: 50px 42px 72px;
 }
@@ -24,14 +28,34 @@
 .balance div { display: grid; gap: var(--space-2); }
 .balance span { color: var(--color-muted); font-size: var(--font-size-lg); }
 .balance strong { color: var(--color-orange-600); font-size: 2.6rem; }
+.balance strong.creditBalance { color: var(--color-green-600); }
 .balance svg { color: var(--color-navy-950); }
 
 .inspector {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
   padding-top: 56px;
   border-left: 1px solid var(--color-border);
+  container-name: booking-inspector;
+  container-type: inline-size;
 }
 
-.inspector > h2 { margin: 0; padding: 0 var(--space-8) var(--space-5); font-size: 1.75rem; }
+.inspectorEmpty {
+  display: grid;
+  flex: 1;
+  min-height: 420px;
+  place-items: center;
+  align-content: center;
+  gap: var(--space-3);
+  padding: var(--space-8);
+  color: var(--color-muted);
+  text-align: center;
+}
+
+.inspectorEmpty svg { color: var(--color-teal-700); }
+.inspectorEmpty strong { color: var(--color-ink); font-size: var(--font-size-lg); }
+.inspectorEmpty p { max-width: 300px; margin: 0; line-height: 1.5; }
 
 .state { display: grid; min-height: 100vh; place-items: center; padding: var(--space-8); }
 .state > * { width: min(100%, 640px); }
@@ -40,6 +64,10 @@
 @media (max-width: 1023px) {
   .layout { display: block; }
   .content { width: min(100%, 780px); }
+}
+
+@container booking-inspector (max-width: 360px) {
+  .inspectorEmpty { padding-inline: var(--space-5); }
 }
 
 @media (max-width: 767px) {

@@ -90,9 +90,9 @@ type ReadResult struct {
 	ReadAt      string `json:"readAt"`
 }
 
-// CreateTx inserts an in-app notification and, when both the group preference
-// and runtime SMTP capability are enabled, its email job in the same transaction.
-// The caller owns tx and therefore controls commit or rollback.
+// CreateTx inserts an in-app notification and, when the recipient has an email
+// address and both delivery switches are enabled, its email job in the same
+// transaction. The caller owns tx and therefore controls commit or rollback.
 func (s Service) CreateTx(ctx context.Context, tx *sql.Tx, input CreateInput) (Notification, error) {
 	if tx == nil {
 		return Notification{}, errors.New("create notification: transaction is required")
@@ -129,7 +129,16 @@ func (s Service) CreateTx(ctx context.Context, tx *sql.Tx, input CreateInput) (N
 		if enabled {
 			_, err = tx.ExecContext(ctx, `INSERT INTO notification_email_outbox(
 				notification_id,group_id,status,attempt_count,next_attempt_at,created_at,updated_at
-			) VALUES(?,?,'PENDING',0,?,?,?)`, notificationID, input.GroupID, input.CreatedAt, input.CreatedAt, input.CreatedAt)
+			)
+			SELECT ?,?,'PENDING',0,?,?,?
+			WHERE EXISTS (
+				SELECT 1
+				FROM memberships membership
+				JOIN users user ON user.id=membership.user_id
+				WHERE membership.id=?
+				  AND membership.group_id=?
+				  AND user.email IS NOT NULL
+			)`, notificationID, input.GroupID, input.CreatedAt, input.CreatedAt, input.CreatedAt, input.MembershipID, input.GroupID)
 			if err != nil {
 				return Notification{}, err
 			}

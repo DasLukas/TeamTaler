@@ -19,11 +19,12 @@ import (
 )
 
 type recordingSender struct {
-	mu            sync.Mutex
-	available     bool
-	err           error
-	messages      []InvitationMessage
-	notifications []NotificationMessage
+	mu                sync.Mutex
+	available         bool
+	err               error
+	messages          []InvitationMessage
+	notifications     []NotificationMessage
+	joinVerifications []JoinVerificationMessage
 }
 
 func (s *recordingSender) Available() bool {
@@ -43,6 +44,13 @@ func (s *recordingSender) SendNotification(_ context.Context, message Notificati
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.notifications = append(s.notifications, message)
+	return s.err
+}
+
+func (s *recordingSender) SendJoinVerification(_ context.Context, message JoinVerificationMessage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.joinVerifications = append(s.joinVerifications, message)
 	return s.err
 }
 

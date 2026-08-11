@@ -26,6 +26,7 @@ const thirdPartyBooking: Booking = {
   id: 'booking-third-party',
   memberId: 'member-target',
   memberName: 'Target Member',
+  memberStatus: 'ACTIVE',
   memberAvatarUrl: '/avatars/target.png',
   productId: 'product-penalty',
   productName: 'Late arrival',
@@ -36,6 +37,7 @@ const thirdPartyBooking: Booking = {
   total: { minorUnits: '500', currency: 'EUR' },
   bookedAt: '2026-08-04T12:00:00Z',
   bookedByName: 'Assigning Manager',
+  bookedByStatus: 'ACTIVE',
   bookedByMemberId: 'member-manager',
   bookedByAvatarUrl: '/avatars/manager.png',
   status: 'POSTED',
@@ -57,6 +59,7 @@ function renderActivities(): void {
 describe('ActivitiesPage booking traceability', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    apiMock.reverseBooking.mockResolvedValue(undefined);
     apiMock.getBookings.mockResolvedValue([thirdPartyBooking]);
     apiMock.getCategories.mockResolvedValue([{
       id: thirdPartyBooking.categoryId,
@@ -84,6 +87,8 @@ describe('ActivitiesPage booking traceability', () => {
     const user = userEvent.setup();
     renderActivities();
 
+    const heading = await screen.findByRole('heading', { level: 1, name: i18n.t('activities.title') });
+    expect(heading.parentElement?.querySelector('p')).not.toBeInTheDocument();
     const row = await screen.findByRole('row', { name: /Target Member.*Assigning Manager/ });
     expect(within(row).getByText(thirdPartyBooking.memberName)).toBeVisible();
     expect(within(row).getByText(thirdPartyBooking.bookedByName)).toBeVisible();
@@ -92,8 +97,99 @@ describe('ActivitiesPage booking traceability', () => {
     expect(row.querySelector('img[src="/avatars/manager.png"]')).toHaveAttribute('alt', '');
     expect(screen.getByRole('columnheader', { name: i18n.t('activities.bookedFor') })).toBeVisible();
     expect(screen.getByRole('columnheader', { name: i18n.t('activities.bookedBy') })).toBeVisible();
+    expect(within(row).getByRole('cell', { name: /Target Member/ })).toHaveAttribute('data-label', i18n.t('activities.bookedFor'));
+    expect(within(row).getByRole('cell', { name: /Assigning Manager/ })).toHaveAttribute('data-label', i18n.t('activities.bookedBy'));
+    expect(within(row).getByRole('cell', { name: thirdPartyBooking.productName })).toHaveAttribute('data-label', i18n.t('activities.booking'));
+    expect(within(row).getByRole('img', { name: i18n.t('common.booked') })).toHaveAttribute('title', i18n.t('common.booked'));
 
     await user.type(screen.getByLabelText(i18n.t('activities.searchLabel')), thirdPartyBooking.bookedByName);
     expect(await screen.findByRole('row', { name: /Target Member.*Assigning Manager/ })).toBeVisible();
+  });
+
+  it('renders reversed bookings as accessible compact status badges', async () => {
+    apiMock.getBookings.mockResolvedValue([{ ...thirdPartyBooking, status: 'REVERSED' }]);
+    renderActivities();
+
+    const row = await screen.findByRole('row', { name: /Target Member.*Assigning Manager/ });
+    expect(within(row).getByRole('img', { name: i18n.t('common.reversed') })).toHaveAttribute('title', i18n.t('common.reversed'));
+  });
+
+  it('allows a self-created booking inside the server-provided window without a reason', async () => {
+    const user = userEvent.setup();
+    apiMock.getBookings.mockResolvedValue([{
+      ...thirdPartyBooking,
+      id: 'booking-self-created',
+      memberId: 'member-viewer',
+      memberName: 'Viewer',
+      bookedByMemberId: 'member-viewer',
+      bookedByName: 'Viewer',
+      canVoid: true,
+      voidReasonRequired: false,
+      voidWithoutReasonUntil: '2026-08-07T12:00:30Z',
+    }]);
+    renderActivities();
+
+    await user.click(await screen.findByRole('button', { name: i18n.t('activities.reverse') }));
+    const reason = screen.getByLabelText(i18n.t('finance.reason'));
+    expect(reason).not.toBeRequired();
+    expect(screen.getByText(/ohne Begründung/)).toBeVisible();
+    await user.click(screen.getByRole('button', { name: i18n.t('activities.confirmReverse') }));
+
+    await waitFor(() => expect(apiMock.reverseBooking).toHaveBeenCalledWith('group-a', 'booking-self-created', ''));
+  });
+
+  it('always requires a reason for a received booking created by another member', async () => {
+    const user = userEvent.setup();
+    apiMock.getBookings.mockResolvedValue([{
+      ...thirdPartyBooking,
+      memberId: 'member-viewer',
+      memberName: 'Viewer',
+      canVoid: true,
+      voidReasonRequired: true,
+      voidWithoutReasonUntil: undefined,
+    }]);
+    renderActivities();
+
+    await user.click(await screen.findByRole('button', { name: i18n.t('activities.reverse') }));
+    const reason = screen.getByLabelText(i18n.t('finance.reason'));
+    const submit = screen.getByRole('button', { name: i18n.t('activities.confirmReverse') });
+    expect(reason).toBeRequired();
+    expect(submit).toBeDisabled();
+    await user.type(reason, 'Incorrect assignment');
+    await user.click(submit);
+
+    await waitFor(() => expect(apiMock.reverseBooking).toHaveBeenCalledWith('group-a', thirdPartyBooking.id, 'Incorrect assignment'));
+  });
+
+  it('marks deleted historical actors and targets without exposing prior avatars', async () => {
+    apiMock.getBookings.mockResolvedValue([{
+      ...thirdPartyBooking,
+      memberStatus: 'DELETED',
+      memberAvatarUrl: undefined,
+      bookedByStatus: 'DELETED',
+      bookedByAvatarUrl: undefined,
+    }]);
+    renderActivities();
+
+    const row = await screen.findByRole('row', { name: /Target Member.*Gelöscht.*Assigning Manager.*Gelöscht/ });
+    const deletedMarkers = within(row).getAllByRole('img', { name: i18n.t('common.deleted') });
+    expect(deletedMarkers).toHaveLength(2);
+    expect(deletedMarkers[0]).toHaveAttribute('title', i18n.t('common.deleted'));
+    expect(row.querySelector('img[src="/avatars/target.png"]')).not.toBeInTheDocument();
+    expect(row.querySelector('img[src="/avatars/manager.png"]')).not.toBeInTheDocument();
+  });
+
+  it('marks archived historical actors and targets with accessible tooltips', async () => {
+    apiMock.getBookings.mockResolvedValue([{
+      ...thirdPartyBooking,
+      memberStatus: 'ARCHIVED',
+      bookedByStatus: 'ARCHIVED',
+    }]);
+    renderActivities();
+
+    const row = await screen.findByRole('row', { name: /Target Member.*Archiviert.*Assigning Manager.*Archiviert/ });
+    const archivedMarkers = within(row).getAllByRole('img', { name: i18n.t('common.archived') });
+    expect(archivedMarkers).toHaveLength(2);
+    expect(archivedMarkers[0]).toHaveAttribute('title', i18n.t('common.archived'));
   });
 });

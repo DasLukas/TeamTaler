@@ -10,7 +10,7 @@ import Settings from 'lucide-react/dist/esm/icons/settings';
 import WalletCards from 'lucide-react/dist/esm/icons/wallet-cards';
 import { useTranslation } from 'react-i18next';
 import { memberPaths } from '@/app/paths';
-import { hasGroupCapability } from '@/app/groupCapabilities';
+import { canOpenBooking, hasGroupCapability } from '@/app/groupCapabilities';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Brand } from '@/components/brand/Brand';
 import { LogoutButton } from '@/components/auth/LogoutButton';
@@ -36,10 +36,11 @@ export function Sidebar() {
   const { t } = useTranslation();
   const { session, activeGroupId, setActiveGroupId } = useActiveGroup();
   const activeGroup = session.groups.find((group) => group.id === activeGroupId);
-  const roles = activeGroup?.membership?.roles ?? [];
-  const canManageCatalog = hasGroupCapability(roles, 'catalog');
-  const canManageFinance = hasGroupCapability(roles, 'finance');
-  const canManageAdministration = hasGroupCapability(roles, 'administration');
+  const grants = activeGroup?.membership?.effectiveGrants;
+  const canManageCatalog = hasGroupCapability(grants, 'catalog');
+  const canManageFinance = hasGroupCapability(grants, 'finance');
+  const canManageAdministration = hasGroupCapability(grants, 'administration');
+  const canBook = canOpenBooking(grants);
   const unreadCount = useUnreadNotificationCount();
 
   return (
@@ -54,6 +55,7 @@ export function Sidebar() {
       </div>
       <nav aria-label={t('nav.primary')} className={styles.nav}>
         {primaryNavigation
+          .filter((item) => item.key !== 'book' || canBook)
           .filter((item) => item.key !== 'catalog' || canManageCatalog)
           .filter((item) => item.key !== 'finance' || canManageFinance)
           .filter((item) => item.key !== 'administration' || canManageAdministration)

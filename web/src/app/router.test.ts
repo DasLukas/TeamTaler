@@ -11,4 +11,10 @@ describe('member route contract', () => {
     expect(router.routesByPath[memberPaths.finance]).toBeDefined();
     expect(router.routesByPath[memberPaths.legacyReports]).toBeDefined();
   });
+
+  it('exposes account recovery and email confirmation routes', () => {
+    expect(router.routesByPath['/forgot-password']).toBeDefined();
+    expect(router.routesByPath['/reset-password']).toBeDefined();
+    expect(router.routesByPath['/email-change/confirm']).toBeDefined();
+  });
 });

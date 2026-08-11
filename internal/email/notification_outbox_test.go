@@ -69,6 +69,53 @@ func TestNotificationDispatcherSendsLocalizedEventAndMarksJobSent(t *testing.T) 
 	}
 }
 
+func TestNotificationDispatcherTerminatesLegacyJobWithoutRecipientEmail(t *testing.T) {
+	ctx := context.Background()
+	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), "managed-notification.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+	const nowText = "2026-08-04T12:00:00Z"
+	for _, statement := range []string{
+		`INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('usr_admin','admin@example.test','Admin','hash','2026-08-04T12:00:00Z','2026-08-04T12:00:00Z')`,
+		`INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('usr_managed',NULL,'Managed Guest',NULL,'2026-08-04T12:00:00Z','2026-08-04T12:00:00Z')`,
+		`INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES('grp_managed','Example Team','EUR','2026-08-04T12:00:00Z','2026-08-04T12:00:00Z')`,
+		`INSERT INTO memberships(id,group_id,user_id,joined_at) VALUES('mem_admin','grp_managed','usr_admin','2026-08-04T12:00:00Z')`,
+		`INSERT INTO memberships(id,group_id,user_id,joined_at,temporary_guest_name_key) VALUES('mem_managed','grp_managed','usr_managed','2026-08-04T12:00:00Z','managed guest')`,
+		`INSERT INTO notifications(id,group_id,membership_id,type,title,body,context_json,created_at) VALUES('notice_managed','grp_managed','mem_managed','BOOKING_ASSIGNED','New booking','Booking body','{}','2026-08-04T12:00:00Z')`,
+		`INSERT INTO notification_email_outbox(notification_id,group_id,status,attempt_count,next_attempt_at,created_at,updated_at) VALUES('notice_managed','grp_managed','PENDING',0,'2026-08-04T12:00:00Z','2026-08-04T12:00:00Z','2026-08-04T12:00:00Z')`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("seed managed notification: %v", err)
+		}
+	}
+	sender := &recordingSender{available: true}
+	publicURL, _ := url.Parse("https://teamtaler.example.test/")
+	dispatcher, err := NewNotificationDispatcher(db, sender, publicURL, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("create dispatcher: %v", err)
+	}
+	dispatcher.now = func() time.Time { return time.Date(2026, time.August, 4, 12, 1, 0, 0, time.UTC) }
+	processed, err := dispatcher.processOne(ctx)
+	if err != nil || !processed {
+		t.Fatalf("process managed notification: processed=%v err=%v", processed, err)
+	}
+	sender.mu.Lock()
+	messages := len(sender.notifications)
+	sender.mu.Unlock()
+	if messages != 0 {
+		t.Fatalf("managed notification sends=%d, want 0", messages)
+	}
+	var status, code string
+	if err := db.QueryRowContext(ctx, `SELECT status,last_error_code FROM notification_email_outbox WHERE notification_id='notice_managed'`).Scan(&status, &code); err != nil {
+		t.Fatalf("read managed outbox status: %v", err)
+	}
+	if status != string(OutboxStatusFailed) || code != string(FailureCodeRecipientUnavailable) {
+		t.Fatalf("managed outbox status/code=%s/%s", status, code)
+	}
+}
+
 func TestFormatEmailMoneyUsesCurrencyExponentWithoutFloatingPoint(t *testing.T) {
 	for _, test := range []struct {
 		amount   int64

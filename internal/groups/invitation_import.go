@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/DasLukas/TeamTaler/internal/audit"
 	"github.com/DasLukas/TeamTaler/internal/domain"
@@ -22,6 +23,13 @@ const maxInvitationImportRows = 100
 // use. Seal must never include plaintext in returned errors.
 type TokenSealer interface {
 	Seal(plaintext string) (string, error)
+}
+
+// TokenOpener authenticates and decrypts a token previously produced by a
+// TokenSealer. Implementations must return generic errors that never contain
+// ciphertext or plaintext.
+type TokenOpener interface {
+	Open(ciphertext string) (string, error)
 }
 
 // InvitationImportStatus describes the business outcome for one CSV row.
@@ -59,10 +67,11 @@ const (
 // InvitationImportCandidate is one parsed CSV row supplied to the group service.
 // ValidationCode may be set by a structural parser to preserve partial results.
 type InvitationImportCandidate struct {
-	Row            int    `json:"row"`
-	Email          string `json:"email,omitempty"`
-	DisplayName    string `json:"displayName,omitempty"`
-	ValidationCode string `json:"validationCode,omitempty"`
+	Row            int      `json:"row"`
+	Email          string   `json:"email,omitempty"`
+	DisplayName    string   `json:"displayName,omitempty"`
+	RoleNames      []string `json:"roleNames,omitempty"`
+	ValidationCode string   `json:"validationCode,omitempty"`
 }
 
 // InvitationImportRow is the stable, secret-free outcome for one source row.
@@ -109,15 +118,17 @@ type InvitationEmailResendResult struct {
 	Token               string              `json:"-"`
 }
 
-// ImportInvitations atomically creates regular-member invitations and encrypted
-// email outbox jobs for valid candidates. Invalid, existing-member, and current-
-// invitation rows are returned as partial outcomes. idempotencyKey protects the
-// batch from duplicate jobs. It returns forbidden, unavailable, validation,
-// idempotency, encryption, audit, or database errors. No plaintext token is
-// returned or stored in the idempotency result.
-func (s Service) ImportInvitations(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey string, candidates []InvitationImportCandidate) (InvitationImportResult, error) {
-	if !HasRole(membership, domain.RoleAdmin) {
-		return InvitationImportResult{}, domain.ErrForbidden
+// ImportInvitations atomically creates invitations with row-specific role
+// names, a legacy shared role set, or the configured default role and encrypted
+// email outbox jobs for valid candidates.
+// Invalid, existing-member, and current-invitation rows are returned as partial
+// outcomes. idempotencyKey protects the role selection and batch from duplicate
+// jobs. It returns forbidden, unavailable, validation, idempotency, encryption,
+// audit, or database errors. No plaintext token is returned or stored in the
+// idempotency result.
+func (s Service) ImportInvitations(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey string, roleIDs []string, candidates []InvitationImportCandidate) (InvitationImportResult, error) {
+	if err := requireCurrentPermission(ctx, s.DB, membership, domain.PermissionGroupAdministration); err != nil {
+		return InvitationImportResult{}, err
 	}
 	if s.TokenSealer == nil {
 		return InvitationImportResult{}, fmt.Errorf("%w: invitation email is not configured", domain.ErrServiceUnavailable)
@@ -128,9 +139,10 @@ func (s Service) ImportInvitations(ctx context.Context, actor domain.Principal, 
 	if len(candidates) < 1 || len(candidates) > maxInvitationImportRows {
 		return InvitationImportResult{}, domain.ValidationError{Field: "file", Message: fmt.Sprintf("must contain 1 to %d data rows", maxInvitationImportRows)}
 	}
+	roleIDs = normalizeRoleIDs(roleIDs)
 
 	normalized := normalizeImportCandidates(candidates)
-	requestHash, err := idempotency.Hash(map[string]any{"action": "invitation.import", "rows": normalized})
+	requestHash, err := idempotency.Hash(map[string]any{"action": "invitation.import", "roleIds": roleIDs, "rows": normalized})
 	if err != nil {
 		return InvitationImportResult{}, fmt.Errorf("hash invitation import: %w", err)
 	}
@@ -139,11 +151,32 @@ func (s Service) ImportInvitations(ctx context.Context, actor domain.Principal, 
 		Rows:    make([]InvitationImportRow, 0, len(normalized)),
 	}
 	err = storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		if err := requireCurrentPermission(ctx, tx, membership, domain.PermissionGroupAdministration); err != nil {
+			return err
+		}
 		found, err := idempotency.Load(ctx, tx, membership.GroupID, actor.UserID, idempotencyKey, requestHash, &result)
 		if err != nil || found {
 			return err
 		}
 
+		if len(roleIDs) > 0 {
+			if err := validateAssignedRoles(ctx, tx, membership.GroupID, roleIDs); err != nil {
+				return err
+			}
+		}
+		adminRoleID, err := reservedAdministratorRoleID(ctx, tx, membership.GroupID)
+		if err != nil {
+			return err
+		}
+		if len(roleIDs) > 0 {
+			if err := requireAssignmentChangePermissions(ctx, tx, membership, adminRoleID, nil, roleIDs); err != nil {
+				return err
+			}
+		}
+		var defaultRoleID sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT default_role_id FROM group_settings WHERE group_id=?`, membership.GroupID).Scan(&defaultRoleID); err != nil {
+			return err
+		}
 		now := platform.Now()
 		for _, candidate := range normalized {
 			row := InvitationImportRow{Row: candidate.Row, Email: candidate.Email, DisplayName: candidate.DisplayName}
@@ -154,8 +187,34 @@ func (s Service) ImportInvitations(ctx context.Context, actor domain.Principal, 
 				result.Rows = append(result.Rows, row)
 				continue
 			}
+			effectiveRoleIDs := roleIDs
+			if len(candidate.RoleNames) > 0 {
+				effectiveRoleIDs, err = resolveImportRoleNames(ctx, tx, membership.GroupID, candidate.RoleNames)
+				if errors.Is(err, sql.ErrNoRows) {
+					row.InvitationStatus = InvitationImportInvalid
+					row.Code = "unknown_role"
+					result.Summary.Invalid++
+					result.Rows = append(result.Rows, row)
+					continue
+				}
+				if err != nil {
+					return err
+				}
+			} else if len(effectiveRoleIDs) == 0 && defaultRoleID.Valid {
+				effectiveRoleIDs = []string{defaultRoleID.String}
+			}
+			if len(effectiveRoleIDs) == 0 {
+				row.InvitationStatus = InvitationImportInvalid
+				row.Code = "missing_default_role"
+				result.Summary.Invalid++
+				result.Rows = append(result.Rows, row)
+				continue
+			}
+			if err := requireAssignmentChangePermissions(ctx, tx, membership, adminRoleID, nil, effectiveRoleIDs); err != nil {
+				return err
+			}
 
-			invitation, createErr := createInvitationTx(ctx, tx, actor, membership, candidate.Email, candidate.DisplayName, nil, nil, nil, now)
+			invitation, createErr := createInvitationTx(ctx, tx, actor, membership, candidate.Email, candidate.DisplayName, nil, nil, nil, effectiveRoleIDs, now, invitationAssignmentStandard)
 			switch {
 			case errors.Is(createErr, ErrMembershipEmailExists):
 				row.InvitationStatus = InvitationImportSkippedMember
@@ -235,8 +294,8 @@ func currentInvitationDeliveryTx(ctx context.Context, tx *sql.Tx, groupID, email
 // conflict, idempotency, audit, or database errors. The encrypted token remains
 // unchanged and no network I/O occurs inside the transaction.
 func (s Service) RetryInvitationEmail(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey, invitationID string) (InvitationEmailRetryResult, error) {
-	if !HasRole(membership, domain.RoleAdmin) {
-		return InvitationEmailRetryResult{}, domain.ErrForbidden
+	if err := requireCurrentPermission(ctx, s.DB, membership, domain.PermissionGroupAdministration); err != nil {
+		return InvitationEmailRetryResult{}, err
 	}
 	if s.TokenSealer == nil {
 		return InvitationEmailRetryResult{}, fmt.Errorf("%w: invitation email is not configured", domain.ErrServiceUnavailable)
@@ -254,6 +313,9 @@ func (s Service) RetryInvitationEmail(ctx context.Context, actor domain.Principa
 	}
 	result := InvitationEmailRetryResult{InvitationID: invitationID, EmailDeliveryStatus: EmailDeliveryPending}
 	err = storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		if err := requireCurrentPermission(ctx, tx, membership, domain.PermissionGroupAdministration); err != nil {
+			return err
+		}
 		found, err := idempotency.Load(ctx, tx, membership.GroupID, actor.UserID, idempotencyKey, requestHash, &result)
 		if err != nil || found {
 			return err
@@ -312,8 +374,8 @@ func (s Service) RetryInvitationEmail(ctx context.Context, actor domain.Principa
 // idempotency response. The method returns authorization, validation, not-found,
 // conflict, configuration, encryption, randomness, audit, or database errors.
 func (s Service) ResendInvitationEmail(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey, invitationID string) (InvitationEmailResendResult, error) {
-	if !HasRole(membership, domain.RoleAdmin) {
-		return InvitationEmailResendResult{}, domain.ErrForbidden
+	if err := requireCurrentPermission(ctx, s.DB, membership, domain.PermissionGroupAdministration); err != nil {
+		return InvitationEmailResendResult{}, err
 	}
 	if s.TokenSealer == nil {
 		return InvitationEmailResendResult{}, fmt.Errorf("%w: invitation email is not configured", domain.ErrServiceUnavailable)
@@ -331,6 +393,9 @@ func (s Service) ResendInvitationEmail(ctx context.Context, actor domain.Princip
 	}
 	result := InvitationEmailResendResult{InvitationID: invitationID, EmailDeliveryStatus: EmailDeliveryPending}
 	err = storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		if err := requireCurrentPermission(ctx, tx, membership, domain.PermissionGroupAdministration); err != nil {
+			return err
+		}
 		found, err := idempotency.Load(ctx, tx, membership.GroupID, actor.UserID, idempotencyKey, requestHash, &result)
 		if err != nil || found {
 			return err
@@ -417,6 +482,9 @@ func normalizeImportCandidates(candidates []InvitationImportCandidate) []Invitat
 	for index, candidate := range candidates {
 		candidate.Email = strings.TrimSpace(candidate.Email)
 		candidate.DisplayName = strings.TrimSpace(candidate.DisplayName)
+		for roleIndex := range candidate.RoleNames {
+			candidate.RoleNames[roleIndex] = strings.TrimSpace(candidate.RoleNames[roleIndex])
+		}
 		if candidate.ValidationCode == "" {
 			email, err := platform.NormalizeEmail(candidate.Email)
 			switch {
@@ -438,9 +506,26 @@ func normalizeImportCandidates(candidates []InvitationImportCandidate) []Invitat
 	return result
 }
 
+func resolveImportRoleNames(ctx context.Context, queryer settingsQueryer, groupID string, roleNames []string) ([]string, error) {
+	roleIDs := make([]string, 0, len(roleNames))
+	seen := make(map[string]struct{}, len(roleNames))
+	for _, roleName := range roleNames {
+		var roleID string
+		if err := queryer.QueryRowContext(ctx, `SELECT id FROM roles WHERE group_id=? AND name=? COLLATE NOCASE`, groupID, roleName).Scan(&roleID); err != nil {
+			return nil, err
+		}
+		if _, exists := seen[roleID]; exists {
+			continue
+		}
+		seen[roleID] = struct{}{}
+		roleIDs = append(roleIDs, roleID)
+	}
+	return roleIDs, nil
+}
+
 func containsControlCharacter(value string) bool {
 	for _, character := range value {
-		if character < 32 || character == 127 {
+		if unicode.IsControl(character) {
 			return true
 		}
 	}

@@ -1,4 +1,4 @@
-.PHONY: install dev-backend dev-frontend test-server format-check lint test build verify
+.PHONY: install dev-backend dev-frontend test-server test-e2e format-check lint test build verify
 
 install:
 	go mod download
@@ -12,6 +12,9 @@ dev-frontend:
 
 test-server:
 	./scripts/test-server.sh
+
+test-e2e:
+	cd web && npm run test:e2e
 
 format-check:
 	test -z "$$(gofmt -l cmd internal migrations)"

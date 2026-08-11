@@ -3,22 +3,33 @@ import {
   adaptAccountSummaries,
   adaptAuditEntry,
   adaptBooking,
+  adaptBookingContext,
   adaptCategories,
   adaptDashboard,
+  adaptGroupSettings,
+  adaptTransactionSettings,
   adaptLedger,
+  adaptMembership,
   adaptMemberships,
   adaptNotification,
+  adaptPermissionDefinition,
   adaptPayment,
   adaptPeriod,
   adaptProduct,
+  adaptRole,
+  adaptRoleAssignment,
   adaptSession,
   adaptSettlement,
+  adaptUser,
 } from './adapters';
 import type {
   AccountSummary,
+  AuthenticationCapabilities,
   AuditEntry,
   Booking,
+  BookingBatchCommand,
   BookingCommand,
+  BookingContext,
   CatalogOrderCommand,
   Category,
   CategoryCreateCommand,
@@ -26,17 +37,22 @@ import type {
   CreatedInvitation,
   Dashboard,
   EmailDeliveryStatus,
+  EmailChangeRequestResult,
   InvitationEmailRetryResult,
   InvitationEmailResendResult,
   InvitationCommand,
   InvitationInput,
+  InvitationUpdateInput,
   InvitationImportResult,
   InvitationMetadata,
   InvitationPreview,
   LedgerEntry,
   LoginCommand,
   GroupSettings,
+  GroupSettingsUpdateInput,
+  TransactionSettings,
   Membership,
+  MemberReactivationCommand,
   Notification,
   NotificationPage,
   NotificationReadResult,
@@ -45,13 +61,22 @@ import type {
   PaymentCommand,
   SelfPaymentCommand,
   Period,
+  PermissionDefinition,
   PermissionUpdate,
   ProblemDetails,
   Product,
   ProductCreateCommand,
   ProductUpdateCommand,
+  PublicJoinLink,
+  PublicJoinLinkUpdate,
+  PublicJoinPreview,
+  PublicJoinRegistrationInput,
+  Role,
+  RoleAssignment,
+  RoleInput,
   Session,
   Settlement,
+  User,
 } from './types';
 import i18n from '@/i18n';
 import { IdempotencyReservationManager, type IdempotencyReservation } from './idempotency';
@@ -137,7 +162,8 @@ async function requestWithMetadata<T>(path: string, init: RequestInit = {}): Pro
       throw new ApiError(await parseProblem(response));
     }
     if (response.status === 204) return { data: undefined as T, headers: response.headers };
-    return { data: normalizeApiValue(await response.json()) as T, headers: response.headers };
+    const text = await response.text();
+    return { data: (text ? normalizeApiValue(JSON.parse(text)) : undefined) as T, headers: response.headers };
   } catch (error) {
     if (DEMO_ENABLED && !(error instanceof ApiError)) {
       return { data: await requestDevelopmentDemo<T>(path, init), headers: new Headers() };
@@ -153,6 +179,11 @@ const json = (value: unknown) => JSON.stringify(value);
 function setSessionActor(session: Session): Session {
   idempotencyReservations.setActor(session.user.id);
   return session;
+}
+
+/** Clears browser-owned state that must never cross authenticated sessions. */
+export function clearAuthenticatedClientState(): void {
+  idempotencyReservations.clearAll();
 }
 
 function invitationCategoryGrants(categoryPermissions: InvitationInput['categoryPermissions']): Record<string, string[]> {
@@ -179,12 +210,16 @@ function adaptInvitation(input: unknown): InvitationMetadata {
     roles: [...((source.roles as InvitationMetadata['roles'] | undefined) ?? []).filter((role) => role !== 'MEMBER'), 'MEMBER'],
     groupPermissions: (source.groupPermissions as InvitationMetadata['groupPermissions'] | undefined) ?? [],
     categoryPermissions,
+    ...(Array.isArray(source.roleIds) ? { roleIds: source.roleIds.map(String) } : {}),
+    roleAssignmentsVersion: Number(source.roleAssignmentsVersion ?? source.version ?? 1),
+    ...(typeof source.etag === 'string' ? { etag: source.etag } : {}),
     expiresAt: String(source.expiresAt ?? ''),
-    acceptedAt: typeof source.acceptedAt === 'string' ? source.acceptedAt : undefined,
-    revokedAt: typeof source.revokedAt === 'string' ? source.revokedAt : undefined,
+    ...(typeof source.acceptedAt === 'string' ? { acceptedAt: source.acceptedAt } : {}),
+    ...(typeof source.revokedAt === 'string' ? { revokedAt: source.revokedAt } : {}),
     emailDeliveryStatus: (source.emailDeliveryStatus as EmailDeliveryStatus | undefined) ?? 'NOT_REQUESTED',
     emailSentAt: typeof source.emailSentAt === 'string' ? source.emailSentAt : undefined,
-    emailFailureCode: typeof source.emailFailureCode === 'string' && source.emailFailureCode ? source.emailFailureCode : undefined,
+    ...(typeof source.emailFailureCode === 'string' && source.emailFailureCode ? { emailFailureCode: source.emailFailureCode } : {}),
+    ...(typeof source.targetMembershipId === 'string' && source.targetMembershipId ? { targetMembershipId: source.targetMembershipId } : {}),
   };
 }
 
@@ -228,6 +263,22 @@ async function idempotentRequest<T>(groupId: string, operation: string, path: st
  */
 export const api = {
   getSession: async (): Promise<Session> => setSessionActor(adaptSession(await request<unknown>('/session'))),
+  getAuthenticationCapabilities: async (): Promise<AuthenticationCapabilities> => request<AuthenticationCapabilities>('/auth/capabilities'),
+  requestPasswordReset: async (email: string): Promise<void> => request<void>('/auth/password-reset/request', { method: 'POST', body: json({ email }) }),
+  confirmPasswordReset: async (token: string, newPassword: string): Promise<void> => {
+    await request<void>('/auth/password-reset/confirm', { method: 'POST', body: json({ token, newPassword }) });
+    clearAuthenticatedClientState();
+  },
+  confirmEmailChange: async (token: string): Promise<void> => {
+    await request<void>('/auth/email-change/confirm', { method: 'POST', body: json({ token }) });
+    clearAuthenticatedClientState();
+  },
+  updateProfile: async (displayName: string): Promise<User> => adaptUser(await request<unknown>('/me/profile', { method: 'PATCH', body: json({ displayName }) })),
+  changePassword: async (currentPassword: string, newPassword: string): Promise<void> => {
+    await request<void>('/me/password', { method: 'PUT', body: json({ currentPassword, newPassword }) });
+    clearAuthenticatedClientState();
+  },
+  requestEmailChange: async (newEmail: string, currentPassword: string): Promise<EmailChangeRequestResult> => request<EmailChangeRequestResult>('/me/email-change', { method: 'POST', body: json({ newEmail, currentPassword }) }),
   uploadProfileAvatar: async (image: File): Promise<{ avatarUrl: string }> => {
     const form = new FormData();
     form.set('image', image);
@@ -239,29 +290,60 @@ export const api = {
     try {
       await request('/auth/logout', { method: 'POST' });
     } finally {
-      idempotencyReservations.clearAll();
+      clearAuthenticatedClientState();
     }
   },
   previewInvitation: async (token: string): Promise<InvitationPreview> => request<InvitationPreview>('/invitations/preview', { method: 'POST', body: json({ token }) }),
   acceptInvitation: async (command: InvitationCommand): Promise<Session> => setSessionActor(adaptSession(await request<unknown>('/invitations/accept', { method: 'POST', body: json(command) }))),
+  previewPublicJoinLink: async (token: string): Promise<PublicJoinPreview> => request<PublicJoinPreview>('/public-join-links/preview', { method: 'POST', body: json({ token }) }),
+  startPublicJoinRegistration: async (input: PublicJoinRegistrationInput): Promise<{ verificationRequired: true }> => request<{ verificationRequired: true }>('/public-join-links/registrations', { method: 'POST', body: json(input) }),
+  resendPublicJoinVerification: async (joinToken: string, email: string): Promise<{ verificationRequired: true }> => request<{ verificationRequired: true }>('/public-join-links/registrations/resend', { method: 'POST', body: json({ joinToken, email }) }),
+  confirmPublicJoinRegistration: async (token: string): Promise<Session> => setSessionActor(adaptSession(await request<unknown>('/public-join-links/registrations/confirm', { method: 'POST', body: json({ token }) }))),
+  acceptPublicJoinLink: async (token: string): Promise<Session> => setSessionActor(adaptSession(await request<unknown>('/public-join-links/accept', { method: 'POST', body: json({ token }) }))),
   createInvitation: async (groupId: string, input: InvitationInput): Promise<CreatedInvitation> => {
-  const response = await request<unknown>(groupPath(groupId, 'invitations'), { method: 'POST', body: json({ email: input.email, displayName: input.displayName, roles: input.roles.filter((role) => role !== 'MEMBER'), groupPermissions: input.groupPermissions, categoryGrants: invitationCategoryGrants(input.categoryPermissions) }) });
-  const source = response as { invitation?: unknown; acceptUrl?: string };
-  const invitation = adaptInvitation(source.invitation ?? response);
-  return {
-    ...invitation,
-    email: invitation.email || input.email,
-    acceptUrl: source.acceptUrl ?? '',
-  };
+    const roleBased = input.roleIds !== undefined;
+    const response = await request<unknown>(groupPath(groupId, 'invitations'), {
+      method: 'POST',
+      body: json(roleBased
+        ? { email: input.email, displayName: input.displayName, roleIds: input.roleIds }
+        : {
+          email: input.email,
+          displayName: input.displayName,
+          roles: input.roles.filter((role) => role !== 'MEMBER'),
+          groupPermissions: input.groupPermissions,
+          categoryGrants: invitationCategoryGrants(input.categoryPermissions),
+        }),
+    });
+    const source = response as { invitation?: unknown; acceptUrl?: string };
+    const invitation = adaptInvitation(source.invitation ?? response);
+    return {
+      ...invitation,
+      email: invitation.email || input.email,
+      acceptUrl: source.acceptUrl ?? '',
+    };
   },
   getInvitations: async (groupId: string): Promise<InvitationMetadata[]> => (await request<unknown[]>(groupPath(groupId, 'invitations'))).map(adaptInvitation),
-  updateInvitation: async (groupId: string, invitationId: string, input: Omit<InvitationInput, 'email'>): Promise<InvitationMetadata> => adaptInvitation(await request<unknown>(groupPath(groupId, `invitations/${encodeURIComponent(invitationId)}`), {
-    method: 'PATCH',
-    body: json({ displayName: input.displayName, roles: input.roles.filter((role) => role !== 'MEMBER'), groupPermissions: input.groupPermissions, categoryGrants: invitationCategoryGrants(input.categoryPermissions) }),
-  })),
+  updateInvitation: async (groupId: string, invitationId: string, input: InvitationUpdateInput): Promise<InvitationMetadata> => {
+    const roleBased = input.roleIds !== undefined;
+    return adaptInvitation(await request<unknown>(groupPath(groupId, `invitations/${encodeURIComponent(invitationId)}`), {
+      method: 'PATCH',
+      headers: { 'If-Match': `"v${input.roleAssignmentsVersion}"` },
+      body: json(roleBased
+        ? { displayName: input.displayName, roleIds: input.roleIds }
+        : {
+          displayName: input.displayName,
+          roles: input.roles.filter((role) => role !== 'MEMBER'),
+          groupPermissions: input.groupPermissions,
+          categoryGrants: invitationCategoryGrants(input.categoryPermissions),
+        }),
+    }));
+  },
   revokeInvitation: async (groupId: string, invitationId: string): Promise<void> => request<void>(groupPath(groupId, `invitations/${encodeURIComponent(invitationId)}`), { method: 'DELETE' }),
-  importInvitations: async (groupId: string, file: File): Promise<InvitationImportResult> => {
-    const path = groupPath(groupId, 'invitations/import');
+  importInvitations: async (groupId: string, file: File, roleIds: string[] = []): Promise<InvitationImportResult> => {
+    const query = new URLSearchParams();
+    roleIds.forEach((roleId) => query.append('roleId', roleId));
+    const queryString = query.toString();
+    const path = `${groupPath(groupId, 'invitations/import')}${queryString ? `?${queryString}` : ''}`;
     let csv: string;
     try {
       csv = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
@@ -283,8 +365,22 @@ export const api = {
     return idempotentRequest<InvitationEmailResendResult>(groupId, 'invitation.email.resend', path, { invitationId }, { method: 'POST' });
   },
   updateGroupName: async (groupId: string, name: string): Promise<{ name: string }> => request<{ name: string }>(groupRootPath(groupId), { method: 'PATCH', body: json({ name }) }),
-  getGroupSettings: async (groupId: string): Promise<GroupSettings> => request<GroupSettings>(groupPath(groupId, 'settings')),
-  updateGroupSettings: async (groupId: string, settings: Pick<GroupSettings, 'membersCanViewAllBookings' | 'notificationEmailsEnabled'>): Promise<GroupSettings> => request<GroupSettings>(groupPath(groupId, 'settings'), { method: 'PATCH', body: json(settings) }),
+  getGroupSettings: async (groupId: string): Promise<GroupSettings> => adaptGroupSettings(await request<unknown>(groupPath(groupId, 'settings'))),
+  getTransactionSettings: async (groupId: string): Promise<TransactionSettings> => adaptTransactionSettings(await request<unknown>(groupPath(groupId, 'transaction-settings'))),
+  updateGroupSettings: async (groupId: string, settings: GroupSettingsUpdateInput): Promise<GroupSettings> => adaptGroupSettings(await request<unknown>(groupPath(groupId, 'settings'), {
+    method: 'PATCH',
+    body: json(settings),
+  })),
+  getPublicJoinLink: async (groupId: string): Promise<PublicJoinLink> => request<PublicJoinLink>(groupPath(groupId, 'public-join-link')),
+  updatePublicJoinLink: async (groupId: string, update: PublicJoinLinkUpdate, version: number): Promise<PublicJoinLink> => request<PublicJoinLink>(groupPath(groupId, 'public-join-link'), {
+    method: 'PUT',
+    headers: version > 0 ? { 'If-Match': `"v${version}"` } : undefined,
+    body: json(update),
+  }),
+  rotatePublicJoinLink: async (groupId: string, version: number): Promise<PublicJoinLink> => request<PublicJoinLink>(groupPath(groupId, 'public-join-link/rotate'), {
+    method: 'POST',
+    headers: { 'If-Match': `"v${version}"` },
+  }),
   uploadGroupLogo: async (groupId: string, image: File): Promise<{ logoUrl: string }> => {
     const form = new FormData();
     form.set('image', image);
@@ -292,14 +388,29 @@ export const api = {
   },
   removeGroupLogo: async (groupId: string): Promise<void> => request<void>(groupPath(groupId, 'logo'), { method: 'DELETE' }),
   getDashboard: async (groupId: string): Promise<Dashboard> => adaptDashboard(await request<unknown>(groupPath(groupId, 'dashboard'))),
+  getBookingContext: async (groupId: string, currency: string): Promise<BookingContext> => adaptBookingContext(await request<unknown>(groupPath(groupId, 'booking-context')), currency),
   getCategories: async (groupId: string): Promise<Category[]> => adaptCategories(await request<unknown>(groupPath(groupId, 'categories'))),
   getMembers: async (groupId: string): Promise<Membership[]> => adaptMemberships(await request<unknown>(groupPath(groupId, 'members'))),
-  archiveMember: async (groupId: string, membershipId: string, confirmSelf: boolean): Promise<void> => request<void>(`${groupPath(groupId, `members/${encodeURIComponent(membershipId)}`)}${confirmSelf ? '?confirmSelf=true' : ''}`, { method: 'DELETE' }),
-  getBookings: async (groupId: string): Promise<Booking[]> => {
-    const [bookings, members] = await Promise.all([request<unknown>(groupPath(groupId, 'bookings')), request<unknown>(groupPath(groupId, 'members'))]);
-    const adaptedMembers = adaptMemberships(members);
-    return (bookings as unknown[]).map((booking) => adaptBooking(booking, adaptedMembers));
+  renameMember: async (groupId: string, membershipId: string, displayName: string): Promise<Membership> => adaptMembership(await request<unknown>(groupPath(groupId, `members/${encodeURIComponent(membershipId)}`), {
+    method: 'PATCH',
+    body: json({ displayName }),
+  })),
+  createTemporaryGuestClaimInvitation: async (groupId: string, membershipId: string, email: string, roleIds: string[]): Promise<CreatedInvitation> => {
+    const response = await request<unknown>(groupPath(groupId, `members/${encodeURIComponent(membershipId)}/claim-invitation`), {
+      method: 'POST',
+      body: json({ email, roleIds }),
+    });
+    const source = response as { invitation?: unknown; acceptUrl?: string };
+    const invitation = adaptInvitation(source.invitation ?? response);
+    return { ...invitation, email: invitation.email || email, acceptUrl: source.acceptUrl ?? '' };
   },
+  archiveMember: async (groupId: string, membershipId: string, confirmSelf: boolean): Promise<void> => request<void>(`${groupPath(groupId, `members/${encodeURIComponent(membershipId)}`)}${confirmSelf ? '?confirmSelf=true' : ''}`, { method: 'DELETE' }),
+  reactivateMember: async (groupId: string, membershipId: string, command: MemberReactivationCommand): Promise<Membership> => adaptMembership(await request<unknown>(groupPath(groupId, `members/${encodeURIComponent(membershipId)}/reactivate`), {
+    method: 'POST',
+    body: json(command),
+  })),
+  permanentlyDeleteMember: async (groupId: string, membershipId: string): Promise<void> => request<void>(groupPath(groupId, `members/${encodeURIComponent(membershipId)}/permanent`), { method: 'DELETE' }),
+  getBookings: async (groupId: string): Promise<Booking[]> => (await request<unknown[]>(groupPath(groupId, 'bookings'))).map((booking) => adaptBooking(booking)),
   createBooking: async (groupId: string, command: BookingCommand): Promise<Booking> => {
     const path = groupPath(groupId, 'bookings');
     const payload = {
@@ -308,6 +419,16 @@ export const api = {
       unitPrice: undefined,
     };
     return adaptBooking(await idempotentRequest<unknown>(groupId, 'booking.create', path, payload, { method: 'POST', body: json(payload) }));
+  },
+  createBookings: async (groupId: string, command: BookingBatchCommand): Promise<Booking[]> => {
+    const path = groupPath(groupId, 'bookings/batch');
+    const payload = {
+      ...command,
+      unitPriceMinor: command.unitPrice ? minorUnitsToSafeNumber(command.unitPrice.minorUnits) : undefined,
+      unitPrice: undefined,
+    };
+    const response = await idempotentRequest<unknown[]>(groupId, 'booking.batch.create', path, payload, { method: 'POST', body: json(payload) });
+    return response.map((booking) => adaptBooking(booking));
   },
   reverseBooking: async (groupId: string, bookingId: string, reason: string): Promise<Booking> => {
     const path = groupPath(groupId, `bookings/${bookingId}/void`);
@@ -360,9 +481,48 @@ export const api = {
     const adaptedMembers = adaptMemberships(members);
     return entries.map((entry) => adaptAuditEntry(entry, adaptedMembers));
   },
-  updatePermissions: async (groupId: string, membershipId: string, update: PermissionUpdate, etag?: string): Promise<void> => {
+  getPermissionDefinitions: async (): Promise<PermissionDefinition[]> => {
+    const response = await request<unknown>('/permission-definitions');
+    const entries = Array.isArray(response) ? response : (response as { permissions?: unknown[] }).permissions ?? [];
+    return entries.map(adaptPermissionDefinition);
+  },
+  getRoles: async (groupId: string): Promise<Role[]> => {
+    const response = await request<unknown>(groupPath(groupId, 'roles'));
+    const entries = Array.isArray(response) ? response : (response as { roles?: unknown[] }).roles ?? [];
+    return entries.map(adaptRole);
+  },
+  getRole: async (groupId: string, roleId: string): Promise<Role> => adaptRole(await request<unknown>(groupPath(groupId, `roles/${encodeURIComponent(roleId)}`))),
+  createRole: async (groupId: string, input: RoleInput): Promise<Role> => adaptRole(await request<unknown>(groupPath(groupId, 'roles'), {
+    method: 'POST',
+    body: json(input),
+  })),
+  updateRole: async (groupId: string, roleId: string, input: RoleInput, version: number): Promise<Role> => adaptRole(await request<unknown>(groupPath(groupId, `roles/${encodeURIComponent(roleId)}`), {
+    method: 'PUT',
+    headers: { 'If-Match': `"v${version}"` },
+    body: json(input),
+  })),
+  deleteRole: async (groupId: string, roleId: string, version: number): Promise<void> => request<void>(groupPath(groupId, `roles/${encodeURIComponent(roleId)}`), {
+    method: 'DELETE',
+    headers: { 'If-Match': `"v${version}"` },
+  }),
+  getRoleAssignments: async (groupId: string): Promise<RoleAssignment[]> => {
+    const response = await request<unknown>(groupPath(groupId, 'role-assignments'));
+    const entries = Array.isArray(response) ? response : (response as { assignments?: unknown[] }).assignments ?? [];
+    return entries.map(adaptRoleAssignment);
+  },
+  updateMemberRoles: async (groupId: string, membershipId: string, roleIds: string[], version: number): Promise<RoleAssignment> => adaptRoleAssignment(await request<unknown>(groupPath(groupId, `members/${encodeURIComponent(membershipId)}/roles`), {
+    method: 'PUT',
+    headers: { 'If-Match': `"v${version}"` },
+    body: json({ roleIds }),
+  })),
+  updateInvitationRoles: async (groupId: string, invitationId: string, roleIds: string[], version: number): Promise<RoleAssignment> => adaptRoleAssignment(await request<unknown>(groupPath(groupId, `invitations/${encodeURIComponent(invitationId)}/roles`), {
+    method: 'PUT',
+    headers: { 'If-Match': `"v${version}"` },
+    body: json({ roleIds }),
+  })),
+  updatePermissions: async (groupId: string, membershipId: string, update: PermissionUpdate, version: number): Promise<void> => {
     const categoryGrants = Object.fromEntries(update.categoryPermissions.map((permission) => [permission.categoryId, [permission.assignToOthers ? 'ASSIGN_TO_OTHERS' : null, permission.voidBookings ? 'VOID_BOOKINGS' : null].filter(Boolean)]));
-    await request<void>(groupPath(groupId, `members/${membershipId}/permissions`), { method: 'PATCH', headers: etag ? { 'If-Match': etag } : undefined, body: json({ roles: update.roles.filter((role) => role !== 'MEMBER'), groupPermissions: update.groupPermissions, categoryGrants }) });
+    await request<void>(groupPath(groupId, `members/${membershipId}/permissions`), { method: 'PATCH', headers: { 'If-Match': `"v${version}"` }, body: json({ roles: update.roles.filter((role) => role !== 'MEMBER'), groupPermissions: update.groupPermissions, categoryGrants }) });
   },
   createCategory: async (groupId: string, input: CategoryCreateCommand): Promise<Category> => adaptCategories([await request<unknown>(groupPath(groupId, 'categories'), { method: 'POST', body: json({ ...input, sortOrder: 0 }) })])[0],
   updateCategory: async (groupId: string, categoryId: string, input: CategoryUpdateCommand): Promise<Category> => adaptCategories([await request<unknown>(groupPath(groupId, `categories/${encodeURIComponent(categoryId)}`), {

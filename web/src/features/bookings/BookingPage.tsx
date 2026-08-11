@@ -1,10 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
+import MousePointerClick from 'lucide-react/dist/esm/icons/mouse-pointer-click';
 import WalletCards from 'lucide-react/dist/esm/icons/wallet-cards';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
-import { formatMoney } from '@/api/money';
+import { formatMoney, isCreditBalance } from '@/api/money';
 import type { Product } from '@/api/types';
 import { hasGroupCapability } from '@/app/groupCapabilities';
 import { memberPaths } from '@/app/paths';
@@ -24,25 +25,21 @@ import styles from './BookingPage.module.css';
  */
 export function BookingPage() {
   const { t } = useTranslation();
-  const { activeGroupId, session } = useActiveGroup();
-  const dashboardQuery = useQuery({ queryKey: ['dashboard', activeGroupId], queryFn: () => api.getDashboard(activeGroupId) });
+  const { activeGroupId, activeGroup } = useActiveGroup();
   const categoriesQuery = useQuery({ queryKey: ['categories', activeGroupId], queryFn: () => api.getCategories(activeGroupId) });
-  const membersQuery = useQuery({ queryKey: ['members', activeGroupId], queryFn: () => api.getMembers(activeGroupId) });
+  const bookingContextQuery = useQuery({ queryKey: ['booking-context', activeGroupId], queryFn: () => api.getBookingContext(activeGroupId, activeGroup.currency) });
   const compact = useMediaQuery('(max-width: 1023px)');
   const [categoryId, setCategoryId] = useState('');
   const [selectedProductId, setSelectedProductId] = useState('');
   const [sheetOpen, setSheetOpen] = useState(false);
-  const activeMembers = useMemo(() => membersQuery.data?.filter((member) => member.active) ?? [], [membersQuery.data]);
   const bookableCategories = useMemo(() => getBookableCategories(categoriesQuery.data ?? []), [categoriesQuery.data]);
   const selectedProduct = useMemo(() => {
     const products = bookableCategories.flatMap((category) => category.products);
     return products.find((product) => product.id === selectedProductId);
   }, [bookableCategories, selectedProductId]);
   const selectedCategory = bookableCategories.find((category) => category.id === selectedProduct?.categoryId);
-  const currentMembership = activeMembers.find((member) => member.userId === session.user.id) ?? activeMembers[0];
   const hasBookableProducts = bookableCategories.some((category) => category.products.length > 0);
-  const activeRoles = session.groups.find((group) => group.id === activeGroupId)?.membership?.roles ?? [];
-  const canManageCatalog = hasGroupCapability(activeRoles, 'catalog');
+  const canManageCatalog = hasGroupCapability(activeGroup.membership?.effectiveGrants, 'catalog');
 
   const clearSelection = () => {
     setSelectedProductId('');
@@ -58,25 +55,33 @@ export function BookingPage() {
     clearSelection();
   };
 
-  if (dashboardQuery.isLoading || categoriesQuery.isLoading || membersQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
-  if (!dashboardQuery.data || !categoriesQuery.data || !membersQuery.data || !currentMembership) {
+  if (categoriesQuery.isLoading || bookingContextQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
+  if (categoriesQuery.isError || bookingContextQuery.isError || !categoriesQuery.data || !bookingContextQuery.data) {
     return <div className={styles.state}><StatePanel kind="error" message={t('booking.productsError')} /></div>;
+  }
+  if (bookingContextQuery.data.targets.length === 0 && !bookingContextQuery.data.canBookForGuests) {
+    return <div className={styles.state}><StatePanel kind="empty" title={t('booking.noAccessTitle')} message={t('booking.noAccessMessage')} /></div>;
   }
   if (!hasBookableProducts) {
     return <div className={styles.state}><StatePanel kind="empty" title={t('booking.noProductsTitle')} message={t('booking.noProductsMessage')}>{canManageCatalog ? <Link className={styles.catalogLink} to={memberPaths.catalog}>{t('booking.catalogLink')}</Link> : null}</StatePanel></div>;
   }
 
+  const hasCreditBalance = isCreditBalance(bookingContextQuery.data.ownBalance);
+
   const inspector = selectedProduct && selectedCategory ? (
     <BookingInspector
       compact
-      currentMembershipId={currentMembership.id}
+      canBookForGuests={bookingContextQuery.data.canBookForGuests}
+      foreignBookingReasonRequired={bookingContextQuery.data.foreignBookingReasonRequired}
+      bookingReasons={bookingContextQuery.data.bookingReasons}
+      currentMembershipId={bookingContextQuery.data.currentMembership.id}
       groupId={activeGroupId}
       key={selectedProduct.id}
-      members={activeMembers}
       onBooked={clearSelection}
       onCancel={clearSelection}
-      period={dashboardQuery.data.currentPeriod}
+      period={bookingContextQuery.data.openPeriod}
       product={selectedProduct}
+      targets={bookingContextQuery.data.targets}
     />
   ) : null;
 
@@ -85,7 +90,7 @@ export function BookingPage() {
       <section className={styles.content}>
         <h1>{t('booking.quickTitle')}</h1>
         <div className={styles.balance}>
-          <div><span>{t('booking.openBalance')}</span><strong>{formatMoney(dashboardQuery.data.openBalance)}</strong></div>
+          <div><span>{t('booking.openBalance')}</span><strong className={hasCreditBalance ? styles.creditBalance : undefined} data-financial-state={hasCreditBalance ? 'credit' : 'due'}>{formatMoney(bookingContextQuery.data.ownBalance)}</strong></div>
           <WalletCards aria-hidden="true" size={40} strokeWidth={1.8} />
         </div>
         <ProductPicker
@@ -97,7 +102,20 @@ export function BookingPage() {
           selectedProductId={selectedProduct?.id}
         />
       </section>
-      {!compact && selectedProduct && inspector ? <aside className={styles.inspector}><h2>{t('booking.productTitle', { name: selectedProduct.name })}</h2>{inspector}</aside> : null}
+      {!compact ? (
+        <aside
+          aria-label={selectedProduct ? t('booking.productTitle', { name: selectedProduct.name }) : t('booking.selectProductTitle')}
+          className={styles.inspector}
+        >
+          {inspector ?? (
+            <div className={styles.inspectorEmpty}>
+              <MousePointerClick aria-hidden="true" size={42} strokeWidth={1.6} />
+              <strong>{t('booking.selectProductTitle')}</strong>
+              <p>{t('booking.selectProductMessage')}</p>
+            </div>
+          )}
+        </aside>
+      ) : null}
       {compact && selectedProduct && inspector ? (
         <Modal onClose={clearSelection} open={sheetOpen} title={t('booking.productTitle', { name: selectedProduct.name })} variant="sheet">
           {inspector}

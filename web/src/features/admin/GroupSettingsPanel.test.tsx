@@ -48,6 +48,8 @@ describe('GroupSettingsPanel', () => {
     const queryClient = renderSettings();
     const nameInput = screen.getByLabelText(i18n.t('groupSettings.nameLabel'));
 
+    expect(screen.queryByText(i18n.t('groupSettings.nameDescription'))).not.toBeInTheDocument();
+    expect(screen.queryByText(i18n.t('groupSettings.logoDescription'))).not.toBeInTheDocument();
     expect(nameInput).toHaveValue('Group A');
     expect(screen.getByRole('button', { name: i18n.t('groupSettings.nameSave') })).toBeDisabled();
     await user.clear(nameInput);

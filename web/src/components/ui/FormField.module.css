@@ -11,6 +11,8 @@
 
 .control {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   min-height: 48px;
   padding: 0 var(--space-4);
   border: 1px solid var(--color-border-strong);
@@ -19,12 +21,29 @@
   font-size: var(--font-size-md);
 }
 
+.control[type='file'] {
+  padding-block: var(--space-2);
+}
+
 .control:hover {
   border-color: var(--color-navy-700);
 }
 
 .control:focus {
   border-color: var(--color-teal-700);
+}
+
+.control:disabled {
+  border-color: var(--color-border);
+  color: var(--color-muted);
+  -webkit-text-fill-color: var(--color-muted);
+  background: var(--color-surface-muted);
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.control:disabled:hover {
+  border-color: var(--color-border);
 }
 
 .hint,

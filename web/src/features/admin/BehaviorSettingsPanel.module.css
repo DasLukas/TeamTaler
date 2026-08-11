@@ -8,8 +8,8 @@
 }
 
 .header h2,
-.header p,
 .settingRow h3,
+.settingRow h4,
 .settingRow p,
 .notice,
 .error,
@@ -17,22 +17,81 @@
   margin: 0;
 }
 
-.header p,
 .settingRow p,
 .notice {
   margin-top: var(--space-2);
   color: var(--color-muted);
 }
 
+.guestSetup {
+  display: grid;
+  gap: var(--space-5);
+  padding-top: var(--space-2);
+}
+
+.guestSetup .settingRow {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+
+.warning,
+.warningBlock > p {
+  color: var(--color-red-600);
+}
+
+.warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  background: var(--color-red-100);
+}
+
+.warning svg,
+.warningBlock svg { flex: 0 0 auto; }
+
+.warningBlock {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--color-red-600);
+  border-radius: var(--radius-md);
+  background: var(--color-red-100);
+}
+
+.warningBlock > p {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.form {
+  display: grid;
+  width: 100%;
+  gap: var(--space-5);
+}
+
+.settingsSection,
+.bookingSection { display: grid; gap: var(--space-5); padding-top: var(--space-3); }
+.settingsSection > header h3,
+.bookingSection > header h3 { margin: 0; font-size: var(--font-size-xl); }
+.ruleList { display: grid; gap: var(--space-4); }
+.ruleList .settingRow + .settingRow { padding-top: var(--space-4); border-top: 1px solid var(--color-border); }
+
 .card {
   display: grid;
-  max-width: 840px;
   padding: var(--space-6);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   background: var(--color-white);
   box-shadow: var(--shadow-sm);
   gap: var(--space-5);
+}
+
+.cardTitle {
+  margin: 0;
 }
 
 .settingRow {
@@ -54,6 +113,17 @@
   justify-content: flex-end;
 }
 
+.formFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.feedback {
+  min-width: 0;
+}
+
 .error,
 .success {
   font-size: var(--font-size-sm);
@@ -68,8 +138,17 @@
 }
 
 @media (max-width: 680px) {
+  .card {
+    padding: var(--space-5);
+  }
+
   .settingRow {
     align-items: flex-start;
+  }
+
+  .formFooter {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .actions > * {

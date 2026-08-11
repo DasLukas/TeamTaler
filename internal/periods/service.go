@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/DasLukas/TeamTaler/internal/audit"
+	"github.com/DasLukas/TeamTaler/internal/authorization"
 	"github.com/DasLukas/TeamTaler/internal/domain"
-	"github.com/DasLukas/TeamTaler/internal/groups"
 	"github.com/DasLukas/TeamTaler/internal/idempotency"
 	"github.com/DasLukas/TeamTaler/internal/ledger"
 	"github.com/DasLukas/TeamTaler/internal/notifications"
@@ -26,6 +26,17 @@ type Service struct {
 	DB *sql.DB
 	// Notifications atomically records generated settlement events.
 	Notifications notifications.Service
+}
+
+func requireFinanceManagement(ctx context.Context, queryer authorization.Queryer, membership domain.Membership) error {
+	allowed, err := authorization.NewPolicy(queryer).Can(ctx, membership.GroupID, membership.ID, domain.PermissionFinanceManagement, authorization.ResourceContext{GroupID: membership.GroupID})
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return domain.ErrForbidden
+	}
+	return nil
 }
 
 // CloseInput provides the final period label, ISO calendar due date, and label
@@ -69,8 +80,8 @@ func (s Service) List(ctx context.Context, groupID string) ([]domain.Period, err
 // input supplies labels and due date. It returns the created or replayed result,
 // or validation, forbidden, not-found, conflict, idempotency, audit, and SQL errors.
 func (s Service) Close(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey, periodID string, input CloseInput) (CloseResult, error) {
-	if !groups.HasRole(membership, domain.RoleFinanceManager) {
-		return CloseResult{}, domain.ErrForbidden
+	if err := requireFinanceManagement(ctx, s.DB, membership); err != nil {
+		return CloseResult{}, err
 	}
 	if err := idempotency.ValidateKey(idempotencyKey); err != nil {
 		return CloseResult{}, err
@@ -99,6 +110,9 @@ func (s Service) Close(ctx context.Context, actor domain.Principal, membership d
 	}
 	var result CloseResult
 	err = storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		if err := requireFinanceManagement(ctx, tx, membership); err != nil {
+			return err
+		}
 		found, err := idempotency.Load(ctx, tx, membership.GroupID, actor.UserID, idempotencyKey, requestHash, &result)
 		if err != nil || found {
 			return err
@@ -173,12 +187,45 @@ func (s Service) snapshotStatements(ctx context.Context, tx *sql.Tx, groupID, pe
 		coalesce((SELECT sum(pa.amount_minor) FROM payment_allocations pa JOIN payments py ON py.id=pa.payment_id WHERE pa.period_id=? AND py.membership_id=m.id AND py.reversed_at IS NULL),0),
 		coalesce((SELECT sum(aa.amount_minor) FROM period_adjustment_allocations aa WHERE aa.target_period_id=? AND aa.membership_id=m.id),0),
 		coalesce((SELECT sum(aa.amount_minor) FROM period_adjustment_allocations aa WHERE aa.source_period_id=? AND aa.membership_id=m.id),0)
-		FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.group_id=?`, periodID, periodID, periodID, periodID, groupID)
+		FROM memberships m
+		JOIN users u ON u.id=m.user_id
+		WHERE m.group_id=?
+		  AND (
+		      u.email IS NOT NULL
+		      OR EXISTS (
+		          SELECT 1
+		          FROM ledger_entries activity_ledger
+		          WHERE activity_ledger.group_id=m.group_id
+		            AND activity_ledger.period_id=?
+		            AND activity_ledger.membership_id=m.id
+		      )
+		      OR EXISTS (
+		          SELECT 1
+		          FROM payment_allocations activity_allocation
+		          JOIN payments activity_payment ON activity_payment.id=activity_allocation.payment_id
+		          WHERE activity_allocation.period_id=?
+		            AND activity_payment.group_id=m.group_id
+		            AND activity_payment.membership_id=m.id
+		      )
+		      OR EXISTS (
+		          SELECT 1
+		          FROM period_adjustment_allocations activity_adjustment
+		          WHERE activity_adjustment.target_period_id=?
+		            AND activity_adjustment.membership_id=m.id
+		      )
+		      OR EXISTS (
+		          SELECT 1
+		          FROM period_adjustment_allocations activity_adjustment
+		          WHERE activity_adjustment.source_period_id=?
+		            AND activity_adjustment.membership_id=m.id
+		      )
+		  )`, periodID, periodID, periodID, periodID, groupID, periodID, periodID, periodID, periodID)
 	if err != nil {
 		return 0, err
 	}
 	type row struct {
-		membershipID, displayName, email string
+		membershipID, displayName        string
+		email                            sql.NullString
 		charges, paid, applied, provided int64
 	}
 	var snapshots []row
@@ -238,7 +285,10 @@ func statementStatus(charges, paid int64) string {
 // allocations so settlement status remains useful. ctx bounds database access;
 // the method returns the result or SQL errors.
 func (s Service) Statements(ctx context.Context, membership domain.Membership, periodID string) ([]domain.Statement, error) {
-	viewAll := groups.HasRole(membership, domain.RoleFinanceManager)
+	viewAll, err := authorization.NewPolicy(s.DB).Can(ctx, membership.GroupID, membership.ID, domain.PermissionFinanceManagement, authorization.ResourceContext{GroupID: membership.GroupID})
+	if err != nil {
+		return nil, err
+	}
 	query := `SELECT ps.id,ps.period_id,ps.membership_id,ps.display_name,ps.email,ps.charges_minor,
 		coalesce((SELECT sum(pa.amount_minor) FROM payment_allocations pa JOIN payments py ON py.id=pa.payment_id WHERE pa.period_id=ps.period_id AND py.membership_id=ps.membership_id AND py.reversed_at IS NULL),0),
 		coalesce((SELECT sum(aa.amount_minor) FROM period_adjustment_allocations aa WHERE aa.target_period_id=ps.period_id AND aa.membership_id=ps.membership_id),0),
@@ -262,8 +312,13 @@ func (s Service) Statements(ctx context.Context, membership domain.Membership, p
 	result := make([]domain.Statement, 0)
 	for rows.Next() {
 		var item domain.Statement
-		if err := rows.Scan(&item.ID, &item.PeriodID, &item.MembershipID, &item.DisplayName, &item.Email, &item.ChargesMinor, &item.PaymentsAllocatedMinor, &item.AdjustmentsAppliedMinor, &item.AdjustmentsProvidedMinor, &item.Currency); err != nil {
+		var email sql.NullString
+		if err := rows.Scan(&item.ID, &item.PeriodID, &item.MembershipID, &item.DisplayName, &email, &item.ChargesMinor, &item.PaymentsAllocatedMinor, &item.AdjustmentsAppliedMinor, &item.AdjustmentsProvidedMinor, &item.Currency); err != nil {
 			return nil, err
+		}
+		if email.Valid {
+			emailValue := email.String
+			item.Email = &emailValue
 		}
 		item.AmountDueMinor = item.ChargesMinor + item.AdjustmentsProvidedMinor - item.PaymentsAllocatedMinor - item.AdjustmentsAppliedMinor
 		item.Status = statementStatus(item.ChargesMinor+item.AdjustmentsProvidedMinor, item.PaymentsAllocatedMinor+item.AdjustmentsAppliedMinor)

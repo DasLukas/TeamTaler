@@ -8,12 +8,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/DasLukas/TeamTaler/internal/audit"
+	"github.com/DasLukas/TeamTaler/internal/authorization"
 	"github.com/DasLukas/TeamTaler/internal/domain"
-	"github.com/DasLukas/TeamTaler/internal/groups"
 	"github.com/DasLukas/TeamTaler/internal/idempotency"
 	"github.com/DasLukas/TeamTaler/internal/ledger"
 	"github.com/DasLukas/TeamTaler/internal/media"
@@ -29,6 +30,17 @@ type Service struct {
 	DB *sql.DB
 	// Notifications atomically records member-visible payment events.
 	Notifications notifications.Service
+}
+
+func requirePermission(ctx context.Context, queryer authorization.Queryer, membership domain.Membership, permission domain.PermissionKey) error {
+	allowed, err := authorization.NewPolicy(queryer).Can(ctx, membership.GroupID, membership.ID, permission, authorization.ResourceContext{GroupID: membership.GroupID})
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return domain.ErrForbidden
+	}
+	return nil
 }
 
 // CategoryStatistic summarizes current-period booking and reversal totals for a
@@ -57,15 +69,17 @@ type Account struct {
 	RecentEntries      []LedgerEntry       `json:"recentEntries"`
 }
 
-// AccountSummary exposes one group membership's consolidated receivable to
-// authorized finance managers without returning its ledger movements.
+// AccountSummary exposes one group membership's consolidated receivable and
+// credential-derived temporary-guest classification to authorized finance
+// managers without returning credentials or ledger movements.
 type AccountSummary struct {
-	MembershipID string `json:"membershipId"`
-	DisplayName  string `json:"displayName"`
-	AvatarURL    string `json:"avatarUrl,omitempty"`
-	Status       string `json:"status"`
-	Currency     string `json:"currency"`
-	BalanceMinor int64  `json:"balanceMinor,string"`
+	MembershipID     string `json:"membershipId"`
+	DisplayName      string `json:"displayName"`
+	AvatarURL        string `json:"avatarUrl,omitempty"`
+	IsTemporaryGuest bool   `json:"isTemporaryGuest"`
+	Status           string `json:"status"`
+	Currency         string `json:"currency"`
+	BalanceMinor     int64  `json:"balanceMinor,string"`
 }
 
 // LedgerEntry is one immutable movement on a member receivable account. Positive
@@ -92,15 +106,18 @@ type Dashboard struct {
 }
 
 // Account returns targetMembershipID's consolidated balance, current-period
-// statistics, anonymous group aggregates, and recent ledger entries. An empty
-// target selects membership itself; finance privileges are required for others.
+// statistics, permission-gated group aggregates, and recent ledger entries. An
+// empty target selects membership itself; FINANCE_MANAGEMENT is required for a
+// different target and VIEW_GROUP_STATISTICS controls the aggregate section.
 // ctx bounds queries. It returns the Account or forbidden, not-found, and SQL errors.
 func (s Service) Account(ctx context.Context, membership domain.Membership, targetMembershipID string) (Account, error) {
 	if targetMembershipID == "" {
 		targetMembershipID = membership.ID
 	}
-	if targetMembershipID != membership.ID && !groups.HasRole(membership, domain.RoleFinanceManager) {
-		return Account{}, domain.ErrForbidden
+	if targetMembershipID != membership.ID {
+		if err := requirePermission(ctx, s.DB, membership, domain.PermissionFinanceManagement); err != nil {
+			return Account{}, err
+		}
 	}
 	var account Account
 	account.MembershipID = targetMembershipID
@@ -144,27 +161,33 @@ func (s Service) Account(ctx context.Context, membership domain.Membership, targ
 	if err := rows.Err(); err != nil {
 		return Account{}, err
 	}
-	groupStats, err := s.DB.QueryContext(ctx, `SELECT c.id,c.name,c.icon,
+	account.GroupCategoryStats = make([]CategoryStatistic, 0)
+	canViewGroupStatistics, err := authorization.NewPolicy(s.DB).Can(ctx, membership.GroupID, membership.ID, domain.PermissionViewGroupStatistics, authorization.GroupResource(membership.GroupID))
+	if err != nil {
+		return Account{}, err
+	}
+	if canViewGroupStatistics {
+		groupStats, err := s.DB.QueryContext(ctx, `SELECT c.id,c.name,c.icon,
 		coalesce((SELECT sum(b.quantity) FROM bookings b WHERE b.category_id=c.id AND b.period_id=? AND b.voided_at IS NULL),0),
 		coalesce((SELECT sum(b.total_minor) FROM bookings b WHERE b.category_id=c.id AND b.period_id=?),0),
 		coalesce(-(SELECT sum(le.amount_minor) FROM ledger_entries le WHERE le.category_id=c.id AND le.period_id=? AND le.account='MEMBER_RECEIVABLE' AND le.reversal_of IS NOT NULL AND le.amount_minor<0),0),
 		coalesce((SELECT sum(le.amount_minor) FROM ledger_entries le WHERE le.category_id=c.id AND le.period_id=? AND le.account='MEMBER_RECEIVABLE' AND le.payment_id IS NULL),0)
 		FROM categories c WHERE c.group_id=? ORDER BY c.sort_order,lower(c.name)`,
-		account.OpenPeriodID, account.OpenPeriodID, account.OpenPeriodID, account.OpenPeriodID, membership.GroupID)
-	if err != nil {
-		return Account{}, err
-	}
-	account.GroupCategoryStats = make([]CategoryStatistic, 0)
-	for groupStats.Next() {
-		var statistic CategoryStatistic
-		if err := groupStats.Scan(&statistic.CategoryID, &statistic.CategoryName, &statistic.Icon, &statistic.Quantity, &statistic.GrossMinor, &statistic.VoidedMinor, &statistic.NetMinor); err != nil {
-			groupStats.Close()
+			account.OpenPeriodID, account.OpenPeriodID, account.OpenPeriodID, account.OpenPeriodID, membership.GroupID)
+		if err != nil {
 			return Account{}, err
 		}
-		account.GroupCategoryStats = append(account.GroupCategoryStats, statistic)
-	}
-	if err := groupStats.Close(); err != nil {
-		return Account{}, err
+		for groupStats.Next() {
+			var statistic CategoryStatistic
+			if err := groupStats.Scan(&statistic.CategoryID, &statistic.CategoryName, &statistic.Icon, &statistic.Quantity, &statistic.GrossMinor, &statistic.VoidedMinor, &statistic.NetMinor); err != nil {
+				groupStats.Close()
+				return Account{}, err
+			}
+			account.GroupCategoryStats = append(account.GroupCategoryStats, statistic)
+		}
+		if err := groupStats.Close(); err != nil {
+			return Account{}, err
+		}
 	}
 	entries, err := s.DB.QueryContext(ctx, `SELECT id,period_id,booking_id,payment_id,reversal_of,amount_minor,description,created_at
 		FROM ledger_entries WHERE group_id=? AND membership_id=? AND account='MEMBER_RECEIVABLE'
@@ -184,22 +207,28 @@ func (s Service) Account(ctx context.Context, membership domain.Membership, targ
 	return account, entries.Err()
 }
 
-// ListAccountSummaries returns every active or archived membership with its
-// consolidated receivable balance. The caller must have finance-manager
-// privileges in the requested group. Results are grouped by membership status,
-// then ordered by descending balance and display name.
+// ListAccountSummaries returns every operational membership and each deleted
+// tombstone that currently has a non-zero consolidated receivable balance. The
+// caller must have finance-manager privileges in the requested group. Results
+// are grouped by lifecycle status, then ordered by descending balance and
+// display name.
 func (s Service) ListAccountSummaries(ctx context.Context, membership domain.Membership) ([]AccountSummary, error) {
-	if !groups.HasRole(membership, domain.RoleFinanceManager) {
-		return nil, domain.ErrForbidden
+	if err := requirePermission(ctx, s.DB, membership, domain.PermissionFinanceManagement); err != nil {
+		return nil, err
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT m.id,u.id,u.display_name,u.avatar_key,m.status,g.currency,coalesce(sum(le.amount_minor),0)
+	rows, err := s.DB.QueryContext(ctx, `SELECT m.id,u.id,u.display_name,
+		CASE WHEN m.deleted_at IS NULL THEN u.avatar_key ELSE NULL END,
+		(m.deleted_at IS NULL AND u.email IS NULL AND u.password_hash IS NULL),
+		CASE WHEN m.deleted_at IS NOT NULL THEN 'DELETED' ELSE m.status END,
+		g.currency,coalesce(sum(le.amount_minor),0)
 		FROM memberships m
 		JOIN users u ON u.id=m.user_id
 		JOIN groups g ON g.id=m.group_id
 		LEFT JOIN ledger_entries le ON le.group_id=m.group_id AND le.membership_id=m.id AND le.account='MEMBER_RECEIVABLE'
 		WHERE m.group_id=?
-		GROUP BY m.id,u.id,u.display_name,u.avatar_key,m.status,g.currency
-		ORDER BY CASE m.status WHEN 'ACTIVE' THEN 0 ELSE 1 END,
+		GROUP BY m.id,u.id,u.display_name,u.avatar_key,u.email,u.password_hash,m.status,m.deleted_at,g.currency
+		HAVING m.deleted_at IS NULL OR coalesce(sum(le.amount_minor),0) != 0
+		ORDER BY CASE WHEN m.deleted_at IS NOT NULL THEN 2 WHEN m.status='ACTIVE' THEN 0 ELSE 1 END,
 			coalesce(sum(le.amount_minor),0) DESC,lower(u.display_name),m.id`, membership.GroupID)
 	if err != nil {
 		return nil, err
@@ -210,7 +239,7 @@ func (s Service) ListAccountSummaries(ctx context.Context, membership domain.Mem
 		var item AccountSummary
 		var userID string
 		var avatarKey sql.NullString
-		if err := rows.Scan(&item.MembershipID, &userID, &item.DisplayName, &avatarKey, &item.Status, &item.Currency, &item.BalanceMinor); err != nil {
+		if err := rows.Scan(&item.MembershipID, &userID, &item.DisplayName, &avatarKey, &item.IsTemporaryGuest, &item.Status, &item.Currency, &item.BalanceMinor); err != nil {
 			return nil, err
 		}
 		item.AvatarURL = media.UserAvatarURL(userID, avatarKey.String)
@@ -251,28 +280,26 @@ const (
 // It returns the created or replayed Payment, or validation, forbidden,
 // not-found, idempotency, audit, and database errors.
 func (s Service) CreatePayment(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey string, input CreatePaymentInput) (domain.Payment, error) {
-	if !groups.HasRole(membership, domain.RoleFinanceManager) {
-		return domain.Payment{}, domain.ErrForbidden
+	if err := requirePermission(ctx, s.DB, membership, domain.PermissionFinanceManagement); err != nil {
+		return domain.Payment{}, err
 	}
 	return s.createPayment(ctx, actor, membership, idempotencyKey, input, true, paymentSourceFinanceWorkspace)
 }
 
 // CreateOwnPayment records a payment for the authenticated membership only.
-// The caller must have SELF_RECORD_PAYMENT or a broader finance role. The
-// resulting payment is immediately posted, audited, and FIFO-allocated without
-// creating a redundant notification for the actor.
+// The caller must have RECORD_OWN_PAYMENT; FINANCE_MANAGEMENT does not imply
+// this independent self-service permission. The resulting payment is
+// immediately posted, audited, and FIFO-allocated without creating a redundant
+// notification for the actor.
 func (s Service) CreateOwnPayment(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey string, input CreateOwnPaymentInput) (domain.Payment, error) {
-	if !groups.HasGroupPermission(membership, domain.PermissionSelfRecordPayment) {
-		return domain.Payment{}, domain.ErrForbidden
+	if err := requirePermission(ctx, s.DB, membership, domain.PermissionRecordOwnPayment); err != nil {
+		return domain.Payment{}, err
 	}
 	input.ReceivedAt = strings.TrimSpace(input.ReceivedAt)
 	if input.ReceivedAt == "" {
 		return domain.Payment{}, domain.ValidationError{Field: "receivedAt", Message: "is required"}
 	}
 	input.Reference = strings.TrimSpace(input.Reference)
-	if input.Reference == "" {
-		return domain.Payment{}, domain.ValidationError{Field: "reference", Message: "is required"}
-	}
 	return s.createPayment(ctx, actor, membership, idempotencyKey, CreatePaymentInput{
 		MembershipID: membership.ID,
 		AmountMinor:  input.AmountMinor,
@@ -291,7 +318,7 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 		storedIdempotencyKey = "self:" + idempotencyKey
 	}
 	input.MembershipID = strings.TrimSpace(input.MembershipID)
-	input.Method = strings.ToUpper(strings.TrimSpace(input.Method))
+	input.Method = strings.TrimSpace(input.Method)
 	input.Reference = strings.TrimSpace(input.Reference)
 	input.Note = strings.TrimSpace(input.Note)
 	if len(input.Reference) > 120 {
@@ -303,8 +330,8 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 	if input.AmountMinor <= 0 || input.AmountMinor > 100_000_000_000 {
 		return domain.Payment{}, domain.ValidationError{Field: "amountMinor", Message: "must be a positive, reasonable integer"}
 	}
-	if input.Method != "CASH" && input.Method != "BANK_TRANSFER" && input.Method != "PAYPAL" && input.Method != "OTHER" {
-		return domain.Payment{}, domain.ValidationError{Field: "method", Message: "must be CASH, BANK_TRANSFER, PAYPAL, or OTHER"}
+	if input.Method == "" || len(input.Method) > 120 {
+		return domain.Payment{}, domain.ValidationError{Field: "method", Message: "must identify a configured payment method"}
 	}
 	receivedAt := platform.Now()
 	if input.ReceivedAt != "" {
@@ -320,16 +347,11 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 	var payment domain.Payment
 	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
 		if source == paymentSourceSelfService {
-			var allowed int
-			if err := tx.QueryRowContext(ctx, `SELECT
-				EXISTS(SELECT 1 FROM membership_roles WHERE group_id=? AND membership_id=? AND role IN ('ADMIN','FINANCE_MANAGER'))
-				OR EXISTS(SELECT 1 FROM membership_permissions WHERE group_id=? AND membership_id=? AND permission='SELF_RECORD_PAYMENT')`,
-				membership.GroupID, membership.ID, membership.GroupID, membership.ID).Scan(&allowed); err != nil {
+			if err := requirePermission(ctx, tx, membership, domain.PermissionRecordOwnPayment); err != nil {
 				return err
 			}
-			if allowed == 0 {
-				return domain.ErrForbidden
-			}
+		} else if err := requirePermission(ctx, tx, membership, domain.PermissionFinanceManagement); err != nil {
+			return err
 		}
 		var storedHash, storedResponse string
 		err := tx.QueryRowContext(ctx, `SELECT request_hash,response_json FROM idempotency_results WHERE group_id=? AND actor_user_id=? AND idempotency_key=?`,
@@ -338,21 +360,50 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 			if storedHash != requestHash {
 				return domain.ErrIdempotencyReuse
 			}
-			return json.Unmarshal([]byte(storedResponse), &payment)
+			if err := json.Unmarshal([]byte(storedResponse), &payment); err != nil {
+				return err
+			}
+			return refreshPaymentMemberStateTx(ctx, tx, &payment)
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		var currency, memberName string
-		var targetExists int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM memberships WHERE id=? AND group_id=? AND status='ACTIVE'`, input.MembershipID, membership.GroupID).Scan(&targetExists); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT label FROM group_payment_methods WHERE group_id=? AND id=?`, membership.GroupID, input.Method).Scan(&payment.MethodLabel); errors.Is(err, sql.ErrNoRows) {
+			return domain.ValidationError{Field: "method", Message: "is not configured for this group"}
+		} else if err != nil {
 			return err
 		}
-		if targetExists == 0 {
+		var ownReasonRequired, otherReasonRequired bool
+		if err := tx.QueryRowContext(ctx, `SELECT own_payment_reason_required,other_payment_reason_required FROM group_settings WHERE group_id=?`, membership.GroupID).Scan(&ownReasonRequired, &otherReasonRequired); err != nil {
+			return err
+		}
+		reasonRequired := source == paymentSourceSelfService && ownReasonRequired
+		if source == paymentSourceFinanceWorkspace {
+			reasonRequired = otherReasonRequired
+		}
+		if reasonRequired && input.Reference == "" {
+			return domain.ValidationError{Field: "reference", Message: "is required"}
+		}
+		var currency, memberName, memberStatus string
+		var deletedAt sql.NullString
+		var currentBalance int64
+		if err := tx.QueryRowContext(ctx, `SELECT u.display_name,m.status,m.deleted_at,
+			coalesce((SELECT sum(le.amount_minor) FROM ledger_entries le
+				WHERE le.group_id=m.group_id AND le.membership_id=m.id AND le.account='MEMBER_RECEIVABLE'),0)
+			FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.id=? AND m.group_id=?`, input.MembershipID, membership.GroupID).
+			Scan(&memberName, &memberStatus, &deletedAt, &currentBalance); errors.Is(err, sql.ErrNoRows) {
+			return domain.ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		if source == paymentSourceSelfService && (memberStatus != domain.MembershipStatusActive || deletedAt.Valid) {
 			return domain.ErrNotFound
 		}
-		if err := tx.QueryRowContext(ctx, `SELECT u.display_name FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.id=?`, input.MembershipID).Scan(&memberName); err != nil {
-			return err
+		if deletedAt.Valid {
+			memberStatus = domain.MembershipStatusDeleted
+			if currentBalance <= 0 || input.AmountMinor > currentBalance {
+				return fmt.Errorf("%w: deleted accounts accept only payments that settle their open balance", domain.ErrConflict)
+			}
 		}
 		if err := tx.QueryRowContext(ctx, `SELECT currency FROM groups WHERE id=?`, membership.GroupID).Scan(&currency); err != nil {
 			return err
@@ -367,10 +418,10 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 		if input.Reference != "" {
 			ledgerDescription += ": " + input.Reference
 		}
-		payment = domain.Payment{ID: paymentID, GroupID: membership.GroupID, MembershipID: input.MembershipID, MemberName: memberName, AmountMinor: input.AmountMinor,
-			Currency: currency, ReceivedAt: platform.Timestamp(receivedAt), Method: input.Method, Reference: input.Reference, Note: input.Note, Status: "POSTED", Allocations: []domain.PaymentAllocation{}}
-		_, err = tx.ExecContext(ctx, `INSERT INTO payments(id,group_id,membership_id,amount_minor,received_at,method,reference,note,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,
-			paymentID, membership.GroupID, input.MembershipID, input.AmountMinor, payment.ReceivedAt, input.Method, nullable(input.Reference), nullable(input.Note), membership.ID, now)
+		payment = domain.Payment{ID: paymentID, GroupID: membership.GroupID, MembershipID: input.MembershipID, MemberName: memberName, MemberStatus: memberStatus, AmountMinor: input.AmountMinor,
+			Currency: currency, ReceivedAt: platform.Timestamp(receivedAt), Method: input.Method, MethodLabel: payment.MethodLabel, Reference: input.Reference, Note: input.Note, Status: "POSTED", Allocations: []domain.PaymentAllocation{}}
+		_, err = tx.ExecContext(ctx, `INSERT INTO payments(id,group_id,membership_id,amount_minor,received_at,method,method_label,reference,note,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+			paymentID, membership.GroupID, input.MembershipID, input.AmountMinor, payment.ReceivedAt, input.Method, payment.MethodLabel, nullable(input.Reference), nullable(input.Note), membership.ID, now)
 		if err != nil {
 			return err
 		}
@@ -398,7 +449,7 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 		if err := allocationRows.Close(); err != nil {
 			return err
 		}
-		if notifyTarget && membership.ID != input.MembershipID {
+		if notifyTarget && membership.ID != input.MembershipID && memberStatus != domain.MembershipStatusDeleted {
 			if _, err := s.Notifications.CreateTx(ctx, tx, notifications.CreateInput{
 				GroupID: membership.GroupID, MembershipID: input.MembershipID,
 				Type: notifications.TypePaymentRecorded, Title: "Payment recorded", Body: "A payment was added to your account.",
@@ -423,13 +474,15 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 // membership's group. ctx bounds queries; finance privileges are required. It
 // returns the slice or forbidden and SQL errors.
 func (s Service) ListPayments(ctx context.Context, membership domain.Membership, limit int) ([]domain.Payment, error) {
-	if !groups.HasRole(membership, domain.RoleFinanceManager) {
-		return nil, domain.ErrForbidden
+	if err := requirePermission(ctx, s.DB, membership, domain.PermissionFinanceManagement); err != nil {
+		return nil, err
 	}
 	if limit < 1 || limit > 200 {
 		limit = 100
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT p.id,p.group_id,p.membership_id,u.display_name,p.amount_minor,g.currency,p.received_at,p.method,coalesce(p.reference,''),coalesce(p.note,''),p.reversed_at
+	rows, err := s.DB.QueryContext(ctx, `SELECT p.id,p.group_id,p.membership_id,u.display_name,
+		CASE WHEN m.deleted_at IS NOT NULL THEN 'DELETED' ELSE m.status END,
+		p.amount_minor,g.currency,p.received_at,p.method,coalesce(p.method_label,''),coalesce(p.reference,''),coalesce(p.note,''),p.reversed_at
 		FROM payments p JOIN groups g ON g.id=p.group_id JOIN memberships m ON m.id=p.membership_id JOIN users u ON u.id=m.user_id
 		WHERE p.group_id=? ORDER BY p.received_at DESC LIMIT ?`, membership.GroupID, limit)
 	if err != nil {
@@ -439,7 +492,7 @@ func (s Service) ListPayments(ctx context.Context, membership domain.Membership,
 	result := make([]domain.Payment, 0)
 	for rows.Next() {
 		var item domain.Payment
-		if err := rows.Scan(&item.ID, &item.GroupID, &item.MembershipID, &item.MemberName, &item.AmountMinor, &item.Currency, &item.ReceivedAt, &item.Method, &item.Reference, &item.Note, &item.ReversedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.GroupID, &item.MembershipID, &item.MemberName, &item.MemberStatus, &item.AmountMinor, &item.Currency, &item.ReceivedAt, &item.Method, &item.MethodLabel, &item.Reference, &item.Note, &item.ReversedAt); err != nil {
 			return nil, err
 		}
 		item.Status = "POSTED"
@@ -478,8 +531,8 @@ func (s Service) allocations(ctx context.Context, paymentID string) ([]domain.Pa
 // scope audit/authorization. It returns validation, forbidden, not-found,
 // conflict, idempotency, audit, or SQL errors.
 func (s Service) ReversePayment(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey, paymentID, reason string) error {
-	if !groups.HasRole(membership, domain.RoleFinanceManager) {
-		return domain.ErrForbidden
+	if err := requirePermission(ctx, s.DB, membership, domain.PermissionFinanceManagement); err != nil {
+		return err
 	}
 	if err := idempotency.ValidateKey(idempotencyKey); err != nil {
 		return err
@@ -496,6 +549,9 @@ func (s Service) ReversePayment(ctx context.Context, actor domain.Principal, mem
 		return err
 	}
 	return storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		if err := requirePermission(ctx, tx, membership, domain.PermissionFinanceManagement); err != nil {
+			return err
+		}
 		var replay map[string]any
 		found, err := idempotency.Load(ctx, tx, membership.GroupID, actor.UserID, idempotencyKey, requestHash, &replay)
 		if err != nil || found {
@@ -503,8 +559,11 @@ func (s Service) ReversePayment(ctx context.Context, actor domain.Principal, mem
 		}
 		var reversed sql.NullString
 		var targetMembershipID, currency string
+		var targetDeletedAt sql.NullString
 		var amountMinor int64
-		if err := tx.QueryRowContext(ctx, `SELECT p.reversed_at,p.membership_id,p.amount_minor,g.currency FROM payments p JOIN groups g ON g.id=p.group_id WHERE p.id=? AND p.group_id=?`, paymentID, membership.GroupID).Scan(&reversed, &targetMembershipID, &amountMinor, &currency); errors.Is(err, sql.ErrNoRows) {
+		if err := tx.QueryRowContext(ctx, `SELECT p.reversed_at,p.membership_id,p.amount_minor,g.currency,m.deleted_at
+			FROM payments p JOIN groups g ON g.id=p.group_id JOIN memberships m ON m.id=p.membership_id
+			WHERE p.id=? AND p.group_id=?`, paymentID, membership.GroupID).Scan(&reversed, &targetMembershipID, &amountMinor, &currency, &targetDeletedAt); errors.Is(err, sql.ErrNoRows) {
 			return domain.ErrNotFound
 		} else if err != nil {
 			return err
@@ -553,7 +612,7 @@ func (s Service) ReversePayment(ctx context.Context, actor domain.Principal, mem
 		if err := ledger.RebuildPaymentAllocations(ctx, tx, membership.GroupID, targetMembershipID); err != nil {
 			return err
 		}
-		if membership.ID != targetMembershipID {
+		if membership.ID != targetMembershipID && !targetDeletedAt.Valid {
 			if _, err := s.Notifications.CreateTx(ctx, tx, notifications.CreateInput{
 				GroupID: membership.GroupID, MembershipID: targetMembershipID,
 				Type: notifications.TypePaymentReversed, Title: "Payment reversed", Body: "A payment on your account was reversed.",
@@ -568,6 +627,15 @@ func (s Service) ReversePayment(ctx context.Context, actor domain.Principal, mem
 		}
 		return idempotency.Store(ctx, tx, membership.GroupID, actor.UserID, idempotencyKey, requestHash, 204, map[string]any{"paymentId": paymentID, "status": "REVERSED"})
 	})
+}
+
+func refreshPaymentMemberStateTx(ctx context.Context, tx *sql.Tx, payment *domain.Payment) error {
+	if payment == nil || payment.MembershipID == "" {
+		return domain.ValidationError{Field: "payment", Message: "requires a membership id"}
+	}
+	return tx.QueryRowContext(ctx, `SELECT u.display_name,CASE WHEN m.deleted_at IS NOT NULL THEN 'DELETED' ELSE m.status END
+		FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.id=?`, payment.MembershipID).
+		Scan(&payment.MemberName, &payment.MemberStatus)
 }
 
 func insertLedger(ctx context.Context, tx *sql.Tx, groupID, periodID, membershipID, paymentID, reversalOf, account string, amount int64, description, createdAt string) error {

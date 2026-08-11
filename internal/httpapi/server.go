@@ -70,20 +70,22 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 		logger = slog.Default()
 	}
 	var tokenSealer groups.TokenSealer
+	var tokenOpener groups.TokenOpener
 	if cfg.SMTP.Enabled {
 		box, err := platform.NewSecretBox(cfg.EmailTokenKey)
 		if err != nil {
 			logger.Error("invitation email token encryption is unavailable", "error", err)
 		} else {
 			tokenSealer = box
+			tokenOpener = box
 		}
 	}
-	groupService := groups.Service{DB: db, TokenSealer: tokenSealer}
+	groupService := groups.Service{DB: db, TokenSealer: tokenSealer, TokenOpener: tokenOpener, EmailDeliveryAvailable: cfg.SMTP.Enabled}
 	notificationService := notifications.Service{DB: db, EmailDeliveryAvailable: cfg.SMTP.Enabled}
 	server := &Server{
 		config:        cfg,
 		db:            db,
-		auth:          auth.Service{DB: db, SessionLifetime: cfg.SessionLifetime},
+		auth:          auth.Service{DB: db, SessionLifetime: cfg.SessionLifetime, TokenSealer: tokenSealer, EmailDeliveryAvailable: cfg.SMTP.Enabled},
 		groups:        groupService,
 		catalog:       catalog.Service{DB: db},
 		bookings:      bookings.Service{DB: db, Groups: groupService, Notifications: notificationService},
@@ -99,31 +101,60 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /health/ready", server.handleReady)
 	mux.HandleFunc("POST /api/v1/auth/login", server.handleLogin)
 	mux.HandleFunc("POST /api/v1/auth/logout", server.handleLogout)
+	mux.HandleFunc("GET /api/v1/auth/capabilities", server.handleAccountCapabilities)
+	mux.HandleFunc("POST /api/v1/auth/password-reset/request", server.handlePasswordResetRequest)
+	mux.HandleFunc("POST /api/v1/auth/password-reset/confirm", server.handlePasswordResetConfirm)
+	mux.HandleFunc("POST /api/v1/auth/email-change/confirm", server.handleEmailChangeConfirm)
 	mux.HandleFunc("GET /api/v1/session", server.handleSession)
 	mux.HandleFunc("GET /api/v1/me", server.handleSession)
+	mux.HandleFunc("PATCH /api/v1/me/profile", server.handleUpdateProfile)
+	mux.HandleFunc("PUT /api/v1/me/password", server.handleChangePassword)
+	mux.HandleFunc("POST /api/v1/me/email-change", server.handleStartEmailChange)
+	mux.HandleFunc("GET /api/v1/permission-definitions", server.handlePermissionDefinitions)
 	mux.HandleFunc("POST /api/v1/me/avatar", server.handleProfileAvatar)
 	mux.HandleFunc("DELETE /api/v1/me/avatar", server.handleRemoveProfileAvatar)
 	mux.HandleFunc("GET /api/v1/users/{userID}/avatar/{imageKey}", server.handleUserAvatar)
 	mux.HandleFunc("POST /api/v1/invitations/preview", server.handlePreviewInvitation)
 	mux.HandleFunc("POST /api/v1/invitations/accept", server.handleAcceptInvitation)
+	mux.HandleFunc("POST /api/v1/public-join-links/preview", server.handlePreviewPublicJoinLink)
+	mux.HandleFunc("POST /api/v1/public-join-links/registrations", server.handleStartPublicJoinRegistration)
+	mux.HandleFunc("POST /api/v1/public-join-links/registrations/resend", server.handleResendPublicJoinVerification)
+	mux.HandleFunc("POST /api/v1/public-join-links/registrations/confirm", server.handleConfirmPublicJoinRegistration)
+	mux.HandleFunc("POST /api/v1/public-join-links/accept", server.handleAcceptPublicJoinLink)
 	mux.HandleFunc("GET /api/v1/groups", server.handleListGroups)
 	mux.HandleFunc("POST /api/v1/groups", server.handleCreateGroup)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}", server.handleUpdateGroup)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/settings", server.handleGetGroupSettings)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/settings", server.handleUpdateGroupSettings)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/transaction-settings", server.handleGetTransactionSettings)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/logo", server.handleGroupLogo)
 	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/logo", server.handleRemoveGroupLogo)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/dashboard", server.handleDashboard)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/members", server.handleListMembers)
+	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/members/{membershipID}", server.handleRenameTemporaryGuest)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/members/{membershipID}/claim-invitation", server.handleCreateTemporaryGuestClaimInvitation)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/members/{membershipID}/permissions", server.handleUpdatePermissions)
+	mux.HandleFunc("PUT /api/v1/groups/{groupID}/members/{membershipID}/roles", server.handleReplaceMemberRoles)
 	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/members/{membershipID}", server.handleArchiveMember)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/members/{membershipID}/reactivate", server.handleReactivateMember)
+	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/members/{membershipID}/permanent", server.handlePermanentlyDeleteMember)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/public-join-link", server.handleGetPublicJoinLink)
+	mux.HandleFunc("PUT /api/v1/groups/{groupID}/public-join-link", server.handlePutPublicJoinLink)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/public-join-link/rotate", server.handleRotatePublicJoinLink)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/invitations", server.handleListInvitations)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/invitations", server.handleCreateInvitation)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/invitations/{invitationID}", server.handleUpdateInvitation)
+	mux.HandleFunc("PUT /api/v1/groups/{groupID}/invitations/{invitationID}/roles", server.handleReplaceInvitationRoles)
 	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/invitations/{invitationID}", server.handleRevokeInvitation)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/invitations/import", server.handleImportInvitations)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/invitations/{invitationID}/email/retry", server.handleRetryInvitationEmail)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/invitations/{invitationID}/email/resend", server.handleResendInvitationEmail)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/roles", server.handleListRoles)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/roles", server.handleCreateRole)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/roles/{roleID}", server.handleGetRole)
+	mux.HandleFunc("PUT /api/v1/groups/{groupID}/roles/{roleID}", server.handleUpdateRole)
+	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/roles/{roleID}", server.handleDeleteRole)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/role-assignments", server.handleListRoleAssignments)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/categories", server.handleListCategories)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/categories", server.handleCreateCategory)
 	mux.HandleFunc("PUT /api/v1/groups/{groupID}/catalog/order", server.handleReorderCatalog)
@@ -135,7 +166,9 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/products/{productID}/image", server.handleProductImage)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/images/{imageKey}", server.handleImage)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/bookings", server.handleListBookings)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/booking-context", server.handleBookingContext)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/bookings", server.handleCreateBooking)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/bookings/batch", server.handleCreateBookingBatch)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/bookings/{bookingID}/void", server.handleVoidBooking)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/accounts", server.handleListAccounts)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/accounts/me", server.handleOwnAccount)
@@ -197,7 +230,7 @@ func (s *Server) sessionContext(next http.Handler) http.Handler {
 
 func (s *Server) csrfCheck(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if request.Method == http.MethodGet || request.Method == http.MethodHead || request.Method == http.MethodOptions || request.URL.Path == "/api/v1/auth/login" || request.URL.Path == "/api/v1/invitations/preview" || request.URL.Path == "/api/v1/invitations/accept" {
+		if request.Method == http.MethodGet || request.Method == http.MethodHead || request.Method == http.MethodOptions || isPublicMutation(request.URL.Path) {
 			next.ServeHTTP(response, request)
 			return
 		}
@@ -213,6 +246,24 @@ func (s *Server) csrfCheck(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(response, request)
 	})
+}
+
+func isPublicMutation(requestPath string) bool {
+	switch requestPath {
+	case "/api/v1/auth/login",
+		"/api/v1/auth/password-reset/request",
+		"/api/v1/auth/password-reset/confirm",
+		"/api/v1/auth/email-change/confirm",
+		"/api/v1/invitations/preview",
+		"/api/v1/invitations/accept",
+		"/api/v1/public-join-links/preview",
+		"/api/v1/public-join-links/registrations",
+		"/api/v1/public-join-links/registrations/resend",
+		"/api/v1/public-join-links/registrations/confirm":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Server) originCheck(next http.Handler) http.Handler {
@@ -298,11 +349,14 @@ func writeJSON(response http.ResponseWriter, status int, value any) {
 }
 
 type problem struct {
-	Type     string `json:"type"`
-	Title    string `json:"title"`
-	Status   int    `json:"status"`
-	Detail   string `json:"detail"`
-	Instance string `json:"instance"`
+	Type                   string `json:"type"`
+	Title                  string `json:"title"`
+	Status                 int    `json:"status"`
+	Detail                 string `json:"detail"`
+	Instance               string `json:"instance"`
+	MemberCount            *int64 `json:"memberCount,omitempty"`
+	PendingInvitationCount *int64 `json:"pendingInvitationCount,omitempty"`
+	ExistingMembershipID   string `json:"existingMembershipId,omitempty"`
 }
 
 func writeProblem(response http.ResponseWriter, request *http.Request, err error) {
@@ -335,7 +389,15 @@ func writeProblem(response http.ResponseWriter, request *http.Request, err error
 	}
 	response.Header().Set("Content-Type", "application/problem+json; charset=utf-8")
 	response.WriteHeader(status)
-	_ = json.NewEncoder(response).Encode(problem{Type: problemType, Title: title, Status: status, Detail: detail, Instance: request.URL.Path})
+	item := problem{Type: problemType, Title: title, Status: status, Detail: detail, Instance: request.URL.Path}
+	if memberCount, invitationCount, ok := roleConflictCounts(err); ok {
+		item.MemberCount = &memberCount
+		item.PendingInvitationCount = &invitationCount
+	}
+	if membershipID, ok := temporaryGuestConflictMembershipID(err); ok {
+		item.ExistingMembershipID = membershipID
+	}
+	_ = json.NewEncoder(response).Encode(item)
 }
 
 func queryLimit(request *http.Request) int {
