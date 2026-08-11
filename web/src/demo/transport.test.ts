@@ -390,6 +390,7 @@ describe('DemoTransport group settings', () => {
   it('persists typed behavior settings', async () => {
     const transport = new DemoTransport();
     await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings')).resolves.toMatchObject({
+      settlementsEnabled: false,
       notificationEmailsEnabled: false,
       notificationEmailDeliveryAvailable: true,
       defaultRoleId: 'role-member',
@@ -400,6 +401,11 @@ describe('DemoTransport group settings', () => {
         { id: 'OTHER', label: 'Other' },
       ],
     });
+    await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settlementsEnabled: true }),
+    })).resolves.toMatchObject({ settlementsEnabled: true });
     await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -421,6 +427,14 @@ describe('DemoTransport group settings', () => {
       body: JSON.stringify({ membersCanViewAllBookings: true }),
     })).rejects.toThrow();
     await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings')).resolves.toMatchObject({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-finance' });
+  });
+
+  it('rejects period closing until settlements are enabled', async () => {
+    const transport = new DemoTransport();
+
+    await expect(transport.request('/groups/group-sv-adler/periods/period-august/close', jsonRequest('POST', { label: 'August 2026', dueAt: '2026-08-15' }))).rejects.toThrow(/disabled/i);
+    await transport.request('/groups/group-sv-adler/settings', jsonRequest('PATCH', { settlementsEnabled: true }));
+    await expect(transport.request('/groups/group-sv-adler/periods/period-august/close', jsonRequest('POST', { label: 'August 2026', dueAt: '2026-08-15' }))).resolves.toMatchObject({ status: 'CLOSED' });
   });
 });
 
@@ -507,15 +521,24 @@ describe('DemoTransport profile images', () => {
     const uploaded = await transport.request<{ avatarUrl: string }>('/me/avatar', { method: 'POST', body: form });
     const session = await transport.request<Session>('/session');
     const members = await transport.request<Membership[]>('/groups/group-sv-adler/members');
+    const bookings = await transport.request<Booking[]>('/groups/group-sv-adler/bookings');
+    const dashboard = await transport.request<Dashboard>('/groups/group-sv-adler/dashboard');
+    const currentMembershipId = session.groups.find((group) => group.id === session.activeGroupId)?.membership?.id;
+    const selfBooking = bookings.find((booking) => booking.memberId === currentMembershipId && booking.bookedByMemberId === currentMembershipId);
+    const dashboardSelfBooking = dashboard.recentBookings.find((booking) => booking.memberId === currentMembershipId && booking.bookedByMemberId === currentMembershipId);
     expect(uploaded.avatarUrl).toMatch(/^blob:/);
     expect(session.user.avatarUrl).toBe(uploaded.avatarUrl);
     expect(members.find((member) => member.userId === session.user.id)?.avatarUrl).toBe(uploaded.avatarUrl);
+    expect(selfBooking).toMatchObject({ memberAvatarUrl: uploaded.avatarUrl, bookedByAvatarUrl: uploaded.avatarUrl });
+    expect(dashboardSelfBooking).toMatchObject({ memberAvatarUrl: uploaded.avatarUrl, bookedByAvatarUrl: uploaded.avatarUrl });
 
     await transport.request<void>('/me/avatar', { method: 'DELETE' });
     const removedSession = await transport.request<Session>('/session');
     const removedMembers = await transport.request<Membership[]>('/groups/group-sv-adler/members');
+    const removedBookings = await transport.request<Booking[]>('/groups/group-sv-adler/bookings');
     expect(removedSession.user.avatarUrl).toBeUndefined();
     expect(removedMembers.find((member) => member.userId === session.user.id)?.avatarUrl).toBeUndefined();
+    expect(removedBookings.find((booking) => booking.id === selfBooking?.id)).toMatchObject({ memberAvatarUrl: undefined, bookedByAvatarUrl: undefined });
   });
 });
 

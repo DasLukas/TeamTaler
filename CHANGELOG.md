@@ -4,6 +4,27 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+### Added
+
+- Migration `0025` and a group-level `settlementsEnabled` setting in the dedicated administration Finance section, disabled by default for every new and upgraded group.
+- A shared drag-and-wheel square crop editor for group logos, profile images, and product images during creation or editing.
+
+### Changed
+
+- Groups can use a continuous balance without settlement-period UI. Disabling settlements preserves the technical open period, immutable history, and full-ledger balances; re-enabling resumes the same period with all activity recorded in the meantime.
+- Group category statistics use the complete history while settlements are disabled and the current open period while they are enabled. Existing settlement history remains read-only and is shown only when present.
+- Group-logo, profile-image, and product-image previews no longer render a synthetic background behind the image; saved crops preserve the chosen position and scale through the existing upload API.
+- The role editor groups permission switches into labelled administration, booking, finance, and catalog sections for faster scanning on desktop and mobile.
+
+### Fixed
+
+- Local group-logo and profile-image previews remain visible during React development checks, and long selected filenames no longer widen the page beyond the viewport.
+- Booking activity and dashboard rows now refresh current actor and target profile images after an avatar upload or replacement.
+
+### Security
+
+- Period close now rechecks `settlementsEnabled` inside the server-side write transaction and rejects close attempts while settlements are disabled; hidden client controls are presentation only.
+
 ## [0.6.0] - 2026-08-09
 
 ### Added

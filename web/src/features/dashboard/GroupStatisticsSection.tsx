@@ -9,7 +9,7 @@ import styles from './GroupStatisticsSection.module.css';
 /** Properties accepted by the anonymous group-statistics section. */
 export interface GroupStatisticsSectionProps {
   groupTotals: CategoryTotal[];
-  periodLabel: string;
+  periodLabel?: string;
   currency: string;
 }
 
@@ -33,9 +33,9 @@ export function GroupStatisticsSection({ groupTotals, periodLabel, currency }: G
       </header>
       <div className={styles.summary}>
         <TrendingUp aria-hidden="true" size={28} />
-        <div><span>{t('dashboard.groupStatistics.groupSum', { period: periodLabel })}</span><strong>{formatMoney({ minorUnits: aggregate.toString(), currency: aggregateCurrency })}</strong></div>
+        <div><span>{periodLabel ? t('dashboard.groupStatistics.groupSum', { period: periodLabel }) : t('dashboard.groupStatistics.groupSumAllTime')}</span><strong>{formatMoney({ minorUnits: aggregate.toString(), currency: aggregateCurrency })}</strong></div>
       </div>
-      {groupTotals.length === 0 ? <p className={styles.empty}>{t('dashboard.groupStatistics.empty')}</p> : (
+      {groupTotals.length === 0 ? <p className={styles.empty}>{t(periodLabel ? 'dashboard.groupStatistics.empty' : 'dashboard.groupStatistics.emptyAllTime')}</p> : (
         <div className={styles.categories}>
           {groupTotals.map((entry) => {
             const percentage = Number(BigInt(entry.total.minorUnits) * 10_000n / max) / 100;

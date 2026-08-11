@@ -181,8 +181,9 @@ export interface ConfigurableItem {
   label: string;
 }
 
-/** Non-sensitive transaction behavior used by booking and payment forms. */
+/** Non-sensitive operational behavior used by finance, booking, and payment surfaces. */
 export interface TransactionSettings {
+  settlementsEnabled: boolean;
   foreignBookingReasonRequired: boolean;
   ownPaymentReasonRequired: boolean;
   otherPaymentReasonRequired: boolean;
@@ -193,6 +194,7 @@ export interface TransactionSettings {
 
 /** Administrator-managed group behavior shared by one group. */
 export interface GroupSettings {
+  settlementsEnabled: boolean;
   notificationEmailsEnabled: boolean;
   notificationEmailDeliveryAvailable: boolean;
   defaultRoleId: string | null;
@@ -208,6 +210,7 @@ export interface GroupSettings {
  * Group notification-settings update accepted by the API.
  */
 export interface GroupSettingsUpdateInput {
+  settlementsEnabled?: boolean;
   notificationEmailsEnabled?: boolean;
   defaultRoleId?: string;
   foreignBookingReasonRequired?: boolean;

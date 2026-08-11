@@ -232,6 +232,7 @@ export class DemoTransport {
   private invitations: InvitationMetadata[] = [];
   private invitationTokens = new Map<string, string>();
   private groupSettings: GroupSettings = {
+    settlementsEnabled: false,
     notificationEmailsEnabled: false,
     notificationEmailDeliveryAvailable: true,
     defaultRoleId: 'role-member',
@@ -333,6 +334,7 @@ export class DemoTransport {
     if (resource === 'settings' && method === 'PATCH') {
       this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
       const update = body as Partial<GroupSettings>;
+      const updatesSettlements = update.settlementsEnabled !== undefined;
       const updatesNotificationEmails = update.notificationEmailsEnabled !== undefined;
       const updatesDefaultRole = update.defaultRoleId !== undefined;
       const updatesTransactionSettings = update.foreignBookingReasonRequired !== undefined
@@ -341,7 +343,8 @@ export class DemoTransport {
         || update.paymentMethods !== undefined
         || update.bookingReasons !== undefined
         || update.paymentReasons !== undefined;
-      if (!updatesNotificationEmails && !updatesDefaultRole && !updatesTransactionSettings) throw new Error('At least one group setting is required.');
+      if (!updatesSettlements && !updatesNotificationEmails && !updatesDefaultRole && !updatesTransactionSettings) throw new Error('At least one group setting is required.');
+      if (updatesSettlements && typeof update.settlementsEnabled !== 'boolean') throw new Error('Settlement availability must be a boolean.');
       if (updatesNotificationEmails && typeof update.notificationEmailsEnabled !== 'boolean') throw new Error('Notification email delivery must be a boolean.');
       if (updatesDefaultRole) {
         const defaultRole = this.roles.find((role) => role.id === update.defaultRoleId);
@@ -350,6 +353,7 @@ export class DemoTransport {
       }
       this.groupSettings = {
         ...this.groupSettings,
+        ...(updatesSettlements ? { settlementsEnabled: update.settlementsEnabled as boolean } : {}),
         ...(updatesNotificationEmails ? { notificationEmailsEnabled: update.notificationEmailsEnabled as boolean } : {}),
         ...(updatesDefaultRole ? { defaultRoleId: update.defaultRoleId as string } : {}),
         ...(update.foreignBookingReasonRequired !== undefined ? { foreignBookingReasonRequired: update.foreignBookingReasonRequired } : {}),
@@ -389,8 +393,12 @@ export class DemoTransport {
       this.publicJoinLink = { ...this.publicJoinLink, version: this.publicJoinLink.version + 1, updatedAt: new Date().toISOString(), acceptUrl: `${window.location.origin}/join#token=${encodeURIComponent(this.publicJoinToken)}` };
       return clone(this.publicJoinLink) as T;
     }
-    if (resource === 'dashboard') return clone(this.dashboard) as T;
+    if (resource === 'dashboard') return clone({
+      ...this.dashboard,
+      recentBookings: this.dashboard.recentBookings.map((booking) => this.bookingWithCurrentIdentities(booking)),
+    }) as T;
     if (resource === 'transaction-settings' && method === 'GET') return clone({
+      settlementsEnabled: this.groupSettings.settlementsEnabled,
       foreignBookingReasonRequired: this.groupSettings.foreignBookingReasonRequired,
       ownPaymentReasonRequired: this.groupSettings.ownPaymentReasonRequired,
       otherPaymentReasonRequired: this.groupSettings.otherPaymentReasonRequired,
@@ -949,7 +957,25 @@ export class DemoTransport {
     const deadline = booking.voidWithoutReasonUntil ?? booking.undoUntil ?? new Date(Date.parse(booking.bookedAt) + 30_000).toISOString();
     const withinReasonlessWindow = createdByActor && Date.parse(deadline) > Date.now();
     const reasonRequired = canVoid && !withinReasonlessWindow;
-    return { ...booking, canVoid, voidReasonRequired: reasonRequired, voidWithoutReasonUntil: canVoid && withinReasonlessWindow ? deadline : undefined, undoUntil: undefined };
+    return {
+      ...this.bookingWithCurrentIdentities(booking),
+      canVoid,
+      voidReasonRequired: reasonRequired,
+      voidWithoutReasonUntil: canVoid && withinReasonlessWindow ? deadline : undefined,
+      undoUntil: undefined,
+    };
+  }
+
+  private bookingWithCurrentIdentities(booking: Booking): Booking {
+    const target = this.members.find((member) => member.id === booking.memberId);
+    const actor = this.members.find((member) => member.id === booking.bookedByMemberId);
+    return {
+      ...booking,
+      memberName: target?.displayName ?? booking.memberName,
+      memberAvatarUrl: target ? target.avatarUrl : booking.memberAvatarUrl,
+      bookedByName: actor?.displayName ?? booking.bookedByName,
+      bookedByAvatarUrl: actor ? actor.avatarUrl : booking.bookedByAvatarUrl,
+    };
   }
 
   private reverseBooking(groupId: string, id: string, reason: string): Booking {
@@ -1466,6 +1492,7 @@ export class DemoTransport {
   }
 
   private closePeriod(id: string, input: { label: string; dueAt: string }): Period {
+    if (!this.groupSettings.settlementsEnabled) throw new Error('Settlements are disabled for this group.');
     const period = this.periods.find((entry) => entry.id === id);
     if (!period) throw new Error(i18n.t('errors.periodNotFound'));
     period.status = 'CLOSED';

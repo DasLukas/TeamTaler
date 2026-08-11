@@ -8,12 +8,17 @@ import { ActiveGroupContext } from '@/app/active-group-context';
 import i18n from '@/i18n';
 import { ProfileImagePanel } from './ProfileImagePanel';
 
+const imageUploadMock = vi.hoisted(() => ({ prepareSquareImage: vi.fn() }));
 const apiMock = vi.hoisted(() => ({
   uploadProfileAvatar: vi.fn(),
   removeProfileAvatar: vi.fn(),
 }));
 
 vi.mock('@/api/client', () => ({ api: apiMock }));
+vi.mock('@/components/media/imageUpload', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/components/media/imageUpload')>(),
+  prepareSquareImage: imageUploadMock.prepareSquareImage,
+}));
 
 const baseSession: Session = {
   user: { id: 'user-a', displayName: 'Alex Member', email: 'alex@example.test' },
@@ -50,19 +55,29 @@ function renderProfileImage(session: Session = baseSession): QueryClient {
 }
 
 describe('ProfileImagePanel', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:profile-preview') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+  });
 
   it('uploads a supported image and synchronizes the session and membership caches', async () => {
     const user = userEvent.setup();
     const image = new File(['avatar'], 'alex.png', { type: 'image/png' });
+    const preparedImage = new File(['prepared'], 'alex.png', { type: 'image/png' });
     const avatarUrl = '/api/v1/users/user-a/avatar/avatar.png';
+    imageUploadMock.prepareSquareImage.mockResolvedValue(preparedImage);
     apiMock.uploadProfileAvatar.mockResolvedValue({ avatarUrl });
     const queryClient = renderProfileImage();
 
     await user.upload(screen.getByLabelText(i18n.t('account.profileImage.label')), image);
+    const preview = screen.getByRole('img', { name: i18n.t('account.profileImage.previewAlt') });
+    expect(preview.querySelector('img')).toHaveAttribute('src', 'blob:profile-preview');
+    fireEvent.wheel(preview, { deltaY: -279.807894 });
     await user.click(screen.getByRole('button', { name: i18n.t('account.profileImage.save') }));
 
-    await waitFor(() => expect(apiMock.uploadProfileAvatar).toHaveBeenCalledWith(image));
+    await waitFor(() => expect(imageUploadMock.prepareSquareImage).toHaveBeenCalledWith(image, { x: 0, y: 0, zoom: expect.closeTo(1.75, 5) }));
+    await waitFor(() => expect(apiMock.uploadProfileAvatar).toHaveBeenCalledWith(preparedImage));
     await waitFor(() => expect(queryClient.getQueryData<Session>(['session'])?.user.avatarUrl).toBe(avatarUrl));
     expect(queryClient.getQueryData<Membership[]>(['members', 'group-a'])?.[0].avatarUrl).toBe(avatarUrl);
     expect(await screen.findByText(i18n.t('account.profileImage.saved'))).toHaveAttribute('role', 'status');

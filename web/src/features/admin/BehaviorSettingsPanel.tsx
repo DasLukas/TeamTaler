@@ -30,6 +30,7 @@ function SettingsForm({ groupId, settings, roles }: SettingsFormProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const defaultRoleCandidates = roles.filter((role) => !role.grants.some((grant) => grant.permission === 'GROUP_ADMINISTRATION'));
+  const [settlementsEnabled, setSettlementsEnabled] = useState(settings.settlementsEnabled);
   const [notificationEmailsEnabled, setNotificationEmailsEnabled] = useState(settings.notificationEmailsEnabled);
   const [defaultRoleId, setDefaultRoleId] = useState(settings.defaultRoleId ?? '');
   const [foreignBookingReasonRequired, setForeignBookingReasonRequired] = useState(settings.foreignBookingReasonRequired);
@@ -43,7 +44,8 @@ function SettingsForm({ groupId, settings, roles }: SettingsFormProps) {
     const labels = items.map((item) => item.label.trim().toLocaleLowerCase());
     return labels.some((label) => !label) || new Set(labels).size !== labels.length;
   });
-  const changed = notificationEmailsEnabled !== settings.notificationEmailsEnabled
+  const changed = settlementsEnabled !== settings.settlementsEnabled
+    || notificationEmailsEnabled !== settings.notificationEmailsEnabled
     || Boolean(defaultRoleId && defaultRoleId !== settings.defaultRoleId)
     || foreignBookingReasonRequired !== settings.foreignBookingReasonRequired
     || ownPaymentReasonRequired !== settings.ownPaymentReasonRequired
@@ -55,6 +57,7 @@ function SettingsForm({ groupId, settings, roles }: SettingsFormProps) {
   const mutation = useMutation({
     mutationFn: () => {
       const update: GroupSettingsUpdateInput = {
+        ...(settlementsEnabled !== settings.settlementsEnabled ? { settlementsEnabled } : {}),
         ...(notificationEmailsEnabled !== settings.notificationEmailsEnabled ? { notificationEmailsEnabled } : {}),
         ...(defaultRoleId && defaultRoleId !== settings.defaultRoleId ? { defaultRoleId } : {}),
         ...(foreignBookingReasonRequired !== settings.foreignBookingReasonRequired ? { foreignBookingReasonRequired } : {}),
@@ -69,6 +72,10 @@ function SettingsForm({ groupId, settings, roles }: SettingsFormProps) {
     onSuccess: async (persisted) => {
       queryClient.setQueryData<GroupSettings>(['group-settings', groupId], persisted);
       await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['transaction-settings', groupId] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard', groupId] }),
+        queryClient.invalidateQueries({ queryKey: ['periods', groupId] }),
+        queryClient.invalidateQueries({ queryKey: ['settlements', groupId] }),
         queryClient.invalidateQueries({ queryKey: ['roles', groupId] }),
         queryClient.invalidateQueries({ queryKey: ['members', groupId] }),
       ]);
@@ -105,6 +112,20 @@ function SettingsForm({ groupId, settings, roles }: SettingsFormProps) {
               {defaultRoleCandidates.map((role) => <option key={role.id} value={role.id}>{roleDisplayName(role)}</option>)}
             </SelectInput>
           </Field>
+        </section>
+      </section>
+
+      <section aria-labelledby="finance-settings-title" className={styles.settingsSection}>
+        <header><h3 id="finance-settings-title">{t('behaviorSettings.financeSectionTitle')}</h3></header>
+        <section aria-labelledby="settlements-setting-title" className={styles.card}>
+          <div className={styles.settingRow}>
+            <div>
+              <h4 id="settlements-setting-title">{t('behaviorSettings.settlementsTitle')}</h4>
+              <p>{t('behaviorSettings.settlementsDescription')}</p>
+            </div>
+            <Toggle checked={settlementsEnabled} disabled={mutation.isPending} label={t('behaviorSettings.settlementsToggle')} onChange={(checked) => { setSettlementsEnabled(checked); mutation.reset(); }} />
+          </div>
+          <p className={styles.notice}>{t(settlementsEnabled ? 'behaviorSettings.settlementsEnabledNotice' : 'behaviorSettings.settlementsDisabledNotice')}</p>
         </section>
       </section>
 

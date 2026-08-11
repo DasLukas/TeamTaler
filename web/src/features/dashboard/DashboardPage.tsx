@@ -46,16 +46,18 @@ export function DashboardPage() {
   const { t } = useTranslation();
   const { activeGroupId, activeGroup, session } = useActiveGroup();
   const dashboardQuery = useQuery({ queryKey: ['dashboard', activeGroupId], queryFn: () => api.getDashboard(activeGroupId) });
+  const transactionSettingsQuery = useQuery({ queryKey: ['transaction-settings', activeGroupId], queryFn: () => api.getTransactionSettings(activeGroupId) });
   const localHour = useLocalHour();
 
-  if (dashboardQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
-  if (dashboardQuery.error || !dashboardQuery.data) {
+  if (dashboardQuery.isLoading || transactionSettingsQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
+  if (dashboardQuery.error || transactionSettingsQuery.error || !dashboardQuery.data || !transactionSettingsQuery.data) {
     return <div className={styles.state}><StatePanel kind="error" message={t('dashboard.error')} /></div>;
   }
 
   const dashboard = dashboardQuery.data;
+  const settlementsEnabled = transactionSettingsQuery.data.settlementsEnabled;
   const recentBookings = dashboard.recentBookings;
-  const periodTotal = dashboard.categoryTotals.reduce((sum, entry) => sum + BigInt(entry.total.minorUnits), 0n);
+  const categoryTotal = dashboard.categoryTotals.reduce((sum, entry) => sum + BigInt(entry.total.minorUnits), 0n);
   const greeting = t(`dashboard.${getDashboardGreetingKey(localHour)}`);
   const canRecordPayment = canRecordOwnPayment(activeGroup.membership?.effectiveGrants);
   const canViewGroupStatistics = can(activeGroup.membership?.effectiveGrants, 'VIEW_GROUP_STATISTICS');
@@ -65,9 +67,9 @@ export function DashboardPage() {
     <div className={styles.dashboard}>
       <section className={styles.content}>
         <h1>{greeting}, {session.user.displayName.split(' ')[0]}</h1>
-        <div className={styles.balanceCard}>
+        <div className={`${styles.balanceCard} ${settlementsEnabled ? '' : styles.continuousBalanceCard}`}>
           <div><span>{t('booking.openBalance')}</span><strong className={hasCreditBalance ? styles.creditBalance : undefined} data-financial-state={hasCreditBalance ? 'credit' : 'due'}>{formatMoney(dashboard.openBalance)}</strong>{canRecordPayment ? <SelfPaymentDialog className={styles.selfPaymentAction} openBalance={dashboard.openBalance} /> : null}</div>
-          <div className={styles.period}><strong>{t('dashboard.settlement', { label: dashboard.currentPeriod.label.split(' ')[0] })}</strong><p>{t(canRecordPayment ? 'dashboard.paymentNoteSelf' : 'dashboard.paymentNote')}</p></div>
+          <div className={styles.period}>{settlementsEnabled ? <strong>{t('dashboard.settlement', { label: dashboard.currentPeriod.label.split(' ')[0] })}</strong> : null}<p>{t(canRecordPayment ? 'dashboard.paymentNoteSelf' : 'dashboard.paymentNote')}</p></div>
         </div>
 
         <div className={styles.lower}>
@@ -89,16 +91,16 @@ export function DashboardPage() {
             </div>
           </section>
           <section className={styles.periodSection}>
-            <h2>{dashboard.currentPeriod.label}</h2>
+            <h2>{settlementsEnabled ? dashboard.currentPeriod.label : t('dashboard.bookingsByCategory')}</h2>
             <div className={styles.monthCard}>
               {dashboard.categoryTotals.map((entry) => {
                 return <div className={styles.totalRow} key={entry.categoryId}><CategoryIcon icon={entry.icon} size={24} /><span>{entry.categoryName}</span><strong>{formatMoney(entry.total)}</strong></div>;
               })}
-              <div className={styles.sum}><span>{t('dashboard.sum')}</span><strong>{formatMoney({ minorUnits: periodTotal.toString(), currency: dashboard.openBalance.currency })}</strong></div>
+              <div className={styles.sum}><span>{t('dashboard.sum')}</span><strong>{formatMoney({ minorUnits: categoryTotal.toString(), currency: dashboard.openBalance.currency })}</strong></div>
             </div>
           </section>
         </div>
-        {canViewGroupStatistics ? <GroupStatisticsSection currency={dashboard.openBalance.currency} groupTotals={dashboard.groupCategoryTotals} periodLabel={dashboard.currentPeriod.label} /> : null}
+        {canViewGroupStatistics ? <GroupStatisticsSection currency={dashboard.openBalance.currency} groupTotals={dashboard.groupCategoryTotals} periodLabel={settlementsEnabled ? dashboard.currentPeriod.label : undefined} /> : null}
       </section>
     </div>
   );

@@ -23,6 +23,10 @@
   border-radius: var(--radius-md);
 }
 
+.continuousBalanceCard {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 1.2fr);
+}
+
 .balanceCard > div:first-child {
   display: grid;
   gap: var(--space-1);

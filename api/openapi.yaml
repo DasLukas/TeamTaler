@@ -580,7 +580,7 @@ paths:
     patch:
       tags: [Groups]
       summary: Partially update GROUP_ADMINISTRATION-managed group behavior settings
-      description: Updates notification delivery, default role, and transaction-form behavior for the group.
+      description: Updates settlement availability, notification delivery, default role, and transaction-form behavior for the group.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/CSRFToken'
@@ -600,13 +600,13 @@ paths:
   /groups/{groupId}/transaction-settings:
     get:
       tags: [Groups]
-      summary: Read ordered payment methods, reason suggestions, and reason requirements
-      description: Returns only the non-sensitive form configuration needed by an active group member.
+      summary: Read settlement availability and ordered transaction behavior
+      description: Returns only the non-sensitive feature and form configuration needed by an active group member.
       parameters:
         - $ref: '#/components/parameters/GroupId'
       responses:
         '200':
-          description: Current transaction-form settings
+          description: Current operational feature and transaction settings
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TransactionSettings' }
@@ -1846,6 +1846,7 @@ paths:
     post:
       tags: [Periods]
       summary: Permanently close a period and open its successor
+      description: Requires FINANCE_MANAGEMENT and settlementsEnabled=true. Disabling settlements never changes the technical open period.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/PeriodId'
@@ -2346,7 +2347,7 @@ components:
     GroupSettings:
       type: object
       additionalProperties: false
-      required: [notificationEmailsEnabled, notificationEmailDeliveryAvailable, defaultRoleId, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
+      required: [notificationEmailsEnabled, notificationEmailDeliveryAvailable, settlementsEnabled, defaultRoleId, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
       properties:
         notificationEmailsEnabled:
           type: boolean
@@ -2355,6 +2356,9 @@ components:
           type: boolean
           readOnly: true
           description: Whether the running server has complete SMTP delivery configuration.
+        settlementsEnabled:
+          type: boolean
+          description: Whether administrators may close the unchanged technical open period and create settlement statements.
         defaultRoleId:
           type: [string, 'null']
           description: Group-owned non-administrative role preselected for new invitations and used by CSV rows without roles.
@@ -2386,6 +2390,9 @@ components:
       minProperties: 1
       properties:
         notificationEmailsEnabled: { type: boolean }
+        settlementsEnabled:
+          type: boolean
+          description: Enables or disables period closing without changing periods, ledger entries, balances, or settlement history.
         defaultRoleId:
           type: string
           minLength: 1
@@ -2416,8 +2423,11 @@ components:
     TransactionSettings:
       type: object
       additionalProperties: false
-      required: [foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
+      required: [settlementsEnabled, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
       properties:
+        settlementsEnabled:
+          type: boolean
+          description: Whether settlement-period references and actions should be shown to active members.
         foreignBookingReasonRequired: { type: boolean }
         ownPaymentReasonRequired: { type: boolean }
         otherPaymentReasonRequired: { type: boolean }
@@ -3079,6 +3089,9 @@ components:
         actorDisplayName:
           type: string
           description: Server-resolved actor name so activity clients do not need the member directory.
+        actorAvatarUrl:
+          type: string
+          description: Current protected actor avatar URL; omitted when no avatar is configured.
         actorMembershipStatus:
           type: string
           enum: [ACTIVE, ARCHIVED, DELETED]
@@ -3087,6 +3100,9 @@ components:
         targetDisplayName:
           type: string
           description: Server-resolved charged-member name so activity clients do not need the member directory.
+        targetAvatarUrl:
+          type: string
+          description: Current protected charged-member avatar URL; omitted when no avatar is configured.
         targetMembershipStatus:
           type: string
           enum: [ACTIVE, ARCHIVED, DELETED]
@@ -3160,10 +3176,11 @@ components:
         openPeriodDueMinor: { $ref: '#/components/schemas/MinorUnits' }
         categoryStatistics:
           type: array
+          description: Category totals for the open period when settlements are enabled, otherwise totals across all periods.
           items: { $ref: '#/components/schemas/CategoryStatistic' }
         groupCategoryStatistics:
           type: array
-          description: Anonymous current-period category totals across the group; an empty array without VIEW_GROUP_STATISTICS.
+          description: Anonymous category totals across the group for the open period when settlements are enabled, otherwise across all periods; an empty array without VIEW_GROUP_STATISTICS.
           items: { $ref: '#/components/schemas/CategoryStatistic' }
         recentEntries:
           type: array

@@ -254,6 +254,7 @@ type Group struct {
 // of one group.
 type GroupSettings struct {
 	NotificationEmailsEnabled    bool               `json:"notificationEmailsEnabled"`
+	SettlementsEnabled           bool               `json:"settlementsEnabled"`
 	DefaultRoleID                *string            `json:"defaultRoleId"`
 	ForeignBookingReasonRequired bool               `json:"foreignBookingReasonRequired"`
 	OwnPaymentReasonRequired     bool               `json:"ownPaymentReasonRequired"`
@@ -270,9 +271,10 @@ type ConfigurableItem struct {
 	Label string `json:"label"`
 }
 
-// TransactionSettings contains the non-sensitive transaction behavior that
-// active members need to render booking and payment forms.
+// TransactionSettings contains the non-sensitive operational behavior that
+// active members need to render finance, booking, and payment surfaces.
 type TransactionSettings struct {
+	SettlementsEnabled           bool               `json:"settlementsEnabled"`
 	ForeignBookingReasonRequired bool               `json:"foreignBookingReasonRequired"`
 	OwnPaymentReasonRequired     bool               `json:"ownPaymentReasonRequired"`
 	OtherPaymentReasonRequired   bool               `json:"otherPaymentReasonRequired"`
@@ -371,9 +373,11 @@ type Booking struct {
 	ProductID              string  `json:"productId"`
 	ActorMembershipID      string  `json:"actorMembershipId"`
 	ActorDisplayName       string  `json:"actorDisplayName"`
+	ActorAvatarURL         string  `json:"actorAvatarUrl,omitempty"`
 	ActorMembershipStatus  string  `json:"actorMembershipStatus"`
 	TargetMembershipID     string  `json:"targetMembershipId"`
 	TargetDisplayName      string  `json:"targetDisplayName"`
+	TargetAvatarURL        string  `json:"targetAvatarUrl,omitempty"`
 	TargetMembershipStatus string  `json:"targetMembershipStatus"`
 	Quantity               int     `json:"quantity"`
 	UnitPriceMinor         int64   `json:"unitPriceMinor,string"`

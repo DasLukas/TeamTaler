@@ -16,6 +16,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/finance"
 	"github.com/DasLukas/TeamTaler/internal/groups"
+	"github.com/DasLukas/TeamTaler/internal/media"
 	"github.com/DasLukas/TeamTaler/internal/periods"
 	"github.com/DasLukas/TeamTaler/internal/storage"
 )
@@ -141,6 +142,102 @@ func (f *fixture) openPeriodID() string {
 		f.t.Fatalf("read open period: %v", err)
 	}
 	return id
+}
+
+func (f *fixture) setSettlementsEnabled(enabled bool) {
+	f.t.Helper()
+	settings, err := f.groups.UpdateSettings(f.ctx, f.admin, f.membership, groups.SettingsUpdate{SettlementsEnabled: &enabled})
+	if err != nil || settings.SettlementsEnabled != enabled {
+		f.t.Fatalf("set settlements enabled=%t: settings=%#v err=%v", enabled, settings, err)
+	}
+}
+
+func TestOptionalSettlementsPreservePeriodBalanceAndStatisticsScope(t *testing.T) {
+	f := newFixture(t)
+	settings, err := f.groups.Settings(f.ctx, f.membership)
+	if err != nil || settings.SettlementsEnabled {
+		t.Fatalf("default group settings=%#v err=%v, want settlements disabled", settings, err)
+	}
+	transactionSettings, err := f.groups.TransactionSettings(f.ctx, f.membership)
+	if err != nil || transactionSettings.SettlementsEnabled {
+		t.Fatalf("default transaction settings=%#v err=%v, want settlements disabled", transactionSettings, err)
+	}
+
+	_, product := f.catalogItem("Optional settlements", 100)
+	periodOne := f.openPeriodID()
+	if _, err := f.bookings.Create(f.ctx, f.admin, f.membership, "optional-settlement-period-one", bookings.CreateInput{
+		ProductID: product.ID, ProductVersion: product.Version, ExpectedPeriodID: periodOne, Quantity: 1,
+	}); err != nil {
+		t.Fatalf("create first-period booking: %v", err)
+	}
+	closeOneInput := periods.CloseInput{Label: "First", DueAt: "2099-01-01", NextPeriodLabel: "Second"}
+	if _, err := f.periods.Close(f.ctx, f.admin, f.membership, "optional-settlement-disabled-close", periodOne, closeOneInput); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("close while disabled error=%v, want conflict", err)
+	}
+	if got := f.openPeriodID(); got != periodOne {
+		t.Fatalf("open period after rejected close=%q, want %q", got, periodOne)
+	}
+
+	f.setSettlementsEnabled(true)
+	account, err := f.finance.Account(f.ctx, f.membership, f.membership.ID)
+	if err != nil || account.BalanceMinor != 100 || len(account.CategoryStats) != 1 || account.CategoryStats[0].NetMinor != 100 {
+		t.Fatalf("enabled first-period account=%#v err=%v", account, err)
+	}
+	closedOne, err := f.periods.Close(f.ctx, f.admin, f.membership, "optional-settlement-close-one", periodOne, closeOneInput)
+	if err != nil {
+		t.Fatalf("close first period: %v", err)
+	}
+	periodTwo := closedOne.OpenPeriod.ID
+	if _, err := f.bookings.Create(f.ctx, f.admin, f.membership, "optional-settlement-period-two", bookings.CreateInput{
+		ProductID: product.ID, ProductVersion: product.Version, ExpectedPeriodID: periodTwo, Quantity: 2,
+	}); err != nil {
+		t.Fatalf("create second-period booking: %v", err)
+	}
+
+	f.setSettlementsEnabled(false)
+	replayed, err := f.periods.Close(f.ctx, f.admin, f.membership, "optional-settlement-close-one", periodOne, closeOneInput)
+	if err != nil || replayed.OpenPeriod.ID != periodTwo {
+		t.Fatalf("replay completed close while disabled=%#v err=%v", replayed, err)
+	}
+	account, err = f.finance.Account(f.ctx, f.membership, f.membership.ID)
+	if err != nil || account.BalanceMinor != 300 || account.CategoryStats[0].NetMinor != 300 || account.GroupCategoryStats[0].NetMinor != 300 {
+		t.Fatalf("disabled all-time account before pause booking=%#v err=%v", account, err)
+	}
+	if _, err := f.bookings.Create(f.ctx, f.admin, f.membership, "optional-settlement-disabled-booking", bookings.CreateInput{
+		ProductID: product.ID, ProductVersion: product.Version, ExpectedPeriodID: periodTwo, Quantity: 3,
+	}); err != nil {
+		t.Fatalf("create booking while settlements disabled: %v", err)
+	}
+	if _, err := f.periods.Close(f.ctx, f.admin, f.membership, "optional-settlement-disabled-close-two", periodTwo, periods.CloseInput{Label: "Second", DueAt: "2099-02-01", NextPeriodLabel: "Third"}); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("close second period while disabled error=%v, want conflict", err)
+	}
+	account, err = f.finance.Account(f.ctx, f.membership, f.membership.ID)
+	if err != nil || account.BalanceMinor != 600 || account.CategoryStats[0].NetMinor != 600 || account.GroupCategoryStats[0].NetMinor != 600 {
+		t.Fatalf("disabled all-time account after pause booking=%#v err=%v", account, err)
+	}
+
+	f.setSettlementsEnabled(true)
+	if got := f.openPeriodID(); got != periodTwo {
+		t.Fatalf("open period after re-enabling=%q, want unchanged %q", got, periodTwo)
+	}
+	account, err = f.finance.Account(f.ctx, f.membership, f.membership.ID)
+	if err != nil || account.BalanceMinor != 600 || account.CategoryStats[0].NetMinor != 500 || account.GroupCategoryStats[0].NetMinor != 500 {
+		t.Fatalf("re-enabled current-period account=%#v err=%v", account, err)
+	}
+	if _, err := f.periods.Close(f.ctx, f.admin, f.membership, "optional-settlement-close-two", periodTwo, periods.CloseInput{Label: "Second", DueAt: "2099-02-01", NextPeriodLabel: "Third"}); err != nil {
+		t.Fatalf("close re-enabled period: %v", err)
+	}
+	statements, err := f.periods.Statements(f.ctx, f.membership, periodTwo)
+	if err != nil || len(statements) != 1 || statements[0].ChargesMinor != 500 {
+		t.Fatalf("second-period statements=%#v err=%v, want paused activity included", statements, err)
+	}
+	var auditMetadata string
+	if err := f.db.QueryRowContext(f.ctx, `SELECT metadata_json FROM audit_events WHERE group_id=? AND action='group.settings.updated' ORDER BY occurred_at DESC,id DESC LIMIT 1`, f.group.ID).Scan(&auditMetadata); err != nil {
+		t.Fatalf("read settlement toggle audit: %v", err)
+	}
+	if !strings.Contains(auditMetadata, `"settlementsEnabled":{"current":true,"previous":false}`) {
+		t.Fatalf("settlement toggle audit metadata=%s", auditMetadata)
+	}
 }
 
 func TestBootstrapLoginInvitationReplayAndTenantRBAC(t *testing.T) {
@@ -595,6 +692,7 @@ func TestExternalPaymentChangesNotifyTarget(t *testing.T) {
 
 func TestDefaultOpenPeriodLabels(t *testing.T) {
 	f := newFixture(t)
+	f.setSettlementsEnabled(true)
 	var bootstrapLabel string
 	if err := f.db.QueryRowContext(f.ctx, `SELECT label FROM periods WHERE group_id=? AND status='OPEN'`, f.group.ID).Scan(&bootstrapLabel); err != nil || bootstrapLabel != domain.DefaultOpenPeriodLabel {
 		t.Fatalf("bootstrap open period label = %q err=%v, want %q", bootstrapLabel, err, domain.DefaultOpenPeriodLabel)
@@ -714,6 +812,7 @@ func TestCatalogReorderPersistsAcrossCatalogBookingAndDashboardReads(t *testing.
 
 func TestCatalogDeletionRequiresArchivalAndPreservesHistory(t *testing.T) {
 	f := newFixture(t)
+	f.setSettlementsEnabled(true)
 	category, product := f.catalogItem("Disposable", 125)
 	regularPrincipal, regularMembership, _ := f.inviteMember("catalog-delete-member@example.test", "Catalog Delete Member", nil)
 	if err := f.catalog.DeleteProduct(f.ctx, regularPrincipal, regularMembership, product.ID, product.Version); !errors.Is(err, domain.ErrForbidden) {
@@ -915,6 +1014,45 @@ func TestAuthenticationThrottlesSessionActivityWrites(t *testing.T) {
 	}
 	if err := f.db.QueryRowContext(f.ctx, `SELECT last_seen_at FROM sessions WHERE id_hash=?`, session.Principal.SessionHash).Scan(&lastSeen); err != nil || lastSeen == stale {
 		t.Fatalf("stale session activity was not refreshed: %q err=%v", lastSeen, err)
+	}
+}
+
+func TestBookingActivityUsesCurrentAvatarURLs(t *testing.T) {
+	f := newFixture(t)
+	_, product := f.catalogItem("Avatar activity", 275)
+	input := bookings.CreateInput{
+		ProductID:        product.ID,
+		ProductVersion:   product.Version,
+		ExpectedPeriodID: f.openPeriodID(),
+		Quantity:         1,
+	}
+
+	created, err := f.bookings.Create(f.ctx, f.admin, f.membership, "avatar-activity-create", input)
+	if err != nil {
+		t.Fatalf("create booking: %v", err)
+	}
+	firstAvatarKey := strings.Repeat("a", 64) + ".png"
+	if _, err := f.db.ExecContext(f.ctx, `UPDATE users SET avatar_key=? WHERE id=?`, firstAvatarKey, f.membership.UserID); err != nil {
+		t.Fatalf("set first avatar: %v", err)
+	}
+	firstAvatarURL := media.UserAvatarURL(f.membership.UserID, firstAvatarKey)
+	activity, err := f.bookings.ListActivity(f.ctx, f.membership, f.openPeriodID(), 20)
+	if err != nil || len(activity) != 1 || activity[0].ActorAvatarURL != firstAvatarURL || activity[0].TargetAvatarURL != firstAvatarURL {
+		t.Fatalf("activity with first avatar = %#v, err = %v", activity, err)
+	}
+
+	secondAvatarKey := strings.Repeat("b", 64) + ".png"
+	if _, err := f.db.ExecContext(f.ctx, `UPDATE users SET avatar_key=? WHERE id=?`, secondAvatarKey, f.membership.UserID); err != nil {
+		t.Fatalf("set replacement avatar: %v", err)
+	}
+	secondAvatarURL := media.UserAvatarURL(f.membership.UserID, secondAvatarKey)
+	activity, err = f.bookings.ListActivity(f.ctx, f.membership, f.openPeriodID(), 20)
+	if err != nil || len(activity) != 1 || activity[0].ActorAvatarURL != secondAvatarURL || activity[0].TargetAvatarURL != secondAvatarURL {
+		t.Fatalf("activity with replacement avatar = %#v, err = %v", activity, err)
+	}
+	replayed, err := f.bookings.Create(f.ctx, f.admin, f.membership, "avatar-activity-create", input)
+	if err != nil || replayed.ID != created.ID || replayed.ActorAvatarURL != secondAvatarURL || replayed.TargetAvatarURL != secondAvatarURL {
+		t.Fatalf("replayed booking with replacement avatar = %#v, err = %v", replayed, err)
 	}
 }
 
@@ -1346,6 +1484,7 @@ func TestUserDefinedProductPricingIsValidatedAndSnapshotted(t *testing.T) {
 
 func TestPaymentFIFOReversalAndClosedPeriodImmutability(t *testing.T) {
 	f := newFixture(t)
+	f.setSettlementsEnabled(true)
 	_, product := f.catalogItem("Products", 100)
 	periodOne := f.openPeriodID()
 	if _, err := f.bookings.Create(f.ctx, f.admin, f.membership, "period-one-booking", bookings.CreateInput{ProductID: product.ID, ProductVersion: product.Version, ExpectedPeriodID: periodOne, Quantity: 1}); err != nil {
@@ -1426,6 +1565,7 @@ func TestPaymentFIFOReversalAndClosedPeriodImmutability(t *testing.T) {
 
 func TestOverpaymentCreditsFutureClaims(t *testing.T) {
 	f := newFixture(t)
+	f.setSettlementsEnabled(true)
 	_, product := f.catalogItem("Products", 100)
 	periodOne := f.openPeriodID()
 	if _, err := f.bookings.Create(f.ctx, f.admin, f.membership, "credit-charge-one", bookings.CreateInput{ProductID: product.ID, ProductVersion: product.Version, ExpectedPeriodID: periodOne, Quantity: 1}); err != nil {
@@ -1461,6 +1601,7 @@ func TestOverpaymentCreditsFutureClaims(t *testing.T) {
 
 func TestNegativeCorrectionOffsetsOldClaimBeforePayment(t *testing.T) {
 	f := newFixture(t)
+	f.setSettlementsEnabled(true)
 	_, product := f.catalogItem("Products", 100)
 	periodOne := f.openPeriodID()
 	booking, err := f.bookings.Create(f.ctx, f.admin, f.membership, "correction-charge", bookings.CreateInput{ProductID: product.ID, ProductVersion: product.Version, ExpectedPeriodID: periodOne, Quantity: 1})
@@ -1500,6 +1641,7 @@ func TestNegativeCorrectionOffsetsOldClaimBeforePayment(t *testing.T) {
 
 func TestPartialCorrectionAndPaymentSettleOriginalClaim(t *testing.T) {
 	f := newFixture(t)
+	f.setSettlementsEnabled(true)
 	_, product := f.catalogItem("Products", 50)
 	periodOne := f.openPeriodID()
 	first, err := f.bookings.Create(f.ctx, f.admin, f.membership, "partial-correction-first", bookings.CreateInput{ProductID: product.ID, ProductVersion: product.Version, ExpectedPeriodID: periodOne, Quantity: 1})

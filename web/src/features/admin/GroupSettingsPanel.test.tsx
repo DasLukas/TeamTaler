@@ -8,6 +8,7 @@ import { ActiveGroupContext } from '@/app/active-group-context';
 import i18n from '@/i18n';
 import { GroupSettingsPanel } from './GroupSettingsPanel';
 
+const imageUploadMock = vi.hoisted(() => ({ prepareSquareImage: vi.fn() }));
 const apiMock = vi.hoisted(() => ({
   updateGroupName: vi.fn(),
   uploadGroupLogo: vi.fn(),
@@ -15,6 +16,10 @@ const apiMock = vi.hoisted(() => ({
 }));
 
 vi.mock('@/api/client', () => ({ api: apiMock }));
+vi.mock('@/components/media/imageUpload', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/components/media/imageUpload')>(),
+  prepareSquareImage: imageUploadMock.prepareSquareImage,
+}));
 
 const baseSession: Session = {
   user: { id: 'user-a', displayName: 'Alex', email: 'alex@example.test' },
@@ -40,6 +45,7 @@ describe('GroupSettingsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:logo-preview') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
   });
 
   it('renames the group and updates the shared session immediately', async () => {
@@ -62,18 +68,23 @@ describe('GroupSettingsPanel', () => {
     expect(await screen.findByText(i18n.t('groupSettings.nameSaved'))).toHaveAttribute('role', 'status');
   });
 
-  it('keeps local file content out of the preview and saves a supported group logo', async () => {
+  it('previews, positions, and saves a normalized group logo crop', async () => {
     const user = userEvent.setup();
     const logo = new File(['logo'], 'club.png', { type: 'image/png' });
+    const preparedLogo = new File(['prepared'], 'club.png', { type: 'image/png' });
+    imageUploadMock.prepareSquareImage.mockResolvedValue(preparedLogo);
     apiMock.uploadGroupLogo.mockResolvedValue({ logoUrl: '/api/v1/groups/group-a/images/logo.png' });
     const queryClient = renderSettings();
 
     await user.upload(screen.getByLabelText(i18n.t('groupSettings.imageLabel')), logo);
-    expect(URL.createObjectURL).not.toHaveBeenCalled();
-    expect(screen.getByAltText(i18n.t('groupSettings.previewAlt', { group: 'Group A' }))).toHaveAttribute('src', '/brand/teamtaler-mark.png');
+    expect(URL.createObjectURL).toHaveBeenCalledWith(logo);
+    const preview = screen.getByRole('img', { name: i18n.t('groupSettings.previewAlt', { group: 'Group A' }) });
+    expect(preview.querySelector('img')).toHaveAttribute('src', 'blob:logo-preview');
+    fireEvent.wheel(preview, { deltaY: -202.732554 });
     await user.click(screen.getByRole('button', { name: i18n.t('groupSettings.save') }));
 
-    await waitFor(() => expect(apiMock.uploadGroupLogo).toHaveBeenCalledWith('group-a', logo));
+    await waitFor(() => expect(imageUploadMock.prepareSquareImage).toHaveBeenCalledWith(logo, { x: 0, y: 0, zoom: expect.closeTo(1.5, 5) }));
+    await waitFor(() => expect(apiMock.uploadGroupLogo).toHaveBeenCalledWith('group-a', preparedLogo));
     await waitFor(() => expect((queryClient.getQueryData<Session>(['session'])?.groups[0].logoUrl)).toBe('/api/v1/groups/group-a/images/logo.png'));
     expect(await screen.findByText(i18n.t('groupSettings.saved'))).toHaveAttribute('role', 'status');
     expect(screen.getByLabelText(i18n.t('groupSettings.imageLabel'))).toHaveValue('');

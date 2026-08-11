@@ -40,6 +40,7 @@ function renderPanel(): QueryClient {
 
 describe('BehaviorSettingsPanel', () => {
   const settings: GroupSettings = {
+    settlementsEnabled: false,
     notificationEmailsEnabled: false,
     notificationEmailDeliveryAvailable: true,
     defaultRoleId: 'role-member',
@@ -79,6 +80,25 @@ describe('BehaviorSettingsPanel', () => {
     expect(defaultRoleRegion.querySelector('span')).toBeNull();
     expect(screen.getByLabelText(i18n.t('groupSettings.nameLabel'))).toHaveValue('Group A');
     expect(screen.getByLabelText(i18n.t('groupSettings.imageLabel'))).toBeVisible();
+  });
+
+  it('renders a dedicated finance section and persists the settlement feature flag', async () => {
+    const user = userEvent.setup();
+    apiMock.updateGroupSettings.mockResolvedValue({ ...settings, settlementsEnabled: true });
+    const queryClient = renderPanel();
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
+
+    expect(await screen.findByRole('region', { name: i18n.t('behaviorSettings.financeSectionTitle') })).toBeVisible();
+    const toggle = screen.getByRole('switch', { name: i18n.t('behaviorSettings.settlementsToggle') });
+    expect(toggle).not.toBeChecked();
+    await user.click(toggle);
+    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
+
+    await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { settlementsEnabled: true }));
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['transaction-settings', 'group-a'] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['dashboard', 'group-a'] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['periods', 'group-a'] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['settlements', 'group-a'] });
   });
 
   it('saves notification email delivery only when SMTP is available', async () => {

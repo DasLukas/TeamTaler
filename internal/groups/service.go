@@ -189,6 +189,7 @@ func (s Service) Settings(ctx context.Context, membership domain.Membership) (do
 // SettingsUpdate describes a partial change to group behavior.
 type SettingsUpdate struct {
 	NotificationEmailsEnabled    *bool
+	SettlementsEnabled           *bool
 	DefaultRoleID                *string
 	ForeignBookingReasonRequired *bool
 	OwnPaymentReasonRequired     *bool
@@ -204,7 +205,7 @@ type SettingsUpdate struct {
 // the persisted settings or validation, forbidden, not-found, audit, and SQL
 // errors.
 func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, membership domain.Membership, update SettingsUpdate) (domain.GroupSettings, error) {
-	if update.NotificationEmailsEnabled == nil && update.DefaultRoleID == nil &&
+	if update.NotificationEmailsEnabled == nil && update.SettlementsEnabled == nil && update.DefaultRoleID == nil &&
 		update.ForeignBookingReasonRequired == nil && update.OwnPaymentReasonRequired == nil &&
 		update.OtherPaymentReasonRequired == nil && update.PaymentMethods == nil &&
 		update.BookingReasons == nil && update.PaymentReasons == nil {
@@ -234,6 +235,9 @@ func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, mem
 		next := previous
 		if update.NotificationEmailsEnabled != nil {
 			next.NotificationEmailsEnabled = *update.NotificationEmailsEnabled
+		}
+		if update.SettlementsEnabled != nil {
+			next.SettlementsEnabled = *update.SettlementsEnabled
 		}
 		if update.DefaultRoleID != nil {
 			if err := validateDefaultRole(ctx, tx, membership.GroupID, *update.DefaultRoleID); err != nil {
@@ -274,9 +278,9 @@ func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, mem
 			return nil
 		}
 		now := platform.Timestamp(platform.Now())
-		if _, err := tx.ExecContext(ctx, `UPDATE group_settings SET notification_emails_enabled=?,default_role_id=?,
+		if _, err := tx.ExecContext(ctx, `UPDATE group_settings SET notification_emails_enabled=?,settlements_enabled=?,default_role_id=?,
 			foreign_booking_reason_required=?,own_payment_reason_required=?,other_payment_reason_required=?,updated_at=? WHERE group_id=?`,
-			next.NotificationEmailsEnabled, nullableText(next.DefaultRoleID), next.ForeignBookingReasonRequired,
+			next.NotificationEmailsEnabled, next.SettlementsEnabled, nullableText(next.DefaultRoleID), next.ForeignBookingReasonRequired,
 			next.OwnPaymentReasonRequired, next.OtherPaymentReasonRequired, now, membership.GroupID); err != nil {
 			return err
 		}
@@ -297,6 +301,7 @@ func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, mem
 		}
 		if err := audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "group.settings.updated", "group", membership.GroupID, map[string]any{
 			"notificationEmailsEnabled": map[string]bool{"previous": previous.NotificationEmailsEnabled, "current": next.NotificationEmailsEnabled},
+			"settlementsEnabled":        map[string]bool{"previous": previous.SettlementsEnabled, "current": next.SettlementsEnabled},
 			"defaultRoleId":             map[string]any{"previous": previous.DefaultRoleID, "current": next.DefaultRoleID},
 			"transactionSettings": map[string]any{
 				"foreignBookingReasonRequired": next.ForeignBookingReasonRequired,
@@ -328,10 +333,10 @@ type settingsQueryer interface {
 
 func querySettings(ctx context.Context, queryer settingsQueryer, groupID string, settings *domain.GroupSettings) error {
 	var defaultRoleID sql.NullString
-	if err := queryer.QueryRowContext(ctx, `SELECT notification_emails_enabled,default_role_id,
+	if err := queryer.QueryRowContext(ctx, `SELECT notification_emails_enabled,settlements_enabled,default_role_id,
 		foreign_booking_reason_required,own_payment_reason_required,other_payment_reason_required
 		FROM group_settings WHERE group_id=?`, groupID).
-		Scan(&settings.NotificationEmailsEnabled, &defaultRoleID, &settings.ForeignBookingReasonRequired,
+		Scan(&settings.NotificationEmailsEnabled, &settings.SettlementsEnabled, &defaultRoleID, &settings.ForeignBookingReasonRequired,
 			&settings.OwnPaymentReasonRequired, &settings.OtherPaymentReasonRequired); err != nil {
 		return err
 	}
@@ -352,8 +357,8 @@ func querySettings(ctx context.Context, queryer settingsQueryer, groupID string,
 	return nil
 }
 
-// TransactionSettings returns non-sensitive booking and payment form options
-// for an active group member.
+// TransactionSettings returns non-sensitive feature state plus booking and
+// payment form options for an active group member.
 func (s Service) TransactionSettings(ctx context.Context, membership domain.Membership) (domain.TransactionSettings, error) {
 	var active bool
 	if err := s.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM memberships WHERE group_id=? AND id=? AND status='ACTIVE' AND deleted_at IS NULL)`, membership.GroupID, membership.ID).Scan(&active); err != nil {
@@ -371,6 +376,7 @@ func (s Service) TransactionSettings(ctx context.Context, membership domain.Memb
 
 func transactionSettingsFromGroup(settings domain.GroupSettings) domain.TransactionSettings {
 	return domain.TransactionSettings{
+		SettlementsEnabled:           settings.SettlementsEnabled,
 		ForeignBookingReasonRequired: settings.ForeignBookingReasonRequired,
 		OwnPaymentReasonRequired:     settings.OwnPaymentReasonRequired,
 		OtherPaymentReasonRequired:   settings.OtherPaymentReasonRequired,
@@ -462,7 +468,7 @@ func replaceConfiguredItems(ctx context.Context, queryer settingsExecutor, group
 }
 
 func groupSettingsEqual(left, right domain.GroupSettings) bool {
-	return left.NotificationEmailsEnabled == right.NotificationEmailsEnabled && nullableStringsEqual(left.DefaultRoleID, right.DefaultRoleID) &&
+	return left.NotificationEmailsEnabled == right.NotificationEmailsEnabled && left.SettlementsEnabled == right.SettlementsEnabled && nullableStringsEqual(left.DefaultRoleID, right.DefaultRoleID) &&
 		left.ForeignBookingReasonRequired == right.ForeignBookingReasonRequired && left.OwnPaymentReasonRequired == right.OwnPaymentReasonRequired &&
 		left.OtherPaymentReasonRequired == right.OtherPaymentReasonRequired && reflect.DeepEqual(left.PaymentMethods, right.PaymentMethods) &&
 		reflect.DeepEqual(left.BookingReasons, right.BookingReasons) && reflect.DeepEqual(left.PaymentReasons, right.PaymentReasons)

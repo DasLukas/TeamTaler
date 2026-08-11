@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -19,8 +19,13 @@ const apiMock = vi.hoisted(() => ({
   deleteProduct: vi.fn(),
   uploadProductImage: vi.fn(),
 }));
+const imageUploadMock = vi.hoisted(() => ({ prepareSquareImage: vi.fn() }));
 
 vi.mock('@/api/client', () => ({ api: apiMock }));
+vi.mock('@/components/media/imageUpload', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/components/media/imageUpload')>(),
+  prepareSquareImage: imageUploadMock.prepareSquareImage,
+}));
 
 const category: Category = {
   id: 'category-a',
@@ -65,6 +70,9 @@ function renderCatalog(): void {
 describe('CatalogPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:product-preview') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    imageUploadMock.prepareSquareImage.mockImplementation(async (file: File) => file);
     apiMock.getCategories.mockResolvedValue([category]);
     apiMock.createCategory.mockResolvedValue(category);
     apiMock.createProduct.mockResolvedValue(createdProduct);
@@ -81,6 +89,24 @@ describe('CatalogPanel', () => {
 
     expect(await screen.findByText('W')).toBeVisible();
     expect(screen.getByText(createdProduct.name)).toHaveAttribute('title', createdProduct.name);
+  });
+
+  it('marks only archived products with an image overlay instead of status labels', async () => {
+    const archivedProduct = { ...createdProduct, id: 'product-archived', name: 'Archived water', active: false };
+    apiMock.getCategories.mockResolvedValue([{ ...category, products: [createdProduct, archivedProduct] }]);
+    renderCatalog();
+
+    const activeCard = (await screen.findByText(createdProduct.name)).closest('article');
+    const archivedCard = screen.getByText(archivedProduct.name).closest('article');
+    expect(activeCard).not.toBeNull();
+    expect(archivedCard).not.toBeNull();
+    expect(activeCard).toHaveAttribute('data-state', 'active');
+    expect(archivedCard).toHaveAttribute('data-state', 'archived');
+    expect(within(activeCard!).queryByText(i18n.t('common.active'))).not.toBeInTheDocument();
+    expect(within(archivedCard!).queryByText(i18n.t('common.archived'))).not.toBeInTheDocument();
+    expect(within(archivedCard!).queryByText(archivedProduct.name.slice(0, 1))).not.toBeInTheDocument();
+    expect(within(activeCard!).queryByRole('img', { name: i18n.t('common.archived') })).not.toBeInTheDocument();
+    expect(within(archivedCard!).getByRole('img', { name: i18n.t('common.archived') })).toBeVisible();
   });
 
   it('creates a category with a selected icon', async () => {
@@ -129,6 +155,33 @@ describe('CatalogPanel', () => {
     expect(apiMock.createProduct).toHaveBeenCalledTimes(1);
     expect(apiMock.uploadProductImage).toHaveBeenCalledTimes(2);
     expect(apiMock.uploadProductImage).toHaveBeenNthCalledWith(2, 'group-a', createdProduct.id, replacementImage);
+  });
+
+  it('applies the selected move and scale transform before creating a product image', async () => {
+    const user = userEvent.setup();
+    const image = new File(['source'], 'source.webp', { type: 'image/webp' });
+    const preparedImage = new File(['prepared'], 'source.png', { type: 'image/png' });
+    imageUploadMock.prepareSquareImage.mockResolvedValue(preparedImage);
+    apiMock.uploadProductImage.mockResolvedValue({ imageUrl: '/api/v1/groups/group-a/products/product-created/image' });
+    renderCatalog();
+
+    await screen.findByRole('button', { name: i18n.t('catalog.productAction') });
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.productAction') }));
+    await user.type(screen.getByLabelText(i18n.t('catalog.productName')), createdProduct.name);
+    await user.type(screen.getByLabelText(i18n.t('catalog.price', { currency: 'EUR' })), '1,00');
+    await user.upload(screen.getByLabelText(i18n.t('catalog.image')), image);
+    const preview = screen.getByRole('img', { name: i18n.t('catalog.imagePreviewAlt') });
+    expect(preview.querySelector('img')).toHaveAttribute('src', 'blob:product-preview');
+    fireEvent.wheel(preview, { deltaY: -279.807894 });
+    fireEvent.keyDown(preview, { key: 'ArrowRight' });
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.createProductAction') }));
+
+    await waitFor(() => expect(imageUploadMock.prepareSquareImage).toHaveBeenCalledWith(image, {
+      x: 0.05,
+      y: 0,
+      zoom: expect.closeTo(1.75, 5),
+    }));
+    await waitFor(() => expect(apiMock.uploadProductImage).toHaveBeenCalledWith('group-a', createdProduct.id, preparedImage));
   });
 
   it('removes a selected image from the product form before creation', async () => {
@@ -243,6 +296,33 @@ describe('CatalogPanel', () => {
       sortOrder: 4,
       version: 6,
     }));
+  });
+
+  it('uses the crop editor when replacing an image while editing a product', async () => {
+    const user = userEvent.setup();
+    const existingProduct = { ...createdProduct, id: 'product-existing', version: 6, sortOrder: 4, imageUrl: '/product.png' };
+    const replacementImage = new File(['replacement'], 'replacement.png', { type: 'image/png' });
+    const preparedImage = new File(['prepared'], 'replacement.png', { type: 'image/png' });
+    apiMock.getCategories.mockResolvedValue([{ ...category, products: [existingProduct] }]);
+    apiMock.updateProduct.mockResolvedValue({ ...existingProduct, version: 7 });
+    apiMock.uploadProductImage.mockResolvedValue({ imageUrl: '/api/v1/groups/group-a/products/product-existing/image' });
+    imageUploadMock.prepareSquareImage.mockResolvedValue(preparedImage);
+    renderCatalog();
+
+    await screen.findByText(existingProduct.name);
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.editProduct', { name: existingProduct.name }) }));
+    await user.upload(screen.getByLabelText(i18n.t('catalog.image')), replacementImage);
+    const preview = screen.getByRole('img', { name: i18n.t('catalog.imagePreviewAlt') });
+    fireEvent.wheel(preview, { deltaY: -202.732554 });
+    fireEvent.keyDown(preview, { key: 'ArrowDown' });
+    await user.click(screen.getByRole('button', { name: i18n.t('common.save') }));
+
+    await waitFor(() => expect(imageUploadMock.prepareSquareImage).toHaveBeenCalledWith(replacementImage, {
+      x: 0,
+      y: 0.05,
+      zoom: expect.closeTo(1.5, 5),
+    }));
+    await waitFor(() => expect(apiMock.uploadProductImage).toHaveBeenCalledWith('group-a', existingProduct.id, preparedImage));
   });
 
   it('offers contextual create tiles and preselects their category', async () => {

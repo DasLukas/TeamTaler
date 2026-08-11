@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import i18n from '@/i18n';
-import { adaptAccountSummaries, adaptBooking, adaptCategories, adaptDashboard, adaptLedger, adaptMembership, adaptNotification, adaptPermissionDefinition, adaptPermissionGrants, adaptProduct, adaptRole, adaptSession, adaptSettlement } from './adapters';
+import { adaptAccountSummaries, adaptBooking, adaptCategories, adaptDashboard, adaptGroupSettings, adaptLedger, adaptMembership, adaptNotification, adaptPermissionDefinition, adaptPermissionGrants, adaptProduct, adaptRole, adaptSession, adaptSettlement, adaptTransactionSettings } from './adapters';
 
 describe('API adapters', () => {
+  it('defaults optional settlement flags to disabled for older API responses', () => {
+    expect(adaptGroupSettings({}).settlementsEnabled).toBe(false);
+    expect(adaptTransactionSettings({}).settlementsEnabled).toBe(false);
+    expect(adaptGroupSettings({ settlementsEnabled: true }).settlementsEnabled).toBe(true);
+    expect(adaptTransactionSettings({ settlementsEnabled: true }).settlementsEnabled).toBe(true);
+  });
+
   it('accepts stable group grants and rejects unknown keys or disabled scopes', () => {
     expect(adaptPermissionGrants([
       { permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } },
@@ -99,6 +106,23 @@ describe('API adapters', () => {
     expect(adaptBooking({ ...booking, memberAvatarUrl: undefined, bookedByAvatarUrl: undefined }, [member])).toMatchObject({
       memberAvatarUrl: avatarUrl,
       bookedByAvatarUrl: avatarUrl,
+    });
+    expect(adaptBooking({
+      id: 'booking-wire',
+      targetMembershipId: 'member-target',
+      targetAvatarUrl: '/api/v1/users/target/avatar/target.png',
+      actorMembershipId: 'member-actor',
+      actorAvatarUrl: '/api/v1/users/actor/avatar/actor.png',
+      productId: 'product-a',
+      categoryId: 'category-a',
+      quantity: 1,
+      unitPriceMinor: 100,
+      totalMinor: 100,
+      currency: 'EUR',
+      createdAt: '2026-08-05T00:00:00Z',
+    })).toMatchObject({
+      memberAvatarUrl: '/api/v1/users/target/avatar/target.png',
+      bookedByAvatarUrl: '/api/v1/users/actor/avatar/actor.png',
     });
   });
 

@@ -9,6 +9,7 @@ import { DashboardPage } from './DashboardPage';
 
 const mocks = vi.hoisted(() => ({
   getDashboard: vi.fn(),
+  getTransactionSettings: vi.fn(),
   getCategories: vi.fn(),
   useActiveGroup: vi.fn(),
 }));
@@ -16,6 +17,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/api/client', () => ({
   api: {
     getDashboard: mocks.getDashboard,
+    getTransactionSettings: mocks.getTransactionSettings,
     getCategories: mocks.getCategories,
     createOwnPayment: vi.fn(),
   },
@@ -27,9 +29,20 @@ vi.mock('@tanstack/react-router', () => ({
 }));
 
 describe('DashboardPage information-only overview', () => {
+  const transactionSettings = {
+    settlementsEnabled: true,
+    foreignBookingReasonRequired: true,
+    ownPaymentReasonRequired: true,
+    otherPaymentReasonRequired: false,
+    paymentMethods: [{ id: 'CASH', label: 'Bar' }],
+    bookingReasons: [],
+    paymentReasons: [],
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getDashboard.mockResolvedValue(demoDashboard);
+    mocks.getTransactionSettings.mockResolvedValue(transactionSettings);
     mocks.useActiveGroup.mockReturnValue({ activeGroupId: demoSession.activeGroupId, activeGroup: demoSession.groups[0], session: demoSession });
   });
 
@@ -81,5 +94,18 @@ describe('DashboardPage information-only overview', () => {
     render(<QueryClientProvider client={queryClient}><DashboardPage /></QueryClientProvider>);
 
     expect(await screen.findByText(/-2,50/, { selector: 'strong[data-financial-state="credit"]' })).toBeVisible();
+  });
+
+  it('removes period references and uses all-time labels when settlements are disabled', async () => {
+    mocks.getTransactionSettings.mockResolvedValue({ ...transactionSettings, settlementsEnabled: false });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    render(<QueryClientProvider client={queryClient}><DashboardPage /></QueryClientProvider>);
+
+    expect(await screen.findByRole('heading', { name: i18n.t('dashboard.bookingsByCategory') })).toBeVisible();
+    expect(screen.queryByText(i18n.t('dashboard.settlement', { label: 'August' }))).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: demoDashboard.currentPeriod.label })).not.toBeInTheDocument();
+    expect(screen.getByText(i18n.t('dashboard.groupStatistics.groupSumAllTime'))).toBeVisible();
+    expect(screen.getByText(i18n.t('dashboard.paymentNoteSelf'))).toBeVisible();
   });
 });
