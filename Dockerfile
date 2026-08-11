@@ -21,7 +21,7 @@ RUN CGO_ENABLED=0 go build \
     -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${REVISION}" \
     -o /out/teamtaler ./cmd/teamtaler
 
-FROM alpine:3.22 AS runtime
+FROM alpine:3.24 AS runtime
 RUN apk add --no-cache ca-certificates tzdata \
     && addgroup -S -g 10001 teamtaler \
     && adduser -S -D -H -u 10001 -G teamtaler teamtaler \
