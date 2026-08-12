@@ -37,14 +37,17 @@ export function AccountFinanceSection() {
   const ledgerQuery = useQuery({ queryKey: ['ledger', activeGroupId], queryFn: () => api.getLedger(activeGroupId) });
   const dashboardQuery = useQuery({ queryKey: ['dashboard', activeGroupId], queryFn: () => api.getDashboard(activeGroupId) });
   const settlementsQuery = useQuery({ queryKey: ['settlements', activeGroupId], queryFn: () => api.getSettlements(activeGroupId) });
+  const transactionSettingsQuery = useQuery({ queryKey: ['transaction-settings', activeGroupId], queryFn: () => api.getTransactionSettings(activeGroupId) });
 
-  if (ledgerQuery.isLoading || dashboardQuery.isLoading || settlementsQuery.isLoading) return <StatePanel kind="loading" />;
-  if (ledgerQuery.isError || !ledgerQuery.data || !dashboardQuery.data || !settlementsQuery.data) return <StatePanel kind="error" message={t('account.error')} />;
+  if (ledgerQuery.isLoading || dashboardQuery.isLoading || settlementsQuery.isLoading || transactionSettingsQuery.isLoading) return <StatePanel kind="loading" />;
+  if (ledgerQuery.isError || dashboardQuery.isError || settlementsQuery.isError || transactionSettingsQuery.isError || !ledgerQuery.data || !dashboardQuery.data || !settlementsQuery.data || !transactionSettingsQuery.data) return <StatePanel kind="error" message={t('account.error')} />;
 
   const balance = dashboardQuery.data.openBalance;
   const hasCreditBalance = isCreditBalance(balance);
   const canRecordPayment = canRecordOwnPayment(activeGroup.membership?.effectiveGrants);
   const ownSettlements = settlementsQuery.data.filter((settlement) => settlement.membershipId === activeGroup.membership?.id);
+  const settlementsEnabled = transactionSettingsQuery.data.settlementsEnabled;
+  const showSettlements = settlementsEnabled || ownSettlements.length > 0;
   return (
     <section aria-label={t('account.financeTitle')} className={styles.finance}>
       <div className={styles.financeActions}>
@@ -55,12 +58,12 @@ export function AccountFinanceSection() {
         <div className={styles.balanceValue}><span>{t('account.currentOpenAmount')}</span><strong className={hasCreditBalance ? styles.creditBalance : undefined} data-financial-state={hasCreditBalance ? 'credit' : 'due'}>{formatMoney(balance)}</strong></div>
         {canRecordPayment ? <SelfPaymentDialog className={styles.paymentAction} openBalance={balance} /> : null}
       </section>
-      <section className={styles.settlements}>
-        <h2>{t('account.closedSettlements')}</h2>
+      {showSettlements ? <section className={styles.settlements}>
+        <h2>{t(settlementsEnabled ? 'account.closedSettlements' : 'account.settlementHistory')}</h2>
         {ownSettlements.length === 0 ? <StatePanel kind="empty" message={t('account.noSettlements')} /> : (
           <div className={tableStyles.tableWrap}><table className={tableStyles.table}><thead><tr><th>{t('account.period')}</th><th>{t('account.due')}</th><th className={tableStyles.number}>{t('account.claim')}</th><th className={tableStyles.number}>{t('account.paid')}</th><th className={tableStyles.number}>{t('account.open')}</th><th>{t('common.status')}</th><th><span className="sr-only">{t('common.action')}</span></th></tr></thead><tbody>{ownSettlements.map((settlement) => <tr key={settlement.id}><td><strong>{settlement.periodLabel}</strong></td><td>{settlement.dueAt ? new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(settlement.dueAt)) : '–'}</td><td className={tableStyles.number}>{formatMoney(settlement.amount)}</td><td className={tableStyles.number}>{formatMoney(settlement.paidAmount)}</td><td className={tableStyles.number}><strong>{formatMoney(settlement.openAmount ?? { minorUnits: (BigInt(settlement.amount.minorUnits) - BigInt(settlement.paidAmount.minorUnits)).toString(), currency: settlement.amount.currency })}</strong></td><td><span className={`${tableStyles.status} ${settlement.status === 'OPEN' || settlement.status === 'PARTIAL' ? tableStyles.statusWarning : ''}`}>{settlement.status === 'PAID' ? t('common.paid') : settlement.status === 'PARTIAL' ? t('common.partiallyPaid') : settlement.status === 'CREDIT' ? t('common.credit') : t('common.open')}</span></td><td><Button leadingIcon={<Printer size={16} />} onClick={() => window.print()} size="small" variant="ghost">{t('account.printPdf')}</Button></td></tr>)}</tbody></table></div>
         )}
-      </section>
+      </section> : null}
       <h2>{t('account.movements')}</h2>
       {ledgerQuery.data.length === 0 ? <StatePanel kind="empty" message={t('account.noMovements')} /> : (
         <div className={tableStyles.tableWrap}>

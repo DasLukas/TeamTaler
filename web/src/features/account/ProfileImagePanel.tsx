@@ -7,13 +7,18 @@ import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import type { Membership, Session } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
+import { ImageCropEditor } from '@/components/media/ImageCropEditor';
+import {
+  ACCEPTED_IMAGE_TYPES,
+  DEFAULT_IMAGE_TRANSFORM,
+  MAX_IMAGE_BYTES,
+  prepareSquareImage,
+  type ImageTransform,
+} from '@/components/media/imageUpload';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
 import styles from './ProfileImagePanel.module.css';
-
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-const ACCEPTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 type AvatarChange = { kind: 'upload'; file: File } | { kind: 'remove' };
 
@@ -29,14 +34,18 @@ export function ProfileImagePanel() {
   const { session } = useActiveGroup();
   const queryClient = useQueryClient();
   const [selectedFile, setSelectedFile] = useState<File>();
+  const [imageTransform, setImageTransform] = useState<ImageTransform>(DEFAULT_IMAGE_TRANSFORM);
   const [fileInputKey, setFileInputKey] = useState(0);
   const [fileError, setFileError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
   const mutation = useMutation({
-    mutationFn: async (change: AvatarChange) => change.kind === 'upload'
-      ? api.uploadProfileAvatar(change.file)
-      : api.removeProfileAvatar().then(() => ({ avatarUrl: undefined })),
+    mutationFn: async (change: AvatarChange) => {
+      if (change.kind === 'remove') {
+        return api.removeProfileAvatar().then(() => ({ avatarUrl: undefined }));
+      }
+      return api.uploadProfileAvatar(await prepareSquareImage(change.file, imageTransform));
+    },
     onSuccess: ({ avatarUrl }, change) => {
       queryClient.setQueryData<Session>(['session'], (current) => current ? {
         ...current,
@@ -48,6 +57,7 @@ export function ProfileImagePanel() {
       void queryClient.invalidateQueries({ queryKey: ['bookings'] });
       void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       setSelectedFile(undefined);
+      setImageTransform(DEFAULT_IMAGE_TRANSFORM);
       setFileInputKey((current) => current + 1);
       setFileError('');
       setSuccessMessage(t(change.kind === 'upload' ? 'account.profileImage.saved' : 'account.profileImage.removed'));
@@ -59,6 +69,7 @@ export function ProfileImagePanel() {
     setSuccessMessage('');
     if (!file) {
       setSelectedFile(undefined);
+      setImageTransform(DEFAULT_IMAGE_TRANSFORM);
       setFileError('');
       return;
     }
@@ -74,10 +85,12 @@ export function ProfileImagePanel() {
     }
     setFileError('');
     setSelectedFile(file);
+    setImageTransform(DEFAULT_IMAGE_TRANSFORM);
   };
 
   const clearSelection = () => {
     setSelectedFile(undefined);
+    setImageTransform(DEFAULT_IMAGE_TRANSFORM);
     setFileInputKey((current) => current + 1);
     setFileError('');
     setSuccessMessage('');
@@ -86,7 +99,18 @@ export function ProfileImagePanel() {
 
   return (
     <section aria-labelledby="profile-image-title" className={styles.card}>
-      <Avatar name={session.user.displayName} size="large" src={session.user.avatarUrl} />
+      {selectedFile ? (
+        <ImageCropEditor
+          alt={t('account.profileImage.previewAlt')}
+          circular
+          file={selectedFile}
+          key={`${selectedFile.name}:${selectedFile.size}:${selectedFile.lastModified}`}
+          onChange={setImageTransform}
+          value={imageTransform}
+        />
+      ) : (
+        <Avatar name={session.user.displayName} size="large" src={session.user.avatarUrl} />
+      )}
       <div className={styles.controls}>
         <div>
           <h2 id="profile-image-title">{t('account.profileImage.title')}</h2>
