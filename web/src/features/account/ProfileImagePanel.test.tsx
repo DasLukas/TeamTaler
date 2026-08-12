@@ -57,8 +57,6 @@ function renderProfileImage(session: Session = baseSession): QueryClient {
 describe('ProfileImagePanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:profile-preview') });
-    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
   });
 
   it('uploads a supported image and synchronizes the session and membership caches', async () => {
@@ -72,7 +70,9 @@ describe('ProfileImagePanel', () => {
 
     await user.upload(screen.getByLabelText(i18n.t('account.profileImage.label')), image);
     const preview = screen.getByRole('img', { name: i18n.t('account.profileImage.previewAlt') });
-    expect(preview.querySelector('img')).toHaveAttribute('src', 'blob:profile-preview');
+    expect(createImageBitmap).toHaveBeenCalledWith(image, { imageOrientation: 'from-image' });
+    expect(preview.querySelector('canvas')).toBeInTheDocument();
+    expect(preview.querySelector('img')).not.toBeInTheDocument();
     fireEvent.wheel(preview, { deltaY: -279.807894 });
     await user.click(screen.getByRole('button', { name: i18n.t('account.profileImage.save') }));
 

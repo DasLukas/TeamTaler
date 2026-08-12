@@ -54,20 +54,52 @@ function clampZoom(value: number): number {
 export function ImageCropEditor({ alt, circular = false, compact = false, file, onChange, value }: ImageCropEditorProps) {
   const { t } = useTranslation();
   const hintId = useId();
-  const [dimensions, setDimensions] = useState({ width: 1, height: 1 });
-  const [previewUrl, setPreviewUrl] = useState<string>();
+  const [bitmap, setBitmap] = useState<ImageBitmap>();
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
   const dragState = useRef<DragState | undefined>(undefined);
   const transformRef = useRef(value);
-  const placement = calculateImagePlacement(dimensions.width, dimensions.height, value);
+  const placement = calculateImagePlacement(bitmap?.width ?? 1, bitmap?.height ?? 1, value);
 
   useEffect(() => {
-    const nextPreviewUrl = URL.createObjectURL(file);
-    // Object URLs are external browser resources whose lifetime must follow the selected file.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setPreviewUrl(nextPreviewUrl);
-    return () => URL.revokeObjectURL(nextPreviewUrl);
+    let active = true;
+    let decodedBitmap: ImageBitmap | undefined;
+    void createImageBitmap(file, { imageOrientation: 'from-image' }).then(
+      (nextBitmap) => {
+        decodedBitmap = nextBitmap;
+        if (active) {
+          setBitmap(nextBitmap);
+        } else {
+          nextBitmap.close();
+        }
+      },
+      () => {
+        if (active) setBitmap(undefined);
+      },
+    );
+    return () => {
+      active = false;
+      decodedBitmap?.close();
+    };
   }, [file]);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    const size = canvas.width;
+    context.clearRect(0, 0, size, size);
+    if (!bitmap) return;
+    const width = placement.width * size;
+    const height = placement.height * size;
+    context.drawImage(
+      bitmap,
+      placement.centerX * size - width / 2,
+      placement.centerY * size - height / 2,
+      width,
+      height,
+    );
+  }, [bitmap, placement.centerX, placement.centerY, placement.height, placement.width]);
   useEffect(() => {
     transformRef.current = value;
   }, [value]);
@@ -167,18 +199,7 @@ export function ImageCropEditor({ alt, circular = false, compact = false, file, 
         role="img"
         tabIndex={0}
       >
-        <img
-          alt=""
-          draggable={false}
-          onLoad={(event) => setDimensions({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
-          src={previewUrl}
-          style={{
-            height: `${placement.height * 100}%`,
-            left: `${placement.centerX * 100}%`,
-            top: `${placement.centerY * 100}%`,
-            width: `${placement.width * 100}%`,
-          }}
-        />
+        <canvas aria-hidden="true" height={512} ref={canvasRef} width={512} />
       </div>
       <p className={styles.hint} id={hintId}>{t('imageEditor.hint')} <span className={styles.assistive}>{t('imageEditor.keyboardHint')}</span></p>
       <Button leadingIcon={<RotateCcw size={16} />} onClick={() => onChange(DEFAULT_IMAGE_TRANSFORM)} size="small" variant="ghost">

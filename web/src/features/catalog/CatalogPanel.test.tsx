@@ -70,8 +70,6 @@ function renderCatalog(): void {
 describe('CatalogPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:product-preview') });
-    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
     imageUploadMock.prepareSquareImage.mockImplementation(async (file: File) => file);
     apiMock.getCategories.mockResolvedValue([category]);
     apiMock.createCategory.mockResolvedValue(category);
@@ -171,7 +169,9 @@ describe('CatalogPanel', () => {
     await user.type(screen.getByLabelText(i18n.t('catalog.price', { currency: 'EUR' })), '1,00');
     await user.upload(screen.getByLabelText(i18n.t('catalog.image')), image);
     const preview = screen.getByRole('img', { name: i18n.t('catalog.imagePreviewAlt') });
-    expect(preview.querySelector('img')).toHaveAttribute('src', 'blob:product-preview');
+    expect(createImageBitmap).toHaveBeenCalledWith(image, { imageOrientation: 'from-image' });
+    expect(preview.querySelector('canvas')).toBeInTheDocument();
+    expect(preview.querySelector('img')).not.toBeInTheDocument();
     fireEvent.wheel(preview, { deltaY: -279.807894 });
     fireEvent.keyDown(preview, { key: 'ArrowRight' });
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.createProductAction') }));

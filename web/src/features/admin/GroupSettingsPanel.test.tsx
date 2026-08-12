@@ -44,8 +44,6 @@ function renderSettings(session: Session = baseSession): QueryClient {
 describe('GroupSettingsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:logo-preview') });
-    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
   });
 
   it('renames the group and updates the shared session immediately', async () => {
@@ -77,9 +75,10 @@ describe('GroupSettingsPanel', () => {
     const queryClient = renderSettings();
 
     await user.upload(screen.getByLabelText(i18n.t('groupSettings.imageLabel')), logo);
-    expect(URL.createObjectURL).toHaveBeenCalledWith(logo);
+    expect(createImageBitmap).toHaveBeenCalledWith(logo, { imageOrientation: 'from-image' });
     const preview = screen.getByRole('img', { name: i18n.t('groupSettings.previewAlt', { group: 'Group A' }) });
-    expect(preview.querySelector('img')).toHaveAttribute('src', 'blob:logo-preview');
+    expect(preview.querySelector('canvas')).toBeInTheDocument();
+    expect(preview.querySelector('img')).not.toBeInTheDocument();
     fireEvent.wheel(preview, { deltaY: -202.732554 });
     await user.click(screen.getByRole('button', { name: i18n.t('groupSettings.save') }));
 
@@ -123,7 +122,7 @@ describe('GroupSettingsPanel', () => {
     });
 
     expect(await screen.findByText(i18n.t('groupSettings.invalidType'))).toHaveAttribute('role', 'alert');
-    expect(URL.createObjectURL).not.toHaveBeenCalled();
+    expect(createImageBitmap).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: i18n.t('groupSettings.save') })).toBeDisabled();
     expect(apiMock.uploadGroupLogo).not.toHaveBeenCalled();
   });
