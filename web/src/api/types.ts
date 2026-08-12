@@ -16,6 +16,7 @@ export type GroupPermission = 'SELF_RECORD_PAYMENT';
 /** Stable authorization keys understood by the API and every client. */
 export type PermissionKey =
   | 'GROUP_ADMINISTRATION'
+  | 'MEMBER_MANAGEMENT'
   | 'ROLE_MANAGEMENT'
   | 'FINANCE_MANAGEMENT'
   | 'CATALOG_MANAGEMENT'
@@ -32,6 +33,7 @@ export type PermissionKey =
 /** Complete permission-key registry in stable display order. */
 export const PERMISSION_KEYS = [
   'GROUP_ADMINISTRATION',
+  'MEMBER_MANAGEMENT',
   'ROLE_MANAGEMENT',
   'FINANCE_MANAGEMENT',
   'CATALOG_MANAGEMENT',
@@ -181,8 +183,9 @@ export interface ConfigurableItem {
   label: string;
 }
 
-/** Non-sensitive transaction behavior used by booking and payment forms. */
+/** Non-sensitive operational behavior used by finance, booking, and payment surfaces. */
 export interface TransactionSettings {
+  settlementsEnabled: boolean;
   foreignBookingReasonRequired: boolean;
   ownPaymentReasonRequired: boolean;
   otherPaymentReasonRequired: boolean;
@@ -193,6 +196,7 @@ export interface TransactionSettings {
 
 /** Administrator-managed group behavior shared by one group. */
 export interface GroupSettings {
+  settlementsEnabled: boolean;
   notificationEmailsEnabled: boolean;
   notificationEmailDeliveryAvailable: boolean;
   defaultRoleId: string | null;
@@ -208,6 +212,7 @@ export interface GroupSettings {
  * Group notification-settings update accepted by the API.
  */
 export interface GroupSettingsUpdateInput {
+  settlementsEnabled?: boolean;
   notificationEmailsEnabled?: boolean;
   defaultRoleId?: string;
   foreignBookingReasonRequired?: boolean;
@@ -391,6 +396,7 @@ export interface CategoryTotal {
 /** Dashboard data for the active group and member. */
 export interface Dashboard {
   openBalance: Money;
+  groupOutstanding?: Money;
   currentPeriod: Period;
   categoryTotals: CategoryTotal[];
   groupCategoryTotals: CategoryTotal[];

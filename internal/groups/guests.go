@@ -151,13 +151,13 @@ func (s Service) RenameTemporaryGuest(ctx context.Context, actor domain.Principa
 		}
 		return domain.Membership{}, err
 	}
-	if err := requireCurrentPermission(ctx, s.DB, actorMembership, domain.PermissionGroupAdministration); err != nil {
+	if err := requireCurrentPermission(ctx, s.DB, actorMembership, domain.PermissionMemberManagement); err != nil {
 		return domain.Membership{}, err
 	}
 	targetMembershipID = strings.TrimSpace(targetMembershipID)
 	var result domain.Membership
 	err = storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
-		if err := requireCurrentPermission(ctx, tx, actorMembership, domain.PermissionGroupAdministration); err != nil {
+		if err := requireCurrentPermission(ctx, tx, actorMembership, domain.PermissionMemberManagement); err != nil {
 			return err
 		}
 		var userID, previousName string
@@ -239,7 +239,7 @@ func mapTemporaryGuestNameConstraintError(ctx context.Context, queryer temporary
 //   - Invitation: Persisted single-use invitation with its transient token.
 //   - error: Authorization, validation, conflict, email, audit, or storage error.
 func (s Service) CreateTemporaryGuestClaimInvitation(ctx context.Context, actor domain.Principal, actorMembership domain.Membership, targetMembershipID, email string, roleIDs []string) (Invitation, error) {
-	if err := requireCurrentPermission(ctx, s.DB, actorMembership, domain.PermissionGroupAdministration); err != nil {
+	if err := requireCurrentPermission(ctx, s.DB, actorMembership, domain.PermissionMemberManagement); err != nil {
 		return Invitation{}, err
 	}
 	normalizedEmail, err := platform.NormalizeEmail(email)
@@ -257,7 +257,7 @@ func (s Service) CreateTemporaryGuestClaimInvitation(ctx context.Context, actor 
 	var invitation Invitation
 	now := platform.Now()
 	err = storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
-		if err := requireCurrentPermission(ctx, tx, actorMembership, domain.PermissionGroupAdministration); err != nil {
+		if err := requireCurrentPermission(ctx, tx, actorMembership, domain.PermissionMemberManagement); err != nil {
 			return err
 		}
 		var displayName string

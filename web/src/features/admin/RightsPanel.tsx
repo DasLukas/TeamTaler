@@ -30,7 +30,7 @@ interface RoleEditorProps {
   isDefaultRole?: boolean;
 }
 
-const ADMIN_CORE_PERMISSIONS: readonly PermissionKey[] = ['GROUP_ADMINISTRATION', 'ROLE_MANAGEMENT'];
+const ADMIN_CORE_PERMISSIONS: readonly PermissionKey[] = ['GROUP_ADMINISTRATION', 'MEMBER_MANAGEMENT', 'ROLE_MANAGEMENT'];
 
 function RoleEditor({ groupId, definitions, role, initial, canManageProtectedRoles, onDuplicate, onSaved, onDeleted, isDefaultRole = false }: RoleEditorProps) {
   const { t } = useTranslation();
