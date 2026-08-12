@@ -1,0 +1,65 @@
+.section {
+  min-width: 0;
+}
+
+.section h2 {
+  margin-bottom: var(--space-3);
+}
+
+.card {
+  display: flex;
+  min-height: 224px;
+  flex-direction: column;
+  justify-content: center;
+  padding: var(--space-6);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.card > span {
+  color: var(--color-muted);
+  font-weight: 700;
+}
+
+.card > strong {
+  margin-top: var(--space-2);
+  color: var(--color-ink);
+  font-size: clamp(2.25rem, 4vw, 3rem);
+  letter-spacing: -0.04em;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.card > p {
+  max-width: 28ch;
+  margin: var(--space-3) 0 0;
+  color: var(--color-muted);
+  line-height: 1.45;
+}
+
+.card.due > strong {
+  color: var(--color-orange-600);
+}
+
+.card.credit > strong {
+  color: var(--color-green-600);
+}
+
+.card.balanced > span {
+  color: var(--color-teal-700);
+}
+
+@media (max-width: 767px) {
+  .section {
+    order: -1;
+  }
+
+  .card {
+    min-height: 164px;
+    padding: var(--space-5);
+  }
+
+  .card > strong {
+    font-size: 2.3rem;
+  }
+}

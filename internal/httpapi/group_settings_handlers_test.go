@@ -23,15 +23,19 @@ func TestGroupSettingsExposeOnlyNotificationDelivery(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &settings); err != nil {
 		t.Fatalf("decode settings: %v", err)
 	}
-	if settings.NotificationEmailsEnabled {
+	if settings.NotificationEmailsEnabled || settings.SettlementsEnabled {
 		t.Fatalf("default settings = %#v", settings)
 	}
 
-	update := roleHandlerRequest(principal, administrator.GroupID, http.MethodPatch, `{"notificationEmailsEnabled":false}`)
+	update := roleHandlerRequest(principal, administrator.GroupID, http.MethodPatch, `{"settlementsEnabled":true}`)
 	updatedResponse := httptest.NewRecorder()
 	server.handleUpdateGroupSettings(updatedResponse, update)
 	if updatedResponse.Code != http.StatusOK {
 		t.Fatalf("settings update status = %d, body = %s", updatedResponse.Code, updatedResponse.Body.String())
+	}
+	var updatedSettings domain.GroupSettings
+	if err := json.Unmarshal(updatedResponse.Body.Bytes(), &updatedSettings); err != nil || !updatedSettings.SettlementsEnabled {
+		t.Fatalf("updated settings = %#v, err = %v", updatedSettings, err)
 	}
 
 	unsupported := roleHandlerRequest(principal, administrator.GroupID, http.MethodPatch, `{"membersCanViewAllBookings":true}`)

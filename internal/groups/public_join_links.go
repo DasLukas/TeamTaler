@@ -19,7 +19,7 @@ const (
 	maximumPublicJoinLifetime = 365 * 24 * time.Hour
 )
 
-// PublicJoinLink describes the single administrator-managed public onboarding
+// PublicJoinLink describes the single member-manager-owned public onboarding
 // link for a group. Token is intentionally excluded from JSON and is exposed
 // only to the authenticated HTTP adapter for same-origin URL construction.
 type PublicJoinLink struct {
@@ -35,10 +35,10 @@ type PublicJoinLink struct {
 
 // GetPublicJoinLink returns the current group-scoped join-link state. A group
 // without a persisted link receives a disabled version-zero resource. The
-// caller must hold GROUP_ADMINISTRATION. The method returns authorization,
+// caller must hold MEMBER_MANAGEMENT. The method returns authorization,
 // decryption, and database errors.
 func (s Service) GetPublicJoinLink(ctx context.Context, membership domain.Membership) (PublicJoinLink, error) {
-	if err := requireCurrentPermission(ctx, s.DB, membership, domain.PermissionGroupAdministration); err != nil {
+	if err := requireCurrentPermission(ctx, s.DB, membership, domain.PermissionMemberManagement); err != nil {
 		return PublicJoinLink{}, err
 	}
 	item, err := queryPublicJoinLink(ctx, s.DB, membership.GroupID)
@@ -84,12 +84,12 @@ func (s Service) PutPublicJoinLink(ctx context.Context, actor domain.Principal, 
 	if enabled && !s.publicJoinAvailable() {
 		return PublicJoinLink{}, fmt.Errorf("%w: verified public registration requires configured email delivery", domain.ErrServiceUnavailable)
 	}
-	if err := requireCurrentPermission(ctx, s.DB, membership, domain.PermissionGroupAdministration); err != nil {
+	if err := requireCurrentPermission(ctx, s.DB, membership, domain.PermissionMemberManagement); err != nil {
 		return PublicJoinLink{}, err
 	}
 	var item PublicJoinLink
 	err = storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
-		if err := requireCurrentPermission(ctx, tx, membership, domain.PermissionGroupAdministration); err != nil {
+		if err := requireCurrentPermission(ctx, tx, membership, domain.PermissionMemberManagement); err != nil {
 			return err
 		}
 		if enabled {
@@ -189,12 +189,12 @@ func (s Service) RotatePublicJoinLink(ctx context.Context, actor domain.Principa
 	if !s.publicJoinAvailable() {
 		return PublicJoinLink{}, fmt.Errorf("%w: verified public registration requires configured email delivery", domain.ErrServiceUnavailable)
 	}
-	if err := requireCurrentPermission(ctx, s.DB, membership, domain.PermissionGroupAdministration); err != nil {
+	if err := requireCurrentPermission(ctx, s.DB, membership, domain.PermissionMemberManagement); err != nil {
 		return PublicJoinLink{}, err
 	}
 	var item PublicJoinLink
 	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
-		if err := requireCurrentPermission(ctx, tx, membership, domain.PermissionGroupAdministration); err != nil {
+		if err := requireCurrentPermission(ctx, tx, membership, domain.PermissionMemberManagement); err != nil {
 			return err
 		}
 		if err := ensurePublicJoinDefaultRole(ctx, tx, membership.GroupID); err != nil {

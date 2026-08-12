@@ -376,6 +376,7 @@ describe('high-risk API idempotency', () => {
   it('uses display-name snapshots from bookings without fetching members', async () => {
     const wireBooking = {
       id: 'booking-a', targetMembershipId: 'member-target', targetDisplayName: 'Target Guest', actorMembershipId: 'member-actor', actorDisplayName: 'Booking Member',
+      targetAvatarUrl: '/api/v1/users/target/avatar/target.png', actorAvatarUrl: '/api/v1/users/actor/avatar/actor.png',
       productId: 'product-a', productName: 'Water', categoryId: 'category-a', categoryName: 'Drinks', quantity: 1, unitPriceMinor: 100, totalMinor: 100,
       currency: 'EUR', createdAt: '2026-08-04T12:00:00Z', status: 'POSTED',
     };
@@ -384,7 +385,12 @@ describe('high-risk API idempotency', () => {
 
     const result = await api.getBookings('group-a');
 
-    expect(result[0]).toMatchObject({ memberName: 'Target Guest', bookedByName: 'Booking Member' });
+    expect(result[0]).toMatchObject({
+      memberName: 'Target Guest',
+      memberAvatarUrl: '/api/v1/users/target/avatar/target.png',
+      bookedByName: 'Booking Member',
+      bookedByAvatarUrl: '/api/v1/users/actor/avatar/actor.png',
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group-a/bookings');
   });
@@ -605,11 +611,12 @@ describe('high-risk API idempotency', () => {
 
   it('reads and updates typed group behavior settings', async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' }))
-      .mockResolvedValueOnce(jsonResponse({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' }));
+      .mockResolvedValueOnce(jsonResponse({ settlementsEnabled: false, notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' }))
+      .mockResolvedValueOnce(jsonResponse({ settlementsEnabled: false, notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' }));
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(api.getGroupSettings('group-a')).resolves.toMatchObject({
+      settlementsEnabled: false,
       notificationEmailsEnabled: false,
       notificationEmailDeliveryAvailable: true,
       defaultRoleId: 'role-member',
@@ -621,6 +628,7 @@ describe('high-risk API idempotency', () => {
       ],
     });
     await expect(api.updateGroupSettings('group-a', { notificationEmailsEnabled: true })).resolves.toMatchObject({
+      settlementsEnabled: false,
       notificationEmailsEnabled: true,
       notificationEmailDeliveryAvailable: true,
       defaultRoleId: 'role-member',

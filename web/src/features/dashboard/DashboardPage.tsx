@@ -6,14 +6,12 @@ import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { formatMoney, isCreditBalance } from '@/api/money';
 import { canRecordOwnPayment } from '@/app/groupCapabilities';
-import { can } from '@/app/permissions';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Avatar } from '@/components/ui/Avatar';
 import { StatePanel } from '@/components/ui/StatePanel';
-import { CategoryIcon } from '@/features/shared/CategoryIcon';
 import { SelfPaymentDialog } from '@/features/finance/SelfPaymentDialog';
 import { getDashboardGreetingKey } from './greeting';
-import { GroupStatisticsSection } from './GroupStatisticsSection';
+import { GroupBalanceCard } from './GroupBalanceCard';
 import styles from './DashboardPage.module.css';
 
 /**
@@ -40,37 +38,45 @@ function useLocalHour(): number {
 /**
  * Renders the member overview without exposing booking controls.
  *
- * @returns Personal summaries, recent activity, and anonymous group statistics.
+ * @returns Personal balance, recent activity, and the permission-gated group balance.
  */
 export function DashboardPage() {
   const { t } = useTranslation();
   const { activeGroupId, activeGroup, session } = useActiveGroup();
   const dashboardQuery = useQuery({ queryKey: ['dashboard', activeGroupId], queryFn: () => api.getDashboard(activeGroupId) });
+  const transactionSettingsQuery = useQuery({ queryKey: ['transaction-settings', activeGroupId], queryFn: () => api.getTransactionSettings(activeGroupId) });
   const localHour = useLocalHour();
 
-  if (dashboardQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
-  if (dashboardQuery.error || !dashboardQuery.data) {
+  if (dashboardQuery.isLoading || transactionSettingsQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
+  if (dashboardQuery.error || transactionSettingsQuery.error || !dashboardQuery.data || !transactionSettingsQuery.data) {
     return <div className={styles.state}><StatePanel kind="error" message={t('dashboard.error')} /></div>;
   }
 
   const dashboard = dashboardQuery.data;
+  const settlementsEnabled = transactionSettingsQuery.data.settlementsEnabled;
   const recentBookings = dashboard.recentBookings;
-  const periodTotal = dashboard.categoryTotals.reduce((sum, entry) => sum + BigInt(entry.total.minorUnits), 0n);
   const greeting = t(`dashboard.${getDashboardGreetingKey(localHour)}`);
   const canRecordPayment = canRecordOwnPayment(activeGroup.membership?.effectiveGrants);
-  const canViewGroupStatistics = can(activeGroup.membership?.effectiveGrants, 'VIEW_GROUP_STATISTICS');
   const hasCreditBalance = isCreditBalance(dashboard.openBalance);
+  // The API omits this field unless VIEW_GROUP_STATISTICS is effective. Using
+  // the response as the single authorization projection avoids hiding a newly
+  // granted balance while locally cached membership grants are still stale.
+  const groupOutstanding = dashboard.groupOutstanding;
+  const showGroupBalance = groupOutstanding !== undefined;
 
   return (
     <div className={styles.dashboard}>
       <section className={styles.content}>
         <h1>{greeting}, {session.user.displayName.split(' ')[0]}</h1>
-        <div className={styles.balanceCard}>
-          <div><span>{t('booking.openBalance')}</span><strong className={hasCreditBalance ? styles.creditBalance : undefined} data-financial-state={hasCreditBalance ? 'credit' : 'due'}>{formatMoney(dashboard.openBalance)}</strong>{canRecordPayment ? <SelfPaymentDialog className={styles.selfPaymentAction} openBalance={dashboard.openBalance} /> : null}</div>
-          <div className={styles.period}><strong>{t('dashboard.settlement', { label: dashboard.currentPeriod.label.split(' ')[0] })}</strong><p>{t(canRecordPayment ? 'dashboard.paymentNoteSelf' : 'dashboard.paymentNote')}</p></div>
-        </div>
+        <section className={styles.personalBalanceSection}>
+          <h2>{t('booking.openBalance')}</h2>
+          <div className={`${styles.balanceCard} ${settlementsEnabled ? '' : styles.continuousBalanceCard}`}>
+            <div><strong className={hasCreditBalance ? styles.creditBalance : undefined} data-financial-state={hasCreditBalance ? 'credit' : 'due'}>{formatMoney(dashboard.openBalance)}</strong>{canRecordPayment ? <SelfPaymentDialog className={styles.selfPaymentAction} openBalance={dashboard.openBalance} /> : null}</div>
+            <div className={styles.period}>{settlementsEnabled ? <strong>{t('dashboard.settlement', { label: dashboard.currentPeriod.label.split(' ')[0] })}</strong> : null}<p>{t(canRecordPayment ? 'dashboard.paymentNoteSelf' : 'dashboard.paymentNote')}</p></div>
+          </div>
+        </section>
 
-        <div className={styles.lower}>
+        <div className={`${styles.lower} ${showGroupBalance ? '' : styles.lowerSingle}`}>
           <section>
             <h2>{t('dashboard.recentActivities')}</h2>
             <div className={styles.activityList}>
@@ -88,17 +94,8 @@ export function DashboardPage() {
               <Link className={styles.allActivities} to="/activities">{t('dashboard.allActivities')} <ChevronRight size={18} /></Link>
             </div>
           </section>
-          <section className={styles.periodSection}>
-            <h2>{dashboard.currentPeriod.label}</h2>
-            <div className={styles.monthCard}>
-              {dashboard.categoryTotals.map((entry) => {
-                return <div className={styles.totalRow} key={entry.categoryId}><CategoryIcon icon={entry.icon} size={24} /><span>{entry.categoryName}</span><strong>{formatMoney(entry.total)}</strong></div>;
-              })}
-              <div className={styles.sum}><span>{t('dashboard.sum')}</span><strong>{formatMoney({ minorUnits: periodTotal.toString(), currency: dashboard.openBalance.currency })}</strong></div>
-            </div>
-          </section>
+          {groupOutstanding !== undefined ? <GroupBalanceCard balance={groupOutstanding} /> : null}
         </div>
-        {canViewGroupStatistics ? <GroupStatisticsSection currency={dashboard.openBalance.currency} groupTotals={dashboard.groupCategoryTotals} periodLabel={dashboard.currentPeriod.label} /> : null}
       </section>
     </div>
   );

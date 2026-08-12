@@ -435,11 +435,11 @@ func assignCurrentDefaultRole(ctx context.Context, tx *sql.Tx, actorUserID, grou
 		return err
 	}
 	var grantsAdministration int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM roles r LEFT JOIN role_permission_grants g ON g.group_id=r.group_id AND g.role_id=r.id AND g.permission_key='GROUP_ADMINISTRATION' AND g.scope_type='GROUP' WHERE r.group_id=? AND r.id=? AND g.role_id IS NOT NULL`, groupID, roleID).Scan(&grantsAdministration); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM roles r LEFT JOIN role_permission_grants g ON g.group_id=r.group_id AND g.role_id=r.id AND g.permission_key IN ('GROUP_ADMINISTRATION','MEMBER_MANAGEMENT') AND g.scope_type='GROUP' WHERE r.group_id=? AND r.id=? AND g.role_id IS NOT NULL`, groupID, roleID).Scan(&grantsAdministration); err != nil {
 		return err
 	}
 	if grantsAdministration > 0 {
-		return domain.ValidationError{Field: "defaultRoleId", Message: "default role cannot grant group administration"}
+		return domain.ValidationError{Field: "defaultRoleId", Message: "default role cannot grant administration permissions"}
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO membership_role_assignments(group_id,membership_id,role_id,version,assigned_at,assigned_by) VALUES(?,?,?,1,?,?)`, groupID, membershipID, roleID, now, actorUserID); err != nil {
 		return err

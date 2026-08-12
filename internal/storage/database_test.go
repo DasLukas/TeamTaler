@@ -250,6 +250,7 @@ func TestRemoveCategoryTypeMigrationPreservesExistingRows(t *testing.T) {
 		`INSERT INTO schema_migrations(version) VALUES('0021_guest_feature.sql')`,
 		`INSERT INTO schema_migrations(version) VALUES('0023_membership_lifecycle.sql')`,
 		`INSERT INTO schema_migrations(version) VALUES('0024_transaction_settings.sql')`,
+		`INSERT INTO schema_migrations(version) VALUES('0026_member_management.sql')`,
 		`CREATE TABLE users(id TEXT PRIMARY KEY) STRICT`,
 		`CREATE TABLE groups(id TEXT PRIMARY KEY) STRICT`,
 		`CREATE TABLE invitations(id TEXT PRIMARY KEY, group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE) STRICT`,
@@ -437,11 +438,11 @@ func TestDynamicRoleMigrationBackfillsLegacyAccessAndDropsCategoryGrants(t *test
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM roles WHERE group_id='group-second'`).Scan(&secondRoleCount); err != nil {
 		t.Fatalf("count second roles: %v", err)
 	}
-	if permissionCount != 13 || mainRoleCount != 5 || secondRoleCount != 4 {
-		t.Fatalf("definitions/main roles/second roles = %d/%d/%d, want 13/5/4", permissionCount, mainRoleCount, secondRoleCount)
+	if permissionCount != 14 || mainRoleCount != 5 || secondRoleCount != 4 {
+		t.Fatalf("definitions/main roles/second roles = %d/%d/%d, want 14/5/4", permissionCount, mainRoleCount, secondRoleCount)
 	}
 	wantPresetGrantCounts := map[string]int{
-		"role:GROUP_ADMINISTRATOR:group-main": 13,
+		"role:GROUP_ADMINISTRATOR:group-main": 14,
 		"role:MEMBER:group-main":              5,
 		"role:FINANCE_MANAGER:group-main":     5,
 		"role:CATALOG_MANAGER:group-main":     3,
@@ -541,6 +542,7 @@ func TestDynamicRoleSchemaEnforcesProtectedRoleAndAssignmentInvariants(t *testin
 		`INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('user-one','one@example.test','One','hash','2026-08-07T09:00:00Z','2026-08-07T09:00:00Z')`,
 		`INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('user-two','two@example.test','Two','hash','2026-08-07T09:00:00Z','2026-08-07T09:00:00Z')`,
 		`INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES('group-one','One','EUR','2026-08-07T09:00:00Z','2026-08-07T09:00:00Z')`,
+		`INSERT INTO group_settings(group_id,default_role_id,updated_at) VALUES('group-one','role:MEMBER:group-one','2026-08-07T09:00:00Z')`,
 		`INSERT INTO memberships(id,group_id,user_id,status,joined_at) VALUES('member-one','group-one','user-one','ACTIVE','2026-08-07T09:00:00Z')`,
 		`INSERT INTO memberships(id,group_id,user_id,status,joined_at) VALUES('member-two','group-one','user-two','ACTIVE','2026-08-07T09:00:00Z')`,
 		`INSERT INTO membership_role_assignments(group_id,membership_id,role_id,assigned_at) VALUES('group-one','member-two','role:MEMBER:group-one','2026-08-07T09:00:00Z')`,
@@ -560,7 +562,10 @@ func TestDynamicRoleSchemaEnforcesProtectedRoleAndAssignmentInvariants(t *testin
 	assertRejected("rename administrator role", `UPDATE roles SET name='Renamed' WHERE id='role:GROUP_ADMINISTRATOR:group-one'`, "CHECK constraint failed")
 	assertRejected("delete administrator role", `DELETE FROM roles WHERE id='role:GROUP_ADMINISTRATOR:group-one'`, "protected role cannot be deleted")
 	assertRejected("delete assigned member starter role", `DELETE FROM roles WHERE id='role:MEMBER:group-one'`, "assigned role cannot be deleted")
-	assertRejected("remove administrator core permission", `DELETE FROM role_permission_grants WHERE role_id='role:GROUP_ADMINISTRATOR:group-one' AND permission_key='ROLE_MANAGEMENT'`, "administrator core permissions cannot be removed")
+	for _, permission := range []string{"GROUP_ADMINISTRATION", "MEMBER_MANAGEMENT", "ROLE_MANAGEMENT"} {
+		assertRejected("remove administrator core permission "+permission, `DELETE FROM role_permission_grants WHERE role_id='role:GROUP_ADMINISTRATOR:group-one' AND permission_key='`+permission+`'`, "administrator core permissions cannot be removed")
+	}
+	assertRejected("grant member administration to the default role", `INSERT INTO role_permission_grants(group_id,role_id,permission_key,scope_type,version,created_at,updated_at) VALUES('group-one','role:MEMBER:group-one','MEMBER_MANAGEMENT','GROUP',1,'2026-08-07T09:00:00Z','2026-08-07T09:00:00Z')`, "default role cannot grant administration permissions")
 	assertRejected("remove final active member role", `DELETE FROM membership_role_assignments WHERE membership_id='member-two' AND role_id='role:MEMBER:group-one'`, "credentialed active memberships must retain at least one role")
 	assertRejected("remove last administrator", `DELETE FROM membership_role_assignments WHERE membership_id='member-one' AND role_id='role:GROUP_ADMINISTRATOR:group-one'`, "group must retain an active group administrator")
 	assertRejected("archive last administrator", `UPDATE memberships SET status='ARCHIVED',archived_at='2026-08-07T10:00:00Z' WHERE id='member-one'`, "group must retain an active group administrator")

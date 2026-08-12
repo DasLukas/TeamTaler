@@ -2,7 +2,9 @@ import type { PermissionGrant, PermissionKey } from '@/api/types';
 
 /** Permissions implied by a broader group-wide permission. */
 export const PERMISSION_IMPLICATIONS: Readonly<Partial<Record<PermissionKey, readonly PermissionKey[]>>> = {
+  MEMBER_MANAGEMENT: ['VIEW_MEMBER_DIRECTORY'],
   VOID_ANY_BOOKING: ['VOID_OWN_BOOKING', 'VIEW_ALL_BOOKING_ACTIVITY'],
+  BOOK_FOR_OTHERS: ['VIEW_MEMBER_DIRECTORY'],
 };
 
 /** Group resource context accepted by the first RBAC release. */

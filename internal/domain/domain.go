@@ -77,10 +77,13 @@ const (
 type PermissionKey string
 
 const (
-	// PermissionGroupAdministration permits group, membership, invitation, and
-	// protected administrator-assignment management.
+	// PermissionGroupAdministration permits group configuration, audit access,
+	// and protected administrator-assignment management.
 	PermissionGroupAdministration PermissionKey = "GROUP_ADMINISTRATION"
-	// PermissionRoleManagement permits role, grant, and unprotected assignment management.
+	// PermissionMemberManagement permits membership, invitation, guest, join-access,
+	// and role-assignment management.
+	PermissionMemberManagement PermissionKey = "MEMBER_MANAGEMENT"
+	// PermissionRoleManagement permits role and grant management.
 	PermissionRoleManagement PermissionKey = "ROLE_MANAGEMENT"
 	// PermissionFinanceManagement permits access to group financial management functions.
 	PermissionFinanceManagement PermissionKey = "FINANCE_MANAGEMENT"
@@ -88,7 +91,7 @@ const (
 	PermissionCatalogManagement PermissionKey = "CATALOG_MANAGEMENT"
 	// PermissionViewMemberDirectory permits reading the group's member directory.
 	PermissionViewMemberDirectory PermissionKey = "VIEW_MEMBER_DIRECTORY"
-	// PermissionViewGroupStatistics permits reading aggregate group statistics.
+	// PermissionViewGroupStatistics permits reading the consolidated group balance.
 	PermissionViewGroupStatistics PermissionKey = "VIEW_GROUP_STATISTICS"
 	// PermissionViewAllBookingActivity permits viewing every identified group booking in the activity feed.
 	PermissionViewAllBookingActivity PermissionKey = "VIEW_ALL_BOOKING_ACTIVITY"
@@ -254,6 +257,7 @@ type Group struct {
 // of one group.
 type GroupSettings struct {
 	NotificationEmailsEnabled    bool               `json:"notificationEmailsEnabled"`
+	SettlementsEnabled           bool               `json:"settlementsEnabled"`
 	DefaultRoleID                *string            `json:"defaultRoleId"`
 	ForeignBookingReasonRequired bool               `json:"foreignBookingReasonRequired"`
 	OwnPaymentReasonRequired     bool               `json:"ownPaymentReasonRequired"`
@@ -270,9 +274,10 @@ type ConfigurableItem struct {
 	Label string `json:"label"`
 }
 
-// TransactionSettings contains the non-sensitive transaction behavior that
-// active members need to render booking and payment forms.
+// TransactionSettings contains the non-sensitive operational behavior that
+// active members need to render finance, booking, and payment surfaces.
 type TransactionSettings struct {
+	SettlementsEnabled           bool               `json:"settlementsEnabled"`
 	ForeignBookingReasonRequired bool               `json:"foreignBookingReasonRequired"`
 	OwnPaymentReasonRequired     bool               `json:"ownPaymentReasonRequired"`
 	OtherPaymentReasonRequired   bool               `json:"otherPaymentReasonRequired"`
@@ -371,9 +376,11 @@ type Booking struct {
 	ProductID              string  `json:"productId"`
 	ActorMembershipID      string  `json:"actorMembershipId"`
 	ActorDisplayName       string  `json:"actorDisplayName"`
+	ActorAvatarURL         string  `json:"actorAvatarUrl,omitempty"`
 	ActorMembershipStatus  string  `json:"actorMembershipStatus"`
 	TargetMembershipID     string  `json:"targetMembershipId"`
 	TargetDisplayName      string  `json:"targetDisplayName"`
+	TargetAvatarURL        string  `json:"targetAvatarUrl,omitempty"`
 	TargetMembershipStatus string  `json:"targetMembershipStatus"`
 	Quantity               int     `json:"quantity"`
 	UnitPriceMinor         int64   `json:"unitPriceMinor,string"`
