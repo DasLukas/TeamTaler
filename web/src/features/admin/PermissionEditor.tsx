@@ -11,7 +11,7 @@ type PermissionGroupKey = 'administration' | 'bookings' | 'finance' | 'catalog';
 const PERMISSION_GROUPS: ReadonlyArray<{ key: PermissionGroupKey; permissions: readonly PermissionKey[] }> = [
   {
     key: 'administration',
-    permissions: ['GROUP_ADMINISTRATION', 'ROLE_MANAGEMENT', 'VIEW_MEMBER_DIRECTORY'],
+    permissions: ['GROUP_ADMINISTRATION', 'MEMBER_MANAGEMENT', 'ROLE_MANAGEMENT'],
   },
   {
     key: 'bookings',

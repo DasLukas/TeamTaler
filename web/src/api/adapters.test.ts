@@ -138,6 +138,23 @@ describe('API adapters', () => {
     }).categoryTotals[0]?.icon).toBe('sport');
   });
 
+  it('adapts the optional signed group outstanding amount without losing precision', () => {
+    const dashboard = adaptDashboard({
+      account: { balanceMinor: '0', currency: 'EUR', categoryStatistics: [], groupCategoryStatistics: [] },
+      openPeriod: { id: 'period', label: 'Current', status: 'OPEN', startsAt: '2026-08-01T00:00:00Z' },
+      recentBookings: [],
+      groupOutstandingMinor: '-9007199254740993123',
+    });
+    const unauthorizedDashboard = adaptDashboard({
+      account: { balanceMinor: '0', currency: 'EUR', categoryStatistics: [], groupCategoryStatistics: [] },
+      openPeriod: { id: 'period', label: 'Current', status: 'OPEN', startsAt: '2026-08-01T00:00:00Z' },
+      recentBookings: [],
+    });
+
+    expect(dashboard.groupOutstanding).toEqual({ minorUnits: '-9007199254740993123', currency: 'EUR' });
+    expect(unauthorizedDashboard.groupOutstanding).toBeUndefined();
+  });
+
   it('adapts fixed and user-defined product pricing without inventing a custom price', () => {
     expect(adaptProduct({ id: 'fixed', name: 'Water', categoryId: 'drinks', pricingMode: 'FIXED', priceMinor: '100', currency: 'EUR' })).toMatchObject({
       pricingMode: 'FIXED', currency: 'EUR', price: { minorUnits: '100', currency: 'EUR' },

@@ -240,6 +240,63 @@ func TestOptionalSettlementsPreservePeriodBalanceAndStatisticsScope(t *testing.T
 	}
 }
 
+func TestGroupOutstandingIncludesPaymentsAndIgnoresSettlementBoundaries(t *testing.T) {
+	f := newFixture(t)
+	_, product := f.catalogItem("Group outstanding", 500)
+	periodID := f.openPeriodID()
+	if _, err := f.bookings.Create(f.ctx, f.admin, f.membership, "group-outstanding-booking", bookings.CreateInput{
+		ProductID: product.ID, ProductVersion: product.Version, ExpectedPeriodID: periodID, Quantity: 1,
+	}); err != nil {
+		t.Fatalf("create group-outstanding booking: %v", err)
+	}
+	if _, err := f.finance.CreatePayment(f.ctx, f.admin, f.membership, "group-outstanding-payment", finance.CreatePaymentInput{
+		MembershipID: f.membership.ID, AmountMinor: 650, ReceivedAt: "2026-08-11T12:00:00Z", Method: "CASH", Reference: "Advance",
+	}); err != nil {
+		t.Fatalf("create group-outstanding payment: %v", err)
+	}
+
+	assertOutstanding := func(membership domain.Membership, want *int64) {
+		t.Helper()
+		outstanding, err := f.finance.GroupOutstanding(f.ctx, membership)
+		if err != nil {
+			t.Fatalf("read group outstanding: %v", err)
+		}
+		if want == nil {
+			if outstanding != nil {
+				t.Fatalf("unauthorized group outstanding=%d, want omitted", *outstanding)
+			}
+			return
+		}
+		if outstanding == nil || *outstanding != *want {
+			t.Fatalf("group outstanding=%v, want %d", outstanding, *want)
+		}
+	}
+
+	wantCredit := int64(-150)
+	assertOutstanding(f.membership, &wantCredit)
+	_, statisticsViewer, _ := f.inviteMember("statistics@example.test", "Statistics Viewer", nil)
+	assertOutstanding(statisticsViewer, &wantCredit)
+
+	f.setSettlementsEnabled(true)
+	if _, err := f.periods.Close(f.ctx, f.admin, f.membership, "group-outstanding-close", periodID, periods.CloseInput{
+		Label: "Closed", DueAt: "2099-01-01", NextPeriodLabel: "Next",
+	}); err != nil {
+		t.Fatalf("close group-outstanding period: %v", err)
+	}
+	assertOutstanding(statisticsViewer, &wantCredit)
+	f.setSettlementsEnabled(false)
+	assertOutstanding(statisticsViewer, &wantCredit)
+
+	emptyRole, err := f.groups.CreateRole(f.ctx, f.admin, f.membership, groups.RoleCommand{Name: "No group statistics", Grants: []domain.PermissionGrant{}})
+	if err != nil {
+		t.Fatalf("create permissionless role: %v", err)
+	}
+	if _, err := f.groups.ReplaceMemberRoles(f.ctx, f.admin, f.membership, statisticsViewer.ID, []string{emptyRole.ID}, statisticsViewer.RoleAssignmentsVersion); err != nil {
+		t.Fatalf("remove group-statistics permission: %v", err)
+	}
+	assertOutstanding(statisticsViewer, nil)
+}
+
 func TestBootstrapLoginInvitationReplayAndTenantRBAC(t *testing.T) {
 	f := newFixture(t)
 	if _, err := f.groups.Create(f.ctx, f.admin, "Invalid Currency", "EU1"); !errors.Is(err, domain.ErrValidation) {
@@ -295,10 +352,10 @@ func TestBootstrapLoginInvitationReplayAndTenantRBAC(t *testing.T) {
 	}
 }
 
-func TestGroupAdministratorCanTransferOnlyReservedRoleWithoutRoleManagement(t *testing.T) {
+func TestGroupAndMemberManagerCanManageMembershipsWithoutRoleDefinitions(t *testing.T) {
 	f := newFixture(t)
 	delegatedPrincipal, delegatedAdministrator, _ := f.inviteMember("delegated-admin@example.test", "Delegated Administrator", nil)
-	delegatedAdministrator = f.assignPermissionRole(delegatedAdministrator, "Delegated group administration", domain.PermissionGroupAdministration)
+	delegatedAdministrator = f.assignPermissionRole(delegatedAdministrator, "Delegated group administration", domain.PermissionGroupAdministration, domain.PermissionMemberManagement)
 	_, transferTarget, _ := f.inviteMember("administrator-target@example.test", "Administrator Target", nil)
 	_, legacyTransferTarget, _ := f.inviteMember("legacy-administrator-target@example.test", "Legacy Administrator Target", nil)
 	nonAdministrativeRole, err := f.groups.CreateRole(f.ctx, f.admin, f.membership, groups.RoleCommand{
@@ -340,19 +397,21 @@ func TestGroupAdministratorCanTransferOnlyReservedRoleWithoutRoleManagement(t *t
 		delegatedAdministrator.ID,
 		append(append([]string(nil), delegatedAdministrator.RoleIDs...), nonAdministrativeRole.ID),
 		delegatedAdministrator.RoleAssignmentsVersion,
-	); !errors.Is(err, domain.ErrForbidden) {
-		t.Fatalf("group-administrator-only non-administrative assignment error = %v, want forbidden", err)
+	); err != nil {
+		t.Fatalf("member-manager ordinary assignment error = %v", err)
 	}
-	if _, err := f.groups.UpdatePermissions(
+	legacyAssignmentVersion, err := f.groups.UpdatePermissions(
 		f.ctx,
 		delegatedPrincipal,
 		delegatedAdministrator,
 		legacyTransferTarget.ID,
 		groups.PermissionUpdate{Roles: []domain.Role{domain.RoleFinanceManager}},
 		legacyTransferTarget.RoleAssignmentsVersion,
-	); !errors.Is(err, domain.ErrForbidden) {
-		t.Fatalf("group-administrator-only legacy member assignment error = %v, want forbidden", err)
+	)
+	if err != nil {
+		t.Fatalf("member-manager legacy member assignment error = %v", err)
 	}
+	legacyTransferTarget.RoleAssignmentsVersion = legacyAssignmentVersion
 	if _, err := f.groups.CreateInvitation(
 		f.ctx,
 		delegatedPrincipal,
@@ -362,8 +421,8 @@ func TestGroupAdministratorCanTransferOnlyReservedRoleWithoutRoleManagement(t *t
 		[]domain.Role{domain.RoleCatalogManager},
 		nil,
 		nil,
-	); !errors.Is(err, domain.ErrForbidden) {
-		t.Fatalf("group-administrator-only legacy invitation creation error = %v, want forbidden", err)
+	); err != nil {
+		t.Fatalf("member-manager legacy invitation creation error = %v", err)
 	}
 	pendingInvitation, err := f.createStarterInvitation("legacy-role-update@example.test", "Legacy Role Update")
 	if err != nil {
@@ -379,8 +438,8 @@ func TestGroupAdministratorCanTransferOnlyReservedRoleWithoutRoleManagement(t *t
 		nil,
 		nil,
 		pendingInvitation.RoleAssignmentsVersion,
-	); !errors.Is(err, domain.ErrForbidden) {
-		t.Fatalf("group-administrator-only legacy invitation update error = %v, want forbidden", err)
+	); err != nil {
+		t.Fatalf("member-manager legacy invitation update error = %v", err)
 	}
 	if _, err := f.groups.ReplaceMemberRoles(
 		f.ctx,
@@ -413,7 +472,7 @@ func TestGroupAdministratorCanTransferOnlyReservedRoleWithoutRoleManagement(t *t
 	}
 }
 
-func TestRoleManagerListsOnlyOpenInvitations(t *testing.T) {
+func TestRoleManagerCannotListInvitationLifecycle(t *testing.T) {
 	f := newFixture(t)
 	_, roleManager, _ := f.inviteMember("role-manager@example.test", "Role Manager", nil)
 	roleManager = f.assignPermissionRole(roleManager, "Invitation role manager", domain.PermissionRoleManagement)
@@ -435,8 +494,7 @@ func TestRoleManagerListsOnlyOpenInvitations(t *testing.T) {
 		t.Fatalf("create claim invitation: %v", err)
 	}
 
-	openInvitation, err := f.createStarterInvitation("open-role-invitation@example.test", "Open Role Invitation")
-	if err != nil {
+	if _, err := f.createStarterInvitation("open-role-invitation@example.test", "Open Role Invitation"); err != nil {
 		t.Fatalf("create open invitation: %v", err)
 	}
 	revokedInvitation, err := f.createStarterInvitation("revoked-role-invitation@example.test", "Revoked Role Invitation")
@@ -455,11 +513,8 @@ func TestRoleManagerListsOnlyOpenInvitations(t *testing.T) {
 	}
 
 	visible, err := f.groups.ListInvitations(f.ctx, roleManager)
-	if err != nil {
-		t.Fatalf("list role-manager invitations: %v", err)
-	}
-	if len(visible) != 1 || visible[0].ID != openInvitation.ID {
-		t.Fatalf("role-manager invitations = %#v, want only %s", visible, openInvitation.ID)
+	if !errors.Is(err, domain.ErrForbidden) || visible != nil {
+		t.Fatalf("role-manager invitations = %#v err=%v, want forbidden", visible, err)
 	}
 	adminVisible, err := f.groups.ListInvitations(f.ctx, f.membership)
 	if err != nil {

@@ -94,7 +94,8 @@ describe('RightsPanel role definitions', () => {
     ]);
     renderPanel();
 
-    expect(await screen.findByText('Zeigt die Buchungssummen der Gruppe.')).toBeVisible();
+    expect(await screen.findByText('Zeigt den aktuellen offenen Nettosaldo der Gruppe.')).toBeVisible();
+    expect(screen.getByText('Gruppensaldo')).toBeVisible();
     expect(screen.getByText('Erlaubt Einzahlungen auf das eigene Konto.')).toBeVisible();
     expect(screen.getByText('Erlaubt Buchungen auf das eigene Konto.')).toBeVisible();
     expect(screen.getByText('Erlaubt Stornos von selbst erstellten oder dem eigenen Konto zugewiesenen Buchungen.')).toBeVisible();
@@ -121,7 +122,7 @@ describe('RightsPanel role definitions', () => {
     expect(within(bookings).getAllByRole('switch')).toHaveLength(6);
     expect(within(finance).getAllByRole('switch')).toHaveLength(3);
     expect(within(catalog).getAllByRole('switch')).toHaveLength(1);
-    expect(screen.getAllByRole('switch')).toHaveLength(PERMISSION_KEYS.length);
+    expect(screen.getAllByRole('switch')).toHaveLength(PERMISSION_KEYS.length - 1);
   });
 
   it('starts a copied role from the duplicate action in the editor title row', async () => {
@@ -141,6 +142,28 @@ describe('RightsPanel role definitions', () => {
     expect(await screen.findByLabelText('Rollenname')).toBeDisabled();
     expect(screen.queryByText('Der Name dieser Sicherheitsrolle ist unveränderlich.')).not.toBeInTheDocument();
     expect(screen.queryByText('Vordefiniert')).not.toBeInTheDocument();
+  });
+
+  it('keeps all three administrator management permissions enabled and locked', async () => {
+    mocks.getRoles.mockResolvedValue([{
+      ...baseRole,
+      id: 'role-admin',
+      presetKey: 'GROUP_ADMINISTRATOR',
+      name: 'Group administrator',
+      nameLocked: true,
+      grants: ['GROUP_ADMINISTRATION', 'MEMBER_MANAGEMENT', 'ROLE_MANAGEMENT'].map((permission) => ({ permission, scope: { type: 'GROUP' as const } })) as Role['grants'],
+    }]);
+    mocks.getPermissionDefinitions.mockResolvedValue([
+      { key: 'GROUP_ADMINISTRATION' },
+      { key: 'MEMBER_MANAGEMENT', implies: ['VIEW_MEMBER_DIRECTORY'] },
+      { key: 'ROLE_MANAGEMENT' },
+    ]);
+    renderPanel();
+
+    for (const label of ['Gruppenadministration', 'Mitgliederverwaltung', 'Rollen/Rechte Verwaltung']) {
+      expect(await screen.findByRole('switch', { name: `Recht „${label}“ umschalten` })).toBeChecked();
+      expect(screen.getByRole('switch', { name: `Recht „${label}“ umschalten` })).toBeDisabled();
+    }
   });
 
   it('keeps computed implications without the redundant arbitrary-void explanation', async () => {

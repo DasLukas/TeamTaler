@@ -77,10 +77,13 @@ const (
 type PermissionKey string
 
 const (
-	// PermissionGroupAdministration permits group, membership, invitation, and
-	// protected administrator-assignment management.
+	// PermissionGroupAdministration permits group configuration, audit access,
+	// and protected administrator-assignment management.
 	PermissionGroupAdministration PermissionKey = "GROUP_ADMINISTRATION"
-	// PermissionRoleManagement permits role, grant, and unprotected assignment management.
+	// PermissionMemberManagement permits membership, invitation, guest, join-access,
+	// and role-assignment management.
+	PermissionMemberManagement PermissionKey = "MEMBER_MANAGEMENT"
+	// PermissionRoleManagement permits role and grant management.
 	PermissionRoleManagement PermissionKey = "ROLE_MANAGEMENT"
 	// PermissionFinanceManagement permits access to group financial management functions.
 	PermissionFinanceManagement PermissionKey = "FINANCE_MANAGEMENT"
@@ -88,7 +91,7 @@ const (
 	PermissionCatalogManagement PermissionKey = "CATALOG_MANAGEMENT"
 	// PermissionViewMemberDirectory permits reading the group's member directory.
 	PermissionViewMemberDirectory PermissionKey = "VIEW_MEMBER_DIRECTORY"
-	// PermissionViewGroupStatistics permits reading aggregate group statistics.
+	// PermissionViewGroupStatistics permits reading the consolidated group balance.
 	PermissionViewGroupStatistics PermissionKey = "VIEW_GROUP_STATISTICS"
 	// PermissionViewAllBookingActivity permits viewing every identified group booking in the activity feed.
 	PermissionViewAllBookingActivity PermissionKey = "VIEW_ALL_BOOKING_ACTIVITY"

@@ -16,6 +16,7 @@ export type GroupPermission = 'SELF_RECORD_PAYMENT';
 /** Stable authorization keys understood by the API and every client. */
 export type PermissionKey =
   | 'GROUP_ADMINISTRATION'
+  | 'MEMBER_MANAGEMENT'
   | 'ROLE_MANAGEMENT'
   | 'FINANCE_MANAGEMENT'
   | 'CATALOG_MANAGEMENT'
@@ -32,6 +33,7 @@ export type PermissionKey =
 /** Complete permission-key registry in stable display order. */
 export const PERMISSION_KEYS = [
   'GROUP_ADMINISTRATION',
+  'MEMBER_MANAGEMENT',
   'ROLE_MANAGEMENT',
   'FINANCE_MANAGEMENT',
   'CATALOG_MANAGEMENT',
@@ -394,6 +396,7 @@ export interface CategoryTotal {
 /** Dashboard data for the active group and member. */
 export interface Dashboard {
   openBalance: Money;
+  groupOutstanding?: Money;
   currentPeriod: Period;
   categoryTotals: CategoryTotal[];
   groupCategoryTotals: CategoryTotal[];

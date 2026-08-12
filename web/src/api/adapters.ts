@@ -497,6 +497,9 @@ export function adaptDashboard(input: unknown): Dashboard {
   const currentPeriod = adaptPeriod(source.openPeriod);
   return {
     openBalance: money(account.balanceMinor, account.currency),
+    groupOutstanding: source.groupOutstandingMinor === undefined || source.groupOutstandingMinor === null
+      ? undefined
+      : money(source.groupOutstandingMinor, account.currency),
     currentPeriod,
     categoryTotals: (account.categoryStatistics as unknown[] ?? []).map((entry) => {
       const statistic = asRecord(entry);

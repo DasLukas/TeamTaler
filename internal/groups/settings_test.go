@@ -89,9 +89,14 @@ func TestGroupSettingsDefaultAuthorizationPersistenceAndAudit(t *testing.T) {
 			break
 		}
 	}
-	financeRole.Grants = append(financeRole.Grants, domain.PermissionGrant{Permission: domain.PermissionGroupAdministration, Scope: domain.PermissionScope{Type: domain.PermissionScopeGroup}})
-	if _, err := service.UpdateRole(ctx, session.Principal, admin, financeRole.ID, financeRole.Version, RoleCommand{Name: financeRole.Name, Description: financeRole.Description, Grants: financeRole.Grants}); !errors.Is(err, domain.ErrValidation) {
+	financeGrants := append([]domain.PermissionGrant(nil), financeRole.Grants...)
+	groupAdministrationGrants := append(append([]domain.PermissionGrant(nil), financeGrants...), domain.PermissionGrant{Permission: domain.PermissionGroupAdministration, Scope: domain.PermissionScope{Type: domain.PermissionScopeGroup}})
+	if _, err := service.UpdateRole(ctx, session.Principal, admin, financeRole.ID, financeRole.Version, RoleCommand{Name: financeRole.Name, Description: financeRole.Description, Grants: groupAdministrationGrants}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("administrator grant on default role error=%v, want validation", err)
+	}
+	memberManagementGrants := append(append([]domain.PermissionGrant(nil), financeGrants...), domain.PermissionGrant{Permission: domain.PermissionMemberManagement, Scope: domain.PermissionScope{Type: domain.PermissionScopeGroup}})
+	if _, err := service.UpdateRole(ctx, session.Principal, admin, financeRole.ID, financeRole.Version, RoleCommand{Name: financeRole.Name, Description: financeRole.Description, Grants: memberManagementGrants}); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("member-management grant on default role error=%v, want validation", err)
 	}
 	if err := service.DeleteRole(ctx, session.Principal, admin, financeRole.ID, financeRole.Version); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("delete default role error=%v, want conflict", err)

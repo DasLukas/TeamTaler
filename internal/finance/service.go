@@ -97,13 +97,35 @@ type LedgerEntry struct {
 }
 
 // Dashboard is the group-scoped landing-page read model combining account,
-// booking, notification, and optional finance-manager totals.
+// booking, notification, and optional permission-gated group totals.
 type Dashboard struct {
 	Account          Account          `json:"account"`
 	OpenPeriod       domain.Period    `json:"openPeriod"`
 	RecentBookings   []domain.Booking `json:"recentBookings"`
 	UnreadCount      int64            `json:"unreadNotificationCount"`
 	GroupOutstanding *int64           `json:"groupOutstandingMinor,omitempty,string"`
+}
+
+// GroupOutstanding returns the signed net receivable across every member
+// account in membership's group when VIEW_GROUP_STATISTICS is effective.
+// Positive values are owed to the group, negative values are member credit,
+// and nil means the caller is not authorized to see the aggregate. The query
+// intentionally spans every accounting period so settlement configuration and
+// period close operations never change the current consolidated balance. ctx
+// bounds authorization and SQL work; policy and database errors propagate.
+func (s Service) GroupOutstanding(ctx context.Context, membership domain.Membership) (*int64, error) {
+	allowed, err := authorization.NewPolicy(s.DB).Can(ctx, membership.GroupID, membership.ID, domain.PermissionViewGroupStatistics, authorization.GroupResource(membership.GroupID))
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, nil
+	}
+	var outstanding int64
+	if err := s.DB.QueryRowContext(ctx, `SELECT coalesce(sum(amount_minor),0) FROM ledger_entries WHERE group_id=? AND account='MEMBER_RECEIVABLE'`, membership.GroupID).Scan(&outstanding); err != nil {
+		return nil, err
+	}
+	return &outstanding, nil
 }
 
 // Account returns targetMembershipID's consolidated balance, settlement-aware

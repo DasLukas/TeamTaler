@@ -127,7 +127,7 @@ type InvitationEmailResendResult struct {
 // audit, or database errors. No plaintext token is returned or stored in the
 // idempotency result.
 func (s Service) ImportInvitations(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey string, roleIDs []string, candidates []InvitationImportCandidate) (InvitationImportResult, error) {
-	if err := requireCurrentPermission(ctx, s.DB, membership, domain.PermissionGroupAdministration); err != nil {
+	if err := requireCurrentPermission(ctx, s.DB, membership, domain.PermissionMemberManagement); err != nil {
 		return InvitationImportResult{}, err
 	}
 	if s.TokenSealer == nil {
@@ -151,7 +151,7 @@ func (s Service) ImportInvitations(ctx context.Context, actor domain.Principal, 
 		Rows:    make([]InvitationImportRow, 0, len(normalized)),
 	}
 	err = storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
-		if err := requireCurrentPermission(ctx, tx, membership, domain.PermissionGroupAdministration); err != nil {
+		if err := requireCurrentPermission(ctx, tx, membership, domain.PermissionMemberManagement); err != nil {
 			return err
 		}
 		found, err := idempotency.Load(ctx, tx, membership.GroupID, actor.UserID, idempotencyKey, requestHash, &result)
@@ -294,7 +294,7 @@ func currentInvitationDeliveryTx(ctx context.Context, tx *sql.Tx, groupID, email
 // conflict, idempotency, audit, or database errors. The encrypted token remains
 // unchanged and no network I/O occurs inside the transaction.
 func (s Service) RetryInvitationEmail(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey, invitationID string) (InvitationEmailRetryResult, error) {
-	if err := requireCurrentPermission(ctx, s.DB, membership, domain.PermissionGroupAdministration); err != nil {
+	if err := requireCurrentPermission(ctx, s.DB, membership, domain.PermissionMemberManagement); err != nil {
 		return InvitationEmailRetryResult{}, err
 	}
 	if s.TokenSealer == nil {
@@ -313,7 +313,7 @@ func (s Service) RetryInvitationEmail(ctx context.Context, actor domain.Principa
 	}
 	result := InvitationEmailRetryResult{InvitationID: invitationID, EmailDeliveryStatus: EmailDeliveryPending}
 	err = storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
-		if err := requireCurrentPermission(ctx, tx, membership, domain.PermissionGroupAdministration); err != nil {
+		if err := requireCurrentPermission(ctx, tx, membership, domain.PermissionMemberManagement); err != nil {
 			return err
 		}
 		found, err := idempotency.Load(ctx, tx, membership.GroupID, actor.UserID, idempotencyKey, requestHash, &result)
@@ -374,7 +374,7 @@ func (s Service) RetryInvitationEmail(ctx context.Context, actor domain.Principa
 // idempotency response. The method returns authorization, validation, not-found,
 // conflict, configuration, encryption, randomness, audit, or database errors.
 func (s Service) ResendInvitationEmail(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey, invitationID string) (InvitationEmailResendResult, error) {
-	if err := requireCurrentPermission(ctx, s.DB, membership, domain.PermissionGroupAdministration); err != nil {
+	if err := requireCurrentPermission(ctx, s.DB, membership, domain.PermissionMemberManagement); err != nil {
 		return InvitationEmailResendResult{}, err
 	}
 	if s.TokenSealer == nil {
@@ -393,7 +393,7 @@ func (s Service) ResendInvitationEmail(ctx context.Context, actor domain.Princip
 	}
 	result := InvitationEmailResendResult{InvitationID: invitationID, EmailDeliveryStatus: EmailDeliveryPending}
 	err = storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
-		if err := requireCurrentPermission(ctx, tx, membership, domain.PermissionGroupAdministration); err != nil {
+		if err := requireCurrentPermission(ctx, tx, membership, domain.PermissionMemberManagement); err != nil {
 			return err
 		}
 		found, err := idempotency.Load(ctx, tx, membership.GroupID, actor.UserID, idempotencyKey, requestHash, &result)

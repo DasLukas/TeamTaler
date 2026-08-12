@@ -231,7 +231,7 @@ func TestTemporaryGuestClaimPreservesHistoryAndAppliesSelectedRoles(t *testing.T
 	}
 }
 
-func TestClaimWithoutRoleManagementAllowsOnlyCurrentDefaultRole(t *testing.T) {
+func TestMemberManagementCanChooseOrdinaryClaimRoles(t *testing.T) {
 	f := newFixture(t)
 	_, product := f.catalogItem("Delegated claim", 100)
 	created, err := f.bookings.CreateBatch(f.ctx, f.admin, f.membership, "delegated-claim-guest", bookings.BatchCreateInput{
@@ -242,15 +242,16 @@ func TestClaimWithoutRoleManagementAllowsOnlyCurrentDefaultRole(t *testing.T) {
 		t.Fatalf("create delegated claim guest: %v", err)
 	}
 	principal, administrator, _ := f.inviteMember("delegated-claim-admin@example.test", "Delegated Claim Admin", nil)
-	administrator = f.assignPermissionRole(administrator, "Delegated claim administration", domain.PermissionGroupAdministration)
+	administrator = f.assignPermissionRole(administrator, "Delegated claim administration", domain.PermissionMemberManagement)
 	memberRoleID := authorization.PresetRoleID(f.membership.GroupID, domain.RolePresetMember)
 	financeRoleID := authorization.PresetRoleID(f.membership.GroupID, domain.RolePresetFinanceManager)
-	if _, err := f.groups.CreateTemporaryGuestClaimInvitation(f.ctx, principal, administrator, created[0].TargetMembershipID, "rejected@example.test", []string{memberRoleID, financeRoleID}); !errors.Is(err, domain.ErrForbidden) {
-		t.Fatalf("delegated expanded claim roles error=%v, want forbidden", err)
+	adminRoleID := authorization.PresetRoleID(f.membership.GroupID, domain.RolePresetGroupAdministrator)
+	if _, err := f.groups.CreateTemporaryGuestClaimInvitation(f.ctx, principal, administrator, created[0].TargetMembershipID, "rejected@example.test", []string{memberRoleID, adminRoleID}); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("delegated protected claim role error=%v, want forbidden", err)
 	}
-	claim, err := f.groups.CreateTemporaryGuestClaimInvitation(f.ctx, principal, administrator, created[0].TargetMembershipID, "delegated@example.test", []string{memberRoleID})
-	if err != nil || len(claim.RoleIDs) != 1 || claim.RoleIDs[0] != memberRoleID {
-		t.Fatalf("delegated default-role claim=%#v err=%v", claim, err)
+	claim, err := f.groups.CreateTemporaryGuestClaimInvitation(f.ctx, principal, administrator, created[0].TargetMembershipID, "delegated@example.test", []string{memberRoleID, financeRoleID})
+	if err != nil || len(claim.RoleIDs) != 2 {
+		t.Fatalf("delegated ordinary claim roles=%#v err=%v", claim, err)
 	}
 }
 

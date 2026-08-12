@@ -13,6 +13,7 @@ const apiMock = vi.hoisted(() => ({
   getCategories: vi.fn(),
   getRoles: vi.fn(),
   getGroupSettings: vi.fn(),
+  updateGroupSettings: vi.fn(),
   createInvitation: vi.fn(),
   updateInvitation: vi.fn(),
   revokeInvitation: vi.fn(),
@@ -45,7 +46,7 @@ vi.mock('@/api/client', () => ({
 
 const session: Session = {
   user: { id: 'user-admin', displayName: 'Admin', email: 'admin@example.test' },
-  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-admin', roleIds: ['role-admin', 'role-member'], effectiveGrants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }], roles: ['ADMIN', 'MEMBER'], groupPermissions: [] } }],
+  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-admin', roleIds: ['role-admin', 'role-member'], effectiveGrants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }], roles: ['ADMIN', 'MEMBER'], groupPermissions: [] } }],
   activeGroupId: 'group-a',
 };
 
@@ -79,7 +80,7 @@ const temporaryGuest: Membership = {
 };
 
 const roles: Role[] = [
-  { id: 'role-admin', presetKey: 'GROUP_ADMINISTRATOR', name: 'Gruppenadministrator', grants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }], version: 1, memberCount: 1, pendingInvitationCount: 0 },
+  { id: 'role-admin', presetKey: 'GROUP_ADMINISTRATOR', name: 'Gruppenadministrator', grants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }], version: 1, memberCount: 1, pendingInvitationCount: 0 },
   { id: 'role-member', presetKey: 'MEMBER', name: 'Mitglied', grants: [{ permission: 'VOID_OWN_BOOKING', scope: { type: 'GROUP' } }], version: 1, memberCount: 1, pendingInvitationCount: 1 },
   { id: 'role-finance', presetKey: 'FINANCE_MANAGER', name: 'Finanzverwaltung', grants: [{ permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } }], version: 1, memberCount: 0, pendingInvitationCount: 0 },
 ];
@@ -132,6 +133,7 @@ describe('MembersPanel invitations', () => {
     apiMock.getMembers.mockResolvedValue(members);
     apiMock.getRoles.mockResolvedValue(roles);
     apiMock.getGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
+    apiMock.updateGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-finance' });
     apiMock.getPublicJoinLink.mockResolvedValue({ enabled: false, expired: false, expiresAt: null, version: 0, emailVerificationAvailable: true });
   apiMock.getCategories.mockResolvedValue([]);
     apiMock.createInvitation.mockResolvedValue({
@@ -184,6 +186,17 @@ describe('MembersPanel invitations', () => {
 
     expect(await screen.findByRole('dialog', { name: i18n.t('publicJoin.adminTitle') })).toBeVisible();
     await waitFor(() => expect(apiMock.getPublicJoinLink).toHaveBeenCalledWith('group-a'));
+  });
+
+  it('owns the default role setting in member management', async () => {
+    const user = userEvent.setup();
+    renderMembers();
+
+    expect(await screen.findByRole('heading', { name: i18n.t('behaviorSettings.defaultRoleTitle') })).toBeVisible();
+    await user.selectOptions(screen.getByLabelText(i18n.t('behaviorSettings.defaultRoleFieldLabel')), 'role-finance');
+    await user.click(screen.getByRole('button', { name: i18n.t('common.save') }));
+
+    await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { defaultRoleId: 'role-finance' }));
   });
 
   it('keeps compact header actions explicitly labelled for assistive technology and tooltips', async () => {
@@ -250,7 +263,8 @@ describe('MembersPanel invitations', () => {
     const nameInput = screen.getByLabelText(i18n.t('auth.displayName'));
     await user.clear(nameInput);
     await user.type(nameInput, 'Updated Member');
-    await user.click(screen.getByRole('button', { name: i18n.t('common.save') }));
+    const editDialog = screen.getByRole('dialog', { name: i18n.t('members.editInvitation') });
+    await user.click(within(editDialog).getByRole('button', { name: i18n.t('common.save') }));
     await waitFor(() => expect(apiMock.updateInvitation).toHaveBeenCalledWith('group-a', 'invitation-new', {
       displayName: 'Updated Member', roleIds: ['role-member'], roleAssignmentsVersion: 3,
     }));
@@ -332,7 +346,8 @@ describe('MembersPanel invitations', () => {
     const nameInput = screen.getByLabelText(i18n.t('auth.displayName'));
     await user.clear(nameInput);
     await user.type(nameInput, 'Renamed Guest');
-    await user.click(screen.getByRole('button', { name: i18n.t('common.save') }));
+    const renameDialog = screen.getByRole('dialog', { name: i18n.t('members.renameGuestTitle') });
+    await user.click(within(renameDialog).getByRole('button', { name: i18n.t('common.save') }));
     await waitFor(() => expect(apiMock.renameMember).toHaveBeenCalledWith('group-a', temporaryGuest.id, 'Renamed Guest'));
 
     await user.click(screen.getByRole('button', { name: i18n.t('members.claimGuestFor', { name: temporaryGuest.displayName }) }));
@@ -400,24 +415,23 @@ describe('MembersPanel invitations', () => {
     ));
   });
 
-  it('locks claim roles to the default without role management', async () => {
+  it('assigns ordinary roles with member management alone', async () => {
     const user = userEvent.setup();
-    const groupAdministratorSession: Session = {
+    const memberManagerSession: Session = {
       ...session,
       groups: [{
         ...session.groups[0],
         membership: {
           ...session.groups[0].membership!,
-          effectiveGrants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }],
+          effectiveGrants: [{ permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }],
         },
       }],
     };
     apiMock.getMembers.mockResolvedValue([...members, temporaryGuest]);
-    renderMembers(groupAdministratorSession);
+    renderMembers(memberManagerSession);
 
     await user.click(await screen.findByRole('button', { name: i18n.t('members.claimGuestFor', { name: temporaryGuest.displayName }) }));
-    expect(screen.queryByRole('checkbox', { name: /Finanzverwaltung/i })).not.toBeInTheDocument();
-    expect(screen.getByText(i18n.t('members.claimDefaultRole', { role: 'Mitglied' }))).toBeVisible();
+    await user.click(screen.getByRole('checkbox', { name: /Finanzverwaltung/i }));
     await user.type(screen.getByLabelText(i18n.t('auth.email')), 'default-role@example.test');
     await user.click(screen.getByRole('button', { name: i18n.t('members.claimGuestCreate') }));
 
@@ -425,7 +439,7 @@ describe('MembersPanel invitations', () => {
       'group-a',
       temporaryGuest.id,
       'default-role@example.test',
-      ['role-member'],
+      ['role-member', 'role-finance'],
     ));
   });
 

@@ -4,20 +4,27 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-12
+
 ### Added
 
 - Migration `0025` and a group-level `settlementsEnabled` setting in the dedicated administration Finance section, disabled by default for every new and upgraded group.
+- Migration `0026` and the visible `MEMBER_MANAGEMENT` permission, implied hidden directory read, and one-time backfill for every existing role with direct group administration.
 - A shared drag-and-wheel square crop editor for group logos, profile images, and product images during creation or editing.
 
 ### Changed
 
+- Refocused the member overview on personal balance, recent activity, and one signed complete-ledger group balance. Category cards, booking counts, progress bars, and period-scoped group summaries moved out of the overview, while `VIEW_GROUP_STATISTICS` now protects the net group receivable returned by the dashboard.
 - Groups can use a continuous balance without settlement-period UI. Disabling settlements preserves the technical open period, immutable history, and full-ledger balances; re-enabling resumes the same period with all activity recorded in the meantime.
 - Group category statistics use the complete history while settlements are disabled and the current open period while they are enabled. Existing settlement history remains read-only and is shown only when present.
 - Group-logo, profile-image, and product-image previews no longer render a synthetic background behind the image; saved crops preserve the chosen position and scale through the existing upload API.
 - The role editor groups permission switches into labelled administration, booking, finance, and catalog sections for faster scanning on desktop and mobile.
+- Separated membership, invitation, guest, public-join, default-role, and ordinary role-assignment operations from technical group configuration. Settings/Audit, Members, and Roles & Rights now mount independently for group, member, and role management.
+- The reserved group-administrator role now retains direct `GROUP_ADMINISTRATION`, `MEMBER_MANAGEMENT`, and `ROLE_MANAGEMENT` grants; all three switches remain enabled and locked.
 
 ### Fixed
 
+- Made the overview group-balance card rely solely on the server-filtered `groupOutstandingMinor` field, avoiding false hiding from stale client-side grants, and renamed the visible permission to “Group balance”.
 - Local group-logo and profile-image previews remain visible during React development checks, and long selected filenames no longer widen the page beyond the viewport.
 - Booking activity and dashboard rows now refresh current actor and target profile images after an avatar upload or replacement.
 
@@ -34,7 +41,7 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Self-service display-name, password, and verified email-address changes, plus enumeration-resistant password reset and public authentication capability discovery.
 - One-hour, single-use account-security actions with hashed proofs and a leased encrypted email outbox for password-reset and email-change delivery.
 - Group-owned, many-to-many roles with stable identifiers, cumulative permission grants, multiple roles per membership or pending invitation, four seeded starter roles, and a role-centered administration workflow.
-- Thirteen stable group permission keys covering group administration, role management, finance, catalog, complete booking activity, own-account payments, own booking creation, own or arbitrary booking reversal, booking for other members, booking for temporary guests, member-directory visibility, and anonymous group-statistic visibility.
+- Fourteen stable group permission keys covering group administration, member management, role management, finance, catalog, complete booking activity, own-account payments, own booking creation, own or arbitrary booking reversal, booking for other members, booking for temporary guests, member-directory visibility, and anonymous group-statistic visibility.
 - Additive v1 role, permission-definition, and role-assignment endpoints with optimistic ETag concurrency control and tenant-bound identifiers.
 - A scope-aware permission-grant contract that stores `GROUP`, `CATEGORY`, and `PRODUCT` scope shapes while accepting only group-wide grants in v1.
 - A group-owned default role that preselects manual invitations and safely supplies CSV rows without an explicit role value.
@@ -85,7 +92,7 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Keep password-reset requests account-enumeration resistant, require the current password for authenticated credential changes, carry account-action secrets only in URL fragments and JSON bodies, and remove encrypted outbox secrets after relay acceptance or cancellation.
 - Protected the reserved group-administrator role, its fixed identity, and its non-removable core grants, and require every group to retain at least one active assignment of that exact role.
 - Revalidate permissions and last-administrator invariants inside serialized SQLite write transactions so revocation is immediate and concurrent demotions or archival cannot lock a group out.
-- Prevent default roles from being deleted or receiving `GROUP_ADMINISTRATION`, avoiding accidental administrative access through invitation defaults or CSV imports.
+- Prevent default roles from being deleted or receiving `GROUP_ADMINISTRATION` or `MEMBER_MANAGEMENT`, avoiding accidental administrative access through invitation defaults or CSV imports.
 - Store reusable public join tokens as hashes plus authenticated ciphertext, keep them in URL fragments, require mailbox verification for new accounts, return enumeration-resistant registration responses, and invalidate pending proofs atomically on rotation or disable.
 - Validate every multi-booking target and permission before writing, and commit all booking, ledger, allocation, notification, audit, and idempotency rows atomically.
 - Couple nullable guest email and password-hash state at the database boundary, exclude credentialless identities from authentication, forbid synthetic credentials, and suppress notification email jobs without a real address.
@@ -194,7 +201,8 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Explicit acting and charged membership display for every booking, including searchable third-party-assignment cues.
 - Canonical backup-entry allowlisting, target-width Argon2 parameter parsing, and directory-confined SPA asset serving with traversal regression coverage.
 
-[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/DasLukas/TeamTaler/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/DasLukas/TeamTaler/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/DasLukas/TeamTaler/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/DasLukas/TeamTaler/compare/v0.4.0...v0.5.0
