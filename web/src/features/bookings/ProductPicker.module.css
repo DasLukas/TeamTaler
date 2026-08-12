@@ -80,11 +80,13 @@
 .product img,
 .fallback {
   width: 100%;
-  height: 132px;
+  aspect-ratio: 1;
   border-radius: 5px;
   object-fit: cover;
   background: var(--color-surface-muted);
 }
+
+.product img { display: block; }
 
 .fallback {
   display: grid;
@@ -158,7 +160,7 @@
 .rows .product img,
 .rows .fallback {
   width: var(--product-row-image-width);
-  height: 72px;
+  height: var(--product-row-image-width);
 }
 
 .rows .name,
@@ -225,7 +227,7 @@
   .tiles .product img,
   .rows .product img {
     width: var(--product-row-image-width);
-    height: 72px;
+    height: var(--product-row-image-width);
     grid-row: 1;
   }
 
@@ -262,6 +264,6 @@
   .tiles .product img,
   .rows .product img {
     width: var(--product-row-image-width);
-    height: 68px;
+    height: var(--product-row-image-width);
   }
 }

@@ -10,7 +10,7 @@ export interface RoleMultiSelectProps {
   onChange: (roleIds: string[]) => void;
   label: string;
   disabled?: boolean;
-  canManageRoles?: boolean;
+  canAssignRoles?: boolean;
   canManageGroup?: boolean;
 }
 
@@ -20,12 +20,12 @@ export interface RoleMultiSelectProps {
  * @param props - Available roles, selected IDs, authorization, and callback.
  * @returns An accessible checkbox group for members and invitations.
  */
-export function RoleMultiSelect({ roles, roleIds, onChange, label, disabled = false, canManageRoles = false, canManageGroup = false }: RoleMultiSelectProps) {
+export function RoleMultiSelect({ roles, roleIds, onChange, label, disabled = false, canAssignRoles = false, canManageGroup = false }: RoleMultiSelectProps) {
   const { t } = useTranslation();
   return (
     <div className={styles.roleSelect}>
       <p>{t('roleManagement.multiRoleHint')}</p>
-      <RoleSelectionList canManageGroup={canManageGroup} canManageRoles={canManageRoles} disabled={disabled} label={label} onChange={onChange} roleIds={roleIds} roles={roles} />
+      <RoleSelectionList canAssignRoles={canAssignRoles} canManageGroup={canManageGroup} disabled={disabled} label={label} onChange={onChange} roleIds={roleIds} roles={roles} />
     </div>
   );
 }

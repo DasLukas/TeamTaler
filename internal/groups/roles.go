@@ -68,16 +68,29 @@ func hasCurrentPermission(ctx context.Context, queryer authorization.Queryer, me
 	return authorization.NewPolicy(queryer).Can(ctx, membership.GroupID, membership.ID, permission, authorization.ResourceContext{GroupID: membership.GroupID})
 }
 
-func requireRoleAssignmentAccess(ctx context.Context, queryer authorization.Queryer, membership domain.Membership) error {
+func requireAnyCurrentPermission(ctx context.Context, queryer authorization.Queryer, membership domain.Membership, permissions ...domain.PermissionKey) error {
+	for _, permission := range permissions {
+		allowed, err := hasCurrentPermission(ctx, queryer, membership, permission)
+		if err != nil {
+			return err
+		}
+		if allowed {
+			return nil
+		}
+	}
+	return domain.ErrForbidden
+}
+
+func requireRoleReadAccess(ctx context.Context, queryer authorization.Queryer, membership domain.Membership) error {
 	canManageRoles, err := hasCurrentPermission(ctx, queryer, membership, domain.PermissionRoleManagement)
 	if err != nil {
 		return err
 	}
-	canAdministerGroup, err := hasCurrentPermission(ctx, queryer, membership, domain.PermissionGroupAdministration)
+	canManageMembers, err := hasCurrentPermission(ctx, queryer, membership, domain.PermissionMemberManagement)
 	if err != nil {
 		return err
 	}
-	if !canManageRoles && !canAdministerGroup {
+	if !canManageRoles && !canManageMembers {
 		return domain.ErrForbidden
 	}
 	return nil
@@ -90,11 +103,10 @@ func PermissionDefinitions() []domain.PermissionDefinition {
 }
 
 // ListRoles returns every role owned by membership's group with assignment
-// counts. ROLE_MANAGEMENT or GROUP_ADMINISTRATION is required so a group
-// administrator can transfer the reserved administrator assignment without
-// gaining role-edit access. No cross-tenant rows are returned.
+// counts. ROLE_MANAGEMENT or MEMBER_MANAGEMENT is required so role definitions
+// and member assignments can share one tenant-bound role catalogue.
 func (s Service) ListRoles(ctx context.Context, membership domain.Membership) ([]ManagedRole, error) {
-	if err := requireRoleAssignmentAccess(ctx, s.DB, membership); err != nil {
+	if err := requireRoleReadAccess(ctx, s.DB, membership); err != nil {
 		return nil, err
 	}
 	rows, err := s.DB.QueryContext(ctx, `SELECT r.id,r.group_id,coalesce(r.preset_key,''),r.name,coalesce(r.description,''),r.name_locked,r.deletable,r.version,r.created_at,r.updated_at,
@@ -228,17 +240,17 @@ func (s Service) UpdateRole(ctx context.Context, actor domain.Principal, members
 		if current.NameLocked && command.Name != current.Name {
 			return domain.ValidationError{Field: "name", Message: "is locked for the reserved administrator role"}
 		}
-		if protectedRole && (!hasGrant(command.Grants, domain.PermissionGroupAdministration) || !hasGrant(command.Grants, domain.PermissionRoleManagement)) {
-			return domain.ValidationError{Field: "grants", Message: "must retain GROUP_ADMINISTRATION and ROLE_MANAGEMENT for the reserved administrator role"}
+		if protectedRole && (!hasGrant(command.Grants, domain.PermissionGroupAdministration) || !hasGrant(command.Grants, domain.PermissionMemberManagement) || !hasGrant(command.Grants, domain.PermissionRoleManagement)) {
+			return domain.ValidationError{Field: "grants", Message: "must retain GROUP_ADMINISTRATION, MEMBER_MANAGEMENT, and ROLE_MANAGEMENT for the reserved administrator role"}
 		}
-		if hasGrant(command.Grants, domain.PermissionGroupAdministration) {
+		if hasGrant(command.Grants, domain.PermissionGroupAdministration) || hasGrant(command.Grants, domain.PermissionMemberManagement) {
 			var isDefault bool
 			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM group_settings WHERE group_id=? AND default_role_id=?)`,
 				membership.GroupID, roleID).Scan(&isDefault); err != nil {
 				return err
 			}
 			if isDefault {
-				return domain.ValidationError{Field: "grants", Message: "the default role must not grant GROUP_ADMINISTRATION"}
+				return domain.ValidationError{Field: "grants", Message: "the default role must not grant GROUP_ADMINISTRATION or MEMBER_MANAGEMENT"}
 			}
 		}
 		if err := validateUniqueRoleName(ctx, tx, membership.GroupID, roleID, command.Name); err != nil {
@@ -314,11 +326,9 @@ func (s Service) DeleteRole(ctx context.Context, actor domain.Principal, members
 }
 
 // ListRoleAssignments returns aggregate role sets for active memberships and
-// open invitations in membership's group. ROLE_MANAGEMENT or
-// GROUP_ADMINISTRATION is required; mutation policy still limits an
-// administrator without role management to the reserved administrator role.
+// open invitations in membership's group. MEMBER_MANAGEMENT is required.
 func (s Service) ListRoleAssignments(ctx context.Context, membership domain.Membership) ([]AssignmentSet, error) {
-	if err := requireRoleAssignmentAccess(ctx, s.DB, membership); err != nil {
+	if err := requireCurrentPermission(ctx, s.DB, membership, domain.PermissionMemberManagement); err != nil {
 		return nil, err
 	}
 	result := make([]AssignmentSet, 0)
@@ -395,12 +405,12 @@ func (s Service) replaceAssignedRoles(ctx context.Context, actor domain.Principa
 	if len(roleIDs) == 0 {
 		return AssignmentSet{}, domain.ValidationError{Field: "roleIds", Message: "must contain at least one role"}
 	}
-	if err := requireRoleAssignmentAccess(ctx, s.DB, membership); err != nil {
+	if err := requireCurrentPermission(ctx, s.DB, membership, domain.PermissionMemberManagement); err != nil {
 		return AssignmentSet{}, err
 	}
 	var result AssignmentSet
 	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
-		if err := requireRoleAssignmentAccess(ctx, tx, membership); err != nil {
+		if err := requireCurrentPermission(ctx, tx, membership, domain.PermissionMemberManagement); err != nil {
 			return err
 		}
 		var currentVersion int64
@@ -727,27 +737,10 @@ func assignmentTouchesAdministration(ctx context.Context, queryer roleQueryer, g
 }
 
 func requireAssignmentChangePermissions(ctx context.Context, queryer roleQueryer, membership domain.Membership, reservedAdminRoleID string, previous, next []string) error {
+	if err := requireCurrentPermission(ctx, queryer, membership, domain.PermissionMemberManagement); err != nil {
+		return err
+	}
 	reservedAdminChanged := containsString(previous, reservedAdminRoleID) != containsString(next, reservedAdminRoleID)
-	nonReservedChanged := false
-	for _, roleID := range previous {
-		if roleID != reservedAdminRoleID && !containsString(next, roleID) {
-			nonReservedChanged = true
-			break
-		}
-	}
-	if !nonReservedChanged {
-		for _, roleID := range next {
-			if roleID != reservedAdminRoleID && !containsString(previous, roleID) {
-				nonReservedChanged = true
-				break
-			}
-		}
-	}
-	if nonReservedChanged {
-		if err := requireCurrentPermission(ctx, queryer, membership, domain.PermissionRoleManagement); err != nil {
-			return err
-		}
-	}
 	protectedChange, err := assignmentTouchesAdministration(ctx, queryer, membership.GroupID, previous, next)
 	if err != nil {
 		return err

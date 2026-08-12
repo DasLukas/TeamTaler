@@ -17,6 +17,35 @@
   gap: var(--space-3);
 }
 
+.defaultRoleCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--space-5);
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-white);
+}
+
+.defaultRoleCard > div:first-child {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.defaultRoleCard h3,
+.defaultRoleActions p { margin: 0; }
+
+.defaultRoleActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.success { color: var(--color-teal-700); font-weight: 700; }
+
 @media (min-width: 768px) and (max-width: 1100px) {
   .headerActions {
     flex-wrap: nowrap;
@@ -383,6 +412,14 @@
 @media (max-width: 767px) {
   .header,
   .templateRow { align-items: stretch; flex-direction: column; }
+
+  .defaultRoleCard {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .defaultRoleActions { justify-content: stretch; }
+  .defaultRoleActions button { width: 100%; }
 
   .headerActions { display: grid; grid-template-columns: 1fr; }
   .headerActions > * { width: 100%; }

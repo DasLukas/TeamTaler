@@ -44,11 +44,11 @@ const thirdPartyBooking: Booking = {
   canVoid: false,
 };
 
-function renderActivities(): void {
+function renderActivities(sessionValue: Session = session): void {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>
-      <ActiveGroupContext.Provider value={{ session, activeGroup: session.groups[0], activeGroupId: 'group-a', setActiveGroupId: vi.fn() }}>
+      <ActiveGroupContext.Provider value={{ session: sessionValue, activeGroup: sessionValue.groups[0], activeGroupId: 'group-a', setActiveGroupId: vi.fn() }}>
         {children}
       </ActiveGroupContext.Provider>
     </QueryClientProvider>
@@ -112,6 +112,24 @@ describe('ActivitiesPage booking traceability', () => {
 
     const row = await screen.findByRole('row', { name: /Target Member.*Assigning Manager/ });
     expect(within(row).getByRole('img', { name: i18n.t('common.reversed') })).toHaveAttribute('title', i18n.t('common.reversed'));
+  });
+
+  it('uses the current session avatar when stale booking data omits it', async () => {
+    const avatarUrl = '/avatars/current-user.png';
+    const selfBooking: Booking = {
+      ...thirdPartyBooking,
+      memberId: 'member-viewer',
+      memberName: 'Viewer',
+      memberAvatarUrl: undefined,
+      bookedByMemberId: 'member-viewer',
+      bookedByName: 'Viewer',
+      bookedByAvatarUrl: undefined,
+    };
+    apiMock.getBookings.mockResolvedValue([selfBooking]);
+    renderActivities({ ...session, user: { ...session.user, avatarUrl } });
+
+    const row = await screen.findByRole('row', { name: /Viewer.*Viewer/ });
+    expect(row.querySelectorAll(`img[src="${avatarUrl}"]`)).toHaveLength(2);
   });
 
   it('allows a self-created booking inside the server-provided window without a reason', async () => {

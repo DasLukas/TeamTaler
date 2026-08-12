@@ -567,7 +567,8 @@ paths:
   /groups/{groupId}/settings:
     get:
       tags: [Groups]
-      summary: Read GROUP_ADMINISTRATION-managed group behavior settings
+      summary: Read shared group and membership settings
+      description: Requires `GROUP_ADMINISTRATION` or `MEMBER_MANAGEMENT`.
       parameters:
         - $ref: '#/components/parameters/GroupId'
       responses:
@@ -579,8 +580,11 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
     patch:
       tags: [Groups]
-      summary: Partially update GROUP_ADMINISTRATION-managed group behavior settings
-      description: Updates notification delivery, default role, and transaction-form behavior for the group.
+      summary: Partially update group or membership settings
+      description: |
+        `defaultRoleId` requires `MEMBER_MANAGEMENT`. Every other field requires
+        `GROUP_ADMINISTRATION`; a request mixing both field classes requires both
+        permissions.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/CSRFToken'
@@ -600,13 +604,13 @@ paths:
   /groups/{groupId}/transaction-settings:
     get:
       tags: [Groups]
-      summary: Read ordered payment methods, reason suggestions, and reason requirements
-      description: Returns only the non-sensitive form configuration needed by an active group member.
+      summary: Read settlement availability and ordered transaction behavior
+      description: Returns only the non-sensitive feature and form configuration needed by an active group member.
       parameters:
         - $ref: '#/components/parameters/GroupId'
       responses:
         '200':
-          description: Current transaction-form settings
+          description: Current operational feature and transaction settings
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TransactionSettings' }
@@ -617,10 +621,9 @@ paths:
       summary: Read the active member dashboard
       description: |
         Returns the authenticated membership's personal account data.
-        `groupCategoryStatistics` is an empty array without
-        `VIEW_GROUP_STATISTICS`. `groupOutstandingMinor` remains independently
-        available only with `FINANCE_MANAGEMENT`; its omission must not be
-        interpreted as a zero group balance.
+        `groupOutstandingMinor` requires `VIEW_GROUP_STATISTICS`; its omission
+        must not be interpreted as a zero group balance. The amount spans the
+        complete ledger and is independent of settlement periods.
       parameters:
         - $ref: '#/components/parameters/GroupId'
       responses:
@@ -675,7 +678,9 @@ paths:
       summary: List group members and effective permissions
       description: |
         Requires `VIEW_MEMBER_DIRECTORY`. `BOOK_FOR_OTHERS` implies that
-        permission. Callers that only need valid booking targets must use the
+        compatible read permission, while `MEMBER_MANAGEMENT` implies it and
+        additionally exposes archived memberships. Callers that only need valid
+        booking targets must use the
         privacy-minimized `/booking-context` read model instead of this
         administrative directory.
       parameters:
@@ -718,9 +723,9 @@ paths:
   /groups/{groupId}/public-join-link:
     get:
       tags: [Groups]
-      summary: Read the administrator-managed public join-link state
+      summary: Read the member-manager-owned public join-link state
       description: |
-        Requires `GROUP_ADMINISTRATION`. The reusable acceptance URL is returned
+        Requires `MEMBER_MANAGEMENT`. The reusable acceptance URL is returned
         only while the single group link is enabled and unexpired. Version zero
         represents a group that has never created a link.
       parameters:
@@ -740,7 +745,7 @@ paths:
       tags: [Groups]
       summary: Create, enable, disable, or change the lifetime of a public join link
       description: |
-        Requires `GROUP_ADMINISTRATION`. The first persisted version omits
+        Requires `MEMBER_MANAGEMENT`. The first persisted version omits
         `If-Match`; later replacements require the current strong ETag. Enabling
         a disabled or expired link creates a new token. A null expiry means
         unlimited availability. Enabling requires configured email delivery and
@@ -774,7 +779,7 @@ paths:
       tags: [Groups]
       summary: Replace the current public join-link token
       description: |
-        Requires `GROUP_ADMINISTRATION` and an enabled, unexpired link. Rotation
+        Requires `MEMBER_MANAGEMENT` and an enabled, unexpired link. Rotation
         invalidates the previous URL, QR code, and all pending registrations in
         the same write transaction while preserving the configured expiry.
       parameters:
@@ -800,7 +805,7 @@ paths:
     get:
       tags: [Authorization]
       summary: List group-owned roles and assignment counts
-      description: Requires `ROLE_MANAGEMENT` or `GROUP_ADMINISTRATION` in the requested group. Group-administration-only clients use this read model solely to identify the protected reserved role for transfer.
+      description: Requires `ROLE_MANAGEMENT` or `MEMBER_MANAGEMENT` in the requested group.
       parameters:
         - $ref: '#/components/parameters/GroupId'
       responses:
@@ -866,8 +871,9 @@ paths:
       description: |
         Requires `ROLE_MANAGEMENT`. Changing `GROUP_ADMINISTRATION` or the
         reserved administrator role additionally requires
-        `GROUP_ADMINISTRATION`. The reserved role name and core grants are
-        immutable. Only `GROUP` grants are accepted in v1.
+        `GROUP_ADMINISTRATION`. The reserved role name and its direct
+        `GROUP_ADMINISTRATION`, `MEMBER_MANAGEMENT`, and `ROLE_MANAGEMENT`
+        grants are immutable. Only `GROUP` grants are accepted in v1.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/RoleId'
@@ -918,7 +924,7 @@ paths:
     get:
       tags: [Authorization]
       summary: List aggregated member and pending-invitation role assignments
-      description: Requires `ROLE_MANAGEMENT` or `GROUP_ADMINISTRATION` in the requested group. Mutation rules still restrict group-administration-only callers to the reserved administrator assignment.
+      description: Requires `MEMBER_MANAGEMENT` in the requested group.
       parameters:
         - $ref: '#/components/parameters/GroupId'
       responses:
@@ -935,10 +941,9 @@ paths:
       tags: [Authorization]
       summary: Replace all role assignments for an active membership
       description: |
-        At least one role must remain assigned. Ordinary role assignments
-        require `ROLE_MANAGEMENT`. Reserved administrator
-        assignment changes require `GROUP_ADMINISTRATION`; assigning any other
-        role containing that permission requires both `ROLE_MANAGEMENT` and
+        At least one role must remain assigned. Every assignment requires
+        `MEMBER_MANAGEMENT`. Reserved administrator assignment changes and any
+        other role containing `GROUP_ADMINISTRATION` additionally require
         `GROUP_ADMINISTRATION`. The last active reserved administrator
         assignment cannot be removed.
       parameters:
@@ -971,7 +976,8 @@ paths:
       tags: [Groups]
       summary: Replace deprecated preset-role and legacy permission fields
       description: |
-        Deprecated compatibility adapter. Preset-role writes preserve custom
+        Requires `MEMBER_MANAGEMENT`. Deprecated compatibility adapter.
+        Preset-role writes preserve custom
         role assignments, `SELF_RECORD_PAYMENT` is mapped through the editable
         migration role, and every non-empty `categoryGrants` value returns
         `422`. Assignment changes use the same authorization policy as the
@@ -1003,7 +1009,7 @@ paths:
       tags: [Groups]
       summary: Rename an active temporary guest
       description: |
-        Requires `GROUP_ADMINISTRATION`. Only an active credentialless temporary
+        Requires `MEMBER_MANAGEMENT`. Only an active credentialless temporary
         guest may be renamed through this endpoint. Credentialed members manage
         their global display name through account flows.
         The normalized display name is written with an audit event. Repeating
@@ -1032,11 +1038,13 @@ paths:
       tags: [Groups]
       summary: Archive a membership while preserving all historical records
       description: |
-        Requires `GROUP_ADMINISTRATION`. The same lifecycle applies to regular
+        Requires `MEMBER_MANAGEMENT`. The same lifecycle applies to regular
         memberships and temporary guests. Archival clears
         effective access while preserving the stable membership identifier,
         credentialless identity, bookings, ledger entries, period statements,
         claim-invitation history, notifications, and audit events.
+        Archiving a membership with a role that grants `GROUP_ADMINISTRATION`
+        additionally requires `GROUP_ADMINISTRATION`.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/MembershipId'
@@ -1045,7 +1053,7 @@ paths:
           in: query
           required: false
           schema: { type: boolean, default: false }
-          description: Must be true when a member with `GROUP_ADMINISTRATION` archives their own membership.
+          description: Must be true when a member archives their own membership.
       responses:
         '204': { description: Membership archived and effective permissions cleared }
         '403': { $ref: '#/components/responses/Problem' }
@@ -1057,11 +1065,11 @@ paths:
       tags: [Groups]
       summary: Reactivate an archived membership
       description: |
-        Requires `GROUP_ADMINISTRATION`. Credentialed memberships must receive
-        at least one role. Without `ROLE_MANAGEMENT`, the only accepted role set
-        is the group's current default role. Temporary guests remain roleless
-        and may provide a conflict-free replacement display name. Permanently
-        deleted memberships cannot be reactivated.
+        Requires `MEMBER_MANAGEMENT`. Credentialed memberships must receive at
+        least one role. A role granting `GROUP_ADMINISTRATION` additionally
+        requires `GROUP_ADMINISTRATION`. Temporary guests remain roleless and
+        may provide a conflict-free replacement display name. Permanently deleted
+        memberships cannot be reactivated.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/MembershipId'
@@ -1086,7 +1094,7 @@ paths:
       tags: [Groups]
       summary: Permanently remove an archived membership from administration
       description: |
-        Requires `GROUP_ADMINISTRATION` and an exact zero consolidated balance.
+        Requires `MEMBER_MANAGEMENT` and an exact zero consolidated balance.
         The membership identifier and its last display name remain as a
         credentialless tombstone for bookings, payments, ledger entries,
         statements, and audit history. The original account and memberships in
@@ -1106,7 +1114,7 @@ paths:
       tags: [Groups]
       summary: Invite an active temporary guest to claim login access
       description: |
-        Requires `GROUP_ADMINISTRATION`. The command creates one seven-day,
+        Requires `MEMBER_MANAGEMENT`. The command creates one seven-day,
         single-use invitation tied to the active credentialless membership and
         records its email outbox work atomically when SMTP is available. The
         fallback URL is returned once. The command accepts no
@@ -1118,9 +1126,9 @@ paths:
         accounting and audit reference. A new claimant receives credentials on
         the temporary identity; an existing account must authenticate and is
         linked without creating a second membership. At least one role is stored
-        with the invitation and applied exactly on acceptance. Without
-        `ROLE_MANAGEMENT`, only the current default role is accepted; other role
-        sets require `ROLE_MANAGEMENT`, and protected-role rules still apply.
+        with the invitation and applied exactly on acceptance. Member managers
+        may select ordinary roles; roles granting `GROUP_ADMINISTRATION`
+        additionally require `GROUP_ADMINISTRATION`.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/MembershipId'
@@ -1145,10 +1153,8 @@ paths:
       tags: [Groups]
       summary: List invitation metadata without secret tokens
       description: |
-        `GROUP_ADMINISTRATION` returns the complete invitation lifecycle.
-        `ROLE_MANAGEMENT` alone returns only currently open ordinary invitations
-        needed for role assignment and cannot see temporary-guest claim invitations
-        or create, revoke, or resend any invitation.
+        Requires `MEMBER_MANAGEMENT` and returns the complete invitation
+        lifecycle without bearer tokens.
       parameters:
         - $ref: '#/components/parameters/GroupId'
       responses:
@@ -1164,13 +1170,14 @@ paths:
       tags: [Groups]
       summary: Create a seven-day, one-time invitation and optionally queue its email
       description: |
+        Requires `MEMBER_MANAGEMENT`.
         When SMTP delivery is configured, the invitation and its encrypted
         transactional outbox job are committed atomically. The one-time
         acceptance URL is returned regardless of SMTP availability so a group
-        administrator can use it as a fallback. A current invitation or group
+        member manager can use it as a fallback. A current invitation or group
         membership for the normalized email address prevents duplicates across
         manual creation and CSV imports. Selected `roleIds` and deprecated role
-        fields apply the same role-management and administrator-capable-role
+        fields apply the same member-management and administrator-capable-role
         checks as the dedicated assignment endpoint. At least one role must be
         selected explicitly.
       parameters:
@@ -1199,6 +1206,7 @@ paths:
       tags: [Groups]
       summary: Import invitations with row-specific roles or the group default
       description: |
+        Requires `MEMBER_MANAGEMENT`.
         Accepts UTF-8 CSV with a required `email` column and an optional
         `display_name` and `roles` columns. Multiple case-insensitive role names
         in one row are separated by `|`. A blank roles cell uses the deprecated
@@ -1248,6 +1256,7 @@ paths:
       tags: [Groups]
       summary: Replace display-name and compatible role defaults of an open invitation
       description: |
+        Requires `MEMBER_MANAGEMENT`.
         Both `roleIds` and deprecated role fields use the current assignment
         policy and require a matching `If-Match`. Legacy role fields preserve
         custom assignments. Non-empty legacy category grants return `422`.
@@ -1279,6 +1288,7 @@ paths:
     delete:
       tags: [Groups]
       summary: Revoke an open invitation and cancel unsent email delivery
+      description: Requires `MEMBER_MANAGEMENT`.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - name: invitationId
@@ -1297,11 +1307,10 @@ paths:
       description: |
         Managed-guest claim invitations have a server-owned guest-role
         assignment and return `409` from this operation.
-        At least one role must remain assigned. Ordinary role assignments
-        require `ROLE_MANAGEMENT`. Changing the reserved
-        administrator-role assignment requires `GROUP_ADMINISTRATION`; changing
-        another role containing that permission requires both `ROLE_MANAGEMENT`
-        and `GROUP_ADMINISTRATION`.
+        At least one role must remain assigned. Every assignment requires
+        `MEMBER_MANAGEMENT`. Changing the reserved administrator role or another
+        role containing `GROUP_ADMINISTRATION` additionally requires
+        `GROUP_ADMINISTRATION`.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/InvitationId'
@@ -1331,6 +1340,7 @@ paths:
     post:
       tags: [Groups]
       summary: Retry a terminally failed invitation email
+      description: Requires `MEMBER_MANAGEMENT`.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - name: invitationId
@@ -1354,7 +1364,7 @@ paths:
     post:
       tags: [Groups]
       summary: Rotate and resend an open invitation
-      description: Creates a new token and seven-day expiry. Older links become invalid; PENDING and SENDING deliveries are rejected.
+      description: Requires `MEMBER_MANAGEMENT`. Creates a new token and seven-day expiry. Older links become invalid; PENDING and SENDING deliveries are rejected.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - name: invitationId
@@ -1846,6 +1856,7 @@ paths:
     post:
       tags: [Periods]
       summary: Permanently close a period and open its successor
+      description: Requires FINANCE_MANAGEMENT and settlementsEnabled=true. Disabling settlements never changes the technical open period.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/PeriodId'
@@ -2346,7 +2357,7 @@ components:
     GroupSettings:
       type: object
       additionalProperties: false
-      required: [notificationEmailsEnabled, notificationEmailDeliveryAvailable, defaultRoleId, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
+      required: [notificationEmailsEnabled, notificationEmailDeliveryAvailable, settlementsEnabled, defaultRoleId, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
       properties:
         notificationEmailsEnabled:
           type: boolean
@@ -2355,6 +2366,9 @@ components:
           type: boolean
           readOnly: true
           description: Whether the running server has complete SMTP delivery configuration.
+        settlementsEnabled:
+          type: boolean
+          description: Whether administrators may close the unchanged technical open period and create settlement statements.
         defaultRoleId:
           type: [string, 'null']
           description: Group-owned non-administrative role preselected for new invitations and used by CSV rows without roles.
@@ -2386,10 +2400,13 @@ components:
       minProperties: 1
       properties:
         notificationEmailsEnabled: { type: boolean }
+        settlementsEnabled:
+          type: boolean
+          description: Enables or disables period closing without changing periods, ledger entries, balances, or settlement history.
         defaultRoleId:
           type: string
           minLength: 1
-          description: Group-owned role that must not grant GROUP_ADMINISTRATION. It cannot be cleared after being set.
+          description: Group-owned role that must not grant GROUP_ADMINISTRATION or MEMBER_MANAGEMENT. It cannot be cleared after being set and may be changed only with MEMBER_MANAGEMENT.
         foreignBookingReasonRequired: { type: boolean }
         ownPaymentReasonRequired: { type: boolean }
         otherPaymentReasonRequired: { type: boolean }
@@ -2416,8 +2433,11 @@ components:
     TransactionSettings:
       type: object
       additionalProperties: false
-      required: [foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
+      required: [settlementsEnabled, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
       properties:
+        settlementsEnabled:
+          type: boolean
+          description: Whether settlement-period references and actions should be shown to active members.
         foreignBookingReasonRequired: { type: boolean }
         ownPaymentReasonRequired: { type: boolean }
         otherPaymentReasonRequired: { type: boolean }
@@ -2494,6 +2514,7 @@ components:
       type: string
       enum:
         - GROUP_ADMINISTRATION
+        - MEMBER_MANAGEMENT
         - ROLE_MANAGEMENT
         - FINANCE_MANAGEMENT
         - CATALOG_MANAGEMENT
@@ -3079,6 +3100,9 @@ components:
         actorDisplayName:
           type: string
           description: Server-resolved actor name so activity clients do not need the member directory.
+        actorAvatarUrl:
+          type: string
+          description: Current protected actor avatar URL; omitted when no avatar is configured.
         actorMembershipStatus:
           type: string
           enum: [ACTIVE, ARCHIVED, DELETED]
@@ -3087,6 +3111,9 @@ components:
         targetDisplayName:
           type: string
           description: Server-resolved charged-member name so activity clients do not need the member directory.
+        targetAvatarUrl:
+          type: string
+          description: Current protected charged-member avatar URL; omitted when no avatar is configured.
         targetMembershipStatus:
           type: string
           enum: [ACTIVE, ARCHIVED, DELETED]
@@ -3160,10 +3187,11 @@ components:
         openPeriodDueMinor: { $ref: '#/components/schemas/MinorUnits' }
         categoryStatistics:
           type: array
+          description: Category totals for the open period when settlements are enabled, otherwise totals across all periods.
           items: { $ref: '#/components/schemas/CategoryStatistic' }
         groupCategoryStatistics:
           type: array
-          description: Anonymous current-period category totals across the group; an empty array without VIEW_GROUP_STATISTICS.
+          description: Anonymous category totals across the group for the open period when settlements are enabled, otherwise across all periods; an empty array without VIEW_GROUP_STATISTICS.
           items: { $ref: '#/components/schemas/CategoryStatistic' }
         recentEntries:
           type: array
@@ -3181,7 +3209,7 @@ components:
         unreadNotificationCount: { type: integer, format: int64 }
         groupOutstandingMinor:
           $ref: '#/components/schemas/MinorUnits'
-          description: Group-wide outstanding amount; omitted without FINANCE_MANAGEMENT.
+          description: Signed complete-ledger net receivable across all member accounts; omitted without VIEW_GROUP_STATISTICS. Positive values are owed to the group and negative values are member credit.
     PaymentCommand:
       type: object
       additionalProperties: false

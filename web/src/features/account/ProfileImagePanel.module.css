@@ -9,12 +9,17 @@
   box-shadow: var(--shadow-sm);
   grid-template-columns: auto minmax(0, 1fr);
   gap: var(--space-6);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .controls {
   display: grid;
   gap: var(--space-4);
+  min-width: 0;
 }
+
+.controls > * { min-width: 0; }
 
 .controls h2,
 .controls p { margin: 0; }
@@ -33,15 +38,20 @@
 
 .selection {
   justify-content: space-between;
+  min-width: 0;
   color: var(--color-muted);
   font-size: var(--font-size-sm);
 }
 
 .selection span {
+  min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.selection button { flex: 0 0 auto; }
 
 .actions { justify-content: flex-end; }
 .error,
@@ -49,8 +59,11 @@
 .error { color: var(--color-red-600); }
 .success { color: var(--color-green-600); }
 
-@media (max-width: 680px) {
+@media (max-width: 900px) {
   .card { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 680px) {
   .actions { align-items: stretch; flex-direction: column-reverse; }
 }
 

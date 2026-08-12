@@ -52,6 +52,7 @@ export function adaptGroupSettings(input: unknown): GroupSettings {
   const source = asRecord(input);
   const paymentMethods = adaptConfigurableItems(source.paymentMethods, true);
   return {
+    settlementsEnabled: source.settlementsEnabled === true,
     notificationEmailsEnabled: source.notificationEmailsEnabled === true,
     notificationEmailDeliveryAvailable: source.notificationEmailDeliveryAvailable === true,
     defaultRoleId: typeof source.defaultRoleId === 'string' && source.defaultRoleId ? source.defaultRoleId : null,
@@ -75,11 +76,12 @@ export function adaptConfigurableItems(input: unknown, localizePaymentMethods = 
   });
 }
 
-/** Adapts non-sensitive transaction settings for operational forms. */
+/** Adapts non-sensitive feature state and transaction settings for operational surfaces. */
 export function adaptTransactionSettings(input: unknown): TransactionSettings {
   const source = asRecord(input);
   const paymentMethods = adaptConfigurableItems(source.paymentMethods, true);
   return {
+    settlementsEnabled: source.settlementsEnabled === true,
     foreignBookingReasonRequired: source.foreignBookingReasonRequired !== false,
     ownPaymentReasonRequired: source.ownPaymentReasonRequired !== false,
     otherPaymentReasonRequired: source.otherPaymentReasonRequired === true,
@@ -454,7 +456,9 @@ export function adaptBooking(input: unknown, members?: Membership[], fallbackMem
       ? source.targetDisplayName
       : memberName(targetId, members, fallbackMemberName),
     memberStatus: source.targetMembershipStatus === 'ARCHIVED' || source.targetMembershipStatus === 'DELETED' ? source.targetMembershipStatus : 'ACTIVE',
-    memberAvatarUrl: memberAvatarUrl(targetId, members),
+    memberAvatarUrl: typeof source.targetAvatarUrl === 'string' && source.targetAvatarUrl
+      ? source.targetAvatarUrl
+      : memberAvatarUrl(targetId, members),
     productId: String(source.productId),
     productName: String(source.productName),
     categoryId: String(source.categoryId),
@@ -468,7 +472,9 @@ export function adaptBooking(input: unknown, members?: Membership[], fallbackMem
       : memberName(actorId, members, actorId === targetId ? fallbackMemberName : i18n.t('common.member')),
     bookedByStatus: source.actorMembershipStatus === 'ARCHIVED' || source.actorMembershipStatus === 'DELETED' ? source.actorMembershipStatus : 'ACTIVE',
     bookedByMemberId: actorId || undefined,
-    bookedByAvatarUrl: memberAvatarUrl(actorId, members),
+    bookedByAvatarUrl: typeof source.actorAvatarUrl === 'string' && source.actorAvatarUrl
+      ? source.actorAvatarUrl
+      : memberAvatarUrl(actorId, members),
     reason: typeof source.reason === 'string' && source.reason ? source.reason : undefined,
     status: source.voidedAt ? 'REVERSED' : 'POSTED',
     undoUntil: typeof source.voidWithoutReasonUntil === 'string' ? source.voidWithoutReasonUntil : typeof source.undoUntil === 'string' ? source.undoUntil : undefined,
@@ -491,6 +497,9 @@ export function adaptDashboard(input: unknown): Dashboard {
   const currentPeriod = adaptPeriod(source.openPeriod);
   return {
     openBalance: money(account.balanceMinor, account.currency),
+    groupOutstanding: source.groupOutstandingMinor === undefined || source.groupOutstandingMinor === null
+      ? undefined
+      : money(source.groupOutstandingMinor, account.currency),
     currentPeriod,
     categoryTotals: (account.categoryStatistics as unknown[] ?? []).map((entry) => {
       const statistic = asRecord(entry);

@@ -57,7 +57,7 @@ import i18n from '@/i18n';
 
 type DemoRequestInit = RequestInit;
 
-const ADMIN_CORE: readonly PermissionKey[] = ['GROUP_ADMINISTRATION', 'ROLE_MANAGEMENT'];
+const ADMIN_CORE: readonly PermissionKey[] = ['GROUP_ADMINISTRATION', 'MEMBER_MANAGEMENT', 'ROLE_MANAGEMENT'];
 
 interface DemoRoutePolicy {
   methods: readonly string[];
@@ -66,16 +66,16 @@ interface DemoRoutePolicy {
 }
 
 const DEMO_ROUTE_POLICIES: readonly DemoRoutePolicy[] = [
-  { methods: ['GET', 'PATCH'], resource: /^settings$/, anyOf: ['GROUP_ADMINISTRATION'] },
+  { methods: ['GET', 'PATCH'], resource: /^settings$/, anyOf: ['GROUP_ADMINISTRATION', 'MEMBER_MANAGEMENT'] },
   { methods: ['POST', 'DELETE'], resource: /^logo$/, anyOf: ['GROUP_ADMINISTRATION'] },
   { methods: ['GET'], resource: /^members$/, anyOf: ['VIEW_MEMBER_DIRECTORY'] },
-  { methods: ['PATCH', 'DELETE'], resource: /^members\/[^/]+$/, anyOf: ['GROUP_ADMINISTRATION'] },
-  { methods: ['POST'], resource: /^members\/[^/]+\/reactivate$/, anyOf: ['GROUP_ADMINISTRATION'] },
-  { methods: ['DELETE'], resource: /^members\/[^/]+\/permanent$/, anyOf: ['GROUP_ADMINISTRATION'] },
-  { methods: ['POST'], resource: /^members\/[^/]+\/claim-invitation$/, anyOf: ['GROUP_ADMINISTRATION'] },
-  { methods: ['GET', 'PUT'], resource: /^public-join-link$/, anyOf: ['GROUP_ADMINISTRATION'] },
-  { methods: ['POST'], resource: /^public-join-link\/rotate$/, anyOf: ['GROUP_ADMINISTRATION'] },
-  { methods: ['PATCH'], resource: /^members\/[^/]+\/permissions$/, anyOf: ['GROUP_ADMINISTRATION'] },
+  { methods: ['PATCH', 'DELETE'], resource: /^members\/[^/]+$/, anyOf: ['MEMBER_MANAGEMENT'] },
+  { methods: ['POST'], resource: /^members\/[^/]+\/reactivate$/, anyOf: ['MEMBER_MANAGEMENT'] },
+  { methods: ['DELETE'], resource: /^members\/[^/]+\/permanent$/, anyOf: ['MEMBER_MANAGEMENT'] },
+  { methods: ['POST'], resource: /^members\/[^/]+\/claim-invitation$/, anyOf: ['MEMBER_MANAGEMENT'] },
+  { methods: ['GET', 'PUT'], resource: /^public-join-link$/, anyOf: ['MEMBER_MANAGEMENT'] },
+  { methods: ['POST'], resource: /^public-join-link\/rotate$/, anyOf: ['MEMBER_MANAGEMENT'] },
+  { methods: ['PATCH'], resource: /^members\/[^/]+\/permissions$/, anyOf: ['MEMBER_MANAGEMENT'] },
   { methods: ['GET'], resource: /^accounts$/, anyOf: ['FINANCE_MANAGEMENT'] },
   { methods: ['GET'], resource: /^accounts\/(?!me$)[^/]+$/, anyOf: ['FINANCE_MANAGEMENT'] },
   { methods: ['GET', 'POST'], resource: /^payments$/, anyOf: ['FINANCE_MANAGEMENT'] },
@@ -86,14 +86,14 @@ const DEMO_ROUTE_POLICIES: readonly DemoRoutePolicy[] = [
   { methods: ['GET'], resource: /^periods\/[^/]+\/statements$/, anyOf: ['FINANCE_MANAGEMENT'] },
   { methods: ['GET'], resource: /^settlements$/, anyOf: ['FINANCE_MANAGEMENT'] },
   { methods: ['GET'], resource: /^audit$/, anyOf: ['GROUP_ADMINISTRATION'] },
-  { methods: ['GET'], resource: /^roles(?:\/[^/]+)?$/, anyOf: ['GROUP_ADMINISTRATION', 'ROLE_MANAGEMENT'] },
-  { methods: ['GET'], resource: /^role-assignments$/, anyOf: ['GROUP_ADMINISTRATION', 'ROLE_MANAGEMENT'] },
-  { methods: ['GET'], resource: /^invitations$/, anyOf: ['GROUP_ADMINISTRATION', 'ROLE_MANAGEMENT'] },
-  { methods: ['POST'], resource: /^invitations$/, anyOf: ['GROUP_ADMINISTRATION'] },
-  { methods: ['POST'], resource: /^invitations\/import$/, anyOf: ['GROUP_ADMINISTRATION'] },
-  { methods: ['PATCH', 'DELETE'], resource: /^invitations\/[^/]+$/, anyOf: ['GROUP_ADMINISTRATION'] },
-  { methods: ['PUT'], resource: /^invitations\/[^/]+\/roles$/, anyOf: ['GROUP_ADMINISTRATION', 'ROLE_MANAGEMENT'] },
-  { methods: ['POST'], resource: /^invitations\/[^/]+\/email\/(?:retry|resend)$/, anyOf: ['GROUP_ADMINISTRATION'] },
+  { methods: ['GET'], resource: /^roles$/, anyOf: ['MEMBER_MANAGEMENT', 'ROLE_MANAGEMENT'] },
+  { methods: ['GET'], resource: /^roles\/[^/]+$/, anyOf: ['ROLE_MANAGEMENT'] },
+  { methods: ['GET'], resource: /^role-assignments$/, anyOf: ['MEMBER_MANAGEMENT'] },
+  { methods: ['GET', 'POST'], resource: /^invitations$/, anyOf: ['MEMBER_MANAGEMENT'] },
+  { methods: ['POST'], resource: /^invitations\/import$/, anyOf: ['MEMBER_MANAGEMENT'] },
+  { methods: ['PATCH', 'DELETE'], resource: /^invitations\/[^/]+$/, anyOf: ['MEMBER_MANAGEMENT'] },
+  { methods: ['PUT'], resource: /^invitations\/[^/]+\/roles$/, anyOf: ['MEMBER_MANAGEMENT'] },
+  { methods: ['POST'], resource: /^invitations\/[^/]+\/email\/(?:retry|resend)$/, anyOf: ['MEMBER_MANAGEMENT'] },
   { methods: ['POST'], resource: /^categories$/, anyOf: ['CATALOG_MANAGEMENT'] },
   { methods: ['PUT'], resource: /^catalog\/order$/, anyOf: ['CATALOG_MANAGEMENT'] },
   { methods: ['PATCH', 'DELETE'], resource: /^categories\/[^/]+$/, anyOf: ['CATALOG_MANAGEMENT'] },
@@ -232,6 +232,7 @@ export class DemoTransport {
   private invitations: InvitationMetadata[] = [];
   private invitationTokens = new Map<string, string>();
   private groupSettings: GroupSettings = {
+    settlementsEnabled: false,
     notificationEmailsEnabled: false,
     notificationEmailDeliveryAvailable: true,
     defaultRoleId: 'role-member',
@@ -331,8 +332,8 @@ export class DemoTransport {
 
     if (resource === 'settings' && method === 'GET') return clone(this.groupSettings) as T;
     if (resource === 'settings' && method === 'PATCH') {
-      this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
       const update = body as Partial<GroupSettings>;
+      const updatesSettlements = update.settlementsEnabled !== undefined;
       const updatesNotificationEmails = update.notificationEmailsEnabled !== undefined;
       const updatesDefaultRole = update.defaultRoleId !== undefined;
       const updatesTransactionSettings = update.foreignBookingReasonRequired !== undefined
@@ -341,15 +342,19 @@ export class DemoTransport {
         || update.paymentMethods !== undefined
         || update.bookingReasons !== undefined
         || update.paymentReasons !== undefined;
-      if (!updatesNotificationEmails && !updatesDefaultRole && !updatesTransactionSettings) throw new Error('At least one group setting is required.');
+      if (!updatesSettlements && !updatesNotificationEmails && !updatesDefaultRole && !updatesTransactionSettings) throw new Error('At least one group setting is required.');
+      if (updatesDefaultRole) this.requirePermission(groupId, 'MEMBER_MANAGEMENT');
+      if (updatesSettlements || updatesNotificationEmails || updatesTransactionSettings) this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
+      if (updatesSettlements && typeof update.settlementsEnabled !== 'boolean') throw new Error('Settlement availability must be a boolean.');
       if (updatesNotificationEmails && typeof update.notificationEmailsEnabled !== 'boolean') throw new Error('Notification email delivery must be a boolean.');
       if (updatesDefaultRole) {
         const defaultRole = this.roles.find((role) => role.id === update.defaultRoleId);
         if (!defaultRole) throw new Error('The default role does not exist.');
-        if (defaultRole.grants.some((grant) => grant.permission === 'GROUP_ADMINISTRATION')) throw new Error('The default role must not grant group administration.');
+        if (defaultRole.grants.some((grant) => grant.permission === 'GROUP_ADMINISTRATION' || grant.permission === 'MEMBER_MANAGEMENT')) throw new Error('The default role must not grant administration permissions.');
       }
       this.groupSettings = {
         ...this.groupSettings,
+        ...(updatesSettlements ? { settlementsEnabled: update.settlementsEnabled as boolean } : {}),
         ...(updatesNotificationEmails ? { notificationEmailsEnabled: update.notificationEmailsEnabled as boolean } : {}),
         ...(updatesDefaultRole ? { defaultRoleId: update.defaultRoleId as string } : {}),
         ...(update.foreignBookingReasonRequired !== undefined ? { foreignBookingReasonRequired: update.foreignBookingReasonRequired } : {}),
@@ -389,8 +394,16 @@ export class DemoTransport {
       this.publicJoinLink = { ...this.publicJoinLink, version: this.publicJoinLink.version + 1, updatedAt: new Date().toISOString(), acceptUrl: `${window.location.origin}/join#token=${encodeURIComponent(this.publicJoinToken)}` };
       return clone(this.publicJoinLink) as T;
     }
-    if (resource === 'dashboard') return clone(this.dashboard) as T;
+    if (resource === 'dashboard') {
+      const dashboard = clone({
+        ...this.dashboard,
+        recentBookings: this.dashboard.recentBookings.map((booking) => this.bookingWithCurrentIdentities(booking)),
+      });
+      if (!can(this.currentMembership(groupId)?.effectiveGrants, 'VIEW_GROUP_STATISTICS')) delete dashboard.groupOutstanding;
+      return dashboard as T;
+    }
     if (resource === 'transaction-settings' && method === 'GET') return clone({
+      settlementsEnabled: this.groupSettings.settlementsEnabled,
       foreignBookingReasonRequired: this.groupSettings.foreignBookingReasonRequired,
       ownPaymentReasonRequired: this.groupSettings.ownPaymentReasonRequired,
       otherPaymentReasonRequired: this.groupSettings.otherPaymentReasonRequired,
@@ -719,6 +732,11 @@ export class DemoTransport {
     return [...new Set(roleIds.filter((roleId) => known.has(roleId)))];
   }
 
+  /** Reports whether any selected role grants protected group administration. */
+  private roleIdsGrantGroupAdministration(roleIds: readonly string[]): boolean {
+    return roleIds.some((roleId) => this.roles.find((role) => role.id === roleId)?.grants.some((grant) => grant.permission === 'GROUP_ADMINISTRATION'));
+  }
+
   /** Returns dynamic role assignment counters without storing redundant values. */
   private recountedRoles(): Role[] {
     const pending = this.invitations.filter((invitation) => !invitation.acceptedAt && !invitation.revokedAt && Date.parse(invitation.expiresAt) > Date.now());
@@ -766,13 +784,17 @@ export class DemoTransport {
     const name = input.name.trim();
     if (!name || this.roles.some((entry) => entry.id !== roleId && entry.name.localeCompare(name, undefined, { sensitivity: 'accent' }) === 0)) throw new Error('A unique role name is required.');
     const changesAdministration = role.grants.some((grant) => grant.permission === 'GROUP_ADMINISTRATION') !== input.grants.some((grant) => grant.permission === 'GROUP_ADMINISTRATION');
-    if (role.presetKey === 'GROUP_ADMINISTRATOR' || changesAdministration) this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
+    if (role.presetKey === 'GROUP_ADMINISTRATOR') {
+      ADMIN_CORE.forEach((permission) => this.requirePermission(groupId, permission));
+    } else if (changesAdministration) {
+      this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
+    }
     if (role.nameLocked && name !== role.name) throw new Error('This role name is protected.');
     if (role.presetKey === 'GROUP_ADMINISTRATOR') {
       if (name !== role.name) throw new Error('The group administrator role cannot be renamed.');
       if (!ADMIN_CORE.every((permission) => input.grants.some((grant) => grant.permission === permission))) throw new Error('Administrator core permissions cannot be removed.');
     }
-    if (this.groupSettings.defaultRoleId === roleId && input.grants.some((grant) => grant.permission === 'GROUP_ADMINISTRATION')) throw new Error('The default role must not grant group administration.');
+    if (this.groupSettings.defaultRoleId === roleId && input.grants.some((grant) => grant.permission === 'GROUP_ADMINISTRATION' || grant.permission === 'MEMBER_MANAGEMENT')) throw new Error('The default role must not grant administration permissions.');
     role.name = name;
     role.description = input.description?.trim() || undefined;
     role.grants = clone(input.grants);
@@ -795,6 +817,7 @@ export class DemoTransport {
 
   /** Replaces a member or invitation role set atomically. */
   private updateRoleAssignment(groupId: string, subjectType: RoleAssignment['subjectType'], subjectId: string, roleIds: string[], expectedVersion: number): RoleAssignment {
+    this.requirePermission(groupId, 'MEMBER_MANAGEMENT');
     const key = `${subjectType}:${subjectId}`;
     const invitation = subjectType === 'INVITATION'
       ? this.invitations.find((entry) => entry.id === subjectId && !entry.acceptedAt && !entry.revokedAt && Date.parse(entry.expiresAt) > Date.now())
@@ -809,11 +832,7 @@ export class DemoTransport {
     const currentRoleIds = member?.roleIds ?? invitation?.roleIds ?? [];
     const changedRoleIds = [...new Set([...currentRoleIds, ...normalized])].filter((roleId) => currentRoleIds.includes(roleId) !== normalized.includes(roleId));
     const adminRole = this.roles.find((role) => role.presetKey === 'GROUP_ADMINISTRATOR');
-    if (changedRoleIds.some((roleId) => roleId !== adminRole?.id)) this.requirePermission(groupId, 'ROLE_MANAGEMENT');
-    const changedAdministrativeRole = changedRoleIds.some((roleId) => {
-      const changed = currentRoleIds.includes(roleId) !== normalized.includes(roleId);
-      return changed && this.roles.find((role) => role.id === roleId)?.grants.some((grant) => grant.permission === 'GROUP_ADMINISTRATION');
-    });
+    const changedAdministrativeRole = changedRoleIds.some((roleId) => this.roleIdsGrantGroupAdministration([roleId]));
     if (changedAdministrativeRole) this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
     if (subjectType === 'MEMBERSHIP') {
       if (!member) throw new Error(i18n.t('errors.memberNotFound'));
@@ -878,6 +897,7 @@ export class DemoTransport {
     this.dashboard.recentBookings.unshift(booking);
     this.dashboard.recentBookings = this.dashboard.recentBookings.slice(0, 5);
     this.dashboard.openBalance.minorUnits = (BigInt(this.dashboard.openBalance.minorUnits) + totalMinorUnits).toString();
+    this.adjustGroupOutstanding(totalMinorUnits);
     this.adjustAccountBalance(target.id, totalMinorUnits);
     const categoryTotal = this.dashboard.categoryTotals.find((entry) => entry.categoryId === category.id);
     if (categoryTotal) categoryTotal.total.minorUnits = (BigInt(categoryTotal.total.minorUnits) + totalMinorUnits).toString();
@@ -949,7 +969,25 @@ export class DemoTransport {
     const deadline = booking.voidWithoutReasonUntil ?? booking.undoUntil ?? new Date(Date.parse(booking.bookedAt) + 30_000).toISOString();
     const withinReasonlessWindow = createdByActor && Date.parse(deadline) > Date.now();
     const reasonRequired = canVoid && !withinReasonlessWindow;
-    return { ...booking, canVoid, voidReasonRequired: reasonRequired, voidWithoutReasonUntil: canVoid && withinReasonlessWindow ? deadline : undefined, undoUntil: undefined };
+    return {
+      ...this.bookingWithCurrentIdentities(booking),
+      canVoid,
+      voidReasonRequired: reasonRequired,
+      voidWithoutReasonUntil: canVoid && withinReasonlessWindow ? deadline : undefined,
+      undoUntil: undefined,
+    };
+  }
+
+  private bookingWithCurrentIdentities(booking: Booking): Booking {
+    const target = this.members.find((member) => member.id === booking.memberId);
+    const actor = this.members.find((member) => member.id === booking.bookedByMemberId);
+    return {
+      ...booking,
+      memberName: target?.displayName ?? booking.memberName,
+      memberAvatarUrl: target ? target.avatarUrl : booking.memberAvatarUrl,
+      bookedByName: actor?.displayName ?? booking.bookedByName,
+      bookedByAvatarUrl: actor ? actor.avatarUrl : booking.bookedByAvatarUrl,
+    };
   }
 
   private reverseBooking(groupId: string, id: string, reason: string): Booking {
@@ -960,14 +998,18 @@ export class DemoTransport {
     const authorized = this.bookingWithPermissions(booking, actor);
     if (!authorized.canVoid) throw new Error(i18n.t('admin.noAccessMessage'));
     if (authorized.voidReasonRequired && !reason.trim()) throw new Error(i18n.t('activities.reasonRequired'));
-    if (booking.status === 'POSTED') this.adjustAccountBalance(booking.memberId, -BigInt(booking.total.minorUnits));
+    if (booking.status === 'POSTED') {
+      const reversal = -BigInt(booking.total.minorUnits);
+      this.adjustAccountBalance(booking.memberId, reversal);
+      this.adjustGroupOutstanding(reversal);
+    }
     booking.status = 'REVERSED';
     booking.canVoid = false;
     return clone(this.bookingWithPermissions(booking, actor));
   }
 
   private updatePermissions(groupId: string, id: string, update: PermissionUpdate & { categoryGrants?: Record<string, string[]> }, expectedVersion: number): Membership {
-    this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
+    this.requirePermission(groupId, 'MEMBER_MANAGEMENT');
     const member = this.members.find((entry) => entry.id === id && entry.active);
     if (!member) throw new Error(i18n.t('errors.memberNotFound'));
     const hasCategoryGrant = (update.categoryPermissions ?? []).some((permission) => permission.assignToOthers || permission.voidBookings)
@@ -985,6 +1027,7 @@ export class DemoTransport {
     if (!member) throw new Error(i18n.t('errors.memberNotFound'));
     const selfRemoval = member.userId === this.session.user.id;
     if (selfRemoval && !confirmSelf) throw new Error('Self-removal must be confirmed.');
+    if (this.roleIdsGrantGroupAdministration(member.roleIds ?? [])) this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
     const adminRole = this.roles.find((entry) => entry.presetKey === 'GROUP_ADMINISTRATOR');
     if (adminRole && member.roleIds?.includes(adminRole.id) && this.activeAdministratorCount() <= 1) {
       throw new Error('The last active administrator cannot be removed.');
@@ -1017,9 +1060,7 @@ export class DemoTransport {
     } else {
       const roleIds = this.normalizedRoleIds(input.roleIds);
       if (roleIds.length === 0) throw new Error(i18n.t('members.reactivationRoleRequired'));
-      const defaultRoleIds = this.groupSettings.defaultRoleId ? [this.groupSettings.defaultRoleId] : [];
-      const differsFromDefault = roleIds.length !== defaultRoleIds.length || roleIds.some((roleId) => !defaultRoleIds.includes(roleId));
-      if (differsFromDefault) this.requirePermission(groupId, 'ROLE_MANAGEMENT');
+      if (this.roleIdsGrantGroupAdministration(roleIds)) this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
       member.roleIds = roleIds;
     }
     member.status = 'ACTIVE';
@@ -1169,13 +1210,14 @@ export class DemoTransport {
   }
 
   private createInvitation(groupId: string, input: InvitationInput & { categoryGrants?: Record<string, string[]>; expiresInDays?: number }): CreatedInvitation {
-    if (input.roleIds !== undefined) this.requirePermission(groupId, 'ROLE_MANAGEMENT');
+    this.requirePermission(groupId, 'MEMBER_MANAGEMENT');
     const email = input.email.trim().toLowerCase();
     if (this.members.some((member) => member.active && member.email?.toLowerCase() === email)) throw new Error('An active membership already exists for this email address.');
     if (this.invitations.some((item) => !item.acceptedAt && !item.revokedAt && Date.parse(item.expiresAt) > Date.now() && item.email.toLowerCase() === email)) throw new Error('An active invitation already exists for this email address.');
     const token = crypto.randomUUID();
     const selectedRoleIds = this.normalizedRoleIds(input.roleIds ?? []);
     if (selectedRoleIds.length === 0) throw new Error('At least one role is required.');
+    if (this.roleIdsGrantGroupAdministration(selectedRoleIds)) this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
     const invitation: CreatedInvitation = {
       id: identifier('invitation'),
       email,
@@ -1406,6 +1448,7 @@ export class DemoTransport {
     this.payments.unshift(payment);
     const paymentMinor = BigInt(payment.amount.minorUnits);
     this.adjustAccountBalance(member.id, -paymentMinor);
+    this.adjustGroupOutstanding(-paymentMinor);
     if (member.userId === this.session.user.id) {
       this.dashboard.openBalance.minorUnits = (BigInt(this.dashboard.openBalance.minorUnits) - paymentMinor).toString();
       this.ledger.unshift({
@@ -1454,8 +1497,18 @@ export class DemoTransport {
   private reversePayment(id: string): void {
     const payment = this.payments.find((entry) => entry.id === id);
     if (!payment) throw new Error(i18n.t('errors.paymentNotFound'));
-    if (payment.status === 'POSTED') this.adjustAccountBalance(payment.membershipId, BigInt(payment.amount.minorUnits));
+    if (payment.status === 'POSTED') {
+      const reversal = BigInt(payment.amount.minorUnits);
+      this.adjustAccountBalance(payment.membershipId, reversal);
+      this.adjustGroupOutstanding(reversal);
+    }
     payment.status = 'REVERSED';
+  }
+
+  /** Applies an exact complete-ledger movement to the demo group balance. */
+  private adjustGroupOutstanding(amount: bigint): void {
+    if (!this.dashboard.groupOutstanding) return;
+    this.dashboard.groupOutstanding.minorUnits = (BigInt(this.dashboard.groupOutstanding.minorUnits) + amount).toString();
   }
 
   /** Applies an exact balance movement to one demo account summary. */
@@ -1466,6 +1519,7 @@ export class DemoTransport {
   }
 
   private closePeriod(id: string, input: { label: string; dueAt: string }): Period {
+    if (!this.groupSettings.settlementsEnabled) throw new Error('Settlements are disabled for this group.');
     const period = this.periods.find((entry) => entry.id === id);
     if (!period) throw new Error(i18n.t('errors.periodNotFound'));
     period.status = 'CLOSED';

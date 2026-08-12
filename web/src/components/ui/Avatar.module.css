@@ -17,6 +17,10 @@
   object-fit: cover;
 }
 
+.withImage {
+  background: transparent;
+}
+
 .small {
   width: 34px;
   height: 34px;

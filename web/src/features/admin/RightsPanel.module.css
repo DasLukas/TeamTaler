@@ -25,6 +25,9 @@
 .roleFields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: var(--space-4); }
 .permissionHeading { margin-bottom: var(--space-3); }
 .permissionHeading h3 { margin: 0; }
+.permissionGroups { display: grid; gap: var(--space-5); }
+.permissionGroup { display: grid; gap: var(--space-2); }
+.permissionGroup h4 { margin: 0; color: var(--color-navy-800); font-size: var(--font-size-sm); }
 .roleList { overflow: hidden; border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); }
 .permissionCard { display: grid; min-height: 90px; grid-template-columns: 42px minmax(0, 1fr) 56px; align-items: center; gap: var(--space-4); padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--color-border); }
 .permissionCard:last-child { border: 0; }

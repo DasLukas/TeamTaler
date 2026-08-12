@@ -117,6 +117,15 @@ func (s Service) Close(ctx context.Context, actor domain.Principal, membership d
 		if err != nil || found {
 			return err
 		}
+		var settlementsEnabled bool
+		if err := tx.QueryRowContext(ctx, `SELECT settlements_enabled FROM group_settings WHERE group_id=?`, membership.GroupID).Scan(&settlementsEnabled); errors.Is(err, sql.ErrNoRows) {
+			return domain.ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		if !settlementsEnabled {
+			return domain.ErrConflict
+		}
 		var startsAt string
 		err = tx.QueryRowContext(ctx, `SELECT starts_at FROM periods WHERE id=? AND group_id=? AND status='OPEN'`, periodID, membership.GroupID).Scan(&startsAt)
 		if errors.Is(err, sql.ErrNoRows) {
