@@ -233,7 +233,9 @@ async function idempotentRequest<T>(groupId: string, operation: string, path: st
   try {
     reservation = await idempotencyReservations.reserve({ groupId, operation, path, payload });
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith('Authenticated actor')) throw new Error(i18n.t('errors.actorMissing'));
+    if (error instanceof Error && error.message.startsWith('Authenticated actor')) {
+      throw new Error(i18n.t('errors.actorMissing'), { cause: error });
+    }
     throw error;
   }
   const headers = new Headers(init.headers);

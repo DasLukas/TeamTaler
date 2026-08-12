@@ -156,7 +156,7 @@ export function ImageCropEditor({ alt, circular = false, compact = false, file, 
   const useKeyboard = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const positionStep = event.shiftKey ? 0.2 : 0.05;
     const zoomStep = event.shiftKey ? 0.25 : 0.1;
-    let next = value;
+    let next: ImageTransform;
     switch (event.key) {
       case 'ArrowLeft':
         if (placement.maxOffsetX === 0) return;
