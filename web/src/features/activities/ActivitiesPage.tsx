@@ -86,7 +86,7 @@ function BookingState({ status }: Pick<Booking, 'status'>) {
  */
 export function ActivitiesPage() {
   const { t } = useTranslation();
-  const { activeGroupId } = useActiveGroup();
+  const { activeGroup, activeGroupId, session } = useActiveGroup();
   const queryClient = useQueryClient();
   const bookingsQuery = useQuery({ queryKey: ['bookings', activeGroupId], queryFn: () => api.getBookings(activeGroupId) });
   const categoriesQuery = useQuery({ queryKey: ['categories', activeGroupId], queryFn: () => api.getCategories(activeGroupId) });
@@ -142,9 +142,11 @@ export function ActivitiesPage() {
             <tbody>
               {filtered.map((booking) => {
                 const productImageUrl = productImages.get(booking.productId);
+                const memberAvatarUrl = booking.memberId === activeGroup.membership?.id ? session.user.avatarUrl : booking.memberAvatarUrl;
+                const bookedByAvatarUrl = booking.bookedByMemberId === activeGroup.membership?.id ? session.user.avatarUrl : booking.bookedByAvatarUrl;
                 return <tr key={booking.id}>
-                  <td data-label={columnLabels.bookedFor}><MembershipIdentity avatarUrl={booking.memberAvatarUrl} name={booking.memberName} status={booking.memberStatus} /></td>
-                  <td data-label={columnLabels.bookedBy}><MembershipIdentity avatarUrl={booking.bookedByAvatarUrl} name={booking.bookedByName} status={booking.bookedByStatus} /></td>
+                  <td data-label={columnLabels.bookedFor}><MembershipIdentity avatarUrl={memberAvatarUrl} name={booking.memberName} status={booking.memberStatus} /></td>
+                  <td data-label={columnLabels.bookedBy}><MembershipIdentity avatarUrl={bookedByAvatarUrl} name={booking.bookedByName} status={booking.bookedByStatus} /></td>
                   <td data-label={columnLabels.booking}>
                     <span className={styles.bookingProduct}>
                       {productImageUrl ? <img alt="" decoding="async" loading="lazy" src={productImageUrl} /> : null}

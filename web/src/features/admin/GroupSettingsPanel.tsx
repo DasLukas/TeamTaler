@@ -6,12 +6,17 @@ import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import type { Session } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
+import { ImageCropEditor } from '@/components/media/ImageCropEditor';
+import {
+  ACCEPTED_IMAGE_TYPES,
+  DEFAULT_IMAGE_TRANSFORM,
+  MAX_IMAGE_BYTES,
+  prepareSquareImage,
+  type ImageTransform,
+} from '@/components/media/imageUpload';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
 import styles from './GroupSettingsPanel.module.css';
-
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-const ACCEPTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 type LogoChange = { kind: 'upload'; file: File } | { kind: 'remove' };
 
@@ -82,20 +87,25 @@ export function GroupSettingsPanel({ embedded = false }: GroupSettingsPanelProps
   const { activeGroup, activeGroupId } = useActiveGroup();
   const queryClient = useQueryClient();
   const [selectedFile, setSelectedFile] = useState<File>();
+  const [imageTransform, setImageTransform] = useState<ImageTransform>(DEFAULT_IMAGE_TRANSFORM);
   const [fileInputKey, setFileInputKey] = useState(0);
   const [fileError, setFileError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
   const logoMutation = useMutation({
-    mutationFn: async (change: LogoChange) => change.kind === 'upload'
-      ? api.uploadGroupLogo(activeGroupId, change.file)
-      : api.removeGroupLogo(activeGroupId).then(() => ({ logoUrl: undefined })),
+    mutationFn: async (change: LogoChange) => {
+      if (change.kind === 'remove') {
+        return api.removeGroupLogo(activeGroupId).then(() => ({ logoUrl: undefined }));
+      }
+      return api.uploadGroupLogo(activeGroupId, await prepareSquareImage(change.file, imageTransform));
+    },
     onSuccess: ({ logoUrl }, change) => {
       queryClient.setQueryData<Session>(['session'], (session) => session ? {
         ...session,
         groups: session.groups.map((group) => group.id === activeGroupId ? { ...group, logoUrl } : group),
       } : session);
       setSelectedFile(undefined);
+      setImageTransform(DEFAULT_IMAGE_TRANSFORM);
       setFileInputKey((current) => current + 1);
       setFileError('');
       setSuccessMessage(t(change.kind === 'upload' ? 'groupSettings.saved' : 'groupSettings.removed'));
@@ -107,6 +117,7 @@ export function GroupSettingsPanel({ embedded = false }: GroupSettingsPanelProps
     setSuccessMessage('');
     if (!file) {
       setSelectedFile(undefined);
+      setImageTransform(DEFAULT_IMAGE_TRANSFORM);
       setFileError('');
       return;
     }
@@ -122,6 +133,7 @@ export function GroupSettingsPanel({ embedded = false }: GroupSettingsPanelProps
     }
     setFileError('');
     setSelectedFile(file);
+    setImageTransform(DEFAULT_IMAGE_TRANSFORM);
   };
 
   const currentPreview = activeGroup.logoUrl || '/brand/teamtaler-mark.png';
@@ -134,10 +146,20 @@ export function GroupSettingsPanel({ embedded = false }: GroupSettingsPanelProps
       </header> : null}
       <div className={styles.cards}>
         <GroupNameForm currentName={activeGroup.name} embedded={embedded} groupId={activeGroupId} key={activeGroupId} />
-        <section className={styles.card}>
-          <div className={styles.preview}>
-            <img alt={t('groupSettings.previewAlt', { group: activeGroup.name })} src={currentPreview} />
-          </div>
+        <section className={`${styles.card} ${styles.brandingCard}`}>
+          {selectedFile ? (
+            <ImageCropEditor
+              alt={t('groupSettings.previewAlt', { group: activeGroup.name })}
+              file={selectedFile}
+              key={`${selectedFile.name}:${selectedFile.size}:${selectedFile.lastModified}`}
+              onChange={setImageTransform}
+              value={imageTransform}
+            />
+          ) : (
+            <div className={styles.preview}>
+              <img alt={t('groupSettings.previewAlt', { group: activeGroup.name })} src={currentPreview} />
+            </div>
+          )}
           <div className={styles.controls}>
             <div>
               {embedded ? <h4>{t('groupSettings.logoTitle')}</h4> : <h3>{t('groupSettings.logoTitle')}</h3>}

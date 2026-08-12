@@ -18,11 +18,16 @@ import (
 var permissionDefinitions = []domain.PermissionDefinition{
 	{
 		Key:         domain.PermissionGroupAdministration,
-		Description: "Manage the group, settings, memberships, invitations, audit access, and protected administrator assignments.",
+		Description: "Manage group identity, behavior settings, audit access, and protected administrator assignments.",
+	},
+	{
+		Key:                domain.PermissionMemberManagement,
+		Description:        "Manage memberships, invitations, guests, join access, and role assignments.",
+		ImpliedPermissions: []domain.PermissionKey{domain.PermissionViewMemberDirectory},
 	},
 	{
 		Key:         domain.PermissionRoleManagement,
-		Description: "Manage roles, permission grants, and unprotected role assignments.",
+		Description: "Manage roles and permission grants.",
 	},
 	{
 		Key:         domain.PermissionFinanceManagement,
@@ -38,7 +43,7 @@ var permissionDefinitions = []domain.PermissionDefinition{
 	},
 	{
 		Key:         domain.PermissionViewGroupStatistics,
-		Description: "View aggregate group booking and financial statistics.",
+		Description: "View the current consolidated group balance.",
 	},
 	{
 		Key:         domain.PermissionViewAllBookingActivity,

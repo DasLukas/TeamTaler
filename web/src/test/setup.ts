@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import '@/i18n';
 import { cleanup } from '@testing-library/react';
-import { afterEach } from 'vitest';
+import { afterEach, vi } from 'vitest';
 
 afterEach(cleanup);
 
@@ -26,3 +26,14 @@ HTMLDialogElement.prototype.showModal ??= function showModal() {
 HTMLDialogElement.prototype.close ??= function close() {
   this.removeAttribute('open');
 };
+
+Object.defineProperty(globalThis, 'createImageBitmap', {
+  configurable: true,
+  writable: true,
+  value: vi.fn(async () => ({ close: vi.fn(), height: 100, width: 100 }) as unknown as ImageBitmap),
+});
+
+Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
+  configurable: true,
+  value: vi.fn(() => ({ clearRect: vi.fn(), drawImage: vi.fn() })),
+});

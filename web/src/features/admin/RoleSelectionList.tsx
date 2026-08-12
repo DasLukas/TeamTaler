@@ -11,7 +11,7 @@ export interface RoleSelectionListProps {
   label: string;
   onChange: (roleIds: string[]) => void;
   disabled?: boolean;
-  canManageRoles?: boolean;
+  canAssignRoles?: boolean;
   canManageGroup?: boolean;
   lockedRoleIds?: readonly string[];
   hideLegend?: boolean;
@@ -21,14 +21,14 @@ export interface RoleSelectionListProps {
  * Determines whether the current administrator may change one role assignment.
  *
  * @param role - Role whose assignment may change.
- * @param canManageRoles - Whether ordinary role assignments may change.
+ * @param canAssignRoles - Whether ordinary role assignments may change.
  * @param canManageGroup - Whether protected administrator assignments may change.
  * @returns Whether the checkbox may be changed.
  */
-function canAssignRole(role: Role, canManageRoles: boolean, canManageGroup: boolean): boolean {
-  if (role.presetKey === 'GROUP_ADMINISTRATOR') return canManageGroup;
+function canAssignRole(role: Role, canAssignRoles: boolean, canManageGroup: boolean): boolean {
+  if (role.presetKey === 'GROUP_ADMINISTRATOR') return canAssignRoles && canManageGroup;
   const containsAdministration = role.grants.some((grant) => grant.permission === 'GROUP_ADMINISTRATION');
-  return containsAdministration ? canManageRoles && canManageGroup : canManageRoles;
+  return containsAdministration ? canAssignRoles && canManageGroup : canAssignRoles;
 }
 
 /**
@@ -43,7 +43,7 @@ export function RoleSelectionList({
   label,
   onChange,
   disabled = false,
-  canManageRoles = false,
+  canAssignRoles = false,
   canManageGroup = false,
   lockedRoleIds = [],
   hideLegend = false,
@@ -82,7 +82,7 @@ export function RoleSelectionList({
       <div className={styles.options}>
         {visibleRoles.map((role) => {
           const isLocked = locked.has(role.id);
-          const assignable = canAssignRole(role, canManageRoles, canManageGroup);
+          const assignable = canAssignRole(role, canAssignRoles, canManageGroup);
           const optionDisabled = disabled || isLocked || !assignable;
           const restriction = !assignable ? t('roleManagement.protectedAssignment') : '';
           return (

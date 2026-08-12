@@ -35,7 +35,7 @@ type ReactivateMemberInput struct {
 //   - domain.Membership: Restored active membership.
 //   - error: Validation, authorization, conflict, tenant, audit, or storage error.
 func (s Service) ReactivateMember(ctx context.Context, actor domain.Principal, actorMembership domain.Membership, targetMembershipID string, input ReactivateMemberInput) (domain.Membership, error) {
-	if err := requireCurrentPermission(ctx, s.DB, actorMembership, domain.PermissionGroupAdministration); err != nil {
+	if err := requireCurrentPermission(ctx, s.DB, actorMembership, domain.PermissionMemberManagement); err != nil {
 		return domain.Membership{}, err
 	}
 	targetMembershipID = strings.TrimSpace(targetMembershipID)
@@ -46,7 +46,7 @@ func (s Service) ReactivateMember(ctx context.Context, actor domain.Principal, a
 	var result domain.Membership
 	now := platform.Timestamp(platform.Now())
 	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
-		if err := requireCurrentPermission(ctx, tx, actorMembership, domain.PermissionGroupAdministration); err != nil {
+		if err := requireCurrentPermission(ctx, tx, actorMembership, domain.PermissionMemberManagement); err != nil {
 			return err
 		}
 		var userID, targetGroupID, status, displayName string
@@ -190,7 +190,7 @@ func (s Service) ReactivateMember(ctx context.Context, actor domain.Principal, a
 //   - error: Validation, authorization, non-zero-balance conflict, tenant,
 //     audit, or storage error.
 func (s Service) PermanentlyDeleteMember(ctx context.Context, actor domain.Principal, actorMembership domain.Membership, targetMembershipID string) error {
-	if err := requireCurrentPermission(ctx, s.DB, actorMembership, domain.PermissionGroupAdministration); err != nil {
+	if err := requireCurrentPermission(ctx, s.DB, actorMembership, domain.PermissionMemberManagement); err != nil {
 		return err
 	}
 	targetMembershipID = strings.TrimSpace(targetMembershipID)
@@ -199,7 +199,7 @@ func (s Service) PermanentlyDeleteMember(ctx context.Context, actor domain.Princ
 	}
 	now := platform.Timestamp(platform.Now())
 	return storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
-		if err := requireCurrentPermission(ctx, tx, actorMembership, domain.PermissionGroupAdministration); err != nil {
+		if err := requireCurrentPermission(ctx, tx, actorMembership, domain.PermissionMemberManagement); err != nil {
 			return err
 		}
 		var userID, targetGroupID, status, displayName string

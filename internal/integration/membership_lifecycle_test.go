@@ -217,7 +217,7 @@ func TestTemporaryGuestLifecycleAndReactivationRoleRules(t *testing.T) {
 
 	_, regular, _ := f.inviteMember("reactivation-rules@example.test", "Reactivation Rules", nil)
 	_, delegated, _ := f.inviteMember("reactivation-admin@example.test", "Reactivation Administrator", nil)
-	delegated = f.assignPermissionRole(delegated, "Lifecycle administration", domain.PermissionGroupAdministration)
+	delegated = f.assignPermissionRole(delegated, "Lifecycle administration", domain.PermissionMemberManagement)
 	if err := f.groups.ArchiveMember(f.ctx, f.admin, f.membership, regular.ID, false); err != nil {
 		t.Fatalf("archive role-rule member: %v", err)
 	}
@@ -229,8 +229,15 @@ func TestTemporaryGuestLifecycleAndReactivationRoleRules(t *testing.T) {
 		t.Fatalf("rearchive role-rule member: %v", err)
 	}
 	financeRoleID := authorization.PresetRoleID(f.group.ID, domain.RolePresetFinanceManager)
-	if _, err := f.groups.ReactivateMember(f.ctx, domain.Principal{UserID: delegated.UserID}, delegated, regular.ID, groups.ReactivateMemberInput{RoleIDs: []string{defaultRoleID, financeRoleID}}); !errors.Is(err, domain.ErrForbidden) {
-		t.Fatalf("delegated expanded-role reactivation error=%v, want forbidden", err)
+	if _, err := f.groups.ReactivateMember(f.ctx, domain.Principal{UserID: delegated.UserID}, delegated, regular.ID, groups.ReactivateMemberInput{RoleIDs: []string{defaultRoleID, financeRoleID}}); err != nil {
+		t.Fatalf("delegated ordinary-role reactivation: %v", err)
+	}
+	if err := f.groups.ArchiveMember(f.ctx, f.admin, f.membership, regular.ID, false); err != nil {
+		t.Fatalf("rearchive expanded-role member: %v", err)
+	}
+	adminRoleID := authorization.PresetRoleID(f.group.ID, domain.RolePresetGroupAdministrator)
+	if _, err := f.groups.ReactivateMember(f.ctx, domain.Principal{UserID: delegated.UserID}, delegated, regular.ID, groups.ReactivateMemberInput{RoleIDs: []string{defaultRoleID, adminRoleID}}); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("delegated protected-role reactivation error=%v, want forbidden", err)
 	}
 	if err := f.groups.PermanentlyDeleteMember(f.ctx, f.admin, f.membership, regular.ID); err != nil {
 		t.Fatalf("permanently delete zero-balance archived regular member: %v", err)
