@@ -217,6 +217,37 @@ export function formatMoney(money: Money, options?: Intl.NumberFormatOptions): s
 }
 
 /**
+ * Formats money with an explicit sign for positive and negative values.
+ *
+ * Zero remains unsigned so the balanced state is not presented as a movement.
+ *
+ * @param money - Canonical signed money value.
+ * @returns A localized currency string with `+` for positive values and `-` for negative values.
+ * @throws TypeError when minor units are not an integer string.
+ * @throws RangeError when the currency is not a three-letter code.
+ * @example `formatSignedMoney({ minorUnits: '250', currency: 'EUR' })` returns a localized positive amount such as `'+2,50 €'`.
+ */
+export function formatSignedMoney(money: Money): string {
+  const formatted = formatMoney(money);
+  return BigInt(money.minorUnits) > 0n ? `+${formatted}` : formatted;
+}
+
+/**
+ * Reports whether an open balance represents credit available to the member.
+ *
+ * Open balances use the ledger convention: positive values are owed by the
+ * member, while negative values are credit in the member's favor.
+ *
+ * @param money - Canonical open-balance value.
+ * @returns `true` when the balance is credit in the member's favor.
+ * @throws SyntaxError when minor units are not a valid integer string.
+ * @example `isCreditBalance({ minorUnits: '-250', currency: 'EUR' })` returns `true`.
+ */
+export function isCreditBalance(money: Money): boolean {
+  return BigInt(money.minorUnits) < 0n;
+}
+
+/**
  * Multiplies a monetary amount by an integer quantity.
  *
  * @param money - Unit amount.

@@ -1,16 +1,46 @@
 import { describe, expect, it } from 'vitest';
 import i18n from '@/i18n';
-import { adaptAccountSummaries, adaptBooking, adaptCategories, adaptDashboard, adaptLedger, adaptMembership, adaptNotification, adaptPermissionDefinition, adaptPermissionGrants, adaptProduct, adaptRole, adaptSession, adaptSettlement } from './adapters';
+import { adaptAccountSummaries, adaptBooking, adaptCategories, adaptDashboard, adaptGroupSettings, adaptLedger, adaptMembership, adaptNotification, adaptPermissionDefinition, adaptPermissionGrants, adaptProduct, adaptRole, adaptSession, adaptSettlement, adaptTransactionSettings } from './adapters';
 
 describe('API adapters', () => {
+  it('defaults optional settlement flags to disabled for older API responses', () => {
+    expect(adaptGroupSettings({}).settlementsEnabled).toBe(false);
+    expect(adaptTransactionSettings({}).settlementsEnabled).toBe(false);
+    expect(adaptGroupSettings({ settlementsEnabled: true }).settlementsEnabled).toBe(true);
+    expect(adaptTransactionSettings({ settlementsEnabled: true }).settlementsEnabled).toBe(true);
+  });
+
   it('accepts stable group grants and rejects unknown keys or disabled scopes', () => {
     expect(adaptPermissionGrants([
       { permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } },
       { permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } },
       { permission: 'CATALOG_MANAGEMENT', scope: { type: 'CATEGORY' }, categoryId: 'category-a' },
+      { permission: 'CREATE_OWN_BOOKING', scope: { type: 'GROUP' }, categoryId: 'category-a' },
+      { permission: 'CREATE_OWN_BOOKING', scope: { type: 'GROUP', categoryId: 'category-a' } },
+      { permission: 'CREATE_OWN_BOOKING', scope: { type: 'GROUP', productId: 'product-a' } },
       { permission: 'UNSUPPORTED', scope: { type: 'GROUP' } },
       null,
     ])).toEqual([{ permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } }]);
+  });
+
+  it('normalizes managed guest identity without inventing an email address', () => {
+    const guest = adaptMembership({
+      id: 'member-guest',
+      userId: 'user-credentialless',
+      displayName: 'Guest One',
+      isTemporaryGuest: true,
+      status: 'ACTIVE',
+      roles: [],
+      categoryGrants: {},
+    });
+
+    expect(guest).toMatchObject({
+      id: 'member-guest',
+      userId: 'user-credentialless',
+      email: null,
+      isTemporaryGuest: true,
+      active: true,
+    });
   });
 
   it('adapts permission registry aliases and protected role metadata', () => {
@@ -77,6 +107,23 @@ describe('API adapters', () => {
       memberAvatarUrl: avatarUrl,
       bookedByAvatarUrl: avatarUrl,
     });
+    expect(adaptBooking({
+      id: 'booking-wire',
+      targetMembershipId: 'member-target',
+      targetAvatarUrl: '/api/v1/users/target/avatar/target.png',
+      actorMembershipId: 'member-actor',
+      actorAvatarUrl: '/api/v1/users/actor/avatar/actor.png',
+      productId: 'product-a',
+      categoryId: 'category-a',
+      quantity: 1,
+      unitPriceMinor: 100,
+      totalMinor: 100,
+      currency: 'EUR',
+      createdAt: '2026-08-05T00:00:00Z',
+    })).toMatchObject({
+      memberAvatarUrl: '/api/v1/users/target/avatar/target.png',
+      bookedByAvatarUrl: '/api/v1/users/actor/avatar/actor.png',
+    });
   });
 
   it('uses persisted category icons and safely falls back for unsupported values', () => {
@@ -89,6 +136,23 @@ describe('API adapters', () => {
       openPeriod: { id: 'period', label: 'Current', status: 'OPEN', startsAt: '2026-08-01T00:00:00Z' },
       recentBookings: [],
     }).categoryTotals[0]?.icon).toBe('sport');
+  });
+
+  it('adapts the optional signed group outstanding amount without losing precision', () => {
+    const dashboard = adaptDashboard({
+      account: { balanceMinor: '0', currency: 'EUR', categoryStatistics: [], groupCategoryStatistics: [] },
+      openPeriod: { id: 'period', label: 'Current', status: 'OPEN', startsAt: '2026-08-01T00:00:00Z' },
+      recentBookings: [],
+      groupOutstandingMinor: '-9007199254740993123',
+    });
+    const unauthorizedDashboard = adaptDashboard({
+      account: { balanceMinor: '0', currency: 'EUR', categoryStatistics: [], groupCategoryStatistics: [] },
+      openPeriod: { id: 'period', label: 'Current', status: 'OPEN', startsAt: '2026-08-01T00:00:00Z' },
+      recentBookings: [],
+    });
+
+    expect(dashboard.groupOutstanding).toEqual({ minorUnits: '-9007199254740993123', currency: 'EUR' });
+    expect(unauthorizedDashboard.groupOutstanding).toBeUndefined();
   });
 
   it('adapts fixed and user-defined product pricing without inventing a custom price', () => {
@@ -122,6 +186,7 @@ describe('API adapters', () => {
       membershipId: 'member-large',
       displayName: 'Large Balance',
       avatarUrl: '/api/v1/users/user-large/avatar/hash.png',
+      isTemporaryGuest: true,
       status: 'ARCHIVED',
       currency: 'EUR',
       balanceMinor: '9007199254740993123',
@@ -131,6 +196,7 @@ describe('API adapters', () => {
       membershipId: 'member-large',
       displayName: 'Large Balance',
       avatarUrl: '/api/v1/users/user-large/avatar/hash.png',
+      isTemporaryGuest: true,
       status: 'ARCHIVED',
       currency: 'EUR',
       balance: { minorUnits: '9007199254740993123', currency: 'EUR' },
@@ -214,5 +280,6 @@ describe('API adapters', () => {
     expect(settlement.amount.minorUnits).toBe('200');
     expect(settlement.paidAmount.minorUnits).toBe('100');
     expect(settlement.openAmount?.minorUnits).toBe('100');
+    expect(settlement.email).toBeNull();
   });
 });

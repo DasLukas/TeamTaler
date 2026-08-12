@@ -1,3 +1,5 @@
+.finance { display: grid; }
+.financeActions { display: flex; justify-content: flex-end; gap: var(--space-3); margin-bottom: var(--space-5); }
 .balance {
   display: flex;
   min-height: 132px;
@@ -12,9 +14,11 @@
 .balanceValue { display: grid; gap: var(--space-1); }
 .balanceValue span { color: var(--color-muted); font-size: var(--font-size-lg); }
 .balanceValue strong { color: var(--color-orange-600); font-size: clamp(2.2rem, 5vw, 3.5rem); }
+.balanceValue strong.creditBalance { color: var(--color-green-600); }
 .paymentAction { flex: 0 0 auto; }
 .settlements { margin-bottom: var(--space-8); }
 @media (max-width: 767px) {
+  .financeActions { align-items: stretch; flex-direction: column; }
   .balance { align-items: flex-start; flex-direction: column; padding: var(--space-5); }
   .paymentAction { width: 100%; }
 }

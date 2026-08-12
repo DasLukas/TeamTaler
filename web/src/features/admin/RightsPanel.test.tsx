@@ -1,9 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Role } from '@/api/types';
+import { PERMISSION_KEYS, type Role } from '@/api/types';
 import { RightsPanel } from './RightsPanel';
 
 const mocks = vi.hoisted(() => ({
@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   getRoleAssignments: vi.fn(),
   getMembers: vi.fn(),
   getInvitations: vi.fn(),
+  getGroupSettings: vi.fn(),
   updateRole: vi.fn(),
   useActiveGroup: vi.fn(),
 }));
@@ -48,6 +49,7 @@ describe('RightsPanel role definitions', () => {
     });
     mocks.getRoles.mockResolvedValue([baseRole]);
     mocks.getPermissionDefinitions.mockResolvedValue([{ key: 'VOID_OWN_BOOKING' }]);
+    mocks.getGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
     mocks.updateRole.mockResolvedValue({ ...baseRole, grants: [], version: 2 });
   });
 
@@ -61,11 +63,66 @@ describe('RightsPanel role definitions', () => {
     expect(mocks.getInvitations).not.toHaveBeenCalled();
   });
 
+  it('keeps assignment counts visible and marks the default role with a labelled icon', async () => {
+    mocks.useActiveGroup.mockReturnValue({
+      activeGroupId: 'group-a',
+      activeGroup: { id: 'group-a', membership: { effectiveGrants: [{ permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }] } },
+    });
+    mocks.getRoles.mockResolvedValue([{ ...baseRole, memberCount: 3, pendingInvitationCount: 2 }]);
+    renderPanel();
+
+    const roleButton = await screen.findByRole('button', { name: /Mitglied/ });
+    expect(within(roleButton).getByText('3 Mitglieder · 2 Einladungen')).toBeVisible();
+    expect(within(roleButton).getByRole('img', { name: 'Standardrolle für neue Mitglieder' })).toHaveAttribute('title', 'Standardrolle für neue Mitglieder');
+  });
+
   it('localizes an unchanged preset description in the editor', async () => {
     renderPanel();
 
     expect(await screen.findByLabelText('Beschreibung')).toHaveValue('Bearbeitbare Startrolle für reguläre Gruppenmitglieder.');
     expect(screen.queryByText('Vordefiniert')).not.toBeInTheDocument();
+  });
+
+  it('uses concise descriptions for booking and balance permissions', async () => {
+    mocks.getPermissionDefinitions.mockResolvedValue([
+      { key: 'VIEW_GROUP_STATISTICS' },
+      { key: 'RECORD_OWN_PAYMENT' },
+      { key: 'CREATE_OWN_BOOKING' },
+      { key: 'VOID_OWN_BOOKING' },
+      { key: 'BOOK_FOR_OTHERS' },
+      { key: 'BOOK_FOR_GUESTS' },
+    ]);
+    renderPanel();
+
+    expect(await screen.findByText('Zeigt den aktuellen offenen Nettosaldo der Gruppe.')).toBeVisible();
+    expect(screen.getByText('Gruppensaldo')).toBeVisible();
+    expect(screen.getByText('Erlaubt Einzahlungen auf das eigene Konto.')).toBeVisible();
+    expect(screen.getByText('Erlaubt Buchungen auf das eigene Konto.')).toBeVisible();
+    expect(screen.getByText('Erlaubt Stornos von selbst erstellten oder dem eigenen Konto zugewiesenen Buchungen.')).toBeVisible();
+    expect(screen.getByText('Buchungen für andere Mitglieder.')).toBeVisible();
+    expect(screen.getByText('Buchungen für Gäste ohne eigenes Konto.')).toBeVisible();
+  });
+
+  it('groups every permission into a labelled topic section', async () => {
+    mocks.getPermissionDefinitions.mockResolvedValue(PERMISSION_KEYS.map((key) => ({ key })));
+    renderPanel();
+
+    const administration = await screen.findByRole('region', { name: 'Verwaltung & Mitglieder' });
+    const bookings = screen.getByRole('region', { name: 'Buchungen & Aktivitäten' });
+    const finance = screen.getByRole('region', { name: 'Finanzen & Auswertungen' });
+    const catalog = screen.getByRole('region', { name: 'Katalog' });
+
+    expect(screen.getAllByRole('heading', { level: 4 }).map((heading) => heading.textContent)).toEqual([
+      'Verwaltung & Mitglieder',
+      'Buchungen & Aktivitäten',
+      'Finanzen & Auswertungen',
+      'Katalog',
+    ]);
+    expect(within(administration).getAllByRole('switch')).toHaveLength(3);
+    expect(within(bookings).getAllByRole('switch')).toHaveLength(6);
+    expect(within(finance).getAllByRole('switch')).toHaveLength(3);
+    expect(within(catalog).getAllByRole('switch')).toHaveLength(1);
+    expect(screen.getAllByRole('switch')).toHaveLength(PERMISSION_KEYS.length - 1);
   });
 
   it('starts a copied role from the duplicate action in the editor title row', async () => {
@@ -85,6 +142,28 @@ describe('RightsPanel role definitions', () => {
     expect(await screen.findByLabelText('Rollenname')).toBeDisabled();
     expect(screen.queryByText('Der Name dieser Sicherheitsrolle ist unveränderlich.')).not.toBeInTheDocument();
     expect(screen.queryByText('Vordefiniert')).not.toBeInTheDocument();
+  });
+
+  it('keeps all three administrator management permissions enabled and locked', async () => {
+    mocks.getRoles.mockResolvedValue([{
+      ...baseRole,
+      id: 'role-admin',
+      presetKey: 'GROUP_ADMINISTRATOR',
+      name: 'Group administrator',
+      nameLocked: true,
+      grants: ['GROUP_ADMINISTRATION', 'MEMBER_MANAGEMENT', 'ROLE_MANAGEMENT'].map((permission) => ({ permission, scope: { type: 'GROUP' as const } })) as Role['grants'],
+    }]);
+    mocks.getPermissionDefinitions.mockResolvedValue([
+      { key: 'GROUP_ADMINISTRATION' },
+      { key: 'MEMBER_MANAGEMENT', implies: ['VIEW_MEMBER_DIRECTORY'] },
+      { key: 'ROLE_MANAGEMENT' },
+    ]);
+    renderPanel();
+
+    for (const label of ['Gruppenadministration', 'Mitgliederverwaltung', 'Rollen/Rechte Verwaltung']) {
+      expect(await screen.findByRole('switch', { name: `Recht „${label}“ umschalten` })).toBeChecked();
+      expect(screen.getByRole('switch', { name: `Recht „${label}“ umschalten` })).toBeDisabled();
+    }
   });
 
   it('keeps computed implications without the redundant arbitrary-void explanation', async () => {

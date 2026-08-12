@@ -77,15 +77,22 @@ const (
 type PermissionKey string
 
 const (
-	// PermissionGroupAdministration permits group, membership, invitation, and
-	// protected administrator-assignment management.
+	// PermissionGroupAdministration permits group configuration, audit access,
+	// and protected administrator-assignment management.
 	PermissionGroupAdministration PermissionKey = "GROUP_ADMINISTRATION"
-	// PermissionRoleManagement permits role, grant, and unprotected assignment management.
+	// PermissionMemberManagement permits membership, invitation, guest, join-access,
+	// and role-assignment management.
+	PermissionMemberManagement PermissionKey = "MEMBER_MANAGEMENT"
+	// PermissionRoleManagement permits role and grant management.
 	PermissionRoleManagement PermissionKey = "ROLE_MANAGEMENT"
 	// PermissionFinanceManagement permits access to group financial management functions.
 	PermissionFinanceManagement PermissionKey = "FINANCE_MANAGEMENT"
 	// PermissionCatalogManagement permits category and product management.
 	PermissionCatalogManagement PermissionKey = "CATALOG_MANAGEMENT"
+	// PermissionViewMemberDirectory permits reading the group's member directory.
+	PermissionViewMemberDirectory PermissionKey = "VIEW_MEMBER_DIRECTORY"
+	// PermissionViewGroupStatistics permits reading the consolidated group balance.
+	PermissionViewGroupStatistics PermissionKey = "VIEW_GROUP_STATISTICS"
 	// PermissionViewAllBookingActivity permits viewing every identified group booking in the activity feed.
 	PermissionViewAllBookingActivity PermissionKey = "VIEW_ALL_BOOKING_ACTIVITY"
 	// PermissionRecordOwnPayment permits self-service payment recording for the current member.
@@ -97,8 +104,10 @@ const (
 	PermissionVoidOwnBooking PermissionKey = "VOID_OWN_BOOKING"
 	// PermissionVoidAnyBooking permits voiding every booking in the group.
 	PermissionVoidAnyBooking PermissionKey = "VOID_ANY_BOOKING"
-	// PermissionBookForOthers permits creating bookings targeting another active member.
+	// PermissionBookForOthers permits reasoned bookings for another credentialed active member.
 	PermissionBookForOthers PermissionKey = "BOOK_FOR_OTHERS"
+	// PermissionBookForGuests permits bookings for credentialless temporary guests.
+	PermissionBookForGuests PermissionKey = "BOOK_FOR_GUESTS"
 )
 
 // PermissionScopeType identifies the resource boundary attached to a permission grant.
@@ -213,10 +222,11 @@ type Membership struct {
 	ID                     string                          `json:"id"`
 	GroupID                string                          `json:"groupId"`
 	UserID                 string                          `json:"userId"`
-	Email                  string                          `json:"email"`
+	Email                  *string                         `json:"email,omitempty"`
 	DisplayName            string                          `json:"displayName"`
 	AvatarURL              string                          `json:"avatarUrl,omitempty"`
 	Status                 string                          `json:"status"`
+	IsTemporaryGuest       bool                            `json:"isTemporaryGuest"`
 	Roles                  []Role                          `json:"roles"`
 	GroupPermissions       []GroupPermission               `json:"groupPermissions"`
 	CategoryGrants         map[string][]CategoryPermission `json:"categoryGrants"`
@@ -224,6 +234,15 @@ type Membership struct {
 	EffectiveGrants        []PermissionGrant               `json:"effectiveGrants"`
 	RoleAssignmentsVersion int64                           `json:"roleAssignmentsVersion"`
 }
+
+const (
+	// MembershipStatusActive identifies a membership that can access the group.
+	MembershipStatusActive = "ACTIVE"
+	// MembershipStatusArchived identifies a reversible inactive membership.
+	MembershipStatusArchived = "ARCHIVED"
+	// MembershipStatusDeleted identifies a history-only financial tombstone.
+	MembershipStatusDeleted = "DELETED"
+)
 
 // Group is the top-level isolation and accounting boundary.
 type Group struct {
@@ -237,8 +256,34 @@ type Group struct {
 // GroupSettings contains administrator-managed behavior shared by every member
 // of one group.
 type GroupSettings struct {
-	NotificationEmailsEnabled bool    `json:"notificationEmailsEnabled"`
-	DefaultRoleID             *string `json:"defaultRoleId"`
+	NotificationEmailsEnabled    bool               `json:"notificationEmailsEnabled"`
+	SettlementsEnabled           bool               `json:"settlementsEnabled"`
+	DefaultRoleID                *string            `json:"defaultRoleId"`
+	ForeignBookingReasonRequired bool               `json:"foreignBookingReasonRequired"`
+	OwnPaymentReasonRequired     bool               `json:"ownPaymentReasonRequired"`
+	OtherPaymentReasonRequired   bool               `json:"otherPaymentReasonRequired"`
+	PaymentMethods               []ConfigurableItem `json:"paymentMethods"`
+	BookingReasons               []ConfigurableItem `json:"bookingReasons"`
+	PaymentReasons               []ConfigurableItem `json:"paymentReasons"`
+}
+
+// ConfigurableItem is one administrator-managed, ordered option used by
+// transaction forms. ID is stable inside one group and Label is user-visible.
+type ConfigurableItem struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// TransactionSettings contains the non-sensitive operational behavior that
+// active members need to render finance, booking, and payment surfaces.
+type TransactionSettings struct {
+	SettlementsEnabled           bool               `json:"settlementsEnabled"`
+	ForeignBookingReasonRequired bool               `json:"foreignBookingReasonRequired"`
+	OwnPaymentReasonRequired     bool               `json:"ownPaymentReasonRequired"`
+	OtherPaymentReasonRequired   bool               `json:"otherPaymentReasonRequired"`
+	PaymentMethods               []ConfigurableItem `json:"paymentMethods"`
+	BookingReasons               []ConfigurableItem `json:"bookingReasons"`
+	PaymentReasons               []ConfigurableItem `json:"paymentReasons"`
 }
 
 // CategoryIcon identifies one supported visual category marker.
@@ -330,7 +375,13 @@ type Booking struct {
 	CategoryID             string  `json:"categoryId"`
 	ProductID              string  `json:"productId"`
 	ActorMembershipID      string  `json:"actorMembershipId"`
+	ActorDisplayName       string  `json:"actorDisplayName"`
+	ActorAvatarURL         string  `json:"actorAvatarUrl,omitempty"`
+	ActorMembershipStatus  string  `json:"actorMembershipStatus"`
 	TargetMembershipID     string  `json:"targetMembershipId"`
+	TargetDisplayName      string  `json:"targetDisplayName"`
+	TargetAvatarURL        string  `json:"targetAvatarUrl,omitempty"`
+	TargetMembershipStatus string  `json:"targetMembershipStatus"`
 	Quantity               int     `json:"quantity"`
 	UnitPriceMinor         int64   `json:"unitPriceMinor,string"`
 	TotalMinor             int64   `json:"totalMinor,string"`
@@ -352,10 +403,12 @@ type Payment struct {
 	GroupID      string              `json:"groupId"`
 	MembershipID string              `json:"membershipId"`
 	MemberName   string              `json:"memberName"`
+	MemberStatus string              `json:"membershipStatus"`
 	AmountMinor  int64               `json:"amountMinor,string"`
 	Currency     string              `json:"currency"`
 	ReceivedAt   string              `json:"receivedAt"`
 	Method       string              `json:"method"`
+	MethodLabel  string              `json:"methodLabel"`
 	Reference    string              `json:"reference,omitempty"`
 	Note         string              `json:"note,omitempty"`
 	ReversedAt   *string             `json:"reversedAt,omitempty"`
@@ -382,16 +435,16 @@ type Period struct {
 
 // Statement is an immutable member snapshot generated when a period closes.
 type Statement struct {
-	ID                       string `json:"id"`
-	PeriodID                 string `json:"periodId"`
-	MembershipID             string `json:"membershipId"`
-	DisplayName              string `json:"displayName"`
-	Email                    string `json:"email"`
-	ChargesMinor             int64  `json:"chargesMinor,string"`
-	PaymentsAllocatedMinor   int64  `json:"paymentsAllocatedMinor,string"`
-	AdjustmentsAppliedMinor  int64  `json:"adjustmentsAppliedMinor,string"`
-	AdjustmentsProvidedMinor int64  `json:"adjustmentsProvidedMinor,string"`
-	AmountDueMinor           int64  `json:"amountDueMinor,string"`
-	Currency                 string `json:"currency"`
-	Status                   string `json:"status"`
+	ID                       string  `json:"id"`
+	PeriodID                 string  `json:"periodId"`
+	MembershipID             string  `json:"membershipId"`
+	DisplayName              string  `json:"displayName"`
+	Email                    *string `json:"email,omitempty"`
+	ChargesMinor             int64   `json:"chargesMinor,string"`
+	PaymentsAllocatedMinor   int64   `json:"paymentsAllocatedMinor,string"`
+	AdjustmentsAppliedMinor  int64   `json:"adjustmentsAppliedMinor,string"`
+	AdjustmentsProvidedMinor int64   `json:"adjustmentsProvidedMinor,string"`
+	AmountDueMinor           int64   `json:"amountDueMinor,string"`
+	Currency                 string  `json:"currency"`
+	Status                   string  `json:"status"`
 }

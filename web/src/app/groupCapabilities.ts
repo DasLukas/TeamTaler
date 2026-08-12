@@ -15,7 +15,7 @@ export type GroupCapability = 'administration' | 'catalog' | 'finance';
 export function hasGroupCapability(grants: readonly PermissionGrant[] | undefined, capability: GroupCapability): boolean {
   if (capability === 'catalog') return can(grants, 'CATALOG_MANAGEMENT');
   if (capability === 'finance') return can(grants, 'FINANCE_MANAGEMENT');
-  return can(grants, 'GROUP_ADMINISTRATION') || can(grants, 'ROLE_MANAGEMENT');
+  return can(grants, 'GROUP_ADMINISTRATION') || can(grants, 'MEMBER_MANAGEMENT') || can(grants, 'ROLE_MANAGEMENT');
 }
 
 /**
@@ -30,7 +30,7 @@ export function canRecordOwnPayment(grants: readonly PermissionGrant[] | undefin
 
 /** Determines whether a membership may create at least one kind of booking. */
 export function canOpenBooking(grants: readonly PermissionGrant[] | undefined): boolean {
-  return can(grants, 'CREATE_OWN_BOOKING') || can(grants, 'BOOK_FOR_OTHERS');
+  return can(grants, 'CREATE_OWN_BOOKING') || can(grants, 'BOOK_FOR_OTHERS') || can(grants, 'BOOK_FOR_GUESTS');
 }
 
 /**

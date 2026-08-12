@@ -4,16 +4,20 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/DasLukas/TeamTaler/migrations"
 	_ "modernc.org/sqlite"
 )
+
+const foreignKeysOffMigrationDirective = "-- teamtaler:migration foreign-keys-off"
 
 // Open opens path, configures SQLite safety pragmas, and applies migrations.
 // The context bounds initialization. It returns a ready connection pool that the
@@ -95,23 +99,125 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", name, err)
 		}
-		tx, err := db.BeginTx(ctx, nil)
-		if err != nil {
-			return fmt.Errorf("begin migration %s: %w", name, err)
-		}
-		if _, err = tx.ExecContext(ctx, string(body)); err == nil {
-			err = verifyForeignKeys(ctx, tx)
-		}
-		if err == nil {
-			_, err = tx.ExecContext(ctx, `INSERT INTO schema_migrations(version) VALUES (?)`, name)
+		if requiresDisabledForeignKeys(body) {
+			err = applyMigrationWithForeignKeysDisabled(ctx, db, name, body)
+		} else {
+			err = applyMigration(ctx, db, name, body)
 		}
 		if err != nil {
-			tx.Rollback()
-			return fmt.Errorf("apply migration %s: %w", name, err)
+			return err
 		}
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit migration %s: %w", name, err)
+	}
+	return nil
+}
+
+// requiresDisabledForeignKeys recognizes the single exact migration directive
+// reserved for table rebuilds whose referenced parent table cannot be replaced
+// while SQLite foreign-key enforcement is active.
+func requiresDisabledForeignKeys(body []byte) bool {
+	firstLine, _, _ := strings.Cut(string(body), "\n")
+	return strings.TrimSpace(firstLine) == foreignKeysOffMigrationDirective
+}
+
+func applyMigration(ctx context.Context, db *sql.DB, name string, body []byte) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin migration %s: %w", name, err)
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, string(body)); err == nil {
+		err = verifyForeignKeys(ctx, tx)
+	}
+	if err == nil {
+		_, err = tx.ExecContext(ctx, `INSERT INTO schema_migrations(version) VALUES (?)`, name)
+	}
+	if err != nil {
+		return fmt.Errorf("apply migration %s: %w", name, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit migration %s: %w", name, err)
+	}
+	return nil
+}
+
+// applyMigrationWithForeignKeysDisabled applies one explicitly annotated
+// migration on a dedicated connection. Enforcement is disabled only before the
+// transaction begins, every resulting reference is checked before commit, and
+// the connection is never returned to the pool until enforcement is restored.
+func applyMigrationWithForeignKeysDisabled(ctx context.Context, db *sql.DB, name string, body []byte) (resultErr error) {
+	connection, err := db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("reserve migration connection %s: %w", name, err)
+	}
+	foreignKeysDisabled := false
+	defer func() {
+		if foreignKeysDisabled {
+			restoreContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			restoreErr := setForeignKeyEnforcement(restoreContext, connection, true)
+			cancel()
+			if restoreErr != nil {
+				// Keep the connection quarantined instead of returning it to the pool
+				// with foreign-key checks disabled.
+				resultErr = errors.Join(resultErr, fmt.Errorf("restore foreign keys after migration %s: %w", name, restoreErr))
+				return
+			}
 		}
+		if closeErr := connection.Close(); closeErr != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("release migration connection %s: %w", name, closeErr))
+		}
+	}()
+
+	// Treat the connection as unsafe as soon as disabling is attempted: the
+	// statement may succeed even if the subsequent verification is interrupted.
+	foreignKeysDisabled = true
+	if err := setForeignKeyEnforcement(ctx, connection, false); err != nil {
+		return fmt.Errorf("disable foreign keys for migration %s: %w", name, err)
+	}
+
+	tx, err := connection.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin migration %s: %w", name, err)
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, string(body)); err == nil {
+		err = verifyForeignKeys(ctx, tx)
+	}
+	if err == nil {
+		_, err = tx.ExecContext(ctx, `INSERT INTO schema_migrations(version) VALUES (?)`, name)
+	}
+	if err != nil {
+		return fmt.Errorf("apply migration %s: %w", name, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit migration %s: %w", name, err)
+	}
+
+	restoreContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := setForeignKeyEnforcement(restoreContext, connection, true); err != nil {
+		cancel()
+		return fmt.Errorf("restore foreign keys after migration %s: %w", name, err)
+	}
+	cancel()
+	foreignKeysDisabled = false
+	return nil
+}
+
+func setForeignKeyEnforcement(ctx context.Context, connection *sql.Conn, enabled bool) error {
+	pragmaValue := "OFF"
+	want := 0
+	if enabled {
+		pragmaValue = "ON"
+		want = 1
+	}
+	if _, err := connection.ExecContext(ctx, `PRAGMA foreign_keys = `+pragmaValue); err != nil {
+		return err
+	}
+	var got int
+	if err := connection.QueryRowContext(ctx, `PRAGMA foreign_keys`).Scan(&got); err != nil {
+		return err
+	}
+	if got != want {
+		return fmt.Errorf("pragma remained %d, want %d", got, want)
 	}
 	return nil
 }

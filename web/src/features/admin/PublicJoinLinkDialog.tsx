@@ -9,8 +9,9 @@ import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import type { PublicJoinLink } from '@/api/types';
 import { Button } from '@/components/ui/Button';
-import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
+import { Field, TextInput } from '@/components/ui/FormField';
 import { Modal } from '@/components/ui/Modal';
+import { SelectMenu, type SelectMenuOption } from '@/components/ui/SelectMenu';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import styles from './PublicJoinLinkDialog.module.css';
@@ -111,6 +112,15 @@ export function PublicJoinLinkDialog({ groupId, onClose }: PublicJoinLinkDialogP
 	const invalidCustomExpiry = selectedLifetime === 'custom' && (!selectedCustomExpiry || customExpiryMilliseconds < openedAt + 60 * 60 * 1_000 || customExpiryMilliseconds > openedAt + 365 * 24 * 60 * 60 * 1_000);
   const pending = updateMutation.isPending || rotateMutation.isPending;
   const mutationError = updateMutation.error ?? rotateMutation.error;
+  const lifetimeOptions: readonly SelectMenuOption<LifetimeChoice>[] = [
+    { value: '1h', label: t('publicJoin.lifetimes.oneHour') },
+    { value: '6h', label: t('publicJoin.lifetimes.sixHours') },
+    { value: '24h', label: t('publicJoin.lifetimes.oneDay') },
+    { value: '7d', label: t('publicJoin.lifetimes.sevenDays') },
+    { value: '30d', label: t('publicJoin.lifetimes.thirtyDays') },
+    { value: 'custom', label: t('publicJoin.lifetimes.custom') },
+    { value: 'unlimited', label: t('publicJoin.lifetimes.unlimited') },
+  ];
 
   const applyLifetime = () => {
     if (invalidCustomExpiry) return;
@@ -150,15 +160,7 @@ export function PublicJoinLinkDialog({ groupId, onClose }: PublicJoinLinkDialogP
           <section className={styles.settingsPanel}>
             <h3>{active ? t('publicJoin.changeLifetime') : link.expired ? t('publicJoin.expiredTitle') : t('publicJoin.createTitle')}</h3>
             <Field htmlFor="public-join-lifetime" label={t('publicJoin.lifetime')}>
-				<SelectInput id="public-join-lifetime" onChange={(event) => { setLifetime(event.target.value as LifetimeChoice); setLifetimeTouched(true); }} value={selectedLifetime}>
-                <option value="1h">{t('publicJoin.lifetimes.oneHour')}</option>
-                <option value="6h">{t('publicJoin.lifetimes.sixHours')}</option>
-                <option value="24h">{t('publicJoin.lifetimes.oneDay')}</option>
-                <option value="7d">{t('publicJoin.lifetimes.sevenDays')}</option>
-                <option value="30d">{t('publicJoin.lifetimes.thirtyDays')}</option>
-                <option value="custom">{t('publicJoin.lifetimes.custom')}</option>
-                <option value="unlimited">{t('publicJoin.lifetimes.unlimited')}</option>
-              </SelectInput>
+              <SelectMenu id="public-join-lifetime" onChange={(choice) => { setLifetime(choice); setLifetimeTouched(true); }} options={lifetimeOptions} value={selectedLifetime} />
             </Field>
 			{selectedLifetime === 'custom' ? <Field error={invalidCustomExpiry ? t('publicJoin.customInvalid') : undefined} htmlFor="public-join-custom-expiry" label={t('publicJoin.customExpiry')}><TextInput id="public-join-custom-expiry" max={maxCustomExpiry} min={minCustomExpiry} onChange={(event) => { setCustomExpiry(event.target.value); setCustomExpiryTouched(true); }} type="datetime-local" value={selectedCustomExpiry} /></Field> : null}
 			{selectedLifetime === 'unlimited' ? <p className={styles.securityWarning}><ShieldAlert aria-hidden="true" size={19} />{t('publicJoin.unlimitedWarning')}</p> : null}

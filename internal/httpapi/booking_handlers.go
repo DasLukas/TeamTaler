@@ -6,6 +6,22 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/bookings"
 )
 
+// handleBookingContext returns the single privacy-minimized read model required
+// by the booking page and never exposes member emails, roles, or grants as targets.
+func (s *Server) handleBookingContext(response http.ResponseWriter, request *http.Request) {
+	_, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	item, err := s.bookings.Context(request.Context(), membership)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, item)
+}
+
 func (s *Server) handleListBookings(response http.ResponseWriter, request *http.Request) {
 	_, membership, err := s.membership(request)
 	if err != nil {

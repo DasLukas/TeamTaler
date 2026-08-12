@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AccountSummary, Booking, Category, CreatedInvitation, Dashboard, Group, GroupSettings, InvitationImportResult, InvitationMetadata, LedgerEntry, Membership, Payment, PermissionDefinition, Product, PublicJoinLink, PublicJoinPreview, Role, RoleAssignment, Session } from '@/api/types';
+import type { AccountSummary, AuthenticationCapabilities, Booking, Category, CreatedInvitation, Dashboard, Group, GroupSettings, InvitationImportResult, InvitationMetadata, LedgerEntry, Membership, Payment, PermissionDefinition, Product, PublicJoinLink, PublicJoinPreview, Role, RoleAssignment, Session, User } from '@/api/types';
 import i18n from '@/i18n';
 import { DemoTransport } from './transport';
 
@@ -7,6 +7,17 @@ const jsonRequest = (method: string, body: unknown = {}): RequestInit => ({
   method,
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(body),
+});
+
+describe('DemoTransport account security', () => {
+  it('fails closed for mail features while supporting local name and password changes', async () => {
+    const transport = new DemoTransport();
+
+    await expect(transport.request<AuthenticationCapabilities>('/auth/capabilities')).resolves.toEqual({ passwordResetAvailable: false, emailChangeAvailable: false });
+    await expect(transport.request<User>('/me/profile', jsonRequest('PATCH', { displayName: 'Demo Changed' }))).resolves.toMatchObject({ displayName: 'Demo Changed' });
+    await expect(transport.request<void>('/me/password', jsonRequest('PUT', { currentPassword: 'teamtaler-demo', newPassword: 'changed-passphrase' }))).resolves.toBeUndefined();
+    await expect(transport.request<Session>('/session')).resolves.toMatchObject({ user: { displayName: 'Demo Changed' } });
+  });
 });
 
 async function demoteCurrentAdministrator(transport: DemoTransport, replacementRoleIds: string[] = ['role-member']): Promise<void> {
@@ -219,6 +230,25 @@ describe('DemoTransport dynamic roles', () => {
     ]));
   });
 
+  it('creates, renames, and offers a claim invitation for a temporary guest', async () => {
+    const transport = new DemoTransport();
+
+    const [booking] = await transport.request<Booking[]>('/groups/group-sv-adler/bookings/batch', jsonRequest('POST', {
+      productId: 'product-water',
+      productVersion: 1,
+      expectedPeriodId: 'period-august',
+      quantity: 1,
+      targetMembershipIds: [],
+      temporaryGuestDisplayNames: ['Guest One'],
+    }));
+    const members = await transport.request<Membership[]>('/groups/group-sv-adler/members');
+    const guest = members.find((member) => member.id === booking.memberId);
+    expect(guest).toMatchObject({ displayName: 'Guest One', email: null, isTemporaryGuest: true, roleIds: [] });
+
+    await expect(transport.request<Membership>(`/groups/group-sv-adler/members/${guest?.id}`, jsonRequest('PATCH', { displayName: 'Renamed Guest' }))).resolves.toMatchObject({ displayName: 'Renamed Guest' });
+    await expect(transport.request<CreatedInvitation>(`/groups/group-sv-adler/members/${guest?.id}/claim-invitation`, jsonRequest('POST', { email: 'guest@example.test', roleIds: ['role-member'] }))).resolves.toMatchObject({ email: 'guest@example.test', targetMembershipId: guest?.id, roleIds: ['role-member'] });
+  });
+
   it('omits void controls on newly created bookings when current grants do not allow voiding', async () => {
     const transport = new DemoTransport();
     await transport.request<Role>('/groups/group-sv-adler/roles/role-member', {
@@ -269,6 +299,7 @@ describe('DemoTransport protected route policy', () => {
     await demoteCurrentAdministrator(transport);
     const requests: Array<[string, RequestInit?]> = [
       ['/groups/group-sv-adler/settings'],
+      ['/groups/group-sv-adler/members'],
       ['/groups/group-sv-adler/accounts'],
       ['/groups/group-sv-adler/accounts/member-mara'],
       ['/groups/group-sv-adler/payments'],
@@ -302,7 +333,7 @@ describe('DemoTransport protected route policy', () => {
     }));
   });
 
-  it('allows a pure role manager to list invitations but not mutate their lifecycle', async () => {
+  it('keeps invitations and members unavailable to a pure role manager', async () => {
     const transport = new DemoTransport();
     const role = await transport.request<Role>('/groups/group-sv-adler/roles', jsonRequest('POST', {
       name: 'Role manager',
@@ -310,7 +341,8 @@ describe('DemoTransport protected route policy', () => {
     }));
     await demoteCurrentAdministrator(transport, ['role-member', role.id]);
 
-    await expect(transport.request<InvitationMetadata[]>('/groups/group-sv-adler/invitations')).resolves.toEqual([]);
+    await expect(transport.request<InvitationMetadata[]>('/groups/group-sv-adler/invitations')).rejects.toThrow(i18n.t('admin.noAccessMessage'));
+    await expect(transport.request<Membership[]>('/groups/group-sv-adler/members')).rejects.toThrow(i18n.t('admin.noAccessMessage'));
     await expect(transport.request('/groups/group-sv-adler/invitations', jsonRequest('POST', {
       email: 'new@example.test',
       displayName: 'New Member',
@@ -318,7 +350,7 @@ describe('DemoTransport protected route policy', () => {
     }))).rejects.toThrow(i18n.t('admin.noAccessMessage'));
   });
 
-  it('allows group-only administrators to read roles and transfer only the reserved administrator assignment', async () => {
+  it('keeps member data unavailable to group-only administrators', async () => {
     const transport = new DemoTransport();
     const groupAdministrator = await transport.request<Role>('/groups/group-sv-adler/roles', jsonRequest('POST', {
       name: 'Group administration only',
@@ -326,18 +358,34 @@ describe('DemoTransport protected route policy', () => {
     }));
     await demoteCurrentAdministrator(transport, ['role-member', groupAdministrator.id]);
 
-    await expect(transport.request<Role[]>('/groups/group-sv-adler/roles')).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ id: 'role-admin' })]));
+    await expect(transport.request<Role[]>('/groups/group-sv-adler/roles')).rejects.toThrow(i18n.t('admin.noAccessMessage'));
+    await expect(transport.request<RoleAssignment[]>('/groups/group-sv-adler/role-assignments')).rejects.toThrow(i18n.t('admin.noAccessMessage'));
+    await expect(transport.request<Membership[]>('/groups/group-sv-adler/members')).rejects.toThrow(i18n.t('admin.noAccessMessage'));
+  });
+
+  it('allows member managers to assign ordinary roles but not protected administration', async () => {
+    const transport = new DemoTransport();
+    const memberManager = await transport.request<Role>('/groups/group-sv-adler/roles', jsonRequest('POST', {
+      name: 'Member manager',
+      grants: [{ permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }],
+    }));
+    await demoteCurrentAdministrator(transport, ['role-member', memberManager.id]);
+
+    await expect(transport.request<Membership[]>('/groups/group-sv-adler/members')).resolves.toEqual(expect.any(Array));
+    await expect(transport.request<InvitationMetadata[]>('/groups/group-sv-adler/invitations')).resolves.toEqual([]);
+    await expect(transport.request<Role[]>('/groups/group-sv-adler/roles')).resolves.toEqual(expect.any(Array));
+    await expect(transport.request<Role>('/groups/group-sv-adler/roles/role-member')).rejects.toThrow(i18n.t('admin.noAccessMessage'));
     const assignments = await transport.request<RoleAssignment[]>('/groups/group-sv-adler/role-assignments');
     const mara = assignments.find((assignment) => assignment.subjectId === 'member-mara')!;
-    const transferred = await transport.request<RoleAssignment>('/groups/group-sv-adler/members/member-mara/roles', {
-      ...jsonRequest('PUT', { roleIds: [...mara.roleIds, 'role-admin'] }),
+    const updated = await transport.request<RoleAssignment>('/groups/group-sv-adler/members/member-mara/roles', {
+      ...jsonRequest('PUT', { roleIds: [...mara.roleIds, 'role-catalog'] }),
       headers: { 'Content-Type': 'application/json', 'If-Match': `"v${mara.version}"` },
     });
+    expect(updated.roleIds).toContain('role-catalog');
 
-    expect(transferred.roleIds).toContain('role-admin');
     await expect(transport.request<RoleAssignment>('/groups/group-sv-adler/members/member-mara/roles', {
-      ...jsonRequest('PUT', { roleIds: [...transferred.roleIds, 'role-catalog'] }),
-      headers: { 'Content-Type': 'application/json', 'If-Match': `"v${transferred.version}"` },
+      ...jsonRequest('PUT', { roleIds: [...updated.roleIds, 'role-admin'] }),
+      headers: { 'Content-Type': 'application/json', 'If-Match': `"v${updated.version}"` },
     })).rejects.toThrow(i18n.t('admin.noAccessMessage'));
   });
 });
@@ -357,28 +405,77 @@ describe('DemoTransport group settings', () => {
 
   it('persists typed behavior settings', async () => {
     const transport = new DemoTransport();
-    await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings')).resolves.toEqual({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
+    await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings')).resolves.toMatchObject({
+      settlementsEnabled: false,
+      notificationEmailsEnabled: false,
+      notificationEmailDeliveryAvailable: true,
+      defaultRoleId: 'role-member',
+      paymentMethods: [
+        { id: 'BANK_TRANSFER', label: 'Bank transfer' },
+        { id: 'CASH', label: 'Cash' },
+        { id: 'PAYPAL', label: 'PayPal' },
+        { id: 'OTHER', label: 'Other' },
+      ],
+    });
+    await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settlementsEnabled: true }),
+    })).resolves.toMatchObject({ settlementsEnabled: true });
     await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ notificationEmailsEnabled: true }),
-    })).resolves.toEqual({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
+    })).resolves.toMatchObject({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
     await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ defaultRoleId: 'role-finance' }),
-    })).resolves.toEqual({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-finance' });
+    })).resolves.toMatchObject({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-finance' });
     await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ defaultRoleId: 'role-admin' }),
-    })).rejects.toThrow(/must not grant group administration/i);
+    })).rejects.toThrow(/must not grant administration permissions/i);
     await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', 'If-Match': '"v1"' },
       body: JSON.stringify({ membersCanViewAllBookings: true }),
     })).rejects.toThrow();
-    await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings')).resolves.toEqual({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-finance' });
+    await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings')).resolves.toMatchObject({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-finance' });
+  });
+
+  it('authorizes default-role and group-configuration fields independently', async () => {
+    const groupTransport = new DemoTransport();
+    const groupOnly = await groupTransport.request<Role>('/groups/group-sv-adler/roles', jsonRequest('POST', {
+      name: 'Group configuration',
+      grants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }],
+    }));
+    await demoteCurrentAdministrator(groupTransport, ['role-member', groupOnly.id]);
+    await expect(groupTransport.request('/groups/group-sv-adler/settings', jsonRequest('PATCH', { settlementsEnabled: true }))).resolves.toMatchObject({ settlementsEnabled: true });
+    await expect(groupTransport.request('/groups/group-sv-adler/settings', jsonRequest('PATCH', { defaultRoleId: 'role-finance' }))).rejects.toThrow(i18n.t('admin.noAccessMessage'));
+
+    const memberTransport = new DemoTransport();
+    const memberOnly = await memberTransport.request<Role>('/groups/group-sv-adler/roles', jsonRequest('POST', {
+      name: 'Membership lifecycle',
+      grants: [{ permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }],
+    }));
+    await demoteCurrentAdministrator(memberTransport, ['role-member', memberOnly.id]);
+    await expect(memberTransport.request('/groups/group-sv-adler/settings', jsonRequest('PATCH', { defaultRoleId: 'role-finance' }))).resolves.toMatchObject({ defaultRoleId: 'role-finance' });
+    await expect(memberTransport.request('/groups/group-sv-adler/settings', jsonRequest('PATCH', { settlementsEnabled: true }))).rejects.toThrow(i18n.t('admin.noAccessMessage'));
+    await expect(memberTransport.request('/groups/group-sv-adler/settings', jsonRequest('PATCH', { defaultRoleId: 'role-member', settlementsEnabled: true }))).rejects.toThrow(i18n.t('admin.noAccessMessage'));
+  });
+
+  it('rejects period closing until settlements are enabled', async () => {
+    const transport = new DemoTransport();
+    const before = await transport.request<Dashboard>('/groups/group-sv-adler/dashboard');
+
+    await expect(transport.request('/groups/group-sv-adler/periods/period-august/close', jsonRequest('POST', { label: 'August 2026', dueAt: '2026-08-15' }))).rejects.toThrow(/disabled/i);
+    await transport.request('/groups/group-sv-adler/settings', jsonRequest('PATCH', { settlementsEnabled: true }));
+    await expect(transport.request('/groups/group-sv-adler/periods/period-august/close', jsonRequest('POST', { label: 'August 2026', dueAt: '2026-08-15' }))).resolves.toMatchObject({ status: 'CLOSED' });
+    const after = await transport.request<Dashboard>('/groups/group-sv-adler/dashboard');
+
+    expect(after.groupOutstanding).toEqual(before.groupOutstanding);
   });
 });
 
@@ -423,6 +520,7 @@ describe('DemoTransport finance accounts', () => {
   it('lists active and archived summaries and applies booking movements', async () => {
     const transport = new DemoTransport();
     const before = await transport.request<AccountSummary[]>('/groups/group-sv-adler/accounts');
+    const dashboardBefore = await transport.request<Dashboard>('/groups/group-sv-adler/dashboard');
     const lukasBefore = before.find((account) => account.membershipId === 'member-lukas');
     expect(before.some((account) => account.status === 'ARCHIVED')).toBe(true);
 
@@ -432,9 +530,11 @@ describe('DemoTransport finance accounts', () => {
       body: JSON.stringify({ productId: 'product-water', productVersion: 1, expectedPeriodId: 'period-august', quantity: 1 }),
     });
     const after = await transport.request<AccountSummary[]>('/groups/group-sv-adler/accounts');
+    const dashboardAfter = await transport.request<Dashboard>('/groups/group-sv-adler/dashboard');
     const lukasAfter = after.find((account) => account.membershipId === 'member-lukas');
 
     expect(BigInt(lukasAfter?.balance.minorUnits ?? '0') - BigInt(lukasBefore?.balance.minorUnits ?? '0')).toBe(100n);
+    expect(BigInt(dashboardAfter.groupOutstanding?.minorUnits ?? '0') - BigInt(dashboardBefore.groupOutstanding?.minorUnits ?? '0')).toBe(100n);
   });
 
   it('posts an authorized own payment to the session membership and exposes resulting credit', async () => {
@@ -451,6 +551,7 @@ describe('DemoTransport finance accounts', () => {
 
     expect(payment).toMatchObject({ membershipId: 'member-lukas', method: 'PAYPAL', reference: 'PayPal advance', status: 'POSTED' });
     expect(BigInt(after.openBalance.minorUnits)).toBe(BigInt(before.openBalance.minorUnits) - 3000n);
+    expect(BigInt(after.groupOutstanding?.minorUnits ?? '0')).toBe(BigInt(before.groupOutstanding?.minorUnits ?? '0') - 3000n);
     expect(after.openBalance.minorUnits).toBe('-660');
     expect(ledger[0]).toMatchObject({ kind: 'PAYMENT', referenceId: payment.id, balance: { minorUnits: '-660', currency: 'EUR' } });
   });
@@ -465,15 +566,24 @@ describe('DemoTransport profile images', () => {
     const uploaded = await transport.request<{ avatarUrl: string }>('/me/avatar', { method: 'POST', body: form });
     const session = await transport.request<Session>('/session');
     const members = await transport.request<Membership[]>('/groups/group-sv-adler/members');
+    const bookings = await transport.request<Booking[]>('/groups/group-sv-adler/bookings');
+    const dashboard = await transport.request<Dashboard>('/groups/group-sv-adler/dashboard');
+    const currentMembershipId = session.groups.find((group) => group.id === session.activeGroupId)?.membership?.id;
+    const selfBooking = bookings.find((booking) => booking.memberId === currentMembershipId && booking.bookedByMemberId === currentMembershipId);
+    const dashboardSelfBooking = dashboard.recentBookings.find((booking) => booking.memberId === currentMembershipId && booking.bookedByMemberId === currentMembershipId);
     expect(uploaded.avatarUrl).toMatch(/^blob:/);
     expect(session.user.avatarUrl).toBe(uploaded.avatarUrl);
     expect(members.find((member) => member.userId === session.user.id)?.avatarUrl).toBe(uploaded.avatarUrl);
+    expect(selfBooking).toMatchObject({ memberAvatarUrl: uploaded.avatarUrl, bookedByAvatarUrl: uploaded.avatarUrl });
+    expect(dashboardSelfBooking).toMatchObject({ memberAvatarUrl: uploaded.avatarUrl, bookedByAvatarUrl: uploaded.avatarUrl });
 
     await transport.request<void>('/me/avatar', { method: 'DELETE' });
     const removedSession = await transport.request<Session>('/session');
     const removedMembers = await transport.request<Membership[]>('/groups/group-sv-adler/members');
+    const removedBookings = await transport.request<Booking[]>('/groups/group-sv-adler/bookings');
     expect(removedSession.user.avatarUrl).toBeUndefined();
     expect(removedMembers.find((member) => member.userId === session.user.id)?.avatarUrl).toBeUndefined();
+    expect(removedBookings.find((booking) => booking.id === selfBooking?.id)).toMatchObject({ memberAvatarUrl: undefined, bookedByAvatarUrl: undefined });
   });
 });
 

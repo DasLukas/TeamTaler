@@ -13,11 +13,16 @@ const apiMock = vi.hoisted(() => ({
   getCategories: vi.fn(),
   getRoles: vi.fn(),
   getGroupSettings: vi.fn(),
+  updateGroupSettings: vi.fn(),
   createInvitation: vi.fn(),
   updateInvitation: vi.fn(),
   revokeInvitation: vi.fn(),
   resendInvitationEmail: vi.fn(),
   archiveMember: vi.fn(),
+  reactivateMember: vi.fn(),
+  permanentlyDeleteMember: vi.fn(),
+  renameMember: vi.fn(),
+  createTemporaryGuestClaimInvitation: vi.fn(),
   importInvitations: vi.fn(),
   getInvitations: vi.fn(),
   retryInvitationEmail: vi.fn(),
@@ -41,7 +46,7 @@ vi.mock('@/api/client', () => ({
 
 const session: Session = {
   user: { id: 'user-admin', displayName: 'Admin', email: 'admin@example.test' },
-  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-admin', roleIds: ['role-admin', 'role-member'], effectiveGrants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }], roles: ['ADMIN', 'MEMBER'], groupPermissions: [] } }],
+  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-admin', roleIds: ['role-admin', 'role-member'], effectiveGrants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }], roles: ['ADMIN', 'MEMBER'], groupPermissions: [] } }],
   activeGroupId: 'group-a',
 };
 
@@ -51,16 +56,31 @@ const members: Membership[] = [{
   displayName: 'Admin',
   email: 'admin@example.test',
   initials: 'A',
+  isTemporaryGuest: false,
   roles: ['ADMIN', 'MEMBER'],
   roleIds: ['role-admin', 'role-member'],
   roleAssignmentsVersion: 1,
   groupPermissions: [],
   categoryPermissions: [],
+  status: 'ACTIVE',
   active: true,
 }];
 
+const temporaryGuest: Membership = {
+  ...members[0],
+  id: 'member-guest',
+  userId: 'user-guest-credentialless',
+  displayName: 'Managed Guest',
+  email: null,
+  initials: 'MG',
+  isTemporaryGuest: true,
+  roles: ['MEMBER'],
+  roleIds: [],
+  effectiveGrants: [],
+};
+
 const roles: Role[] = [
-  { id: 'role-admin', presetKey: 'GROUP_ADMINISTRATOR', name: 'Gruppenadministrator', grants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }], version: 1, memberCount: 1, pendingInvitationCount: 0 },
+  { id: 'role-admin', presetKey: 'GROUP_ADMINISTRATOR', name: 'Gruppenadministrator', grants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }], version: 1, memberCount: 1, pendingInvitationCount: 0 },
   { id: 'role-member', presetKey: 'MEMBER', name: 'Mitglied', grants: [{ permission: 'VOID_OWN_BOOKING', scope: { type: 'GROUP' } }], version: 1, memberCount: 1, pendingInvitationCount: 1 },
   { id: 'role-finance', presetKey: 'FINANCE_MANAGER', name: 'Finanzverwaltung', grants: [{ permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } }], version: 1, memberCount: 0, pendingInvitationCount: 0 },
 ];
@@ -94,11 +114,11 @@ const invitationMetadata: InvitationMetadata[] = [{
  *
  * @returns The query client used by the rendered panel.
  */
-function renderMembers(): QueryClient {
+function renderMembers(activeSession: Session = session): QueryClient {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>
-      <ActiveGroupContext.Provider value={{ session, activeGroup: session.groups[0], activeGroupId: 'group-a', setActiveGroupId: vi.fn() }}>
+      <ActiveGroupContext.Provider value={{ session: activeSession, activeGroup: activeSession.groups[0], activeGroupId: 'group-a', setActiveGroupId: vi.fn() }}>
         {children}
       </ActiveGroupContext.Provider>
     </QueryClientProvider>
@@ -113,6 +133,7 @@ describe('MembersPanel invitations', () => {
     apiMock.getMembers.mockResolvedValue(members);
     apiMock.getRoles.mockResolvedValue(roles);
     apiMock.getGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
+    apiMock.updateGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-finance' });
     apiMock.getPublicJoinLink.mockResolvedValue({ enabled: false, expired: false, expiresAt: null, version: 0, emailVerificationAvailable: true });
   apiMock.getCategories.mockResolvedValue([]);
     apiMock.createInvitation.mockResolvedValue({
@@ -133,6 +154,23 @@ describe('MembersPanel invitations', () => {
   apiMock.revokeInvitation.mockResolvedValue(undefined);
   apiMock.resendInvitationEmail.mockResolvedValue({ invitationId: 'invitation-new', emailDeliveryStatus: 'PENDING', expiresAt: '2026-08-12T12:00:00Z', acceptUrl: 'https://teamtaler.example/invite#token=rotated' });
   apiMock.archiveMember.mockResolvedValue(undefined);
+  apiMock.reactivateMember.mockImplementation((_groupId: string, _membershipId: string, input: { displayName?: string; roleIds: string[] }) => Promise.resolve({ ...members[0], displayName: input.displayName ?? members[0].displayName, roleIds: input.roleIds, status: 'ACTIVE', active: true }));
+  apiMock.permanentlyDeleteMember.mockResolvedValue(undefined);
+  apiMock.renameMember.mockImplementation((_groupId: string, _membershipId: string, displayName: string) => Promise.resolve({ ...members[0], displayName }));
+  apiMock.createTemporaryGuestClaimInvitation.mockResolvedValue({
+    id: 'invitation-claim',
+    email: 'guest@example.test',
+    displayName: 'Managed Guest',
+    roles: ['MEMBER'],
+    roleIds: ['role-member'],
+    roleAssignmentsVersion: 1,
+    groupPermissions: [],
+    categoryPermissions: [],
+    expiresAt: '2026-08-11T12:00:00Z',
+    acceptUrl: 'https://teamtaler.example/invite#token=claim-token',
+    emailDeliveryStatus: 'PENDING',
+    targetMembershipId: 'member-guest',
+  });
   apiMock.updateMemberRoles.mockResolvedValue({ subjectType: 'MEMBERSHIP', subjectId: 'member-admin', roleIds: ['role-admin', 'role-member', 'role-finance'], version: 2 });
   apiMock.updateInvitationRoles.mockResolvedValue({ subjectType: 'INVITATION', subjectId: 'invitation-new', roleIds: ['role-member', 'role-finance'], version: 4 });
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:member-import-template') });
@@ -148,6 +186,17 @@ describe('MembersPanel invitations', () => {
 
     expect(await screen.findByRole('dialog', { name: i18n.t('publicJoin.adminTitle') })).toBeVisible();
     await waitFor(() => expect(apiMock.getPublicJoinLink).toHaveBeenCalledWith('group-a'));
+  });
+
+  it('owns the default role setting in member management', async () => {
+    const user = userEvent.setup();
+    renderMembers();
+
+    expect(await screen.findByRole('heading', { name: i18n.t('behaviorSettings.defaultRoleTitle') })).toBeVisible();
+    await user.selectOptions(screen.getByLabelText(i18n.t('behaviorSettings.defaultRoleFieldLabel')), 'role-finance');
+    await user.click(screen.getByRole('button', { name: i18n.t('common.save') }));
+
+    await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { defaultRoleId: 'role-finance' }));
   });
 
   it('keeps compact header actions explicitly labelled for assistive technology and tooltips', async () => {
@@ -214,7 +263,8 @@ describe('MembersPanel invitations', () => {
     const nameInput = screen.getByLabelText(i18n.t('auth.displayName'));
     await user.clear(nameInput);
     await user.type(nameInput, 'Updated Member');
-    await user.click(screen.getByRole('button', { name: i18n.t('common.save') }));
+    const editDialog = screen.getByRole('dialog', { name: i18n.t('members.editInvitation') });
+    await user.click(within(editDialog).getByRole('button', { name: i18n.t('common.save') }));
     await waitFor(() => expect(apiMock.updateInvitation).toHaveBeenCalledWith('group-a', 'invitation-new', {
       displayName: 'Updated Member', roleIds: ['role-member'], roleAssignmentsVersion: 3,
     }));
@@ -246,9 +296,9 @@ describe('MembersPanel invitations', () => {
     await waitFor(() => expect(apiMock.updateInvitationRoles).toHaveBeenCalledWith('group-a', 'invitation-new', ['role-member', 'role-finance'], 3));
   });
 
-  it('applies member roles explicitly and archives or re-invites memberships from separate sections', async () => {
+  it('applies member roles and uses one archive, reactivate, and delete lifecycle', async () => {
     const user = userEvent.setup();
-    const former: Membership = { ...members[0], id: 'member-former', userId: 'user-former', email: 'former@example.test', displayName: 'Former Member', initials: 'FM', active: false, roles: ['MEMBER'] };
+    const former: Membership = { ...members[0], id: 'member-former', userId: 'user-former', email: 'former@example.test', displayName: 'Former Member', initials: 'FM', active: false, status: 'ARCHIVED', roles: ['MEMBER'], roleIds: [] };
     apiMock.getMembers.mockResolvedValue([...members, former]);
     renderMembers();
 
@@ -260,14 +310,173 @@ describe('MembersPanel invitations', () => {
     expect(apiMock.updateMemberRoles).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: i18n.t('roleManagement.applyAssignment') }));
     await waitFor(() => expect(apiMock.updateMemberRoles).toHaveBeenCalledWith('group-a', 'member-admin', ['role-admin', 'role-member', 'role-finance'], 1));
-    await user.click(screen.getByRole('button', { name: i18n.t('members.inviteAgain') }));
-    expect(screen.getByLabelText(i18n.t('auth.email'))).toHaveValue('former@example.test');
-    await user.click(screen.getByRole('button', { name: i18n.t('common.cancel') }));
-
-    await user.click(screen.getByRole('button', { name: i18n.t('members.removeFor', { name: 'Admin' }) }));
-    const removeDialog = screen.getByRole('dialog', { name: i18n.t('members.removeSelfTitle') });
-    await user.click(within(removeDialog).getByRole('button', { name: i18n.t('members.confirmSelfRemoval') }));
+    await user.click(screen.getByRole('button', { name: i18n.t('members.archiveFor', { name: 'Admin' }) }));
+    const removeDialog = screen.getByRole('dialog', { name: i18n.t('members.archiveTitle') });
+    await user.click(within(removeDialog).getByRole('button', { name: i18n.t('members.archive') }));
     await waitFor(() => expect(apiMock.archiveMember).toHaveBeenCalledWith('group-a', 'member-admin', true));
+
+    await user.click(screen.getByRole('button', { name: i18n.t('members.reactivate') }));
+    const reactivationDialog = screen.getByRole('dialog', { name: i18n.t('members.reactivateTitle') });
+    expect(within(reactivationDialog).getByText(i18n.t('roleManagement.memberRoles'))).toBeVisible();
+    expect(within(reactivationDialog).queryByText('roleManagement.memberRoles')).not.toBeInTheDocument();
+    await user.click(within(reactivationDialog).getByRole('button', { name: i18n.t('members.reactivate') }));
+    await waitFor(() => expect(apiMock.reactivateMember).toHaveBeenCalledWith('group-a', 'member-former', { displayName: undefined, roleIds: ['role-member'] }));
+
+    await user.click(screen.getByRole('button', { name: i18n.t('common.delete') }));
+    const deleteDialog = screen.getByRole('dialog', { name: i18n.t('members.permanentDeleteTitle') });
+    expect(within(deleteDialog).getByText(i18n.t('members.permanentDeleteExplanation', { name: 'Former Member' }))).toBeVisible();
+    await user.click(within(deleteDialog).getByRole('button', { name: i18n.t('common.delete') }));
+    await waitFor(() => expect(apiMock.permanentlyDeleteMember).toHaveBeenCalledWith('group-a', 'member-former'));
+  });
+
+  it('manages a credentialless guest without exposing login or role controls', async () => {
+    const user = userEvent.setup();
+    apiMock.getMembers.mockResolvedValue([...members, temporaryGuest]);
+    renderMembers();
+
+    expect(await screen.findByText(i18n.t('members.temporaryGuestBadge'))).toBeVisible();
+    const guestRow = screen.getByRole('row', { name: new RegExp(temporaryGuest.displayName) });
+    const guestCells = within(guestRow).getAllByRole('cell');
+    expect(guestCells[1]).toBeEmptyDOMElement();
+    expect(guestCells[2]).toBeEmptyDOMElement();
+    expect(within(guestRow).getByText(i18n.t('members.claimGuest'), { exact: true })).toBeVisible();
+    expect(screen.queryByRole('button', { name: i18n.t('roleManagement.editRolesFor', { name: temporaryGuest.displayName }) })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: i18n.t('members.renameGuestFor', { name: temporaryGuest.displayName }) }));
+    const nameInput = screen.getByLabelText(i18n.t('auth.displayName'));
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Renamed Guest');
+    const renameDialog = screen.getByRole('dialog', { name: i18n.t('members.renameGuestTitle') });
+    await user.click(within(renameDialog).getByRole('button', { name: i18n.t('common.save') }));
+    await waitFor(() => expect(apiMock.renameMember).toHaveBeenCalledWith('group-a', temporaryGuest.id, 'Renamed Guest'));
+
+    await user.click(screen.getByRole('button', { name: i18n.t('members.claimGuestFor', { name: temporaryGuest.displayName }) }));
+    await user.type(screen.getByLabelText(i18n.t('auth.email')), 'guest@example.test');
+    await user.click(screen.getByRole('button', { name: i18n.t('members.claimGuestCreate') }));
+    await waitFor(() => expect(apiMock.createTemporaryGuestClaimInvitation).toHaveBeenCalledWith('group-a', temporaryGuest.id, 'guest@example.test', ['role-member']));
+    expect(await screen.findByLabelText(i18n.t('members.invitationLink'))).toHaveValue('https://teamtaler.example/invite#token=claim-token');
+    await user.click(screen.getByRole('button', { name: i18n.t('common.done') }));
+
+    apiMock.getInvitations.mockClear();
+    await user.click(screen.getByRole('button', { name: i18n.t('members.archiveFor', { name: temporaryGuest.displayName }) }));
+    const archiveDialog = screen.getByRole('dialog', { name: i18n.t('members.archiveTitle') });
+    await user.click(within(archiveDialog).getByRole('button', { name: i18n.t('members.archive') }));
+    await waitFor(() => expect(apiMock.archiveMember).toHaveBeenCalledWith('group-a', temporaryGuest.id, false));
+    await waitFor(() => expect(apiMock.getInvitations).toHaveBeenCalledWith('group-a'));
+  });
+
+  it('reactivates an archived guest without roles and keeps permanent deletion explicit', async () => {
+    const user = userEvent.setup();
+    const archivedGuest: Membership = { ...temporaryGuest, active: false, status: 'ARCHIVED' };
+    apiMock.getMembers.mockResolvedValue([...members, archivedGuest]);
+    renderMembers();
+
+    await user.click(await screen.findByRole('button', { name: i18n.t('members.reactivate') }));
+    const reactivationDialog = screen.getByRole('dialog', { name: i18n.t('members.reactivateTitle') });
+    const nameInput = within(reactivationDialog).getByLabelText(i18n.t('auth.displayName'));
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Returning Guest');
+    await user.click(within(reactivationDialog).getByRole('button', { name: i18n.t('members.reactivate') }));
+    await waitFor(() => expect(apiMock.reactivateMember).toHaveBeenCalledWith('group-a', archivedGuest.id, { displayName: 'Returning Guest', roleIds: [] }));
+
+    await user.click(screen.getByRole('button', { name: i18n.t('common.delete') }));
+    const deleteDialog = screen.getByRole('dialog', { name: i18n.t('members.permanentDeleteTitle') });
+    await user.click(within(deleteDialog).getByRole('button', { name: i18n.t('common.delete') }));
+    await waitFor(() => expect(apiMock.permanentlyDeleteMember).toHaveBeenCalledWith('group-a', archivedGuest.id));
+  });
+
+  it('explains why a credentialless guest cannot be claimed before a default role is configured', async () => {
+    apiMock.getMembers.mockResolvedValue([...members, temporaryGuest]);
+    apiMock.getGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: null });
+    renderMembers();
+
+    const claimButton = await screen.findByRole('button', { name: i18n.t('members.claimGuestFor', { name: temporaryGuest.displayName }) });
+    expect(claimButton).toBeDisabled();
+    expect(claimButton).toHaveAttribute('title', i18n.t('members.claimUnavailableNoRole'));
+    expect(screen.getByText(i18n.t('members.claimUnavailableNoRole'))).toBeVisible();
+    expect(apiMock.createTemporaryGuestClaimInvitation).not.toHaveBeenCalled();
+  });
+
+  it('allows role managers to extend the preselected claim role', async () => {
+    const user = userEvent.setup();
+    apiMock.getMembers.mockResolvedValue([...members, temporaryGuest]);
+    renderMembers();
+
+    await user.click(await screen.findByRole('button', { name: i18n.t('members.claimGuestFor', { name: temporaryGuest.displayName }) }));
+    await user.type(screen.getByLabelText(i18n.t('auth.email')), 'multi-role@example.test');
+    await user.click(screen.getByRole('checkbox', { name: /Finanzverwaltung/i }));
+    await user.click(screen.getByRole('button', { name: i18n.t('members.claimGuestCreate') }));
+
+    await waitFor(() => expect(apiMock.createTemporaryGuestClaimInvitation).toHaveBeenCalledWith(
+      'group-a',
+      temporaryGuest.id,
+      'multi-role@example.test',
+      ['role-member', 'role-finance'],
+    ));
+  });
+
+  it('assigns ordinary roles with member management alone', async () => {
+    const user = userEvent.setup();
+    const memberManagerSession: Session = {
+      ...session,
+      groups: [{
+        ...session.groups[0],
+        membership: {
+          ...session.groups[0].membership!,
+          effectiveGrants: [{ permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }],
+        },
+      }],
+    };
+    apiMock.getMembers.mockResolvedValue([...members, temporaryGuest]);
+    renderMembers(memberManagerSession);
+
+    await user.click(await screen.findByRole('button', { name: i18n.t('members.claimGuestFor', { name: temporaryGuest.displayName }) }));
+    await user.click(screen.getByRole('checkbox', { name: /Finanzverwaltung/i }));
+    await user.type(screen.getByLabelText(i18n.t('auth.email')), 'default-role@example.test');
+    await user.click(screen.getByRole('button', { name: i18n.t('members.claimGuestCreate') }));
+
+    await waitFor(() => expect(apiMock.createTemporaryGuestClaimInvitation).toHaveBeenCalledWith(
+      'group-a',
+      temporaryGuest.id,
+      'default-role@example.test',
+      ['role-member', 'role-finance'],
+    ));
+  });
+
+  it('keeps claim-invitation roles locked while retaining resend and revoke actions', async () => {
+    const claimInvitation: InvitationMetadata = {
+      ...invitationMetadata[0],
+      id: 'invitation-claim',
+      email: 'guest@example.test',
+      displayName: temporaryGuest.displayName,
+      targetMembershipId: temporaryGuest.id,
+    };
+    apiMock.getInvitations.mockResolvedValue([claimInvitation]);
+    renderMembers();
+
+    expect(await screen.findByText(i18n.t('members.claimInvitationRoleLocked'))).toBeVisible();
+    expect(screen.queryByRole('button', { name: i18n.t('members.editInvitationFor', { email: claimInvitation.email }) })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: i18n.t('roleManagement.editRolesFor', { name: temporaryGuest.displayName }) })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: i18n.t('members.resendFor', { email: claimInvitation.email }) })).toBeVisible();
+    expect(screen.getByRole('button', { name: i18n.t('members.deleteInvitationFor', { email: claimInvitation.email }) })).toBeVisible();
+  });
+
+  it('allows a new claim after the previous claim invitation expired', async () => {
+    const expiredClaim: InvitationMetadata = {
+      ...invitationMetadata[0],
+      id: 'invitation-expired-claim',
+      email: 'expired-guest@example.test',
+      displayName: temporaryGuest.displayName,
+      expiresAt: '2020-01-01T00:00:00Z',
+      targetMembershipId: temporaryGuest.id,
+    };
+    apiMock.getMembers.mockResolvedValue([...members, temporaryGuest]);
+    apiMock.getInvitations.mockResolvedValue([expiredClaim]);
+    renderMembers();
+
+    expect(await screen.findByText(i18n.t('members.expired'))).toBeVisible();
+    expect(screen.queryByText(i18n.t('members.claimPending'))).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: i18n.t('members.claimGuestFor', { name: temporaryGuest.displayName }) })).toBeEnabled();
   });
 
   it('explains link-only fallback when SMTP delivery is not configured', async () => {

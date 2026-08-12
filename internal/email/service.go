@@ -87,6 +87,20 @@ type JoinVerificationMessage struct {
 	ExpiresAt time.Time
 }
 
+// AccountSecurityMessage contains the recipient and one-time account-security
+// link for password recovery or email-address confirmation. All fields are
+// validated before SMTP network access.
+type AccountSecurityMessage struct {
+	// ToAddress is the recipient's single ASCII mailbox address.
+	ToAddress string
+	// ToName is the active account display name.
+	ToName string
+	// ActionURL is the absolute one-time action URL.
+	ActionURL string
+	// ExpiresAt identifies when the action stops being valid.
+	ExpiresAt time.Time
+}
+
 // NotificationMessage contains the recipient, localized event summary, group,
 // and same-origin action URL for one member notification email.
 type NotificationMessage struct {
@@ -200,6 +214,36 @@ func (s *SMTP) SendJoinVerification(ctx context.Context, message JoinVerificatio
 		return fmt.Errorf("send join verification: %w", err)
 	}
 	return s.sendPayload(ctx, "join verification", recipient, payload)
+}
+
+// SendPasswordReset validates, renders, and submits a password-reset message.
+// It returns ErrUnavailable, validation, context, or SMTP transport errors.
+func (s *SMTP) SendPasswordReset(ctx context.Context, message AccountSecurityMessage) error {
+	return s.sendAccountSecurity(ctx, message, "password reset", "Reset your TeamTaler password", "Choose a new password:", "If you did not request a password reset, you can ignore this email.")
+}
+
+// SendEmailChangeVerification validates, renders, and submits a new-mailbox
+// confirmation message. It returns ErrUnavailable, validation, context, or SMTP
+// transport errors.
+func (s *SMTP) SendEmailChangeVerification(ctx context.Context, message AccountSecurityMessage) error {
+	return s.sendAccountSecurity(ctx, message, "email change verification", "Confirm your TeamTaler email address", "Confirm email address:", "If you did not request this email change, you can ignore this email.")
+}
+
+func (s *SMTP) sendAccountSecurity(ctx context.Context, message AccountSecurityMessage, operation, subject, instruction, ignored string) error {
+	if !s.Available() {
+		return fmt.Errorf("%w: SMTP is disabled", ErrUnavailable)
+	}
+	if ctx == nil {
+		return fmt.Errorf("send %s: context is required", operation)
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("send %s: %w", operation, err)
+	}
+	recipient, payload, err := s.renderAccountSecurity(message, subject, instruction, ignored)
+	if err != nil {
+		return fmt.Errorf("send %s: %w", operation, err)
+	}
+	return s.sendPayload(ctx, operation, recipient, payload)
 }
 
 // SendNotification validates, renders, and submits message as one UTF-8
@@ -505,6 +549,60 @@ func (s *SMTP) renderNotification(message NotificationMessage) (string, []byte, 
 		"From: " + fromHeader,
 		"To: " + toHeader,
 		"Subject: " + subject,
+		"MIME-Version: 1.0",
+		"Content-Type: text/plain; charset=UTF-8",
+		"Content-Transfer-Encoding: quoted-printable",
+		"Auto-Submitted: auto-generated",
+	}
+	return recipient, []byte(strings.Join(headers, "\r\n") + "\r\n\r\n" + encodedBody.String()), nil
+}
+
+func (s *SMTP) renderAccountSecurity(message AccountSecurityMessage, subject, instruction, ignored string) (string, []byte, error) {
+	recipient, err := parseMailbox(message.ToAddress, "recipient")
+	if err != nil {
+		return "", nil, err
+	}
+	toName := strings.TrimSpace(message.ToName)
+	if containsHeaderControl(toName) || len(toName) > 120 {
+		return "", nil, errors.New("recipient name must contain at most 120 characters without control characters")
+	}
+	actionURL := strings.TrimSpace(message.ActionURL)
+	parsedURL, err := url.Parse(actionURL)
+	if err != nil || actionURL == "" || len(actionURL) > maximumURLSize || containsHeaderControl(actionURL) || parsedURL.Host == "" || parsedURL.User != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+		return "", nil, errors.New("action URL must be an absolute HTTP(S) URL without credentials")
+	}
+	if message.ExpiresAt.IsZero() {
+		return "", nil, errors.New("account action expiry is required")
+	}
+	greeting := "Hello,"
+	if toName != "" {
+		greeting = "Hello " + toName + ","
+	}
+	body := strings.Join([]string{
+		greeting,
+		"",
+		instruction,
+		actionURL,
+		"",
+		"This link expires at " + message.ExpiresAt.UTC().Format(time.RFC1123) + ".",
+		"",
+		ignored,
+	}, "\r\n") + "\r\n"
+	var encodedBody bytes.Buffer
+	quotedPrintable := quotedprintable.NewWriter(&encodedBody)
+	if _, err := quotedPrintable.Write([]byte(body)); err != nil {
+		return "", nil, fmt.Errorf("encode account-security body: %w", err)
+	}
+	if err := quotedPrintable.Close(); err != nil {
+		return "", nil, fmt.Errorf("finish account-security body: %w", err)
+	}
+	fromHeader := (&mail.Address{Name: s.configuration.FromName, Address: s.configuration.FromAddress}).String()
+	toHeader := (&mail.Address{Name: toName, Address: recipient}).String()
+	headers := []string{
+		"Date: " + s.now().UTC().Format(time.RFC1123Z),
+		"From: " + fromHeader,
+		"To: " + toHeader,
+		"Subject: " + mime.QEncoding.Encode("utf-8", subject),
 		"MIME-Version: 1.0",
 		"Content-Type: text/plain; charset=UTF-8",
 		"Content-Transfer-Encoding: quoted-printable",

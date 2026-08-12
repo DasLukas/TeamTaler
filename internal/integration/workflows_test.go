@@ -16,6 +16,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/finance"
 	"github.com/DasLukas/TeamTaler/internal/groups"
+	"github.com/DasLukas/TeamTaler/internal/media"
 	"github.com/DasLukas/TeamTaler/internal/periods"
 	"github.com/DasLukas/TeamTaler/internal/storage"
 )
@@ -143,6 +144,159 @@ func (f *fixture) openPeriodID() string {
 	return id
 }
 
+func (f *fixture) setSettlementsEnabled(enabled bool) {
+	f.t.Helper()
+	settings, err := f.groups.UpdateSettings(f.ctx, f.admin, f.membership, groups.SettingsUpdate{SettlementsEnabled: &enabled})
+	if err != nil || settings.SettlementsEnabled != enabled {
+		f.t.Fatalf("set settlements enabled=%t: settings=%#v err=%v", enabled, settings, err)
+	}
+}
+
+func TestOptionalSettlementsPreservePeriodBalanceAndStatisticsScope(t *testing.T) {
+	f := newFixture(t)
+	settings, err := f.groups.Settings(f.ctx, f.membership)
+	if err != nil || settings.SettlementsEnabled {
+		t.Fatalf("default group settings=%#v err=%v, want settlements disabled", settings, err)
+	}
+	transactionSettings, err := f.groups.TransactionSettings(f.ctx, f.membership)
+	if err != nil || transactionSettings.SettlementsEnabled {
+		t.Fatalf("default transaction settings=%#v err=%v, want settlements disabled", transactionSettings, err)
+	}
+
+	_, product := f.catalogItem("Optional settlements", 100)
+	periodOne := f.openPeriodID()
+	if _, err := f.bookings.Create(f.ctx, f.admin, f.membership, "optional-settlement-period-one", bookings.CreateInput{
+		ProductID: product.ID, ProductVersion: product.Version, ExpectedPeriodID: periodOne, Quantity: 1,
+	}); err != nil {
+		t.Fatalf("create first-period booking: %v", err)
+	}
+	closeOneInput := periods.CloseInput{Label: "First", DueAt: "2099-01-01", NextPeriodLabel: "Second"}
+	if _, err := f.periods.Close(f.ctx, f.admin, f.membership, "optional-settlement-disabled-close", periodOne, closeOneInput); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("close while disabled error=%v, want conflict", err)
+	}
+	if got := f.openPeriodID(); got != periodOne {
+		t.Fatalf("open period after rejected close=%q, want %q", got, periodOne)
+	}
+
+	f.setSettlementsEnabled(true)
+	account, err := f.finance.Account(f.ctx, f.membership, f.membership.ID)
+	if err != nil || account.BalanceMinor != 100 || len(account.CategoryStats) != 1 || account.CategoryStats[0].NetMinor != 100 {
+		t.Fatalf("enabled first-period account=%#v err=%v", account, err)
+	}
+	closedOne, err := f.periods.Close(f.ctx, f.admin, f.membership, "optional-settlement-close-one", periodOne, closeOneInput)
+	if err != nil {
+		t.Fatalf("close first period: %v", err)
+	}
+	periodTwo := closedOne.OpenPeriod.ID
+	if _, err := f.bookings.Create(f.ctx, f.admin, f.membership, "optional-settlement-period-two", bookings.CreateInput{
+		ProductID: product.ID, ProductVersion: product.Version, ExpectedPeriodID: periodTwo, Quantity: 2,
+	}); err != nil {
+		t.Fatalf("create second-period booking: %v", err)
+	}
+
+	f.setSettlementsEnabled(false)
+	replayed, err := f.periods.Close(f.ctx, f.admin, f.membership, "optional-settlement-close-one", periodOne, closeOneInput)
+	if err != nil || replayed.OpenPeriod.ID != periodTwo {
+		t.Fatalf("replay completed close while disabled=%#v err=%v", replayed, err)
+	}
+	account, err = f.finance.Account(f.ctx, f.membership, f.membership.ID)
+	if err != nil || account.BalanceMinor != 300 || account.CategoryStats[0].NetMinor != 300 || account.GroupCategoryStats[0].NetMinor != 300 {
+		t.Fatalf("disabled all-time account before pause booking=%#v err=%v", account, err)
+	}
+	if _, err := f.bookings.Create(f.ctx, f.admin, f.membership, "optional-settlement-disabled-booking", bookings.CreateInput{
+		ProductID: product.ID, ProductVersion: product.Version, ExpectedPeriodID: periodTwo, Quantity: 3,
+	}); err != nil {
+		t.Fatalf("create booking while settlements disabled: %v", err)
+	}
+	if _, err := f.periods.Close(f.ctx, f.admin, f.membership, "optional-settlement-disabled-close-two", periodTwo, periods.CloseInput{Label: "Second", DueAt: "2099-02-01", NextPeriodLabel: "Third"}); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("close second period while disabled error=%v, want conflict", err)
+	}
+	account, err = f.finance.Account(f.ctx, f.membership, f.membership.ID)
+	if err != nil || account.BalanceMinor != 600 || account.CategoryStats[0].NetMinor != 600 || account.GroupCategoryStats[0].NetMinor != 600 {
+		t.Fatalf("disabled all-time account after pause booking=%#v err=%v", account, err)
+	}
+
+	f.setSettlementsEnabled(true)
+	if got := f.openPeriodID(); got != periodTwo {
+		t.Fatalf("open period after re-enabling=%q, want unchanged %q", got, periodTwo)
+	}
+	account, err = f.finance.Account(f.ctx, f.membership, f.membership.ID)
+	if err != nil || account.BalanceMinor != 600 || account.CategoryStats[0].NetMinor != 500 || account.GroupCategoryStats[0].NetMinor != 500 {
+		t.Fatalf("re-enabled current-period account=%#v err=%v", account, err)
+	}
+	if _, err := f.periods.Close(f.ctx, f.admin, f.membership, "optional-settlement-close-two", periodTwo, periods.CloseInput{Label: "Second", DueAt: "2099-02-01", NextPeriodLabel: "Third"}); err != nil {
+		t.Fatalf("close re-enabled period: %v", err)
+	}
+	statements, err := f.periods.Statements(f.ctx, f.membership, periodTwo)
+	if err != nil || len(statements) != 1 || statements[0].ChargesMinor != 500 {
+		t.Fatalf("second-period statements=%#v err=%v, want paused activity included", statements, err)
+	}
+	var auditMetadata string
+	if err := f.db.QueryRowContext(f.ctx, `SELECT metadata_json FROM audit_events WHERE group_id=? AND action='group.settings.updated' ORDER BY occurred_at DESC,id DESC LIMIT 1`, f.group.ID).Scan(&auditMetadata); err != nil {
+		t.Fatalf("read settlement toggle audit: %v", err)
+	}
+	if !strings.Contains(auditMetadata, `"settlementsEnabled":{"current":true,"previous":false}`) {
+		t.Fatalf("settlement toggle audit metadata=%s", auditMetadata)
+	}
+}
+
+func TestGroupOutstandingIncludesPaymentsAndIgnoresSettlementBoundaries(t *testing.T) {
+	f := newFixture(t)
+	_, product := f.catalogItem("Group outstanding", 500)
+	periodID := f.openPeriodID()
+	if _, err := f.bookings.Create(f.ctx, f.admin, f.membership, "group-outstanding-booking", bookings.CreateInput{
+		ProductID: product.ID, ProductVersion: product.Version, ExpectedPeriodID: periodID, Quantity: 1,
+	}); err != nil {
+		t.Fatalf("create group-outstanding booking: %v", err)
+	}
+	if _, err := f.finance.CreatePayment(f.ctx, f.admin, f.membership, "group-outstanding-payment", finance.CreatePaymentInput{
+		MembershipID: f.membership.ID, AmountMinor: 650, ReceivedAt: "2026-08-11T12:00:00Z", Method: "CASH", Reference: "Advance",
+	}); err != nil {
+		t.Fatalf("create group-outstanding payment: %v", err)
+	}
+
+	assertOutstanding := func(membership domain.Membership, want *int64) {
+		t.Helper()
+		outstanding, err := f.finance.GroupOutstanding(f.ctx, membership)
+		if err != nil {
+			t.Fatalf("read group outstanding: %v", err)
+		}
+		if want == nil {
+			if outstanding != nil {
+				t.Fatalf("unauthorized group outstanding=%d, want omitted", *outstanding)
+			}
+			return
+		}
+		if outstanding == nil || *outstanding != *want {
+			t.Fatalf("group outstanding=%v, want %d", outstanding, *want)
+		}
+	}
+
+	wantCredit := int64(-150)
+	assertOutstanding(f.membership, &wantCredit)
+	_, statisticsViewer, _ := f.inviteMember("statistics@example.test", "Statistics Viewer", nil)
+	assertOutstanding(statisticsViewer, &wantCredit)
+
+	f.setSettlementsEnabled(true)
+	if _, err := f.periods.Close(f.ctx, f.admin, f.membership, "group-outstanding-close", periodID, periods.CloseInput{
+		Label: "Closed", DueAt: "2099-01-01", NextPeriodLabel: "Next",
+	}); err != nil {
+		t.Fatalf("close group-outstanding period: %v", err)
+	}
+	assertOutstanding(statisticsViewer, &wantCredit)
+	f.setSettlementsEnabled(false)
+	assertOutstanding(statisticsViewer, &wantCredit)
+
+	emptyRole, err := f.groups.CreateRole(f.ctx, f.admin, f.membership, groups.RoleCommand{Name: "No group statistics", Grants: []domain.PermissionGrant{}})
+	if err != nil {
+		t.Fatalf("create permissionless role: %v", err)
+	}
+	if _, err := f.groups.ReplaceMemberRoles(f.ctx, f.admin, f.membership, statisticsViewer.ID, []string{emptyRole.ID}, statisticsViewer.RoleAssignmentsVersion); err != nil {
+		t.Fatalf("remove group-statistics permission: %v", err)
+	}
+	assertOutstanding(statisticsViewer, nil)
+}
+
 func TestBootstrapLoginInvitationReplayAndTenantRBAC(t *testing.T) {
 	f := newFixture(t)
 	if _, err := f.groups.Create(f.ctx, f.admin, "Invalid Currency", "EU1"); !errors.Is(err, domain.ErrValidation) {
@@ -198,10 +352,10 @@ func TestBootstrapLoginInvitationReplayAndTenantRBAC(t *testing.T) {
 	}
 }
 
-func TestGroupAdministratorCanTransferOnlyReservedRoleWithoutRoleManagement(t *testing.T) {
+func TestGroupAndMemberManagerCanManageMembershipsWithoutRoleDefinitions(t *testing.T) {
 	f := newFixture(t)
 	delegatedPrincipal, delegatedAdministrator, _ := f.inviteMember("delegated-admin@example.test", "Delegated Administrator", nil)
-	delegatedAdministrator = f.assignPermissionRole(delegatedAdministrator, "Delegated group administration", domain.PermissionGroupAdministration)
+	delegatedAdministrator = f.assignPermissionRole(delegatedAdministrator, "Delegated group administration", domain.PermissionGroupAdministration, domain.PermissionMemberManagement)
 	_, transferTarget, _ := f.inviteMember("administrator-target@example.test", "Administrator Target", nil)
 	_, legacyTransferTarget, _ := f.inviteMember("legacy-administrator-target@example.test", "Legacy Administrator Target", nil)
 	nonAdministrativeRole, err := f.groups.CreateRole(f.ctx, f.admin, f.membership, groups.RoleCommand{
@@ -243,19 +397,21 @@ func TestGroupAdministratorCanTransferOnlyReservedRoleWithoutRoleManagement(t *t
 		delegatedAdministrator.ID,
 		append(append([]string(nil), delegatedAdministrator.RoleIDs...), nonAdministrativeRole.ID),
 		delegatedAdministrator.RoleAssignmentsVersion,
-	); !errors.Is(err, domain.ErrForbidden) {
-		t.Fatalf("group-administrator-only non-administrative assignment error = %v, want forbidden", err)
+	); err != nil {
+		t.Fatalf("member-manager ordinary assignment error = %v", err)
 	}
-	if _, err := f.groups.UpdatePermissions(
+	legacyAssignmentVersion, err := f.groups.UpdatePermissions(
 		f.ctx,
 		delegatedPrincipal,
 		delegatedAdministrator,
 		legacyTransferTarget.ID,
 		groups.PermissionUpdate{Roles: []domain.Role{domain.RoleFinanceManager}},
 		legacyTransferTarget.RoleAssignmentsVersion,
-	); !errors.Is(err, domain.ErrForbidden) {
-		t.Fatalf("group-administrator-only legacy member assignment error = %v, want forbidden", err)
+	)
+	if err != nil {
+		t.Fatalf("member-manager legacy member assignment error = %v", err)
 	}
+	legacyTransferTarget.RoleAssignmentsVersion = legacyAssignmentVersion
 	if _, err := f.groups.CreateInvitation(
 		f.ctx,
 		delegatedPrincipal,
@@ -265,8 +421,8 @@ func TestGroupAdministratorCanTransferOnlyReservedRoleWithoutRoleManagement(t *t
 		[]domain.Role{domain.RoleCatalogManager},
 		nil,
 		nil,
-	); !errors.Is(err, domain.ErrForbidden) {
-		t.Fatalf("group-administrator-only legacy invitation creation error = %v, want forbidden", err)
+	); err != nil {
+		t.Fatalf("member-manager legacy invitation creation error = %v", err)
 	}
 	pendingInvitation, err := f.createStarterInvitation("legacy-role-update@example.test", "Legacy Role Update")
 	if err != nil {
@@ -282,8 +438,8 @@ func TestGroupAdministratorCanTransferOnlyReservedRoleWithoutRoleManagement(t *t
 		nil,
 		nil,
 		pendingInvitation.RoleAssignmentsVersion,
-	); !errors.Is(err, domain.ErrForbidden) {
-		t.Fatalf("group-administrator-only legacy invitation update error = %v, want forbidden", err)
+	); err != nil {
+		t.Fatalf("member-manager legacy invitation update error = %v", err)
 	}
 	if _, err := f.groups.ReplaceMemberRoles(
 		f.ctx,
@@ -316,13 +472,29 @@ func TestGroupAdministratorCanTransferOnlyReservedRoleWithoutRoleManagement(t *t
 	}
 }
 
-func TestRoleManagerListsOnlyOpenInvitations(t *testing.T) {
+func TestRoleManagerCannotListInvitationLifecycle(t *testing.T) {
 	f := newFixture(t)
 	_, roleManager, _ := f.inviteMember("role-manager@example.test", "Role Manager", nil)
 	roleManager = f.assignPermissionRole(roleManager, "Invitation role manager", domain.PermissionRoleManagement)
-
-	openInvitation, err := f.createStarterInvitation("open-role-invitation@example.test", "Open Role Invitation")
+	_, product := f.catalogItem("Invitation privacy product", 100)
+	guestBookings, err := f.bookings.CreateBatch(f.ctx, f.admin, f.membership, "invitation-privacy-guest", bookings.BatchCreateInput{
+		ProductID:                  product.ID,
+		ProductVersion:             product.Version,
+		ExpectedPeriodID:           f.openPeriodID(),
+		Quantity:                   1,
+		TemporaryGuestDisplayNames: []string{"Invitation Privacy Guest"},
+	})
+	if err != nil || len(guestBookings) != 1 {
+		t.Fatalf("create invitation privacy guest: bookings=%#v err=%v", guestBookings, err)
+	}
+	claimInvitation, err := f.groups.CreateTemporaryGuestClaimInvitation(f.ctx, f.admin, f.membership, guestBookings[0].TargetMembershipID, "future-login@example.test", []string{
+		authorization.PresetRoleID(f.membership.GroupID, domain.RolePresetMember),
+	})
 	if err != nil {
+		t.Fatalf("create claim invitation: %v", err)
+	}
+
+	if _, err := f.createStarterInvitation("open-role-invitation@example.test", "Open Role Invitation"); err != nil {
 		t.Fatalf("create open invitation: %v", err)
 	}
 	revokedInvitation, err := f.createStarterInvitation("revoked-role-invitation@example.test", "Revoked Role Invitation")
@@ -341,11 +513,21 @@ func TestRoleManagerListsOnlyOpenInvitations(t *testing.T) {
 	}
 
 	visible, err := f.groups.ListInvitations(f.ctx, roleManager)
-	if err != nil {
-		t.Fatalf("list role-manager invitations: %v", err)
+	if !errors.Is(err, domain.ErrForbidden) || visible != nil {
+		t.Fatalf("role-manager invitations = %#v err=%v, want forbidden", visible, err)
 	}
-	if len(visible) != 1 || visible[0].ID != openInvitation.ID {
-		t.Fatalf("role-manager invitations = %#v, want only %s", visible, openInvitation.ID)
+	adminVisible, err := f.groups.ListInvitations(f.ctx, f.membership)
+	if err != nil {
+		t.Fatalf("list administrator invitations: %v", err)
+	}
+	claimVisible := false
+	for _, invitation := range adminVisible {
+		if invitation.ID == claimInvitation.ID {
+			claimVisible = invitation.TargetMembershipID != nil && *invitation.TargetMembershipID == guestBookings[0].TargetMembershipID
+		}
+	}
+	if !claimVisible {
+		t.Fatalf("administrator invitations = %#v, want claim invitation %s with target", adminVisible, claimInvitation.ID)
 	}
 }
 
@@ -565,6 +747,7 @@ func TestExternalPaymentChangesNotifyTarget(t *testing.T) {
 
 func TestDefaultOpenPeriodLabels(t *testing.T) {
 	f := newFixture(t)
+	f.setSettlementsEnabled(true)
 	var bootstrapLabel string
 	if err := f.db.QueryRowContext(f.ctx, `SELECT label FROM periods WHERE group_id=? AND status='OPEN'`, f.group.ID).Scan(&bootstrapLabel); err != nil || bootstrapLabel != domain.DefaultOpenPeriodLabel {
 		t.Fatalf("bootstrap open period label = %q err=%v, want %q", bootstrapLabel, err, domain.DefaultOpenPeriodLabel)
@@ -684,6 +867,7 @@ func TestCatalogReorderPersistsAcrossCatalogBookingAndDashboardReads(t *testing.
 
 func TestCatalogDeletionRequiresArchivalAndPreservesHistory(t *testing.T) {
 	f := newFixture(t)
+	f.setSettlementsEnabled(true)
 	category, product := f.catalogItem("Disposable", 125)
 	regularPrincipal, regularMembership, _ := f.inviteMember("catalog-delete-member@example.test", "Catalog Delete Member", nil)
 	if err := f.catalog.DeleteProduct(f.ctx, regularPrincipal, regularMembership, product.ID, product.Version); !errors.Is(err, domain.ErrForbidden) {
@@ -888,6 +1072,45 @@ func TestAuthenticationThrottlesSessionActivityWrites(t *testing.T) {
 	}
 }
 
+func TestBookingActivityUsesCurrentAvatarURLs(t *testing.T) {
+	f := newFixture(t)
+	_, product := f.catalogItem("Avatar activity", 275)
+	input := bookings.CreateInput{
+		ProductID:        product.ID,
+		ProductVersion:   product.Version,
+		ExpectedPeriodID: f.openPeriodID(),
+		Quantity:         1,
+	}
+
+	created, err := f.bookings.Create(f.ctx, f.admin, f.membership, "avatar-activity-create", input)
+	if err != nil {
+		t.Fatalf("create booking: %v", err)
+	}
+	firstAvatarKey := strings.Repeat("a", 64) + ".png"
+	if _, err := f.db.ExecContext(f.ctx, `UPDATE users SET avatar_key=? WHERE id=?`, firstAvatarKey, f.membership.UserID); err != nil {
+		t.Fatalf("set first avatar: %v", err)
+	}
+	firstAvatarURL := media.UserAvatarURL(f.membership.UserID, firstAvatarKey)
+	activity, err := f.bookings.ListActivity(f.ctx, f.membership, f.openPeriodID(), 20)
+	if err != nil || len(activity) != 1 || activity[0].ActorAvatarURL != firstAvatarURL || activity[0].TargetAvatarURL != firstAvatarURL {
+		t.Fatalf("activity with first avatar = %#v, err = %v", activity, err)
+	}
+
+	secondAvatarKey := strings.Repeat("b", 64) + ".png"
+	if _, err := f.db.ExecContext(f.ctx, `UPDATE users SET avatar_key=? WHERE id=?`, secondAvatarKey, f.membership.UserID); err != nil {
+		t.Fatalf("set replacement avatar: %v", err)
+	}
+	secondAvatarURL := media.UserAvatarURL(f.membership.UserID, secondAvatarKey)
+	activity, err = f.bookings.ListActivity(f.ctx, f.membership, f.openPeriodID(), 20)
+	if err != nil || len(activity) != 1 || activity[0].ActorAvatarURL != secondAvatarURL || activity[0].TargetAvatarURL != secondAvatarURL {
+		t.Fatalf("activity with replacement avatar = %#v, err = %v", activity, err)
+	}
+	replayed, err := f.bookings.Create(f.ctx, f.admin, f.membership, "avatar-activity-create", input)
+	if err != nil || replayed.ID != created.ID || replayed.ActorAvatarURL != secondAvatarURL || replayed.TargetAvatarURL != secondAvatarURL {
+		t.Fatalf("replayed booking with replacement avatar = %#v, err = %v", replayed, err)
+	}
+}
+
 func TestBookingCreateReplayRefreshesVoidCapabilitiesAndState(t *testing.T) {
 	f := newFixture(t)
 	memberPrincipal, member, _ := f.inviteMember("booking-replay@example.test", "Booking Replay", nil)
@@ -906,8 +1129,18 @@ func TestBookingCreateReplayRefreshesVoidCapabilitiesAndState(t *testing.T) {
 	if _, err := f.bookings.Void(f.ctx, memberPrincipal, member, "replay-void-one", created.ID, ""); err != nil {
 		t.Fatalf("void created booking: %v", err)
 	}
+	const renamedMember = "Booking Replay Renamed"
+	if _, err := f.db.ExecContext(f.ctx, `UPDATE users SET display_name=? WHERE id=?`, renamedMember, member.UserID); err != nil {
+		t.Fatalf("rename booking replay member: %v", err)
+	}
+	member.DisplayName = renamedMember
+	memberPrincipal.DisplayName = renamedMember
+	replayedVoid, err := f.bookings.Void(f.ctx, memberPrincipal, member, "replay-void-one", created.ID, "")
+	if err != nil || replayedVoid.ActorDisplayName != renamedMember || replayedVoid.TargetDisplayName != renamedMember {
+		t.Fatalf("void replay with refreshed identities = %#v, err = %v", replayedVoid, err)
+	}
 	replayedVoided, err := f.bookings.Create(f.ctx, memberPrincipal, member, "replay-create-one", input)
-	if err != nil || replayedVoided.VoidedAt == nil || replayedVoided.CanVoid || replayedVoided.VoidReasonRequired || replayedVoided.VoidWithoutReasonUntil != nil {
+	if err != nil || replayedVoided.VoidedAt == nil || replayedVoided.CanVoid || replayedVoided.VoidReasonRequired || replayedVoided.VoidWithoutReasonUntil != nil || replayedVoided.ActorDisplayName != renamedMember || replayedVoided.TargetDisplayName != renamedMember {
 		t.Fatalf("voided create replay = %#v, err = %v", replayedVoided, err)
 	}
 
@@ -1306,6 +1539,7 @@ func TestUserDefinedProductPricingIsValidatedAndSnapshotted(t *testing.T) {
 
 func TestPaymentFIFOReversalAndClosedPeriodImmutability(t *testing.T) {
 	f := newFixture(t)
+	f.setSettlementsEnabled(true)
 	_, product := f.catalogItem("Products", 100)
 	periodOne := f.openPeriodID()
 	if _, err := f.bookings.Create(f.ctx, f.admin, f.membership, "period-one-booking", bookings.CreateInput{ProductID: product.ID, ProductVersion: product.Version, ExpectedPeriodID: periodOne, Quantity: 1}); err != nil {
@@ -1386,6 +1620,7 @@ func TestPaymentFIFOReversalAndClosedPeriodImmutability(t *testing.T) {
 
 func TestOverpaymentCreditsFutureClaims(t *testing.T) {
 	f := newFixture(t)
+	f.setSettlementsEnabled(true)
 	_, product := f.catalogItem("Products", 100)
 	periodOne := f.openPeriodID()
 	if _, err := f.bookings.Create(f.ctx, f.admin, f.membership, "credit-charge-one", bookings.CreateInput{ProductID: product.ID, ProductVersion: product.Version, ExpectedPeriodID: periodOne, Quantity: 1}); err != nil {
@@ -1421,6 +1656,7 @@ func TestOverpaymentCreditsFutureClaims(t *testing.T) {
 
 func TestNegativeCorrectionOffsetsOldClaimBeforePayment(t *testing.T) {
 	f := newFixture(t)
+	f.setSettlementsEnabled(true)
 	_, product := f.catalogItem("Products", 100)
 	periodOne := f.openPeriodID()
 	booking, err := f.bookings.Create(f.ctx, f.admin, f.membership, "correction-charge", bookings.CreateInput{ProductID: product.ID, ProductVersion: product.Version, ExpectedPeriodID: periodOne, Quantity: 1})
@@ -1460,6 +1696,7 @@ func TestNegativeCorrectionOffsetsOldClaimBeforePayment(t *testing.T) {
 
 func TestPartialCorrectionAndPaymentSettleOriginalClaim(t *testing.T) {
 	f := newFixture(t)
+	f.setSettlementsEnabled(true)
 	_, product := f.catalogItem("Products", 50)
 	periodOne := f.openPeriodID()
 	first, err := f.bookings.Create(f.ctx, f.admin, f.membership, "partial-correction-first", bookings.CreateInput{ProductID: product.ID, ProductVersion: product.Version, ExpectedPeriodID: periodOne, Quantity: 1})

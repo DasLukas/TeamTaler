@@ -16,28 +16,36 @@ export type GroupPermission = 'SELF_RECORD_PAYMENT';
 /** Stable authorization keys understood by the API and every client. */
 export type PermissionKey =
   | 'GROUP_ADMINISTRATION'
+  | 'MEMBER_MANAGEMENT'
   | 'ROLE_MANAGEMENT'
   | 'FINANCE_MANAGEMENT'
   | 'CATALOG_MANAGEMENT'
+  | 'VIEW_MEMBER_DIRECTORY'
+  | 'VIEW_GROUP_STATISTICS'
   | 'VIEW_ALL_BOOKING_ACTIVITY'
   | 'RECORD_OWN_PAYMENT'
   | 'CREATE_OWN_BOOKING'
   | 'VOID_OWN_BOOKING'
   | 'VOID_ANY_BOOKING'
-  | 'BOOK_FOR_OTHERS';
+  | 'BOOK_FOR_OTHERS'
+  | 'BOOK_FOR_GUESTS';
 
 /** Complete permission-key registry in stable display order. */
 export const PERMISSION_KEYS = [
   'GROUP_ADMINISTRATION',
+  'MEMBER_MANAGEMENT',
   'ROLE_MANAGEMENT',
   'FINANCE_MANAGEMENT',
   'CATALOG_MANAGEMENT',
+  'VIEW_MEMBER_DIRECTORY',
+  'VIEW_GROUP_STATISTICS',
   'VIEW_ALL_BOOKING_ACTIVITY',
   'RECORD_OWN_PAYMENT',
   'CREATE_OWN_BOOKING',
   'VOID_OWN_BOOKING',
   'VOID_ANY_BOOKING',
   'BOOK_FOR_OTHERS',
+  'BOOK_FOR_GUESTS',
 ] as const satisfies readonly PermissionKey[];
 
 /**
@@ -131,12 +139,26 @@ export type PeriodStatus = 'OPEN' | 'CLOSED';
 /** Settlement payment status. */
 export type SettlementStatus = 'OPEN' | 'PARTIAL' | 'PAID' | 'CREDIT';
 
+/** Operational lifecycle state of one group membership. */
+export type MembershipStatus = 'ACTIVE' | 'ARCHIVED' | 'DELETED';
+
 /** A signed-in user account. */
 export interface User {
   id: string;
   displayName: string;
   email: string;
   avatarUrl?: string;
+}
+
+/** Public availability of account-recovery features for the current deployment. */
+export interface AuthenticationCapabilities {
+  passwordResetAvailable: boolean;
+  emailChangeAvailable: boolean;
+}
+
+/** Confirmation returned after an email-change request has been accepted. */
+export interface EmailChangeRequestResult {
+  verificationRequired: true;
 }
 
 /** A group available to the signed-in user. */
@@ -155,19 +177,50 @@ export interface Group {
   };
 }
 
-/** Administrator-managed notification behavior shared by one group. */
+/** One stable, ordered, administrator-managed transaction form option. */
+export interface ConfigurableItem {
+  id: string;
+  label: string;
+}
+
+/** Non-sensitive operational behavior used by finance, booking, and payment surfaces. */
+export interface TransactionSettings {
+  settlementsEnabled: boolean;
+  foreignBookingReasonRequired: boolean;
+  ownPaymentReasonRequired: boolean;
+  otherPaymentReasonRequired: boolean;
+  paymentMethods: ConfigurableItem[];
+  bookingReasons: ConfigurableItem[];
+  paymentReasons: ConfigurableItem[];
+}
+
+/** Administrator-managed group behavior shared by one group. */
 export interface GroupSettings {
+  settlementsEnabled: boolean;
   notificationEmailsEnabled: boolean;
   notificationEmailDeliveryAvailable: boolean;
   defaultRoleId: string | null;
+  foreignBookingReasonRequired: boolean;
+  ownPaymentReasonRequired: boolean;
+  otherPaymentReasonRequired: boolean;
+  paymentMethods: ConfigurableItem[];
+  bookingReasons: ConfigurableItem[];
+  paymentReasons: ConfigurableItem[];
 }
 
 /**
  * Group notification-settings update accepted by the API.
  */
 export interface GroupSettingsUpdateInput {
+  settlementsEnabled?: boolean;
   notificationEmailsEnabled?: boolean;
   defaultRoleId?: string;
+  foreignBookingReasonRequired?: boolean;
+  ownPaymentReasonRequired?: boolean;
+  otherPaymentReasonRequired?: boolean;
+  paymentMethods?: ConfigurableItem[];
+  bookingReasons?: ConfigurableItem[];
+  paymentReasons?: ConfigurableItem[];
 }
 
 /** Administrator-visible state of the group's single public join link. */
@@ -289,15 +342,17 @@ export interface Membership {
   id: string;
   userId: string;
   displayName: string;
-  email: string;
+  email: string | null;
   initials: string;
   avatarUrl?: string;
+  isTemporaryGuest: boolean;
   roles: GroupRole[];
   groupPermissions: GroupPermission[];
   categoryPermissions: CategoryPermission[];
   roleIds?: string[];
   effectiveGrants?: PermissionGrant[];
   roleAssignmentsVersion?: number;
+  status: MembershipStatus;
   active: boolean;
   etag?: string;
 }
@@ -307,6 +362,7 @@ export interface Booking {
   id: string;
   memberId: string;
   memberName: string;
+  memberStatus: MembershipStatus;
   memberAvatarUrl?: string;
   productId: string;
   productName: string;
@@ -317,6 +373,7 @@ export interface Booking {
   total: Money;
   bookedAt: string;
   bookedByName: string;
+  bookedByStatus: MembershipStatus;
   bookedByMemberId?: string;
   bookedByAvatarUrl?: string;
   reason?: string;
@@ -339,6 +396,7 @@ export interface CategoryTotal {
 /** Dashboard data for the active group and member. */
 export interface Dashboard {
   openBalance: Money;
+  groupOutstanding?: Money;
   currentPeriod: Period;
   categoryTotals: CategoryTotal[];
   groupCategoryTotals: CategoryTotal[];
@@ -363,8 +421,28 @@ export interface BookingBatchCommand {
   expectedPeriodId: string;
   quantity: number;
   unitPrice?: Money;
-  targetMembershipIds: string[];
+  targetMembershipIds?: string[];
+  temporaryGuestDisplayNames?: string[];
   reason?: string;
+}
+
+/** Minimal member identity exposed as a selectable booking target. */
+export interface BookingTarget {
+  membershipId: string;
+  displayName: string;
+  avatarUrl?: string;
+  isTemporaryGuest: boolean;
+}
+
+/** Permission-filtered read model required by the product booking page. */
+export interface BookingContext {
+  openPeriod: Period;
+  ownBalance: Money;
+  currentMembership: Membership;
+  targets: BookingTarget[];
+  canBookForGuests: boolean;
+  foreignBookingReasonRequired: boolean;
+  bookingReasons: ConfigurableItem[];
 }
 
 /** One immutable row in a member account statement. */
@@ -378,12 +456,13 @@ export interface LedgerEntry {
   referenceId: string;
 }
 
-/** Consolidated group account balance for one active or archived membership. */
+/** Consolidated group account balance for one operational or non-zero deleted membership. */
 export interface AccountSummary {
   membershipId: string;
   displayName: string;
   avatarUrl?: string;
-  status: 'ACTIVE' | 'ARCHIVED';
+  isTemporaryGuest: boolean;
+  status: MembershipStatus;
   currency: string;
   balance: Money;
 }
@@ -393,12 +472,20 @@ export interface Payment {
   id: string;
   membershipId: string;
   memberName: string;
+  membershipStatus: MembershipStatus;
   amount: Money;
   receivedAt: string;
-  method: 'CASH' | 'BANK_TRANSFER' | 'PAYPAL' | 'OTHER';
+  method: string;
+  methodLabel: string;
   reference?: string;
   note?: string;
   status: 'POSTED' | 'REVERSED';
+}
+
+/** Complete command for restoring one archived group membership. */
+export interface MemberReactivationCommand {
+  displayName?: string;
+  roleIds: string[];
 }
 
 /** Command used by finance managers to record an incoming payment. */
@@ -416,7 +503,7 @@ export interface SelfPaymentCommand {
   amount: Money;
   receivedAt: string;
   method: Payment['method'];
-  reference: string;
+  reference?: string;
 }
 
 /** An accounting period that groups bookings and payments. */
@@ -436,6 +523,7 @@ export interface Settlement {
   periodLabel: string;
   membershipId: string;
   memberName: string;
+  email: string | null;
   amount: Money;
   paidAmount: Money;
   openAmount?: Money;
@@ -544,6 +632,7 @@ export interface InvitationMetadata {
   emailDeliveryStatus: EmailDeliveryStatus;
   emailSentAt?: string;
   emailFailureCode?: string;
+  targetMembershipId?: string;
 }
 
 /** A newly created one-time invitation including its one-time acceptance URL. */
@@ -559,6 +648,7 @@ export interface CreatedInvitation {
   expiresAt: string;
   acceptUrl: string;
   emailDeliveryStatus: EmailDeliveryStatus;
+  targetMembershipId?: string;
 }
 
 /** Editable defaults assigned to a manual group invitation. */
@@ -642,5 +732,6 @@ export interface ProblemDetails {
   status: number;
   detail?: string;
   instance?: string;
+  existingMembershipId?: string;
   errors?: Record<string, string[]>;
 }

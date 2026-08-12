@@ -313,7 +313,7 @@ func (s Service) AcceptPublicJoinLink(ctx context.Context, principal domain.Prin
 			return err
 		}
 		var membershipID, status string
-		err = tx.QueryRowContext(ctx, `SELECT id,status FROM memberships WHERE group_id=? AND user_id=?`, link.GroupID, principal.UserID).Scan(&membershipID, &status)
+		err = tx.QueryRowContext(ctx, `SELECT id,status FROM memberships WHERE group_id=? AND user_id=? AND deleted_at IS NULL`, link.GroupID, principal.UserID).Scan(&membershipID, &status)
 		if err == nil && status == "ACTIVE" {
 			return hydrateJoinedMembership(ctx, tx, principal, membershipID, link.GroupID, &membership)
 		}
@@ -329,7 +329,7 @@ func (s Service) AcceptPublicJoinLink(ctx context.Context, principal domain.Prin
 			if _, err := tx.ExecContext(ctx, `DELETE FROM membership_roles WHERE group_id=? AND membership_id=?`, link.GroupID, membershipID); err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx, `UPDATE memberships SET status='ACTIVE',archived_at=NULL WHERE group_id=? AND id=? AND status='ARCHIVED'`, link.GroupID, membershipID); err != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE memberships SET status='ACTIVE',archived_at=NULL WHERE group_id=? AND id=? AND status='ARCHIVED' AND deleted_at IS NULL`, link.GroupID, membershipID); err != nil {
 				return err
 			}
 		} else {
@@ -435,11 +435,11 @@ func assignCurrentDefaultRole(ctx context.Context, tx *sql.Tx, actorUserID, grou
 		return err
 	}
 	var grantsAdministration int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM roles r LEFT JOIN role_permission_grants g ON g.group_id=r.group_id AND g.role_id=r.id AND g.permission_key='GROUP_ADMINISTRATION' AND g.scope_type='GROUP' WHERE r.group_id=? AND r.id=? AND g.role_id IS NOT NULL`, groupID, roleID).Scan(&grantsAdministration); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM roles r LEFT JOIN role_permission_grants g ON g.group_id=r.group_id AND g.role_id=r.id AND g.permission_key IN ('GROUP_ADMINISTRATION','MEMBER_MANAGEMENT') AND g.scope_type='GROUP' WHERE r.group_id=? AND r.id=? AND g.role_id IS NOT NULL`, groupID, roleID).Scan(&grantsAdministration); err != nil {
 		return err
 	}
 	if grantsAdministration > 0 {
-		return domain.ValidationError{Field: "defaultRoleId", Message: "default role cannot grant group administration"}
+		return domain.ValidationError{Field: "defaultRoleId", Message: "default role cannot grant administration permissions"}
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO membership_role_assignments(group_id,membership_id,role_id,version,assigned_at,assigned_by) VALUES(?,?,?,1,?,?)`, groupID, membershipID, roleID, now, actorUserID); err != nil {
 		return err
@@ -468,10 +468,11 @@ func hydrateJoinedMembership(ctx context.Context, queryer publicJoinQueryer, pri
 	membership.ID = membershipID
 	membership.GroupID = groupID
 	membership.UserID = principal.UserID
-	membership.Email = principal.Email
+	membership.Email = stringPointer(principal.Email)
 	membership.DisplayName = principal.DisplayName
 	membership.AvatarURL = media.UserAvatarURL(principal.UserID, "")
 	membership.Status = "ACTIVE"
+	membership.IsTemporaryGuest = false
 	return nil
 }
 

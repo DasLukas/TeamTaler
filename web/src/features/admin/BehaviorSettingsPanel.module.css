@@ -9,6 +9,7 @@
 
 .header h2,
 .settingRow h3,
+.settingRow h4,
 .settingRow p,
 .notice,
 .error,
@@ -22,11 +23,62 @@
   color: var(--color-muted);
 }
 
+.guestSetup {
+  display: grid;
+  gap: var(--space-5);
+  padding-top: var(--space-2);
+}
+
+.guestSetup .settingRow {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+
+.warning,
+.warningBlock > p {
+  color: var(--color-red-600);
+}
+
+.warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  background: var(--color-red-100);
+}
+
+.warning svg,
+.warningBlock svg { flex: 0 0 auto; }
+
+.warningBlock {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--color-red-600);
+  border-radius: var(--radius-md);
+  background: var(--color-red-100);
+}
+
+.warningBlock > p {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
 .form {
   display: grid;
-  max-width: 840px;
+  width: 100%;
   gap: var(--space-5);
 }
+
+.settingsSection,
+.bookingSection { display: grid; gap: var(--space-5); padding-top: var(--space-3); }
+.settingsSection > header h3,
+.bookingSection > header h3 { margin: 0; font-size: var(--font-size-xl); }
+.ruleList { display: grid; gap: var(--space-4); }
+.ruleList .settingRow + .settingRow { padding-top: var(--space-4); border-top: 1px solid var(--color-border); }
 
 .card {
   display: grid;

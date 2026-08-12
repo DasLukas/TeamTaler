@@ -18,7 +18,7 @@ describe('AccountBalancesPanel', () => {
     mocks.useActiveGroup.mockReturnValue({ activeGroupId: 'group-sv-adler', activeGroup: demoSession.groups[0] });
   });
 
-  it('shows exact summary amounts and separates active and former memberships', async () => {
+  it('shows exact summary amounts and separates active and archived memberships', async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(<QueryClientProvider client={queryClient}><AccountBalancesPanel /></QueryClientProvider>);
 
@@ -29,7 +29,7 @@ describe('AccountBalancesPanel', () => {
     expect(within(credits as HTMLElement).getByText(/2,50/)).toBeVisible();
     expect(within(net as HTMLElement).getByText(/25,90/)).toBeVisible();
     expect(screen.getByRole('heading', { name: /Aktive Mitglieder/ })).toBeVisible();
-    expect(screen.getByRole('heading', { name: /Ehemalige Mitglieder/ })).toBeVisible();
+    expect(screen.getByRole('heading', { name: /Archivierte Mitglieder/ })).toBeVisible();
     expect(screen.getAllByText('Pia Lehmann').length).toBeGreaterThan(0);
   });
 
@@ -43,5 +43,19 @@ describe('AccountBalancesPanel', () => {
 
     expect(screen.queryByText('Lukas Waschul')).not.toBeInTheDocument();
     expect(screen.getAllByText('Pia Lehmann').length).toBeGreaterThan(0);
+  });
+
+  it('renders deleted accounts in their own operational group', async () => {
+    mocks.getAccountSummaries.mockResolvedValue([...demoAccountSummaries, {
+      membershipId: 'member-deleted', displayName: 'Deleted Account', isTemporaryGuest: false, status: 'DELETED',
+      currency: 'EUR', balance: { minorUnits: '250', currency: 'EUR' },
+    }]);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><AccountBalancesPanel /></QueryClientProvider>);
+
+    const deletedHeading = await screen.findByRole('heading', { name: /Gelöschte Konten/ });
+    const deletedSection = deletedHeading.closest('section');
+    expect(within(deletedSection as HTMLElement).getAllByText('Deleted Account').length).toBeGreaterThan(0);
+    expect(within(deletedSection as HTMLElement).getAllByText(i18n.t('common.deleted')).length).toBeGreaterThan(0);
   });
 });

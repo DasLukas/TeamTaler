@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
@@ -9,6 +9,8 @@ import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
 import { AuthLayout } from './AuthLayout';
 import styles from './AuthForms.module.css';
+import { authenticationCapabilitiesQueryKey } from './authenticationCapabilities';
+import { PASSWORD_MAX_LENGTH } from './passwordPolicy';
 
 /**
  * Renders and submits the local-account login form.
@@ -19,6 +21,7 @@ export function LoginPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const capabilities = useQuery({ queryKey: authenticationCapabilitiesQueryKey, queryFn: api.getAuthenticationCapabilities, retry: false, staleTime: Infinity });
   const { register, handleSubmit, formState: { errors } } = useForm<LoginCommand>({ defaultValues: isDevelopmentDemoEnabled ? { email: 'lukas@example.test', password: 'teamtaler-demo' } : { email: '', password: '' } });
   const loginMutation = useMutation({
     mutationFn: api.login,
@@ -36,8 +39,9 @@ export function LoginPage() {
           <TextInput autoComplete="email" id="login-email" type="email" {...register('email', { required: t('auth.emailRequired') })} />
         </Field>
         <Field error={errors.password?.message} htmlFor="login-password" label={t('auth.password')}>
-          <TextInput autoComplete="current-password" id="login-password" type="password" {...register('password', { required: t('auth.passwordRequired'), maxLength: { value: 1024, message: t('auth.passwordMax') } })} />
+          <TextInput autoComplete="current-password" id="login-password" type="password" {...register('password', { required: t('auth.passwordRequired'), maxLength: { value: PASSWORD_MAX_LENGTH, message: t('auth.passwordMax') } })} />
         </Field>
+        {capabilities.data?.passwordResetAvailable === true ? <Link className={styles.secondaryLink} to="/forgot-password">{t('auth.forgotPassword')}</Link> : null}
         {loginMutation.isError ? <p className={styles.error} role="alert">{loginMutation.error.message}</p> : null}
         <Button disabled={loginMutation.isPending} fullWidth size="large" type="submit">{loginMutation.isPending ? t('auth.loginPending') : t('auth.loginAction')}</Button>
       </form>

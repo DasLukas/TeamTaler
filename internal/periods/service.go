@@ -117,6 +117,15 @@ func (s Service) Close(ctx context.Context, actor domain.Principal, membership d
 		if err != nil || found {
 			return err
 		}
+		var settlementsEnabled bool
+		if err := tx.QueryRowContext(ctx, `SELECT settlements_enabled FROM group_settings WHERE group_id=?`, membership.GroupID).Scan(&settlementsEnabled); errors.Is(err, sql.ErrNoRows) {
+			return domain.ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		if !settlementsEnabled {
+			return domain.ErrConflict
+		}
 		var startsAt string
 		err = tx.QueryRowContext(ctx, `SELECT starts_at FROM periods WHERE id=? AND group_id=? AND status='OPEN'`, periodID, membership.GroupID).Scan(&startsAt)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -187,12 +196,45 @@ func (s Service) snapshotStatements(ctx context.Context, tx *sql.Tx, groupID, pe
 		coalesce((SELECT sum(pa.amount_minor) FROM payment_allocations pa JOIN payments py ON py.id=pa.payment_id WHERE pa.period_id=? AND py.membership_id=m.id AND py.reversed_at IS NULL),0),
 		coalesce((SELECT sum(aa.amount_minor) FROM period_adjustment_allocations aa WHERE aa.target_period_id=? AND aa.membership_id=m.id),0),
 		coalesce((SELECT sum(aa.amount_minor) FROM period_adjustment_allocations aa WHERE aa.source_period_id=? AND aa.membership_id=m.id),0)
-		FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.group_id=?`, periodID, periodID, periodID, periodID, groupID)
+		FROM memberships m
+		JOIN users u ON u.id=m.user_id
+		WHERE m.group_id=?
+		  AND (
+		      u.email IS NOT NULL
+		      OR EXISTS (
+		          SELECT 1
+		          FROM ledger_entries activity_ledger
+		          WHERE activity_ledger.group_id=m.group_id
+		            AND activity_ledger.period_id=?
+		            AND activity_ledger.membership_id=m.id
+		      )
+		      OR EXISTS (
+		          SELECT 1
+		          FROM payment_allocations activity_allocation
+		          JOIN payments activity_payment ON activity_payment.id=activity_allocation.payment_id
+		          WHERE activity_allocation.period_id=?
+		            AND activity_payment.group_id=m.group_id
+		            AND activity_payment.membership_id=m.id
+		      )
+		      OR EXISTS (
+		          SELECT 1
+		          FROM period_adjustment_allocations activity_adjustment
+		          WHERE activity_adjustment.target_period_id=?
+		            AND activity_adjustment.membership_id=m.id
+		      )
+		      OR EXISTS (
+		          SELECT 1
+		          FROM period_adjustment_allocations activity_adjustment
+		          WHERE activity_adjustment.source_period_id=?
+		            AND activity_adjustment.membership_id=m.id
+		      )
+		  )`, periodID, periodID, periodID, periodID, groupID, periodID, periodID, periodID, periodID)
 	if err != nil {
 		return 0, err
 	}
 	type row struct {
-		membershipID, displayName, email string
+		membershipID, displayName        string
+		email                            sql.NullString
 		charges, paid, applied, provided int64
 	}
 	var snapshots []row
@@ -279,8 +321,13 @@ func (s Service) Statements(ctx context.Context, membership domain.Membership, p
 	result := make([]domain.Statement, 0)
 	for rows.Next() {
 		var item domain.Statement
-		if err := rows.Scan(&item.ID, &item.PeriodID, &item.MembershipID, &item.DisplayName, &item.Email, &item.ChargesMinor, &item.PaymentsAllocatedMinor, &item.AdjustmentsAppliedMinor, &item.AdjustmentsProvidedMinor, &item.Currency); err != nil {
+		var email sql.NullString
+		if err := rows.Scan(&item.ID, &item.PeriodID, &item.MembershipID, &item.DisplayName, &email, &item.ChargesMinor, &item.PaymentsAllocatedMinor, &item.AdjustmentsAppliedMinor, &item.AdjustmentsProvidedMinor, &item.Currency); err != nil {
 			return nil, err
+		}
+		if email.Valid {
+			emailValue := email.String
+			item.Email = &emailValue
 		}
 		item.AmountDueMinor = item.ChargesMinor + item.AdjustmentsProvidedMinor - item.PaymentsAllocatedMinor - item.AdjustmentsAppliedMinor
 		item.Status = statementStatus(item.ChargesMinor+item.AdjustmentsProvidedMinor, item.PaymentsAllocatedMinor+item.AdjustmentsAppliedMinor)

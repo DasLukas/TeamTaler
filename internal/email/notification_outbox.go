@@ -134,6 +134,11 @@ func (d *NotificationDispatcher) processOne(ctx context.Context) (bool, error) {
 			d.releaseAfterCancellation(job)
 			return true, nil
 		}
+		if errors.Is(err, sql.ErrNoRows) {
+			return true, withCompletionContext(func(completionContext context.Context) error {
+				return d.markUndeliverable(completionContext, job)
+			})
+		}
 		return true, withCompletionContext(func(completionContext context.Context) error {
 			return d.recordFailure(completionContext, job, FailureCodeDeliveryFailed)
 		})
@@ -200,7 +205,7 @@ func (d *NotificationDispatcher) loadDelivery(ctx context.Context, notificationI
 		JOIN memberships m ON m.id=n.membership_id AND m.group_id=n.group_id
 		JOIN users u ON u.id=m.user_id
 		JOIN groups g ON g.id=n.group_id
-		WHERE n.id=?`, notificationID).Scan(&delivery.toAddress, &delivery.toName, &delivery.groupName, &delivery.eventType, &contextJSON)
+		WHERE n.id=? AND u.email IS NOT NULL`, notificationID).Scan(&delivery.toAddress, &delivery.toName, &delivery.groupName, &delivery.eventType, &contextJSON)
 	if err != nil {
 		return notificationDelivery{}, err
 	}
@@ -219,6 +224,21 @@ func (d *NotificationDispatcher) markSent(ctx context.Context, job claimedNotifi
 	changed, _ := result.RowsAffected()
 	if changed != 1 {
 		return errors.New("notification email lease was lost before completion")
+	}
+	return nil
+}
+
+func (d *NotificationDispatcher) markUndeliverable(ctx context.Context, job claimedNotification) error {
+	now := platform.Timestamp(d.now().UTC())
+	result, err := d.db.ExecContext(ctx, `UPDATE notification_email_outbox
+		SET status='FAILED',next_attempt_at=NULL,lease_token=NULL,lease_until=NULL,last_error_code=?,updated_at=?
+		WHERE notification_id=? AND status='SENDING' AND lease_token=?`, FailureCodeRecipientUnavailable, now, job.notificationID, job.leaseToken)
+	if err != nil {
+		return err
+	}
+	changed, _ := result.RowsAffected()
+	if changed != 1 {
+		return errors.New("notification email lease was lost before recipient failure recording")
 	}
 	return nil
 }

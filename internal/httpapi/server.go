@@ -101,8 +101,15 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /health/ready", server.handleReady)
 	mux.HandleFunc("POST /api/v1/auth/login", server.handleLogin)
 	mux.HandleFunc("POST /api/v1/auth/logout", server.handleLogout)
+	mux.HandleFunc("GET /api/v1/auth/capabilities", server.handleAccountCapabilities)
+	mux.HandleFunc("POST /api/v1/auth/password-reset/request", server.handlePasswordResetRequest)
+	mux.HandleFunc("POST /api/v1/auth/password-reset/confirm", server.handlePasswordResetConfirm)
+	mux.HandleFunc("POST /api/v1/auth/email-change/confirm", server.handleEmailChangeConfirm)
 	mux.HandleFunc("GET /api/v1/session", server.handleSession)
 	mux.HandleFunc("GET /api/v1/me", server.handleSession)
+	mux.HandleFunc("PATCH /api/v1/me/profile", server.handleUpdateProfile)
+	mux.HandleFunc("PUT /api/v1/me/password", server.handleChangePassword)
+	mux.HandleFunc("POST /api/v1/me/email-change", server.handleStartEmailChange)
 	mux.HandleFunc("GET /api/v1/permission-definitions", server.handlePermissionDefinitions)
 	mux.HandleFunc("POST /api/v1/me/avatar", server.handleProfileAvatar)
 	mux.HandleFunc("DELETE /api/v1/me/avatar", server.handleRemoveProfileAvatar)
@@ -119,13 +126,18 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}", server.handleUpdateGroup)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/settings", server.handleGetGroupSettings)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/settings", server.handleUpdateGroupSettings)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/transaction-settings", server.handleGetTransactionSettings)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/logo", server.handleGroupLogo)
 	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/logo", server.handleRemoveGroupLogo)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/dashboard", server.handleDashboard)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/members", server.handleListMembers)
+	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/members/{membershipID}", server.handleRenameTemporaryGuest)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/members/{membershipID}/claim-invitation", server.handleCreateTemporaryGuestClaimInvitation)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/members/{membershipID}/permissions", server.handleUpdatePermissions)
 	mux.HandleFunc("PUT /api/v1/groups/{groupID}/members/{membershipID}/roles", server.handleReplaceMemberRoles)
 	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/members/{membershipID}", server.handleArchiveMember)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/members/{membershipID}/reactivate", server.handleReactivateMember)
+	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/members/{membershipID}/permanent", server.handlePermanentlyDeleteMember)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/public-join-link", server.handleGetPublicJoinLink)
 	mux.HandleFunc("PUT /api/v1/groups/{groupID}/public-join-link", server.handlePutPublicJoinLink)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/public-join-link/rotate", server.handleRotatePublicJoinLink)
@@ -154,6 +166,7 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/products/{productID}/image", server.handleProductImage)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/images/{imageKey}", server.handleImage)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/bookings", server.handleListBookings)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/booking-context", server.handleBookingContext)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/bookings", server.handleCreateBooking)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/bookings/batch", server.handleCreateBookingBatch)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/bookings/{bookingID}/void", server.handleVoidBooking)
@@ -217,7 +230,7 @@ func (s *Server) sessionContext(next http.Handler) http.Handler {
 
 func (s *Server) csrfCheck(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if request.Method == http.MethodGet || request.Method == http.MethodHead || request.Method == http.MethodOptions || request.URL.Path == "/api/v1/auth/login" || request.URL.Path == "/api/v1/invitations/preview" || request.URL.Path == "/api/v1/invitations/accept" || request.URL.Path == "/api/v1/public-join-links/preview" || request.URL.Path == "/api/v1/public-join-links/registrations" || request.URL.Path == "/api/v1/public-join-links/registrations/resend" || request.URL.Path == "/api/v1/public-join-links/registrations/confirm" {
+		if request.Method == http.MethodGet || request.Method == http.MethodHead || request.Method == http.MethodOptions || isPublicMutation(request.URL.Path) {
 			next.ServeHTTP(response, request)
 			return
 		}
@@ -233,6 +246,24 @@ func (s *Server) csrfCheck(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(response, request)
 	})
+}
+
+func isPublicMutation(requestPath string) bool {
+	switch requestPath {
+	case "/api/v1/auth/login",
+		"/api/v1/auth/password-reset/request",
+		"/api/v1/auth/password-reset/confirm",
+		"/api/v1/auth/email-change/confirm",
+		"/api/v1/invitations/preview",
+		"/api/v1/invitations/accept",
+		"/api/v1/public-join-links/preview",
+		"/api/v1/public-join-links/registrations",
+		"/api/v1/public-join-links/registrations/resend",
+		"/api/v1/public-join-links/registrations/confirm":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Server) originCheck(next http.Handler) http.Handler {
@@ -272,7 +303,7 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 			response.Header().Set("Cache-Control", "no-store")
 			response.Header().Add("Vary", "Cookie")
 		}
-		response.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")
+		response.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")
 		response.Header().Set("Referrer-Policy", "no-referrer")
 		response.Header().Set("X-Content-Type-Options", "nosniff")
 		response.Header().Set("X-Frame-Options", "DENY")
@@ -325,6 +356,7 @@ type problem struct {
 	Instance               string `json:"instance"`
 	MemberCount            *int64 `json:"memberCount,omitempty"`
 	PendingInvitationCount *int64 `json:"pendingInvitationCount,omitempty"`
+	ExistingMembershipID   string `json:"existingMembershipId,omitempty"`
 }
 
 func writeProblem(response http.ResponseWriter, request *http.Request, err error) {
@@ -361,6 +393,9 @@ func writeProblem(response http.ResponseWriter, request *http.Request, err error
 	if memberCount, invitationCount, ok := roleConflictCounts(err); ok {
 		item.MemberCount = &memberCount
 		item.PendingInvitationCount = &invitationCount
+	}
+	if membershipID, ok := temporaryGuestConflictMembershipID(err); ok {
+		item.ExistingMembershipID = membershipID
 	}
 	_ = json.NewEncoder(response).Encode(item)
 }

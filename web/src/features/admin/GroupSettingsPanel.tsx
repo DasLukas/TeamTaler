@@ -6,14 +6,25 @@ import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import type { Session } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
+import { ImageCropEditor } from '@/components/media/ImageCropEditor';
+import {
+  ACCEPTED_IMAGE_TYPES,
+  DEFAULT_IMAGE_TRANSFORM,
+  MAX_IMAGE_BYTES,
+  prepareSquareImage,
+  type ImageTransform,
+} from '@/components/media/imageUpload';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
 import styles from './GroupSettingsPanel.module.css';
 
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-const ACCEPTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
-
 type LogoChange = { kind: 'upload'; file: File } | { kind: 'remove' };
+
+/** Properties for group identity controls embedded in another settings surface. */
+interface GroupSettingsPanelProps {
+  /** Removes the standalone title and uses nested heading levels. */
+  embedded?: boolean;
+}
 
 /**
  * Renders the administrator-only group-name form and synchronizes successful
@@ -22,7 +33,7 @@ type LogoChange = { kind: 'upload'; file: File } | { kind: 'remove' };
  * @param props - Stable group identity and the currently persisted name.
  * @returns A validated group-name form with mutation feedback.
  */
-function GroupNameForm({ groupId, currentName }: { groupId: string; currentName: string }) {
+function GroupNameForm({ groupId, currentName, embedded }: { groupId: string; currentName: string; embedded: boolean }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [name, setName] = useState(currentName);
@@ -44,8 +55,7 @@ function GroupNameForm({ groupId, currentName }: { groupId: string; currentName:
     <form className={`${styles.card} ${styles.nameCard}`} onSubmit={(event) => { event.preventDefault(); nameMutation.mutate(); }}>
       <div className={styles.controls}>
         <div>
-          <h3>{t('groupSettings.nameTitle')}</h3>
-          <p>{t('groupSettings.nameDescription')}</p>
+          {embedded ? <h4>{t('groupSettings.nameTitle')}</h4> : <h3>{t('groupSettings.nameTitle')}</h3>}
         </div>
         <Field htmlFor="group-name" label={t('groupSettings.nameLabel')}>
           <TextInput autoComplete="organization" id="group-name" maxLength={120} onChange={(event) => { setName(event.target.value); nameMutation.reset(); }} required value={name} />
@@ -69,27 +79,33 @@ function GroupNameForm({ groupId, currentName }: { groupId: string; currentName:
  * update the shared session cache so every active brand surface changes without
  * a page reload.
  *
+ * @param props - Optional embedding behavior for the combined settings workspace.
  * @returns Group-name settings, a group-logo preview, and update actions.
  */
-export function GroupSettingsPanel() {
+export function GroupSettingsPanel({ embedded = false }: GroupSettingsPanelProps) {
   const { t } = useTranslation();
   const { activeGroup, activeGroupId } = useActiveGroup();
   const queryClient = useQueryClient();
   const [selectedFile, setSelectedFile] = useState<File>();
+  const [imageTransform, setImageTransform] = useState<ImageTransform>(DEFAULT_IMAGE_TRANSFORM);
   const [fileInputKey, setFileInputKey] = useState(0);
   const [fileError, setFileError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
   const logoMutation = useMutation({
-    mutationFn: async (change: LogoChange) => change.kind === 'upload'
-      ? api.uploadGroupLogo(activeGroupId, change.file)
-      : api.removeGroupLogo(activeGroupId).then(() => ({ logoUrl: undefined })),
+    mutationFn: async (change: LogoChange) => {
+      if (change.kind === 'remove') {
+        return api.removeGroupLogo(activeGroupId).then(() => ({ logoUrl: undefined }));
+      }
+      return api.uploadGroupLogo(activeGroupId, await prepareSquareImage(change.file, imageTransform));
+    },
     onSuccess: ({ logoUrl }, change) => {
       queryClient.setQueryData<Session>(['session'], (session) => session ? {
         ...session,
         groups: session.groups.map((group) => group.id === activeGroupId ? { ...group, logoUrl } : group),
       } : session);
       setSelectedFile(undefined);
+      setImageTransform(DEFAULT_IMAGE_TRANSFORM);
       setFileInputKey((current) => current + 1);
       setFileError('');
       setSuccessMessage(t(change.kind === 'upload' ? 'groupSettings.saved' : 'groupSettings.removed'));
@@ -101,6 +117,7 @@ export function GroupSettingsPanel() {
     setSuccessMessage('');
     if (!file) {
       setSelectedFile(undefined);
+      setImageTransform(DEFAULT_IMAGE_TRANSFORM);
       setFileError('');
       return;
     }
@@ -116,26 +133,36 @@ export function GroupSettingsPanel() {
     }
     setFileError('');
     setSelectedFile(file);
+    setImageTransform(DEFAULT_IMAGE_TRANSFORM);
   };
 
   const currentPreview = activeGroup.logoUrl || '/brand/teamtaler-mark.png';
 
   return (
-    <div className={styles.content}>
-      <header className={styles.header}>
+    <div className={embedded ? styles.embedded : styles.content}>
+      {!embedded ? <header className={styles.header}>
         <h2>{t('groupSettings.title')}</h2>
         <p>{t('groupSettings.intro')}</p>
-      </header>
+      </header> : null}
       <div className={styles.cards}>
-        <GroupNameForm currentName={activeGroup.name} groupId={activeGroupId} key={activeGroupId} />
-        <section className={styles.card}>
-          <div className={styles.preview}>
-            <img alt={t('groupSettings.previewAlt', { group: activeGroup.name })} src={currentPreview} />
-          </div>
+        <GroupNameForm currentName={activeGroup.name} embedded={embedded} groupId={activeGroupId} key={activeGroupId} />
+        <section className={`${styles.card} ${styles.brandingCard}`}>
+          {selectedFile ? (
+            <ImageCropEditor
+              alt={t('groupSettings.previewAlt', { group: activeGroup.name })}
+              file={selectedFile}
+              key={`${selectedFile.name}:${selectedFile.size}:${selectedFile.lastModified}`}
+              onChange={setImageTransform}
+              value={imageTransform}
+            />
+          ) : (
+            <div className={styles.preview}>
+              <img alt={t('groupSettings.previewAlt', { group: activeGroup.name })} src={currentPreview} />
+            </div>
+          )}
           <div className={styles.controls}>
             <div>
-              <h3>{t('groupSettings.logoTitle')}</h3>
-              <p>{t('groupSettings.logoDescription')}</p>
+              {embedded ? <h4>{t('groupSettings.logoTitle')}</h4> : <h3>{t('groupSettings.logoTitle')}</h3>}
             </div>
             <Field error={fileError || undefined} hint={t('groupSettings.imageHint')} htmlFor="group-logo" label={t('groupSettings.imageLabel')}>
               <TextInput accept="image/jpeg,image/png,image/webp" id="group-logo" key={fileInputKey} onChange={(event) => selectFile(event.target.files?.[0])} type="file" />

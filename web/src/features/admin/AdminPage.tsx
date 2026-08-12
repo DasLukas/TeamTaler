@@ -5,16 +5,14 @@ import { useActiveGroup } from '@/app/useActiveGroup';
 import { Page } from '@/components/layout/Page';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { AuditPanel } from './AuditPanel';
-import { GroupSettingsPanel } from './GroupSettingsPanel';
 import { BehaviorSettingsPanel } from './BehaviorSettingsPanel';
 import { MembersPanel } from './MembersPanel';
 import { RightsPanel } from './RightsPanel';
 import styles from './AdminPage.module.css';
 
-type AdminTab = 'group' | 'settings' | 'members' | 'rights' | 'audit';
+type AdminTab = 'settings' | 'members' | 'rights' | 'audit';
 
 const tabs: Array<{ id: AdminTab; labelKey: string }> = [
-  { id: 'group', labelKey: 'admin.tabs.group' },
   { id: 'settings', labelKey: 'admin.tabs.settings' },
   { id: 'members', labelKey: 'admin.tabs.members' },
   { id: 'rights', labelKey: 'admin.tabs.rights' },
@@ -31,13 +29,14 @@ export function AdminPage() {
   const { activeGroup } = useActiveGroup();
   const grants = activeGroup.membership?.effectiveGrants;
   const canManageGroup = can(grants, 'GROUP_ADMINISTRATION');
+  const canManageMembers = can(grants, 'MEMBER_MANAGEMENT');
   const canManageRoles = can(grants, 'ROLE_MANAGEMENT');
   const tabGroupId = useId();
   const tabRefs = useRef<Partial<Record<AdminTab, HTMLButtonElement | null>>>({});
-  const [requestedTab, setRequestedTab] = useState<AdminTab>('group');
+  const [requestedTab, setRequestedTab] = useState<AdminTab>('settings');
   const availableTabs = tabs.filter((tab) => {
     if (tab.id === 'rights') return canManageRoles;
-    if (tab.id === 'members') return canManageGroup || canManageRoles;
+    if (tab.id === 'members') return canManageMembers;
     return canManageGroup;
   });
   const activeTab = availableTabs.some((tab) => tab.id === requestedTab) ? requestedTab : availableTabs[0]?.id;
@@ -63,7 +62,6 @@ export function AdminPage() {
         })}
       </div>
       <section aria-labelledby={`${tabGroupId}-tab-${activeTab}`} className={styles.panel} id={`${tabGroupId}-panel-${activeTab}`} role="tabpanel" tabIndex={0}>
-        {activeTab === 'group' ? <GroupSettingsPanel key={activeGroup.id} /> : null}
         {activeTab === 'settings' ? <BehaviorSettingsPanel key={activeGroup.id} /> : null}
         {activeTab === 'members' ? <MembersPanel key={activeGroup.id} /> : null}
         {activeTab === 'rights' ? <RightsPanel key={activeGroup.id} /> : null}

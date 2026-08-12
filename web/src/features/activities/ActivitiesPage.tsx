@@ -1,12 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import Archive from 'lucide-react/dist/esm/icons/archive';
+import CircleCheck from 'lucide-react/dist/esm/icons/circle-check';
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
 import Search from 'lucide-react/dist/esm/icons/search';
+import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
 import { useDeferredValue, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { formatMoney } from '@/api/money';
-import type { Booking } from '@/api/types';
-import { can } from '@/app/permissions';
+import type { Booking, MembershipStatus } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Page } from '@/components/layout/Page';
 import { Avatar } from '@/components/ui/Avatar';
@@ -17,6 +19,66 @@ import { StatePanel } from '@/components/ui/StatePanel';
 import tableStyles from '@/features/shared/Table.module.css';
 import styles from './ActivitiesPage.module.css';
 
+interface MembershipIdentityProps {
+  avatarUrl?: string;
+  name: string;
+  status: MembershipStatus;
+}
+
+/**
+ * Renders a compact historical member identity with an accessible lifecycle marker.
+ *
+ * @param props - The current display name, avatar projection, and membership status.
+ * @returns A table-safe identity that exposes archived and deleted states through text and tooltip labels.
+ */
+function MembershipIdentity({ avatarUrl, name, status }: MembershipIdentityProps) {
+  const { t } = useTranslation();
+  const statusLabel = status === 'ARCHIVED' ? t('common.archived') : status === 'DELETED' ? t('common.deleted') : undefined;
+  const StatusIcon = status === 'ARCHIVED' ? Archive : Trash2;
+
+  return (
+    <span className={styles.member}>
+      <Avatar name={name} size="small" src={avatarUrl} />
+      <span className={styles.memberName} title={name}>{name}</span>
+      {statusLabel ? (
+        <span
+          aria-label={statusLabel}
+          className={`${styles.membershipState} ${status === 'DELETED' ? styles.membershipStateDeleted : styles.membershipStateArchived}`}
+          role="img"
+          title={statusLabel}
+        >
+          <StatusIcon aria-hidden="true" size={14} />
+          <span className={styles.membershipStateText}>{statusLabel}</span>
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+/**
+ * Renders a compact booking status that expands to a labeled badge on wide screens.
+ *
+ * @param props - The immutable booking status rendered in the activity table.
+ * @returns An icon badge with an accessible label and native hover tooltip.
+ */
+function BookingState({ status }: Pick<Booking, 'status'>) {
+  const { t } = useTranslation();
+  const label = status === 'POSTED' ? t('common.booked') : t('common.reversed');
+  const StatusIcon = status === 'POSTED' ? CircleCheck : RotateCcw;
+
+  return (
+    <span
+      aria-label={label}
+      className={`${tableStyles.status} ${styles.bookingState} ${status === 'REVERSED' ? tableStyles.statusMuted : ''}`}
+      role="img"
+      title={label}
+    >
+      <StatusIcon aria-hidden="true" size={15} />
+      <span className={styles.bookingStateText}>{label}</span>
+    </span>
+  );
+}
+
 /**
  * Renders a searchable and auditable booking activity page.
  *
@@ -24,7 +86,7 @@ import styles from './ActivitiesPage.module.css';
  */
 export function ActivitiesPage() {
   const { t } = useTranslation();
-  const { activeGroupId, activeGroup } = useActiveGroup();
+  const { activeGroup, activeGroupId, session } = useActiveGroup();
   const queryClient = useQueryClient();
   const bookingsQuery = useQuery({ queryKey: ['bookings', activeGroupId], queryFn: () => api.getBookings(activeGroupId) });
   const categoriesQuery = useQuery({ queryKey: ['categories', activeGroupId], queryFn: () => api.getCategories(activeGroupId) });
@@ -64,10 +126,8 @@ export function ActivitiesPage() {
     action: t('common.action'),
   };
 
-  const canViewAll = can(activeGroup.membership?.effectiveGrants, 'VIEW_ALL_BOOKING_ACTIVITY');
-
   return (
-    <Page className={styles.page} intro={t(canViewAll ? 'activities.introAll' : 'activities.introOwn')} title={t('activities.title')} wide>
+    <Page className={styles.page} title={t('activities.title')} wide>
       <div className={tableStyles.toolbar}>
         <div className={tableStyles.search}>
           <Field htmlFor="activity-search" label={t('activities.searchLabel')}>
@@ -82,9 +142,11 @@ export function ActivitiesPage() {
             <tbody>
               {filtered.map((booking) => {
                 const productImageUrl = productImages.get(booking.productId);
+                const memberAvatarUrl = booking.memberId === activeGroup.membership?.id ? session.user.avatarUrl : booking.memberAvatarUrl;
+                const bookedByAvatarUrl = booking.bookedByMemberId === activeGroup.membership?.id ? session.user.avatarUrl : booking.bookedByAvatarUrl;
                 return <tr key={booking.id}>
-                  <td data-label={columnLabels.bookedFor}><span className={styles.member}><Avatar name={booking.memberName} size="small" src={booking.memberAvatarUrl} />{booking.memberName}</span></td>
-                  <td data-label={columnLabels.bookedBy}><span className={styles.member}><Avatar name={booking.bookedByName} size="small" src={booking.bookedByAvatarUrl} />{booking.bookedByName}</span></td>
+                  <td data-label={columnLabels.bookedFor}><MembershipIdentity avatarUrl={memberAvatarUrl} name={booking.memberName} status={booking.memberStatus} /></td>
+                  <td data-label={columnLabels.bookedBy}><MembershipIdentity avatarUrl={bookedByAvatarUrl} name={booking.bookedByName} status={booking.bookedByStatus} /></td>
                   <td data-label={columnLabels.booking}>
                     <span className={styles.bookingProduct}>
                       {productImageUrl ? <img alt="" decoding="async" loading="lazy" src={productImageUrl} /> : null}
@@ -94,7 +156,7 @@ export function ActivitiesPage() {
                   <td data-label={columnLabels.category}>{booking.categoryName}</td>
                   <td data-label={columnLabels.time}>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(booking.bookedAt))}</td>
                   <td className={tableStyles.number} data-label={columnLabels.amount}>{formatMoney(booking.total)}</td>
-                  <td data-label={columnLabels.status}><span className={`${tableStyles.status} ${booking.status === 'REVERSED' ? tableStyles.statusMuted : ''}`}>{booking.status === 'POSTED' ? t('common.booked') : t('common.reversed')}</span></td>
+                  <td data-label={columnLabels.status}><BookingState status={booking.status} /></td>
                   <td data-label={columnLabels.action}>{booking.status === 'POSTED' && booking.canVoid ? <Button leadingIcon={<RotateCcw size={16} />} onClick={() => setReversal(booking)} size="small" variant="ghost">{t('activities.reverse')}</Button> : null}</td>
                 </tr>;
               })}

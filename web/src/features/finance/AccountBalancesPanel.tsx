@@ -26,6 +26,9 @@ interface AccountCollectionProps {
 
 function AccountCollection({ accounts, emptyMessage, title }: AccountCollectionProps) {
   const { t } = useTranslation();
+  const membershipStatus = (status: AccountSummary['status']) => status === 'ACTIVE'
+    ? t('financeWorkspace.active')
+    : status === 'ARCHIVED' ? t('financeWorkspace.archived') : t('common.deleted');
   if (accounts.length === 0) return <section className={styles.group}><h3>{title}</h3><p className={styles.empty}>{emptyMessage}</p></section>;
   return (
     <section className={styles.group}>
@@ -35,7 +38,7 @@ function AccountCollection({ accounts, emptyMessage, title }: AccountCollectionP
           <thead><tr><th>{t('common.member')}</th><th>{t('financeWorkspace.membershipStatus')}</th><th>{t('common.status')}</th><th className={styles.number}>{t('financeWorkspace.balance')}</th></tr></thead>
           <tbody>{accounts.map((account) => {
             const state = balanceState(account);
-            return <tr key={account.membershipId}><td><span className={styles.member}><Avatar name={account.displayName} size="small" src={account.avatarUrl} /><strong>{account.displayName}</strong></span></td><td>{account.status === 'ACTIVE' ? t('financeWorkspace.active') : t('financeWorkspace.archived')}</td><td><span className={`${styles.state} ${styles[state]}`}>{t(`financeWorkspace.states.${state}`)}</span></td><td className={`${styles.number} ${styles.balance}`}>{formatMoney(account.balance)}</td></tr>;
+            return <tr key={account.membershipId}><td><span className={styles.member}><Avatar name={account.displayName} size="small" src={account.avatarUrl} /><strong>{account.displayName}</strong></span></td><td>{membershipStatus(account.status)}</td><td><span className={`${styles.state} ${styles[state]}`}>{t(`financeWorkspace.states.${state}`)}</span></td><td className={`${styles.number} ${styles.balance}`}>{formatMoney(account.balance)}</td></tr>;
           })}</tbody>
         </table>
       </div>
@@ -44,7 +47,7 @@ function AccountCollection({ accounts, emptyMessage, title }: AccountCollectionP
         return (
           <article className={styles.accountCard} key={account.membershipId}>
             <Avatar name={account.displayName} src={account.avatarUrl} />
-            <div className={styles.cardIdentity}><strong>{account.displayName}</strong><small>{account.status === 'ACTIVE' ? t('financeWorkspace.active') : t('financeWorkspace.archived')}</small></div>
+            <div className={styles.cardIdentity}><strong>{account.displayName}</strong><small>{membershipStatus(account.status)}</small></div>
             <div className={styles.cardBalance}><strong>{formatMoney(account.balance)}</strong><span className={`${styles.state} ${styles[state]}`}>{t(`financeWorkspace.states.${state}`)}</span></div>
           </article>
         );
@@ -54,7 +57,7 @@ function AccountCollection({ accounts, emptyMessage, title }: AccountCollectionP
 }
 
 /**
- * Renders consolidated balances for all current and former group memberships.
+ * Renders consolidated balances grouped by operational and deleted lifecycle state.
  *
  * @returns Summary cards, search, and responsive account collections.
  */
@@ -74,7 +77,7 @@ export function AccountBalancesPanel() {
   if (accountsQuery.isLoading) return <div className={styles.queryState}><StatePanel kind="loading" /></div>;
   if (!accountsQuery.data) return <div className={styles.queryState}><StatePanel kind="error" message={t('financeWorkspace.overviewError')} /></div>;
 
-  const hasMatches = visibleAccounts.active.length > 0 || visibleAccounts.archived.length > 0;
+  const hasMatches = visibleAccounts.active.length > 0 || visibleAccounts.archived.length > 0 || visibleAccounts.deleted.length > 0;
   return (
     <div className={styles.content}>
       <header className={styles.header}><h2>{t('financeWorkspace.overviewTitle')}</h2><p>{t('financeWorkspace.overviewIntro')}</p></header>
@@ -84,7 +87,7 @@ export function AccountBalancesPanel() {
         <article><span>{t('financeWorkspace.netBalance')}</span><strong>{formatMoney(totals.net)}</strong></article>
       </div>
       <label className={styles.search} htmlFor="finance-member-search"><span>{t('financeWorkspace.search')}</span><div><Search aria-hidden="true" size={19} /><input id="finance-member-search" onChange={(event) => setSearch(event.target.value)} placeholder={t('financeWorkspace.searchPlaceholder')} type="search" value={search} /></div></label>
-      {hasMatches ? <><AccountCollection accounts={visibleAccounts.active} emptyMessage={t('financeWorkspace.noActiveMembers')} title={t('financeWorkspace.activeMembers')} /><AccountCollection accounts={visibleAccounts.archived} emptyMessage={t('financeWorkspace.noArchivedMembers')} title={t('financeWorkspace.archivedMembers')} /></> : <StatePanel kind="empty" message={search ? t('financeWorkspace.noSearchResults') : t('financeWorkspace.noAccounts')} />}
+      {hasMatches ? <><AccountCollection accounts={visibleAccounts.active} emptyMessage={t('financeWorkspace.noActiveMembers')} title={t('financeWorkspace.activeMembers')} /><AccountCollection accounts={visibleAccounts.archived} emptyMessage={t('financeWorkspace.noArchivedMembers')} title={t('financeWorkspace.archivedMembers')} /><AccountCollection accounts={visibleAccounts.deleted} emptyMessage={t('financeWorkspace.noDeletedAccounts')} title={t('financeWorkspace.deletedAccounts')} /></> : <StatePanel kind="empty" message={search ? t('financeWorkspace.noSearchResults') : t('financeWorkspace.noAccounts')} />}
     </div>
   );
 }

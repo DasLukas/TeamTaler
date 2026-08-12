@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { formatMoney } from '@/api/money';
-import type { Period } from '@/api/types';
+import type { Period, Settlement } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
@@ -15,17 +15,23 @@ import { StatePanel } from '@/components/ui/StatePanel';
 import tableStyles from '@/features/shared/Table.module.css';
 import styles from './SettlementsPanel.module.css';
 
+/** Properties for the settlement workflow and immutable history. */
+export interface SettlementsPanelProps {
+  settlements: Settlement[];
+  settlementsEnabled: boolean;
+}
+
 /**
  * Renders the period-close workflow and immutable settlement overview.
  *
+ * @param props - Current feature state and immutable settlement history.
  * @returns Localized period controls, settlement table, and close dialog.
  */
-export function SettlementsPanel() {
+export function SettlementsPanel({ settlements, settlementsEnabled }: SettlementsPanelProps) {
   const { t } = useTranslation();
   const { activeGroupId } = useActiveGroup();
   const queryClient = useQueryClient();
-  const periodsQuery = useQuery({ queryKey: ['periods', activeGroupId], queryFn: () => api.getPeriods(activeGroupId) });
-  const settlementsQuery = useQuery({ queryKey: ['settlements', activeGroupId], queryFn: () => api.getSettlements(activeGroupId) });
+  const periodsQuery = useQuery({ queryKey: ['periods', activeGroupId], queryFn: () => api.getPeriods(activeGroupId), enabled: settlementsEnabled });
   const [periodToClose, setPeriodToClose] = useState<Period | null>(null);
   const [label, setLabel] = useState('');
   const [dueAt, setDueAt] = useState('');
@@ -42,10 +48,10 @@ export function SettlementsPanel() {
     },
   });
 
-  if (periodsQuery.isLoading || settlementsQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
-  if (!periodsQuery.data || !settlementsQuery.data) return <div className={styles.state}><StatePanel kind="error" message={t('periods.error')} /></div>;
+  if (settlementsEnabled && periodsQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
+  if (settlementsEnabled && !periodsQuery.data) return <div className={styles.state}><StatePanel kind="error" message={t('periods.error')} /></div>;
 
-  const openPeriod = periodsQuery.data.find((period) => period.status === 'OPEN');
+  const openPeriod = settlementsEnabled ? periodsQuery.data?.find((period) => period.status === 'OPEN') : undefined;
   const beginClose = (period: Period) => {
     setPeriodToClose(period);
     setLabel(period.label);
@@ -56,12 +62,12 @@ export function SettlementsPanel() {
 
   return (
     <div className={styles.content}>
-      <header className={styles.header}><div><h2>{t('periods.title')}</h2><p>{t('periods.intro')}</p></div>{openPeriod ? <Button leadingIcon={<LockKeyhole size={18} />} onClick={() => beginClose(openPeriod)}>{t('periods.close')}</Button> : null}</header>
+      <header className={styles.header}><div><h2>{t(settlementsEnabled ? 'periods.title' : 'periods.historyTitle')}</h2><p>{t(settlementsEnabled ? 'periods.intro' : 'periods.historyIntro')}</p></div>{openPeriod ? <Button leadingIcon={<LockKeyhole size={18} />} onClick={() => beginClose(openPeriod)}>{t('periods.close')}</Button> : null}</header>
       {openPeriod ? <section className={styles.openPeriod}><span><CalendarCheck size={27} /></span><div><small>{t('periods.current')}</small><strong>{openPeriod.label}</strong><p>{t('periods.openedSince', { date: new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(openPeriod.startsAt)) })}</p></div></section> : null}
       <h3>{t('periods.closedSettlements')}</h3>
-      {settlementsQuery.data.length === 0 ? <StatePanel kind="empty" message={t('periods.empty')} /> : (
+      {settlements.length === 0 ? <StatePanel kind="empty" message={t('periods.empty')} /> : (
         <div className={tableStyles.tableWrap}>
-          <table className={tableStyles.table}><thead><tr><th>{t('periods.period')}</th><th>{t('common.member')}</th><th>{t('periods.due')}</th><th className={tableStyles.number}>{t('periods.claim')}</th><th className={tableStyles.number}>{t('periods.paid')}</th><th>{t('common.status')}</th><th><span className="sr-only">{t('common.action')}</span></th></tr></thead><tbody>{settlementsQuery.data.map((settlement) => <tr key={settlement.id}><td><strong>{settlement.periodLabel}</strong></td><td>{settlement.memberName}</td><td>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(settlement.dueAt))}</td><td className={tableStyles.number}>{formatMoney(settlement.amount)}</td><td className={tableStyles.number}>{formatMoney(settlement.paidAmount)}</td><td><span className={`${tableStyles.status} ${settlement.status === 'PARTIAL' || settlement.status === 'OPEN' ? tableStyles.statusWarning : ''}`}>{settlement.status === 'PAID' ? t('common.paid') : settlement.status === 'PARTIAL' ? t('common.partiallyPaid') : settlement.status === 'CREDIT' ? t('common.credit') : t('common.open')}</span></td><td><Button leadingIcon={<Printer size={16} />} onClick={() => window.print()} size="small" variant="ghost">{t('common.print')}</Button></td></tr>)}</tbody></table>
+          <table className={tableStyles.table}><thead><tr><th>{t('periods.period')}</th><th>{t('common.member')}</th><th>{t('periods.due')}</th><th className={tableStyles.number}>{t('periods.claim')}</th><th className={tableStyles.number}>{t('periods.paid')}</th><th>{t('common.status')}</th><th><span className="sr-only">{t('common.action')}</span></th></tr></thead><tbody>{settlements.map((settlement) => <tr key={settlement.id}><td><strong>{settlement.periodLabel}</strong></td><td>{settlement.memberName}</td><td>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(settlement.dueAt))}</td><td className={tableStyles.number}>{formatMoney(settlement.amount)}</td><td className={tableStyles.number}>{formatMoney(settlement.paidAmount)}</td><td><span className={`${tableStyles.status} ${settlement.status === 'PARTIAL' || settlement.status === 'OPEN' ? tableStyles.statusWarning : ''}`}>{settlement.status === 'PAID' ? t('common.paid') : settlement.status === 'PARTIAL' ? t('common.partiallyPaid') : settlement.status === 'CREDIT' ? t('common.credit') : t('common.open')}</span></td><td><Button leadingIcon={<Printer size={16} />} onClick={() => window.print()} size="small" variant="ghost">{t('common.print')}</Button></td></tr>)}</tbody></table>
         </div>
       )}
       <Modal onClose={() => setPeriodToClose(null)} open={Boolean(periodToClose)} title={t('periods.closeDialog')}>

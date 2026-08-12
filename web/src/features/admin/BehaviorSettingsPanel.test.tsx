@@ -3,15 +3,17 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Role, Session } from '@/api/types';
+import type { GroupSettings, Session } from '@/api/types';
 import { ActiveGroupContext } from '@/app/active-group-context';
 import i18n from '@/i18n';
 import { BehaviorSettingsPanel } from './BehaviorSettingsPanel';
 
 const apiMock = vi.hoisted(() => ({
   getGroupSettings: vi.fn(),
-  getRoles: vi.fn(),
+  removeGroupLogo: vi.fn(),
   updateGroupSettings: vi.fn(),
+  updateGroupName: vi.fn(),
+  uploadGroupLogo: vi.fn(),
 }));
 
 vi.mock('@/api/client', () => ({ api: apiMock }));
@@ -36,10 +38,27 @@ function renderPanel(): QueryClient {
 }
 
 describe('BehaviorSettingsPanel', () => {
+  const settings: GroupSettings = {
+    settlementsEnabled: false,
+    notificationEmailsEnabled: false,
+    notificationEmailDeliveryAvailable: true,
+    defaultRoleId: 'role-member',
+    foreignBookingReasonRequired: true,
+    ownPaymentReasonRequired: true,
+    otherPaymentReasonRequired: false,
+    paymentMethods: [
+      { id: 'BANK_TRANSFER', label: 'Banküberweisung' },
+      { id: 'CASH', label: 'Bar' },
+      { id: 'PAYPAL', label: 'PayPal' },
+      { id: 'OTHER', label: 'Sonstige' },
+    ],
+    bookingReasons: [],
+    paymentReasons: [],
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
-    apiMock.getGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
-    apiMock.getRoles.mockResolvedValue([{ id: 'role-member', name: 'Member', grants: [], version: 1, memberCount: 0, pendingInvitationCount: 0 }] satisfies Role[]);
+    apiMock.getGroupSettings.mockResolvedValue(settings);
   });
 
   it('removes the legacy booking-visibility switch from the new settings UI', async () => {
@@ -48,16 +67,39 @@ describe('BehaviorSettingsPanel', () => {
     expect(screen.queryByRole('switch', { name: i18n.t('behaviorSettings.bookingVisibilityToggle') })).not.toBeInTheDocument();
   });
 
-  it('renders notification delivery and the default role as separate settings regions', async () => {
+  it('keeps group configuration separate from membership defaults', async () => {
     renderPanel();
 
+    expect(await screen.findByRole('region', { name: i18n.t('behaviorSettings.groupSectionTitle') })).toBeVisible();
     expect(await screen.findByRole('region', { name: i18n.t('behaviorSettings.notificationEmailTitle') })).toBeVisible();
-    expect(screen.getByRole('region', { name: i18n.t('behaviorSettings.defaultRoleTitle') })).toBeVisible();
+    expect(screen.queryByRole('region', { name: i18n.t('behaviorSettings.rolesMembersSectionTitle') })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: i18n.t('behaviorSettings.defaultRoleTitle') })).not.toBeInTheDocument();
+    expect(screen.getByLabelText(i18n.t('groupSettings.nameLabel'))).toHaveValue('Group A');
+    expect(screen.getByLabelText(i18n.t('groupSettings.imageLabel'))).toBeVisible();
+  });
+
+  it('renders a dedicated finance section and persists the settlement feature flag', async () => {
+    const user = userEvent.setup();
+    apiMock.updateGroupSettings.mockResolvedValue({ ...settings, settlementsEnabled: true });
+    const queryClient = renderPanel();
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
+
+    expect(await screen.findByRole('region', { name: i18n.t('behaviorSettings.financeSectionTitle') })).toBeVisible();
+    const toggle = screen.getByRole('switch', { name: i18n.t('behaviorSettings.settlementsToggle') });
+    expect(toggle).not.toBeChecked();
+    await user.click(toggle);
+    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
+
+    await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { settlementsEnabled: true }));
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['transaction-settings', 'group-a'] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['dashboard', 'group-a'] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['periods', 'group-a'] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['settlements', 'group-a'] });
   });
 
   it('saves notification email delivery only when SMTP is available', async () => {
     const user = userEvent.setup();
-    apiMock.updateGroupSettings.mockResolvedValue({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
+    apiMock.updateGroupSettings.mockResolvedValue({ ...settings, notificationEmailsEnabled: true });
     renderPanel();
     const toggle = await screen.findByRole('switch', { name: i18n.t('behaviorSettings.notificationEmailToggle') });
 
@@ -68,7 +110,7 @@ describe('BehaviorSettingsPanel', () => {
   });
 
   it('keeps notification email delivery visible but disabled without SMTP', async () => {
-    apiMock.getGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: false, defaultRoleId: 'role-member' });
+    apiMock.getGroupSettings.mockResolvedValue({ ...settings, notificationEmailDeliveryAvailable: false });
     renderPanel();
 
     expect(await screen.findByRole('switch', { name: i18n.t('behaviorSettings.notificationEmailToggle') })).toBeDisabled();
@@ -81,21 +123,44 @@ describe('BehaviorSettingsPanel', () => {
     expect(await screen.findByText(i18n.t('behaviorSettings.loadError'))).toBeVisible();
   });
 
-  it('persists a non-administrative default role', async () => {
-    const user = userEvent.setup();
-    apiMock.getRoles.mockResolvedValue([
-      { id: 'role-member', name: 'Member', grants: [], version: 1, memberCount: 0, pendingInvitationCount: 0 },
-      { id: 'role-finance', name: 'Finance', grants: [], version: 1, memberCount: 0, pendingInvitationCount: 0 },
-      { id: 'role-admin', name: 'Admin', grants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }], version: 1, memberCount: 1, pendingInvitationCount: 0 },
-    ] satisfies Role[]);
-    apiMock.updateGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-finance' });
+  it('does not load or render membership-role settings', async () => {
+    renderPanel();
+    await screen.findByRole('region', { name: i18n.t('behaviorSettings.groupSectionTitle') });
+    expect(screen.queryByLabelText(i18n.t('behaviorSettings.defaultRoleFieldLabel'))).not.toBeInTheDocument();
+    expect(screen.queryByText('Guest role')).not.toBeInTheDocument();
+  });
+
+  it('renders compact icon-only add controls with accessible names', async () => {
     renderPanel();
 
-    const select = await screen.findByLabelText(i18n.t('behaviorSettings.defaultRoleFieldLabel'));
-    expect(screen.queryByRole('option', { name: 'Admin' })).not.toBeInTheDocument();
-    await user.selectOptions(select, 'role-finance');
+    const paymentMethodButton = await screen.findByRole('button', { name: i18n.t('behaviorSettings.addPaymentMethod') });
+    const reasonButtons = screen.getAllByRole('button', { name: /Grund hinzufügen/ });
+    expect(paymentMethodButton).toHaveTextContent('');
+    expect(reasonButtons).toHaveLength(2);
+    reasonButtons.forEach((button) => expect(button).toHaveTextContent(''));
+  });
+
+  it('edits, reorders, adds, and removes configured payment methods while retaining one', async () => {
+    const user = userEvent.setup();
+    apiMock.updateGroupSettings.mockImplementation(async (_groupId: string, update: Partial<GroupSettings>) => ({ ...settings, ...update }));
+    renderPanel();
+
+    const cash = await screen.findByDisplayValue('Bar');
+    await user.clear(cash);
+    await user.type(cash, 'Kasse');
+    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.moveUp', { name: 'PayPal' }) }));
+    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.removeOption', { name: 'Sonstige' }) }));
+    await user.type(screen.getByRole('textbox', { name: i18n.t('behaviorSettings.addPaymentMethod') }), 'Karte');
+    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.addPaymentMethod') }));
     await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
 
-    await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { defaultRoleId: 'role-finance' }));
+    await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', {
+      paymentMethods: [
+        { id: 'BANK_TRANSFER', label: 'Banküberweisung' },
+        { id: 'PAYPAL', label: 'PayPal' },
+        { id: 'CASH', label: 'Kasse' },
+        expect.objectContaining({ label: 'Karte' }),
+      ],
+    }));
   });
 });
