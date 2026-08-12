@@ -43,8 +43,9 @@ func requirePermission(ctx context.Context, queryer authorization.Queryer, membe
 	return nil
 }
 
-// CategoryStatistic summarizes current-period booking and reversal totals for a
-// category without exposing other member identities.
+// CategoryStatistic summarizes booking and reversal totals for a category
+// without exposing other member identities. Its period scope follows the
+// group's settlement setting.
 type CategoryStatistic struct {
 	CategoryID   string              `json:"categoryId"`
 	CategoryName string              `json:"categoryName"`
@@ -56,7 +57,7 @@ type CategoryStatistic struct {
 }
 
 // Account is the current consolidated account for a member, combining the
-// append-only ledger, current-period category statistics, and recent activity.
+// append-only ledger, settlement-aware category statistics, and recent activity.
 type Account struct {
 	MembershipID       string              `json:"membershipId"`
 	DisplayName        string              `json:"displayName"`
@@ -96,7 +97,7 @@ type LedgerEntry struct {
 }
 
 // Dashboard is the group-scoped landing-page read model combining account,
-// booking, notification, and optional finance-manager totals.
+// booking, notification, and optional permission-gated group totals.
 type Dashboard struct {
 	Account          Account          `json:"account"`
 	OpenPeriod       domain.Period    `json:"openPeriod"`
@@ -105,10 +106,34 @@ type Dashboard struct {
 	GroupOutstanding *int64           `json:"groupOutstandingMinor,omitempty,string"`
 }
 
-// Account returns targetMembershipID's consolidated balance, current-period
+// GroupOutstanding returns the signed net receivable across every member
+// account in membership's group when VIEW_GROUP_STATISTICS is effective.
+// Positive values are owed to the group, negative values are member credit,
+// and nil means the caller is not authorized to see the aggregate. The query
+// intentionally spans every accounting period so settlement configuration and
+// period close operations never change the current consolidated balance. ctx
+// bounds authorization and SQL work; policy and database errors propagate.
+func (s Service) GroupOutstanding(ctx context.Context, membership domain.Membership) (*int64, error) {
+	allowed, err := authorization.NewPolicy(s.DB).Can(ctx, membership.GroupID, membership.ID, domain.PermissionViewGroupStatistics, authorization.GroupResource(membership.GroupID))
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, nil
+	}
+	var outstanding int64
+	if err := s.DB.QueryRowContext(ctx, `SELECT coalesce(sum(amount_minor),0) FROM ledger_entries WHERE group_id=? AND account='MEMBER_RECEIVABLE'`, membership.GroupID).Scan(&outstanding); err != nil {
+		return nil, err
+	}
+	return &outstanding, nil
+}
+
+// Account returns targetMembershipID's consolidated balance, settlement-aware
 // statistics, permission-gated group aggregates, and recent ledger entries. An
 // empty target selects membership itself; FINANCE_MANAGEMENT is required for a
 // different target and VIEW_GROUP_STATISTICS controls the aggregate section.
+// Category statistics cover the open period while settlements are enabled and
+// all periods while they are disabled; the consolidated balance never changes.
 // ctx bounds queries. It returns the Account or forbidden, not-found, and SQL errors.
 func (s Service) Account(ctx context.Context, membership domain.Membership, targetMembershipID string) (Account, error) {
 	if targetMembershipID == "" {
@@ -132,33 +157,22 @@ func (s Service) Account(ctx context.Context, membership domain.Membership, targ
 	if err != nil {
 		return Account{}, err
 	}
-	if err := s.DB.QueryRowContext(ctx, `SELECT id FROM periods WHERE group_id=? AND status='OPEN'`, membership.GroupID).Scan(&account.OpenPeriodID); err != nil {
+	var settlementsEnabled bool
+	if err := s.DB.QueryRowContext(ctx, `SELECT p.id,gs.settlements_enabled
+		FROM periods p JOIN group_settings gs ON gs.group_id=p.group_id
+		WHERE p.group_id=? AND p.status='OPEN'`, membership.GroupID).Scan(&account.OpenPeriodID, &settlementsEnabled); err != nil {
 		return Account{}, err
 	}
 	if err := s.DB.QueryRowContext(ctx, `SELECT coalesce(sum(amount_minor),0) FROM ledger_entries WHERE group_id=? AND period_id=? AND membership_id=? AND account='MEMBER_RECEIVABLE'`,
 		membership.GroupID, account.OpenPeriodID, targetMembershipID).Scan(&account.OpenPeriodDue); err != nil {
 		return Account{}, err
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT c.id,c.name,c.icon,
-		coalesce((SELECT sum(b.quantity) FROM bookings b WHERE b.category_id=c.id AND b.target_membership_id=? AND b.period_id=? AND b.voided_at IS NULL),0),
-		coalesce((SELECT sum(b.total_minor) FROM bookings b WHERE b.category_id=c.id AND b.target_membership_id=? AND b.period_id=?),0),
-		coalesce(-(SELECT sum(le.amount_minor) FROM ledger_entries le WHERE le.category_id=c.id AND le.membership_id=? AND le.period_id=? AND le.account='MEMBER_RECEIVABLE' AND le.reversal_of IS NOT NULL AND le.amount_minor<0),0),
-		coalesce((SELECT sum(le.amount_minor) FROM ledger_entries le WHERE le.category_id=c.id AND le.membership_id=? AND le.period_id=? AND le.account='MEMBER_RECEIVABLE' AND le.payment_id IS NULL),0)
-		FROM categories c WHERE c.group_id=? ORDER BY c.sort_order,lower(c.name)`,
-		targetMembershipID, account.OpenPeriodID, targetMembershipID, account.OpenPeriodID, targetMembershipID, account.OpenPeriodID, targetMembershipID, account.OpenPeriodID, membership.GroupID)
+	statisticsPeriodID := ""
+	if settlementsEnabled {
+		statisticsPeriodID = account.OpenPeriodID
+	}
+	account.CategoryStats, err = s.categoryStatistics(ctx, membership.GroupID, targetMembershipID, statisticsPeriodID)
 	if err != nil {
-		return Account{}, err
-	}
-	defer rows.Close()
-	account.CategoryStats = make([]CategoryStatistic, 0)
-	for rows.Next() {
-		var statistic CategoryStatistic
-		if err := rows.Scan(&statistic.CategoryID, &statistic.CategoryName, &statistic.Icon, &statistic.Quantity, &statistic.GrossMinor, &statistic.VoidedMinor, &statistic.NetMinor); err != nil {
-			return Account{}, err
-		}
-		account.CategoryStats = append(account.CategoryStats, statistic)
-	}
-	if err := rows.Err(); err != nil {
 		return Account{}, err
 	}
 	account.GroupCategoryStats = make([]CategoryStatistic, 0)
@@ -167,25 +181,8 @@ func (s Service) Account(ctx context.Context, membership domain.Membership, targ
 		return Account{}, err
 	}
 	if canViewGroupStatistics {
-		groupStats, err := s.DB.QueryContext(ctx, `SELECT c.id,c.name,c.icon,
-		coalesce((SELECT sum(b.quantity) FROM bookings b WHERE b.category_id=c.id AND b.period_id=? AND b.voided_at IS NULL),0),
-		coalesce((SELECT sum(b.total_minor) FROM bookings b WHERE b.category_id=c.id AND b.period_id=?),0),
-		coalesce(-(SELECT sum(le.amount_minor) FROM ledger_entries le WHERE le.category_id=c.id AND le.period_id=? AND le.account='MEMBER_RECEIVABLE' AND le.reversal_of IS NOT NULL AND le.amount_minor<0),0),
-		coalesce((SELECT sum(le.amount_minor) FROM ledger_entries le WHERE le.category_id=c.id AND le.period_id=? AND le.account='MEMBER_RECEIVABLE' AND le.payment_id IS NULL),0)
-		FROM categories c WHERE c.group_id=? ORDER BY c.sort_order,lower(c.name)`,
-			account.OpenPeriodID, account.OpenPeriodID, account.OpenPeriodID, account.OpenPeriodID, membership.GroupID)
+		account.GroupCategoryStats, err = s.categoryStatistics(ctx, membership.GroupID, "", statisticsPeriodID)
 		if err != nil {
-			return Account{}, err
-		}
-		for groupStats.Next() {
-			var statistic CategoryStatistic
-			if err := groupStats.Scan(&statistic.CategoryID, &statistic.CategoryName, &statistic.Icon, &statistic.Quantity, &statistic.GrossMinor, &statistic.VoidedMinor, &statistic.NetMinor); err != nil {
-				groupStats.Close()
-				return Account{}, err
-			}
-			account.GroupCategoryStats = append(account.GroupCategoryStats, statistic)
-		}
-		if err := groupStats.Close(); err != nil {
 			return Account{}, err
 		}
 	}
@@ -205,6 +202,65 @@ func (s Service) Account(ctx context.Context, membership domain.Membership, targ
 		account.RecentEntries = append(account.RecentEntries, entry)
 	}
 	return account, entries.Err()
+}
+
+// categoryStatistics returns category totals for an optional member and period
+// scope. Empty scope identifiers deliberately mean the entire group history.
+func (s Service) categoryStatistics(ctx context.Context, groupID, membershipID, periodID string) ([]CategoryStatistic, error) {
+	query := `WITH booking_statistics AS (
+		SELECT category_id,
+			coalesce(sum(CASE WHEN voided_at IS NULL THEN quantity ELSE 0 END),0) AS quantity,
+			coalesce(sum(total_minor),0) AS gross_minor
+		FROM bookings WHERE group_id=?`
+	args := []any{groupID}
+	if membershipID != "" {
+		query += ` AND target_membership_id=?`
+		args = append(args, membershipID)
+	}
+	if periodID != "" {
+		query += ` AND period_id=?`
+		args = append(args, periodID)
+	}
+	query += ` GROUP BY category_id
+	), ledger_statistics AS (
+		SELECT category_id,
+			coalesce(-sum(CASE WHEN reversal_of IS NOT NULL AND amount_minor<0 THEN amount_minor ELSE 0 END),0) AS voided_minor,
+			coalesce(sum(CASE WHEN payment_id IS NULL THEN amount_minor ELSE 0 END),0) AS net_minor
+		FROM ledger_entries
+		WHERE group_id=? AND account='MEMBER_RECEIVABLE' AND category_id IS NOT NULL`
+	args = append(args, groupID)
+	if membershipID != "" {
+		query += ` AND membership_id=?`
+		args = append(args, membershipID)
+	}
+	if periodID != "" {
+		query += ` AND period_id=?`
+		args = append(args, periodID)
+	}
+	query += ` GROUP BY category_id
+	)
+	SELECT c.id,c.name,c.icon,
+		coalesce(bs.quantity,0),coalesce(bs.gross_minor,0),
+		coalesce(ls.voided_minor,0),coalesce(ls.net_minor,0)
+	FROM categories c
+	LEFT JOIN booking_statistics bs ON bs.category_id=c.id
+	LEFT JOIN ledger_statistics ls ON ls.category_id=c.id
+	WHERE c.group_id=? ORDER BY c.sort_order,lower(c.name)`
+	args = append(args, groupID)
+	rows, err := s.DB.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]CategoryStatistic, 0)
+	for rows.Next() {
+		var statistic CategoryStatistic
+		if err := rows.Scan(&statistic.CategoryID, &statistic.CategoryName, &statistic.Icon, &statistic.Quantity, &statistic.GrossMinor, &statistic.VoidedMinor, &statistic.NetMinor); err != nil {
+			return nil, err
+		}
+		result = append(result, statistic)
+	}
+	return result, rows.Err()
 }
 
 // ListAccountSummaries returns every operational membership and each deleted

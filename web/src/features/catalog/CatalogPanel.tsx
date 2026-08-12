@@ -7,6 +7,14 @@ import { api } from '@/api/client';
 import { majorUnitsInputPattern, majorUnitsInputValue, majorUnitsPlaceholder, validatePositiveMajorUnits } from '@/api/money';
 import type { Category, CategoryIcon as CategoryIconName, Product, ProductPricingMode } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
+import { ImageCropEditor } from '@/components/media/ImageCropEditor';
+import {
+  ACCEPTED_IMAGE_TYPES,
+  DEFAULT_IMAGE_TRANSFORM,
+  MAX_IMAGE_BYTES,
+  prepareSquareImage,
+  type ImageTransform,
+} from '@/components/media/imageUpload';
 import { Button } from '@/components/ui/Button';
 import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { Modal } from '@/components/ui/Modal';
@@ -46,7 +54,9 @@ export function CatalogPanel() {
   const [productPriceTouched, setProductPriceTouched] = useState(false);
   const [productActive, setProductActive] = useState(true);
   const [productImage, setProductImage] = useState<File | undefined>();
+  const [productImageTransform, setProductImageTransform] = useState<ImageTransform>(DEFAULT_IMAGE_TRANSFORM);
   const [productImageInputKey, setProductImageInputKey] = useState(0);
+  const [productImageError, setProductImageError] = useState('');
   const [persistedProduct, setPersistedProduct] = useState<Product | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 
@@ -54,7 +64,34 @@ export function CatalogPanel() {
 
   const resetProductImageInput = () => {
     setProductImage(undefined);
+    setProductImageTransform(DEFAULT_IMAGE_TRANSFORM);
     setProductImageInputKey((current) => current + 1);
+    setProductImageError('');
+  };
+
+  const selectProductImage = (file?: File) => {
+    imageMutation.reset();
+    if (!file) {
+      resetProductImageInput();
+      return;
+    }
+    if (!ACCEPTED_IMAGE_TYPES.has(file.type)) {
+      setProductImage(undefined);
+      setProductImageTransform(DEFAULT_IMAGE_TRANSFORM);
+      setProductImageInputKey((current) => current + 1);
+      setProductImageError(t('catalog.imageInvalidType'));
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      setProductImage(undefined);
+      setProductImageTransform(DEFAULT_IMAGE_TRANSFORM);
+      setProductImageInputKey((current) => current + 1);
+      setProductImageError(t('catalog.imageTooLarge'));
+      return;
+    }
+    setProductImage(file);
+    setProductImageTransform(DEFAULT_IMAGE_TRANSFORM);
+    setProductImageError('');
   };
 
   const clearCategoryDialog = () => {
@@ -165,7 +202,9 @@ export function CatalogPanel() {
   });
 
   const imageMutation = useMutation({
-    mutationFn: ({ productId, image }: { productId: string; image: File }) => api.uploadProductImage(activeGroupId, productId, image),
+    mutationFn: async ({ productId, image, transform }: { productId: string; image: File; transform: ImageTransform }) => (
+      api.uploadProductImage(activeGroupId, productId, await prepareSquareImage(image, transform))
+    ),
     onSuccess: async () => {
       clearProductDialog();
       await invalidateCatalog();
@@ -205,7 +244,7 @@ export function CatalogPanel() {
         return;
       }
       setPersistedProduct(product);
-      imageMutation.mutate({ productId: product.id, image: productImage });
+      imageMutation.mutate({ productId: product.id, image: productImage, transform: productImageTransform });
     },
     onError: async () => { await invalidateCatalog(); },
   });
@@ -297,7 +336,7 @@ export function CatalogPanel() {
       <Modal onClose={clearProductDialog} open={dialog === 'product'} title={editingProduct ? t('catalog.editProductDialog') : t('catalog.productDialog')}>
         <form className={styles.form} onSubmit={(event) => {
           event.preventDefault();
-          if (persistedProduct && productImage) imageMutation.mutate({ productId: persistedProduct.id, image: productImage });
+          if (persistedProduct && productImage) imageMutation.mutate({ productId: persistedProduct.id, image: productImage, transform: productImageTransform });
           else if (!persistedProduct) productMutation.mutate();
         }}>
           {persistedProduct ? <div className={styles.hint} role="status"><strong>{editingProduct ? t('catalog.updatePartialSuccessTitle') : t('catalog.partialSuccessTitle')}</strong><p>{editingProduct ? t('catalog.updatePartialSuccessMessage', { name: persistedProduct.name }) : t('catalog.partialSuccessMessage', { name: persistedProduct.name })}</p></div> : null}
@@ -306,10 +345,22 @@ export function CatalogPanel() {
           <Field htmlFor="product-pricing-mode" label={t('catalog.pricingMode')}><SelectInput disabled={metadataLocked} id="product-pricing-mode" onChange={(event) => { setProductPricingMode(event.target.value as ProductPricingMode); setProductPrice(''); setProductPriceTouched(false); }} value={productPricingMode}><option value="FIXED">{t('catalog.fixedPrice')}</option><option value="USER_DEFINED">{t('catalog.userDefinedPrice')}</option></SelectInput></Field>
           {productPricingMode === 'FIXED' ? <Field error={productPriceTouched ? productPriceValidation.error : undefined} htmlFor="product-price" label={t('catalog.price', { currency: activeGroup.currency })}><TextInput disabled={metadataLocked} id="product-price" inputMode="decimal" onBlur={() => setProductPriceTouched(true)} onChange={(event) => setProductPrice(event.target.value)} pattern={majorUnitsInputPattern(activeGroup.currency)} placeholder={majorUnitsPlaceholder(activeGroup.currency)} required type="text" value={productPrice} /></Field> : null}
           {editingProduct ? <Field htmlFor="product-status" label={t('common.status')}><SelectInput disabled={metadataLocked} id="product-status" onChange={(event) => setProductActive(event.target.value === 'active')} value={productActive ? 'active' : 'archived'}><option value="active">{t('common.active')}</option><option value="archived">{t('common.archived')}</option></SelectInput></Field> : null}
-          <Field hint={editingProduct || persistedProduct ? t('catalog.replaceImage') : t('catalog.imageHint')} htmlFor="product-image" label={t('catalog.image')}>
-            <div className={styles.imageSelection}>
-              <TextInput accept="image/jpeg,image/png,image/webp" id="product-image" key={productImageInputKey} onChange={(event) => { setProductImage(event.target.files?.[0]); imageMutation.reset(); }} type="file" />
-              {productImage ? <Button leadingIcon={<Trash2 size={16} />} onClick={() => { resetProductImageInput(); imageMutation.reset(); }} size="small" variant="ghost">{t('catalog.removeSelectedImage')}</Button> : null}
+          <Field error={productImageError || undefined} hint={editingProduct || persistedProduct ? t('catalog.replaceImage') : t('catalog.imageHint')} htmlFor="product-image" label={t('catalog.image')}>
+            <div className={`${styles.imageSelection} ${productImage ? styles.imageSelectionWithPreview : ''}`}>
+              {productImage ? (
+                <ImageCropEditor
+                  alt={t('catalog.imagePreviewAlt')}
+                  compact
+                  file={productImage}
+                  key={`${productImage.name}:${productImage.size}:${productImage.lastModified}`}
+                  onChange={setProductImageTransform}
+                  value={productImageTransform}
+                />
+              ) : null}
+              <div className={styles.imageUploadControls}>
+                <TextInput accept="image/jpeg,image/png,image/webp" id="product-image" key={productImageInputKey} onChange={(event) => selectProductImage(event.target.files?.[0])} type="file" />
+                {productImage ? <Button leadingIcon={<Trash2 size={16} />} onClick={() => { resetProductImageInput(); imageMutation.reset(); }} size="small" variant="ghost">{t('catalog.removeSelectedImage')}</Button> : null}
+              </div>
             </div>
           </Field>
           {productMutation.isError ? <p className={styles.error} role="alert">{productMutation.error.message}</p> : null}

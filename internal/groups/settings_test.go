@@ -36,7 +36,7 @@ func TestGroupSettingsDefaultAuthorizationPersistenceAndAudit(t *testing.T) {
 	admin := items[0].Membership
 	settings, err := service.Settings(ctx, admin)
 	memberRoleID := authorization.PresetRoleID(admin.GroupID, domain.RolePresetMember)
-	if err != nil || settings.NotificationEmailsEnabled || settings.DefaultRoleID == nil || *settings.DefaultRoleID != memberRoleID {
+	if err != nil || settings.NotificationEmailsEnabled || settings.SettlementsEnabled || settings.DefaultRoleID == nil || *settings.DefaultRoleID != memberRoleID {
 		t.Fatalf("default settings=%#v err=%v", settings, err)
 	}
 	if !settings.ForeignBookingReasonRequired || !settings.OwnPaymentReasonRequired || settings.OtherPaymentReasonRequired || len(settings.PaymentMethods) != 4 {
@@ -89,9 +89,14 @@ func TestGroupSettingsDefaultAuthorizationPersistenceAndAudit(t *testing.T) {
 			break
 		}
 	}
-	financeRole.Grants = append(financeRole.Grants, domain.PermissionGrant{Permission: domain.PermissionGroupAdministration, Scope: domain.PermissionScope{Type: domain.PermissionScopeGroup}})
-	if _, err := service.UpdateRole(ctx, session.Principal, admin, financeRole.ID, financeRole.Version, RoleCommand{Name: financeRole.Name, Description: financeRole.Description, Grants: financeRole.Grants}); !errors.Is(err, domain.ErrValidation) {
+	financeGrants := append([]domain.PermissionGrant(nil), financeRole.Grants...)
+	groupAdministrationGrants := append(append([]domain.PermissionGrant(nil), financeGrants...), domain.PermissionGrant{Permission: domain.PermissionGroupAdministration, Scope: domain.PermissionScope{Type: domain.PermissionScopeGroup}})
+	if _, err := service.UpdateRole(ctx, session.Principal, admin, financeRole.ID, financeRole.Version, RoleCommand{Name: financeRole.Name, Description: financeRole.Description, Grants: groupAdministrationGrants}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("administrator grant on default role error=%v, want validation", err)
+	}
+	memberManagementGrants := append(append([]domain.PermissionGrant(nil), financeGrants...), domain.PermissionGrant{Permission: domain.PermissionMemberManagement, Scope: domain.PermissionScope{Type: domain.PermissionScopeGroup}})
+	if _, err := service.UpdateRole(ctx, session.Principal, admin, financeRole.ID, financeRole.Version, RoleCommand{Name: financeRole.Name, Description: financeRole.Description, Grants: memberManagementGrants}); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("member-management grant on default role error=%v, want validation", err)
 	}
 	if err := service.DeleteRole(ctx, session.Principal, admin, financeRole.ID, financeRole.Version); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("delete default role error=%v, want conflict", err)
@@ -151,7 +156,7 @@ func TestTransactionSettingsAreOrderedEditableAndRequireOnePaymentMethod(t *test
 		t.Fatalf("updated payment methods=%#v", updated.PaymentMethods)
 	}
 	operational, err := service.TransactionSettings(ctx, admin)
-	if err != nil || len(operational.BookingReasons) != 2 || operational.BookingReasons[0].ID != "TEAM" || operational.PaymentReasons[0].ID != "MONTHLY" {
+	if err != nil || operational.SettlementsEnabled || len(operational.BookingReasons) != 2 || operational.BookingReasons[0].ID != "TEAM" || operational.PaymentReasons[0].ID != "MONTHLY" {
 		t.Fatalf("operational transaction settings=%#v err=%v", operational, err)
 	}
 	empty := []domain.ConfigurableItem{}

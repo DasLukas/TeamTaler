@@ -23,7 +23,7 @@ function initialsForName(name: string): string {
  */
 export function Avatar({ decorative = false, name, src, size = 'medium', className = '' }: AvatarProps) {
   return (
-    <span aria-hidden={decorative || undefined} aria-label={decorative ? undefined : name} className={`${styles.avatar} ${styles[size]} ${className}`} role={decorative ? undefined : 'img'}>
+    <span aria-hidden={decorative || undefined} aria-label={decorative ? undefined : name} className={`${styles.avatar} ${src ? styles.withImage : ''} ${styles[size]} ${className}`} role={decorative ? undefined : 'img'}>
       {src ? <img alt="" src={src} /> : initialsForName(name)}
     </span>
   );

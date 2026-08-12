@@ -15,6 +15,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import Archive from 'lucide-react/dist/esm/icons/archive';
 import GripVertical from 'lucide-react/dist/esm/icons/grip-vertical';
 import Pencil from 'lucide-react/dist/esm/icons/pencil';
 import Plus from 'lucide-react/dist/esm/icons/plus';
@@ -41,13 +42,16 @@ function SortableProduct({ disabled, product, onEdit }: SortableProductProps) {
   });
   return (
     <article
-      className={`${!product.active ? styles.archived : ''} ${styles.sortable} ${isDragging ? styles.dragging : ''}`}
+      className={`${styles.sortable} ${isDragging ? styles.dragging : ''}`}
+      data-state={product.active ? 'active' : 'archived'}
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
     >
-      {product.imageUrl ? <img alt="" src={product.imageUrl} /> : <span className={styles.imageFallback}>{product.name.slice(0, 1)}</span>}
+      <span className={styles.productImage}>
+        {product.imageUrl ? <img alt="" src={product.imageUrl} /> : product.active ? <span className={styles.imageFallback}>{product.name.slice(0, 1)}</span> : null}
+        {!product.active ? <span aria-label={t('common.archived')} className={styles.archivedMarker} role="img"><Archive aria-hidden="true" size={24} /></span> : null}
+      </span>
       <div><strong title={product.name}>{product.name}</strong><span>{product.pricingMode === 'FIXED' && product.price ? formatMoney(product.price) : t('catalog.userDefinedPrice')}</span></div>
-      <small>{product.active ? t('common.active') : t('common.archived')}</small>
       <IconButton className={styles.productEdit} label={t('catalog.editProduct', { name: product.name })} onClick={() => onEdit(product)} variant="surface"><Pencil size={16} /></IconButton>
       <IconButton
         {...attributes}

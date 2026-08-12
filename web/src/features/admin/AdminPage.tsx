@@ -29,14 +29,14 @@ export function AdminPage() {
   const { activeGroup } = useActiveGroup();
   const grants = activeGroup.membership?.effectiveGrants;
   const canManageGroup = can(grants, 'GROUP_ADMINISTRATION');
+  const canManageMembers = can(grants, 'MEMBER_MANAGEMENT');
   const canManageRoles = can(grants, 'ROLE_MANAGEMENT');
-  const canViewMemberDirectory = can(grants, 'VIEW_MEMBER_DIRECTORY');
   const tabGroupId = useId();
   const tabRefs = useRef<Partial<Record<AdminTab, HTMLButtonElement | null>>>({});
   const [requestedTab, setRequestedTab] = useState<AdminTab>('settings');
   const availableTabs = tabs.filter((tab) => {
     if (tab.id === 'rights') return canManageRoles;
-    if (tab.id === 'members') return canViewMemberDirectory && (canManageGroup || canManageRoles);
+    if (tab.id === 'members') return canManageMembers;
     return canManageGroup;
   });
   const activeTab = availableTabs.some((tab) => tab.id === requestedTab) ? requestedTab : availableTabs[0]?.id;

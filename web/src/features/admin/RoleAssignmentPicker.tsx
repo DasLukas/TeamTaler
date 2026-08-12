@@ -17,7 +17,7 @@ export interface RoleAssignmentPickerProps {
   roles: readonly Role[];
   roleIds: readonly string[];
   onApply: (roleIds: string[]) => Promise<void>;
-  canManageRoles?: boolean;
+  canAssignRoles?: boolean;
   canManageGroup?: boolean;
   lockedRoleIds?: readonly string[];
   disabled?: boolean;
@@ -60,7 +60,7 @@ export function RoleAssignmentPicker({
   roles,
   roleIds,
   onApply,
-  canManageRoles = false,
+  canAssignRoles = false,
   canManageGroup = false,
   lockedRoleIds = [],
   disabled = false,
@@ -149,7 +149,7 @@ export function RoleAssignmentPicker({
       <div className={styles.listViewport}>
         <RoleSelectionList
           canManageGroup={canManageGroup}
-          canManageRoles={canManageRoles}
+          canAssignRoles={canAssignRoles}
           disabled={pending}
           hideLegend
           label={title}

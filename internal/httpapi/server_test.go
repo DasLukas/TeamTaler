@@ -75,6 +75,24 @@ func TestSPAHandlerDoesNotEscapeStaticRoot(t *testing.T) {
 	}
 }
 
+func TestSecurityHeadersAllowBlobURLsOnlyForImagePreviews(t *testing.T) {
+	handler := (&Server{}).securityHeaders(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.WriteHeader(http.StatusNoContent)
+	}))
+	request := httptest.NewRequest(http.MethodGet, "http://teamtaler.test/account", nil)
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	policy := response.Header().Get("Content-Security-Policy")
+	if !strings.Contains(policy, "img-src 'self' data: blob:") {
+		t.Fatalf("Content-Security-Policy does not permit local image previews: %q", policy)
+	}
+	if strings.Contains(policy, "script-src 'self' blob:") {
+		t.Fatalf("Content-Security-Policy unexpectedly permits blob scripts: %q", policy)
+	}
+}
+
 func writeStaticFixture(t *testing.T, root, name, body string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(name))

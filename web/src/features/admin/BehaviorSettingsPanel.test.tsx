@@ -3,14 +3,13 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { GroupSettings, Role, Session } from '@/api/types';
+import type { GroupSettings, Session } from '@/api/types';
 import { ActiveGroupContext } from '@/app/active-group-context';
 import i18n from '@/i18n';
 import { BehaviorSettingsPanel } from './BehaviorSettingsPanel';
 
 const apiMock = vi.hoisted(() => ({
   getGroupSettings: vi.fn(),
-  getRoles: vi.fn(),
   removeGroupLogo: vi.fn(),
   updateGroupSettings: vi.fn(),
   updateGroupName: vi.fn(),
@@ -40,6 +39,7 @@ function renderPanel(): QueryClient {
 
 describe('BehaviorSettingsPanel', () => {
   const settings: GroupSettings = {
+    settlementsEnabled: false,
     notificationEmailsEnabled: false,
     notificationEmailDeliveryAvailable: true,
     defaultRoleId: 'role-member',
@@ -59,7 +59,6 @@ describe('BehaviorSettingsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     apiMock.getGroupSettings.mockResolvedValue(settings);
-    apiMock.getRoles.mockResolvedValue([{ id: 'role-member', name: 'Member', grants: [], version: 1, memberCount: 0, pendingInvitationCount: 0 }] satisfies Role[]);
   });
 
   it('removes the legacy booking-visibility switch from the new settings UI', async () => {
@@ -68,17 +67,34 @@ describe('BehaviorSettingsPanel', () => {
     expect(screen.queryByRole('switch', { name: i18n.t('behaviorSettings.bookingVisibilityToggle') })).not.toBeInTheDocument();
   });
 
-  it('groups identity and email settings separately from role and member defaults', async () => {
+  it('keeps group configuration separate from membership defaults', async () => {
     renderPanel();
 
     expect(await screen.findByRole('region', { name: i18n.t('behaviorSettings.groupSectionTitle') })).toBeVisible();
     expect(await screen.findByRole('region', { name: i18n.t('behaviorSettings.notificationEmailTitle') })).toBeVisible();
-    expect(screen.getByRole('region', { name: i18n.t('behaviorSettings.rolesMembersSectionTitle') })).toBeVisible();
-    const defaultRoleRegion = screen.getByRole('region', { name: i18n.t('behaviorSettings.defaultRoleTitle') });
-    expect(defaultRoleRegion).toBeVisible();
-    expect(defaultRoleRegion.querySelector('span')).toBeNull();
+    expect(screen.queryByRole('region', { name: i18n.t('behaviorSettings.rolesMembersSectionTitle') })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: i18n.t('behaviorSettings.defaultRoleTitle') })).not.toBeInTheDocument();
     expect(screen.getByLabelText(i18n.t('groupSettings.nameLabel'))).toHaveValue('Group A');
     expect(screen.getByLabelText(i18n.t('groupSettings.imageLabel'))).toBeVisible();
+  });
+
+  it('renders a dedicated finance section and persists the settlement feature flag', async () => {
+    const user = userEvent.setup();
+    apiMock.updateGroupSettings.mockResolvedValue({ ...settings, settlementsEnabled: true });
+    const queryClient = renderPanel();
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
+
+    expect(await screen.findByRole('region', { name: i18n.t('behaviorSettings.financeSectionTitle') })).toBeVisible();
+    const toggle = screen.getByRole('switch', { name: i18n.t('behaviorSettings.settlementsToggle') });
+    expect(toggle).not.toBeChecked();
+    await user.click(toggle);
+    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
+
+    await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { settlementsEnabled: true }));
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['transaction-settings', 'group-a'] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['dashboard', 'group-a'] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['periods', 'group-a'] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['settlements', 'group-a'] });
   });
 
   it('saves notification email delivery only when SMTP is available', async () => {
@@ -107,27 +123,10 @@ describe('BehaviorSettingsPanel', () => {
     expect(await screen.findByText(i18n.t('behaviorSettings.loadError'))).toBeVisible();
   });
 
-  it('persists a non-administrative default role', async () => {
-    const user = userEvent.setup();
-    apiMock.getRoles.mockResolvedValue([
-      { id: 'role-member', name: 'Member', grants: [], version: 1, memberCount: 0, pendingInvitationCount: 0 },
-      { id: 'role-finance', name: 'Finance', grants: [], version: 1, memberCount: 0, pendingInvitationCount: 0 },
-      { id: 'role-admin', name: 'Admin', grants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }], version: 1, memberCount: 1, pendingInvitationCount: 0 },
-    ] satisfies Role[]);
-    apiMock.updateGroupSettings.mockResolvedValue({ ...settings, defaultRoleId: 'role-finance' });
+  it('does not load or render membership-role settings', async () => {
     renderPanel();
-
-    const select = await screen.findByLabelText(i18n.t('behaviorSettings.defaultRoleFieldLabel'));
-    expect(screen.queryByRole('option', { name: 'Admin' })).not.toBeInTheDocument();
-    await user.selectOptions(select, 'role-finance');
-    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
-
-    await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { defaultRoleId: 'role-finance' }));
-  });
-
-  it('does not render a separate guest settings region', async () => {
-    renderPanel();
-    await screen.findByRole('region', { name: i18n.t('behaviorSettings.defaultRoleTitle') });
+    await screen.findByRole('region', { name: i18n.t('behaviorSettings.groupSectionTitle') });
+    expect(screen.queryByLabelText(i18n.t('behaviorSettings.defaultRoleFieldLabel'))).not.toBeInTheDocument();
     expect(screen.queryByText('Guest role')).not.toBeInTheDocument();
   });
 

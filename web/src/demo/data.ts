@@ -25,6 +25,7 @@ const grants = (...permissions: PermissionKey[]): PermissionGrant[] => permissio
 /** Stable permission registry returned by the development transport. */
 export const demoPermissionDefinitions: PermissionDefinition[] = [
   { key: 'GROUP_ADMINISTRATION' },
+  { key: 'MEMBER_MANAGEMENT', impliedPermissions: ['VIEW_MEMBER_DIRECTORY'] },
   { key: 'ROLE_MANAGEMENT' },
   { key: 'FINANCE_MANAGEMENT' },
   { key: 'CATALOG_MANAGEMENT' },
@@ -49,7 +50,7 @@ export const demoRoles: Role[] = [
     description: 'Geschützte Vollzugriffsrolle der Gruppe',
     nameLocked: true,
     deletable: false,
-    grants: grants('GROUP_ADMINISTRATION', 'ROLE_MANAGEMENT', 'FINANCE_MANAGEMENT', 'CATALOG_MANAGEMENT', 'VIEW_MEMBER_DIRECTORY', 'VIEW_GROUP_STATISTICS', 'VIEW_ALL_BOOKING_ACTIVITY', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING', 'VOID_ANY_BOOKING', 'BOOK_FOR_OTHERS', 'BOOK_FOR_GUESTS'),
+    grants: grants('GROUP_ADMINISTRATION', 'MEMBER_MANAGEMENT', 'ROLE_MANAGEMENT', 'FINANCE_MANAGEMENT', 'CATALOG_MANAGEMENT', 'VIEW_MEMBER_DIRECTORY', 'VIEW_GROUP_STATISTICS', 'VIEW_ALL_BOOKING_ACTIVITY', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING', 'VOID_ANY_BOOKING', 'BOOK_FOR_OTHERS', 'BOOK_FOR_GUESTS'),
     version: 1,
     memberCount: 1,
     pendingInvitationCount: 0,
@@ -299,6 +300,7 @@ export const demoBookings: Booking[] = [
 /** Demo dashboard values matching the approved desktop concept. */
 export const demoDashboard: Dashboard = {
   openBalance: { minorUnits: '2340', currency: 'EUR' },
+  groupOutstanding: { minorUnits: '2590', currency: 'EUR' },
   currentPeriod: demoPeriods[0],
   categoryTotals: [
     { categoryId: 'category-drinks', categoryName: 'Getränke', icon: 'drink', total: { minorUnits: '1840', currency: 'EUR' } },

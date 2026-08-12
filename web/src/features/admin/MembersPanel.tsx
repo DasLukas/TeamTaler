@@ -16,6 +16,7 @@ import { api, ApiError } from '@/api/client';
 import type {
   CreatedInvitation,
   EmailDeliveryStatus,
+  GroupSettings,
   InvitationImportRow,
   InvitationImportStatus,
   InvitationInput,
@@ -27,7 +28,7 @@ import { can } from '@/app/permissions';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
-import { Field, TextInput } from '@/components/ui/FormField';
+import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { Modal } from '@/components/ui/Modal';
 import { StatePanel } from '@/components/ui/StatePanel';
 import tableStyles from '@/features/shared/Table.module.css';
@@ -359,6 +360,51 @@ function MemberImportDialog({ activeGroupId, defaultRole, onClose }: MemberImpor
 
 const emptyInvitationInput = (): InvitationInput => ({ email: '', displayName: '', roleIds: [], roles: ['MEMBER'], groupPermissions: [], categoryPermissions: [] });
 
+interface DefaultRoleSettingProps {
+  groupId: string;
+  roles: Role[];
+  settings: GroupSettings;
+}
+
+/**
+ * Renders the member-manager-owned default role setting.
+ *
+ * @param props - Active group, assignable roles, and persisted settings.
+ * @returns An explicit default-role selector with save feedback.
+ */
+function DefaultRoleSetting({ groupId, roles, settings }: DefaultRoleSettingProps) {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const [roleId, setRoleId] = useState(settings.defaultRoleId ?? '');
+  const candidates = roles.filter((role) => !role.grants.some((grant) => grant.permission === 'GROUP_ADMINISTRATION' || grant.permission === 'MEMBER_MANAGEMENT'));
+  const mutation = useMutation({
+    mutationFn: () => api.updateGroupSettings(groupId, { defaultRoleId: roleId }),
+    onSuccess: async (persisted) => {
+      queryClient.setQueryData<GroupSettings>(['group-settings', groupId], persisted);
+      await queryClient.invalidateQueries({ queryKey: ['roles', groupId] });
+    },
+  });
+
+  return (
+    <section aria-labelledby="default-role-setting-title" className={styles.defaultRoleCard}>
+      <div>
+        <h3 id="default-role-setting-title">{t('behaviorSettings.defaultRoleTitle')}</h3>
+        <Field hint={!settings.defaultRoleId ? t('behaviorSettings.defaultRoleMissing') : undefined} htmlFor="default-membership-role" label={t('behaviorSettings.defaultRoleFieldLabel')}>
+          <SelectInput id="default-membership-role" onChange={(event) => { setRoleId(event.target.value); mutation.reset(); }} value={roleId}>
+            <option disabled value="">{t('behaviorSettings.defaultRolePlaceholder')}</option>
+            {candidates.map((role) => <option key={role.id} value={role.id}>{roleDisplayName(role)}</option>)}
+          </SelectInput>
+        </Field>
+      </div>
+      <div className={styles.defaultRoleActions}>
+        {mutation.isError ? <p className={styles.error} role="alert">{t('behaviorSettings.saveError')}</p> : null}
+        {mutation.isSuccess ? <p className={styles.success} role="status">{t('behaviorSettings.saved')}</p> : null}
+        <Button disabled={!roleId || roleId === settings.defaultRoleId || mutation.isPending} onClick={() => mutation.mutate()}>{mutation.isPending ? t('behaviorSettings.saving') : t('common.save')}</Button>
+      </div>
+    </section>
+  );
+}
+
 /**
  * Renders open invitations, active members, archived members, and all
  * reversible or permanent lifecycle controls.
@@ -373,17 +419,16 @@ export function MembersPanel() {
   const invitationQueryKey = ['invitations', activeGroupId] as const;
   const compact = useMediaQuery('(max-width: 767px)');
   const membersQuery = useQuery({ queryKey: membersQueryKey, queryFn: () => api.getMembers(activeGroupId) });
-  const canManageRoles = can(activeGroup.membership?.effectiveGrants, 'ROLE_MANAGEMENT');
+  const canManageMembers = can(activeGroup.membership?.effectiveGrants, 'MEMBER_MANAGEMENT');
   const canManageProtectedRoles = can(activeGroup.membership?.effectiveGrants, 'GROUP_ADMINISTRATION');
-  const canManageAssignments = canManageRoles || canManageProtectedRoles;
   const rolesQueryKey = ['roles', activeGroupId] as const;
-  const rolesQuery = useQuery({ queryKey: rolesQueryKey, queryFn: () => api.getRoles(activeGroupId), enabled: canManageAssignments });
+  const rolesQuery = useQuery({ queryKey: rolesQueryKey, queryFn: () => api.getRoles(activeGroupId), enabled: canManageMembers });
   const invitationsQuery = useQuery({
     queryKey: invitationQueryKey,
     queryFn: () => api.getInvitations(activeGroupId),
     refetchInterval: (query) => query.state.data?.some((item) => ACTIVE_DELIVERY_STATUSES.has(item.emailDeliveryStatus)) ? DELIVERY_POLL_INTERVAL_MS : false,
   });
-  const settingsQuery = useQuery({ queryKey: ['group-settings', activeGroupId], queryFn: () => api.getGroupSettings(activeGroupId), enabled: canManageProtectedRoles });
+  const settingsQuery = useQuery({ queryKey: ['group-settings', activeGroupId], queryFn: () => api.getGroupSettings(activeGroupId), enabled: canManageMembers });
   const [dialog, setDialog] = useState<MembersDialog>(null);
   const [publicJoinOpen, setPublicJoinOpen] = useState(false);
   const [draft, setDraft] = useState<InvitationInput>(emptyInvitationInput);
@@ -408,19 +453,11 @@ export function MembersPanel() {
   const updateMutation = useMutation({
     mutationFn: () => {
       if (!selectedInvitation) return Promise.reject(new Error(t('members.noInvitationSelected')));
-      return canManageAssignments
-        ? api.updateInvitation(activeGroupId, selectedInvitation.id, {
-          displayName: draft.displayName.trim(),
-          roleIds: draft.roleIds ?? [],
-          roleAssignmentsVersion: selectedInvitation.roleAssignmentsVersion,
-        })
-        : api.updateInvitation(activeGroupId, selectedInvitation.id, {
-          displayName: draft.displayName.trim(),
-          roleAssignmentsVersion: selectedInvitation.roleAssignmentsVersion,
-          roles: draft.roles,
-          groupPermissions: draft.groupPermissions,
-          categoryPermissions: draft.categoryPermissions,
-        });
+      return api.updateInvitation(activeGroupId, selectedInvitation.id, {
+        displayName: draft.displayName.trim(),
+        roleIds: draft.roleIds ?? [],
+        roleAssignmentsVersion: selectedInvitation.roleAssignmentsVersion,
+      });
     },
     onSuccess: async () => {
       setDialog(null);
@@ -545,8 +582,8 @@ export function MembersPanel() {
     }
   };
 
-  if (membersQuery.isLoading || invitationsQuery.isLoading || (canManageAssignments && rolesQuery.isLoading) || (canManageProtectedRoles && settingsQuery.isLoading)) return <div className={styles.state}><StatePanel kind="loading" /></div>;
-  if (!membersQuery.data || !invitationsQuery.data || (canManageAssignments && !rolesQuery.data) || (canManageProtectedRoles && !settingsQuery.data)) return <div className={styles.state}><StatePanel kind="error" message={t('members.error')} /></div>;
+  if (membersQuery.isLoading || invitationsQuery.isLoading || rolesQuery.isLoading || settingsQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
+  if (!membersQuery.data || !invitationsQuery.data || !rolesQuery.data || !settingsQuery.data) return <div className={styles.state}><StatePanel kind="error" message={t('members.error')} /></div>;
 
   const activeMembers = membersQuery.data.filter((member) => member.active);
   const formerMembers = membersQuery.data.filter((member) => !member.active);
@@ -636,14 +673,14 @@ export function MembersPanel() {
     <div className={styles.content}>
       <header className={styles.header}>
         <h2>{t('members.title')}</h2>
-        {canManageProtectedRoles ? <div className={styles.headerActions}>
+        {canManageMembers ? <div className={styles.headerActions}>
           <Button aria-label={t('publicJoin.action')} className={styles.headerAction} leadingIcon={<QrCode size={18} />} onClick={() => setPublicJoinOpen(true)} title={t('publicJoin.action')} variant="secondary">{t('publicJoin.action')}</Button>
-          {canManageRoles ? <>
-            <Button aria-label={t('members.csvImport.action')} className={styles.headerAction} leadingIcon={<FileUp size={18} />} onClick={() => setDialog('import')} title={t('members.csvImport.action')} variant="secondary">{t('members.csvImport.action')}</Button>
-            <Button aria-label={t('members.invite')} className={styles.headerAction} leadingIcon={<UserRoundPlus size={18} />} onClick={() => openInvite()} title={t('members.invite')}>{t('members.invite')}</Button>
-          </> : null}
+          <Button aria-label={t('members.csvImport.action')} className={styles.headerAction} leadingIcon={<FileUp size={18} />} onClick={() => setDialog('import')} title={t('members.csvImport.action')} variant="secondary">{t('members.csvImport.action')}</Button>
+          <Button aria-label={t('members.invite')} className={styles.headerAction} leadingIcon={<UserRoundPlus size={18} />} onClick={() => openInvite()} title={t('members.invite')}>{t('members.invite')}</Button>
         </div> : null}
       </header>
+
+      <DefaultRoleSetting groupId={activeGroupId} key={`${activeGroupId}:${settingsQuery.data.defaultRoleId ?? ''}`} roles={roles} settings={settingsQuery.data} />
 
       <section className={styles.section}>
         <div className={styles.sectionHeading}><h3>{t('members.openInvitations')}</h3><span>{openInvitations.length}</span></div>
@@ -655,8 +692,8 @@ export function MembersPanel() {
             return <article className={styles.mobileCard} key={item.id}>
               <header className={styles.mobileCardHeader}><div><strong>{item.displayName || item.email}</strong><small>{item.email}</small></div><span className={deliveryBadgeClass(item.emailDeliveryStatus)}>{t(DELIVERY_STATUS_KEYS[item.emailDeliveryStatus])}</span></header>
               <p className={expired ? styles.expired : styles.mobileMetadata}>{expired ? t('members.expired') : t('members.validUntilDate', { date: new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(item.expiresAt)) })}</p>
-              {claimInvitation ? <p className={styles.temporaryGuestRole}>{t('members.claimInvitationRoleLocked')}</p> : <RoleAssignmentPicker canManageGroup={canManageProtectedRoles} canManageRoles={canManageRoles} onApply={(roleIds) => applyInvitationRoles(item, roleIds)} roleIds={item.roleIds ?? []} roles={roles} subjectName={item.displayName || item.email} />}
-              {canManageProtectedRoles ? <div className={styles.mobileActions}>
+              {claimInvitation ? <p className={styles.temporaryGuestRole}>{t('members.claimInvitationRoleLocked')}</p> : <RoleAssignmentPicker canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} onApply={(roleIds) => applyInvitationRoles(item, roleIds)} roleIds={item.roleIds ?? []} roles={roles} subjectName={item.displayName || item.email} />}
+              {canManageMembers ? <div className={styles.mobileActions}>
                 {!claimInvitation ? <Button aria-label={t('members.editInvitationFor', { email: item.email })} leadingIcon={<Pencil size={16} />} onClick={() => openEdit(item)} size="small" variant="ghost">{t('common.edit')}</Button> : null}
                 <Button aria-label={t('members.resendFor', { email: item.email })} disabled={resendBlocked} leadingIcon={<RotateCcw size={16} />} onClick={() => { setSelectedInvitation(item); setResendResult(null); setDialog('resend'); }} size="small" variant="ghost">{t('members.resend')}</Button>
                 <Button aria-label={t('members.deleteInvitationFor', { email: item.email })} leadingIcon={<Trash2 size={16} />} onClick={() => { setSelectedInvitation(item); setDialog('revoke'); }} size="small" variant="ghost">{t('common.delete')}</Button>
@@ -664,19 +701,19 @@ export function MembersPanel() {
             </article>;
           })}</div> : <div className={tableStyles.tableWrap}>
             <table className={tableStyles.table}>
-              <thead><tr><th>{t('members.email')}</th><th>{t('common.name')}</th><th>{t('members.roles')}</th><th>{t('members.delivery')}</th><th>{t('members.validUntil')}</th>{canManageProtectedRoles ? <th><span className="sr-only">{t('common.action')}</span></th> : null}</tr></thead>
+              <thead><tr><th>{t('members.email')}</th><th>{t('common.name')}</th><th>{t('members.roles')}</th><th>{t('members.delivery')}</th><th>{t('members.validUntil')}</th>{canManageMembers ? <th><span className="sr-only">{t('common.action')}</span></th> : null}</tr></thead>
               <tbody>{openInvitations.map((item) => {
                 const expired = Date.parse(item.expiresAt) <= invitationsQuery.dataUpdatedAt;
                 const resendBlocked = ACTIVE_DELIVERY_STATUSES.has(item.emailDeliveryStatus);
                 const claimInvitation = Boolean(item.targetMembershipId);
                 return (
                   <tr key={item.id}>
-                    <td>{canManageProtectedRoles && !claimInvitation ? <button className={styles.rowLink} onClick={() => openEdit(item)} type="button"><strong>{item.email}</strong></button> : <strong>{item.email}</strong>}</td>
+                    <td>{canManageMembers && !claimInvitation ? <button className={styles.rowLink} onClick={() => openEdit(item)} type="button"><strong>{item.email}</strong></button> : <strong>{item.email}</strong>}</td>
                     <td>{item.displayName || '–'}</td>
-                    <td className={styles.roleCell}>{claimInvitation ? <span className={styles.temporaryGuestRole}>{t('members.claimInvitationRoleLocked')}</span> : <RoleAssignmentPicker canManageGroup={canManageProtectedRoles} canManageRoles={canManageRoles} onApply={(roleIds) => applyInvitationRoles(item, roleIds)} roleIds={item.roleIds ?? []} roles={roles} subjectName={item.displayName || item.email} />}</td>
+                    <td className={styles.roleCell}>{claimInvitation ? <span className={styles.temporaryGuestRole}>{t('members.claimInvitationRoleLocked')}</span> : <RoleAssignmentPicker canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} onApply={(roleIds) => applyInvitationRoles(item, roleIds)} roleIds={item.roleIds ?? []} roles={roles} subjectName={item.displayName || item.email} />}</td>
                     <td><span className={deliveryBadgeClass(item.emailDeliveryStatus)}>{t(DELIVERY_STATUS_KEYS[item.emailDeliveryStatus])}</span></td>
                     <td><span className={expired ? styles.expired : ''}>{expired ? t('members.expired') : new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(item.expiresAt))}</span></td>
-                    {canManageProtectedRoles ? <td><div className={styles.tableActions}>
+                    {canManageMembers ? <td><div className={styles.tableActions}>
                       {!claimInvitation ? <Button aria-label={t('members.editInvitationFor', { email: item.email })} leadingIcon={<Pencil size={16} />} onClick={() => openEdit(item)} size="small" variant="ghost">{t('common.edit')}</Button> : null}
                       <Button aria-label={t('members.resendFor', { email: item.email })} disabled={resendBlocked} leadingIcon={<RotateCcw size={16} />} onClick={() => { setSelectedInvitation(item); setResendResult(null); setDialog('resend'); }} size="small" variant="ghost">{t('members.resend')}</Button>
                       <Button aria-label={t('members.deleteInvitationFor', { email: item.email })} leadingIcon={<Trash2 size={16} />} onClick={() => { setSelectedInvitation(item); setDialog('revoke'); }} size="small" variant="ghost">{t('common.delete')}</Button>
@@ -696,8 +733,8 @@ export function MembersPanel() {
           const claimPending = claimInvitationMembershipIds.has(member.id);
           return <article className={styles.mobileCard} key={member.id}>
             <header className={styles.mobileCardHeader}><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /><span><span className={styles.memberName}><strong>{member.displayName}</strong>{temporaryGuest ? <span className={styles.guestBadge}>{t('members.temporaryGuestBadge')}</span> : null}</span>{member.email ? <small>{member.email}</small> : null}</span></span></header>
-            {!temporaryGuest ? <RoleAssignmentPicker canManageGroup={canManageProtectedRoles} canManageRoles={canManageRoles} lockedRoleIds={lockedAdministratorRoleIds(member.roleIds ?? [])} onApply={(roleIds) => applyMemberRoles(member, roleIds)} roleIds={member.roleIds ?? []} roles={roles} subjectName={member.displayName} /> : null}
-            {canManageProtectedRoles ? <div className={styles.mobileActions}>
+            {!temporaryGuest ? <RoleAssignmentPicker canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} lockedRoleIds={lockedAdministratorRoleIds(member.roleIds ?? [])} onApply={(roleIds) => applyMemberRoles(member, roleIds)} roleIds={member.roleIds ?? []} roles={roles} subjectName={member.displayName} /> : null}
+            {canManageMembers ? <div className={styles.mobileActions}>
               {temporaryGuest ? <Button aria-label={t('members.renameGuestFor', { name: member.displayName })} leadingIcon={<Pencil size={16} />} onClick={() => openGuestRename(member)} size="small" variant="ghost">{t('members.renameGuest')}</Button> : null}
               {temporaryGuest ? renderGuestClaimAction(member, claimPending) : null}
               <Button aria-label={t('members.archiveFor', { name: member.displayName })} leadingIcon={<UserMinus size={16} />} onClick={() => { setSelectedMember(member); setDialog('archive'); }} size="small" variant="ghost">{t('members.archive')}</Button>
@@ -705,15 +742,15 @@ export function MembersPanel() {
           </article>;
         })}</div> : <div className={tableStyles.tableWrap}>
           <table className={tableStyles.table}>
-            <thead><tr><th>{t('common.member')}</th><th>{t('members.email')}</th><th>{t('members.roles')}</th>{canManageProtectedRoles ? <th><span className="sr-only">{t('common.action')}</span></th> : null}</tr></thead>
+            <thead><tr><th>{t('common.member')}</th><th>{t('members.email')}</th><th>{t('members.roles')}</th>{canManageMembers ? <th><span className="sr-only">{t('common.action')}</span></th> : null}</tr></thead>
             <tbody>{activeMembers.map((member) => {
               const temporaryGuest = isTemporaryGuest(member);
               const claimPending = claimInvitationMembershipIds.has(member.id);
               return <tr key={member.id}>
                 <td><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /> <span className={styles.memberName}><strong>{member.displayName}</strong>{temporaryGuest ? <span className={styles.guestBadge}>{t('members.temporaryGuestBadge')}</span> : null}</span></span></td>
                 <td>{member.email}</td>
-                <td className={styles.roleCell}>{!temporaryGuest ? <RoleAssignmentPicker canManageGroup={canManageProtectedRoles} canManageRoles={canManageRoles} lockedRoleIds={lockedAdministratorRoleIds(member.roleIds ?? [])} onApply={(roleIds) => applyMemberRoles(member, roleIds)} roleIds={member.roleIds ?? []} roles={roles} subjectName={member.displayName} /> : null}</td>
-                {canManageProtectedRoles ? <td><div className={styles.tableActions}>
+                <td className={styles.roleCell}>{!temporaryGuest ? <RoleAssignmentPicker canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} lockedRoleIds={lockedAdministratorRoleIds(member.roleIds ?? [])} onApply={(roleIds) => applyMemberRoles(member, roleIds)} roleIds={member.roleIds ?? []} roles={roles} subjectName={member.displayName} /> : null}</td>
+                {canManageMembers ? <td><div className={styles.tableActions}>
                   {temporaryGuest ? <Button aria-label={t('members.renameGuestFor', { name: member.displayName })} leadingIcon={<Pencil size={16} />} onClick={() => openGuestRename(member)} size="small" variant="ghost">{t('members.renameGuest')}</Button> : null}
                   {temporaryGuest ? renderGuestClaimAction(member, claimPending) : null}
                   <Button aria-label={t('members.archiveFor', { name: member.displayName })} leadingIcon={<UserMinus size={16} />} onClick={() => { setSelectedMember(member); setDialog('archive'); }} size="small" variant="ghost">{t('members.archive')}</Button>
@@ -724,7 +761,7 @@ export function MembersPanel() {
         </div>}
       </section>
 
-      {canManageProtectedRoles ? <section className={styles.section}>
+      {canManageMembers ? <section className={styles.section}>
         <div className={styles.sectionHeading}><h3>{t('members.archivedMembers')}</h3><span>{formerMembers.length}</span></div>
         {formerMembers.length === 0 ? <p className={styles.emptySection}>{t('members.noArchivedMembers')}</p> : compact ? <div className={styles.mobileCards}>{formerMembers.map((member) => (
           <article className={styles.mobileCard} key={member.id}>
@@ -761,7 +798,7 @@ export function MembersPanel() {
               <Field hint={t('members.emailHint')} htmlFor="invitation-email" label={t('auth.email')}><TextInput id="invitation-email" onChange={(event) => setDraft((current) => ({ ...current, email: event.target.value }))} required type="email" value={draft.email} /></Field>
               <Field hint={t('members.displayNameHint')} htmlFor="invitation-display-name" label={t('auth.displayName')}><TextInput id="invitation-display-name" maxLength={120} onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))} value={draft.displayName} /></Field>
             </div>
-            {canManageAssignments ? <RoleMultiSelect canManageGroup={canManageProtectedRoles} canManageRoles={canManageRoles} label={t('roleManagement.invitationRoles')} onChange={(roleIds) => setDraft((current) => ({ ...current, roleIds }))} roleIds={draft.roleIds ?? []} roles={roles} /> : <p className={styles.expiry}>{t('members.baseRoleOnly')}</p>}
+            <RoleMultiSelect canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} label={t('roleManagement.invitationRoles')} onChange={(roleIds) => setDraft((current) => ({ ...current, roleIds }))} roleIds={draft.roleIds ?? []} roles={roles} />
             <p className={styles.expiry}>{t('members.expiry')}</p>
             {createMutation.isError ? <p className={styles.error} role="alert">{createMutation.error.message}</p> : null}
             <div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!draft.email.trim() || (draft.roleIds?.length ?? 0) === 0 || createMutation.isPending} type="submit">{t('members.createInvitation')}</Button></div>
@@ -773,7 +810,7 @@ export function MembersPanel() {
         <form className={styles.form} onSubmit={(event) => { event.preventDefault(); updateMutation.mutate(); }}>
           <Field hint={t('members.emailImmutable')} htmlFor="edit-invitation-email" label={t('auth.email')}><TextInput disabled id="edit-invitation-email" value={draft.email} /></Field>
           <Field hint={t('members.displayNameHint')} htmlFor="edit-invitation-display-name" label={t('auth.displayName')}><TextInput id="edit-invitation-display-name" maxLength={120} onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))} value={draft.displayName} /></Field>
-          {canManageAssignments ? <RoleMultiSelect canManageGroup={canManageProtectedRoles} canManageRoles={canManageRoles} label={t('roleManagement.invitationRoles')} onChange={(roleIds) => setDraft((current) => ({ ...current, roleIds }))} roleIds={draft.roleIds ?? []} roles={roles} /> : <p className={styles.expiry}>{t('members.rolesProtected')}</p>}
+          <RoleMultiSelect canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} label={t('roleManagement.invitationRoles')} onChange={(roleIds) => setDraft((current) => ({ ...current, roleIds }))} roleIds={draft.roleIds ?? []} roles={roles} />
           {updateMutation.isError ? <p className={styles.error} role="alert">{updateMutation.error.message}</p> : null}
           <div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={(draft.roleIds?.length ?? 0) === 0 || updateMutation.isPending} type="submit">{t('common.save')}</Button></div>
         </form>
@@ -813,9 +850,7 @@ export function MembersPanel() {
           <Field hint={t('members.claimGuestEmailHint')} htmlFor="temporary-guest-claim-email" label={t('auth.email')}>
             <TextInput autoComplete="email" id="temporary-guest-claim-email" onChange={(event) => { setGuestClaimEmail(event.target.value); claimGuestMutation.reset(); }} required type="email" value={guestClaimEmail} />
           </Field>
-          {canManageRoles ? (
-            <RoleMultiSelect canManageGroup={canManageProtectedRoles} canManageRoles label={t('roleManagement.memberRoles')} onChange={(roleIds) => { setGuestClaimRoleIds(roleIds); claimGuestMutation.reset(); }} roleIds={guestClaimRoleIds} roles={roles} />
-          ) : <p className={styles.claimNotice}>{t('members.claimDefaultRole', { role: defaultRole ? roleDisplayName(defaultRole) : t('members.claimUnavailableNoRole') })}</p>}
+          <RoleMultiSelect canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} label={t('roleManagement.memberRoles')} onChange={(roleIds) => { setGuestClaimRoleIds(roleIds); claimGuestMutation.reset(); }} roleIds={guestClaimRoleIds} roles={roles} />
           <p className={styles.claimNotice}>{t('members.claimGuestHistoryNotice')}</p>
           {claimGuestMutation.isError ? <p className={styles.error} role="alert">{claimGuestMutation.error.message}</p> : null}
           <div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!guestClaimEmail.trim() || guestClaimRoleIds.length === 0 || claimGuestMutation.isPending} type="submit">{claimGuestMutation.isPending ? t('members.claimGuestPending') : t('members.claimGuestCreate')}</Button></div>
@@ -831,7 +866,7 @@ export function MembersPanel() {
           <p className={styles.expiry}>{t('members.reactivateExplanation', { name: selectedMember?.displayName ?? '' })}</p>
           {selectedMember && isTemporaryGuest(selectedMember) ? <Field htmlFor="reactivation-display-name" label={t('auth.displayName')}>
             <TextInput id="reactivation-display-name" maxLength={120} onChange={(event) => { setReactivationDisplayName(event.target.value); reactivateMutation.reset(); }} required value={reactivationDisplayName} />
-          </Field> : canManageRoles ? <RoleMultiSelect canManageGroup={canManageProtectedRoles} canManageRoles label={t('roleManagement.memberRoles')} onChange={(roleIds) => { setReactivationRoleIds(roleIds); reactivateMutation.reset(); }} roleIds={reactivationRoleIds} roles={roles} /> : <p className={styles.claimNotice}>{t('members.reactivateDefaultRole', { role: defaultRole ? roleDisplayName(defaultRole) : '–' })}</p>}
+          </Field> : <RoleMultiSelect canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} label={t('roleManagement.memberRoles')} onChange={(roleIds) => { setReactivationRoleIds(roleIds); reactivateMutation.reset(); }} roleIds={reactivationRoleIds} roles={roles} />}
           {reactivateMutation.isError ? <p className={styles.error} role="alert">{reactivateMutation.error.message}</p> : null}
           <div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={reactivateMutation.isPending || (selectedMember && isTemporaryGuest(selectedMember) ? !reactivationDisplayName.trim() : reactivationRoleIds.length === 0)} type="submit">{t('members.reactivate')}</Button></div>
         </form>
