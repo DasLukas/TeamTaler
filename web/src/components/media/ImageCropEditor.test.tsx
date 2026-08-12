@@ -34,6 +34,31 @@ describe('ImageCropEditor', () => {
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview-2');
   });
 
+  it('binds the opaque preview URL without assigning the DOM src property imperatively', () => {
+    const sourceDescriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
+    if (!sourceDescriptor?.set) throw new Error('HTMLImageElement.src setter is unavailable');
+    const sourceSetter = vi.fn();
+    Object.defineProperty(HTMLImageElement.prototype, 'src', {
+      ...sourceDescriptor,
+      set(value: string) {
+        sourceSetter(value);
+        sourceDescriptor.set?.call(this, value);
+      },
+    });
+    const file = new File(['image'], '"><svg onload=alert(1)>.png', { type: 'image/png' });
+    const rendered = render(<EditorHarness file={file} />);
+
+    try {
+      const previewImage = screen.getByRole('img', { name: 'Local preview' }).querySelector('img');
+      expect(previewImage).toHaveAttribute('src', 'blob:preview-1');
+      expect(sourceSetter).not.toHaveBeenCalled();
+      expect(rendered.container.querySelector('[onload]')).not.toBeInTheDocument();
+    } finally {
+      rendered.unmount();
+      Object.defineProperty(HTMLImageElement.prototype, 'src', sourceDescriptor);
+    }
+  });
+
   it('moves the crop with pointer dragging', () => {
     const file = new File(['image'], 'product.png', { type: 'image/png' });
     const onChange = vi.fn();

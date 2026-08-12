@@ -31,6 +31,7 @@ All notable TeamTaler changes are documented in this file. The project follows [
 ### Security
 
 - Period close now rechecks `settlementsEnabled` inside the server-side write transaction and rejects close attempts while settlements are disabled; hidden client controls are presentation only.
+- Local image previews now bind opaque object URLs declaratively through React instead of copying them through an imperative DOM source sink.
 
 ## [0.6.0] - 2026-08-09
 

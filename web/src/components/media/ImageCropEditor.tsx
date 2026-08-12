@@ -55,21 +55,18 @@ export function ImageCropEditor({ alt, circular = false, compact = false, file, 
   const { t } = useTranslation();
   const hintId = useId();
   const [dimensions, setDimensions] = useState({ width: 1, height: 1 });
+  const [previewUrl, setPreviewUrl] = useState<string>();
   const frameRef = useRef<HTMLDivElement>(null);
-  const imageRef = useRef<HTMLImageElement>(null);
   const dragState = useRef<DragState | undefined>(undefined);
   const transformRef = useRef(value);
   const placement = calculateImagePlacement(dimensions.width, dimensions.height, value);
 
   useEffect(() => {
-    const image = imageRef.current;
-    if (!image) return;
-    const previewUrl = URL.createObjectURL(file);
-    image.src = previewUrl;
-    return () => {
-      if (image.src === previewUrl) image.removeAttribute('src');
-      URL.revokeObjectURL(previewUrl);
-    };
+    const nextPreviewUrl = URL.createObjectURL(file);
+    // Object URLs are external browser resources whose lifetime must follow the selected file.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPreviewUrl(nextPreviewUrl);
+    return () => URL.revokeObjectURL(nextPreviewUrl);
   }, [file]);
   useEffect(() => {
     transformRef.current = value;
@@ -174,7 +171,7 @@ export function ImageCropEditor({ alt, circular = false, compact = false, file, 
           alt=""
           draggable={false}
           onLoad={(event) => setDimensions({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
-          ref={imageRef}
+          src={previewUrl}
           style={{
             height: `${placement.height * 100}%`,
             left: `${placement.centerX * 100}%`,
