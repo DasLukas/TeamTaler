@@ -4,6 +4,24 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+### Added
+
+- A recipient-first multi-product booking cart with persistent cart-level member and temporary-guest selection, a compact recipient icon and count badge beside the open balance, per-line quantities and user-defined prices, responsive desktop/mobile summaries, and one explicit product-target confirmation.
+- `POST /api/v1/groups/{groupId}/bookings/bulk` for idempotent, item-major creation of up to 25 distinct products across up to 100 explicit targets and at most 500 expanded bookings.
+
+### Changed
+
+- Product selection now adds or increments cart lines while preserving the two-action fixed-price self-booking path. Successful carts clear their draft and restore the authenticated member as the safe target default.
+- Cart line details now scroll independently so the result summary and primary booking action remain visible together at every supported viewport height.
+- Mandatory shared booking reasons now stay in the persistent checkout directly above its primary action, eliminating a separate mobile reveal step.
+- The compact booking cart now follows the production bottom-sheet geometry, handle, elevation, spacing, motion, and close affordance for a consistent mobile interaction language.
+- Desktop cart lines now retain their intrinsic card height instead of stretching to fill the available inspector when only a few products are selected.
+- Selected catalog cards now expose direct decrement controls and switch to an explicit remove action at quantity one.
+
+### Security
+
+- Bulk carts revalidate every target permission, product version, price, quantity, and open-period precondition before writing, then commit guest identities, immutable bookings, balanced ledger entries, allocations, notifications, audits, and one idempotency result in a single transaction.
+
 ## [0.7.0] - 2026-08-12
 
 ### Added

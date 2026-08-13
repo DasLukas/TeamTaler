@@ -76,4 +76,36 @@ describe('Modal lifecycle and focus restoration', () => {
     expect(screen.queryByRole('dialog', { name: 'Controlled dialog' })).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
   });
+
+  it('keeps sheets above the software keyboard visual viewport', () => {
+    const originalViewport = Object.getOwnPropertyDescriptor(window, 'visualViewport');
+    const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+    const addEventListener = vi.fn();
+    const removeEventListener = vi.fn();
+    const visualViewport = {
+      addEventListener,
+      height: 540,
+      offsetTop: 0,
+      removeEventListener,
+    } as unknown as VisualViewport;
+
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 915 });
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: visualViewport });
+    const rendered = render(<Modal onClose={vi.fn()} open title="Keyboard-safe sheet" variant="sheet"><input aria-label="Guest name" /></Modal>);
+
+    try {
+      const dialog = screen.getByRole('dialog', { name: 'Keyboard-safe sheet' });
+      expect(dialog).toHaveStyle({ '--modal-visual-viewport-height': '540px', '--modal-visual-viewport-bottom': '375px' });
+      expect(addEventListener).toHaveBeenCalledWith('resize', expect.any(Function));
+      expect(addEventListener).toHaveBeenCalledWith('scroll', expect.any(Function));
+    } finally {
+      rendered.unmount();
+      if (originalViewport) Object.defineProperty(window, 'visualViewport', originalViewport);
+      else Reflect.deleteProperty(window, 'visualViewport');
+      if (originalInnerHeight) Object.defineProperty(window, 'innerHeight', originalInnerHeight);
+    }
+
+    expect(removeEventListener).toHaveBeenCalledWith('resize', expect.any(Function));
+    expect(removeEventListener).toHaveBeenCalledWith('scroll', expect.any(Function));
+  });
 });

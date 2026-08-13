@@ -426,6 +426,23 @@ export interface BookingBatchCommand {
   reason?: string;
 }
 
+/** One product line submitted as part of an atomic multi-product booking. */
+export interface BookingBulkItemCommand {
+  productId: string;
+  productVersion: number;
+  quantity: number;
+  unitPrice?: Money;
+}
+
+/** Command used to atomically book multiple product lines for shared targets. */
+export interface BookingBulkCommand {
+  expectedPeriodId: string;
+  items: BookingBulkItemCommand[];
+  targetMembershipIds?: string[];
+  temporaryGuestDisplayNames?: string[];
+  reason?: string;
+}
+
 /** Minimal member identity exposed as a selectable booking target. */
 export interface BookingTarget {
   membershipId: string;

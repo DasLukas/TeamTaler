@@ -74,6 +74,27 @@ func (s *Server) handleCreateBookingBatch(response http.ResponseWriter, request 
 	writeJSON(response, http.StatusCreated, items)
 }
 
+// handleCreateBookingBulk creates a complete multi-product, multi-target cart
+// as one idempotent transaction and returns bookings in item-major order.
+func (s *Server) handleCreateBookingBulk(response http.ResponseWriter, request *http.Request) {
+	principal, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	var input bookings.BulkCreateInput
+	if err := decodeJSON(response, request, &input); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	items, err := s.bookings.CreateBulk(request.Context(), principal, membership, request.Header.Get("Idempotency-Key"), input)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, items)
+}
+
 func (s *Server) handleVoidBooking(response http.ResponseWriter, request *http.Request) {
 	principal, membership, err := s.membership(request)
 	if err != nil {

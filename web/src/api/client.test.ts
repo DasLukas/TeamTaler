@@ -307,6 +307,41 @@ describe('high-risk API idempotency', () => {
     });
   });
 
+  it('serializes an ordered multi-product cart as one atomic bulk request', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(session('user-a')))
+      .mockResolvedValueOnce(jsonResponse([
+        { ...booking, id: 'booking-water' },
+        { ...booking, id: 'booking-donation', productId: 'product-donation', unitPriceMinor: '250', totalMinor: '500' },
+      ], 201));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.getSession();
+    await api.createBulkBookings('group-a', {
+      expectedPeriodId: 'period-a',
+      items: [
+        { productId: 'product-water', productVersion: 1, quantity: 1 },
+        { productId: 'product-donation', productVersion: 3, quantity: 2, unitPrice: { minorUnits: '250', currency: 'EUR' } },
+      ],
+      targetMembershipIds: ['member-user-a', 'member-b'],
+      reason: 'Shared order',
+    });
+
+    const call = fetchMock.mock.calls[1];
+    expect(call[0]).toBe('/api/v1/groups/group-a/bookings/bulk');
+    expect((call[1] as RequestInit).method).toBe('POST');
+    expect(idempotencyKey(call)).toBeTruthy();
+    expect(requestBody(call)).toEqual({
+      expectedPeriodId: 'period-a',
+      items: [
+        { productId: 'product-water', productVersion: 1, quantity: 1 },
+        { productId: 'product-donation', productVersion: 3, quantity: 2, unitPriceMinor: 250 },
+      ],
+      targetMembershipIds: ['member-user-a', 'member-b'],
+      reason: 'Shared order',
+    });
+  });
+
   it('loads the minimal booking context without requesting the member directory', async () => {
     const context = {
       openPeriod: { id: 'period-a', label: 'August', status: 'OPEN', startsAt: '2026-08-01T00:00:00Z' },

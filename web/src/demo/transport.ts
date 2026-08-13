@@ -2,6 +2,7 @@ import type {
   AccountSummary,
   Booking,
   BookingBatchCommand,
+  BookingBulkCommand,
   BookingCommand,
   CatalogOrderCommand,
   Category,
@@ -435,6 +436,7 @@ export class DemoTransport {
     if (resource === 'bookings' && method === 'GET') return this.listBookings(groupId) as T;
     if (resource === 'bookings' && method === 'POST') return this.createBooking(groupId, body as BookingCommand) as T;
     if (resource === 'bookings/batch' && method === 'POST') return this.createBookingBatch(groupId, body as BookingBatchCommand & { unitPriceMinor?: number }) as T;
+    if (resource === 'bookings/bulk' && method === 'POST') return this.createBookingBulk(groupId, body as BookingBulkCommand & { items: Array<BookingBulkCommand['items'][number] & { unitPriceMinor?: number }> }) as T;
     if (resource === 'accounts/me') return clone(this.ledger) as T;
     if (resource === 'accounts' && method === 'GET') return clone(this.accountSummaries.filter((account) => account.status !== 'DELETED' || BigInt(account.balance.minorUnits) !== 0n)) as T;
     if (resource === 'payments' && method === 'GET') return clone(this.payments) as T;
@@ -951,6 +953,50 @@ export class DemoTransport {
       return membership.id;
     });
     return [...targets, ...guestMembershipIds].map((targetMembershipId) => this.createBooking(groupId, { ...command, targetMembershipId }));
+  }
+
+  /**
+   * Creates every product-and-target combination from one demo bulk command.
+   *
+   * @param groupId - Active group receiving the bookings.
+   * @param command - Ordered product lines and their shared target scope.
+   * @returns Created bookings in item-major and then target-major order.
+   * @throws Error when the cart is empty, exceeds 500 bookings, or contains invalid lines.
+   */
+  private createBookingBulk(groupId: string, command: BookingBulkCommand & { items: Array<BookingBulkCommand['items'][number] & { unitPriceMinor?: number }> }): Booking[] {
+    const targetCount = (command.targetMembershipIds?.length ?? 0) + (command.temporaryGuestDisplayNames?.length ?? 0);
+    if (command.items.length < 1 || command.items.length > 25 || targetCount < 1 || new Set(command.items.map((item) => item.productId)).size !== command.items.length) {
+      throw new Error(i18n.t('booking.noAvailableTarget'));
+    }
+    const bookingCount = command.items.length * targetCount;
+    if (bookingCount > 500) throw new Error(i18n.t('booking.tooManyBookings'));
+    for (const item of command.items) {
+      const product = this.categories.flatMap((category) => category.products).find((entry) => entry.id === item.productId);
+      if (!product || !product.active || product.version !== item.productVersion || !Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 99) {
+        throw new Error(i18n.t('errors.missingProductOrMember'));
+      }
+      if (product.pricingMode === 'USER_DEFINED') validateDemoProductPrice(item.unitPrice?.minorUnits ?? item.unitPriceMinor);
+      if (product.pricingMode === 'FIXED' && (item.unitPrice || item.unitPriceMinor !== undefined)) throw new Error(i18n.t('errors.amountFormat'));
+    }
+
+    const [first, ...remaining] = command.items;
+    const firstBookings = this.createBookingBatch(groupId, {
+      ...first,
+      expectedPeriodId: command.expectedPeriodId,
+      targetMembershipIds: command.targetMembershipIds,
+      temporaryGuestDisplayNames: command.temporaryGuestDisplayNames,
+      reason: command.reason,
+    });
+    const resolvedTargetIds = firstBookings.map((booking) => booking.memberId);
+    return remaining.reduce<Booking[]>((created, item) => [
+      ...created,
+      ...this.createBookingBatch(groupId, {
+        ...item,
+        expectedPeriodId: command.expectedPeriodId,
+        targetMembershipIds: resolvedTargetIds,
+        reason: command.reason,
+      }),
+    ], firstBookings);
   }
 
   private listBookings(groupId: string): Booking[] {

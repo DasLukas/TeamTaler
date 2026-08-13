@@ -230,6 +230,28 @@ describe('DemoTransport dynamic roles', () => {
     ]));
   });
 
+  it('creates every ordered product-target combination from one bulk cart command', async () => {
+    const transport = new DemoTransport();
+    const created = await transport.request<Booking[]>('/groups/group-sv-adler/bookings/bulk', jsonRequest('POST', {
+      expectedPeriodId: 'period-august',
+      items: [
+        { productId: 'product-water', productVersion: 1, quantity: 2 },
+        { productId: 'product-late', productVersion: 1, quantity: 1 },
+      ],
+      targetMembershipIds: ['member-lukas', 'member-mara'],
+      reason: 'Shared cart',
+    }));
+
+    expect(created).toHaveLength(4);
+    expect(created.map((booking) => [booking.productId, booking.memberId])).toEqual([
+      ['product-water', 'member-lukas'],
+      ['product-water', 'member-mara'],
+      ['product-late', 'member-lukas'],
+      ['product-late', 'member-mara'],
+    ]);
+    expect(created.every((booking) => booking.reason === 'Shared cart')).toBe(true);
+  });
+
   it('creates, renames, and offers a claim invitation for a temporary guest', async () => {
     const transport = new DemoTransport();
 

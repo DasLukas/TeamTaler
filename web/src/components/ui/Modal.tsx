@@ -67,6 +67,28 @@ export function Modal({ open, title, onClose, children, variant = 'dialog', clas
     };
   }, []);
 
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    const visualViewport = window.visualViewport;
+    if (!open || variant !== 'sheet' || !dialog || !visualViewport) return undefined;
+
+    const synchronizeVisualViewport = () => {
+      const obscuredBottom = Math.max(0, window.innerHeight - visualViewport.offsetTop - visualViewport.height);
+      dialog.style.setProperty('--modal-visual-viewport-height', `${visualViewport.height}px`);
+      dialog.style.setProperty('--modal-visual-viewport-bottom', `${obscuredBottom}px`);
+    };
+
+    synchronizeVisualViewport();
+    visualViewport.addEventListener('resize', synchronizeVisualViewport);
+    visualViewport.addEventListener('scroll', synchronizeVisualViewport);
+    return () => {
+      visualViewport.removeEventListener('resize', synchronizeVisualViewport);
+      visualViewport.removeEventListener('scroll', synchronizeVisualViewport);
+      dialog.style.removeProperty('--modal-visual-viewport-height');
+      dialog.style.removeProperty('--modal-visual-viewport-bottom');
+    };
+  }, [open, variant]);
+
   return (
     <dialog
       aria-labelledby={titleId}
