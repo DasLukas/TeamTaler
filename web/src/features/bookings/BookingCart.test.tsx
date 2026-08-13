@@ -150,6 +150,8 @@ describe('BookingCart booking expansion limits', () => {
     const checkout = reasonInput.closest('footer');
     expect(checkout).not.toBeNull();
     expect(reasonField?.nextElementSibling).toBe(scope);
+    expect(scope?.firstElementChild).toHaveTextContent('2,00 €');
+    expect(scope?.querySelector('[aria-hidden="true"]')).toHaveTextContent('1×2=2');
     expect(scope?.nextElementSibling).toBe(submit);
     expect(submit).toBeDisabled();
   });
@@ -222,7 +224,8 @@ describe('BookingCart booking expansion limits', () => {
       total: '6,00 €',
     }) });
     expect(open).toHaveAttribute('aria-expanded', 'false');
-    expect(open).toHaveTextContent(i18n.t('booking.productCount', { count: 2 }));
+    expect(open).toHaveTextContent('Warenkorb26,00 €');
+    expect(open).not.toHaveTextContent(i18n.t('booking.productCount', { count: 2 }));
     expect(open).not.toHaveTextContent('3 Personen');
     expect(screen.queryByLabelText(`${i18n.t('booking.reason')} *`)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: i18n.t('booking.submitBookings') })).not.toBeInTheDocument();

@@ -56,6 +56,8 @@
 .peekIdentity { display: grid; min-width: 0; gap: 2px; }
 .peekIdentity > strong { font-size: var(--font-size-lg); }
 .peekIdentity > span { overflow: hidden; color: var(--color-muted); font-size: var(--font-size-sm); text-overflow: ellipsis; white-space: nowrap; }
+.peekProductCount { display: inline-flex; align-items: center; gap: var(--space-1); }
+.peekProductCount svg { flex: 0 0 auto; }
 .peekTotal { color: var(--color-teal-800); font-size: var(--font-size-lg); white-space: nowrap; }
 .peekButton > svg { color: var(--color-teal-700); }
 
@@ -87,10 +89,20 @@
 .stepper button:last-child { border-left: 1px solid var(--color-border); }
 .stepper output { text-align: center; font-weight: 700; }
 
-.scope { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; gap: var(--space-1); padding: var(--space-4); border-radius: var(--radius-md); background: var(--color-surface-teal); }
+.scope {
+  display: flex;
+  flex-flow: row-reverse wrap;
+  align-items: center;
+  justify-content: space-between;
+  column-gap: var(--space-5);
+  row-gap: var(--space-1);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-teal);
+}
 .scope span { color: var(--color-teal-800); font-size: var(--font-size-sm); font-weight: 700; line-height: 1.35; }
-.scope strong { color: var(--color-teal-800); font-size: var(--font-size-xl); white-space: nowrap; }
-.scopeEquation { display: flex; min-width: 0; align-items: center; gap: var(--space-1); }
+.scope strong { flex: 0 0 auto; color: var(--color-teal-800); font-size: var(--font-size-xl); white-space: nowrap; }
+.scopeEquation { display: flex; min-width: 0; flex: 0 0 auto; align-items: center; gap: var(--space-1); }
 .scopeEquation svg { width: 16px; height: 16px; }
 .scopeFactor { display: inline-flex; align-items: center; gap: var(--space-1); white-space: nowrap; }
 .scopeFactor svg { flex: 0 0 auto; }

@@ -118,7 +118,7 @@ describe('BookingPage multi-product workspace', () => {
     await waitFor(() => expect(mocks.createBulkBookings).toHaveBeenCalledWith(demoSession.activeGroupId, expect.objectContaining({ reason: 'Training' })));
   });
 
-  it('shows an optional reason only after opening the compact cart editor', async () => {
+  it('shows an optional reason in the full compact cart opened by the first product', async () => {
     const user = userEvent.setup();
     const context = bookingContext([demoMembers[0]]);
     context.ownBookingReasonMode = 'OPTIONAL';
@@ -127,13 +127,11 @@ describe('BookingPage multi-product workspace', () => {
     renderBookingPage();
 
     await user.click(await screen.findByRole('button', { name: /Wasser.*1,00.*hinzufügen/i }));
-    expect(screen.queryByLabelText(i18n.t('booking.reason'))).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: i18n.t('booking.cartEdit') }));
     const reason = screen.getByLabelText(i18n.t('booking.reason'));
     expect(reason).toBeVisible();
     expect(reason).toHaveAttribute('placeholder', i18n.t('booking.reason'));
     expect(screen.queryByText(i18n.t('booking.reason'))).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: i18n.t('booking.cartCollapse') })).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('decreases and removes a selected product directly from its catalogue card', async () => {
@@ -222,7 +220,8 @@ describe('BookingPage multi-product workspace', () => {
     expect(reasonInput).toBeVisible();
     expect(reasonInput).toHaveAttribute('placeholder', `${i18n.t('booking.reason')} *`);
     expect(submit).toBeDisabled();
-    expect(screen.getByRole('button', { name: i18n.t('booking.cartEdit') })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: /Wasser.*Anzahl erhöhen/i })).toBeVisible();
+    expect(screen.getByRole('button', { name: i18n.t('booking.cartCollapse') })).toHaveAttribute('aria-expanded', 'true');
 
     await user.type(reasonInput, 'Teamabend');
     expect(submit).toBeEnabled();
@@ -238,12 +237,15 @@ describe('BookingPage multi-product workspace', () => {
     await user.click(screen.getByRole('button', { name: i18n.t('dialog.close') }));
     await user.click(screen.getByRole('button', { name: /Wasser.*1,00.*hinzufügen/i }));
     expect(screen.getByLabelText(`${i18n.t('booking.reason')} *`)).toBeVisible();
+    expect(screen.getByRole('button', { name: /Wasser.*Anzahl erhöhen/i })).toBeVisible();
     await user.click(screen.getByRole('button', { name: /Spezi.*1,50.*hinzufügen/i }));
 
     expect(screen.queryByLabelText(`${i18n.t('booking.reason')} *`)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: i18n.t('booking.submitBookings') })).not.toBeInTheDocument();
     const openCart = screen.getByRole('button', { name: /Warenkorb öffnen/ });
-    expect(openCart).toHaveTextContent(i18n.t('booking.productCount', { count: 2 }));
+    expect(openCart).toHaveAccessibleName(expect.stringContaining(i18n.t('booking.productCount', { count: 2 })));
+    expect(openCart).toHaveTextContent('Warenkorb2');
+    expect(openCart).not.toHaveTextContent(i18n.t('booking.productCount', { count: 2 }));
     expect(openCart).not.toHaveTextContent(i18n.t('booking.targetCount', { count: 2 }));
 
     await user.click(openCart);

@@ -126,7 +126,7 @@ function BookingWorkspace({ groupId, categories, context, compact }: BookingWork
       if (compact) setCartView('summary');
       return;
     }
-    if (compact) setCartView(product.pricingMode === 'USER_DEFINED' ? 'details' : lines.length === 0 ? 'summary' : 'peek');
+    if (compact) setCartView(product.pricingMode === 'USER_DEFINED' || lines.length === 0 ? 'details' : 'peek');
     setCartLimitError('');
     setLines((current) => [...current, { product, quantity: 1, unitPriceInput: '', unitPriceTouched: false }]);
   };

@@ -196,7 +196,7 @@ export function BookingCart({
         >
           <span className={styles.peekIdentity}>
             <strong>{t('booking.cartTitle')}</strong>
-            <span aria-live="polite">{t('booking.productCount', { count: productCount })}</span>
+            <span aria-hidden="true" className={styles.peekProductCount}><Package size={16} strokeWidth={1.9} />{productCount}</span>
           </span>
           <strong className={styles.peekTotal}>{total ? formatMoney(total) : '—'}</strong>
           <ChevronUp aria-hidden="true" size={24} strokeWidth={2} />
