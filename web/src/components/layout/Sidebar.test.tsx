@@ -23,14 +23,14 @@ describe('Sidebar role navigation', () => {
     usePermissions(['FINANCE_MANAGEMENT']);
     render(<Sidebar />);
     expect(screen.getByRole('link', { name: 'Finanzen' })).toHaveAttribute('href', '/finance');
-    expect(screen.queryByRole('link', { name: 'Verwaltung' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Einstellungen' })).not.toBeInTheDocument();
   });
 
   it('shows catalog without administration or finance to a pure catalog manager', () => {
     usePermissions(['CATALOG_MANAGEMENT']);
     render(<Sidebar />);
     expect(screen.getByRole('link', { name: 'Katalog' })).toHaveAttribute('href', '/catalog');
-    expect(screen.queryByRole('link', { name: 'Verwaltung' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Einstellungen' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Finanzen' })).not.toBeInTheDocument();
   });
 
@@ -39,6 +39,6 @@ describe('Sidebar role navigation', () => {
     render(<Sidebar />);
     const links = screen.getAllByRole('link').map((link) => link.textContent);
     expect(links.indexOf('Katalog')).toBeLessThan(links.indexOf('Finanzen'));
-    expect(links.indexOf('Finanzen')).toBeLessThan(links.indexOf('Verwaltung'));
+    expect(links.indexOf('Finanzen')).toBeLessThan(links.indexOf('Einstellungen'));
   });
 });
