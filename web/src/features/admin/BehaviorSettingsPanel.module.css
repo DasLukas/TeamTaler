@@ -3,11 +3,6 @@
   padding: var(--space-8) 0;
 }
 
-.header {
-  margin-bottom: var(--space-6);
-}
-
-.header h2,
 .settingRow h3,
 .settingRow h4,
 .settingRow p,

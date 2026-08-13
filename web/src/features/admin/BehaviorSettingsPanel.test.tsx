@@ -74,6 +74,7 @@ describe('BehaviorSettingsPanel', () => {
   it('keeps group configuration separate from membership defaults', async () => {
     renderPanel();
 
+    expect(screen.queryByRole('heading', { level: 2, name: i18n.t('behaviorSettings.title') })).not.toBeInTheDocument();
     expect(await screen.findByRole('region', { name: i18n.t('behaviorSettings.groupSectionTitle') })).toBeVisible();
     expect(await screen.findByRole('region', { name: i18n.t('behaviorSettings.notificationEmailTitle') })).toBeVisible();
     expect(screen.queryByRole('region', { name: i18n.t('behaviorSettings.rolesMembersSectionTitle') })).not.toBeInTheDocument();

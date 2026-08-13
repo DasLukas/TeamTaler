@@ -196,7 +196,6 @@ export function BehaviorSettingsPanel() {
   if (settingsQuery.isError || !settingsQuery.data) return <div className={styles.state}><StatePanel kind="error" message={t('behaviorSettings.loadError')} /></div>;
 
   return <div className={styles.content}>
-    <header className={styles.header}><h2>{t('behaviorSettings.title')}</h2></header>
     <SettingsForm groupId={activeGroupId} key={`${activeGroupId}:${JSON.stringify(settingsQuery.data)}`} settings={settingsQuery.data} />
   </div>;
 }
