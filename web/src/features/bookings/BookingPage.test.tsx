@@ -88,6 +88,19 @@ describe('BookingPage multi-product workspace', () => {
     expect(screen.queryByRole('button', { name: i18n.t('booking.submit') })).not.toBeInTheDocument();
   });
 
+  it('keeps a long localized balance available without replacing financial digits', async () => {
+    mocks.getBookingContext.mockResolvedValue({
+      ...bookingContext([demoMembers[0]]),
+      ownBalance: { minorUnits: '123450', currency: 'EUR' },
+    });
+    renderBookingPage();
+
+    const balance = await screen.findByTitle(/1\.234,50/);
+    expect(balance).toHaveTextContent('1.234,50 €');
+    expect(balance).toHaveAttribute('title', '1.234,50 €');
+    expect(balance).toHaveStyle({ whiteSpace: 'nowrap' });
+  });
+
   it('keeps an optional own-booking reason editable and submits it with the cart', async () => {
     const user = userEvent.setup();
     const context = bookingContext([demoMembers[0]]);

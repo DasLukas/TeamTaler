@@ -34,6 +34,7 @@ const primaryNavigation = [
 export interface SidebarProps {
   collapsed: boolean;
   onCollapsedChange: (collapsed: boolean) => void;
+  onNavigate?: () => void;
 }
 
 /**
@@ -42,7 +43,7 @@ export interface SidebarProps {
  * @param props - Current tablet-rail state and its state-change callback.
  * @returns A localized group selector and navigation landmark.
  */
-export function Sidebar({ collapsed, onCollapsedChange }: SidebarProps) {
+export function Sidebar({ collapsed, onCollapsedChange, onNavigate }: SidebarProps) {
   const { t } = useTranslation();
   const { session, activeGroupId, setActiveGroupId } = useActiveGroup();
   const activeGroup = session.groups.find((group) => group.id === activeGroupId);
@@ -91,6 +92,7 @@ export function Sidebar({ collapsed, onCollapsedChange }: SidebarProps) {
             aria-label={t(`nav.${key}`)}
             className={styles.link}
             key={to}
+            onClick={onNavigate}
             title={collapsed ? t(`nav.${key}`) : undefined}
             to={to}
           >
@@ -100,12 +102,12 @@ export function Sidebar({ collapsed, onCollapsedChange }: SidebarProps) {
           ))}
       </nav>
       <div className={styles.bottom}>
-        <Link aria-label={t('nav.notifications')} activeProps={{ className: styles.active }} className={styles.link} title={collapsed ? t('nav.notifications') : undefined} to={memberPaths.notifications}>
+        <Link aria-label={t('nav.notifications')} activeProps={{ className: styles.active }} className={styles.link} onClick={onNavigate} title={collapsed ? t('nav.notifications') : undefined} to={memberPaths.notifications}>
           <Bell aria-hidden="true" size={23} strokeWidth={1.8} />
           <span className={styles.linkLabel}>{t('nav.notifications')}</span>
           <NotificationBadge className={styles.badge} count={unreadCount} />
         </Link>
-        <Link aria-label={t('nav.account')} activeProps={{ className: styles.active }} className={styles.link} title={collapsed ? t('nav.account') : undefined} to="/account">
+        <Link aria-label={t('nav.account')} activeProps={{ className: styles.active }} className={styles.link} onClick={onNavigate} title={collapsed ? t('nav.account') : undefined} to="/account">
           <CircleUserRound aria-hidden="true" size={23} strokeWidth={1.8} />
           <span className={styles.linkLabel}>{t('nav.account')}</span>
         </Link>

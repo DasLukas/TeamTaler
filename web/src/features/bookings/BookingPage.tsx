@@ -62,6 +62,8 @@ function BookingWorkspace({ groupId, categories, context, compact }: BookingWork
   const hasOwnBooking = targetMembershipIds.includes(context.currentMembership.id);
   const reasonContext = hasForeignBooking ? 'FOREIGN' : hasOwnBooking ? 'OWN' : 'OFF';
   const reasonMode = hasForeignBooking ? context.foreignBookingReasonMode : hasOwnBooking ? context.ownBookingReasonMode : 'OFF';
+  const balanceLabel = formatMoney(context.ownBalance);
+  const balanceLengthClass = balanceLabel.length > 10 ? styles.balanceAmountCompact : balanceLabel.length > 8 ? styles.balanceAmountReduced : '';
   useEffect(() => () => {
     if (confirmationTimerRef.current !== undefined) window.clearTimeout(confirmationTimerRef.current);
   }, []);
@@ -168,7 +170,7 @@ function BookingWorkspace({ groupId, categories, context, compact }: BookingWork
         <h1>{t('booking.quickTitle')}</h1>
         <div className={`${styles.balanceRow} ${canAssignOthers ? styles.hasTargetControl : ''}`}>
           <div className={styles.balance}>
-            <div className={styles.balanceAmount}><span>{t('booking.openBalance')}</span><strong className={isCreditBalance(context.ownBalance) ? styles.creditBalance : undefined} data-financial-state={isCreditBalance(context.ownBalance) ? 'credit' : 'due'}>{formatMoney(context.ownBalance)}</strong></div>
+            <div className={styles.balanceAmount}><span>{t('booking.openBalance')}</span><strong className={`${isCreditBalance(context.ownBalance) ? styles.creditBalance : ''} ${balanceLengthClass}`} data-financial-state={isCreditBalance(context.ownBalance) ? 'credit' : 'due'} title={balanceLabel}>{balanceLabel}</strong></div>
             {!canAssignOthers ? <WalletCards aria-hidden="true" size={40} strokeWidth={1.8} /> : null}
           </div>
           {canAssignOthers ? <div className={styles.targetControl}>
