@@ -121,6 +121,10 @@
   .balanceRow.hasTargetControl { grid-template-columns: minmax(0, 1fr) 104px; gap: var(--space-3); }
 }
 
+@media (min-width: 768px) and (max-height: 500px) {
+  .inspector { padding-top: var(--space-3); }
+}
+
 @media (max-width: 767px) {
   .inspector { bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom)); }
 
