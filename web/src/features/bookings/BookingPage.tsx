@@ -238,7 +238,7 @@ export function BookingPage() {
   const { activeGroupId, activeGroup } = useActiveGroup();
   const categoriesQuery = useQuery({ queryKey: ['categories', activeGroupId], queryFn: () => api.getCategories(activeGroupId) });
   const bookingContextQuery = useQuery({ queryKey: ['booking-context', activeGroupId], queryFn: () => api.getBookingContext(activeGroupId, activeGroup.currency) });
-  const compact = useMediaQuery('(max-width: 1023px)');
+  const compact = useMediaQuery('(max-width: 767px)');
 
   if (categoriesQuery.isLoading || bookingContextQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
   if (categoriesQuery.isError || bookingContextQuery.isError || !categoriesQuery.data || !bookingContextQuery.data) {

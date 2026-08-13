@@ -82,7 +82,7 @@
 .state > * { width: min(100%, 640px); }
 .catalogLink { display: inline-flex; min-height: 44px; align-items: center; padding: 0 var(--space-5); border-radius: var(--radius-md); color: var(--color-white); background: var(--color-teal-700); font-weight: 700; }
 
-@media (max-width: 1023px) {
+@media (max-width: 767px) {
   .layout { display: block; }
   .content { width: min(100%, 780px); padding-bottom: 64px; }
   .hasCart .content { padding-bottom: 300px; }
@@ -106,10 +106,6 @@
 
 @container booking-inspector (max-width: 360px) {
   .inspectorEmpty { padding-inline: var(--space-5); }
-}
-
-@media (min-width: 768px) and (max-width: 1023px) {
-  .inspector { left: var(--shell-sidebar-width, var(--sidebar-width)); }
 }
 
 @media (max-width: 767px) {

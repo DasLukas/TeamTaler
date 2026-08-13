@@ -25,7 +25,7 @@ vi.mock('@/api/client', () => ({
 }));
 
 vi.mock('@/app/useActiveGroup', () => ({ useActiveGroup: () => mocks.useActiveGroup() }));
-vi.mock('@/hooks/useMediaQuery', () => ({ useMediaQuery: () => mocks.useMediaQuery() }));
+vi.mock('@/hooks/useMediaQuery', () => ({ useMediaQuery: (query: string) => mocks.useMediaQuery(query) }));
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, to }: { children: ReactNode; to: string }) => <a href={to}>{children}</a>,
 }));
@@ -69,6 +69,7 @@ describe('BookingPage multi-product workspace', () => {
     renderBookingPage();
 
     const water = await screen.findByRole('button', { name: /Wasser.*1,00.*hinzufügen/i });
+    expect(mocks.useMediaQuery).toHaveBeenCalledWith('(max-width: 767px)');
     expect(screen.queryByRole('button', { name: recipientButtonLabel(1) })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: i18n.t('booking.submit') })).not.toBeInTheDocument();
 

@@ -8,8 +8,17 @@
   padding: 30px 18px 24px;
   color: var(--color-white);
   background: linear-gradient(165deg, var(--color-navy-950) 0%, #002950 100%);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-color: rgb(255 255 255 / 32%) transparent;
+  scrollbar-width: thin;
   transition: width var(--motion-normal) ease, padding var(--motion-normal) ease;
 }
+
+.sidebar::-webkit-scrollbar { width: 5px; }
+.sidebar::-webkit-scrollbar-track { background: transparent; }
+.sidebar::-webkit-scrollbar-thumb { border-radius: var(--radius-full); background: rgb(255 255 255 / 32%); }
 
 .sidebarHeader {
   position: relative;

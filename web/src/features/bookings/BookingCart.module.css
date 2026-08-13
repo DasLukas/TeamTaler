@@ -106,7 +106,7 @@
 .empty strong { color: var(--color-ink); font-size: var(--font-size-lg); }
 .empty p { max-width: 300px; margin: 0; line-height: 1.5; }
 
-@media (max-width: 1023px) {
+@media (max-width: 767px) {
   .compact {
     height: auto;
     max-height: 82vh;
