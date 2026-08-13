@@ -87,17 +87,14 @@
 .stepper button:last-child { border-left: 1px solid var(--color-border); }
 .stepper output { text-align: center; font-weight: 700; }
 
-.scope { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); padding: var(--space-4); border-radius: var(--radius-md); background: var(--color-surface-teal); }
+.scope { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; gap: var(--space-1); padding: var(--space-4); border-radius: var(--radius-md); background: var(--color-surface-teal); }
 .scope span { color: var(--color-teal-800); font-size: var(--font-size-sm); font-weight: 700; line-height: 1.35; }
 .scope strong { color: var(--color-teal-800); font-size: var(--font-size-xl); white-space: nowrap; }
-.multiTargetScope { grid-template-columns: minmax(0, 1fr); justify-items: start; gap: var(--space-1); }
-.multiTargetScope .scopeEquation { gap: var(--space-1); }
-.multiTargetScope .scopeEquation svg { width: 16px; height: 16px; }
-.multiTargetScope .scopeFactor b { font-size: var(--font-size-sm); }
-.scopeEquation { display: flex; min-width: 0; align-items: center; gap: var(--space-2); }
+.scopeEquation { display: flex; min-width: 0; align-items: center; gap: var(--space-1); }
+.scopeEquation svg { width: 16px; height: 16px; }
 .scopeFactor { display: inline-flex; align-items: center; gap: var(--space-1); white-space: nowrap; }
 .scopeFactor svg { flex: 0 0 auto; }
-.scopeFactor b { font-size: var(--font-size-md); }
+.scopeFactor b { font-size: var(--font-size-sm); }
 .scopeOperator { color: var(--color-teal-700); }
 .checkout { display: grid; flex: 0 0 auto; gap: var(--space-5); }
 .reasonField { display: grid; gap: var(--space-1); }

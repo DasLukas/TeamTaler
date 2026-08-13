@@ -54,6 +54,26 @@ func TestRunSeedsTwoIsolatedGroups(t *testing.T) {
 	assertCount(t, ctx, db, `SELECT count(*) FROM memberships m JOIN groups g ON g.id=m.group_id WHERE g.name=? AND m.status='ACTIVE'`, []any{secondaryGroupName}, 3)
 	assertCount(t, ctx, db, `SELECT count(*) FROM categories c JOIN groups g ON g.id=c.group_id WHERE g.name=? AND c.name=?`, []any{secondaryGroupName, secondaryCategory}, 1)
 	assertCount(t, ctx, db, `SELECT count(*) FROM products p JOIN categories c ON c.id=p.category_id JOIN groups g ON g.id=c.group_id WHERE g.name=? AND p.name=? AND p.price_minor=180`, []any{secondaryGroupName, secondaryProduct}, 1)
+	assertCount(t, ctx, db, `SELECT count(*) FROM products WHERE deleted_at IS NULL`, nil, 6)
+	assertCount(t, ctx, db, `SELECT count(*) FROM products WHERE deleted_at IS NULL AND image_key IS NOT NULL`, nil, 6)
+	assertCount(t, ctx, db, `SELECT count(*) FROM users WHERE active=1 AND email IS NOT NULL`, nil, 5)
+	assertCount(t, ctx, db, `SELECT count(*) FROM users WHERE active=1 AND email IS NOT NULL AND avatar_key IS NOT NULL`, nil, 5)
+	for _, groupName := range []string{"TeamTaler Demo Club", secondaryGroupName} {
+		assertCount(t, ctx, db, `SELECT count(*) FROM group_reason_suggestions r JOIN groups g ON g.id=r.group_id WHERE g.name=? AND r.kind='BOOKING'`, []any{groupName}, 2)
+		assertCount(t, ctx, db, `SELECT count(*) FROM group_reason_suggestions r JOIN groups g ON g.id=r.group_id WHERE g.name=? AND r.kind='PAYMENT'`, []any{groupName}, 2)
+	}
+	assertCount(t, ctx, db, `SELECT count(DISTINCT image_key) FROM (
+		SELECT image_key FROM products WHERE image_key IS NOT NULL
+		UNION ALL
+		SELECT avatar_key AS image_key FROM users WHERE avatar_key IS NOT NULL
+	)`, nil, 11)
+	storedImages, err := os.ReadDir(filepath.Join(dataDirectory, "images"))
+	if err != nil {
+		t.Fatalf("read stored fixture images: %v", err)
+	}
+	if len(storedImages) != 11 {
+		t.Fatalf("stored fixture images=%d, want 11", len(storedImages))
+	}
 }
 
 // assertCount compares one scalar query result with want and fails the current

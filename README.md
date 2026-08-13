@@ -239,7 +239,7 @@ The Codex environment action **Start test server** starts the real Go backend on
 make test-server
 ```
 
-The fixture contains `TeamTaler Demo Club` and `TeamTaler Weekend Club`. The second group includes the `Refreshments` category with the fixed-price `Club Coffee` product. All seeded accounts use the password `TeamTaler-Test-2026!`:
+The fixture contains `TeamTaler Demo Club` and `TeamTaler Weekend Club`. Every seeded product has a local image, every seeded account has a fictional profile image, and each group includes two predefined booking reasons plus two predefined payment reasons. The second group includes the `Refreshments` category with the fixed-price `Club Coffee` product. All seeded accounts use the password `TeamTaler-Test-2026!`:
 
 - `admin@example.test` has the protected group-administrator role in both groups.
 - `jonas@example.test` has the finance-manager and catalog-manager preset roles.

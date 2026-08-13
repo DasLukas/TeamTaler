@@ -279,10 +279,10 @@ export function BookingCart({
             {!reason.trim() && error && reasonRequired ? <span className={styles.reasonError} id="booking-reason-error" role="alert">{t('booking.reasonRequired')}</span> : null}
           </div>
         ) : null}
-        <div aria-live="polite" className={`${styles.scope} ${targetCount > 1 ? styles.multiTargetScope : ''}`}>
+        <div aria-live="polite" className={styles.scope}>
+          <strong>{total ? formatMoney(total) : '—'}</strong>
           {targetCount > 1 ? (
             <>
-              <strong>{total ? formatMoney(total) : '—'}</strong>
               <span aria-hidden="true" className={styles.scopeEquation}>
                 <span className={styles.scopeFactor}><Package size={18} strokeWidth={2} /><b>{productCount}</b></span>
                 <span className={styles.scopeOperator}>×</span>
@@ -294,8 +294,10 @@ export function BookingCart({
             </>
           ) : (
             <>
-              <span>{t('booking.bookingCount', { count: bookingCount })}</span>
-              <strong>{total ? formatMoney(total) : '—'}</strong>
+              <span aria-hidden="true" className={styles.scopeEquation}>
+                <span className={styles.scopeFactor}><Package size={18} strokeWidth={2} /><b>{productCount}</b></span>
+              </span>
+              <span className="sr-only">{bookingScopeLabel}</span>
             </>
           )}
         </div>

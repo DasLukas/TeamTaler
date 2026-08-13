@@ -82,16 +82,21 @@ describe('BookingCart booking expansion limits', () => {
     expect(screen.getByText(/198,00/)).toBeVisible();
   });
 
-  it('removes the recipient name and shows only the result for one target', () => {
+  it('uses the stacked total and product-symbol summary for one target', () => {
     renderCart({ lines: [cartLine(1), cartLine(2)], targetCount: 1 });
 
-    expect(screen.queryByText('Ada Admin')).not.toBeInTheDocument();
-    expect(screen.getByText(i18n.t('booking.bookingCount', { count: 2 }))).toBeVisible();
-    expect(screen.queryByText(i18n.t('booking.bookingScope', {
+    const accessibleScope = screen.getByText(i18n.t('booking.bookingScope', {
       products: i18n.t('booking.productCount', { count: 2 }),
       targets: i18n.t('booking.personCount', { count: 1 }),
       bookings: i18n.t('booking.bookingCount', { count: 2 }),
-    }))).not.toBeInTheDocument();
+    }));
+    const scope = accessibleScope.parentElement;
+    const visualProductCount = accessibleScope.previousElementSibling;
+    expect(screen.queryByText('Ada Admin')).not.toBeInTheDocument();
+    expect(accessibleScope).toHaveClass('sr-only');
+    expect(scope?.firstElementChild).toHaveTextContent('2,00');
+    expect(visualProductCount).toHaveTextContent('2');
+    expect(visualProductCount?.querySelectorAll('svg')).toHaveLength(1);
   });
 
   it('groups the result and booking action in one persistent checkout footer', () => {
