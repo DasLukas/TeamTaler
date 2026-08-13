@@ -3,10 +3,13 @@ import Bell from 'lucide-react/dist/esm/icons/bell';
 import BookOpenCheck from 'lucide-react/dist/esm/icons/book-open-check';
 import Boxes from 'lucide-react/dist/esm/icons/boxes';
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down';
+import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left';
+import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
 import CircleUserRound from 'lucide-react/dist/esm/icons/circle-user-round';
 import Clock3 from 'lucide-react/dist/esm/icons/clock-3';
 import Home from 'lucide-react/dist/esm/icons/home';
 import Settings from 'lucide-react/dist/esm/icons/settings';
+import UsersRound from 'lucide-react/dist/esm/icons/users-round';
 import WalletCards from 'lucide-react/dist/esm/icons/wallet-cards';
 import { useTranslation } from 'react-i18next';
 import { memberPaths } from '@/app/paths';
@@ -27,12 +30,19 @@ const primaryNavigation = [
   { to: '/admin', key: 'administration', icon: Settings },
 ] as const;
 
+/** Properties accepted by the responsive desktop sidebar. */
+export interface SidebarProps {
+  collapsed: boolean;
+  onCollapsedChange: (collapsed: boolean) => void;
+}
+
 /**
  * Renders the desktop navigation rail and role-aware destinations.
  *
+ * @param props - Current tablet-rail state and its state-change callback.
  * @returns A localized group selector and navigation landmark.
  */
-export function Sidebar() {
+export function Sidebar({ collapsed, onCollapsedChange }: SidebarProps) {
   const { t } = useTranslation();
   const { session, activeGroupId, setActiveGroupId } = useActiveGroup();
   const activeGroup = session.groups.find((group) => group.id === activeGroupId);
@@ -44,14 +54,29 @@ export function Sidebar() {
   const unreadCount = useUnreadNotificationCount();
 
   return (
-    <aside className={styles.sidebar}>
-      <Brand imageAlt={activeGroup?.logoUrl ? t('brand.groupMarkAlt', { group: activeGroup.name }) : undefined} imageUrl={activeGroup?.logoUrl} />
+    <aside className={`${styles.sidebar} ${collapsed ? styles.collapsed : ''}`} data-collapsed={collapsed} id="desktop-sidebar">
+      <div className={styles.sidebarHeader}>
+        <Brand className={styles.brand} imageAlt={activeGroup?.logoUrl ? t('brand.groupMarkAlt', { group: activeGroup.name }) : undefined} imageUrl={activeGroup?.logoUrl} />
+        <button
+          aria-controls="desktop-sidebar"
+          aria-expanded={!collapsed}
+          aria-label={t(collapsed ? 'nav.expandSidebar' : 'nav.collapseSidebar')}
+          className={styles.collapseButton}
+          onClick={() => onCollapsedChange(!collapsed)}
+          title={t(collapsed ? 'nav.expandSidebar' : 'nav.collapseSidebar')}
+          type="button"
+        >
+          <span aria-hidden="true" className={styles.handleHitArea} />
+          {collapsed ? <ChevronRight aria-hidden="true" size={14} strokeWidth={2.4} /> : <ChevronLeft aria-hidden="true" size={14} strokeWidth={2.4} />}
+        </button>
+      </div>
       <label className={styles.groupLabel} htmlFor="desktop-group">{t('nav.group')}</label>
-      <div className={styles.groupSelectWrap}>
-        <select id="desktop-group" onChange={(event) => setActiveGroupId(event.target.value)} value={activeGroupId}>
+      <div className={styles.groupSelectWrap} title={collapsed ? t('nav.selectGroup') : undefined}>
+        <UsersRound aria-hidden="true" className={styles.groupIcon} size={24} strokeWidth={1.8} />
+        <select aria-label={t('nav.selectGroup')} id="desktop-group" onChange={(event) => setActiveGroupId(event.target.value)} value={activeGroupId}>
           {session.groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
         </select>
-        <ChevronDown aria-hidden="true" size={18} />
+        <ChevronDown aria-hidden="true" className={styles.groupChevron} size={18} />
       </div>
       <nav aria-label={t('nav.primary')} className={styles.nav}>
         {primaryNavigation
@@ -60,21 +85,29 @@ export function Sidebar() {
           .filter((item) => item.key !== 'finance' || canManageFinance)
           .filter((item) => item.key !== 'administration' || canManageAdministration)
           .map(({ to, key, icon: Icon }) => (
-          <Link activeOptions={{ exact: true }} activeProps={{ className: styles.active }} className={styles.link} key={to} to={to}>
+          <Link
+            activeOptions={{ exact: true }}
+            activeProps={{ className: styles.active }}
+            aria-label={t(`nav.${key}`)}
+            className={styles.link}
+            key={to}
+            title={collapsed ? t(`nav.${key}`) : undefined}
+            to={to}
+          >
             <Icon aria-hidden="true" size={25} strokeWidth={1.8} />
-            <span>{t(`nav.${key}`)}</span>
+            <span className={styles.linkLabel}>{t(`nav.${key}`)}</span>
           </Link>
           ))}
       </nav>
       <div className={styles.bottom}>
-        <Link activeProps={{ className: styles.active }} className={styles.link} to={memberPaths.notifications}>
+        <Link aria-label={t('nav.notifications')} activeProps={{ className: styles.active }} className={styles.link} title={collapsed ? t('nav.notifications') : undefined} to={memberPaths.notifications}>
           <Bell aria-hidden="true" size={23} strokeWidth={1.8} />
-          <span>{t('nav.notifications')}</span>
+          <span className={styles.linkLabel}>{t('nav.notifications')}</span>
           <NotificationBadge className={styles.badge} count={unreadCount} />
         </Link>
-        <Link activeProps={{ className: styles.active }} className={styles.link} to="/account">
+        <Link aria-label={t('nav.account')} activeProps={{ className: styles.active }} className={styles.link} title={collapsed ? t('nav.account') : undefined} to="/account">
           <CircleUserRound aria-hidden="true" size={23} strokeWidth={1.8} />
-          <span>{t('nav.account')}</span>
+          <span className={styles.linkLabel}>{t('nav.account')}</span>
         </Link>
         <LogoutButton className={styles.link} />
       </div>

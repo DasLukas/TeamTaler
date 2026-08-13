@@ -3,11 +3,69 @@
   z-index: 30;
   inset: 0 auto 0 0;
   display: flex;
-  width: var(--sidebar-width);
+  width: var(--shell-sidebar-width, var(--sidebar-width));
   flex-direction: column;
   padding: 30px 18px 24px;
   color: var(--color-white);
   background: linear-gradient(165deg, var(--color-navy-950) 0%, #002950 100%);
+  transition: width var(--motion-normal) ease, padding var(--motion-normal) ease;
+}
+
+.sidebarHeader {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.brand {
+  min-width: 0;
+}
+
+.collapseButton {
+  --sidebar-handle-background: #002950;
+
+  position: fixed;
+  z-index: 2;
+  top: 50%;
+  left: var(--shell-sidebar-width, var(--sidebar-width));
+  display: none;
+  width: 14px;
+  height: 92px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0 14px 14px 0;
+  color: var(--color-white);
+  background: var(--sidebar-handle-background);
+  box-shadow: 4px 0 10px rgb(3 24 47 / 11%);
+  cursor: pointer;
+  transform: translateY(-50%);
+  transition: left var(--motion-normal) ease, color var(--motion-fast);
+}
+
+.handleHitArea {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  left: 0;
+  width: 44px;
+  height: 92px;
+}
+
+.collapseButton > svg {
+  position: relative;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.collapseButton:hover {
+  color: #53d7ce;
+}
+
+.collapseButton:focus-visible {
+  outline: none;
+  box-shadow: 4px 0 10px rgb(3 24 47 / 11%), inset 0 0 0 2px #53d7ce;
 }
 
 .groupLabel {
@@ -37,11 +95,13 @@
   font-size: var(--font-size-md);
 }
 
-.groupSelectWrap svg {
+.groupChevron {
   position: absolute;
   right: 13px;
   pointer-events: none;
 }
+
+.groupIcon { display: none; }
 
 .nav {
   display: grid;
@@ -100,4 +160,100 @@
 
 @media (max-width: 767px) {
   .sidebar { display: none; }
+}
+
+@media (min-width: 768px) and (max-width: 1279px) {
+  .collapseButton { display: grid; }
+
+  .collapsed {
+    padding-inline: 12px;
+  }
+
+  .collapsed .sidebarHeader {
+    justify-content: center;
+  }
+
+  .collapsed .brand {
+    justify-content: center;
+  }
+
+  .collapsed .brand strong,
+  .collapsed .groupLabel,
+  .collapsed .linkLabel,
+  .collapsed .link > span:not(.badge) {
+    display: none;
+  }
+
+  .collapsed .groupSelectWrap {
+    width: 48px;
+    height: 48px;
+    flex: 0 0 48px;
+    justify-content: center;
+    margin: 34px auto 0;
+    border: 1px solid rgb(255 255 255 / 24%);
+    border-radius: var(--radius-md);
+  }
+
+  .collapsed .groupSelectWrap:hover {
+    background: rgb(255 255 255 / 8%);
+  }
+
+  .collapsed .groupSelectWrap:focus-within {
+    outline: 3px solid #53d7ce;
+    outline-offset: 2px;
+  }
+
+  .collapsed .groupSelectWrap select {
+    position: absolute;
+    z-index: 1;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+
+  .collapsed .groupIcon {
+    display: block;
+    pointer-events: none;
+  }
+
+  .collapsed .groupChevron {
+    display: none;
+  }
+
+  .collapsed .nav {
+    justify-items: center;
+    margin-top: 26px;
+  }
+
+  .collapsed .link {
+    width: 48px;
+    min-height: 48px;
+    justify-content: center;
+    gap: 0;
+    padding: 0;
+  }
+
+  .collapsed .active::before {
+    inset-inline-start: -16px;
+  }
+
+  .collapsed .badge {
+    position: absolute;
+    top: -3px;
+    right: -7px;
+    margin: 0;
+  }
+
+  .collapsed .bottom {
+    justify-items: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar,
+  .collapseButton { transition: none; }
 }

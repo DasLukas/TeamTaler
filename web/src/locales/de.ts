@@ -17,6 +17,8 @@ export const de = {
     more: 'Mehr',
     group: 'Gruppe',
     selectGroup: 'Gruppe auswählen',
+    collapseSidebar: 'Navigationsleiste einklappen',
+    expandSidebar: 'Navigationsleiste ausklappen',
     primary: 'Hauptnavigation',
     mobilePrimary: 'Mobile Hauptnavigation',
     additional: 'Weitere Bereiche',

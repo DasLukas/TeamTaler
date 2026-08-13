@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Navigate, Outlet } from '@tanstack/react-router';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ApiError, api, isDevelopmentDemoEnabled } from '@/api/client';
 import { GroupProvider } from '@/app/GroupContext';
@@ -10,6 +11,21 @@ import { BottomNavigation } from './BottomNavigation';
 import { MobileHeader } from './MobileHeader';
 import { Sidebar } from './Sidebar';
 import styles from './AppShell.module.css';
+
+const SIDEBAR_PREFERENCE_STORAGE_KEY = 'teamtaler:sidebar:v1';
+
+/**
+ * Reads the locally stored desktop-sidebar preference without blocking app startup when storage is unavailable.
+ *
+ * @returns Whether the tablet navigation rail should start collapsed.
+ */
+function readSidebarCollapsedPreference(): boolean {
+  try {
+    return window.localStorage.getItem(SIDEBAR_PREFERENCE_STORAGE_KEY) === 'collapsed';
+  } catch {
+    return false;
+  }
+}
 
 /** Remounts route-local state whenever the user changes the active group. */
 function GroupScopedOutlet() {
@@ -29,7 +45,17 @@ function RouteOutlet() {
  */
 export function AppShell() {
   const { t } = useTranslation();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsedPreference);
   const sessionQuery = useQuery({ queryKey: ['session'], queryFn: api.getSession });
+
+  const changeSidebarCollapsed = (collapsed: boolean) => {
+    setSidebarCollapsed(collapsed);
+    try {
+      window.localStorage.setItem(SIDEBAR_PREFERENCE_STORAGE_KEY, collapsed ? 'collapsed' : 'expanded');
+    } catch {
+      // The in-memory preference still works when private browsing blocks storage.
+    }
+  };
 
   if (sessionQuery.isLoading) return <main className={styles.center}><StatePanel kind="loading" /></main>;
   if (sessionQuery.error instanceof ApiError && sessionQuery.error.problem.status === 401) return <Navigate to="/login" />;
@@ -47,8 +73,11 @@ export function AppShell() {
   return (
     <GroupProvider session={sessionQuery.data}>
       <NotificationSummaryProvider>
-        <div className={styles.shell}>
-          <Sidebar />
+        <div
+          className={`${styles.shell} ${sidebarCollapsed ? styles.sidebarCollapsed : ''}`}
+          data-sidebar-collapsed={sidebarCollapsed}
+        >
+          <Sidebar collapsed={sidebarCollapsed} onCollapsedChange={changeSidebarCollapsed} />
           <MobileHeader />
           <main className={styles.main} id="main-content">
             {isDevelopmentDemoEnabled && sessionQuery.data.demo ? (

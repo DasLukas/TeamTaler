@@ -109,7 +109,7 @@
 }
 
 @media (min-width: 768px) and (max-width: 1023px) {
-  .inspector { left: var(--sidebar-width); }
+  .inspector { left: var(--shell-sidebar-width, var(--sidebar-width)); }
 }
 
 @media (max-width: 767px) {

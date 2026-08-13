@@ -35,7 +35,14 @@ export function LogoutButton({ className = '', showChevron = false }: LogoutButt
   };
 
   return (
-    <button className={className} disabled={pending} onClick={() => void logout()} type="button">
+    <button
+      aria-label={pending ? t('logout.pending') : t('logout.action')}
+      className={className}
+      disabled={pending}
+      onClick={() => void logout()}
+      title={t('logout.action')}
+      type="button"
+    >
       <LogOut aria-hidden="true" size={23} strokeWidth={1.8} />
       <span>{pending ? t('logout.pending') : t('logout.action')}</span>
       {showChevron ? <ChevronRight aria-hidden="true" size={20} /> : null}
