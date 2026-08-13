@@ -100,10 +100,21 @@ describe('ActivitiesPage booking traceability', () => {
     expect(within(row).getByRole('cell', { name: /Target Member/ })).toHaveAttribute('data-label', i18n.t('activities.bookedFor'));
     expect(within(row).getByRole('cell', { name: /Assigning Manager/ })).toHaveAttribute('data-label', i18n.t('activities.bookedBy'));
     expect(within(row).getByRole('cell', { name: thirdPartyBooking.productName })).toHaveAttribute('data-label', i18n.t('activities.booking'));
+    expect(row.querySelector('time')).toHaveAttribute('datetime', thirdPartyBooking.bookedAt);
     expect(within(row).getByRole('img', { name: i18n.t('common.booked') })).toHaveAttribute('title', i18n.t('common.booked'));
 
     await user.type(screen.getByLabelText(i18n.t('activities.searchLabel')), thirdPartyBooking.bookedByName);
     expect(await screen.findByRole('row', { name: /Target Member.*Assigning Manager/ })).toBeVisible();
+  });
+
+  it('preserves activities as a semantic table with vertical booking rows', async () => {
+    renderActivities();
+
+    const table = await screen.findByRole('table', { name: i18n.t('activities.title') });
+    expect(within(table).getAllByRole('columnheader')).toHaveLength(8);
+    const rows = within(table).getAllByRole('row');
+    expect(rows).toHaveLength(2);
+    expect(within(rows[1]).getAllByRole('cell')).toHaveLength(8);
   });
 
   it('renders reversed bookings as accessible compact status badges', async () => {
