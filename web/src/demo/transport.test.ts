@@ -432,6 +432,10 @@ describe('DemoTransport group settings', () => {
       notificationEmailsEnabled: false,
       notificationEmailDeliveryAvailable: true,
       defaultRoleId: 'role-member',
+      ownBookingReasonMode: 'OFF',
+      foreignBookingReasonMode: 'REQUIRED',
+      ownPaymentReasonMode: 'REQUIRED',
+      otherPaymentReasonMode: 'OPTIONAL',
       paymentMethods: [
         { id: 'BANK_TRANSFER', label: 'Bank transfer' },
         { id: 'CASH', label: 'Cash' },
@@ -449,6 +453,20 @@ describe('DemoTransport group settings', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ notificationEmailsEnabled: true }),
     })).resolves.toMatchObject({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
+    await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings', jsonRequest('PATCH', {
+      ownBookingReasonMode: 'OPTIONAL',
+      foreignBookingReasonMode: 'OFF',
+      ownPaymentReasonMode: 'OFF',
+      otherPaymentReasonMode: 'REQUIRED',
+    }))).resolves.toMatchObject({
+      ownBookingReasonMode: 'OPTIONAL',
+      foreignBookingReasonMode: 'OFF',
+      ownPaymentReasonMode: 'OFF',
+      otherPaymentReasonMode: 'REQUIRED',
+      foreignBookingReasonRequired: false,
+      ownPaymentReasonRequired: false,
+      otherPaymentReasonRequired: true,
+    });
     await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },

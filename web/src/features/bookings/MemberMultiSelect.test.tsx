@@ -5,9 +5,9 @@ import type { BookingTarget } from '@/api/types';
 import i18n from '@/i18n';
 import { MemberMultiSelect } from './MemberMultiSelect';
 
-const mediaQuery = vi.hoisted(() => ({ compact: false }));
+const mediaQuery = vi.hoisted(() => ({ compact: false, query: '' }));
 
-vi.mock('@/hooks/useMediaQuery', () => ({ useMediaQuery: () => mediaQuery.compact }));
+vi.mock('@/hooks/useMediaQuery', () => ({ useMediaQuery: (query: string) => { mediaQuery.query = query; return mediaQuery.compact; } }));
 
 const targets: BookingTarget[] = [
   { membershipId: 'member-regular', displayName: 'Regular Member', isTemporaryGuest: false },
@@ -17,6 +17,7 @@ const targets: BookingTarget[] = [
 describe('MemberMultiSelect', () => {
   beforeEach(() => {
     mediaQuery.compact = false;
+    mediaQuery.query = '';
   });
 
   it('renders the recipient count as an icon-button badge and keeps names in the dialog', async () => {
@@ -65,7 +66,8 @@ describe('MemberMultiSelect', () => {
     expect(screen.getByRole('group', { name: i18n.t('booking.guests') })).toBeVisible();
     expect(screen.getByRole('checkbox', { name: /Regular Member/ })).toBeEnabled();
     expect(screen.getByRole('checkbox', { name: 'Existing Guest' })).toBeDisabled();
-    expect(screen.getByPlaceholderText('Anzeigename')).toBeVisible();
+    expect(screen.getByPlaceholderText(i18n.t('booking.newGuest'))).toBeVisible();
+    expect(screen.queryByText(i18n.t('booking.addGuest'))).not.toBeInTheDocument();
     expect(screen.queryByText('Der Gast wird erst zusammen mit der Buchung angelegt und benötigt kein Login.')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: i18n.t('booking.addGuestAction') })).toBeDisabled();
   });
@@ -89,16 +91,46 @@ describe('MemberMultiSelect', () => {
     />);
 
     const trigger = screen.getByRole('button', { name: 'Empfänger auswählen. 1 Person ausgewählt.' });
+    expect(mediaQuery.query).toBe('(max-width: 767px)');
     await user.click(trigger);
 
     const sheet = screen.getByRole('dialog', { name: i18n.t('booking.selectRecipients') });
     expect(sheet).toBeVisible();
     expect(sheet).toHaveTextContent('Regular Member');
-    expect(screen.getByLabelText(i18n.t('booking.addGuest'))).toBeVisible();
+    const guestInput = screen.getByLabelText(i18n.t('booking.addGuest'));
+    expect(guestInput).toBeVisible();
+    expect(guestInput).toHaveAttribute('placeholder', i18n.t('booking.newGuest'));
+    expect(screen.queryByText(i18n.t('booking.addGuest'))).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: i18n.t('dialog.close') }));
     expect(screen.queryByRole('dialog', { name: i18n.t('booking.selectRecipients') })).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
+  });
+
+  it('keeps the recipient picker anchored on tablets and desktops', async () => {
+    const user = userEvent.setup();
+    const label = 'Empfänger auswählen. 1 Person ausgewählt.';
+    render(<MemberMultiSelect
+      canBookForGuests
+      iconOnly
+      id="target-picker"
+      label={label}
+      onAddGuest={vi.fn()}
+      onChange={vi.fn()}
+      onRemoveGuest={vi.fn()}
+      overlayOnMobile
+      pendingGuestNames={[]}
+      placeholder={i18n.t('booking.selectMembers')}
+      selectedIds={['member-regular']}
+      targets={targets}
+    />);
+
+    await user.click(screen.getByRole('button', { name: label }));
+
+    expect(mediaQuery.query).toBe('(max-width: 767px)');
+    expect(screen.getByRole('dialog', { name: label })).toBeVisible();
+    expect(screen.queryByRole('dialog', { name: i18n.t('booking.selectRecipients') })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(i18n.t('dialog.sheetHandle'))).not.toBeInTheDocument();
   });
 
   it('matches server-side control-character, code-point, and case-folding validation', async () => {

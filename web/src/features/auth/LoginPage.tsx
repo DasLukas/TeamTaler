@@ -10,6 +10,7 @@ import { Field, TextInput } from '@/components/ui/FormField';
 import { AuthLayout } from './AuthLayout';
 import styles from './AuthForms.module.css';
 import { authenticationCapabilitiesQueryKey } from './authenticationCapabilities';
+import { loginErrorMessage } from './loginError';
 import { PASSWORD_MAX_LENGTH } from './passwordPolicy';
 
 /**
@@ -42,7 +43,7 @@ export function LoginPage() {
           <TextInput autoComplete="current-password" id="login-password" type="password" {...register('password', { required: t('auth.passwordRequired'), maxLength: { value: PASSWORD_MAX_LENGTH, message: t('auth.passwordMax') } })} />
         </Field>
         {capabilities.data?.passwordResetAvailable === true ? <Link className={styles.secondaryLink} to="/forgot-password">{t('auth.forgotPassword')}</Link> : null}
-        {loginMutation.isError ? <p className={styles.error} role="alert">{loginMutation.error.message}</p> : null}
+        {loginMutation.isError ? <p className={styles.error} role="alert">{loginErrorMessage(loginMutation.error, t)}</p> : null}
         <Button disabled={loginMutation.isPending} fullWidth size="large" type="submit">{loginMutation.isPending ? t('auth.loginPending') : t('auth.loginAction')}</Button>
       </form>
     </AuthLayout>

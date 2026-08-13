@@ -56,7 +56,7 @@ export function MemberMultiSelect({
   placeholder,
 }: MemberMultiSelectProps) {
   const { t } = useTranslation();
-  const compact = useMediaQuery('(max-width: 1023px)');
+  const compact = useMediaQuery('(max-width: 767px)');
   const rootRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [guestName, setGuestName] = useState('');
@@ -165,9 +165,9 @@ export function MemberMultiSelect({
           </label>
         ))}
         {canBookForGuests ? <div className={styles.guestCreator}>
-          <label htmlFor={`${id}-guest-name`}>{t('booking.addGuest')}</label>
           <div className={styles.guestCreatorRow}>
             <TextInput
+              aria-label={t('booking.addGuest')}
               aria-describedby={guestNameError ? `${id}-guest-name-error` : undefined}
               aria-invalid={guestNameError ? 'true' : undefined}
               autoComplete="off"

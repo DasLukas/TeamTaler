@@ -10,10 +10,9 @@ import type { BookingContext, Category, Product } from '@/api/types';
 import { hasGroupCapability } from '@/app/groupCapabilities';
 import { memberPaths } from '@/app/paths';
 import { useActiveGroup } from '@/app/useActiveGroup';
-import { Field, TextInput } from '@/components/ui/FormField';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
-import { BookingCart } from './BookingCart';
+import { BookingCart, type BookingCartView } from './BookingCart';
 import { resolveCartLinePrice, type BookingCartLine } from './bookingCartModel';
 import { MemberMultiSelect } from './MemberMultiSelect';
 import { ProductPicker } from './ProductPicker';
@@ -48,21 +47,21 @@ function BookingWorkspace({ groupId, categories, context, compact }: BookingWork
   const [requestedTargetMembershipIds, setRequestedTargetMembershipIds] = useState<string[]>(initialTargetMembershipIds);
   const [temporaryGuestDisplayNames, setTemporaryGuestDisplayNames] = useState<string[]>([]);
   const [reason, setReason] = useState('');
-  const [cartExpanded, setCartExpanded] = useState(false);
+  const [cartView, setCartView] = useState<BookingCartView>('summary');
+  const [priceEntryRequest, setPriceEntryRequest] = useState<{ productId: string; requestId: number }>();
   const [confirmation, setConfirmation] = useState('');
   const [cartLimitError, setCartLimitError] = useState('');
   const targetSelectionTouchedRef = useRef(false);
   const confirmationTimerRef = useRef<number | undefined>(undefined);
+  const priceEntryRequestIdRef = useRef(0);
   const availableTargetIds = new Set(context.targets.map((target) => target.membershipId));
   const targetsById = new Map(context.targets.map((target) => [target.membershipId, target]));
   const targetMembershipIds = requestedTargetMembershipIds.filter((membershipId) => availableTargetIds.has(membershipId));
   const targetCount = targetMembershipIds.length + temporaryGuestDisplayNames.length;
-  const selectedTargets = context.targets.filter((target) => targetMembershipIds.includes(target.membershipId));
-  const targetSummary = targetCount === 1
-    ? selectedTargets[0]?.displayName ?? temporaryGuestDisplayNames[0] ?? t('common.selectedMemberFallback')
-    : t('booking.targetCount', { count: targetCount });
   const hasForeignBooking = targetMembershipIds.some((membershipId) => membershipId !== context.currentMembership.id && !targetsById.get(membershipId)?.isTemporaryGuest);
-  const reasonRequired = hasForeignBooking && context.foreignBookingReasonRequired;
+  const hasOwnBooking = targetMembershipIds.includes(context.currentMembership.id);
+  const reasonContext = hasForeignBooking ? 'FOREIGN' : hasOwnBooking ? 'OWN' : 'OFF';
+  const reasonMode = hasForeignBooking ? context.foreignBookingReasonMode : hasOwnBooking ? context.ownBookingReasonMode : 'OFF';
   useEffect(() => () => {
     if (confirmationTimerRef.current !== undefined) window.clearTimeout(confirmationTimerRef.current);
   }, []);
@@ -73,7 +72,8 @@ function BookingWorkspace({ groupId, categories, context, compact }: BookingWork
     setTemporaryGuestDisplayNames([]);
     targetSelectionTouchedRef.current = false;
     setReason('');
-    setCartExpanded(false);
+    setCartView('summary');
+    setPriceEntryRequest(undefined);
   };
 
   const bookingMutation = useMutation({
@@ -87,7 +87,7 @@ function BookingWorkspace({ groupId, categories, context, compact }: BookingWork
       })),
       targetMembershipIds,
       ...(temporaryGuestDisplayNames.length > 0 ? { temporaryGuestDisplayNames } : {}),
-      reason: reason.trim() || undefined,
+      reason: reasonMode !== 'OFF' ? reason.trim() || undefined : undefined,
     }),
     onSuccess: (createdBookings) => {
       setConfirmation(t('booking.bulkSuccess', { count: createdBookings.length }));
@@ -109,18 +109,24 @@ function BookingWorkspace({ groupId, categories, context, compact }: BookingWork
   });
 
   const addProduct = (product: Product) => {
+    if (product.pricingMode === 'USER_DEFINED') {
+      priceEntryRequestIdRef.current += 1;
+      setPriceEntryRequest({ productId: product.id, requestId: priceEntryRequestIdRef.current });
+    }
     const existing = lines.some((line) => line.product.id === product.id);
     if (existing) {
+      if (compact) setCartView(product.pricingMode === 'USER_DEFINED' ? 'details' : 'peek');
       setLines((current) => current.map((line) => line.product.id === product.id ? { ...line, quantity: Math.min(99, line.quantity + 1) } : line));
       return;
     }
     if (lines.length >= 25) {
       setCartLimitError(t('booking.tooManyProducts'));
+      if (compact) setCartView('summary');
       return;
     }
+    if (compact) setCartView(product.pricingMode === 'USER_DEFINED' ? 'details' : lines.length === 0 ? 'summary' : 'peek');
     setCartLimitError('');
     setLines((current) => [...current, { product, quantity: 1, unitPriceInput: '', unitPriceTouched: false }]);
-    if (compact && product.pricingMode === 'USER_DEFINED') setCartExpanded(true);
   };
 
   const changeLineQuantity = (productId: string, quantity: number) => {
@@ -137,8 +143,10 @@ function BookingWorkspace({ groupId, categories, context, compact }: BookingWork
 
   const changeTargets = (membershipIds: string[]) => {
     targetSelectionTouchedRef.current = true;
-    const keepsForeignMember = membershipIds.some((membershipId) => membershipId !== context.currentMembership.id && !targetsById.get(membershipId)?.isTemporaryGuest);
-    if (!keepsForeignMember) setReason('');
+	const nextHasForeignBooking = membershipIds.some((membershipId) => membershipId !== context.currentMembership.id && !targetsById.get(membershipId)?.isTemporaryGuest);
+	const nextHasOwnBooking = membershipIds.includes(context.currentMembership.id);
+	const nextReasonContext = nextHasForeignBooking ? 'FOREIGN' : nextHasOwnBooking ? 'OWN' : 'OFF';
+    if (nextReasonContext !== reasonContext) setReason('');
     setRequestedTargetMembershipIds(membershipIds);
   };
 
@@ -148,13 +156,14 @@ function BookingWorkspace({ groupId, categories, context, compact }: BookingWork
       && targetMembershipIds.length === 1
       && targetMembershipIds[0] === context.currentMembership.id) {
       setRequestedTargetMembershipIds([]);
+	  setReason('');
     }
     targetSelectionTouchedRef.current = true;
     setTemporaryGuestDisplayNames((current) => [...current, displayName]);
   };
 
   return (
-    <div className={`${styles.layout} ${lines.length > 0 ? styles.hasCart : ''}`}>
+    <div className={`${styles.layout} ${lines.length > 0 ? styles.hasCart : ''} ${cartView === 'peek' ? styles.hasPeekCart : ''}`}>
       <section className={styles.content}>
         <h1>{t('booking.quickTitle')}</h1>
         <div className={`${styles.balanceRow} ${canAssignOthers ? styles.hasTargetControl : ''}`}>
@@ -181,15 +190,6 @@ function BookingWorkspace({ groupId, categories, context, compact }: BookingWork
           </div> : null}
         </div>
 
-        {hasForeignBooking && !context.foreignBookingReasonRequired ? (
-          <div className={styles.optionalReason}>
-            <Field htmlFor="booking-shared-reason" label={t('booking.reason')}>
-              <TextInput id="booking-shared-reason" list="booking-shared-reason-suggestions" maxLength={500} onChange={(event) => setReason(event.target.value)} value={reason} />
-              <datalist id="booking-shared-reason-suggestions">{context.bookingReasons.map((item) => <option key={item.id} value={item.label} />)}</datalist>
-            </Field>
-          </div>
-        ) : null}
-
         {confirmation ? <div className={styles.confirmation} role="status"><CheckCircle2 aria-hidden="true" size={22} /> {confirmation}</div> : null}
 
         <ProductPicker
@@ -208,20 +208,20 @@ function BookingWorkspace({ groupId, categories, context, compact }: BookingWork
           bookingReasons={context.bookingReasons}
           compact={compact}
           error={cartLimitError || (bookingMutation.isError ? bookingMutation.error.message : undefined)}
-          expanded={cartExpanded}
           lines={lines}
-          onExpandedChange={setCartExpanded}
           onQuantityChange={changeLineQuantity}
           onReasonChange={setReason}
           onRemove={(productId) => changeLineQuantity(productId, 0)}
           onSubmit={() => bookingMutation.mutate()}
           onUnitPriceBlur={(productId) => setLines((current) => current.map((line) => line.product.id === productId ? { ...line, unitPriceTouched: true } : line))}
           onUnitPriceChange={(productId, value) => setLines((current) => current.map((line) => line.product.id === productId ? { ...line, unitPriceInput: value } : line))}
+          onViewChange={setCartView}
           pending={bookingMutation.isPending}
+          priceEntryRequest={priceEntryRequest}
           reason={reason}
-          reasonRequired={reasonRequired}
+          reasonMode={reasonMode}
           targetCount={targetCount}
-          targetSummary={targetSummary}
+          view={cartView}
         />
       </aside>
     </div>

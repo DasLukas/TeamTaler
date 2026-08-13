@@ -159,11 +159,6 @@
   border-top: 1px dashed var(--color-border-strong);
 }
 
-.guestCreator > label {
-  font-size: var(--font-size-sm);
-  font-weight: 700;
-}
-
 .guestCreatorRow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

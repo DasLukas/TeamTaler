@@ -37,6 +37,8 @@ function bookingContext(targets = demoMembers.slice(0, 3)): BookingContext {
     currentMembership: demoMembers[0],
     targets: targets.map((member) => ({ membershipId: member.id, displayName: member.displayName, avatarUrl: member.avatarUrl, isTemporaryGuest: member.isTemporaryGuest })),
     canBookForGuests: false,
+    ownBookingReasonMode: 'OFF',
+    foreignBookingReasonMode: 'REQUIRED',
     foreignBookingReasonRequired: true,
     bookingReasons: [],
   };
@@ -85,6 +87,41 @@ describe('BookingPage multi-product workspace', () => {
     expect(screen.queryByRole('button', { name: i18n.t('booking.submit') })).not.toBeInTheDocument();
   });
 
+  it('keeps an optional own-booking reason editable and submits it with the cart', async () => {
+    const user = userEvent.setup();
+    const context = bookingContext([demoMembers[0]]);
+    context.ownBookingReasonMode = 'OPTIONAL';
+    mocks.getBookingContext.mockResolvedValue(context);
+    renderBookingPage();
+
+    await user.click(await screen.findByRole('button', { name: /Wasser.*1,00.*hinzufügen/i }));
+    const reason = await screen.findByLabelText(i18n.t('booking.reason'));
+    expect(reason).not.toBeRequired();
+    expect(reason).toHaveAttribute('placeholder', i18n.t('booking.reason'));
+    await user.type(reason, 'Training');
+    await user.click(screen.getByRole('button', { name: i18n.t('booking.submit') }));
+
+    await waitFor(() => expect(mocks.createBulkBookings).toHaveBeenCalledWith(demoSession.activeGroupId, expect.objectContaining({ reason: 'Training' })));
+  });
+
+  it('shows an optional reason only after opening the compact cart editor', async () => {
+    const user = userEvent.setup();
+    const context = bookingContext([demoMembers[0]]);
+    context.ownBookingReasonMode = 'OPTIONAL';
+    mocks.getBookingContext.mockResolvedValue(context);
+    mocks.useMediaQuery.mockReturnValue(true);
+    renderBookingPage();
+
+    await user.click(await screen.findByRole('button', { name: /Wasser.*1,00.*hinzufügen/i }));
+    expect(screen.queryByLabelText(i18n.t('booking.reason'))).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: i18n.t('booking.cartEdit') }));
+    const reason = screen.getByLabelText(i18n.t('booking.reason'));
+    expect(reason).toBeVisible();
+    expect(reason).toHaveAttribute('placeholder', i18n.t('booking.reason'));
+    expect(screen.queryByText(i18n.t('booking.reason'))).not.toBeInTheDocument();
+  });
+
   it('decreases and removes a selected product directly from its catalogue card', async () => {
     const user = userEvent.setup();
     renderBookingPage();
@@ -113,7 +150,7 @@ describe('BookingPage multi-product workspace', () => {
     await user.click(screen.getByRole('tab', { name: 'Strafen' }));
     await user.click(screen.getByRole('button', { name: /Zu spät zum Training.*5,00.*hinzufügen/i }));
     await user.type(screen.getByLabelText(`${i18n.t('booking.reason')} *`), 'Teamabend');
-    await user.click(screen.getByRole('button', { name: i18n.t('booking.submitBookingCount', { count: 4 }) }));
+    await user.click(screen.getByRole('button', { name: i18n.t('booking.submitBookings') }));
 
     await waitFor(() => expect(mocks.createBulkBookings).toHaveBeenCalledTimes(1));
     expect(mocks.createBulkBookings).toHaveBeenCalledWith(demoSession.activeGroupId, {
@@ -167,13 +204,69 @@ describe('BookingPage multi-product workspace', () => {
     await user.click(screen.getByRole('button', { name: /Wasser.*1,00.*hinzufügen/i }));
 
     const reasonInput = screen.getByLabelText(`${i18n.t('booking.reason')} *`);
-    const submit = screen.getByRole('button', { name: i18n.t('booking.submitBookingCount', { count: 2 }) });
+    const submit = screen.getByRole('button', { name: i18n.t('booking.submitBookings') });
     expect(reasonInput).toBeVisible();
+    expect(reasonInput).toHaveAttribute('placeholder', `${i18n.t('booking.reason')} *`);
     expect(submit).toBeDisabled();
     expect(screen.getByRole('button', { name: i18n.t('booking.cartEdit') })).toHaveAttribute('aria-expanded', 'false');
 
     await user.type(reasonInput, 'Teamabend');
     expect(submit).toBeEnabled();
+  });
+
+  it('auto-minimizes after another fixed-price product without losing the booking draft', async () => {
+    const user = userEvent.setup();
+    mocks.useMediaQuery.mockReturnValue(true);
+    renderBookingPage();
+
+    await user.click(await screen.findByRole('button', { name: recipientButtonLabel(1) }));
+    await user.click(screen.getByRole('checkbox', { name: new RegExp(demoMembers[1].displayName) }));
+    await user.click(screen.getByRole('button', { name: i18n.t('dialog.close') }));
+    await user.click(screen.getByRole('button', { name: /Wasser.*1,00.*hinzufügen/i }));
+    expect(screen.getByLabelText(`${i18n.t('booking.reason')} *`)).toBeVisible();
+    await user.click(screen.getByRole('button', { name: /Spezi.*1,50.*hinzufügen/i }));
+
+    expect(screen.queryByLabelText(`${i18n.t('booking.reason')} *`)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: i18n.t('booking.submitBookings') })).not.toBeInTheDocument();
+    const openCart = screen.getByRole('button', { name: /Warenkorb öffnen/ });
+    expect(openCart).toHaveTextContent(i18n.t('booking.productCount', { count: 2 }));
+    expect(openCart).not.toHaveTextContent(i18n.t('booking.targetCount', { count: 2 }));
+
+    await user.click(openCart);
+    expect(screen.getByLabelText(`${i18n.t('booking.reason')} *`)).toBeVisible();
+    expect(screen.getByRole('button', { name: i18n.t('booking.submitBookings') })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Wasser.*Anzahl erhöhen/i })).toHaveAccessibleName(/Aktuell 1 im Warenkorb/);
+    expect(screen.getByRole('button', { name: /Spezi.*Anzahl erhöhen/i })).toHaveAccessibleName(/Aktuell 1 im Warenkorb/);
+  });
+
+  it('keeps the compact cart open when a product requires price input', async () => {
+    const user = userEvent.setup();
+    mocks.useMediaQuery.mockReturnValue(true);
+    renderBookingPage();
+
+    await screen.findByText(i18n.t('booking.openBalance'));
+    await user.click(screen.getByRole('button', { name: /Wasser.*1,00.*hinzufügen/i }));
+    await user.click(screen.getByRole('tab', { name: 'Strafen' }));
+    await user.click(screen.getByRole('button', { name: /Ausrüstung vergessen.*Preis eingeben.*hinzufügen/i }));
+
+    expect(screen.queryByRole('button', { name: /Warenkorb öffnen/ })).not.toBeInTheDocument();
+    const priceInput = screen.getByLabelText(i18n.t('booking.unitPriceForProduct', { name: 'Ausrüstung vergessen', currency: 'EUR' }));
+    expect(priceInput).toBeVisible();
+    await waitFor(() => expect(priceInput).toHaveFocus());
+  });
+
+  it('focuses a newly selected user-defined price in the desktop inspector', async () => {
+    const user = userEvent.setup();
+    renderBookingPage();
+
+    await screen.findByText(i18n.t('booking.openBalance'));
+    await user.click(screen.getByRole('button', { name: /Wasser.*1,00.*hinzufügen/i }));
+    await user.click(screen.getByRole('tab', { name: 'Strafen' }));
+    await user.click(screen.getByRole('button', { name: /Ausrüstung vergessen.*Preis eingeben.*hinzufügen/i }));
+
+    const priceInput = screen.getByLabelText(i18n.t('booking.unitPriceForProduct', { name: 'Ausrüstung vergessen', currency: 'EUR' }));
+    expect(priceInput).toBeVisible();
+    await waitFor(() => expect(priceInput).toHaveFocus());
   });
 
   it('shows the catalogue empty state only when no bookable products exist', async () => {

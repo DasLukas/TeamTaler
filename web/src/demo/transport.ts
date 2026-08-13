@@ -33,6 +33,7 @@ import type {
   Role,
   RoleAssignment,
   RoleInput,
+  ReasonMode,
   Session,
 } from '@/api/types';
 import { isCategoryIcon } from '@/api/types';
@@ -237,6 +238,10 @@ export class DemoTransport {
     notificationEmailsEnabled: false,
     notificationEmailDeliveryAvailable: true,
     defaultRoleId: 'role-member',
+    ownBookingReasonMode: 'OFF',
+    foreignBookingReasonMode: 'REQUIRED',
+    ownPaymentReasonMode: 'REQUIRED',
+    otherPaymentReasonMode: 'OPTIONAL',
     foreignBookingReasonRequired: true,
     ownPaymentReasonRequired: true,
     otherPaymentReasonRequired: false,
@@ -337,7 +342,11 @@ export class DemoTransport {
       const updatesSettlements = update.settlementsEnabled !== undefined;
       const updatesNotificationEmails = update.notificationEmailsEnabled !== undefined;
       const updatesDefaultRole = update.defaultRoleId !== undefined;
-      const updatesTransactionSettings = update.foreignBookingReasonRequired !== undefined
+      const updatesTransactionSettings = update.ownBookingReasonMode !== undefined
+        || update.foreignBookingReasonMode !== undefined
+        || update.ownPaymentReasonMode !== undefined
+        || update.otherPaymentReasonMode !== undefined
+        || update.foreignBookingReasonRequired !== undefined
         || update.ownPaymentReasonRequired !== undefined
         || update.otherPaymentReasonRequired !== undefined
         || update.paymentMethods !== undefined
@@ -348,19 +357,31 @@ export class DemoTransport {
       if (updatesSettlements || updatesNotificationEmails || updatesTransactionSettings) this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
       if (updatesSettlements && typeof update.settlementsEnabled !== 'boolean') throw new Error('Settlement availability must be a boolean.');
       if (updatesNotificationEmails && typeof update.notificationEmailsEnabled !== 'boolean') throw new Error('Notification email delivery must be a boolean.');
+      const submittedReasonModes = [update.ownBookingReasonMode, update.foreignBookingReasonMode, update.ownPaymentReasonMode, update.otherPaymentReasonMode].filter((value) => value !== undefined);
+      if (submittedReasonModes.some((value) => value !== 'OFF' && value !== 'OPTIONAL' && value !== 'REQUIRED')) throw new Error('Reason modes must be OFF, OPTIONAL, or REQUIRED.');
       if (updatesDefaultRole) {
         const defaultRole = this.roles.find((role) => role.id === update.defaultRoleId);
         if (!defaultRole) throw new Error('The default role does not exist.');
         if (defaultRole.grants.some((grant) => grant.permission === 'GROUP_ADMINISTRATION' || grant.permission === 'MEMBER_MANAGEMENT')) throw new Error('The default role must not grant administration permissions.');
       }
+      const foreignBookingReasonMode = update.foreignBookingReasonMode
+        ?? (update.foreignBookingReasonRequired === undefined ? this.groupSettings.foreignBookingReasonMode : update.foreignBookingReasonRequired ? 'REQUIRED' : 'OPTIONAL');
+      const ownPaymentReasonMode = update.ownPaymentReasonMode
+        ?? (update.ownPaymentReasonRequired === undefined ? this.groupSettings.ownPaymentReasonMode : update.ownPaymentReasonRequired ? 'REQUIRED' : 'OPTIONAL');
+      const otherPaymentReasonMode = update.otherPaymentReasonMode
+        ?? (update.otherPaymentReasonRequired === undefined ? this.groupSettings.otherPaymentReasonMode : update.otherPaymentReasonRequired ? 'REQUIRED' : 'OPTIONAL');
       this.groupSettings = {
         ...this.groupSettings,
         ...(updatesSettlements ? { settlementsEnabled: update.settlementsEnabled as boolean } : {}),
         ...(updatesNotificationEmails ? { notificationEmailsEnabled: update.notificationEmailsEnabled as boolean } : {}),
         ...(updatesDefaultRole ? { defaultRoleId: update.defaultRoleId as string } : {}),
-        ...(update.foreignBookingReasonRequired !== undefined ? { foreignBookingReasonRequired: update.foreignBookingReasonRequired } : {}),
-        ...(update.ownPaymentReasonRequired !== undefined ? { ownPaymentReasonRequired: update.ownPaymentReasonRequired } : {}),
-        ...(update.otherPaymentReasonRequired !== undefined ? { otherPaymentReasonRequired: update.otherPaymentReasonRequired } : {}),
+        ...(update.ownBookingReasonMode !== undefined ? { ownBookingReasonMode: update.ownBookingReasonMode } : {}),
+        foreignBookingReasonMode,
+        ownPaymentReasonMode,
+        otherPaymentReasonMode,
+        foreignBookingReasonRequired: foreignBookingReasonMode === 'REQUIRED',
+        ownPaymentReasonRequired: ownPaymentReasonMode === 'REQUIRED',
+        otherPaymentReasonRequired: otherPaymentReasonMode === 'REQUIRED',
         ...(update.paymentMethods !== undefined ? { paymentMethods: clone(update.paymentMethods) } : {}),
         ...(update.bookingReasons !== undefined ? { bookingReasons: clone(update.bookingReasons) } : {}),
         ...(update.paymentReasons !== undefined ? { paymentReasons: clone(update.paymentReasons) } : {}),
@@ -405,6 +426,10 @@ export class DemoTransport {
     }
     if (resource === 'transaction-settings' && method === 'GET') return clone({
       settlementsEnabled: this.groupSettings.settlementsEnabled,
+      ownBookingReasonMode: this.groupSettings.ownBookingReasonMode,
+      foreignBookingReasonMode: this.groupSettings.foreignBookingReasonMode,
+      ownPaymentReasonMode: this.groupSettings.ownPaymentReasonMode,
+      otherPaymentReasonMode: this.groupSettings.otherPaymentReasonMode,
       foreignBookingReasonRequired: this.groupSettings.foreignBookingReasonRequired,
       ownPaymentReasonRequired: this.groupSettings.ownPaymentReasonRequired,
       otherPaymentReasonRequired: this.groupSettings.otherPaymentReasonRequired,
@@ -427,6 +452,8 @@ export class DemoTransport {
         currentMembership: actor,
         targets,
         canBookForGuests,
+        ownBookingReasonMode: this.groupSettings.ownBookingReasonMode,
+        foreignBookingReasonMode: this.groupSettings.foreignBookingReasonMode,
         foreignBookingReasonRequired: this.groupSettings.foreignBookingReasonRequired,
         bookingReasons: this.groupSettings.bookingReasons,
       }) as T;
@@ -854,7 +881,7 @@ export class DemoTransport {
     return clone({ subjectType, subjectId, roleIds: normalized, version });
   }
 
-  private createBooking(groupId: string, command: BookingCommand & { unitPriceMinor?: number }): Booking {
+  private createBooking(groupId: string, command: BookingCommand & { unitPriceMinor?: number }, reasonModeOverride?: ReasonMode): Booking {
     const product = this.categories.flatMap((category) => category.products).find((entry) => entry.id === command.productId);
     const target = this.members.find((member) => member.id === command.targetMembershipId) ?? this.members.find((member) => member.userId === this.session.user.id);
     const actor = this.currentMembership(groupId);
@@ -863,7 +890,11 @@ export class DemoTransport {
     if (target.id !== actor.id && target.isTemporaryGuest && !can(actor.effectiveGrants, 'BOOK_FOR_GUESTS')) throw new Error(i18n.t('admin.noAccessMessage'));
     if (target.id !== actor.id && !target.isTemporaryGuest && !can(actor.effectiveGrants, 'BOOK_FOR_OTHERS')) throw new Error(i18n.t('admin.noAccessMessage'));
     if (target.id === actor.id && !can(actor.effectiveGrants, 'CREATE_OWN_BOOKING')) throw new Error(i18n.t('admin.noAccessMessage'));
-    if (target.id !== actor.id && !target.isTemporaryGuest && !command.reason?.trim()) throw new Error(i18n.t('booking.reasonRequired'));
+    const reasonMode = reasonModeOverride ?? (target.id === actor.id
+      ? this.groupSettings.ownBookingReasonMode
+      : target.isTemporaryGuest ? 'OFF' : this.groupSettings.foreignBookingReasonMode);
+    if (reasonMode === 'REQUIRED' && !command.reason?.trim()) throw new Error(i18n.t('booking.reasonRequired'));
+    const effectiveReason = reasonMode === 'OFF' ? undefined : command.reason?.trim() || undefined;
     if (product.pricingMode === 'FIXED' && (command.unitPrice || command.unitPriceMinor !== undefined)) throw new Error(i18n.t('errors.amountFormat'));
     const chosenPrice = product.pricingMode === 'USER_DEFINED'
       ? validateDemoProductPrice(command.unitPrice?.minorUnits ?? command.unitPriceMinor)
@@ -889,7 +920,7 @@ export class DemoTransport {
       bookedByMemberId: actor.id,
       memberStatus: target.status,
       bookedByStatus: actor.status,
-      reason: command.reason?.trim() || undefined,
+      reason: effectiveReason,
       status: 'POSTED',
       voidWithoutReasonUntil: new Date(Date.now() + 30_000).toISOString(),
       canVoid: false,
@@ -931,7 +962,9 @@ export class DemoTransport {
     if (includesOwn && !can(actor.effectiveGrants, 'CREATE_OWN_BOOKING')) throw new Error(i18n.t('admin.noAccessMessage'));
     if (includesOthers && !can(actor.effectiveGrants, 'BOOK_FOR_OTHERS')) throw new Error(i18n.t('admin.noAccessMessage'));
     if (includesGuests && !can(actor.effectiveGrants, 'BOOK_FOR_GUESTS')) throw new Error(i18n.t('admin.noAccessMessage'));
-    if (includesOthers && !command.reason?.trim()) throw new Error(i18n.t('booking.reasonRequired'));
+    const reasonMode = includesOthers ? this.groupSettings.foreignBookingReasonMode : includesOwn ? this.groupSettings.ownBookingReasonMode : 'OFF';
+    if (reasonMode === 'REQUIRED' && !command.reason?.trim()) throw new Error(i18n.t('booking.reasonRequired'));
+    const effectiveReason = reasonMode === 'OFF' ? undefined : command.reason?.trim() || undefined;
     const guestMembershipIds = temporaryGuestNames.map((displayName) => {
       const membership: Membership = {
         id: identifier('member-guest'),
@@ -952,7 +985,7 @@ export class DemoTransport {
       this.members.push(membership);
       return membership.id;
     });
-    return [...targets, ...guestMembershipIds].map((targetMembershipId) => this.createBooking(groupId, { ...command, targetMembershipId }));
+    return [...targets, ...guestMembershipIds].map((targetMembershipId) => this.createBooking(groupId, { ...command, reason: effectiveReason, targetMembershipId }, reasonMode));
   }
 
   /**
@@ -1479,15 +1512,18 @@ export class DemoTransport {
     category.products.splice(productIndex, 1);
   }
 
-  private createPayment(command: PaymentCommand & { amountMinor?: number }): Payment {
+  private createPayment(command: PaymentCommand & { amountMinor?: number }, reasonMode: ReasonMode = this.groupSettings.otherPaymentReasonMode): Payment {
     const member = this.members.find((entry) => entry.id === command.membershipId);
     if (!member) throw new Error(i18n.t('errors.memberNotFound'));
+    if (reasonMode === 'REQUIRED' && !command.reference?.trim()) throw new Error(i18n.t('selfPayment.referenceRequired'));
+    const effectiveReference = reasonMode === 'OFF' ? undefined : command.reference?.trim() || undefined;
     const payment: Payment = {
       id: identifier('payment'),
       memberName: member.displayName,
       membershipStatus: member.status,
       status: 'POSTED',
       ...command,
+      reference: effectiveReference,
       amount: command.amount ?? { minorUnits: String(command.amountMinor ?? 0), currency: 'EUR' },
       methodLabel: this.groupSettings.paymentMethods.find((entry) => entry.id === command.method)?.label ?? command.method,
     };
@@ -1530,14 +1566,14 @@ export class DemoTransport {
     if (amountMinor > 100_000_000_000n) throw new Error(i18n.t('errors.amountRange'));
     if (!command.receivedAt || Number.isNaN(Date.parse(command.receivedAt))) throw new Error(i18n.t('errors.requestFailed'));
     if (!['BANK_TRANSFER', 'CASH', 'PAYPAL', 'OTHER'].includes(command.method)) throw new Error(i18n.t('errors.requestFailed'));
-    if (!command.reference?.trim()) throw new Error(i18n.t('selfPayment.referenceRequired'));
+    if (this.groupSettings.ownPaymentReasonMode === 'REQUIRED' && !command.reference?.trim()) throw new Error(i18n.t('selfPayment.referenceRequired'));
     return this.createPayment({
       membershipId: member.id,
       amount: command.amount ?? { minorUnits: amountMinor.toString(), currency: 'EUR' },
       receivedAt: command.receivedAt,
       method: command.method,
-      reference: command.reference.trim(),
-    });
+      reference: command.reference?.trim(),
+    }, this.groupSettings.ownPaymentReasonMode);
   }
 
   private reversePayment(id: string): void {

@@ -10,6 +10,29 @@ describe('API adapters', () => {
     expect(adaptTransactionSettings({ settlementsEnabled: true }).settlementsEnabled).toBe(true);
   });
 
+  it('normalizes reason modes and maps legacy requirement flags', () => {
+    expect(adaptGroupSettings({})).toMatchObject({
+      ownBookingReasonMode: 'OFF',
+      foreignBookingReasonMode: 'REQUIRED',
+      ownPaymentReasonMode: 'REQUIRED',
+      otherPaymentReasonMode: 'OPTIONAL',
+    });
+    expect(adaptTransactionSettings({
+      ownBookingReasonMode: 'OPTIONAL',
+      foreignBookingReasonRequired: false,
+      ownPaymentReasonMode: 'OFF',
+      otherPaymentReasonRequired: true,
+    })).toMatchObject({
+      ownBookingReasonMode: 'OPTIONAL',
+      foreignBookingReasonMode: 'OPTIONAL',
+      ownPaymentReasonMode: 'OFF',
+      otherPaymentReasonMode: 'REQUIRED',
+      foreignBookingReasonRequired: false,
+      ownPaymentReasonRequired: false,
+      otherPaymentReasonRequired: true,
+    });
+  });
+
   it('accepts stable group grants and rejects unknown keys or disabled scopes', () => {
     expect(adaptPermissionGrants([
       { permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } },

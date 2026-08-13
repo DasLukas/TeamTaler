@@ -2407,7 +2407,7 @@ components:
     GroupSettings:
       type: object
       additionalProperties: false
-      required: [notificationEmailsEnabled, notificationEmailDeliveryAvailable, settlementsEnabled, defaultRoleId, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
+      required: [notificationEmailsEnabled, notificationEmailDeliveryAvailable, settlementsEnabled, defaultRoleId, ownBookingReasonMode, foreignBookingReasonMode, ownPaymentReasonMode, otherPaymentReasonMode, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
       properties:
         notificationEmailsEnabled:
           type: boolean
@@ -2422,15 +2422,26 @@ components:
         defaultRoleId:
           type: [string, 'null']
           description: Group-owned non-administrative role preselected for new invitations and used by CSV rows without roles.
+        ownBookingReasonMode:
+          $ref: '#/components/schemas/ReasonMode'
+        foreignBookingReasonMode:
+          $ref: '#/components/schemas/ReasonMode'
+        ownPaymentReasonMode:
+          $ref: '#/components/schemas/ReasonMode'
+        otherPaymentReasonMode:
+          $ref: '#/components/schemas/ReasonMode'
         foreignBookingReasonRequired:
           type: boolean
-          description: Whether bookings for another credentialed member require a reason.
+          deprecated: true
+          description: Compatibility alias for foreignBookingReasonMode=REQUIRED.
         ownPaymentReasonRequired:
           type: boolean
-          description: Whether self-service payments require a reason.
+          deprecated: true
+          description: Compatibility alias for ownPaymentReasonMode=REQUIRED.
         otherPaymentReasonRequired:
           type: boolean
-          description: Whether finance-managed payments require a reason.
+          deprecated: true
+          description: Compatibility alias for otherPaymentReasonMode=REQUIRED.
         paymentMethods:
           type: array
           minItems: 1
@@ -2457,9 +2468,19 @@ components:
           type: string
           minLength: 1
           description: Group-owned role that must not grant GROUP_ADMINISTRATION or MEMBER_MANAGEMENT. It cannot be cleared after being set and may be changed only with MEMBER_MANAGEMENT.
-        foreignBookingReasonRequired: { type: boolean }
-        ownPaymentReasonRequired: { type: boolean }
-        otherPaymentReasonRequired: { type: boolean }
+        ownBookingReasonMode: { $ref: '#/components/schemas/ReasonMode' }
+        foreignBookingReasonMode: { $ref: '#/components/schemas/ReasonMode' }
+        ownPaymentReasonMode: { $ref: '#/components/schemas/ReasonMode' }
+        otherPaymentReasonMode: { $ref: '#/components/schemas/ReasonMode' }
+        foreignBookingReasonRequired:
+          type: boolean
+          deprecated: true
+        ownPaymentReasonRequired:
+          type: boolean
+          deprecated: true
+        otherPaymentReasonRequired:
+          type: boolean
+          deprecated: true
         paymentMethods:
           type: array
           minItems: 1
@@ -2480,17 +2501,25 @@ components:
       properties:
         id: { type: string, minLength: 1, maxLength: 120 }
         label: { type: string, minLength: 1, maxLength: 120 }
+    ReasonMode:
+      type: string
+      enum: [OFF, OPTIONAL, REQUIRED]
+      description: Controls whether the corresponding transaction reason is hidden, optional, or mandatory.
     TransactionSettings:
       type: object
       additionalProperties: false
-      required: [settlementsEnabled, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
+      required: [settlementsEnabled, ownBookingReasonMode, foreignBookingReasonMode, ownPaymentReasonMode, otherPaymentReasonMode, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
       properties:
         settlementsEnabled:
           type: boolean
           description: Whether settlement-period references and actions should be shown to active members.
-        foreignBookingReasonRequired: { type: boolean }
-        ownPaymentReasonRequired: { type: boolean }
-        otherPaymentReasonRequired: { type: boolean }
+        ownBookingReasonMode: { $ref: '#/components/schemas/ReasonMode' }
+        foreignBookingReasonMode: { $ref: '#/components/schemas/ReasonMode' }
+        ownPaymentReasonMode: { $ref: '#/components/schemas/ReasonMode' }
+        otherPaymentReasonMode: { $ref: '#/components/schemas/ReasonMode' }
+        foreignBookingReasonRequired: { type: boolean, deprecated: true }
+        ownPaymentReasonRequired: { type: boolean, deprecated: true }
+        otherPaymentReasonRequired: { type: boolean, deprecated: true }
         paymentMethods:
           type: array
           minItems: 1
@@ -3059,7 +3088,7 @@ components:
     BookingContext:
       type: object
       additionalProperties: false
-      required: [openPeriod, ownBalanceMinor, currentMembership, targets, canBookForGuests, foreignBookingReasonRequired, bookingReasons]
+      required: [openPeriod, ownBalanceMinor, currentMembership, targets, canBookForGuests, ownBookingReasonMode, foreignBookingReasonMode, foreignBookingReasonRequired, bookingReasons]
       properties:
         openPeriod: { $ref: '#/components/schemas/Period' }
         ownBalanceMinor:
@@ -3073,9 +3102,14 @@ components:
         canBookForGuests:
           type: boolean
           description: True only when BOOK_FOR_GUESTS is effective; controls inline temporary-guest creation.
+        ownBookingReasonMode:
+          $ref: '#/components/schemas/ReasonMode'
+        foreignBookingReasonMode:
+          $ref: '#/components/schemas/ReasonMode'
         foreignBookingReasonRequired:
           type: boolean
-          description: Whether the current group requires a reason for credentialed foreign targets.
+          deprecated: true
+          description: Compatibility alias for foreignBookingReasonMode=REQUIRED.
         bookingReasons:
           type: array
           description: Ordered suggestions; clients must keep the reason field freely editable.

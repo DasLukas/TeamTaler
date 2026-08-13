@@ -44,7 +44,6 @@
   min-width: 0;
 }
 
-.optionalReason { margin: calc(-1 * var(--space-4)) 0 var(--space-8); }
 
 .confirmation { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-5); padding: var(--space-4); border-radius: var(--radius-md); color: var(--color-teal-800); background: var(--color-surface-teal); font-weight: 700; }
 
@@ -87,6 +86,7 @@
   .layout { display: block; }
   .content { width: min(100%, 780px); padding-bottom: 64px; }
   .hasCart .content { padding-bottom: 300px; }
+  .hasCart.hasPeekCart .content { padding-bottom: 120px; }
   .inspector {
     position: fixed;
     z-index: 20;
@@ -108,6 +108,10 @@
   .inspectorEmpty { padding-inline: var(--space-5); }
 }
 
+@media (min-width: 768px) and (max-width: 1023px) {
+  .inspector { left: var(--sidebar-width); }
+}
+
 @media (max-width: 767px) {
   .inspector { bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom)); }
 
@@ -122,5 +126,4 @@
   .balance { min-height: 104px; grid-template-columns: minmax(0, 1fr) auto; padding: var(--space-5); }
   .balanceAmount > span { font-size: var(--font-size-sm); }
   .balanceAmount > strong { font-size: 2rem; white-space: nowrap; }
-  .optionalReason { margin-top: calc(-1 * var(--space-2)); margin-bottom: var(--space-6); }
 }

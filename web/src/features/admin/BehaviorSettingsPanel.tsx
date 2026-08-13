@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
-import type { GroupSettings, GroupSettingsUpdateInput } from '@/api/types';
+import type { GroupSettings, GroupSettingsUpdateInput, ReasonMode } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Button } from '@/components/ui/Button';
 import { StatePanel } from '@/components/ui/StatePanel';
@@ -17,6 +17,41 @@ interface SettingsFormProps {
   settings: GroupSettings;
 }
 
+/** Properties for the accessible three-state reason-policy control. */
+interface ReasonModeControlProps {
+  disabled?: boolean;
+  id: string;
+  label: string;
+  onChange: (value: ReasonMode) => void;
+  value: ReasonMode;
+}
+
+/**
+ * Renders a native-radio segmented control for off, optional, and required.
+ *
+ * @param props - Stable identifier, label, value, disabled state, and change callback.
+ * @returns A keyboard-operable three-position reason-policy selector.
+ */
+function ReasonModeControl({ disabled = false, id, label, onChange, value }: ReasonModeControlProps) {
+  const { t } = useTranslation();
+  const options: Array<{ label: string; value: ReasonMode }> = [
+    { label: t('behaviorSettings.reasonModeOff'), value: 'OFF' },
+    { label: t('behaviorSettings.reasonModeOptional'), value: 'OPTIONAL' },
+    { label: t('behaviorSettings.reasonModeRequired'), value: 'REQUIRED' },
+  ];
+  return (
+    <fieldset className={styles.reasonModeControl} disabled={disabled}>
+      <legend className="sr-only">{label}</legend>
+      {options.map((option) => (
+        <label key={option.value}>
+          <input checked={value === option.value} name={id} onChange={() => onChange(option.value)} type="radio" value={option.value} />
+          <span>{option.label}</span>
+        </label>
+      ))}
+    </fieldset>
+  );
+}
+
 /**
  * Renders grouped identity, notification, finance, and transaction settings for one group.
  *
@@ -28,9 +63,10 @@ function SettingsForm({ groupId, settings }: SettingsFormProps) {
   const queryClient = useQueryClient();
   const [settlementsEnabled, setSettlementsEnabled] = useState(settings.settlementsEnabled);
   const [notificationEmailsEnabled, setNotificationEmailsEnabled] = useState(settings.notificationEmailsEnabled);
-  const [foreignBookingReasonRequired, setForeignBookingReasonRequired] = useState(settings.foreignBookingReasonRequired);
-  const [ownPaymentReasonRequired, setOwnPaymentReasonRequired] = useState(settings.ownPaymentReasonRequired);
-  const [otherPaymentReasonRequired, setOtherPaymentReasonRequired] = useState(settings.otherPaymentReasonRequired);
+  const [ownBookingReasonMode, setOwnBookingReasonMode] = useState(settings.ownBookingReasonMode);
+  const [foreignBookingReasonMode, setForeignBookingReasonMode] = useState(settings.foreignBookingReasonMode);
+  const [ownPaymentReasonMode, setOwnPaymentReasonMode] = useState(settings.ownPaymentReasonMode);
+  const [otherPaymentReasonMode, setOtherPaymentReasonMode] = useState(settings.otherPaymentReasonMode);
   const [paymentMethods, setPaymentMethods] = useState(settings.paymentMethods);
   const [bookingReasons, setBookingReasons] = useState(settings.bookingReasons);
   const [paymentReasons, setPaymentReasons] = useState(settings.paymentReasons);
@@ -41,9 +77,10 @@ function SettingsForm({ groupId, settings }: SettingsFormProps) {
   });
   const changed = settlementsEnabled !== settings.settlementsEnabled
     || notificationEmailsEnabled !== settings.notificationEmailsEnabled
-    || foreignBookingReasonRequired !== settings.foreignBookingReasonRequired
-    || ownPaymentReasonRequired !== settings.ownPaymentReasonRequired
-    || otherPaymentReasonRequired !== settings.otherPaymentReasonRequired
+    || ownBookingReasonMode !== settings.ownBookingReasonMode
+    || foreignBookingReasonMode !== settings.foreignBookingReasonMode
+    || ownPaymentReasonMode !== settings.ownPaymentReasonMode
+    || otherPaymentReasonMode !== settings.otherPaymentReasonMode
     || JSON.stringify(paymentMethods) !== JSON.stringify(settings.paymentMethods)
     || JSON.stringify(bookingReasons) !== JSON.stringify(settings.bookingReasons)
     || JSON.stringify(paymentReasons) !== JSON.stringify(settings.paymentReasons);
@@ -53,9 +90,10 @@ function SettingsForm({ groupId, settings }: SettingsFormProps) {
       const update: GroupSettingsUpdateInput = {
         ...(settlementsEnabled !== settings.settlementsEnabled ? { settlementsEnabled } : {}),
         ...(notificationEmailsEnabled !== settings.notificationEmailsEnabled ? { notificationEmailsEnabled } : {}),
-        ...(foreignBookingReasonRequired !== settings.foreignBookingReasonRequired ? { foreignBookingReasonRequired } : {}),
-        ...(ownPaymentReasonRequired !== settings.ownPaymentReasonRequired ? { ownPaymentReasonRequired } : {}),
-        ...(otherPaymentReasonRequired !== settings.otherPaymentReasonRequired ? { otherPaymentReasonRequired } : {}),
+        ...(ownBookingReasonMode !== settings.ownBookingReasonMode ? { ownBookingReasonMode } : {}),
+        ...(foreignBookingReasonMode !== settings.foreignBookingReasonMode ? { foreignBookingReasonMode } : {}),
+        ...(ownPaymentReasonMode !== settings.ownPaymentReasonMode ? { ownPaymentReasonMode } : {}),
+        ...(otherPaymentReasonMode !== settings.otherPaymentReasonMode ? { otherPaymentReasonMode } : {}),
         ...(JSON.stringify(paymentMethods) !== JSON.stringify(settings.paymentMethods) ? { paymentMethods } : {}),
         ...(JSON.stringify(bookingReasons) !== JSON.stringify(settings.bookingReasons) ? { bookingReasons } : {}),
         ...(JSON.stringify(paymentReasons) !== JSON.stringify(settings.paymentReasons) ? { paymentReasons } : {}),
@@ -65,6 +103,7 @@ function SettingsForm({ groupId, settings }: SettingsFormProps) {
     onSuccess: async (persisted) => {
       queryClient.setQueryData<GroupSettings>(['group-settings', groupId], persisted);
       await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['booking-context', groupId] }),
         queryClient.invalidateQueries({ queryKey: ['transaction-settings', groupId] }),
         queryClient.invalidateQueries({ queryKey: ['dashboard', groupId] }),
         queryClient.invalidateQueries({ queryKey: ['periods', groupId] }),
@@ -113,10 +152,12 @@ function SettingsForm({ groupId, settings }: SettingsFormProps) {
         <header><h3 id="booking-settings-title">{t('behaviorSettings.bookingTitle')}</h3></header>
         <section className={styles.card}>
           <h4 className={styles.cardTitle}>{t('behaviorSettings.reasonRulesTitle')}</h4>
+          <p className={styles.cardDescription}>{t('behaviorSettings.reasonRulesDescription')}</p>
           <div className={styles.ruleList}>
-            <div className={styles.settingRow}><span>{t('behaviorSettings.foreignBookingReason')}</span><Toggle checked={foreignBookingReasonRequired} label={t('behaviorSettings.foreignBookingReason')} onChange={(value) => { setForeignBookingReasonRequired(value); mutation.reset(); }} /></div>
-            <div className={styles.settingRow}><span>{t('behaviorSettings.ownPaymentReason')}</span><Toggle checked={ownPaymentReasonRequired} label={t('behaviorSettings.ownPaymentReason')} onChange={(value) => { setOwnPaymentReasonRequired(value); mutation.reset(); }} /></div>
-            <div className={styles.settingRow}><span>{t('behaviorSettings.otherPaymentReason')}</span><Toggle checked={otherPaymentReasonRequired} label={t('behaviorSettings.otherPaymentReason')} onChange={(value) => { setOtherPaymentReasonRequired(value); mutation.reset(); }} /></div>
+            <div className={`${styles.settingRow} ${styles.reasonRule}`}><span>{t('behaviorSettings.ownBookingReason')}</span><ReasonModeControl disabled={mutation.isPending} id="own-booking-reason-mode" label={t('behaviorSettings.ownBookingReason')} onChange={(value) => { setOwnBookingReasonMode(value); mutation.reset(); }} value={ownBookingReasonMode} /></div>
+            <div className={`${styles.settingRow} ${styles.reasonRule}`}><span>{t('behaviorSettings.foreignBookingReason')}</span><ReasonModeControl disabled={mutation.isPending} id="foreign-booking-reason-mode" label={t('behaviorSettings.foreignBookingReason')} onChange={(value) => { setForeignBookingReasonMode(value); mutation.reset(); }} value={foreignBookingReasonMode} /></div>
+            <div className={`${styles.settingRow} ${styles.reasonRule}`}><span>{t('behaviorSettings.ownPaymentReason')}</span><ReasonModeControl disabled={mutation.isPending} id="own-payment-reason-mode" label={t('behaviorSettings.ownPaymentReason')} onChange={(value) => { setOwnPaymentReasonMode(value); mutation.reset(); }} value={ownPaymentReasonMode} /></div>
+            <div className={`${styles.settingRow} ${styles.reasonRule}`}><span>{t('behaviorSettings.otherPaymentReason')}</span><ReasonModeControl disabled={mutation.isPending} id="other-payment-reason-mode" label={t('behaviorSettings.otherPaymentReason')} onChange={(value) => { setOtherPaymentReasonMode(value); mutation.reset(); }} value={otherPaymentReasonMode} /></div>
           </div>
         </section>
         <section className={styles.card}>

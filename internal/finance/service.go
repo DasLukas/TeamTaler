@@ -429,16 +429,23 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 		} else if err != nil {
 			return err
 		}
-		var ownReasonRequired, otherReasonRequired bool
-		if err := tx.QueryRowContext(ctx, `SELECT own_payment_reason_required,other_payment_reason_required FROM group_settings WHERE group_id=?`, membership.GroupID).Scan(&ownReasonRequired, &otherReasonRequired); err != nil {
+		var ownReasonMode, otherReasonMode domain.ReasonMode
+		if err := tx.QueryRowContext(ctx, `SELECT own_payment_reason_mode,other_payment_reason_mode FROM group_settings WHERE group_id=?`, membership.GroupID).Scan(&ownReasonMode, &otherReasonMode); err != nil {
 			return err
 		}
-		reasonRequired := source == paymentSourceSelfService && ownReasonRequired
+		reasonMode := ownReasonMode
 		if source == paymentSourceFinanceWorkspace {
-			reasonRequired = otherReasonRequired
+			reasonMode = otherReasonMode
 		}
-		if reasonRequired && input.Reference == "" {
+		if !reasonMode.Valid() {
+			return fmt.Errorf("group %s has unsupported payment reason mode %q", membership.GroupID, reasonMode)
+		}
+		if reasonMode.Required() && input.Reference == "" {
 			return domain.ValidationError{Field: "reference", Message: "is required"}
+		}
+		effectiveReference := input.Reference
+		if !reasonMode.Enabled() {
+			effectiveReference = ""
 		}
 		var currency, memberName, memberStatus string
 		var deletedAt sql.NullString
@@ -471,13 +478,13 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 		paymentID, _ := platform.NewID("pay")
 		now := platform.Timestamp(platform.Now())
 		ledgerDescription := "Payment received"
-		if input.Reference != "" {
-			ledgerDescription += ": " + input.Reference
+		if effectiveReference != "" {
+			ledgerDescription += ": " + effectiveReference
 		}
 		payment = domain.Payment{ID: paymentID, GroupID: membership.GroupID, MembershipID: input.MembershipID, MemberName: memberName, MemberStatus: memberStatus, AmountMinor: input.AmountMinor,
-			Currency: currency, ReceivedAt: platform.Timestamp(receivedAt), Method: input.Method, MethodLabel: payment.MethodLabel, Reference: input.Reference, Note: input.Note, Status: "POSTED", Allocations: []domain.PaymentAllocation{}}
+			Currency: currency, ReceivedAt: platform.Timestamp(receivedAt), Method: input.Method, MethodLabel: payment.MethodLabel, Reference: effectiveReference, Note: input.Note, Status: "POSTED", Allocations: []domain.PaymentAllocation{}}
 		_, err = tx.ExecContext(ctx, `INSERT INTO payments(id,group_id,membership_id,amount_minor,received_at,method,method_label,reference,note,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-			paymentID, membership.GroupID, input.MembershipID, input.AmountMinor, payment.ReceivedAt, input.Method, payment.MethodLabel, nullable(input.Reference), nullable(input.Note), membership.ID, now)
+			paymentID, membership.GroupID, input.MembershipID, input.AmountMinor, payment.ReceivedAt, input.Method, payment.MethodLabel, nullable(effectiveReference), nullable(input.Note), membership.ID, now)
 		if err != nil {
 			return err
 		}
