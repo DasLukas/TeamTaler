@@ -4,6 +4,8 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-14
+
 ### Added
 
 - A recipient-first multi-product booking cart with persistent cart-level member and temporary-guest selection, a compact recipient icon and count badge beside the open balance, per-line quantities and user-defined prices, responsive desktop/mobile summaries, and one explicit product-target confirmation.
@@ -230,7 +232,8 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Explicit acting and charged membership display for every booking, including searchable third-party-assignment cues.
 - Canonical backup-entry allowlisting, target-width Argon2 parameter parsing, and directory-confined SPA asset serving with traversal regression coverage.
 
-[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/DasLukas/TeamTaler/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/DasLukas/TeamTaler/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/DasLukas/TeamTaler/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/DasLukas/TeamTaler/compare/v0.5.0...v0.5.1
