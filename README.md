@@ -247,7 +247,7 @@ The fixture contains `TeamTaler Demo Club` and `TeamTaler Weekend Club`. Every s
 - `lena@example.test` belongs to both groups and has a regular member role in the second group.
 - `noah@example.test` has a regular member role and belongs only to `TeamTaler Weekend Club`.
 
-The server binds only to loopback. Stopping the action terminates both processes and removes that run's disposable database. Generated binaries remain below the ignored `tmp/test-server` directory so later starts can reuse Go's build cache.
+The server binds only to loopback. Stopping the action terminates both processes and removes that run's disposable database. Generated binaries remain below the ignored `tmp/test-server` directory so later starts can reuse Go's build cache. Backend and frontend listener-readiness checks allow 60 seconds by default to accommodate cold Vite starts; the frontend probe uses the static `/health/ready.txt` asset so initial dependency optimization cannot terminate an otherwise healthy server. Set `TEAMTALER_TEST_SERVER_READY_TIMEOUT_SECONDS` to a positive integer when a slower development machine needs a different limit.
 
 Optional SMTP delivery for this disposable server is read from the ignored `.env.test-server.local` file. The file accepts only the documented SMTP variables and is never sourced as shell code. When username or password is empty, the action starts normally with email delivery disabled. For IONOS, use `smtp.ionos.de` on port `587` with `starttls`; the authenticated mailbox is also used as the sender unless `TEAMTALER_SMTP_FROM_ADDRESS` is set explicitly. Restart the action after changing the file.
 
