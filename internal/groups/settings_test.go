@@ -42,6 +42,10 @@ func TestGroupSettingsDefaultAuthorizationPersistenceAndAudit(t *testing.T) {
 	if !settings.ForeignBookingReasonRequired || !settings.OwnPaymentReasonRequired || settings.OtherPaymentReasonRequired || len(settings.PaymentMethods) != 4 {
 		t.Fatalf("default transaction settings=%#v", settings)
 	}
+	if settings.OwnBookingReasonMode != domain.ReasonModeOff || settings.ForeignBookingReasonMode != domain.ReasonModeRequired ||
+		settings.OwnPaymentReasonMode != domain.ReasonModeRequired || settings.OtherPaymentReasonMode != domain.ReasonModeOptional {
+		t.Fatalf("default reason modes=%#v", settings)
+	}
 	wantDefaultMethods := []string{"BANK_TRANSFER", "CASH", "PAYPAL", "OTHER"}
 	for index, method := range settings.PaymentMethods {
 		if method.ID != wantDefaultMethods[index] {
@@ -135,10 +139,12 @@ func TestTransactionSettingsAreOrderedEditableAndRequireOnePaymentMethod(t *test
 	foreignBookingReasonRequired := false
 	ownPaymentReasonRequired := false
 	otherPaymentReasonRequired := true
+	ownBookingReasonMode := domain.ReasonModeOptional
 	paymentMethods := []domain.ConfigurableItem{{ID: "CARD", Label: "Card"}, {ID: "CASH", Label: "Cash desk"}}
 	bookingReasons := []domain.ConfigurableItem{{ID: "TEAM", Label: "Team event"}, {ID: "TRAVEL", Label: "Travel"}}
 	paymentReasons := []domain.ConfigurableItem{{ID: "MONTHLY", Label: "Monthly settlement"}}
 	updated, err := service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{
+		OwnBookingReasonMode:         &ownBookingReasonMode,
 		ForeignBookingReasonRequired: &foreignBookingReasonRequired,
 		OwnPaymentReasonRequired:     &ownPaymentReasonRequired,
 		OtherPaymentReasonRequired:   &otherPaymentReasonRequired,
@@ -151,6 +157,10 @@ func TestTransactionSettingsAreOrderedEditableAndRequireOnePaymentMethod(t *test
 	}
 	if updated.ForeignBookingReasonRequired || updated.OwnPaymentReasonRequired || !updated.OtherPaymentReasonRequired {
 		t.Fatalf("updated reason requirements=%#v", updated)
+	}
+	if updated.OwnBookingReasonMode != domain.ReasonModeOptional || updated.ForeignBookingReasonMode != domain.ReasonModeOptional ||
+		updated.OwnPaymentReasonMode != domain.ReasonModeOptional || updated.OtherPaymentReasonMode != domain.ReasonModeRequired {
+		t.Fatalf("updated reason modes=%#v", updated)
 	}
 	if len(updated.PaymentMethods) != 2 || updated.PaymentMethods[0].ID != "CARD" || updated.PaymentMethods[1].Label != "Cash desk" {
 		t.Fatalf("updated payment methods=%#v", updated.PaymentMethods)
@@ -166,5 +176,9 @@ func TestTransactionSettingsAreOrderedEditableAndRequireOnePaymentMethod(t *test
 	duplicates := []domain.ConfigurableItem{{ID: "ONE", Label: "Card"}, {ID: "TWO", Label: "card"}}
 	if _, err := service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{PaymentMethods: &duplicates}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("duplicate payment methods error=%v, want validation", err)
+	}
+	invalidMode := domain.ReasonMode("MAYBE")
+	if _, err := service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{OwnBookingReasonMode: &invalidMode}); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("invalid reason mode error=%v, want validation", err)
 	}
 }

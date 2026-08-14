@@ -60,6 +60,10 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
   const [referenceError, setReferenceError] = useState('');
   const [command, setCommand] = useState<SelfPaymentCommand | null>(null);
   const [updatedBalance, setUpdatedBalance] = useState<Money | null>(null);
+  const reasonMode = transactionSettingsQuery.data?.ownPaymentReasonMode
+    ?? (transactionSettingsQuery.data?.ownPaymentReasonRequired === false ? 'OPTIONAL' : 'REQUIRED');
+  const reasonEnabled = reasonMode !== 'OFF';
+  const reasonRequired = reasonMode === 'REQUIRED';
 
   const reset = () => {
     setStep('entry');
@@ -111,7 +115,7 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
       return;
     }
     const trimmedReference = reference.trim();
-    if (transactionSettingsQuery.data?.ownPaymentReasonRequired && !trimmedReference) {
+    if (reasonRequired && !trimmedReference) {
       setReferenceError(t('selfPayment.referenceRequired'));
       return;
     }
@@ -121,13 +125,12 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
       amount: { minorUnits: validation.minorUnits, currency: activeGroup.currency },
       receivedAt,
       method,
-      reference: trimmedReference || undefined,
+      reference: reasonEnabled ? trimmedReference || undefined : undefined,
     });
     setStep('review');
   };
 
   const paymentMethod = command ? transactionSettingsQuery.data?.paymentMethods.find((item) => item.id === command.method)?.label ?? command.method : '';
-  const reasonRequired = transactionSettingsQuery.data?.ownPaymentReasonRequired !== false;
   const updatedBalanceIsCredit = updatedBalance ? isCreditBalance(updatedBalance) : false;
 
   return (
@@ -146,7 +149,7 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
               <Field htmlFor="self-payment-date" label={t('finance.receivedDate')}><TextInput id="self-payment-date" onChange={(event) => setReceivedAt(event.target.value)} required type="date" value={receivedAt} /></Field>
               <Field htmlFor="self-payment-method" label={t('finance.paymentType')}><SelectInput id="self-payment-method" onChange={(event) => setMethod(event.target.value)} required value={method}>{transactionSettingsQuery.data?.paymentMethods.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</SelectInput></Field>
             </div>
-            <Field error={referenceError || undefined} htmlFor="self-payment-reference" label={`${t('finance.reason')}${reasonRequired ? ' *' : ''}`}><TextInput id="self-payment-reference" list="self-payment-reason-suggestions" maxLength={120} onChange={(event) => { setReference(event.target.value); setReferenceError(''); }} required={reasonRequired} value={reference} /><datalist id="self-payment-reason-suggestions">{transactionSettingsQuery.data?.paymentReasons.map((item) => <option key={item.id} value={item.label} />)}</datalist></Field>
+            {reasonEnabled ? <Field error={referenceError || undefined} htmlFor="self-payment-reference" label={`${t('finance.reason')}${reasonRequired ? ' *' : ''}`}><TextInput id="self-payment-reference" list="self-payment-reason-suggestions" maxLength={120} onChange={(event) => { setReference(event.target.value); setReferenceError(''); }} required={reasonRequired} value={reference} /><datalist id="self-payment-reason-suggestions">{transactionSettingsQuery.data?.paymentReasons.map((item) => <option key={item.id} value={item.label} />)}</datalist></Field> : null}
             <div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button type="submit">{t('selfPayment.review')}</Button></div>
           </form>
         ) : null}
@@ -159,7 +162,7 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
               <div><dt>{t('common.amount')}</dt><dd><strong className={styles.paymentAmount} data-financial-state="payment">{formatMoney(command.amount)}</strong></dd></div>
               <div><dt>{t('common.date')}</dt><dd>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(`${receivedAt}T12:00:00`))}</dd></div>
               <div><dt>{t('finance.paymentType')}</dt><dd>{paymentMethod}</dd></div>
-              <div><dt>{t('finance.reason')}</dt><dd>{command.reference || '–'}</dd></div>
+              {reasonEnabled ? <div><dt>{t('finance.reason')}</dt><dd>{command.reference || '–'}</dd></div> : null}
             </dl>
             {mutation.isError ? <p className={styles.error} role="alert">{mutation.error.message}</p> : null}
             <div className={styles.actions}><Button disabled={mutation.isPending} onClick={() => { mutation.reset(); setStep('entry'); }} variant="secondary">{t('common.back')}</Button><Button disabled={mutation.isPending} onClick={() => mutation.mutate(command)}>{mutation.isPending ? t('selfPayment.pending') : t('selfPayment.confirm', { amount: formatMoney(command.amount) })}</Button></div>

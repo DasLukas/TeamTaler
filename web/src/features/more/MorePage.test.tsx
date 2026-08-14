@@ -31,7 +31,7 @@ describe('MorePage role navigation', () => {
     usePermissions(['FINANCE_MANAGEMENT', 'CATALOG_MANAGEMENT', 'GROUP_ADMINISTRATION']);
     render(<MorePage />);
 
-    expect(menuItems()).toEqual(['Benachrichtigungen', 'Finanzen', 'Katalog', 'Verwaltung', 'Mein Konto', 'Abmelden']);
+    expect(menuItems()).toEqual(['Benachrichtigungen', 'Finanzen', 'Katalog', 'Einstellungen', 'Mein Konto', 'Abmelden']);
     expect(screen.getByRole('link', { name: 'Benachrichtigungen' })).toHaveAttribute('href', '/notifications');
   });
 

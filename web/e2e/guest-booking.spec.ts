@@ -36,26 +36,26 @@ async function createTemporaryGuestWithGuestOnlyPermission(page: Page, guestName
   expect(access.permissions).toEqual(['BOOK_FOR_GUESTS']);
   expect(access.memberDirectoryStatus).toBe(403);
 
-  await page.getByRole('button', { name: /Mineral Water/ }).click();
   await page.getByRole('button', { name: 'Buchung für' }).click();
   await page.getByLabel('Gast direkt hinzufügen').fill(guestName);
   await page.getByRole('button', { name: 'Gast zur Buchung hinzufügen' }).click();
   await expect(page.getByLabel('Begründung')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Buchung für' }).click();
+  await page.getByRole('button', { name: /Mineral Water.*zum Warenkorb hinzufügen/ }).click();
 
-  const requestPromise = page.waitForRequest((request) => request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/bookings/batch'));
-  const responsePromise = page.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith('/bookings/batch'));
+  const requestPromise = page.waitForRequest((request) => request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/bookings/bulk'));
+  const responsePromise = page.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith('/bookings/bulk'));
   await page.getByRole('button', { name: 'Jetzt buchen' }).click();
   const request = await requestPromise;
   expect(request.postDataJSON()).toMatchObject({ targetMembershipIds: [], temporaryGuestDisplayNames: [guestName] });
   expect(request.postDataJSON()).not.toHaveProperty('reason');
   expect((await responsePromise).status()).toBe(201);
-  await expect(page.getByText('Buchung gespeichert')).toBeVisible();
-  await expect(page.getByText('Buchung gespeichert')).toHaveCount(0, { timeout: 3_000 });
+  await expect(page.getByText('1 Buchung wurde gespeichert.')).toBeVisible();
+  await expect(page.getByText('1 Buchung wurde gespeichert.')).toHaveCount(0, { timeout: 3_000 });
 }
 
-/** Books for self and an existing temporary guest with a mixed permission set. */
+/** Books a multi-product cart for self and an existing temporary guest. */
 async function reselectTemporaryGuestWithAdministrator(page: Page, guestName: string): Promise<void> {
-  await page.getByRole('button', { name: /Mineral Water/ }).click();
   await page.getByRole('button', { name: 'Buchung für' }).click();
   const regularMembers = page.getByRole('group', { name: 'Mitglieder' });
   const guests = page.getByRole('group', { name: 'Gäste' });
@@ -65,12 +65,14 @@ async function reselectTemporaryGuestWithAdministrator(page: Page, guestName: st
   await guests.getByRole('checkbox', { name: guestName }).click();
   await expect(page.getByLabel('Begründung')).toHaveCount(0);
   await page.getByRole('button', { name: 'Buchung für' }).click();
+  await page.getByRole('button', { name: /Mineral Water.*zum Warenkorb hinzufügen/ }).click();
+  await page.getByRole('button', { name: /Apple Spritzer.*zum Warenkorb hinzufügen/ }).click();
 
-  const responsePromise = page.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith('/bookings/batch'));
-  await page.getByRole('button', { name: 'Für 2 Personen buchen' }).click();
+  const responsePromise = page.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith('/bookings/bulk'));
+  await page.getByRole('button', { name: '4 Buchungen bestätigen' }).click();
   expect((await responsePromise).status()).toBe(201);
-  await expect(page.getByText('Buchung gespeichert')).toBeVisible();
-  await expect(page.getByText('Buchung gespeichert')).toHaveCount(0, { timeout: 3_000 });
+  await expect(page.getByText('4 Buchungen wurden gespeichert.')).toBeVisible();
+  await expect(page.getByText('4 Buchungen wurden gespeichert.')).toHaveCount(0, { timeout: 3_000 });
 }
 
 /** Creates a claim invitation and returns its URL and exact role selection. */
@@ -124,8 +126,6 @@ test('temporary guest booking, mixed permissions, and account claim work end to 
   expect(claimed.membership?.roleIds).toEqual(claim.roleIds);
   expect(claimed.directoryStatus).toBe(200);
 
-  await page.getByRole('button', { name: /Mineral Water/ }).click();
-  const ownTarget = page.getByLabel('Buchung für');
-  await expect(ownTarget).toBeDisabled();
-  await expect(ownTarget).toContainText(guestName);
+  await expect(page.getByRole('button', { name: 'Buchung für' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Mineral Water.*zum Warenkorb hinzufügen/ })).toBeVisible();
 });

@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
 import { AuthLayout } from './AuthLayout';
 import formStyles from './AuthForms.module.css';
+import { loginErrorMessage } from './loginError';
 import styles from './PublicJoinPage.module.css';
 
 interface RegistrationForm {
@@ -115,7 +116,7 @@ export function PublicJoinPage() {
               )}
             </>
           )}
-          {error ? <p className={formStyles.error} role="alert">{error.message}</p> : null}
+          {error ? <p className={formStyles.error} role="alert">{loginMutation.isError ? loginErrorMessage(loginMutation.error, t) : error.message}</p> : null}
         </div>
       ) : null}
     </AuthLayout>

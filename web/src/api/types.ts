@@ -183,9 +183,16 @@ export interface ConfigurableItem {
   label: string;
 }
 
+/** Visibility and validation policy for one transaction-reason context. */
+export type ReasonMode = 'OFF' | 'OPTIONAL' | 'REQUIRED';
+
 /** Non-sensitive operational behavior used by finance, booking, and payment surfaces. */
 export interface TransactionSettings {
   settlementsEnabled: boolean;
+  ownBookingReasonMode: ReasonMode;
+  foreignBookingReasonMode: ReasonMode;
+  ownPaymentReasonMode: ReasonMode;
+  otherPaymentReasonMode: ReasonMode;
   foreignBookingReasonRequired: boolean;
   ownPaymentReasonRequired: boolean;
   otherPaymentReasonRequired: boolean;
@@ -200,6 +207,10 @@ export interface GroupSettings {
   notificationEmailsEnabled: boolean;
   notificationEmailDeliveryAvailable: boolean;
   defaultRoleId: string | null;
+  ownBookingReasonMode: ReasonMode;
+  foreignBookingReasonMode: ReasonMode;
+  ownPaymentReasonMode: ReasonMode;
+  otherPaymentReasonMode: ReasonMode;
   foreignBookingReasonRequired: boolean;
   ownPaymentReasonRequired: boolean;
   otherPaymentReasonRequired: boolean;
@@ -215,6 +226,10 @@ export interface GroupSettingsUpdateInput {
   settlementsEnabled?: boolean;
   notificationEmailsEnabled?: boolean;
   defaultRoleId?: string;
+  ownBookingReasonMode?: ReasonMode;
+  foreignBookingReasonMode?: ReasonMode;
+  ownPaymentReasonMode?: ReasonMode;
+  otherPaymentReasonMode?: ReasonMode;
   foreignBookingReasonRequired?: boolean;
   ownPaymentReasonRequired?: boolean;
   otherPaymentReasonRequired?: boolean;
@@ -426,6 +441,23 @@ export interface BookingBatchCommand {
   reason?: string;
 }
 
+/** One product line submitted as part of an atomic multi-product booking. */
+export interface BookingBulkItemCommand {
+  productId: string;
+  productVersion: number;
+  quantity: number;
+  unitPrice?: Money;
+}
+
+/** Command used to atomically book multiple product lines for shared targets. */
+export interface BookingBulkCommand {
+  expectedPeriodId: string;
+  items: BookingBulkItemCommand[];
+  targetMembershipIds?: string[];
+  temporaryGuestDisplayNames?: string[];
+  reason?: string;
+}
+
 /** Minimal member identity exposed as a selectable booking target. */
 export interface BookingTarget {
   membershipId: string;
@@ -441,6 +473,8 @@ export interface BookingContext {
   currentMembership: Membership;
   targets: BookingTarget[];
   canBookForGuests: boolean;
+  ownBookingReasonMode: ReasonMode;
+  foreignBookingReasonMode: ReasonMode;
   foreignBookingReasonRequired: boolean;
   bookingReasons: ConfigurableItem[];
 }

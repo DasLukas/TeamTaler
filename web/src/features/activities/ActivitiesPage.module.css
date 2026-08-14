@@ -65,16 +65,19 @@
   z-index: 1;
   top: 0;
 }
-.activityTable th:nth-child(1) { width: 20%; }
-.activityTable th:nth-child(2) { width: 18%; }
-.activityTable th:nth-child(3) { width: 17%; }
-.activityTable th:nth-child(4) { width: 8%; }
-.activityTable th:nth-child(5) { width: 13%; }
-.activityTable th:nth-child(6) { width: 7%; }
+.activityTable th:nth-child(1) { width: 19%; }
+.activityTable th:nth-child(2) { width: 17%; }
+.activityTable th:nth-child(3) { width: 15%; }
+.activityTable th:nth-child(4) { width: 10%; }
+.activityTable th:nth-child(5) { width: 14%; }
+.activityTable th:nth-child(6) { width: 8%; }
 .activityTable th:nth-child(7) { width: 7%; }
 .activityTable th:nth-child(8) { width: 10%; }
 .activityTable td small { display: block; margin-top: 4px; color: var(--color-muted); }
 .activityTable td:last-child button { white-space: nowrap; }
+.categoryCell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap !important; }
+.timeCell,
+.amountCell { overflow-wrap: normal !important; white-space: nowrap !important; }
 .reversalForm { display: grid; gap: var(--space-5); padding: var(--space-4) var(--space-6) var(--space-6); }
 .reversalForm p { margin: 0; color: var(--color-muted); line-height: 1.55; }
 .actions { display: flex; justify-content: flex-end; gap: var(--space-3); }
@@ -82,9 +85,11 @@
 .reversalForm .windowNotice { padding: var(--space-3); border-radius: var(--radius-md); color: var(--color-teal-700); background: var(--color-surface-teal); font-size: var(--font-size-sm); }
 
 @media (min-width: 1800px) {
-  .activityTable th:nth-child(1) { width: 19%; }
-  .activityTable th:nth-child(5) { width: 12%; }
+  .activityTable th:nth-child(1) { width: 18%; }
+  .activityTable th:nth-child(3) { width: 16%; }
+  .activityTable th:nth-child(5) { width: 13%; }
   .activityTable th:nth-child(7) { width: 9%; }
+  .activityTable th:nth-child(8) { width: 9%; }
 
   .membershipState {
     width: auto;
@@ -118,5 +123,14 @@
     padding-inline: var(--space-5);
   }
 
-  .activityList { margin-inline: 0; border: 1px solid var(--color-border); border-radius: var(--radius-md); }
+  .activityList {
+    margin-inline: 0;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+  }
+
+  .activityTable { min-width: 1040px; }
+
+  .activityList .activityTable th,
+  .activityList .activityTable td { padding-inline: var(--space-3); }
 }

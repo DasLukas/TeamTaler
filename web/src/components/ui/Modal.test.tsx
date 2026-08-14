@@ -34,7 +34,10 @@ function ControlledModalHarness() {
 }
 
 describe('Modal lifecycle and focus restoration', () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
 
   it('closes before unmounting and restores focus after an in-content cancel action', async () => {
     const user = userEvent.setup();
@@ -75,5 +78,102 @@ describe('Modal lifecycle and focus restoration', () => {
 
     expect(screen.queryByRole('dialog', { name: 'Controlled dialog' })).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
+  });
+
+  it('keeps sheets above the software keyboard visual viewport', () => {
+    const originalViewport = Object.getOwnPropertyDescriptor(window, 'visualViewport');
+    const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+    const addEventListener = vi.fn();
+    const removeEventListener = vi.fn();
+    const visualViewport = {
+      addEventListener,
+      height: 540,
+      offsetTop: 0,
+      removeEventListener,
+    } as unknown as VisualViewport;
+
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 915 });
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: visualViewport });
+    const rendered = render(<Modal onClose={vi.fn()} open title="Keyboard-safe sheet" variant="sheet"><input aria-label="Guest name" /></Modal>);
+
+    try {
+      const dialog = screen.getByRole('dialog', { name: 'Keyboard-safe sheet' });
+      expect(dialog).toHaveStyle({ '--modal-visual-viewport-height': '540px', '--modal-visual-viewport-bottom': '375px' });
+      expect(addEventListener).toHaveBeenCalledWith('resize', expect.any(Function));
+      expect(addEventListener).toHaveBeenCalledWith('scroll', expect.any(Function));
+    } finally {
+      rendered.unmount();
+      if (originalViewport) Object.defineProperty(window, 'visualViewport', originalViewport);
+      else Reflect.deleteProperty(window, 'visualViewport');
+      if (originalInnerHeight) Object.defineProperty(window, 'innerHeight', originalInnerHeight);
+    }
+
+    expect(removeEventListener).toHaveBeenCalledWith('resize', expect.any(Function));
+    expect(removeEventListener).toHaveBeenCalledWith('scroll', expect.any(Function));
+  });
+
+  it('closes every sheet when its shared handle is swiped down', () => {
+    vi.useFakeTimers();
+    const onClose = vi.fn();
+    const rendered = render(<Modal onClose={onClose} open title="Swipeable sheet" variant="sheet"><span>Content</span></Modal>);
+    const handle = rendered.container.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.t('dialog.sheetHandle')}"]`);
+    expect(handle).not.toBeNull();
+    if (!handle) return;
+
+    fireEvent.pointerDown(handle, { button: 0, clientY: 100, pointerId: 1 });
+    fireEvent.pointerMove(handle, { clientY: 180, pointerId: 1 });
+    fireEvent.pointerUp(handle, { clientY: 180, pointerId: 1 });
+    vi.advanceTimersByTime(220);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns a sheet to its resting position after a short handle drag', () => {
+    const onClose = vi.fn();
+    const rendered = render(<Modal onClose={onClose} open title="Stable sheet" variant="sheet"><span>Content</span></Modal>);
+    const dialog = screen.getByRole('dialog', { name: 'Stable sheet' });
+    const handle = rendered.container.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.t('dialog.sheetHandle')}"]`);
+    expect(handle).not.toBeNull();
+    if (!handle) return;
+
+    fireEvent.pointerDown(handle, { button: 0, clientY: 100, pointerId: 1 });
+    fireEvent.pointerMove(handle, { clientY: 110, pointerId: 1 });
+    fireEvent.pointerUp(handle, { clientY: 110, pointerId: 1 });
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(dialog.style.transform).toBe('');
+    expect(dialog).not.toHaveAttribute('data-dragging');
+  });
+
+  it('supports the shared swipe gesture when pointer events are unavailable', () => {
+    vi.useFakeTimers();
+    const onClose = vi.fn();
+    const rendered = render(<Modal onClose={onClose} open title="Mouse-compatible sheet" variant="sheet"><span>Content</span></Modal>);
+    const handle = rendered.container.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.t('dialog.sheetHandle')}"]`);
+    expect(handle).not.toBeNull();
+    if (!handle) return;
+
+    fireEvent.mouseDown(handle, { button: 0, clientY: 100 });
+    fireEvent.mouseMove(window, { button: 0, clientY: 180 });
+    fireEvent.mouseUp(window, { button: 0, clientY: 180 });
+    vi.advanceTimersByTime(220);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('supports direct touch swipes on the shared sheet handle', () => {
+    vi.useFakeTimers();
+    const onClose = vi.fn();
+    const rendered = render(<Modal onClose={onClose} open title="Touch sheet" variant="sheet"><span>Content</span></Modal>);
+    const handle = rendered.container.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.t('dialog.sheetHandle')}"]`);
+    expect(handle).not.toBeNull();
+    if (!handle) return;
+
+    fireEvent.touchStart(handle, { touches: [{ clientY: 100, identifier: 4 }] });
+    fireEvent.touchMove(handle, { touches: [{ clientY: 180, identifier: 4 }] });
+    fireEvent.touchEnd(handle, { changedTouches: [{ clientY: 180, identifier: 4 }], touches: [] });
+    vi.advanceTimersByTime(220);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

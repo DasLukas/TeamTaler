@@ -7,6 +7,7 @@ readonly project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly server_root="${project_root}/tmp/test-server"
 readonly binary_dir="${server_root}/bin"
 readonly local_env_file="${project_root}/.env.test-server.local"
+readonly readiness_timeout_seconds="${TEAMTALER_TEST_SERVER_READY_TIMEOUT_SECONDS:-60}"
 
 backend_pid=""
 frontend_pid=""
@@ -71,6 +72,47 @@ load_local_environment() {
   done <"${local_env_file}"
 }
 
+# Wait until a child process serves its readiness URL.
+#
+# Arguments:
+#   $1 - Human-readable process name used in diagnostics.
+#   $2 - Child process ID to monitor.
+#   $3 - HTTP URL that must return a successful status code.
+#
+# Returns:
+#   0 when the URL becomes ready within the configured timeout, otherwise 1.
+wait_for_server() {
+  local process_name="$1"
+  local process_pid="$2"
+  local readiness_url="$3"
+  local deadline=$((SECONDS + readiness_timeout_seconds))
+  local exit_code=0
+
+  while ((SECONDS < deadline)); do
+    if ! kill -0 "${process_pid}" 2>/dev/null; then
+      if wait "${process_pid}"; then
+        exit_code=0
+      else
+        exit_code=$?
+      fi
+      echo "${process_name} stopped before becoming ready (exit code ${exit_code})." >&2
+      return 1
+    fi
+    if curl --fail --silent --max-time 1 "${readiness_url}" >/dev/null; then
+      return 0
+    fi
+    sleep 0.25
+  done
+
+  echo "${process_name} did not become ready within ${readiness_timeout_seconds} seconds." >&2
+  return 1
+}
+
+if [[ ! "${readiness_timeout_seconds}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "TEAMTALER_TEST_SERVER_READY_TIMEOUT_SECONDS must be a positive integer." >&2
+  exit 1
+fi
+
 if [[ "${TEAMTALER_TEST_DISABLE_SMTP:-false}" == "true" ]]; then
   unset TEAMTALER_SMTP_HOST TEAMTALER_SMTP_PORT TEAMTALER_SMTP_USERNAME \
     TEAMTALER_SMTP_PASSWORD TEAMTALER_SMTP_FROM_ADDRESS TEAMTALER_SMTP_FROM_NAME \
@@ -126,18 +168,7 @@ TEAMTALER_LISTEN="127.0.0.1:8080" \
 "${binary_dir}/teamtaler" serve &
 backend_pid=$!
 
-for _ in {1..60}; do
-  if ! kill -0 "${backend_pid}" 2>/dev/null; then
-    wait "${backend_pid}"
-  fi
-  if curl --fail --silent --max-time 1 "http://127.0.0.1:8080/health/ready" >/dev/null; then
-    break
-  fi
-  sleep 0.25
-done
-
-if ! curl --fail --silent --max-time 1 "http://127.0.0.1:8080/health/ready" >/dev/null; then
-  echo "Backend did not become ready within 15 seconds." >&2
+if ! wait_for_server "Backend" "${backend_pid}" "http://127.0.0.1:8080/health/ready"; then
   exit 1
 fi
 
@@ -147,18 +178,7 @@ VITE_DEMO_MODE=false web/node_modules/.bin/vite web \
   --strictPort &
 frontend_pid=$!
 
-for _ in {1..60}; do
-  if ! kill -0 "${frontend_pid}" 2>/dev/null; then
-    wait "${frontend_pid}"
-  fi
-  if curl --fail --silent --max-time 1 "http://127.0.0.1:5173/" >/dev/null; then
-    break
-  fi
-  sleep 0.25
-done
-
-if ! curl --fail --silent --max-time 1 "http://127.0.0.1:5173/" >/dev/null; then
-  echo "Frontend did not become ready within 15 seconds." >&2
+if ! wait_for_server "Frontend" "${frontend_pid}" "http://127.0.0.1:5173/health/ready.txt"; then
   exit 1
 fi
 

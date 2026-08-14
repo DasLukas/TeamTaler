@@ -28,6 +28,7 @@ import type {
   AuditEntry,
   Booking,
   BookingBatchCommand,
+  BookingBulkCommand,
   BookingCommand,
   BookingContext,
   CatalogOrderCommand,
@@ -233,7 +234,9 @@ async function idempotentRequest<T>(groupId: string, operation: string, path: st
   try {
     reservation = await idempotencyReservations.reserve({ groupId, operation, path, payload });
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith('Authenticated actor')) throw new Error(i18n.t('errors.actorMissing'));
+    if (error instanceof Error && error.message.startsWith('Authenticated actor')) {
+      throw new Error(i18n.t('errors.actorMissing'), { cause: error });
+    }
     throw error;
   }
   const headers = new Headers(init.headers);
@@ -428,6 +431,19 @@ export const api = {
       unitPrice: undefined,
     };
     const response = await idempotentRequest<unknown[]>(groupId, 'booking.batch.create', path, payload, { method: 'POST', body: json(payload) });
+    return response.map((booking) => adaptBooking(booking));
+  },
+  createBulkBookings: async (groupId: string, command: BookingBulkCommand): Promise<Booking[]> => {
+    const path = groupPath(groupId, 'bookings/bulk');
+    const payload = {
+      ...command,
+      items: command.items.map((item) => ({
+        ...item,
+        unitPriceMinor: item.unitPrice ? minorUnitsToSafeNumber(item.unitPrice.minorUnits) : undefined,
+        unitPrice: undefined,
+      })),
+    };
+    const response = await idempotentRequest<unknown[]>(groupId, 'booking.bulk.create', path, payload, { method: 'POST', body: json(payload) });
     return response.map((booking) => adaptBooking(booking));
   },
   reverseBooking: async (groupId: string, bookingId: string, reason: string): Promise<Booking> => {

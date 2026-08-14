@@ -63,13 +63,23 @@
 .product {
   position: relative;
   min-width: 0;
-  padding: var(--space-2) var(--space-2) var(--space-3);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-white);
-  text-align: center;
   overflow: hidden;
   transition: border var(--motion-fast), background var(--motion-fast), transform var(--motion-fast);
+}
+
+.productAction {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  padding: var(--space-2) var(--space-2) var(--space-3);
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: center;
 }
 
 .product:hover {
@@ -125,6 +135,14 @@
   color: var(--color-teal-700);
 }
 
+.product > .decreaseControl {
+  position: absolute;
+  z-index: 1;
+  top: 7px;
+  left: 7px;
+  color: var(--color-teal-700);
+}
+
 .check {
   position: absolute;
   top: 9px;
@@ -139,6 +157,8 @@
   background: var(--color-teal-700);
 }
 
+.check strong { font-size: var(--font-size-sm); line-height: 1; }
+
 .rows {
   display: grid;
   gap: var(--space-3);
@@ -150,11 +170,23 @@
 
   display: grid;
   min-height: 96px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.rows .productAction {
+  display: grid;
+  align-self: stretch;
   grid-template-columns: var(--product-row-image-width) minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-5);
   padding: var(--space-3) var(--space-4);
   text-align: left;
+}
+
+.rows .product > .decreaseControl {
+  position: static;
+  margin-right: var(--space-3);
 }
 
 .rows .product img,
@@ -215,11 +247,27 @@
 
     display: grid;
     min-height: 92px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .product .productAction,
+  .tiles .productAction,
+  .rows .productAction {
+    display: grid;
+    align-self: stretch;
     grid-template-columns: var(--product-row-image-width) minmax(0, 1fr) auto;
     align-items: center;
     gap: var(--space-4);
     padding: var(--space-3) var(--space-4);
     text-align: left;
+  }
+
+  .product > .decreaseControl,
+  .tiles .product > .decreaseControl,
+  .rows .product > .decreaseControl {
+    position: static;
+    margin-right: var(--space-3);
   }
 
   .product img,
@@ -253,7 +301,11 @@
   .rows .product {
     --product-row-image-width: 78px;
     --product-row-inline-padding: var(--space-3);
+  }
 
+  .product .productAction,
+  .tiles .productAction,
+  .rows .productAction {
     grid-template-columns: var(--product-row-image-width) minmax(0, 1fr) auto;
     gap: var(--space-3);
     padding-inline: var(--space-3);

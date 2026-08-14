@@ -42,7 +42,10 @@ export function PaymentsPanel() {
   const deletedAccounts = accountsQuery.data?.filter((account) => account.status === 'DELETED' && BigInt(account.balance.minorUnits) > 0n) ?? [];
   const defaultAccount = regularAccounts[0] ?? temporaryGuestAccounts[0] ?? archivedAccounts[0] ?? deletedAccounts[0];
   const selectedMembershipId = membershipId || defaultAccount?.membershipId || '';
-  const reasonRequired = transactionSettingsQuery.data?.otherPaymentReasonRequired === true;
+  const reasonMode = transactionSettingsQuery.data?.otherPaymentReasonMode
+    ?? (transactionSettingsQuery.data?.otherPaymentReasonRequired ? 'REQUIRED' : 'OPTIONAL');
+  const reasonEnabled = reasonMode !== 'OFF';
+  const reasonRequired = reasonMode === 'REQUIRED';
   const openRecordDialog = () => {
     setMethod(transactionSettingsQuery.data?.paymentMethods[0]?.id ?? '');
     setDialogOpen(true);
@@ -55,7 +58,7 @@ export function PaymentsPanel() {
     queryClient.invalidateQueries({ queryKey: ['dashboard', activeGroupId] }),
   ]);
   const paymentMutation = useMutation({
-    mutationFn: () => api.createPayment(activeGroupId, { membershipId: selectedMembershipId, amount: { minorUnits: parseMajorUnits(amount, activeGroup.currency), currency: activeGroup.currency }, receivedAt, method, reference: reference.trim() || undefined }),
+    mutationFn: () => api.createPayment(activeGroupId, { membershipId: selectedMembershipId, amount: { minorUnits: parseMajorUnits(amount, activeGroup.currency), currency: activeGroup.currency }, receivedAt, method, reference: reasonEnabled ? reference.trim() || undefined : undefined }),
     onSuccess: async () => {
       setDialogOpen(false);
       setAmount('');
@@ -97,7 +100,7 @@ export function PaymentsPanel() {
           </Field>
           <div className={styles.formRow}><Field htmlFor="payment-amount" label={`${t('finance.amountIn', { currency: activeGroup.currency })} *`}><TextInput id="payment-amount" inputMode="decimal" onChange={(event) => setAmount(event.target.value)} pattern={majorUnitsInputPattern(activeGroup.currency)} placeholder={majorUnitsPlaceholder(activeGroup.currency)} required type="text" value={amount} /></Field><Field htmlFor="payment-date" label={t('finance.receivedDate')}><TextInput id="payment-date" onChange={(event) => setReceivedAt(event.target.value)} required type="date" value={receivedAt} /></Field></div>
           <Field htmlFor="payment-method" label={t('finance.paymentType')}><SelectInput id="payment-method" onChange={(event) => setMethod(event.target.value)} required value={method}>{transactionSettingsQuery.data.paymentMethods.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</SelectInput></Field>
-          <Field htmlFor="payment-reference" label={`${t('finance.reason')}${reasonRequired ? ' *' : ''}`}><TextInput id="payment-reference" list="payment-reason-suggestions" maxLength={120} onChange={(event) => setReference(event.target.value)} required={reasonRequired} value={reference} /><datalist id="payment-reason-suggestions">{transactionSettingsQuery.data.paymentReasons.map((item) => <option key={item.id} value={item.label} />)}</datalist></Field>
+          {reasonEnabled ? <Field htmlFor="payment-reference" label={`${t('finance.reason')}${reasonRequired ? ' *' : ''}`}><TextInput id="payment-reference" list="payment-reason-suggestions" maxLength={120} onChange={(event) => setReference(event.target.value)} required={reasonRequired} value={reference} /><datalist id="payment-reason-suggestions">{transactionSettingsQuery.data.paymentReasons.map((item) => <option key={item.id} value={item.label} />)}</datalist></Field> : null}
           {paymentMutation.isError ? <p className={styles.error} role="alert">{paymentMutation.error.message}</p> : null}
           <div className={styles.actions}><Button onClick={() => setDialogOpen(false)} variant="secondary">{t('common.cancel')}</Button><Button disabled={!amount || !method || (reasonRequired && !reference.trim()) || paymentMutation.isPending} type="submit">{t('finance.bookPayment')}</Button></div>
         </form>

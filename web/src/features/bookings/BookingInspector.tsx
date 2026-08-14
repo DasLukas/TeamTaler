@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { formatMoney, majorUnitsInputPattern, majorUnitsPlaceholder, multiplyMoney, validatePositiveMajorUnits } from '@/api/money';
-import type { BookingTarget, ConfigurableItem, Period, Product } from '@/api/types';
+import type { BookingTarget, ConfigurableItem, Period, Product, ReasonMode } from '@/api/types';
 import { Button } from '@/components/ui/Button';
 import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { IconButton } from '@/components/ui/IconButton';
@@ -23,6 +23,8 @@ export interface BookingInspectorProps {
   targets: BookingTarget[];
   currentMembershipId: string;
   canBookForGuests: boolean;
+  ownBookingReasonMode?: ReasonMode;
+  foreignBookingReasonMode?: ReasonMode;
   foreignBookingReasonRequired: boolean;
   bookingReasons: ConfigurableItem[];
   onCancel: () => void;
@@ -43,6 +45,8 @@ export function BookingInspector({
   targets,
   currentMembershipId,
   canBookForGuests,
+  ownBookingReasonMode = 'OFF',
+  foreignBookingReasonMode,
   foreignBookingReasonRequired,
   bookingReasons,
   onCancel,
@@ -68,7 +72,13 @@ export function BookingInspector({
   const targetMembershipIds = requestedTargetMembershipIds.filter((membershipId) => availableTargetIds.has(membershipId));
   const targetCount = targetMembershipIds.length + temporaryGuestDisplayNames.length;
   const hasForeignBooking = targetMembershipIds.some((membershipId) => membershipId !== currentMembershipId && !targetsById.get(membershipId)?.isTemporaryGuest);
-  const needsReason = hasForeignBooking && foreignBookingReasonRequired;
+  const hasOwnBooking = targetMembershipIds.includes(currentMembershipId);
+  const reasonContext = hasForeignBooking ? 'FOREIGN' : hasOwnBooking ? 'OWN' : 'OFF';
+  const activeReasonMode = hasForeignBooking
+    ? foreignBookingReasonMode ?? (foreignBookingReasonRequired ? 'REQUIRED' : 'OPTIONAL')
+    : hasOwnBooking ? ownBookingReasonMode : 'OFF';
+  const reasonEnabled = activeReasonMode !== 'OFF';
+  const needsReason = activeReasonMode === 'REQUIRED';
   const userDefinesPrice = product.pricingMode === 'USER_DEFINED';
   const unitPriceValidation = userDefinesPrice ? validatePositiveMajorUnits(unitPriceInput, product.currency) : {};
   const unitPrice = userDefinesPrice
@@ -91,7 +101,7 @@ export function BookingInspector({
         unitPrice: userDefinesPrice ? unitPrice : undefined,
         targetMembershipIds,
         ...(temporaryGuestDisplayNames.length > 0 ? { temporaryGuestDisplayNames } : {}),
-        reason: reason.trim() || undefined,
+        reason: reasonEnabled ? reason.trim() || undefined : undefined,
       });
     },
     onSuccess: () => {
@@ -126,6 +136,10 @@ export function BookingInspector({
 
   const changeTargets = (membershipIds: string[]) => {
     targetSelectionTouchedRef.current = true;
+    const nextHasForeignBooking = membershipIds.some((membershipId) => membershipId !== currentMembershipId && !targetsById.get(membershipId)?.isTemporaryGuest);
+    const nextHasOwnBooking = membershipIds.includes(currentMembershipId);
+    const nextReasonContext = nextHasForeignBooking ? 'FOREIGN' : nextHasOwnBooking ? 'OWN' : 'OFF';
+    if (nextReasonContext !== reasonContext) setReason('');
     setRequestedTargetMembershipIds(membershipIds);
   };
 
@@ -135,6 +149,7 @@ export function BookingInspector({
       && targetMembershipIds.length === 1
       && targetMembershipIds[0] === currentMembershipId) {
       setRequestedTargetMembershipIds([]);
+      setReason('');
     }
     targetSelectionTouchedRef.current = true;
     setTemporaryGuestDisplayNames((current) => [...current, displayName]);
@@ -187,7 +202,7 @@ export function BookingInspector({
         </Field>
       ) : null}
 
-      {hasForeignBooking ? (
+      {reasonEnabled ? (
         <Field error={needsReason && !reason.trim() && bookingMutation.isError ? t('booking.reasonRequired') : undefined} htmlFor="booking-reason" label={`${t('booking.reason')}${needsReason ? ' *' : ''}`}>
           <TextInput id="booking-reason" list="booking-reason-suggestions" maxLength={500} onChange={(event) => setReason(event.target.value)} required={needsReason} value={reason} />
           <datalist id="booking-reason-suggestions">{bookingReasons.map((item) => <option key={item.id} value={item.label} />)}</datalist>

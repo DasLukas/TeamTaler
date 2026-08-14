@@ -99,4 +99,20 @@ describe('PaymentsPanel', () => {
     expect(reason).toBeRequired();
     expect(reason).toHaveAttribute('list', 'payment-reason-suggestions');
   });
+
+  it('hides the managed-payment reason when its mode is off', async () => {
+    const user = userEvent.setup();
+    apiMock.getTransactionSettings.mockResolvedValue({
+      otherPaymentReasonMode: 'OFF',
+      otherPaymentReasonRequired: false,
+      paymentMethods: [{ id: 'CASH', label: 'Bar' }],
+      bookingReasons: [],
+      paymentReasons: [],
+    });
+    renderPayments();
+    await user.click((await screen.findAllByRole('button', { name: i18n.t('finance.record') }))[0]);
+
+    expect(screen.queryByLabelText(i18n.t('finance.reason'))).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(`${i18n.t('finance.reason')} *`)).not.toBeInTheDocument();
+  });
 });

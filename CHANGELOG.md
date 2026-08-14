@@ -4,6 +4,36 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-14
+
+### Added
+
+- A recipient-first multi-product booking cart with persistent cart-level member and temporary-guest selection, a compact recipient icon and count badge beside the open balance, per-line quantities and user-defined prices, responsive desktop/mobile summaries, and one explicit product-target confirmation.
+- `POST /api/v1/groups/{groupId}/bookings/bulk` for idempotent, item-major creation of up to 25 distinct products across up to 100 explicit targets and at most 500 expanded bookings.
+- Migration `0027` and four independent `OFF`, `OPTIONAL`, or `REQUIRED` reason modes for own bookings, foreign bookings, own payments, and finance-managed payments.
+
+### Changed
+
+- Product selection now adds or increments cart lines while preserving the two-action fixed-price self-booking path. Successful carts clear their draft and restore the authenticated member as the safe target default.
+- Cart line details now scroll independently so the result summary and primary booking action remain visible together at every supported viewport height.
+- Mandatory shared booking reasons now stay in the persistent checkout directly above its primary action, eliminating a separate mobile reveal step.
+- The compact booking cart now follows the production bottom-sheet geometry, handle, elevation, spacing, motion, and close affordance for a consistent mobile interaction language.
+- Compact carts now open quick checkout for the first fixed-price product, collapse to a live cart peek after subsequent fixed-price selections or a downward handle swipe, and reopen details automatically for products requiring price input.
+- Selecting a user-defined-price product in a populated cart now brings its exact line into view and focuses the required price input immediately on mobile, tablet, and desktop.
+- Desktop cart lines now retain their intrinsic card height instead of stretching to fill the available inspector when only a few products are selected.
+- Selected catalog cards now expose direct decrement controls and switch to an explicit remove action at quantity one.
+- Open booking carts now omit recipient names, reduce single-target summaries to the booking result and total, use an accessible icon equation for multi-target results, and remain fully visible beside the persistent sidebar on landscape tablets.
+- Minimized booking carts now omit recipient names from both visible and assistive text, leaving only the product count and total.
+- All shared mobile bottom sheets now support handle-based downward dismissal with drag-following motion, velocity-aware thresholds, snap-back, and pointer-event fallbacks; the recipient picker remains an anchored dropdown on tablets and desktops.
+- The temporary-guest creator now omits its redundant visible label and uses “Neuer Gast” as the concise name placeholder while retaining an accessible control name.
+- Multi-recipient cart summaries now lead with the total and place the smaller product-person equation on its own line underneath.
+- Administration now uses one accessible three-position segmented control per reason context. Transaction forms hide disabled reasons, keep optional reasons editable, and place mandatory reasons in the required checkout path.
+
+### Security
+
+- Bulk carts revalidate every target permission, product version, price, quantity, and open-period precondition before writing, then commit guest identities, immutable bookings, balanced ledger entries, allocations, notifications, audits, and one idempotency result in a single transaction.
+- Booking and payment writes reload the active reason mode inside their transaction; `OFF` discards submitted reason text and `REQUIRED` rejects empty values before financial records are written.
+
 ## [0.7.0] - 2026-08-12
 
 ### Added
@@ -202,7 +232,8 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Explicit acting and charged membership display for every booking, including searchable third-party-assignment cues.
 - Canonical backup-entry allowlisting, target-width Argon2 parameter parsing, and directory-confined SPA asset serving with traversal regression coverage.
 
-[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/DasLukas/TeamTaler/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/DasLukas/TeamTaler/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/DasLukas/TeamTaler/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/DasLukas/TeamTaler/compare/v0.5.0...v0.5.1

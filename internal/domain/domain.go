@@ -253,12 +253,46 @@ type Group struct {
 	Membership Membership `json:"membership"`
 }
 
+// ReasonMode controls whether a transaction reason is hidden, optional, or
+// mandatory for one administrator-configured transaction context.
+type ReasonMode string
+
+const (
+	// ReasonModeOff removes the reason field and discards submitted reason text.
+	ReasonModeOff ReasonMode = "OFF"
+	// ReasonModeOptional exposes the reason field without requiring a value.
+	ReasonModeOptional ReasonMode = "OPTIONAL"
+	// ReasonModeRequired exposes the reason field and requires a non-empty value.
+	ReasonModeRequired ReasonMode = "REQUIRED"
+)
+
+// Valid reports whether mode belongs to the closed set accepted by settings
+// commands and persisted group policy.
+func (mode ReasonMode) Valid() bool {
+	switch mode {
+	case ReasonModeOff, ReasonModeOptional, ReasonModeRequired:
+		return true
+	default:
+		return false
+	}
+}
+
+// Enabled reports whether a transaction form should expose its reason field.
+func (mode ReasonMode) Enabled() bool { return mode != ReasonModeOff }
+
+// Required reports whether a transaction command must include a reason.
+func (mode ReasonMode) Required() bool { return mode == ReasonModeRequired }
+
 // GroupSettings contains administrator-managed behavior shared by every member
 // of one group.
 type GroupSettings struct {
 	NotificationEmailsEnabled    bool               `json:"notificationEmailsEnabled"`
 	SettlementsEnabled           bool               `json:"settlementsEnabled"`
 	DefaultRoleID                *string            `json:"defaultRoleId"`
+	OwnBookingReasonMode         ReasonMode         `json:"ownBookingReasonMode"`
+	ForeignBookingReasonMode     ReasonMode         `json:"foreignBookingReasonMode"`
+	OwnPaymentReasonMode         ReasonMode         `json:"ownPaymentReasonMode"`
+	OtherPaymentReasonMode       ReasonMode         `json:"otherPaymentReasonMode"`
 	ForeignBookingReasonRequired bool               `json:"foreignBookingReasonRequired"`
 	OwnPaymentReasonRequired     bool               `json:"ownPaymentReasonRequired"`
 	OtherPaymentReasonRequired   bool               `json:"otherPaymentReasonRequired"`
@@ -278,6 +312,10 @@ type ConfigurableItem struct {
 // active members need to render finance, booking, and payment surfaces.
 type TransactionSettings struct {
 	SettlementsEnabled           bool               `json:"settlementsEnabled"`
+	OwnBookingReasonMode         ReasonMode         `json:"ownBookingReasonMode"`
+	ForeignBookingReasonMode     ReasonMode         `json:"foreignBookingReasonMode"`
+	OwnPaymentReasonMode         ReasonMode         `json:"ownPaymentReasonMode"`
+	OtherPaymentReasonMode       ReasonMode         `json:"otherPaymentReasonMode"`
 	ForeignBookingReasonRequired bool               `json:"foreignBookingReasonRequired"`
 	OwnPaymentReasonRequired     bool               `json:"ownPaymentReasonRequired"`
 	OtherPaymentReasonRequired   bool               `json:"otherPaymentReasonRequired"`

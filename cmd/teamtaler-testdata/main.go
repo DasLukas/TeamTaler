@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"embed"
 	"errors"
 	"fmt"
 	"log"
@@ -19,17 +20,25 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/finance"
 	"github.com/DasLukas/TeamTaler/internal/groups"
+	"github.com/DasLukas/TeamTaler/internal/media"
 	"github.com/DasLukas/TeamTaler/internal/storage"
 )
 
 const (
 	testPassword         = "TeamTaler-Test-2026!"
+	testDataSeedTimeout  = 2 * time.Minute
 	adminEmail           = "admin@example.test"
 	secondaryGroupName   = "TeamTaler Weekend Club"
 	secondaryMemberEmail = "noah@example.test"
 	secondaryCategory    = "Refreshments"
 	secondaryProduct     = "Club Coffee"
 )
+
+// fixtureAssets contains the local-only catalog and profile images normalized
+// into the disposable server's protected media store during seeding.
+//
+//go:embed assets/*.webp
+var fixtureAssets embed.FS
 
 type memberSeed struct {
 	email                   string
@@ -44,6 +53,21 @@ type seededMember struct {
 	membership domain.Membership
 }
 
+type imageSeed struct {
+	assetPath string
+	product   domain.Product
+}
+
+var bookingReasonSeeds = []domain.ConfigurableItem{
+	{ID: "TEAM_EVENT", Label: "Team event"},
+	{ID: "TRAINING_MATERIALS", Label: "Training materials"},
+}
+
+var paymentReasonSeeds = []domain.ConfigurableItem{
+	{ID: "MONTHLY_SETTLEMENT", Label: "Monthly settlement"},
+	{ID: "CASH_DEPOSIT", Label: "Cash deposit"},
+}
+
 func main() {
 	if err := run(); err != nil {
 		log.Fatal(err)
@@ -52,10 +76,11 @@ func main() {
 
 // run creates the complete development fixture in the configured empty
 // database. Configuration is read from TEAMTALER_* variables and the operation
-// is bounded to 30 seconds. It returns validation, storage, or domain-service
-// errors and refuses to modify a database that already contains users.
+// is bounded to two minutes to accommodate image normalization on race-enabled
+// or resource-constrained systems. It returns validation, storage, or domain-
+// service errors and refuses to modify a database that already contains users.
 func run() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testDataSeedTimeout)
 	defer cancel()
 
 	cfg, err := config.Load()
@@ -87,6 +112,9 @@ func run() error {
 	}
 	adminGroup, err := onlyGroup(ctx, groupService, adminSession.Principal.UserID)
 	if err != nil {
+		return err
+	}
+	if err := seedReasonSuggestions(ctx, groupService, adminSession.Principal, adminGroup.Membership); err != nil {
 		return err
 	}
 
@@ -155,6 +183,19 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	for _, avatar := range []struct {
+		assetPath string
+		principal domain.Principal
+	}{
+		{assetPath: "assets/avatar-ada.webp", principal: adminSession.Principal},
+		{assetPath: "assets/avatar-marie.webp", principal: marie.principal},
+		{assetPath: "assets/avatar-jonas.webp", principal: jonas.principal},
+		{assetPath: "assets/avatar-lena.webp", principal: lena.principal},
+	} {
+		if err := seedAvatar(ctx, authService, cfg.DataDirectory, avatar.principal, avatar.assetPath); err != nil {
+			return err
+		}
+	}
 
 	periodID, err := openPeriodID(ctx, db, adminGroup.ID)
 	if err != nil {
@@ -191,6 +232,17 @@ func run() error {
 	}); err != nil {
 		return fmt.Errorf("create contribution booking: %w", err)
 	}
+	for _, image := range []imageSeed{
+		{assetPath: "assets/product-mineral-water.webp", product: water},
+		{assetPath: "assets/product-apple-spritzer.webp", product: appleJuice},
+		{assetPath: "assets/product-pretzel.webp", product: pretzel},
+		{assetPath: "assets/product-late-to-practice.webp", product: lateFee},
+		{assetPath: "assets/product-voluntary-contribution.webp", product: customContribution},
+	} {
+		if err := seedProductImage(ctx, catalogService, cfg.DataDirectory, adminSession.Principal, adminGroup.Membership, image); err != nil {
+			return err
+		}
+	}
 
 	financeService := finance.Service{DB: db}
 	if _, err := financeService.CreatePayment(ctx, adminSession.Principal, adminGroup.Membership, "seed-payment-marie", finance.CreatePaymentInput{
@@ -198,7 +250,7 @@ func run() error {
 	}); err != nil {
 		return fmt.Errorf("create Marie payment: %w", err)
 	}
-	if err := seedSecondaryGroup(ctx, authService, groupService, catalogService, adminSession.Principal); err != nil {
+	if err := seedSecondaryGroup(ctx, authService, groupService, catalogService, cfg.DataDirectory, adminSession.Principal); err != nil {
 		return err
 	}
 
@@ -213,10 +265,13 @@ func run() error {
 // for testing group switching and data isolation. The administrator and Lena
 // reuse their existing accounts, while Noah is created exclusively for the new
 // group. It returns a contextualized group, invitation, or catalog error.
-func seedSecondaryGroup(ctx context.Context, authService auth.Service, groupService groups.Service, catalogService catalog.Service, administrator domain.Principal) error {
+func seedSecondaryGroup(ctx context.Context, authService auth.Service, groupService groups.Service, catalogService catalog.Service, dataDirectory string, administrator domain.Principal) error {
 	secondaryGroup, err := groupService.Create(ctx, administrator, secondaryGroupName, "EUR")
 	if err != nil {
 		return fmt.Errorf("create secondary test group: %w", err)
+	}
+	if err := seedReasonSuggestions(ctx, groupService, administrator, secondaryGroup.Membership); err != nil {
+		return err
 	}
 	category, err := catalogService.CreateCategory(ctx, administrator, secondaryGroup.Membership, catalog.CreateCategoryInput{
 		Name: secondaryCategory, Icon: domain.CategoryIconDrink, SortOrder: 10,
@@ -224,18 +279,91 @@ func seedSecondaryGroup(ctx context.Context, authService auth.Service, groupServ
 	if err != nil {
 		return fmt.Errorf("create secondary test category: %w", err)
 	}
-	if _, err := createFixedProduct(ctx, catalogService, administrator, secondaryGroup.Membership, category.ID, "seed-secondary-product-coffee", secondaryProduct, 180, 10); err != nil {
+	coffee, err := createFixedProduct(ctx, catalogService, administrator, secondaryGroup.Membership, category.ID, "seed-secondary-product-coffee", secondaryProduct, 180, 10)
+	if err != nil {
 		return fmt.Errorf("create secondary test product: %w", err)
+	}
+	if err := seedProductImage(ctx, catalogService, dataDirectory, administrator, secondaryGroup.Membership, imageSeed{
+		assetPath: "assets/product-club-coffee.webp", product: coffee,
+	}); err != nil {
+		return err
 	}
 	for _, seed := range []memberSeed{
 		{email: "lena@example.test", displayName: "Lena Player"},
 		{email: secondaryMemberEmail, displayName: "Noah Newcomer"},
 	} {
-		if _, err := createMember(ctx, authService, groupService, administrator, secondaryGroup.Membership, seed); err != nil {
+		member, err := createMember(ctx, authService, groupService, administrator, secondaryGroup.Membership, seed)
+		if err != nil {
 			return fmt.Errorf("seed secondary group member %s: %w", seed.email, err)
+		}
+		if seed.email == secondaryMemberEmail {
+			if err := seedAvatar(ctx, authService, dataDirectory, member.principal, "assets/avatar-noah.webp"); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
+}
+
+// seedReasonSuggestions configures the two booking and two payment reasons
+// shared by every disposable group. It returns permission, validation, audit,
+// or storage errors from the group settings service.
+func seedReasonSuggestions(ctx context.Context, service groups.Service, actor domain.Principal, membership domain.Membership) error {
+	bookingReasons := append([]domain.ConfigurableItem(nil), bookingReasonSeeds...)
+	paymentReasons := append([]domain.ConfigurableItem(nil), paymentReasonSeeds...)
+	if _, err := service.UpdateSettings(ctx, actor, membership, groups.SettingsUpdate{
+		BookingReasons: &bookingReasons,
+		PaymentReasons: &paymentReasons,
+	}); err != nil {
+		return fmt.Errorf("seed transaction reason suggestions for group %q: %w", membership.GroupID, err)
+	}
+	return nil
+}
+
+// seedProductImage normalizes one embedded image into dataDirectory and
+// attaches it to the corresponding product through the catalog service. It
+// returns embedded-file, media-validation, authorization, audit, or storage
+// errors with the affected product name.
+func seedProductImage(ctx context.Context, service catalog.Service, dataDirectory string, actor domain.Principal, membership domain.Membership, seed imageSeed) error {
+	imageKey, err := storeFixtureImage(dataDirectory, seed.assetPath)
+	if err != nil {
+		return fmt.Errorf("store image for product %q: %w", seed.product.Name, err)
+	}
+	if _, _, err := service.SetProductImage(ctx, actor, membership, seed.product.ID, imageKey); err != nil {
+		return fmt.Errorf("attach image to product %q: %w", seed.product.Name, err)
+	}
+	return nil
+}
+
+// seedAvatar normalizes one embedded image into dataDirectory and attaches it
+// to principal's account. It returns embedded-file, media-validation, or
+// storage errors with the affected display name.
+func seedAvatar(ctx context.Context, service auth.Service, dataDirectory string, principal domain.Principal, assetPath string) error {
+	imageKey, err := storeFixtureImage(dataDirectory, assetPath)
+	if err != nil {
+		return fmt.Errorf("store avatar for %q: %w", principal.DisplayName, err)
+	}
+	if _, _, err := service.SetAvatar(ctx, principal, imageKey); err != nil {
+		return fmt.Errorf("attach avatar to %q: %w", principal.DisplayName, err)
+	}
+	return nil
+}
+
+// storeFixtureImage opens assetPath from the embedded fixture, validates and
+// normalizes it, and stores it content-addressed below dataDirectory. It
+// returns the canonical image key or an embedded-file, validation, or I/O
+// error.
+func storeFixtureImage(dataDirectory, assetPath string) (string, error) {
+	asset, err := fixtureAssets.Open(assetPath)
+	if err != nil {
+		return "", fmt.Errorf("open embedded asset %q: %w", assetPath, err)
+	}
+	defer asset.Close()
+	imageKey, _, err := media.NormalizeAndStoreImage(dataDirectory, asset)
+	if err != nil {
+		return "", err
+	}
+	return imageKey, nil
 }
 
 // onlyGroup resolves the single group owned by a freshly bootstrapped test

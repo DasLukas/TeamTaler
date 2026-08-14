@@ -16,7 +16,7 @@
 .brandPanel h1 {
   margin-bottom: var(--space-5);
   color: var(--color-white);
-  font-size: clamp(2.4rem, 5vw, 4.5rem);
+  font-size: clamp(2.4rem, 4vw, 4.5rem);
   line-height: 1.03;
 }
 

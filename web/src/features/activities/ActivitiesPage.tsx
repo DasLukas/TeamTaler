@@ -19,6 +19,8 @@ import { StatePanel } from '@/components/ui/StatePanel';
 import tableStyles from '@/features/shared/Table.module.css';
 import styles from './ActivitiesPage.module.css';
 
+const activityDateTimeFormatter = new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' });
+
 interface MembershipIdentityProps {
   avatarUrl?: string;
   name: string;
@@ -153,9 +155,9 @@ export function ActivitiesPage() {
                       <span><strong>{booking.productName}</strong>{booking.quantity > 1 ? ` × ${booking.quantity}` : ''}{booking.reason ? <small>{booking.reason}</small> : null}</span>
                     </span>
                   </td>
-                  <td data-label={columnLabels.category}>{booking.categoryName}</td>
-                  <td data-label={columnLabels.time}>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(booking.bookedAt))}</td>
-                  <td className={tableStyles.number} data-label={columnLabels.amount}>{formatMoney(booking.total)}</td>
+                  <td className={styles.categoryCell} data-label={columnLabels.category} title={booking.categoryName}>{booking.categoryName}</td>
+                  <td className={styles.timeCell} data-label={columnLabels.time}><time dateTime={booking.bookedAt}>{activityDateTimeFormatter.format(new Date(booking.bookedAt))}</time></td>
+                  <td className={`${tableStyles.number} ${styles.amountCell}`} data-label={columnLabels.amount}>{formatMoney(booking.total)}</td>
                   <td data-label={columnLabels.status}><BookingState status={booking.status} /></td>
                   <td data-label={columnLabels.action}>{booking.status === 'POSTED' && booking.canVoid ? <Button leadingIcon={<RotateCcw size={16} />} onClick={() => setReversal(booking)} size="small" variant="ghost">{t('activities.reverse')}</Button> : null}</td>
                 </tr>;

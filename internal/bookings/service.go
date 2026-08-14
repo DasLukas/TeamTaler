@@ -79,6 +79,32 @@ type BatchCreateInput struct {
 	Reason                     string   `json:"reason,omitempty"`
 }
 
+// BulkCreateItem describes one product line in an atomic cart booking. Each
+// line is expanded across every selected target membership.
+type BulkCreateItem struct {
+	ProductID      string `json:"productId"`
+	ProductVersion int64  `json:"productVersion"`
+	Quantity       int    `json:"quantity"`
+	UnitPriceMinor *int64 `json:"unitPriceMinor,omitempty"`
+}
+
+// BulkCreateInput is the idempotent multi-product, multi-target booking
+// command contract. ExpectedPeriodID and Reason apply to the complete cart.
+// At least one existing membership or temporary guest target is required.
+type BulkCreateInput struct {
+	ExpectedPeriodID           string           `json:"expectedPeriodId"`
+	Items                      []BulkCreateItem `json:"items"`
+	TargetMembershipIDs        []string         `json:"targetMembershipIds,omitempty"`
+	TemporaryGuestDisplayNames []string         `json:"temporaryGuestDisplayNames,omitempty"`
+	Reason                     string           `json:"reason,omitempty"`
+}
+
+const (
+	maxBookingTargets       = 100
+	maxBulkBookingItems     = 25
+	maxBulkBookingExpansion = 500
+)
+
 // BookingTarget is the privacy-minimized active-membership representation used
 // by the booking form. It deliberately omits user IDs, email, roles, and grants.
 type BookingTarget struct {
@@ -96,6 +122,8 @@ type BookingContext struct {
 	CurrentMembership            domain.Membership         `json:"currentMembership"`
 	Targets                      []BookingTarget           `json:"targets"`
 	CanBookForGuests             bool                      `json:"canBookForGuests"`
+	OwnBookingReasonMode         domain.ReasonMode         `json:"ownBookingReasonMode"`
+	ForeignBookingReasonMode     domain.ReasonMode         `json:"foreignBookingReasonMode"`
 	ForeignBookingReasonRequired bool                      `json:"foreignBookingReasonRequired"`
 	BookingReasons               []domain.ConfigurableItem `json:"bookingReasons"`
 }
@@ -161,6 +189,8 @@ func (s Service) Context(ctx context.Context, membership domain.Membership) (Boo
 	if err != nil {
 		return BookingContext{}, err
 	}
+	result.OwnBookingReasonMode = transactionSettings.OwnBookingReasonMode
+	result.ForeignBookingReasonMode = transactionSettings.ForeignBookingReasonMode
 	result.ForeignBookingReasonRequired = transactionSettings.ForeignBookingReasonRequired
 	result.BookingReasons = transactionSettings.BookingReasons
 
@@ -218,7 +248,7 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, membership 
 	if input.TargetMembershipID == "" {
 		input.TargetMembershipID = membership.ID
 	}
-	if err := authorizeBookingTargets(ctx, s.DB, membership, []string{input.TargetMembershipID}, input.Reason); err != nil {
+	if _, err := authorizeBookingTargets(ctx, s.DB, membership, []string{input.TargetMembershipID}, input.Reason); err != nil {
 		return domain.Booking{}, err
 	}
 	encodedRequest, _ := json.Marshal(input)
@@ -242,7 +272,8 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, membership 
 			return err
 		}
 
-		if err := authorizeBookingTargets(ctx, tx, membership, []string{input.TargetMembershipID}, input.Reason); err != nil {
+		effectiveReason, err := authorizeBookingTargets(ctx, tx, membership, []string{input.TargetMembershipID}, input.Reason)
+		if err != nil {
 			return err
 		}
 		details, err := loadBookingDetails(ctx, tx, membership.GroupID, input.ProductID, input.ProductVersion, input.ExpectedPeriodID, input.Quantity, input.UnitPriceMinor)
@@ -250,7 +281,7 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, membership 
 			return err
 		}
 		nowTime := platform.Now()
-		booking, err = s.createBookingForTargetTx(ctx, tx, actor, membership, input.ProductID, input.Quantity, input.TargetMembershipID, input.Reason, details, nowTime)
+		booking, err = s.createBookingForTargetTx(ctx, tx, actor, membership, input.ProductID, input.Quantity, input.TargetMembershipID, effectiveReason, details, nowTime)
 		if err != nil {
 			return err
 		}
@@ -292,10 +323,10 @@ func (s Service) CreateBatch(ctx context.Context, actor domain.Principal, member
 		return nil, err
 	}
 	input.TemporaryGuestDisplayNames = guestNames
-	if len(targets)+len(guestNames) < 1 || len(targets)+len(guestNames) > 100 {
+	if len(targets)+len(guestNames) < 1 || len(targets)+len(guestNames) > maxBookingTargets {
 		return nil, domain.ValidationError{Field: "bookingTargets", Message: "existing memberships and temporary guests must contain between 1 and 100 targets combined"}
 	}
-	if err := authorizeBookingTargets(ctx, s.DB, membership, targets, input.Reason); err != nil {
+	if _, err := authorizeBookingTargets(ctx, s.DB, membership, targets, input.Reason); err != nil {
 		return nil, err
 	}
 	if len(guestNames) > 0 {
@@ -328,7 +359,8 @@ func (s Service) CreateBatch(ctx context.Context, actor domain.Principal, member
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		if err := authorizeBookingTargets(ctx, tx, membership, targets, input.Reason); err != nil {
+		effectiveReason, err := authorizeBookingTargets(ctx, tx, membership, targets, input.Reason)
+		if err != nil {
 			return err
 		}
 		if len(guestNames) > 0 {
@@ -350,7 +382,7 @@ func (s Service) CreateBatch(ctx context.Context, actor domain.Principal, member
 			allTargets = append(allTargets, guest.ID)
 		}
 		for _, targetID := range allTargets {
-			booking, err := s.createBookingForTargetTx(ctx, tx, actor, membership, input.ProductID, input.Quantity, targetID, input.Reason, details, nowTime)
+			booking, err := s.createBookingForTargetTx(ctx, tx, actor, membership, input.ProductID, input.Quantity, targetID, effectiveReason, details, nowTime)
 			if err != nil {
 				return err
 			}
@@ -364,8 +396,138 @@ func (s Service) CreateBatch(ctx context.Context, actor domain.Principal, member
 	return bookings, err
 }
 
+// CreateBulk validates and atomically expands a cart across selected targets.
+// Products are returned in request order, with each product's bookings in
+// target order. Temporary guests are created once per command and reused for
+// every product line. The complete response is replayed by idempotency key.
+//
+// Parameters:
+//   - ctx: Cancellation and deadline context for all database work.
+//   - actor: Authenticated principal recorded in audit events.
+//   - membership: Active group membership that scopes permissions and data.
+//   - idempotencyKey: Caller-generated key containing 8 to 200 characters.
+//   - input: Cart lines, targets, expected open period, and optional reason.
+//
+// Returns:
+//   - []domain.Booking: Created or replayed bookings in item-major order.
+//   - error: Validation, authorization, precondition, idempotency, or storage error.
+func (s Service) CreateBulk(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey string, input BulkCreateInput) ([]domain.Booking, error) {
+	if err := idempotency.ValidateKey(idempotencyKey); err != nil {
+		return nil, err
+	}
+	input.ExpectedPeriodID = strings.TrimSpace(input.ExpectedPeriodID)
+	input.Reason = strings.TrimSpace(input.Reason)
+	if input.ExpectedPeriodID == "" {
+		return nil, domain.ValidationError{Field: "expectedPeriodId", Message: "is required"}
+	}
+	if len(input.Reason) > 500 {
+		return nil, domain.ValidationError{Field: "reason", Message: "must contain at most 500 characters"}
+	}
+	if len(input.Items) < 1 || len(input.Items) > maxBulkBookingItems {
+		return nil, domain.ValidationError{Field: "items", Message: "must contain between 1 and 25 product lines"}
+	}
+	rawTargetCount := len(input.TargetMembershipIDs) + len(input.TemporaryGuestDisplayNames)
+	if rawTargetCount < 1 || rawTargetCount > maxBookingTargets {
+		return nil, domain.ValidationError{Field: "bookingTargets", Message: "existing memberships and temporary guests must contain between 1 and 100 targets combined"}
+	}
+	seenProducts := make(map[string]struct{}, len(input.Items))
+	for index := range input.Items {
+		item := &input.Items[index]
+		item.ProductID = strings.TrimSpace(item.ProductID)
+		field := fmt.Sprintf("items[%d]", index)
+		if item.ProductID == "" || item.ProductVersion < 1 || item.Quantity < 1 || item.Quantity > 99 {
+			return nil, domain.ValidationError{Field: field, Message: "productId, productVersion, and a quantity between 1 and 99 are required"}
+		}
+		if _, duplicate := seenProducts[item.ProductID]; duplicate {
+			return nil, domain.ValidationError{Field: "items", Message: "must not contain duplicate product IDs"}
+		}
+		seenProducts[item.ProductID] = struct{}{}
+	}
+	targets, err := normalizeBookingTargets(input.TargetMembershipIDs)
+	if err != nil {
+		return nil, err
+	}
+	guestNames, err := normalizeTemporaryGuestNames(input.TemporaryGuestDisplayNames)
+	if err != nil {
+		return nil, err
+	}
+	input.TargetMembershipIDs = targets
+	input.TemporaryGuestDisplayNames = guestNames
+	targetCount := len(targets) + len(guestNames)
+	if targetCount < 1 || targetCount > maxBookingTargets {
+		return nil, domain.ValidationError{Field: "bookingTargets", Message: "existing memberships and temporary guests must contain between 1 and 100 targets combined"}
+	}
+	if len(input.Items)*targetCount > maxBulkBookingExpansion {
+		return nil, domain.ValidationError{Field: "items", Message: "cart expansion must not exceed 500 bookings"}
+	}
+	requestHash, err := idempotency.Hash(input)
+	if err != nil {
+		return nil, err
+	}
+	created := make([]domain.Booking, 0, len(input.Items)*targetCount)
+	err = storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		found, err := idempotency.Load(ctx, tx, membership.GroupID, actor.UserID, idempotencyKey, requestHash, &created)
+		if err != nil {
+			return err
+		}
+		if found {
+			return nil
+		}
+		effectiveReason, err := authorizeBookingTargets(ctx, tx, membership, targets, input.Reason)
+		if err != nil {
+			return err
+		}
+		if len(guestNames) > 0 {
+			if err := requirePermission(ctx, tx, membership, domain.PermissionBookForGuests); err != nil {
+				return err
+			}
+		}
+		details := make([]bookingDetails, len(input.Items))
+		var expandedTotalMinor int64
+		for index, item := range input.Items {
+			details[index], err = loadBookingDetails(ctx, tx, membership.GroupID, item.ProductID, item.ProductVersion, input.ExpectedPeriodID, item.Quantity, item.UnitPriceMinor)
+			if err != nil {
+				return err
+			}
+			if details[index].totalMinor > math.MaxInt64/int64(targetCount) {
+				return domain.ValidationError{Field: fmt.Sprintf("items[%d]", index), Message: "expanded amount exceeds the supported range"}
+			}
+			expandedItemTotal := details[index].totalMinor * int64(targetCount)
+			if expandedTotalMinor > math.MaxInt64-expandedItemTotal {
+				return domain.ValidationError{Field: "items", Message: "cart amount exceeds the supported range"}
+			}
+			expandedTotalMinor += expandedItemTotal
+		}
+		nowTime := platform.Now()
+		allTargets := append(make([]string, 0, targetCount), targets...)
+		for _, guestName := range guestNames {
+			guest, err := groups.CreateTemporaryGuestTx(ctx, tx, actor, membership, guestName, nowTime)
+			if err != nil {
+				return err
+			}
+			allTargets = append(allTargets, guest.ID)
+		}
+		for itemIndex, item := range input.Items {
+			for _, targetID := range allTargets {
+				booking, err := s.createBookingForTargetTxWithAllocationRebuild(ctx, tx, actor, membership, item.ProductID, item.Quantity, targetID, effectiveReason, details[itemIndex], nowTime, false)
+				if err != nil {
+					return err
+				}
+				created = append(created, booking)
+			}
+		}
+		for _, targetID := range allTargets {
+			if err := ledger.RebuildPaymentAllocations(ctx, tx, membership.GroupID, targetID); err != nil {
+				return err
+			}
+		}
+		return idempotency.Store(ctx, tx, membership.GroupID, actor.UserID, idempotencyKey, requestHash, 201, created)
+	})
+	return created, err
+}
+
 func normalizeBookingTargets(targets []string) ([]string, error) {
-	if len(targets) > 100 {
+	if len(targets) > maxBookingTargets {
 		return nil, domain.ValidationError{Field: "targetMembershipIds", Message: "must contain at most 100 memberships"}
 	}
 	normalized := make([]string, 0, len(targets))
@@ -401,7 +563,7 @@ func normalizeTemporaryGuestNames(names []string) ([]string, error) {
 	return normalized, nil
 }
 
-func authorizeBookingTargets(ctx context.Context, queryer bookingQueryer, membership domain.Membership, targets []string, reason string) error {
+func authorizeBookingTargets(ctx context.Context, queryer bookingQueryer, membership domain.Membership, targets []string, reason string) (string, error) {
 	needsOwnPermission := false
 	needsOthersPermission := false
 	needsGuestsPermission := false
@@ -418,22 +580,22 @@ func authorizeBookingTargets(ctx context.Context, queryer bookingQueryer, member
 			FROM memberships m JOIN users u ON u.id=m.user_id
 			WHERE m.group_id=? AND m.status='ACTIVE' AND m.id IN (`+strings.Join(placeholders, ",")+`)`, arguments...)
 		if err != nil {
-			return err
+			return "", err
 		}
 		for rows.Next() {
 			var membershipID string
 			var isCredentialless bool
 			if err := rows.Scan(&membershipID, &isCredentialless); err != nil {
 				rows.Close()
-				return err
+				return "", err
 			}
 			credentialless[membershipID] = isCredentialless
 		}
 		if err := rows.Close(); err != nil {
-			return err
+			return "", err
 		}
 		if len(credentialless) != len(targets) {
-			return domain.ErrNotFound
+			return "", domain.ErrNotFound
 		}
 	}
 	for _, target := range targets {
@@ -447,27 +609,41 @@ func authorizeBookingTargets(ctx context.Context, queryer bookingQueryer, member
 	}
 	if needsOwnPermission {
 		if err := requirePermission(ctx, queryer, membership, domain.PermissionCreateOwnBooking); err != nil {
-			return err
+			return "", err
 		}
 	}
 	if needsOthersPermission {
 		if err := requirePermission(ctx, queryer, membership, domain.PermissionBookForOthers); err != nil {
-			return err
-		}
-		var reasonRequired bool
-		if err := queryer.QueryRowContext(ctx, `SELECT foreign_booking_reason_required FROM group_settings WHERE group_id=?`, membership.GroupID).Scan(&reasonRequired); err != nil {
-			return err
-		}
-		if reasonRequired && reason == "" {
-			return domain.ValidationError{Field: "reason", Message: "is required when assigning a booking to another member"}
+			return "", err
 		}
 	}
 	if needsGuestsPermission {
 		if err := requirePermission(ctx, queryer, membership, domain.PermissionBookForGuests); err != nil {
-			return err
+			return "", err
 		}
 	}
-	return nil
+	reasonMode := domain.ReasonModeOff
+	requiredMessage := "is required for own bookings"
+	if needsOthersPermission {
+		requiredMessage = "is required when assigning a booking to another member"
+		if err := queryer.QueryRowContext(ctx, `SELECT foreign_booking_reason_mode FROM group_settings WHERE group_id=?`, membership.GroupID).Scan(&reasonMode); err != nil {
+			return "", err
+		}
+	} else if needsOwnPermission {
+		if err := queryer.QueryRowContext(ctx, `SELECT own_booking_reason_mode FROM group_settings WHERE group_id=?`, membership.GroupID).Scan(&reasonMode); err != nil {
+			return "", err
+		}
+	}
+	if !reasonMode.Valid() {
+		return "", fmt.Errorf("group %s has unsupported booking reason mode %q", membership.GroupID, reasonMode)
+	}
+	if reasonMode.Required() && reason == "" {
+		return "", domain.ValidationError{Field: "reason", Message: requiredMessage}
+	}
+	if !reasonMode.Enabled() {
+		return "", nil
+	}
+	return reason, nil
 }
 
 func loadBookingDetails(ctx context.Context, queryer bookingQueryer, groupID, productID string, productVersion int64, expectedPeriodID string, quantity int, requestedUnitPrice *int64) (bookingDetails, error) {
@@ -515,6 +691,10 @@ func loadBookingDetails(ctx context.Context, queryer bookingQueryer, groupID, pr
 }
 
 func (s Service) createBookingForTargetTx(ctx context.Context, tx *sql.Tx, actor domain.Principal, membership domain.Membership, productID string, quantity int, targetID, reason string, details bookingDetails, nowTime time.Time) (domain.Booking, error) {
+	return s.createBookingForTargetTxWithAllocationRebuild(ctx, tx, actor, membership, productID, quantity, targetID, reason, details, nowTime, true)
+}
+
+func (s Service) createBookingForTargetTxWithAllocationRebuild(ctx context.Context, tx *sql.Tx, actor domain.Principal, membership domain.Membership, productID string, quantity int, targetID, reason string, details bookingDetails, nowTime time.Time, rebuildAllocations bool) (domain.Booking, error) {
 	bookingID, err := platform.NewID("bok")
 	if err != nil {
 		return domain.Booking{}, err
@@ -532,8 +712,10 @@ func (s Service) createBookingForTargetTx(ctx context.Context, tx *sql.Tx, actor
 	if err := insertLedger(ctx, tx, membership.GroupID, details.periodID, "", details.categoryID, bookingID, "", "", "CATEGORY_REVENUE", -details.totalMinor, details.ledgerDescription, now); err != nil {
 		return domain.Booking{}, err
 	}
-	if err := ledger.RebuildPaymentAllocations(ctx, tx, membership.GroupID, targetID); err != nil {
-		return domain.Booking{}, err
+	if rebuildAllocations {
+		if err := ledger.RebuildPaymentAllocations(ctx, tx, membership.GroupID, targetID); err != nil {
+			return domain.Booking{}, err
+		}
 	}
 	if targetID != membership.ID {
 		body := fmt.Sprintf("%s assigned %s to you.", membership.DisplayName, details.productName)

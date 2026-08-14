@@ -34,7 +34,7 @@ export function currencyExponent(currency: string): number {
   if (!CURRENCY_CODE_PATTERN.test(normalized)) throw new RangeError('Currency must be a three-letter code.');
   const cached = exponentCache.get(normalized);
   if (cached !== undefined) return cached;
-  let exponent = 2;
+  let exponent: number;
   try {
     exponent = new Intl.NumberFormat('de-DE', { style: 'currency', currency: normalized }).resolvedOptions().maximumFractionDigits ?? 2;
   } catch {

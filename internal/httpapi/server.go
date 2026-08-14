@@ -169,6 +169,7 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/booking-context", server.handleBookingContext)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/bookings", server.handleCreateBooking)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/bookings/batch", server.handleCreateBookingBatch)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/bookings/bulk", server.handleCreateBookingBulk)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/bookings/{bookingID}/void", server.handleVoidBooking)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/accounts", server.handleListAccounts)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/accounts/me", server.handleOwnAccount)
