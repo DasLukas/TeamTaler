@@ -75,6 +75,32 @@ describe('authentication form policies', () => {
     await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith({ to: '/book' }));
   });
 
+  it('shows a safe localized message for invalid credentials', async () => {
+    const user = userEvent.setup();
+    mocks.login.mockRejectedValue({ problem: { status: 401, detail: 'authentication required' } });
+    renderPage(<LoginPage />);
+
+    await user.type(screen.getByLabelText(i18n.t('auth.email')), 'alex@example.test');
+    await user.type(screen.getByLabelText(i18n.t('auth.password')), 'incorrect-password');
+    await user.click(screen.getByRole('button', { name: i18n.t('auth.loginAction') }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(i18n.t('auth.invalidCredentials'));
+    expect(screen.queryByText('authentication required')).not.toBeInTheDocument();
+  });
+
+  it('explains rate limiting without exposing a technical API message', async () => {
+    const user = userEvent.setup();
+    mocks.login.mockRejectedValue({ problem: { status: 429, detail: 'rate limited' } });
+    renderPage(<LoginPage />);
+
+    await user.type(screen.getByLabelText(i18n.t('auth.email')), 'alex@example.test');
+    await user.type(screen.getByLabelText(i18n.t('auth.password')), 'incorrect-password');
+    await user.click(screen.getByRole('button', { name: i18n.t('auth.loginAction') }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(i18n.t('auth.tooManyLoginAttempts'));
+    expect(screen.queryByText('rate limited')).not.toBeInTheDocument();
+  });
+
   it('hides password recovery when the deployment capability is unavailable', async () => {
     mocks.getAuthenticationCapabilities.mockResolvedValue({ passwordResetAvailable: false, emailChangeAvailable: false });
     renderPage(<LoginPage />);

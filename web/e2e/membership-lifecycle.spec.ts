@@ -49,9 +49,9 @@ test('regular members share archive, reactivate, and zero-balance permanent remo
   await page.getByLabel('Passwort bestätigen').fill(password);
   await page.getByRole('button', { name: 'Einladung annehmen' }).click();
   await expect(page).toHaveURL(/\/book$/);
-  await page.getByRole('button', { name: /Mineral Water/ }).click();
+  await page.getByRole('button', { name: /Mineral Water.*zum Warenkorb hinzufügen/ }).click();
   const bookingResponse = page.waitForResponse((response) => response.request().method() === 'POST'
-    && new URL(response.url()).pathname.endsWith('/bookings/batch'));
+    && new URL(response.url()).pathname.endsWith('/bookings/bulk'));
   await page.getByRole('button', { name: 'Jetzt buchen' }).click();
   expect((await bookingResponse).status()).toBe(201);
   const membership = await page.evaluate(async () => {

@@ -1,4 +1,7 @@
 .shell {
+  --shell-sidebar-width: var(--sidebar-width);
+  --shell-content-offset: var(--shell-sidebar-width);
+
   width: 100%;
   max-width: 100%;
   min-height: 100vh;
@@ -8,7 +11,19 @@
 .main {
   min-width: 0;
   min-height: 100vh;
-  margin-left: var(--sidebar-width);
+  margin-left: var(--shell-content-offset);
+  transition: margin-left var(--motion-normal) ease;
+}
+
+.sidebarBackdrop {
+  position: fixed;
+  z-index: 29;
+  inset: 0 0 0 var(--sidebar-width);
+  padding: 0;
+  border: 0;
+  background: rgb(4 23 42 / 18%);
+  backdrop-filter: blur(1px);
+  cursor: pointer;
 }
 
 .center {
@@ -41,4 +56,21 @@
     margin-left: 0;
     padding-bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom));
   }
+}
+
+@media (min-width: 768px) and (max-width: 1279px) {
+  .sidebarCollapsed {
+    --shell-sidebar-width: var(--sidebar-collapsed-width);
+    --shell-content-offset: var(--sidebar-collapsed-width);
+  }
+}
+
+@media (min-width: 768px) and (max-width: 959px) {
+  .sidebarOverlayMode {
+    --shell-content-offset: var(--sidebar-collapsed-width);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .main { transition: none; }
 }

@@ -28,6 +28,7 @@ import type {
   AuditEntry,
   Booking,
   BookingBatchCommand,
+  BookingBulkCommand,
   BookingCommand,
   BookingContext,
   CatalogOrderCommand,
@@ -430,6 +431,19 @@ export const api = {
       unitPrice: undefined,
     };
     const response = await idempotentRequest<unknown[]>(groupId, 'booking.batch.create', path, payload, { method: 'POST', body: json(payload) });
+    return response.map((booking) => adaptBooking(booking));
+  },
+  createBulkBookings: async (groupId: string, command: BookingBulkCommand): Promise<Booking[]> => {
+    const path = groupPath(groupId, 'bookings/bulk');
+    const payload = {
+      ...command,
+      items: command.items.map((item) => ({
+        ...item,
+        unitPriceMinor: item.unitPrice ? minorUnitsToSafeNumber(item.unitPrice.minorUnits) : undefined,
+        unitPrice: undefined,
+      })),
+    };
+    const response = await idempotentRequest<unknown[]>(groupId, 'booking.bulk.create', path, payload, { method: 'POST', body: json(payload) });
     return response.map((booking) => adaptBooking(booking));
   },
   reverseBooking: async (groupId: string, bookingId: string, reason: string): Promise<Booking> => {

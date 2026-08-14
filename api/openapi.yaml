@@ -1796,6 +1796,56 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/bookings/bulk:
+    post:
+      tags: [Bookings]
+      summary: Atomically create multiple product bookings for the same targets
+      description: |
+        Creates every requested product and target combination, including its
+        balanced ledger pair, notification, and audit event, in one transaction.
+        The command accepts between 1 and 25 distinct product lines, between 1
+        and 100 existing or newly created targets, and expands to at most 500
+        immutable bookings. Duplicate product IDs are rejected; callers express
+        repeated units through each line's quantity.
+
+        Selecting the current membership requires `CREATE_OWN_BOOKING`;
+        selecting another credentialed membership requires `BOOK_FOR_OTHERS`
+        and the group's configured shared reason; selecting an existing or new
+        temporary guest requires `BOOK_FOR_GUESTS`. New temporary guests are
+        created once and reused for every product line in the command.
+
+        For a new idempotency key, every target, permission, product version,
+        price, quantity, and the open accounting period are revalidated inside
+        the write transaction. Any
+        invalid input, concurrent catalog change, guest-name conflict, accounting
+        conflict, notification failure, or audit failure rolls back the complete
+        command. The idempotency payload covers the normalized targets, names,
+        reason, period, and ordered product lines. Reusing a key with a different
+        payload returns `409`; replaying the same payload returns the original
+        result. Responses are ordered by product line first and then by existing
+        target IDs followed by new temporary guests, preserving request order.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BookingBulkCommand' }
+      responses:
+        '201':
+          description: Created booking snapshots in product-line and target request order
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Booking' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/payments/self:
     post:
       tags: [Finance]
@@ -2357,7 +2407,7 @@ components:
     GroupSettings:
       type: object
       additionalProperties: false
-      required: [notificationEmailsEnabled, notificationEmailDeliveryAvailable, settlementsEnabled, defaultRoleId, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
+      required: [notificationEmailsEnabled, notificationEmailDeliveryAvailable, settlementsEnabled, defaultRoleId, ownBookingReasonMode, foreignBookingReasonMode, ownPaymentReasonMode, otherPaymentReasonMode, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
       properties:
         notificationEmailsEnabled:
           type: boolean
@@ -2372,15 +2422,26 @@ components:
         defaultRoleId:
           type: [string, 'null']
           description: Group-owned non-administrative role preselected for new invitations and used by CSV rows without roles.
+        ownBookingReasonMode:
+          $ref: '#/components/schemas/ReasonMode'
+        foreignBookingReasonMode:
+          $ref: '#/components/schemas/ReasonMode'
+        ownPaymentReasonMode:
+          $ref: '#/components/schemas/ReasonMode'
+        otherPaymentReasonMode:
+          $ref: '#/components/schemas/ReasonMode'
         foreignBookingReasonRequired:
           type: boolean
-          description: Whether bookings for another credentialed member require a reason.
+          deprecated: true
+          description: Compatibility alias for foreignBookingReasonMode=REQUIRED.
         ownPaymentReasonRequired:
           type: boolean
-          description: Whether self-service payments require a reason.
+          deprecated: true
+          description: Compatibility alias for ownPaymentReasonMode=REQUIRED.
         otherPaymentReasonRequired:
           type: boolean
-          description: Whether finance-managed payments require a reason.
+          deprecated: true
+          description: Compatibility alias for otherPaymentReasonMode=REQUIRED.
         paymentMethods:
           type: array
           minItems: 1
@@ -2407,9 +2468,19 @@ components:
           type: string
           minLength: 1
           description: Group-owned role that must not grant GROUP_ADMINISTRATION or MEMBER_MANAGEMENT. It cannot be cleared after being set and may be changed only with MEMBER_MANAGEMENT.
-        foreignBookingReasonRequired: { type: boolean }
-        ownPaymentReasonRequired: { type: boolean }
-        otherPaymentReasonRequired: { type: boolean }
+        ownBookingReasonMode: { $ref: '#/components/schemas/ReasonMode' }
+        foreignBookingReasonMode: { $ref: '#/components/schemas/ReasonMode' }
+        ownPaymentReasonMode: { $ref: '#/components/schemas/ReasonMode' }
+        otherPaymentReasonMode: { $ref: '#/components/schemas/ReasonMode' }
+        foreignBookingReasonRequired:
+          type: boolean
+          deprecated: true
+        ownPaymentReasonRequired:
+          type: boolean
+          deprecated: true
+        otherPaymentReasonRequired:
+          type: boolean
+          deprecated: true
         paymentMethods:
           type: array
           minItems: 1
@@ -2430,17 +2501,25 @@ components:
       properties:
         id: { type: string, minLength: 1, maxLength: 120 }
         label: { type: string, minLength: 1, maxLength: 120 }
+    ReasonMode:
+      type: string
+      enum: [OFF, OPTIONAL, REQUIRED]
+      description: Controls whether the corresponding transaction reason is hidden, optional, or mandatory.
     TransactionSettings:
       type: object
       additionalProperties: false
-      required: [settlementsEnabled, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
+      required: [settlementsEnabled, ownBookingReasonMode, foreignBookingReasonMode, ownPaymentReasonMode, otherPaymentReasonMode, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
       properties:
         settlementsEnabled:
           type: boolean
           description: Whether settlement-period references and actions should be shown to active members.
-        foreignBookingReasonRequired: { type: boolean }
-        ownPaymentReasonRequired: { type: boolean }
-        otherPaymentReasonRequired: { type: boolean }
+        ownBookingReasonMode: { $ref: '#/components/schemas/ReasonMode' }
+        foreignBookingReasonMode: { $ref: '#/components/schemas/ReasonMode' }
+        ownPaymentReasonMode: { $ref: '#/components/schemas/ReasonMode' }
+        otherPaymentReasonMode: { $ref: '#/components/schemas/ReasonMode' }
+        foreignBookingReasonRequired: { type: boolean, deprecated: true }
+        ownPaymentReasonRequired: { type: boolean, deprecated: true }
+        otherPaymentReasonRequired: { type: boolean, deprecated: true }
         paymentMethods:
           type: array
           minItems: 1
@@ -3009,7 +3088,7 @@ components:
     BookingContext:
       type: object
       additionalProperties: false
-      required: [openPeriod, ownBalanceMinor, currentMembership, targets, canBookForGuests, foreignBookingReasonRequired, bookingReasons]
+      required: [openPeriod, ownBalanceMinor, currentMembership, targets, canBookForGuests, ownBookingReasonMode, foreignBookingReasonMode, foreignBookingReasonRequired, bookingReasons]
       properties:
         openPeriod: { $ref: '#/components/schemas/Period' }
         ownBalanceMinor:
@@ -3023,9 +3102,14 @@ components:
         canBookForGuests:
           type: boolean
           description: True only when BOOK_FOR_GUESTS is effective; controls inline temporary-guest creation.
+        ownBookingReasonMode:
+          $ref: '#/components/schemas/ReasonMode'
+        foreignBookingReasonMode:
+          $ref: '#/components/schemas/ReasonMode'
         foreignBookingReasonRequired:
           type: boolean
-          description: Whether the current group requires a reason for credentialed foreign targets.
+          deprecated: true
+          description: Compatibility alias for foreignBookingReasonMode=REQUIRED.
         bookingReasons:
           type: array
           description: Ordered suggestions; clients must keep the reason field freely editable.
@@ -3087,6 +3171,58 @@ components:
             targetMembershipIds: { minItems: 1 }
         - required: [temporaryGuestDisplayNames]
       description: At least one target array must be present and non-empty; the two arrays may be combined but their total item count cannot exceed 100.
+    BookingBulkLineItem:
+      type: object
+      additionalProperties: false
+      required: [productId, productVersion, quantity]
+      properties:
+        productId: { type: string, minLength: 1 }
+        productVersion: { type: integer, format: int64, minimum: 1 }
+        quantity: { type: integer, minimum: 1, maximum: 99 }
+        unitPriceMinor:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 100000000000
+          description: Required for USER_DEFINED products and forbidden for FIXED products; interpreted as this line's unit price for every target.
+    BookingBulkCommand:
+      type: object
+      additionalProperties: false
+      required: [expectedPeriodId, items]
+      properties:
+        expectedPeriodId: { type: string, minLength: 1 }
+        items:
+          type: array
+          minItems: 1
+          maxItems: 25
+          description: Ordered, distinct product lines. Duplicate product IDs are rejected.
+          items: { $ref: '#/components/schemas/BookingBulkLineItem' }
+        targetMembershipIds:
+          type: array
+          minItems: 0
+          maxItems: 100
+          uniqueItems: true
+          items: { type: string, minLength: 1 }
+        temporaryGuestDisplayNames:
+          type: array
+          minItems: 1
+          maxItems: 100
+          uniqueItems: true
+          description: |
+            Trimmed, control-character-free names for new credentialless guests.
+            Normalized duplicates within the command are rejected; names never
+            identify or merge existing memberships. Requires BOOK_FOR_GUESTS.
+          items: { type: string, minLength: 1, maxLength: 120 }
+        reason:
+          type: string
+          maxLength: 500
+          description: Shared reason stored on every created booking; required only when at least one target is another credentialed membership and the group requires one.
+      anyOf:
+        - required: [targetMembershipIds]
+          properties:
+            targetMembershipIds: { minItems: 1 }
+        - required: [temporaryGuestDisplayNames]
+      description: At least one target array must be non-empty. The target arrays may contain at most 100 entries combined, and items multiplied by targets may create at most 500 bookings.
     Booking:
       type: object
       required: [id, groupId, periodId, categoryId, productId, actorMembershipId, actorDisplayName, actorMembershipStatus, targetMembershipId, targetDisplayName, targetMembershipStatus, quantity, unitPriceMinor, totalMinor, currency, productName, categoryName, createdAt, canVoid, voidReasonRequired]

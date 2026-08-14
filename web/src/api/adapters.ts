@@ -20,6 +20,7 @@ import type {
   Product,
   Role,
   RoleAssignment,
+  ReasonMode,
   Session,
   Settlement,
   TransactionSettings,
@@ -42,6 +43,13 @@ const PAYMENT_DESCRIPTION_PREFIX = 'Payment received';
 const REVERSAL_DESCRIPTION_PREFIX = 'Reversal: ';
 const NOTIFICATION_EVENT_TYPES: Notification['eventType'][] = ['BOOKING_ASSIGNED', 'BOOKING_REVERSED', 'PAYMENT_RECORDED', 'PAYMENT_REVERSED', 'SETTLEMENT_CREATED'];
 
+/** Normalizes a reason mode while retaining safe defaults for legacy servers. */
+const reasonMode = (value: unknown, legacyRequired: unknown, fallback: ReasonMode): ReasonMode => {
+  if (value === 'OFF' || value === 'OPTIONAL' || value === 'REQUIRED') return value;
+  if (typeof legacyRequired === 'boolean') return legacyRequired ? 'REQUIRED' : 'OPTIONAL';
+  return fallback;
+};
+
 /**
  * Adapts administrator-managed group settings and applies safe feature defaults.
  *
@@ -51,14 +59,22 @@ const NOTIFICATION_EVENT_TYPES: Notification['eventType'][] = ['BOOKING_ASSIGNED
 export function adaptGroupSettings(input: unknown): GroupSettings {
   const source = asRecord(input);
   const paymentMethods = adaptConfigurableItems(source.paymentMethods, true);
+  const ownBookingReasonMode = reasonMode(source.ownBookingReasonMode, undefined, 'OFF');
+  const foreignBookingReasonMode = reasonMode(source.foreignBookingReasonMode, source.foreignBookingReasonRequired, 'REQUIRED');
+  const ownPaymentReasonMode = reasonMode(source.ownPaymentReasonMode, source.ownPaymentReasonRequired, 'REQUIRED');
+  const otherPaymentReasonMode = reasonMode(source.otherPaymentReasonMode, source.otherPaymentReasonRequired, 'OPTIONAL');
   return {
     settlementsEnabled: source.settlementsEnabled === true,
     notificationEmailsEnabled: source.notificationEmailsEnabled === true,
     notificationEmailDeliveryAvailable: source.notificationEmailDeliveryAvailable === true,
     defaultRoleId: typeof source.defaultRoleId === 'string' && source.defaultRoleId ? source.defaultRoleId : null,
-    foreignBookingReasonRequired: source.foreignBookingReasonRequired !== false,
-    ownPaymentReasonRequired: source.ownPaymentReasonRequired !== false,
-    otherPaymentReasonRequired: source.otherPaymentReasonRequired === true,
+    ownBookingReasonMode,
+    foreignBookingReasonMode,
+    ownPaymentReasonMode,
+    otherPaymentReasonMode,
+    foreignBookingReasonRequired: foreignBookingReasonMode === 'REQUIRED',
+    ownPaymentReasonRequired: ownPaymentReasonMode === 'REQUIRED',
+    otherPaymentReasonRequired: otherPaymentReasonMode === 'REQUIRED',
     paymentMethods: paymentMethods.length > 0 ? paymentMethods : defaultPaymentMethods(),
     bookingReasons: adaptConfigurableItems(source.bookingReasons),
     paymentReasons: adaptConfigurableItems(source.paymentReasons),
@@ -80,11 +96,19 @@ export function adaptConfigurableItems(input: unknown, localizePaymentMethods = 
 export function adaptTransactionSettings(input: unknown): TransactionSettings {
   const source = asRecord(input);
   const paymentMethods = adaptConfigurableItems(source.paymentMethods, true);
+  const ownBookingReasonMode = reasonMode(source.ownBookingReasonMode, undefined, 'OFF');
+  const foreignBookingReasonMode = reasonMode(source.foreignBookingReasonMode, source.foreignBookingReasonRequired, 'REQUIRED');
+  const ownPaymentReasonMode = reasonMode(source.ownPaymentReasonMode, source.ownPaymentReasonRequired, 'REQUIRED');
+  const otherPaymentReasonMode = reasonMode(source.otherPaymentReasonMode, source.otherPaymentReasonRequired, 'OPTIONAL');
   return {
     settlementsEnabled: source.settlementsEnabled === true,
-    foreignBookingReasonRequired: source.foreignBookingReasonRequired !== false,
-    ownPaymentReasonRequired: source.ownPaymentReasonRequired !== false,
-    otherPaymentReasonRequired: source.otherPaymentReasonRequired === true,
+    ownBookingReasonMode,
+    foreignBookingReasonMode,
+    ownPaymentReasonMode,
+    otherPaymentReasonMode,
+    foreignBookingReasonRequired: foreignBookingReasonMode === 'REQUIRED',
+    ownPaymentReasonRequired: ownPaymentReasonMode === 'REQUIRED',
+    otherPaymentReasonRequired: otherPaymentReasonMode === 'REQUIRED',
     paymentMethods: paymentMethods.length > 0 ? paymentMethods : defaultPaymentMethods(),
     bookingReasons: adaptConfigurableItems(source.bookingReasons),
     paymentReasons: adaptConfigurableItems(source.paymentReasons),
@@ -411,13 +435,17 @@ export function adaptBookingTarget(input: unknown): BookingTarget {
  */
 export function adaptBookingContext(input: unknown, currency: string): BookingContext {
   const source = asRecord(input);
+  const ownBookingReasonMode = reasonMode(source.ownBookingReasonMode, undefined, 'OFF');
+  const foreignBookingReasonMode = reasonMode(source.foreignBookingReasonMode, source.foreignBookingReasonRequired, 'REQUIRED');
   return {
     openPeriod: adaptPeriod(source.openPeriod),
     ownBalance: money(source.ownBalanceMinor, currency),
     currentMembership: adaptMembership(source.currentMembership),
     targets: (source.targets as unknown[] ?? []).map(adaptBookingTarget),
     canBookForGuests: source.canBookForGuests === true,
-    foreignBookingReasonRequired: source.foreignBookingReasonRequired !== false,
+    ownBookingReasonMode,
+    foreignBookingReasonMode,
+    foreignBookingReasonRequired: foreignBookingReasonMode === 'REQUIRED',
     bookingReasons: adaptConfigurableItems(source.bookingReasons),
   };
 }

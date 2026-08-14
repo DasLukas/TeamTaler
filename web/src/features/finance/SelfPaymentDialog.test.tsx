@@ -155,4 +155,21 @@ describe('SelfPaymentDialog', () => {
     expect(reason).toHaveAttribute('list', 'self-payment-reason-suggestions');
     expect(document.querySelector('option[value="Monatsausgleich"]')).toBeInTheDocument();
   });
+
+  it('hides the own-payment reason when its mode is off', async () => {
+    const user = userEvent.setup();
+    apiMock.getTransactionSettings.mockResolvedValue({
+      ownPaymentReasonMode: 'OFF',
+      ownPaymentReasonRequired: false,
+      paymentMethods: [{ id: 'CASH', label: 'Bar' }],
+      bookingReasons: [],
+      paymentReasons: [],
+    });
+    renderDialog();
+    await waitFor(() => expect(screen.getByRole('button', { name: i18n.t('selfPayment.action') })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.action') }));
+
+    expect(screen.queryByLabelText(i18n.t('finance.reason'))).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(`${i18n.t('finance.reason')} *`)).not.toBeInTheDocument();
+  });
 });

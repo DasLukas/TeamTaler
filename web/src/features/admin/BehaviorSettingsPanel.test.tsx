@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -43,6 +43,10 @@ describe('BehaviorSettingsPanel', () => {
     notificationEmailsEnabled: false,
     notificationEmailDeliveryAvailable: true,
     defaultRoleId: 'role-member',
+    ownBookingReasonMode: 'OFF',
+    foreignBookingReasonMode: 'REQUIRED',
+    ownPaymentReasonMode: 'REQUIRED',
+    otherPaymentReasonMode: 'OPTIONAL',
     foreignBookingReasonRequired: true,
     ownPaymentReasonRequired: true,
     otherPaymentReasonRequired: false,
@@ -70,6 +74,7 @@ describe('BehaviorSettingsPanel', () => {
   it('keeps group configuration separate from membership defaults', async () => {
     renderPanel();
 
+    expect(screen.queryByRole('heading', { level: 2, name: i18n.t('behaviorSettings.title') })).not.toBeInTheDocument();
     expect(await screen.findByRole('region', { name: i18n.t('behaviorSettings.groupSectionTitle') })).toBeVisible();
     expect(await screen.findByRole('region', { name: i18n.t('behaviorSettings.notificationEmailTitle') })).toBeVisible();
     expect(screen.queryByRole('region', { name: i18n.t('behaviorSettings.rolesMembersSectionTitle') })).not.toBeInTheDocument();
@@ -91,10 +96,24 @@ describe('BehaviorSettingsPanel', () => {
     await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
 
     await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { settlementsEnabled: true }));
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['booking-context', 'group-a'] });
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['transaction-settings', 'group-a'] });
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['dashboard', 'group-a'] });
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['periods', 'group-a'] });
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['settlements', 'group-a'] });
+  });
+
+  it('persists each reason context through an accessible three-state control', async () => {
+    const user = userEvent.setup();
+    apiMock.updateGroupSettings.mockResolvedValue({ ...settings, ownBookingReasonMode: 'OPTIONAL' });
+    renderPanel();
+
+    const ownBookingGroup = await screen.findByRole('group', { name: i18n.t('behaviorSettings.ownBookingReason') });
+    expect(within(ownBookingGroup).getByRole('radio', { name: i18n.t('behaviorSettings.reasonModeOff') })).toBeChecked();
+    await user.click(within(ownBookingGroup).getByRole('radio', { name: i18n.t('behaviorSettings.reasonModeOptional') }));
+    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
+
+    await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { ownBookingReasonMode: 'OPTIONAL' }));
   });
 
   it('saves notification email delivery only when SMTP is available', async () => {

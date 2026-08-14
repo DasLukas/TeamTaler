@@ -190,6 +190,10 @@ type SettingsUpdate struct {
 	NotificationEmailsEnabled    *bool
 	SettlementsEnabled           *bool
 	DefaultRoleID                *string
+	OwnBookingReasonMode         *domain.ReasonMode
+	ForeignBookingReasonMode     *domain.ReasonMode
+	OwnPaymentReasonMode         *domain.ReasonMode
+	OtherPaymentReasonMode       *domain.ReasonMode
 	ForeignBookingReasonRequired *bool
 	OwnPaymentReasonRequired     *bool
 	OtherPaymentReasonRequired   *bool
@@ -203,6 +207,8 @@ type SettingsUpdate struct {
 // every technical and behavioral field. Mixed updates require both rights.
 func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, membership domain.Membership, update SettingsUpdate) (domain.GroupSettings, error) {
 	if update.NotificationEmailsEnabled == nil && update.SettlementsEnabled == nil && update.DefaultRoleID == nil &&
+		update.OwnBookingReasonMode == nil && update.ForeignBookingReasonMode == nil &&
+		update.OwnPaymentReasonMode == nil && update.OtherPaymentReasonMode == nil &&
 		update.ForeignBookingReasonRequired == nil && update.OwnPaymentReasonRequired == nil &&
 		update.OtherPaymentReasonRequired == nil && update.PaymentMethods == nil &&
 		update.BookingReasons == nil && update.PaymentReasons == nil {
@@ -214,6 +220,9 @@ func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, mem
 			return domain.GroupSettings{}, domain.ValidationError{Field: "defaultRoleId", Message: "is required"}
 		}
 		update.DefaultRoleID = &trimmed
+	}
+	if err := validateReasonModeUpdates(update); err != nil {
+		return domain.GroupSettings{}, err
 	}
 	if err := requireSettingsUpdatePermissions(ctx, s.DB, membership, update); err != nil {
 		return domain.GroupSettings{}, err
@@ -242,15 +251,36 @@ func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, mem
 			}
 			next.DefaultRoleID = update.DefaultRoleID
 		}
-		if update.ForeignBookingReasonRequired != nil {
+		if update.OwnBookingReasonMode != nil {
+			next.OwnBookingReasonMode = *update.OwnBookingReasonMode
+		}
+		if update.ForeignBookingReasonMode != nil {
+			next.ForeignBookingReasonMode = *update.ForeignBookingReasonMode
+		} else if update.ForeignBookingReasonRequired != nil {
+			next.ForeignBookingReasonMode = reasonModeFromLegacyRequired(*update.ForeignBookingReasonRequired)
+		}
+		if update.OwnPaymentReasonMode != nil {
+			next.OwnPaymentReasonMode = *update.OwnPaymentReasonMode
+		} else if update.OwnPaymentReasonRequired != nil {
+			next.OwnPaymentReasonMode = reasonModeFromLegacyRequired(*update.OwnPaymentReasonRequired)
+		}
+		if update.OtherPaymentReasonMode != nil {
+			next.OtherPaymentReasonMode = *update.OtherPaymentReasonMode
+		} else if update.OtherPaymentReasonRequired != nil {
+			next.OtherPaymentReasonMode = reasonModeFromLegacyRequired(*update.OtherPaymentReasonRequired)
+		}
+		if update.ForeignBookingReasonRequired != nil && update.ForeignBookingReasonMode == nil {
 			next.ForeignBookingReasonRequired = *update.ForeignBookingReasonRequired
 		}
-		if update.OwnPaymentReasonRequired != nil {
+		if update.OwnPaymentReasonRequired != nil && update.OwnPaymentReasonMode == nil {
 			next.OwnPaymentReasonRequired = *update.OwnPaymentReasonRequired
 		}
-		if update.OtherPaymentReasonRequired != nil {
+		if update.OtherPaymentReasonRequired != nil && update.OtherPaymentReasonMode == nil {
 			next.OtherPaymentReasonRequired = *update.OtherPaymentReasonRequired
 		}
+		next.ForeignBookingReasonRequired = next.ForeignBookingReasonMode.Required()
+		next.OwnPaymentReasonRequired = next.OwnPaymentReasonMode.Required()
+		next.OtherPaymentReasonRequired = next.OtherPaymentReasonMode.Required()
 		var err error
 		if update.PaymentMethods != nil {
 			next.PaymentMethods, err = normalizeConfigurableItems(*update.PaymentMethods, "paymentMethods", 1, 20)
@@ -276,8 +306,10 @@ func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, mem
 		}
 		now := platform.Timestamp(platform.Now())
 		if _, err := tx.ExecContext(ctx, `UPDATE group_settings SET notification_emails_enabled=?,settlements_enabled=?,default_role_id=?,
+			own_booking_reason_mode=?,foreign_booking_reason_mode=?,own_payment_reason_mode=?,other_payment_reason_mode=?,
 			foreign_booking_reason_required=?,own_payment_reason_required=?,other_payment_reason_required=?,updated_at=? WHERE group_id=?`,
-			next.NotificationEmailsEnabled, next.SettlementsEnabled, nullableText(next.DefaultRoleID), next.ForeignBookingReasonRequired,
+			next.NotificationEmailsEnabled, next.SettlementsEnabled, nullableText(next.DefaultRoleID), next.OwnBookingReasonMode,
+			next.ForeignBookingReasonMode, next.OwnPaymentReasonMode, next.OtherPaymentReasonMode, next.ForeignBookingReasonRequired,
 			next.OwnPaymentReasonRequired, next.OtherPaymentReasonRequired, now, membership.GroupID); err != nil {
 			return err
 		}
@@ -301,6 +333,10 @@ func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, mem
 			"settlementsEnabled":        map[string]bool{"previous": previous.SettlementsEnabled, "current": next.SettlementsEnabled},
 			"defaultRoleId":             map[string]any{"previous": previous.DefaultRoleID, "current": next.DefaultRoleID},
 			"transactionSettings": map[string]any{
+				"ownBookingReasonMode":         next.OwnBookingReasonMode,
+				"foreignBookingReasonMode":     next.ForeignBookingReasonMode,
+				"ownPaymentReasonMode":         next.OwnPaymentReasonMode,
+				"otherPaymentReasonMode":       next.OtherPaymentReasonMode,
 				"foreignBookingReasonRequired": next.ForeignBookingReasonRequired,
 				"ownPaymentReasonRequired":     next.OwnPaymentReasonRequired,
 				"otherPaymentReasonRequired":   next.OtherPaymentReasonRequired,
@@ -321,6 +357,8 @@ func requireSettingsUpdatePermissions(ctx context.Context, queryer authorization
 		}
 	}
 	updatesGroupConfiguration := update.NotificationEmailsEnabled != nil || update.SettlementsEnabled != nil ||
+		update.OwnBookingReasonMode != nil || update.ForeignBookingReasonMode != nil ||
+		update.OwnPaymentReasonMode != nil || update.OtherPaymentReasonMode != nil ||
 		update.ForeignBookingReasonRequired != nil || update.OwnPaymentReasonRequired != nil ||
 		update.OtherPaymentReasonRequired != nil || update.PaymentMethods != nil ||
 		update.BookingReasons != nil || update.PaymentReasons != nil
@@ -347,9 +385,11 @@ type settingsQueryer interface {
 func querySettings(ctx context.Context, queryer settingsQueryer, groupID string, settings *domain.GroupSettings) error {
 	var defaultRoleID sql.NullString
 	if err := queryer.QueryRowContext(ctx, `SELECT notification_emails_enabled,settlements_enabled,default_role_id,
+		own_booking_reason_mode,foreign_booking_reason_mode,own_payment_reason_mode,other_payment_reason_mode,
 		foreign_booking_reason_required,own_payment_reason_required,other_payment_reason_required
 		FROM group_settings WHERE group_id=?`, groupID).
-		Scan(&settings.NotificationEmailsEnabled, &settings.SettlementsEnabled, &defaultRoleID, &settings.ForeignBookingReasonRequired,
+		Scan(&settings.NotificationEmailsEnabled, &settings.SettlementsEnabled, &defaultRoleID, &settings.OwnBookingReasonMode,
+			&settings.ForeignBookingReasonMode, &settings.OwnPaymentReasonMode, &settings.OtherPaymentReasonMode, &settings.ForeignBookingReasonRequired,
 			&settings.OwnPaymentReasonRequired, &settings.OtherPaymentReasonRequired); err != nil {
 		return err
 	}
@@ -390,6 +430,10 @@ func (s Service) TransactionSettings(ctx context.Context, membership domain.Memb
 func transactionSettingsFromGroup(settings domain.GroupSettings) domain.TransactionSettings {
 	return domain.TransactionSettings{
 		SettlementsEnabled:           settings.SettlementsEnabled,
+		OwnBookingReasonMode:         settings.OwnBookingReasonMode,
+		ForeignBookingReasonMode:     settings.ForeignBookingReasonMode,
+		OwnPaymentReasonMode:         settings.OwnPaymentReasonMode,
+		OtherPaymentReasonMode:       settings.OtherPaymentReasonMode,
 		ForeignBookingReasonRequired: settings.ForeignBookingReasonRequired,
 		OwnPaymentReasonRequired:     settings.OwnPaymentReasonRequired,
 		OtherPaymentReasonRequired:   settings.OtherPaymentReasonRequired,
@@ -482,9 +526,40 @@ func replaceConfiguredItems(ctx context.Context, queryer settingsExecutor, group
 
 func groupSettingsEqual(left, right domain.GroupSettings) bool {
 	return left.NotificationEmailsEnabled == right.NotificationEmailsEnabled && left.SettlementsEnabled == right.SettlementsEnabled && nullableStringsEqual(left.DefaultRoleID, right.DefaultRoleID) &&
+		left.OwnBookingReasonMode == right.OwnBookingReasonMode && left.ForeignBookingReasonMode == right.ForeignBookingReasonMode &&
+		left.OwnPaymentReasonMode == right.OwnPaymentReasonMode && left.OtherPaymentReasonMode == right.OtherPaymentReasonMode &&
 		left.ForeignBookingReasonRequired == right.ForeignBookingReasonRequired && left.OwnPaymentReasonRequired == right.OwnPaymentReasonRequired &&
 		left.OtherPaymentReasonRequired == right.OtherPaymentReasonRequired && reflect.DeepEqual(left.PaymentMethods, right.PaymentMethods) &&
 		reflect.DeepEqual(left.BookingReasons, right.BookingReasons) && reflect.DeepEqual(left.PaymentReasons, right.PaymentReasons)
+}
+
+// validateReasonModeUpdates rejects unknown values before the settings command
+// performs authorization or opens a write transaction.
+func validateReasonModeUpdates(update SettingsUpdate) error {
+	fields := []struct {
+		name string
+		mode *domain.ReasonMode
+	}{
+		{name: "ownBookingReasonMode", mode: update.OwnBookingReasonMode},
+		{name: "foreignBookingReasonMode", mode: update.ForeignBookingReasonMode},
+		{name: "ownPaymentReasonMode", mode: update.OwnPaymentReasonMode},
+		{name: "otherPaymentReasonMode", mode: update.OtherPaymentReasonMode},
+	}
+	for _, field := range fields {
+		if field.mode != nil && !field.mode.Valid() {
+			return domain.ValidationError{Field: field.name, Message: "must be OFF, OPTIONAL, or REQUIRED"}
+		}
+	}
+	return nil
+}
+
+// reasonModeFromLegacyRequired maps the deprecated Boolean setting to the two
+// states expressible by legacy clients.
+func reasonModeFromLegacyRequired(required bool) domain.ReasonMode {
+	if required {
+		return domain.ReasonModeRequired
+	}
+	return domain.ReasonModeOptional
 }
 
 func validateDefaultRole(ctx context.Context, queryer settingsQueryer, groupID, roleID string) error {
