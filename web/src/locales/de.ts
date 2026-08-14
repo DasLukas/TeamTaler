@@ -146,8 +146,8 @@ export const de = {
     sheetHandle: 'Dialog schließen oder nach unten wischen',
   },
   auth: {
-    slogan: 'Mehr Miteinander.<br/>Weniger Rechnerei.',
-    productSummary: 'TeamTaler macht gemeinsame Ausgaben fair, klar und entspannt.',
+    slogan: 'Die einfache Art für gemeinsame Finanzen',
+    productSummary: 'TeamTaler macht gemeinsame Finanzen einfach, transparent und fair.',
     inviteLink: 'Einladung annehmen',
     privacy: 'Self-hosted und datensparsam',
     loginTitle: 'Willkommen zurück',
