@@ -63,7 +63,7 @@
   min-width: 0;
   flex-direction: column;
   box-sizing: border-box;
-  padding-top: 56px;
+  padding-top: var(--space-6);
   border-left: 1px solid var(--color-border);
   container-name: booking-inspector;
   container-type: inline-size;

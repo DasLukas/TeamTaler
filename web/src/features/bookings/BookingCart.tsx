@@ -18,7 +18,7 @@ import { calculateCartTotal, resolveCartLinePrice, type BookingCartLine } from '
 import styles from './BookingCart.module.css';
 
 /** Supported presentation levels for the compact booking cart. */
-export type BookingCartView = 'peek' | 'summary' | 'details';
+export type BookingCartView = 'peek' | 'details';
 
 /** Properties accepted by the responsive booking cart. */
 export interface BookingCartProps {
@@ -74,13 +74,16 @@ export function BookingCart({
   const dragRef = useRef<{ pointerId: number; startY: number; startTime: number; moved: boolean } | null>(null);
   const suppressHandleClickRef = useRef(false);
   const productCount = lines.length;
+  const itemCount = lines.reduce((sum, line) => sum + line.quantity, 0);
   const bookingCount = productCount * targetCount;
   const total = calculateCartTotal(lines, targetCount);
-  const bookingScopeLabel = t('booking.bookingScope', {
-    products: t('booking.productCount', { count: productCount }),
-    targets: t('booking.personCount', { count: targetCount }),
-    bookings: t('booking.bookingCount', { count: bookingCount }),
-  });
+  const bookingScopeLabel = targetCount > 1
+    ? t('booking.bookingScope', {
+        products: t('booking.productCount', { count: productCount }),
+        targets: t('booking.personCount', { count: targetCount }),
+        bookings: t('booking.bookingCount', { count: bookingCount }),
+      })
+    : `${t('booking.productCount', { count: itemCount })}; ${t('booking.bookingCount', { count: bookingCount })}`;
   const hasInvalidPrice = lines.some((line) => !resolveCartLinePrice(line));
   const minimized = compact && view === 'peek';
   const showDetails = !compact || view === 'details';
@@ -187,16 +190,16 @@ export function BookingCart({
         <button
           aria-expanded="false"
           aria-label={t('booking.cartExpandAccessible', {
-            products: t('booking.productCount', { count: productCount }),
+            products: t('booking.productCount', { count: itemCount }),
             total: total ? formatMoney(total) : '—',
           })}
           className={styles.peekButton}
-          onClick={() => onViewChange('summary')}
+          onClick={() => onViewChange('details')}
           type="button"
         >
           <span className={styles.peekIdentity}>
             <strong>{t('booking.cartTitle')}</strong>
-            <span aria-hidden="true" className={styles.peekProductCount}><Package size={16} strokeWidth={1.9} />{productCount}</span>
+            <span aria-hidden="true" className={styles.peekProductCount}><Package size={16} strokeWidth={1.9} />{itemCount}</span>
           </span>
           <strong className={styles.peekTotal}>{total ? formatMoney(total) : '—'}</strong>
           <ChevronUp aria-hidden="true" size={24} strokeWidth={2} />
@@ -208,11 +211,7 @@ export function BookingCart({
           </div>
           {compact ? (
             <div className={styles.headerActions}>
-              {view === 'details' ? (
-                <IconButton aria-expanded="true" label={t('booking.cartCollapse')} onClick={() => onViewChange('summary')}><X size={28} strokeWidth={1.8} /></IconButton>
-              ) : (
-                <Button aria-expanded="false" onClick={() => onViewChange('details')} size="small" variant="ghost">{t('booking.cartEdit')}</Button>
-              )}
+              <IconButton aria-expanded="true" label={t('booking.cartCollapse')} onClick={() => onViewChange('peek')}><X size={28} strokeWidth={1.8} /></IconButton>
             </div>
           ) : null}
         </header>
@@ -295,7 +294,7 @@ export function BookingCart({
           ) : (
             <>
               <span aria-hidden="true" className={styles.scopeEquation}>
-                <span className={styles.scopeFactor}><Package size={18} strokeWidth={2} /><b>{productCount}</b></span>
+                <span className={styles.scopeFactor}><Package size={18} strokeWidth={2} /><b>{itemCount}</b></span>
               </span>
               <span className="sr-only">{bookingScopeLabel}</span>
             </>

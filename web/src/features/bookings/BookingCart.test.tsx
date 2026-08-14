@@ -85,11 +85,7 @@ describe('BookingCart booking expansion limits', () => {
   it('uses the stacked total and product-symbol summary for one target', () => {
     renderCart({ lines: [cartLine(1), cartLine(2)], targetCount: 1 });
 
-    const accessibleScope = screen.getByText(i18n.t('booking.bookingScope', {
-      products: i18n.t('booking.productCount', { count: 2 }),
-      targets: i18n.t('booking.personCount', { count: 1 }),
-      bookings: i18n.t('booking.bookingCount', { count: 2 }),
-    }));
+    const accessibleScope = screen.getByText(`${i18n.t('booking.productCount', { count: 2 })}; ${i18n.t('booking.bookingCount', { count: 2 })}`);
     const scope = accessibleScope.parentElement;
     const visualProductCount = accessibleScope.previousElementSibling;
     expect(screen.queryByText('Ada Admin')).not.toBeInTheDocument();
@@ -97,6 +93,17 @@ describe('BookingCart booking expansion limits', () => {
     expect(scope?.firstElementChild).toHaveTextContent('2,00');
     expect(visualProductCount).toHaveTextContent('2');
     expect(visualProductCount?.querySelectorAll('svg')).toHaveLength(1);
+  });
+
+  it('updates the visible item count when a single cart line quantity changes', () => {
+    renderCart({ lines: [cartLine(1, 2)], targetCount: 1 });
+
+    const accessibleScope = screen.getByText(`${i18n.t('booking.productCount', { count: 2 })}; ${i18n.t('booking.bookingCount', { count: 1 })}`);
+    const scope = accessibleScope.parentElement;
+    const visualItemCount = accessibleScope.previousElementSibling;
+    expect(scope?.firstElementChild).toHaveTextContent('2,00');
+    expect(visualItemCount).toHaveTextContent('2');
+    expect(screen.getByRole('button', { name: i18n.t('booking.submit') })).toBeEnabled();
   });
 
   it('groups the result and booking action in one persistent checkout footer', () => {
@@ -112,19 +119,25 @@ describe('BookingCart booking expansion limits', () => {
     expect(checkout).toContainElement(screen.getByRole('button', { name: i18n.t('booking.submitBookings') }));
   });
 
-  it('uses the production sheet handle without a separate minimize icon', () => {
-    const { container } = renderCart({ compact: true, view: 'details' });
+  it('uses the production sheet handle and closes details directly to the minimized state', async () => {
+    const user = userEvent.setup();
+    const onViewChange = vi.fn();
+    const { container } = renderCart({ compact: true, onViewChange, view: 'details' });
 
     const minimizeHandle = container.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.t('booking.cartMinimize')}"]`);
     expect(minimizeHandle).not.toBeNull();
     expect(container.querySelector('form > button > span[aria-hidden="true"]')).toBeInTheDocument();
     expect(minimizeHandle?.querySelector('svg')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: i18n.t('booking.cartCollapse') })).toHaveAttribute('aria-expanded', 'true');
+    const close = screen.getByRole('button', { name: i18n.t('booking.cartCollapse') });
+    expect(close).toHaveAttribute('aria-expanded', 'true');
+
+    await user.click(close);
+    expect(onViewChange).toHaveBeenCalledWith('peek');
   });
 
   it('minimizes the compact sheet when its handle is swiped down', () => {
     const onViewChange = vi.fn();
-    const { container } = renderCart({ compact: true, onViewChange, view: 'summary' });
+    const { container } = renderCart({ compact: true, onViewChange, view: 'details' });
     const handle = container.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.t('booking.cartMinimize')}"]`);
     expect(handle).not.toBeNull();
     if (!handle) return;
@@ -137,7 +150,7 @@ describe('BookingCart booking expansion limits', () => {
   });
 
   it('keeps the reason above the result and the result directly above the primary action', () => {
-    renderCart({ compact: true, view: 'summary', reasonMode: 'REQUIRED', targetCount: 2 });
+    renderCart({ compact: true, view: 'details', reasonMode: 'REQUIRED', targetCount: 2 });
 
     const reasonInput = screen.getByLabelText(`${i18n.t('booking.reason')} *`);
     const reasonField = reasonInput.parentElement;
@@ -156,8 +169,8 @@ describe('BookingCart booking expansion limits', () => {
     expect(submit).toBeDisabled();
   });
 
-  it('keeps an optional reason out of the compact summary and inside cart details', () => {
-    const { rerender } = renderCart({ compact: true, reasonMode: 'OPTIONAL', view: 'summary' });
+  it('keeps an optional reason out of the minimized cart and inside cart details', () => {
+    const { rerender } = renderCart({ compact: true, reasonMode: 'OPTIONAL', view: 'peek' });
     expect(screen.queryByLabelText(i18n.t('booking.reason'))).not.toBeInTheDocument();
 
     rerender(<BookingCart
@@ -214,7 +227,7 @@ describe('BookingCart booking expansion limits', () => {
     rectSpy.mockRestore();
   });
 
-  it('reduces the compact cart to an accessible peek and restores the checkout on demand', async () => {
+  it('reduces the compact cart to an accessible peek and restores details directly', async () => {
     const user = userEvent.setup();
     const onViewChange = vi.fn();
     renderCart({ compact: true, lines: [cartLine(1), cartLine(2)], onViewChange, reasonMode: 'REQUIRED', targetCount: 3, view: 'peek' });
@@ -231,7 +244,17 @@ describe('BookingCart booking expansion limits', () => {
     expect(screen.queryByRole('button', { name: i18n.t('booking.submitBookings') })).not.toBeInTheDocument();
 
     await user.click(open);
-    expect(onViewChange).toHaveBeenCalledWith('summary');
+    expect(onViewChange).toHaveBeenCalledWith('details');
+  });
+
+  it('shows the summed item quantity in the minimized cart', () => {
+    renderCart({ compact: true, lines: [cartLine(1, 2)], view: 'peek' });
+
+    const open = screen.getByRole('button', { name: i18n.t('booking.cartExpandAccessible', {
+      products: i18n.t('booking.productCount', { count: 2 }),
+      total: '2,00 €',
+    }) });
+    expect(open).toHaveTextContent('Warenkorb22,00 €');
   });
 
   it('blocks carts that would expand beyond 500 product-target bookings', () => {

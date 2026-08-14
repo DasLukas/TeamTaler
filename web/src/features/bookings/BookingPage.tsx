@@ -47,7 +47,7 @@ function BookingWorkspace({ groupId, categories, context, compact }: BookingWork
   const [requestedTargetMembershipIds, setRequestedTargetMembershipIds] = useState<string[]>(initialTargetMembershipIds);
   const [temporaryGuestDisplayNames, setTemporaryGuestDisplayNames] = useState<string[]>([]);
   const [reason, setReason] = useState('');
-  const [cartView, setCartView] = useState<BookingCartView>('summary');
+  const [cartView, setCartView] = useState<BookingCartView>('details');
   const [priceEntryRequest, setPriceEntryRequest] = useState<{ productId: string; requestId: number }>();
   const [confirmation, setConfirmation] = useState('');
   const [cartLimitError, setCartLimitError] = useState('');
@@ -74,7 +74,7 @@ function BookingWorkspace({ groupId, categories, context, compact }: BookingWork
     setTemporaryGuestDisplayNames([]);
     targetSelectionTouchedRef.current = false;
     setReason('');
-    setCartView('summary');
+    setCartView('details');
     setPriceEntryRequest(undefined);
   };
 
@@ -123,7 +123,7 @@ function BookingWorkspace({ groupId, categories, context, compact }: BookingWork
     }
     if (lines.length >= 25) {
       setCartLimitError(t('booking.tooManyProducts'));
-      if (compact) setCartView('summary');
+      if (compact) setCartView('details');
       return;
     }
     if (compact) setCartView(product.pricingMode === 'USER_DEFINED' || lines.length === 0 ? 'details' : 'peek');
