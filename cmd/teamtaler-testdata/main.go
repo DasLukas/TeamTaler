@@ -26,6 +26,7 @@ import (
 
 const (
 	testPassword         = "TeamTaler-Test-2026!"
+	testDataSeedTimeout  = 2 * time.Minute
 	adminEmail           = "admin@example.test"
 	secondaryGroupName   = "TeamTaler Weekend Club"
 	secondaryMemberEmail = "noah@example.test"
@@ -75,10 +76,11 @@ func main() {
 
 // run creates the complete development fixture in the configured empty
 // database. Configuration is read from TEAMTALER_* variables and the operation
-// is bounded to 30 seconds. It returns validation, storage, or domain-service
-// errors and refuses to modify a database that already contains users.
+// is bounded to two minutes to accommodate image normalization on race-enabled
+// or resource-constrained systems. It returns validation, storage, or domain-
+// service errors and refuses to modify a database that already contains users.
 func run() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testDataSeedTimeout)
 	defer cancel()
 
 	cfg, err := config.Load()
