@@ -22,6 +22,7 @@ const session: Session = {
   user: { id: 'user-a', displayName: 'Admin', email: 'admin@example.test' },
   groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', roles: ['ADMIN', 'MEMBER'], groupPermissions: [] } }],
   activeGroupId: 'group-a',
+  defaultGroupId: null,
 };
 
 function renderPanel(): QueryClient {

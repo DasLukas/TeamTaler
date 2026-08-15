@@ -8,7 +8,7 @@ All source code, code comments, documentation, commit messages, issue text, and 
 
 ## Development setup
 
-1. Install Go 1.26.x, Node.js 24.x, and npm 11.x.
+1. Install Go 1.26.x, Node.js 24.x, and npm 11.x. If you use NVM, run `nvm use` from the repository root.
 2. Run `make install`.
 3. Start the API with `make dev-backend`.
 4. Start the frontend with `make dev-frontend`.

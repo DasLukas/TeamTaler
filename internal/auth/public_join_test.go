@@ -53,7 +53,7 @@ func TestPublicJoinRegistrationVerifiesEmailAndUsesCurrentDefaultRole(t *testing
 		t.Fatalf("start registration: %v", err)
 	}
 
-	financeRoleID := authorization.PresetRoleID(adminMembership.GroupID, domain.RolePresetFinanceManager)
+	financeRoleID := authorization.TemplateRoleID(adminMembership.GroupID, domain.RoleTemplateFinance)
 	if _, err := groupService.UpdateSettings(ctx, adminSession.Principal, adminMembership, groups.SettingsUpdate{DefaultRoleID: &financeRoleID}); err != nil {
 		t.Fatalf("change current default role: %v", err)
 	}
@@ -138,17 +138,17 @@ func TestAuthenticatedPublicJoinReactivatesWithOnlyCurrentDefaultRole(t *testing
 	if err != nil {
 		t.Fatalf("join existing account: %v", err)
 	}
-	memberRoleID := authorization.PresetRoleID(adminMembership.GroupID, domain.RolePresetMember)
-	assertOnlyAssignedRole(t, db, adminMembership.GroupID, joined.ID, memberRoleID)
+	guestRoleID := authorization.GuestRoleID(adminMembership.GroupID)
+	assertOnlyAssignedRole(t, db, adminMembership.GroupID, joined.ID, guestRoleID)
 
-	financeRoleID := authorization.PresetRoleID(adminMembership.GroupID, domain.RolePresetFinanceManager)
+	financeRoleID := authorization.TemplateRoleID(adminMembership.GroupID, domain.RoleTemplateFinance)
 	if _, err := db.ExecContext(ctx, `INSERT INTO membership_role_assignments(group_id,membership_id,role_id,version,assigned_at,assigned_by) VALUES(?,?,?,1,?,?)`, adminMembership.GroupID, joined.ID, financeRoleID, now, adminSession.Principal.UserID); err != nil {
 		t.Fatalf("assign second role: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `UPDATE memberships SET status='ARCHIVED',archived_at=? WHERE id=? AND group_id=?`, now, joined.ID, adminMembership.GroupID); err != nil {
 		t.Fatalf("archive membership: %v", err)
 	}
-	catalogRoleID := authorization.PresetRoleID(adminMembership.GroupID, domain.RolePresetCatalogManager)
+	catalogRoleID := authorization.TemplateRoleID(adminMembership.GroupID, domain.RoleTemplateCatalog)
 	if _, err := groupService.UpdateSettings(ctx, adminSession.Principal, adminMembership, groups.SettingsUpdate{DefaultRoleID: &catalogRoleID}); err != nil {
 		t.Fatalf("change default role: %v", err)
 	}

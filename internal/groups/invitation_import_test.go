@@ -19,7 +19,7 @@ import (
 type failingTokenSealer struct{}
 
 func invitationImportRoleIDs(membership domain.Membership) []string {
-	return []string{authorization.PresetRoleID(membership.GroupID, domain.RolePresetMember)}
+	return []string{authorization.TemplateRoleID(membership.GroupID, domain.RoleTemplateMember)}
 }
 
 func createStarterInvitation(ctx context.Context, service Service, actor domain.Principal, membership domain.Membership, email, displayName string) (Invitation, error) {
@@ -364,7 +364,7 @@ func TestImportInvitationsResolvesRowRolesAndDefaultFallback(t *testing.T) {
 	membership := groups[0].Membership
 	result, err := service.ImportInvitations(ctx, session.Principal, membership, "role-name-import", nil, []InvitationImportCandidate{
 		{Row: 2, Email: "default@example.test"},
-		{Row: 3, Email: "finance@example.test", RoleNames: []string{"finance MANAGER", "Finance manager"}},
+		{Row: 3, Email: "finance@example.test", RoleNames: []string{"FINANZVERWALTUNG", "Finanzverwaltung"}},
 		{Row: 4, Email: "unknown@example.test", RoleNames: []string{"Missing role"}},
 	})
 	if err != nil {
@@ -374,8 +374,8 @@ func TestImportInvitationsResolvesRowRolesAndDefaultFallback(t *testing.T) {
 		t.Fatalf("result=%#v", result)
 	}
 	for email, expectedRoleID := range map[string]string{
-		"default@example.test": authorization.PresetRoleID(membership.GroupID, domain.RolePresetMember),
-		"finance@example.test": authorization.PresetRoleID(membership.GroupID, domain.RolePresetFinanceManager),
+		"default@example.test": authorization.GuestRoleID(membership.GroupID),
+		"finance@example.test": authorization.TemplateRoleID(membership.GroupID, domain.RoleTemplateFinance),
 	} {
 		var roleID string
 		if err := db.QueryRowContext(ctx, `SELECT assignment.role_id FROM invitation_role_assignments assignment JOIN invitations invitation ON invitation.id=assignment.invitation_id WHERE invitation.group_id=? AND invitation.email=?`, membership.GroupID, email).Scan(&roleID); err != nil || roleID != expectedRoleID {

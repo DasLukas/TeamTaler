@@ -105,7 +105,7 @@ func TestRoleHTTPOptimisticLifecycleAssignmentsAndAdministratorProtection(t *tes
 		t.Fatalf("updated role = %#v, ETag = %q", role, updatedResponse.Header().Get("ETag"))
 	}
 
-	invitation, err := server.groups.CreateInvitationWithRoles(ctx, principal, administrator, "role-member@example.test", "Role Member", []string{authorization.PresetRoleID(administrator.GroupID, domain.RolePresetMember)})
+	invitation, err := server.groups.CreateInvitationWithRoles(ctx, principal, administrator, "role-member@example.test", "Role Member", []string{authorization.TemplateRoleID(administrator.GroupID, domain.RoleTemplateMember)})
 	if err != nil {
 		t.Fatalf("create member invitation: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestRoleHTTPOptimisticLifecycleAssignmentsAndAdministratorProtection(t *tes
 		t.Fatalf("role conflict counts = %#v", conflict)
 	}
 
-	memberRoleID := authorization.PresetRoleID(administrator.GroupID, domain.RolePresetMember)
+	memberRoleID := authorization.TemplateRoleID(administrator.GroupID, domain.RoleTemplateMember)
 	unassign := roleHandlerRequest(principal, administrator.GroupID, http.MethodPut, fmt.Sprintf(`{"roleIds":[%q]}`, memberRoleID))
 	unassign.SetPathValue("membershipID", member.ID)
 	unassign.Header.Set("If-Match", versionETag(assignment.Version))
@@ -208,7 +208,7 @@ func TestDynamicInvitationRoleUpdateUsesAssignmentETag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create invitation role: %v", err)
 	}
-	invitation, err := server.groups.CreateInvitationWithRoles(context.Background(), principal, administrator, "dynamic-invitation@example.test", "Pending Member", []string{authorization.PresetRoleID(administrator.GroupID, domain.RolePresetMember)})
+	invitation, err := server.groups.CreateInvitationWithRoles(context.Background(), principal, administrator, "dynamic-invitation@example.test", "Pending Member", []string{authorization.TemplateRoleID(administrator.GroupID, domain.RoleTemplateMember)})
 	if err != nil {
 		t.Fatalf("create invitation: %v", err)
 	}
@@ -264,7 +264,7 @@ func TestLegacyAssignmentUpdatesRequireCurrentETag(t *testing.T) {
 
 	server, principal, administrator := invitationImportServer(t, false)
 	ctx := context.Background()
-	acceptedInvitation, err := server.groups.CreateInvitationWithRoles(ctx, principal, administrator, "legacy-member@example.test", "Legacy Member", []string{authorization.PresetRoleID(administrator.GroupID, domain.RolePresetMember)})
+	acceptedInvitation, err := server.groups.CreateInvitationWithRoles(ctx, principal, administrator, "legacy-member@example.test", "Legacy Member", []string{authorization.TemplateRoleID(administrator.GroupID, domain.RoleTemplateMember)})
 	if err != nil {
 		t.Fatalf("create member invitation: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestLegacyAssignmentUpdatesRequireCurrentETag(t *testing.T) {
 		t.Fatalf("stale legacy member update status = %d, body = %s", staleMemberResponse.Code, staleMemberResponse.Body.String())
 	}
 
-	pendingInvitation, err := server.groups.CreateInvitationWithRoles(ctx, principal, administrator, "legacy-invitation@example.test", "Pending Legacy Member", []string{authorization.PresetRoleID(administrator.GroupID, domain.RolePresetMember)})
+	pendingInvitation, err := server.groups.CreateInvitationWithRoles(ctx, principal, administrator, "legacy-invitation@example.test", "Pending Legacy Member", []string{authorization.TemplateRoleID(administrator.GroupID, domain.RoleTemplateMember)})
 	if err != nil {
 		t.Fatalf("create pending invitation: %v", err)
 	}

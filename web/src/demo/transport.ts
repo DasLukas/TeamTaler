@@ -237,7 +237,7 @@ export class DemoTransport {
     settlementsEnabled: false,
     notificationEmailsEnabled: false,
     notificationEmailDeliveryAvailable: true,
-    defaultRoleId: 'role-member',
+    defaultRoleId: 'role-guest',
     ownBookingReasonMode: 'OFF',
     foreignBookingReasonMode: 'REQUIRED',
     ownPaymentReasonMode: 'REQUIRED',
@@ -281,6 +281,20 @@ export class DemoTransport {
       this.session.user.displayName = displayName;
       this.members = this.members.map((member) => member.userId === this.session.user.id ? { ...member, displayName } : member);
       return clone(this.session.user) as T;
+    }
+    if (cleanPath === '/me/group-preference' && method === 'PUT') {
+      const defaultGroupId = (body as { defaultGroupId?: unknown }).defaultGroupId;
+      if (defaultGroupId !== null && (typeof defaultGroupId !== 'string' || !this.session.groups.some((group) => group.id === defaultGroupId))) {
+        throw new Error('The default group must be an available group or null.');
+      }
+      this.session.defaultGroupId = defaultGroupId;
+      return { defaultGroupId } as T;
+    }
+    if (cleanPath === '/me/group-preference/last-used' && method === 'PUT') {
+      const groupId = String((body as { groupId?: unknown }).groupId ?? '');
+      if (!this.session.groups.some((group) => group.id === groupId)) throw new Error('The last-used group must be available.');
+      this.session.activeGroupId = groupId;
+      return undefined as T;
     }
     if (cleanPath === '/me/password' && method === 'PUT') return undefined as T;
     if (cleanPath === '/session' || cleanPath === '/me') return clone(this.session) as T;
@@ -619,6 +633,8 @@ export class DemoTransport {
     if (!command.email.includes('@') || command.password.length < 8) {
       throw new Error(i18n.t('errors.invalidDemoCredentials'));
     }
+    const activeGroupId = this.session.defaultGroupId ?? this.session.activeGroupId ?? this.session.groups[0]?.id ?? '';
+    this.session.activeGroupId = activeGroupId;
     return clone(this.session);
   }
 
@@ -721,38 +737,36 @@ export class DemoTransport {
     }
   }
 
-  /** Derives deprecated role strings only from seeded preset assignments. */
+  /** Derives deprecated role strings from the protected admin identity and effective grants. */
   private legacyRolesForRoleIds(roleIds: readonly string[]): Membership['roles'] {
     const roles = new Set<Membership['roles'][number]>();
-    for (const roleId of roleIds) {
-      const preset = this.roles.find((role) => role.id === roleId)?.presetKey;
-      if (preset === 'GROUP_ADMINISTRATOR') roles.add('ADMIN');
-      if (preset === 'FINANCE_MANAGER') roles.add('FINANCE_MANAGER');
-      if (preset === 'CATALOG_MANAGER') roles.add('CATALOG_MANAGER');
-    }
-    return [...roles];
+    const assigned = this.roles.filter((role) => roleIds.includes(role.id));
+    if (assigned.some((role) => role.presetKey === 'GROUP_ADMINISTRATOR')) roles.add('ADMIN');
+    const grants = this.grantsForRoleIds(roleIds);
+    if (grants.some((grant) => grant.permission === 'CATALOG_MANAGEMENT')) roles.add('CATALOG_MANAGER');
+    if (grants.some((grant) => grant.permission === 'FINANCE_MANAGEMENT')) roles.add('FINANCE_MANAGER');
+    return [...roles] as Membership['roles'];
   }
 
-  /** Replaces legacy presets while preserving every custom role assignment. */
+  /** Replaces legacy compatibility assignments while preserving ordinary dynamic roles. */
   private roleIdsForLegacyUpdate(currentRoleIds: readonly string[], roles: readonly Membership['roles'][number][], groupPermissions: readonly string[]): string[] {
-    const legacyPreset = new Map<Membership['roles'][number], Role['presetKey']>([
-      ['ADMIN', 'GROUP_ADMINISTRATOR'],
-      ['FINANCE_MANAGER', 'FINANCE_MANAGER'],
-      ['CATALOG_MANAGER', 'CATALOG_MANAGER'],
-      ['MEMBER', 'MEMBER'],
+    const legacyRoleIds = new Map<Membership['roles'][number], string>([
+      ['ADMIN', 'role-admin'],
+      ['FINANCE_MANAGER', 'role-finance'],
+      ['CATALOG_MANAGER', 'role-catalog'],
     ]);
     const migrationRole = this.roles.find((role) => role.id === 'role-self-payment');
+    const managedRoleIds = new Set(legacyRoleIds.values());
     const preservedCustom = currentRoleIds.filter((roleId) => {
       const role = this.roles.find((entry) => entry.id === roleId);
-      return role && !role.presetKey && role.id !== migrationRole?.id;
+      return role && !managedRoleIds.has(role.id) && role.id !== migrationRole?.id;
     });
-    const presetRoleIds = roles.flatMap((legacyRole) => {
-      const preset = legacyPreset.get(legacyRole);
-      const role = this.roles.find((entry) => entry.presetKey === preset);
-      return role ? [role.id] : [];
+    const compatibilityRoleIds = roles.flatMap((legacyRole) => {
+      const roleId = legacyRoleIds.get(legacyRole);
+      return roleId && this.roles.some((role) => role.id === roleId) ? [roleId] : [];
     });
     const selfPaymentRoleIds = groupPermissions.includes('SELF_RECORD_PAYMENT') && migrationRole ? [migrationRole.id] : [];
-    return this.normalizedRoleIds([...preservedCustom, ...presetRoleIds, ...selfPaymentRoleIds]);
+    return this.normalizedRoleIds([...preservedCustom, ...compatibilityRoleIds, ...selfPaymentRoleIds]);
   }
 
   /** Normalizes an explicit role selection to unique, known identifiers. */

@@ -7,7 +7,7 @@ import { ApiError, api } from '@/api/client';
 import type { Membership, Session, User } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Button } from '@/components/ui/Button';
-import { Field, TextInput } from '@/components/ui/FormField';
+import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { Modal } from '@/components/ui/Modal';
 import { authenticationCapabilitiesQueryKey } from '@/features/auth/authenticationCapabilities';
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from '@/features/auth/passwordPolicy';
@@ -19,6 +19,8 @@ type AccountDialog = 'name' | 'password' | 'email';
 interface NameForm { displayName: string }
 interface PasswordForm { currentPassword: string; newPassword: string; passwordConfirmation: string }
 interface EmailForm { newEmail: string; currentPassword: string }
+
+const LAST_USED_GROUP_VALUE = '__LAST_USED_GROUP__';
 
 function accountMutationError(error: unknown, kind: AccountDialog, t: (key: string) => string): string {
   if (error instanceof ApiError) {
@@ -125,10 +127,45 @@ function EmailChangeForm({ onClose }: { onClose: () => void }) {
   );
 }
 
+function DefaultGroupSetting({ session }: { session: Session }) {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const persistedValue = session.defaultGroupId ?? LAST_USED_GROUP_VALUE;
+  const [selection, setSelection] = useState(persistedValue);
+  const mutation = useMutation({
+    mutationFn: () => api.updateDefaultGroup(selection === LAST_USED_GROUP_VALUE ? null : selection),
+    onSuccess: (preference) => {
+      queryClient.setQueryData<Session>(['session'], (current) => current ? { ...current, defaultGroupId: preference.defaultGroupId } : current);
+    },
+  });
+  return (
+    <div className={styles.preferenceRow}>
+      <dt>{t('account.details.defaultGroup')}</dt>
+      <dd className={styles.preference}>
+        <SelectInput
+          aria-label={t('account.details.defaultGroup')}
+          id="account-default-group"
+          onChange={(event) => { setSelection(event.target.value); mutation.reset(); }}
+          value={selection}
+        >
+          <option value={LAST_USED_GROUP_VALUE}>{t('account.details.lastUsedGroup')}</option>
+          {session.groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+        </SelectInput>
+        <span className={styles.preferenceHint}>{t('account.details.defaultGroupHint')}</span>
+        {mutation.isSuccess ? <span className={styles.success} role="status">{t('account.details.defaultGroupSaved')}</span> : null}
+        {mutation.isError ? <span className={styles.error} role="alert">{t('account.details.saveError')}</span> : null}
+      </dd>
+      <Button disabled={selection === persistedValue || mutation.isPending} onClick={() => mutation.mutate()} size="small" variant="secondary">
+        {mutation.isPending ? t('common.saving') : t('common.save')}
+      </Button>
+    </div>
+  );
+}
+
 /**
  * Renders self-service account data with responsive change dialogs.
  *
- * @returns Name, email, and password controls available for this deployment.
+ * @returns Name, email, password, and multi-group login-preference controls available for this deployment.
  */
 export function AccountDetailsPanel() {
   const { t } = useTranslation();
@@ -149,6 +186,7 @@ export function AccountDetailsPanel() {
         <div><dt>{t('account.details.name')}</dt><dd>{session.user.displayName}</dd><Button onClick={() => setDialog('name')} size="small" variant="secondary">{t('common.edit')}</Button></div>
         <div><dt>{t('account.details.email')}</dt><dd>{session.user.email}</dd>{capabilities.data?.emailChangeAvailable === true ? <Button onClick={() => setDialog('email')} size="small" variant="secondary">{t('common.edit')}</Button> : null}</div>
         <div><dt>{t('account.details.password')}</dt><dd aria-label={t('account.details.password')}>••••••••••••</dd><Button onClick={() => setDialog('password')} size="small" variant="secondary">{t('common.edit')}</Button></div>
+        {session.groups.length > 1 ? <DefaultGroupSetting session={session} /> : null}
       </dl>
       {successMessage ? <p className={styles.success} role="status">{successMessage}</p> : null}
       <Modal onClose={closeDialog} open={dialog !== undefined} title={dialog ? dialogTitles[dialog] : ''} variant="sheet">

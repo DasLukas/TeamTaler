@@ -25,6 +25,7 @@ const baseSession: Session = {
   user: { id: 'user-a', displayName: 'Alex', email: 'alex@example.test' },
   groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', roles: ['ADMIN', 'MEMBER'], groupPermissions: [] } }],
   activeGroupId: 'group-a',
+  defaultGroupId: null,
 };
 
 function renderSettings(session: Session = baseSession): QueryClient {

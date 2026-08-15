@@ -1,29 +1,19 @@
-import type { Role, RolePresetKey } from '@/api/types';
+import type { Role } from '@/api/types';
 import i18n from '@/i18n';
 
-const CANONICAL_PRESET_NAMES: Readonly<Record<RolePresetKey, string>> = {
-  GROUP_ADMINISTRATOR: 'Group administrator',
-  MEMBER: 'Member',
-  FINANCE_MANAGER: 'Finance manager',
-  CATALOG_MANAGER: 'Catalog manager',
-};
-
-const CANONICAL_PRESET_DESCRIPTIONS: Readonly<Record<RolePresetKey, string>> = {
-  GROUP_ADMINISTRATOR: 'Required administrator role with full group access.',
-  MEMBER: 'Editable starter role for regular group members.',
-  FINANCE_MANAGER: 'Seeded role for financial management.',
-  CATALOG_MANAGER: 'Seeded role for catalog management.',
-};
+const CANONICAL_ADMINISTRATOR_DESCRIPTIONS: readonly string[] = ['Required administrator role with full group access.', 'Standardrolle für Administratorrolle mit vollständigem Zugriff auf die Gruppe'];
 
 /**
- * Localizes unchanged seeded role names without hiding administrator renames.
+ * Returns the persisted role name verbatim for every UI surface.
+ *
+ * Role names are group-owned content. Translating canonical-looking values
+ * would make the editor disagree with role pickers and assignment summaries.
  *
  * @param role - Group-owned role returned by the API.
- * @returns A localized preset name or the administrator-defined role name.
+ * @returns The exact name stored for the role.
  */
 export function roleDisplayName(role: Role): string {
-  if (!role.presetKey || role.name !== CANONICAL_PRESET_NAMES[role.presetKey]) return role.name;
-  return i18n.t(`roleManagement.presetNames.${role.presetKey}`);
+  return role.name;
 }
 
 /**
@@ -34,6 +24,6 @@ export function roleDisplayName(role: Role): string {
  * @returns A localized preset description or the stored custom description.
  */
 export function roleDisplayDescription(role: Role): string {
-  if (!role.presetKey || role.description !== CANONICAL_PRESET_DESCRIPTIONS[role.presetKey]) return role.description ?? '';
-  return i18n.t(`roleManagement.presetDescriptions.${role.presetKey}`);
+  if (role.presetKey !== 'GROUP_ADMINISTRATOR' || !CANONICAL_ADMINISTRATOR_DESCRIPTIONS.includes(role.description ?? '')) return role.description ?? '';
+  return i18n.t('roleManagement.presetDescriptions.GROUP_ADMINISTRATOR');
 }

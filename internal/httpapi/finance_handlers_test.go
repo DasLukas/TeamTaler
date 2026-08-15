@@ -20,6 +20,7 @@ func TestHandleCreateOwnPaymentDerivesAuthenticatedMembershipAndRejectsTargetFie
 
 	server, principal, membership := invitationImportServer(t, false)
 	server.finance = finance.Service{DB: server.db}
+	membership = assignTestTemplateRoles(t, context.Background(), server.groups, principal, membership, domain.RoleTemplateFinance)
 	request := ownPaymentRequest(principal, membership.GroupID, `{"amountMinor":125,"receivedAt":"2026-08-06T00:00:00Z","method":"PAYPAL","reference":"Own PayPal payment"}`)
 	response := httptest.NewRecorder()
 

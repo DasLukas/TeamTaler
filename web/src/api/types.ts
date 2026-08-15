@@ -79,7 +79,7 @@ export interface PermissionDefinition {
 }
 
 /** Reserved role identities whose behavior is protected by the server. */
-export type RolePresetKey = 'GROUP_ADMINISTRATOR' | 'MEMBER' | 'FINANCE_MANAGER' | 'CATALOG_MANAGER';
+export type RolePresetKey = 'GROUP_ADMINISTRATOR';
 
 /** A group-owned role containing reusable permission grants. */
 export interface Role {
@@ -275,7 +275,13 @@ export interface Session {
   user: User;
   groups: Group[];
   activeGroupId: string;
+  defaultGroupId: string | null;
   demo?: boolean;
+}
+
+/** Persisted account preference controlling the group selected after login. */
+export interface GroupPreference {
+  defaultGroupId: string | null;
 }
 
 /** A product that can be booked against a member account. */

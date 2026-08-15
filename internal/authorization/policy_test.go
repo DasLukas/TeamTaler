@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -51,6 +52,22 @@ func TestDefinitionsAndPermissionImplications(t *testing.T) {
 	memberManagement := authorization.ExpandPermissions([]domain.PermissionKey{domain.PermissionMemberManagement})
 	if !containsPermission(memberManagement, domain.PermissionViewMemberDirectory) || len(memberManagement) != 2 {
 		t.Fatalf("MEMBER_MANAGEMENT expansion = %#v, want management plus directory read", memberManagement)
+	}
+}
+
+func TestLegacyRolesUsesOnlyReservedAdministratorIdentityAndEffectiveCapabilities(t *testing.T) {
+	grants := []domain.PermissionGrant{
+		{Permission: domain.PermissionGroupAdministration, Scope: domain.PermissionScope{Type: domain.PermissionScopeGroup}},
+		{Permission: domain.PermissionFinanceManagement, Scope: domain.PermissionScope{Type: domain.PermissionScopeGroup}},
+		{Permission: domain.PermissionCatalogManagement, Scope: domain.PermissionScope{Type: domain.PermissionScopeGroup}},
+	}
+	want := []domain.Role{domain.RoleAdmin, domain.RoleCatalogManager, domain.RoleFinanceManager}
+	if got := authorization.LegacyRoles(true, grants); !reflect.DeepEqual(got, want) {
+		t.Fatalf("legacy roles = %#v, want %#v", got, want)
+	}
+	wantWithoutReservedAdministrator := []domain.Role{domain.RoleCatalogManager, domain.RoleFinanceManager}
+	if got := authorization.LegacyRoles(false, grants); !reflect.DeepEqual(got, wantWithoutReservedAdministrator) {
+		t.Fatalf("ordinary administrative role projection = %#v, want %#v", got, wantWithoutReservedAdministrator)
 	}
 }
 
@@ -247,9 +264,12 @@ func TestSeedGroupRolesIsIdempotentAndAssignsProtectedAdministratorRole(t *testi
 		t.Fatalf("commit group role seed: %v", err)
 	}
 
-	var roleCount, adminAssignmentCount int
-	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM roles WHERE group_id='group-seed' AND preset_key IS NOT NULL`).Scan(&roleCount); err != nil {
+	var roleCount, presetRoleCount, adminAssignmentCount int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM roles WHERE group_id='group-seed'`).Scan(&roleCount); err != nil {
 		t.Fatalf("count seeded roles: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM roles WHERE group_id='group-seed' AND preset_key IS NOT NULL`).Scan(&presetRoleCount); err != nil {
+		t.Fatalf("count seeded preset roles: %v", err)
 	}
 	if err := db.QueryRowContext(ctx, `
 		SELECT count(*)
@@ -259,14 +279,41 @@ func TestSeedGroupRolesIsIdempotentAndAssignsProtectedAdministratorRole(t *testi
 		  AND r.preset_key='GROUP_ADMINISTRATOR'`).Scan(&adminAssignmentCount); err != nil {
 		t.Fatalf("count administrator assignment: %v", err)
 	}
-	if roleCount != 4 || adminAssignmentCount != 1 {
-		t.Fatalf("seeded roles/admin assignments = %d/%d, want 4/1", roleCount, adminAssignmentCount)
+	if roleCount != 5 || presetRoleCount != 1 || adminAssignmentCount != 1 {
+		t.Fatalf("seeded roles/system presets/admin assignments = %d/%d/%d, want 5/1/1", roleCount, presetRoleCount, adminAssignmentCount)
+	}
+	wantGrantCounts := map[string]int{
+		authorization.PresetRoleID("group-seed", domain.RolePresetGroupAdministrator): 4,
+		authorization.TemplateRoleID("group-seed", domain.RoleTemplateMember):         2,
+		authorization.TemplateRoleID("group-seed", domain.RoleTemplateFinance):        5,
+		authorization.TemplateRoleID("group-seed", domain.RoleTemplateCatalog):        2,
+		authorization.GuestRoleID("group-seed"):                                       1,
+	}
+	for roleID, want := range wantGrantCounts {
+		var got int
+		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM role_permission_grants WHERE group_id='group-seed' AND role_id=?`, roleID).Scan(&got); err != nil || got != want {
+			t.Fatalf("role %s grant count = %d, %v, want %d, nil", roleID, got, err, want)
+		}
+	}
+	var guestPreset sql.NullString
+	var guestName, guestDescription string
+	if err := db.QueryRowContext(ctx, `SELECT preset_key,name,description FROM roles WHERE id=?`, authorization.GuestRoleID("group-seed")).Scan(&guestPreset, &guestName, &guestDescription); err != nil {
+		t.Fatalf("read guest role: %v", err)
+	}
+	if guestPreset.Valid || guestName != "Gast" || guestDescription != "Standardrolle für Gäste" {
+		t.Fatalf("guest role = preset:%#v name:%q description:%q", guestPreset, guestName, guestDescription)
 	}
 	policy := authorization.NewPolicy(db)
+	wantAdministratorPermissions := map[domain.PermissionKey]bool{
+		domain.PermissionGroupAdministration: true,
+		domain.PermissionMemberManagement:    true,
+		domain.PermissionRoleManagement:      true,
+		domain.PermissionViewMemberDirectory: true,
+	}
 	for _, definition := range authorization.Definitions() {
 		allowed, err := policy.Can(ctx, "group-seed", "admin-seed", definition.Key, authorization.GroupResource("group-seed"))
-		if err != nil || !allowed {
-			t.Fatalf("seeded administrator Can(%s) = %t, %v, want true, nil", definition.Key, allowed, err)
+		if want := wantAdministratorPermissions[definition.Key]; err != nil || allowed != want {
+			t.Fatalf("seeded administrator Can(%s) = %t, %v, want %t, nil", definition.Key, allowed, err, want)
 		}
 	}
 }

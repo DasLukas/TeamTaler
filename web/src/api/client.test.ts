@@ -44,6 +44,7 @@ function session(userId: string): Session {
     user: { id: userId, displayName: userId, email: `${userId}@example.test` },
     groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: `member-${userId}`, roles: ['MEMBER'], groupPermissions: [] } }],
     activeGroupId: 'group-a',
+    defaultGroupId: null,
   };
 }
 

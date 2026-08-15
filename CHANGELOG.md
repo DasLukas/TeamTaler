@@ -4,6 +4,17 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+### Added
+
+- Multi-group accounts can select a fixed default group or the most recently used group in account settings; the server validates membership ownership and resolves that preference for subsequent sessions.
+
+### Changed
+
+- Frontend development and container builds now consistently use Node.js 24, matching CI and the documented development environment.
+- Migration `0028` makes `GROUP_ADMINISTRATOR` the only preset-backed system role, clears only the historical non-administrator preset metadata in existing groups, and seeds `Mitglied`, `Finanzverwaltung`, `Katalogverwaltung`, and default `Gast` as ordinary editable roles in new groups.
+- New reserved administrator roles now start with the three protected management grants and `VIEW_MEMBER_DIRECTORY`; finance, catalog, statistics, and booking capabilities require additional role assignments. Existing group roles, grants, assignments, and defaults remain unchanged during migration.
+- Persisted role names now render verbatim in role editors, selectors, summaries, and assignment controls instead of being replaced by frontend translations.
+
 ## [0.8.0] - 2026-08-14
 
 ### Added

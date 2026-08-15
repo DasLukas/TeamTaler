@@ -108,6 +108,8 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /api/v1/session", server.handleSession)
 	mux.HandleFunc("GET /api/v1/me", server.handleSession)
 	mux.HandleFunc("PATCH /api/v1/me/profile", server.handleUpdateProfile)
+	mux.HandleFunc("PUT /api/v1/me/group-preference", server.handleUpdateDefaultGroup)
+	mux.HandleFunc("PUT /api/v1/me/group-preference/last-used", server.handleRecordLastUsedGroup)
 	mux.HandleFunc("PUT /api/v1/me/password", server.handleChangePassword)
 	mux.HandleFunc("POST /api/v1/me/email-change", server.handleStartEmailChange)
 	mux.HandleFunc("GET /api/v1/permission-definitions", server.handlePermissionDefinitions)

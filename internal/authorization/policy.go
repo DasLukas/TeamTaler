@@ -413,28 +413,102 @@ func Require(ctx context.Context, queryer Queryer, groupID, membershipID string,
 	return nil
 }
 
-// PresetRoleID returns the deterministic stable identifier used for a seeded role.
+// LegacyRoles derives the deprecated fixed-role projection from current
+// authorization data. Only the reserved administrator assignment is
+// identity-based; finance and catalog labels follow effective group grants.
+// The returned labels are compatibility metadata and must never authorize an
+// operation.
+//
+// Parameters:
+//   - hasReservedAdministrator: Whether the protected administrator role is assigned.
+//   - grants: Effective permission grants for the membership or role selection.
+//
+// Returns:
+//   - []domain.Role: Stable legacy labels in admin, catalog, finance order.
+//
+// Errors:
+//   - None. Invalid or unrelated grants are ignored.
+//
+// This function cannot fail. Example: LegacyRoles(false,
+// []domain.PermissionGrant{{Permission: domain.PermissionFinanceManagement,
+// Scope: domain.PermissionScope{Type: domain.PermissionScopeGroup}}}).
+func LegacyRoles(hasReservedAdministrator bool, grants []domain.PermissionGrant) []domain.Role {
+	permissions := make(map[domain.PermissionKey]struct{}, len(grants))
+	for _, grant := range grants {
+		if grant.Scope.Type == domain.PermissionScopeGroup {
+			permissions[grant.Permission] = struct{}{}
+		}
+	}
+	roles := make([]domain.Role, 0, 3)
+	if hasReservedAdministrator {
+		roles = append(roles, domain.RoleAdmin)
+	}
+	if _, allowed := permissions[domain.PermissionCatalogManagement]; allowed {
+		roles = append(roles, domain.RoleCatalogManager)
+	}
+	if _, allowed := permissions[domain.PermissionFinanceManagement]; allowed {
+		roles = append(roles, domain.RoleFinanceManager)
+	}
+	return roles
+}
+
+// PresetRoleID returns the deterministic stable identifier used for the
+// protected group-administrator system role.
 //
 // Parameters:
 //   - groupID: Group that owns the role.
-//   - preset: One of the four supported preset keys.
+//   - preset: Reserved system-role key. The current model accepts only
+//     domain.RolePresetGroupAdministrator.
 //
 // Returns:
 //   - string: Identifier in role:<PRESET>:<GROUP> form.
 //
 // This function cannot fail. Callers must validate non-empty identifiers before
-// persistence. Example: PresetRoleID(groupID, domain.RolePresetMember).
+// persistence. Example: PresetRoleID(groupID, domain.RolePresetGroupAdministrator).
 func PresetRoleID(groupID string, preset domain.RolePresetKey) string {
 	return "role:" + string(preset) + ":" + strings.TrimSpace(groupID)
 }
 
-// SeedGroupRoles idempotently ensures the four preset roles, their initial grants,
-// and the creator's member and group-administrator assignments inside tx.
+// TemplateRoleID returns the deterministic identifier of an ordinary role
+// created from the application bootstrap template. The template key is not
+// stored on the role and has no authorization semantics.
+//
+// Parameters:
+//   - groupID: Group that owns the seeded ordinary role.
+//   - template: Bootstrap template whose stable identifier is required.
+//
+// Returns:
+//   - string: Identifier in role:<TEMPLATE>:<GROUP> form.
+//
+// This function cannot fail. Example:
+// TemplateRoleID("grp_example", domain.RoleTemplateMember).
+func TemplateRoleID(groupID string, template domain.RoleTemplateKey) string {
+	return "role:" + string(template) + ":" + strings.TrimSpace(groupID)
+}
+
+// GuestRoleID returns the deterministic identifier of the editable guest role
+// seeded for every new group. The role deliberately has no preset key and
+// therefore carries no special authorization semantics.
+//
+// Parameters:
+//   - groupID: Group that owns the seeded guest role.
+//
+// Returns:
+//   - string: Identifier in role:GUEST:<GROUP> form.
+//
+// This function cannot fail. Example: GuestRoleID("grp_example").
+func GuestRoleID(groupID string) string {
+	return TemplateRoleID(groupID, domain.RoleTemplateGuest)
+}
+
+// SeedGroupRoles idempotently ensures the protected administrator role, four
+// ordinary template roles, their initial grants, and the creator's protected
+// administrator assignment inside tx.
 //
 // Parameters:
 //   - ctx: Bounds all seed statements.
 //   - tx: Existing transaction that already contains the group and membership.
-//   - groupID: Group receiving the presets.
+//   - groupID: Group receiving the seeded roles.
 //   - actorUserID: User recorded in role and assignment audit fields; may be empty.
 //   - adminMembershipID: Active creator membership receiving protected admin access.
 //   - now: Timestamp used consistently for seeded rows.
@@ -461,16 +535,56 @@ func SeedGroupRoles(ctx context.Context, tx *sql.Tx, groupID, actorUserID, admin
 	actor := nullableString(actorUserID)
 
 	roleSeeds := []struct {
-		preset      domain.RolePresetKey
+		id          string
+		preset      string
 		name        string
 		description string
 		nameLocked  int
 		deletable   int
+		grants      []domain.PermissionKey
 	}{
-		{domain.RolePresetGroupAdministrator, "Group administrator", "Required administrator role with full group access.", 1, 0},
-		{domain.RolePresetMember, "Member", "Editable starter role for regular group members.", 0, 1},
-		{domain.RolePresetFinanceManager, "Finance manager", "Seeded role for financial management.", 0, 1},
-		{domain.RolePresetCatalogManager, "Catalog manager", "Seeded role for catalog management.", 0, 1},
+		{
+			id: PresetRoleID(groupID, domain.RolePresetGroupAdministrator), preset: string(domain.RolePresetGroupAdministrator),
+			name: "Group administrator", description: "Standardrolle für Administratorrolle mit vollständigem Zugriff auf die Gruppe", nameLocked: 1, deletable: 0,
+			grants: []domain.PermissionKey{
+				domain.PermissionGroupAdministration,
+				domain.PermissionMemberManagement,
+				domain.PermissionRoleManagement,
+				domain.PermissionViewMemberDirectory,
+			},
+		},
+		{
+			id:   TemplateRoleID(groupID, domain.RoleTemplateMember),
+			name: "Mitglied", description: "Standardrolle für reguläre Gruppenmitglieder", deletable: 1,
+			grants: []domain.PermissionKey{
+				domain.PermissionCreateOwnBooking,
+				domain.PermissionViewMemberDirectory,
+			},
+		},
+		{
+			id:   TemplateRoleID(groupID, domain.RoleTemplateFinance),
+			name: "Finanzverwaltung", description: "Standardrolle für Finanzverwaltung", deletable: 1,
+			grants: []domain.PermissionKey{
+				domain.PermissionFinanceManagement,
+				domain.PermissionRecordOwnPayment,
+				domain.PermissionViewAllBookingActivity,
+				domain.PermissionViewGroupStatistics,
+				domain.PermissionViewMemberDirectory,
+			},
+		},
+		{
+			id:   TemplateRoleID(groupID, domain.RoleTemplateCatalog),
+			name: "Katalogverwaltung", description: "Standardrolle für Katalogverwaltung", deletable: 1,
+			grants: []domain.PermissionKey{
+				domain.PermissionCatalogManagement,
+				domain.PermissionViewMemberDirectory,
+			},
+		},
+		{
+			id:   GuestRoleID(groupID),
+			name: "Gast", description: "Standardrolle für Gäste", deletable: 1,
+			grants: []domain.PermissionKey{domain.PermissionCreateOwnBooking},
+		},
 	}
 	for _, seed := range roleSeeds {
 		if _, err := tx.ExecContext(ctx, `
@@ -478,43 +592,22 @@ func SeedGroupRoles(ctx context.Context, tx *sql.Tx, groupID, actorUserID, admin
 				id,group_id,preset_key,name,description,name_locked,deletable,
 				version,created_at,updated_at,created_by,updated_by
 			) VALUES(?,?,?,?,?,?,?,1,?,?,?,?)`,
-			PresetRoleID(groupID, seed.preset), groupID, seed.preset, seed.name,
+			seed.id, groupID, nullableString(seed.preset), seed.name,
 			seed.description, seed.nameLocked, seed.deletable, timestamp, timestamp, actor, actor); err != nil {
-			return fmt.Errorf("seed %s role: %w", seed.preset, err)
+			return fmt.Errorf("seed %s role: %w", seed.name, err)
 		}
 	}
 
-	grantsByPreset := map[domain.RolePresetKey][]domain.PermissionKey{
-		domain.RolePresetGroupAdministrator: directPermissionKeys(),
-		domain.RolePresetMember: {
-			domain.PermissionViewMemberDirectory,
-			domain.PermissionViewGroupStatistics,
-			domain.PermissionCreateOwnBooking,
-			domain.PermissionVoidOwnBooking,
-		},
-		domain.RolePresetFinanceManager: {
-			domain.PermissionFinanceManagement,
-			domain.PermissionViewMemberDirectory,
-			domain.PermissionViewGroupStatistics,
-			domain.PermissionViewAllBookingActivity,
-			domain.PermissionRecordOwnPayment,
-		},
-		domain.RolePresetCatalogManager: {
-			domain.PermissionCatalogManagement,
-			domain.PermissionViewMemberDirectory,
-			domain.PermissionViewGroupStatistics,
-		},
-	}
 	for _, seed := range roleSeeds {
-		for _, permission := range grantsByPreset[seed.preset] {
+		for _, permission := range seed.grants {
 			if _, err := tx.ExecContext(ctx, `
 				INSERT OR IGNORE INTO role_permission_grants(
 					group_id,role_id,permission_key,scope_type,version,
 					created_at,updated_at,created_by,updated_by
 				) VALUES(?,?,?,'GROUP',1,?,?,?,?)`,
-				groupID, PresetRoleID(groupID, seed.preset), permission,
+				groupID, seed.id, permission,
 				timestamp, timestamp, actor, actor); err != nil {
-				return fmt.Errorf("seed %s grant %s: %w", seed.preset, permission, err)
+				return fmt.Errorf("seed %s grant %s: %w", seed.name, permission, err)
 			}
 		}
 	}
@@ -540,14 +633,6 @@ type scopeIdentity struct {
 type grantIdentity struct {
 	permission domain.PermissionKey
 	scopeIdentity
-}
-
-func directPermissionKeys() []domain.PermissionKey {
-	keys := make([]domain.PermissionKey, 0, len(permissionDefinitions))
-	for _, definition := range permissionDefinitions {
-		keys = append(keys, definition.Key)
-	}
-	return keys
 }
 
 func nullableString(value string) any {

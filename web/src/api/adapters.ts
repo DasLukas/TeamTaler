@@ -283,6 +283,7 @@ export function adaptSession(input: unknown): Session {
     user: adaptUser(source.user),
     groups,
     activeGroupId: typeof source.activeGroupId === 'string' ? source.activeGroupId : groups[0]?.id ?? '',
+    defaultGroupId: typeof source.defaultGroupId === 'string' ? source.defaultGroupId : null,
     demo: source.demo === true,
   };
 }

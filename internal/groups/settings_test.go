@@ -35,8 +35,8 @@ func TestGroupSettingsDefaultAuthorizationPersistenceAndAudit(t *testing.T) {
 	}
 	admin := items[0].Membership
 	settings, err := service.Settings(ctx, admin)
-	memberRoleID := authorization.PresetRoleID(admin.GroupID, domain.RolePresetMember)
-	if err != nil || settings.NotificationEmailsEnabled || settings.SettlementsEnabled || settings.DefaultRoleID == nil || *settings.DefaultRoleID != memberRoleID {
+	guestRoleID := authorization.GuestRoleID(admin.GroupID)
+	if err != nil || settings.NotificationEmailsEnabled || settings.SettlementsEnabled || settings.DefaultRoleID == nil || *settings.DefaultRoleID != guestRoleID {
 		t.Fatalf("default settings=%#v err=%v", settings, err)
 	}
 	if !settings.ForeignBookingReasonRequired || !settings.OwnPaymentReasonRequired || settings.OtherPaymentReasonRequired || len(settings.PaymentMethods) != 4 {
@@ -73,7 +73,7 @@ func TestGroupSettingsDefaultAuthorizationPersistenceAndAudit(t *testing.T) {
 	if err != nil || updated.NotificationEmailsEnabled {
 		t.Fatalf("partial notification update=%#v err=%v", updated, err)
 	}
-	financeRoleID := authorization.PresetRoleID(admin.GroupID, domain.RolePresetFinanceManager)
+	financeRoleID := authorization.TemplateRoleID(admin.GroupID, domain.RoleTemplateFinance)
 	updated, err = service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{DefaultRoleID: &financeRoleID})
 	if err != nil || updated.DefaultRoleID == nil || *updated.DefaultRoleID != financeRoleID {
 		t.Fatalf("updated default role=%#v err=%v", updated, err)

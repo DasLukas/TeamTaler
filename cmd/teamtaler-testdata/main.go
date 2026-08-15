@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/DasLukas/TeamTaler/internal/auth"
+	"github.com/DasLukas/TeamTaler/internal/authorization"
 	"github.com/DasLukas/TeamTaler/internal/bookings"
 	"github.com/DasLukas/TeamTaler/internal/catalog"
 	"github.com/DasLukas/TeamTaler/internal/config"
@@ -111,6 +112,10 @@ func run() error {
 		return fmt.Errorf("login seeded administrator: %w", err)
 	}
 	adminGroup, err := onlyGroup(ctx, groupService, adminSession.Principal.UserID)
+	if err != nil {
+		return err
+	}
+	adminGroup.Membership, err = grantDevelopmentAdministratorCapabilities(ctx, groupService, adminSession.Principal, adminGroup.Membership)
 	if err != nil {
 		return err
 	}
@@ -270,6 +275,10 @@ func seedSecondaryGroup(ctx context.Context, authService auth.Service, groupServ
 	if err != nil {
 		return fmt.Errorf("create secondary test group: %w", err)
 	}
+	secondaryGroup.Membership, err = grantDevelopmentAdministratorCapabilities(ctx, groupService, administrator, secondaryGroup.Membership)
+	if err != nil {
+		return err
+	}
 	if err := seedReasonSuggestions(ctx, groupService, administrator, secondaryGroup.Membership); err != nil {
 		return err
 	}
@@ -303,6 +312,59 @@ func seedSecondaryGroup(ctx context.Context, authService auth.Service, groupServ
 		}
 	}
 	return nil
+}
+
+// grantDevelopmentAdministratorCapabilities adds a disposable custom role with
+// the non-administrative capabilities needed to populate every development
+// workspace. Production group defaults remain least-privileged; only local test
+// data receives this explicit supplemental assignment.
+//
+// Parameters:
+//   - ctx: Bounds role creation, assignment, and membership reload operations.
+//   - service: Group service connected to the disposable test database.
+//   - actor: Authenticated group creator receiving the supplemental role.
+//   - membership: Creator membership that already owns the reserved administrator role.
+//
+// Returns:
+//   - domain.Membership: Reloaded membership with combined effective grants.
+//   - error: Role creation, assignment, authorization, or storage failure.
+func grantDevelopmentAdministratorCapabilities(ctx context.Context, service groups.Service, actor domain.Principal, membership domain.Membership) (domain.Membership, error) {
+	permissions := []domain.PermissionKey{
+		domain.PermissionFinanceManagement,
+		domain.PermissionCatalogManagement,
+		domain.PermissionViewGroupStatistics,
+		domain.PermissionViewAllBookingActivity,
+		domain.PermissionRecordOwnPayment,
+		domain.PermissionCreateOwnBooking,
+		domain.PermissionVoidOwnBooking,
+		domain.PermissionVoidAnyBooking,
+		domain.PermissionBookForOthers,
+		domain.PermissionBookForGuests,
+	}
+	grants := make([]domain.PermissionGrant, 0, len(permissions))
+	for _, permission := range permissions {
+		grants = append(grants, domain.PermissionGrant{
+			Permission: permission,
+			Scope:      domain.PermissionScope{Type: domain.PermissionScopeGroup},
+		})
+	}
+	role, err := service.CreateRole(ctx, actor, membership, groups.RoleCommand{
+		Name:        "Development administrator capabilities",
+		Description: "Supplemental capabilities for disposable local test data.",
+		Grants:      grants,
+	})
+	if err != nil {
+		return domain.Membership{}, fmt.Errorf("create development administrator role for group %q: %w", membership.GroupID, err)
+	}
+	roleIDs := append(append([]string(nil), membership.RoleIDs...), role.ID)
+	if _, err := service.ReplaceMemberRoles(ctx, actor, membership, membership.ID, roleIDs, membership.RoleAssignmentsVersion); err != nil {
+		return domain.Membership{}, fmt.Errorf("assign development administrator role for group %q: %w", membership.GroupID, err)
+	}
+	updated, err := service.MembershipForUser(ctx, membership.GroupID, membership.UserID)
+	if err != nil {
+		return domain.Membership{}, fmt.Errorf("reload development administrator for group %q: %w", membership.GroupID, err)
+	}
+	return updated, nil
 }
 
 // seedReasonSuggestions configures the two booking and two payment reasons
@@ -402,21 +464,21 @@ func createMember(ctx context.Context, authService auth.Service, groupService gr
 	if err != nil {
 		return seededMember{}, fmt.Errorf("list roles for %s: %w", seed.email, err)
 	}
-	wantedPresets := make(map[domain.RolePresetKey]struct{}, len(seed.roles)+1)
+	wantedRoleIDs := make(map[string]struct{}, len(seed.roles)+1)
 	if len(seed.roles) == 0 || len(seed.permissions) > 0 {
-		wantedPresets[domain.RolePresetMember] = struct{}{}
+		wantedRoleIDs[authorization.TemplateRoleID(actorMembership.GroupID, domain.RoleTemplateMember)] = struct{}{}
 	}
 	for _, legacyRole := range seed.roles {
 		switch legacyRole {
 		case domain.RoleFinanceManager:
-			wantedPresets[domain.RolePresetFinanceManager] = struct{}{}
+			wantedRoleIDs[authorization.TemplateRoleID(actorMembership.GroupID, domain.RoleTemplateFinance)] = struct{}{}
 		case domain.RoleCatalogManager:
-			wantedPresets[domain.RolePresetCatalogManager] = struct{}{}
+			wantedRoleIDs[authorization.TemplateRoleID(actorMembership.GroupID, domain.RoleTemplateCatalog)] = struct{}{}
 		}
 	}
-	roleIDs := make([]string, 0, len(wantedPresets))
+	roleIDs := make([]string, 0, len(wantedRoleIDs))
 	for _, role := range availableRoles {
-		if _, selected := wantedPresets[role.PresetKey]; selected {
+		if _, selected := wantedRoleIDs[role.ID]; selected {
 			roleIDs = append(roleIDs, role.ID)
 		}
 	}

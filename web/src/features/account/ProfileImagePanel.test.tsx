@@ -24,6 +24,7 @@ const baseSession: Session = {
   user: { id: 'user-a', displayName: 'Alex Member', email: 'alex@example.test' },
   groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', roles: ['MEMBER'], groupPermissions: [] } }],
   activeGroupId: 'group-a',
+  defaultGroupId: null,
 };
 
 function renderProfileImage(session: Session = baseSession): QueryClient {

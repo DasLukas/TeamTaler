@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/DasLukas/TeamTaler/internal/auth"
+	"github.com/DasLukas/TeamTaler/internal/authorization"
 	"github.com/DasLukas/TeamTaler/internal/bookings"
 	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/finance"
@@ -24,12 +25,13 @@ func TestInvitationPermissionsPreviewArchiveAndReactivation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list other-group roles: %v", err)
 	}
-	var otherFinanceRoleID string
+	otherFinanceRoleID := authorization.TemplateRoleID(otherGroup.ID, domain.RoleTemplateFinance)
+	foundOtherFinanceRole := false
 	for _, role := range otherRoles {
-		if role.PresetKey == domain.RolePresetFinanceManager {
-			otherFinanceRoleID = role.ID
-			break
-		}
+		foundOtherFinanceRole = foundOtherFinanceRole || role.ID == otherFinanceRoleID
+	}
+	if !foundOtherFinanceRole {
+		t.Fatalf("other-group finance template role %q not found", otherFinanceRoleID)
 	}
 	if _, err := f.groups.CreateInvitationWithRoles(f.ctx, f.admin, f.membership, "cross-group@example.test", "Cross Group", []string{otherFinanceRoleID}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("cross-group invitation role error = %v, want forbidden", err)
@@ -278,10 +280,7 @@ func TestConcurrentAdministratorDemotionsKeepOneReservedAdministrator(t *testing
 	f := newFixture(t)
 	secondPrincipal, secondMembership, _ := f.inviteMember("concurrent-admin@example.test", "Concurrent Admin", []domain.Role{domain.RoleAdmin})
 
-	var memberRoleID string
-	if err := f.db.QueryRowContext(f.ctx, `SELECT id FROM roles WHERE group_id=? AND preset_key='MEMBER'`, f.group.ID).Scan(&memberRoleID); err != nil {
-		t.Fatalf("load member role: %v", err)
-	}
+	memberRoleID := authorization.TemplateRoleID(f.group.ID, domain.RoleTemplateMember)
 
 	start := make(chan struct{})
 	results := make(chan error, 2)

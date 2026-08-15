@@ -31,7 +31,7 @@ func TestHandleCreateInvitationQueuesEmailAndReturnsFallbackURL(t *testing.T) {
 		t.Fatalf("parse public URL: %v", err)
 	}
 	server.config.PublicURL = publicURL
-	memberRoleID := authorization.PresetRoleID(membership.GroupID, domain.RolePresetMember)
+	memberRoleID := authorization.TemplateRoleID(membership.GroupID, domain.RoleTemplateMember)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+membership.GroupID+"/invitations", bytes.NewBufferString(fmt.Sprintf(`{"email":"manual@example.test","displayName":"Manual Member","roleIds":[%q]}`, memberRoleID)))
 	request.Header.Set("Content-Type", "application/json")
 	request.SetPathValue("groupID", membership.GroupID)
@@ -117,7 +117,7 @@ func TestHandleImportInvitationsUsesDefaultRoleWithoutQueryParameter(t *testing.
 	t.Parallel()
 
 	server, principal, membership := invitationImportServer(t, true)
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+membership.GroupID+"/invitations/import", bytes.NewBufferString("email,roles\ndefault@example.test,\nfinance@example.test,Finance manager\n"))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+membership.GroupID+"/invitations/import", bytes.NewBufferString("email,roles\ndefault@example.test,\nfinance@example.test,Finanzverwaltung\n"))
 	request.Header.Set("Content-Type", "text/csv")
 	request.Header.Set("Idempotency-Key", "csv-default-role-test")
 	request.SetPathValue("groupID", membership.GroupID)
@@ -224,7 +224,7 @@ func invitationImportServer(t *testing.T, emailEnabled bool) (*Server, domain.Pr
 }
 
 func invitationImportRequest(principal domain.Principal, groupID, body, contentType string) *http.Request {
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+groupID+"/invitations/import?roleId="+url.QueryEscape(authorization.PresetRoleID(groupID, domain.RolePresetMember)), bytes.NewBufferString(body))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+groupID+"/invitations/import?roleId="+url.QueryEscape(authorization.TemplateRoleID(groupID, domain.RoleTemplateMember)), bytes.NewBufferString(body))
 	request.Header.Set("Content-Type", contentType)
 	request.Header.Set("Idempotency-Key", "csv-import-test-key")
 	request.SetPathValue("groupID", groupID)

@@ -48,6 +48,7 @@ const session: Session = {
   user: { id: 'user-admin', displayName: 'Admin', email: 'admin@example.test' },
   groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-admin', roleIds: ['role-admin', 'role-member'], effectiveGrants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }], roles: ['ADMIN', 'MEMBER'], groupPermissions: [] } }],
   activeGroupId: 'group-a',
+  defaultGroupId: null,
 };
 
 const members: Membership[] = [{
@@ -81,8 +82,8 @@ const temporaryGuest: Membership = {
 
 const roles: Role[] = [
   { id: 'role-admin', presetKey: 'GROUP_ADMINISTRATOR', name: 'Gruppenadministrator', grants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }], version: 1, memberCount: 1, pendingInvitationCount: 0 },
-  { id: 'role-member', presetKey: 'MEMBER', name: 'Mitglied', grants: [{ permission: 'VOID_OWN_BOOKING', scope: { type: 'GROUP' } }], version: 1, memberCount: 1, pendingInvitationCount: 1 },
-  { id: 'role-finance', presetKey: 'FINANCE_MANAGER', name: 'Finanzverwaltung', grants: [{ permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } }], version: 1, memberCount: 0, pendingInvitationCount: 0 },
+  { id: 'role-member', name: 'Mitglied', grants: [{ permission: 'VOID_OWN_BOOKING', scope: { type: 'GROUP' } }], version: 1, memberCount: 1, pendingInvitationCount: 1 },
+  { id: 'role-finance', name: 'Finanzverwaltung', grants: [{ permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } }], version: 1, memberCount: 0, pendingInvitationCount: 0 },
 ];
 
 const importResult: InvitationImportResult = {

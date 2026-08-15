@@ -214,6 +214,46 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /me/group-preference:
+    put:
+      tags: [Authentication]
+      summary: Select the group opened after login
+      description: |
+        A group identifier selects a fixed default from the current user's
+        active memberships. Null selects the most recently used active group.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GroupPreferenceUpdate' }
+      responses:
+        '200':
+          description: Persisted default-group preference
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GroupPreference' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /me/group-preference/last-used:
+    put:
+      tags: [Authentication]
+      summary: Record the current group as most recently used
+      description: Accepts only a group with an active membership for the current user.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LastUsedGroupUpdate' }
+      responses:
+        '204': { description: Most recently used group recorded }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /me/password:
     put:
       tags: [Authentication]
@@ -1237,8 +1277,8 @@ paths:
               examples:
                 - |-
                   email,display_name,roles
-                  alex@example.com,Alex Member,Member
-                  sam@example.com,Sam Member,Finance manager|Catalog manager
+                  alex@example.com,Alex Member,Mitglied
+                  sam@example.com,Sam Member,Finanzverwaltung|Katalogverwaltung
       responses:
         '200':
           description: Complete or partial row-level import result
@@ -2248,6 +2288,28 @@ components:
       required: [displayName]
       properties:
         displayName: { type: string, minLength: 1, maxLength: 120 }
+    GroupPreferenceUpdate:
+      type: object
+      additionalProperties: false
+      required: [defaultGroupId]
+      properties:
+        defaultGroupId:
+          type: [string, 'null']
+          description: Active fixed default group, or null to reopen the most recently used active group.
+    GroupPreference:
+      type: object
+      additionalProperties: false
+      required: [defaultGroupId]
+      properties:
+        defaultGroupId:
+          type: [string, 'null']
+          readOnly: true
+    LastUsedGroupUpdate:
+      type: object
+      additionalProperties: false
+      required: [groupId]
+      properties:
+        groupId: { type: string, minLength: 1 }
     PasswordUpdate:
       type: object
       additionalProperties: false
@@ -2378,7 +2440,7 @@ components:
           description: Null means unlimited while enabled; finite values must be between one hour and 365 days in the future.
     Session:
       type: object
-      required: [user, csrfToken, groups]
+      required: [user, csrfToken, groups, activeGroupId, defaultGroupId]
       properties:
         user: { $ref: '#/components/schemas/User' }
         csrfToken: { type: string }
@@ -2387,6 +2449,9 @@ components:
           items: { $ref: '#/components/schemas/Group' }
         activeGroupId:
           type: [string, 'null']
+        defaultGroupId:
+          type: [string, 'null']
+          description: Fixed active group selected for login, or null for most-recently-used behavior.
     User:
       type: object
       required: [id, email, displayName]
@@ -2658,7 +2723,8 @@ components:
         scope: { $ref: '#/components/schemas/PermissionScope' }
     RolePresetKey:
       type: string
-      enum: [GROUP_ADMINISTRATOR, MEMBER, FINANCE_MANAGER, CATALOG_MANAGER]
+      description: Reserved system-role identity. Ordinary seeded roles have no preset key.
+      enum: [GROUP_ADMINISTRATOR]
     Role:
       type: object
       additionalProperties: false

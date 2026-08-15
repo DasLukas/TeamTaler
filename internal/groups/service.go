@@ -69,7 +69,7 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, name, curre
 		if _, err := tx.ExecContext(ctx, `INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES(?,?,?,?,?)`, groupID, name, currency, now, now); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO group_settings(group_id,members_can_view_all_bookings,default_role_id,updated_at) VALUES(?,0,?,?)`, groupID, authorization.PresetRoleID(groupID, domain.RolePresetMember), now); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO group_settings(group_id,members_can_view_all_bookings,default_role_id,updated_at) VALUES(?,0,?,?)`, groupID, authorization.GuestRoleID(groupID), now); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO memberships(id,group_id,user_id,status,joined_at) VALUES(?,?,?,'ACTIVE',?)`, membershipID, groupID, actor.UserID, now); err != nil {
@@ -703,7 +703,7 @@ func (s Service) hydrateMembershipAuthorization(ctx context.Context, membership 
 	}
 	defer rows.Close()
 	roleIDs := make(map[string]struct{})
-	legacyRoles := make(map[domain.Role]struct{})
+	hasReservedAdministrator := false
 	for rows.Next() {
 		var roleID string
 		var preset domain.RolePresetKey
@@ -711,13 +711,8 @@ func (s Service) hydrateMembershipAuthorization(ctx context.Context, membership 
 			return err
 		}
 		roleIDs[roleID] = struct{}{}
-		switch preset {
-		case domain.RolePresetGroupAdministrator:
-			legacyRoles[domain.RoleAdmin] = struct{}{}
-		case domain.RolePresetFinanceManager:
-			legacyRoles[domain.RoleFinanceManager] = struct{}{}
-		case domain.RolePresetCatalogManager:
-			legacyRoles[domain.RoleCatalogManager] = struct{}{}
+		if preset == domain.RolePresetGroupAdministrator {
+			hasReservedAdministrator = true
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -731,16 +726,11 @@ func (s Service) hydrateMembershipAuthorization(ctx context.Context, membership 
 		membership.RoleIDs = append(membership.RoleIDs, roleID)
 	}
 	sort.Strings(membership.RoleIDs)
-	membership.Roles = membership.Roles[:0]
-	for _, role := range []domain.Role{domain.RoleAdmin, domain.RoleCatalogManager, domain.RoleFinanceManager} {
-		if _, ok := legacyRoles[role]; ok {
-			membership.Roles = append(membership.Roles, role)
-		}
-	}
 	membership.EffectiveGrants, err = authorization.NewPolicy(s.DB).EffectiveGrants(ctx, membership.GroupID, membership.ID)
 	if err != nil {
 		return err
 	}
+	membership.Roles = authorization.LegacyRoles(hasReservedAdministrator, membership.EffectiveGrants)
 	membership.GroupPermissions = membership.GroupPermissions[:0]
 	for _, grant := range membership.EffectiveGrants {
 		if grant.Permission == domain.PermissionRecordOwnPayment && grant.Scope.Type == domain.PermissionScopeGroup {
@@ -856,7 +846,7 @@ func (s Service) UpdatePermissions(ctx context.Context, actor domain.Principal, 
 		if err != nil {
 			return err
 		}
-		nextRoleIDs, err := legacyAssignmentRoleIDs(ctx, tx, targetGroup, currentRoleIDs, roles, permissions)
+		nextRoleIDs, err := legacyAssignmentRoleIDs(targetGroup, currentRoleIDs, roles, permissions)
 		if err != nil {
 			return err
 		}
@@ -1087,32 +1077,33 @@ func ensureLegacySelfPaymentRoleTx(ctx context.Context, tx *sql.Tx, groupID, act
 	return err
 }
 
-func legacyAssignmentRoleIDs(ctx context.Context, queryer roleQueryer, groupID string, currentRoleIDs []string, roles []domain.Role, permissions []domain.GroupPermission) ([]string, error) {
+func legacyAssignmentRoleIDs(groupID string, currentRoleIDs []string, roles []domain.Role, permissions []domain.GroupPermission) ([]string, error) {
 	roleIDs := map[string]struct{}{}
 	for _, role := range roles {
-		var preset domain.RolePresetKey
+		var roleID string
 		switch role {
 		case domain.RoleAdmin:
-			preset = domain.RolePresetGroupAdministrator
+			roleID = authorization.PresetRoleID(groupID, domain.RolePresetGroupAdministrator)
 		case domain.RoleFinanceManager:
-			preset = domain.RolePresetFinanceManager
+			roleID = authorization.TemplateRoleID(groupID, domain.RoleTemplateFinance)
 		case domain.RoleCatalogManager:
-			preset = domain.RolePresetCatalogManager
+			roleID = authorization.TemplateRoleID(groupID, domain.RoleTemplateCatalog)
 		}
-		if preset != "" {
-			roleIDs[authorization.PresetRoleID(groupID, preset)] = struct{}{}
+		if roleID != "" {
+			roleIDs[roleID] = struct{}{}
 		}
 	}
 	legacySelfRoleID := "role:LEGACY_SELF_PAYMENT:" + groupID
 	if containsGroupPermission(permissions, domain.PermissionSelfRecordPayment) {
 		roleIDs[legacySelfRoleID] = struct{}{}
 	}
+	managedRoleIDs := map[string]struct{}{
+		authorization.PresetRoleID(groupID, domain.RolePresetGroupAdministrator): {},
+		authorization.TemplateRoleID(groupID, domain.RoleTemplateFinance):        {},
+		authorization.TemplateRoleID(groupID, domain.RoleTemplateCatalog):        {},
+	}
 	for _, roleID := range currentRoleIDs {
-		var preset sql.NullString
-		if err := queryer.QueryRowContext(ctx, `SELECT preset_key FROM roles WHERE id=? AND group_id=?`, roleID, groupID).Scan(&preset); err != nil {
-			return nil, err
-		}
-		if !preset.Valid && roleID != legacySelfRoleID {
+		if _, managed := managedRoleIDs[roleID]; !managed && roleID != legacySelfRoleID {
 			roleIDs[roleID] = struct{}{}
 		}
 	}
@@ -1230,7 +1221,7 @@ func createInvitationTx(ctx context.Context, tx *sql.Tx, actor domain.Principal,
 	if dynamicRoleCommand {
 		nextRoleIDs = normalizeRoleIDs(roleIDs)
 	} else {
-		nextRoleIDs, err = legacyAssignmentRoleIDs(ctx, tx, membership.GroupID, nil, roles, groupPermissions)
+		nextRoleIDs, err = legacyAssignmentRoleIDs(membership.GroupID, nil, roles, groupPermissions)
 		if err != nil {
 			return Invitation{}, err
 		}
@@ -1436,7 +1427,7 @@ func (s Service) UpdateInvitation(ctx context.Context, actor domain.Principal, m
 		if err != nil {
 			return err
 		}
-		roleIDs, err := legacyAssignmentRoleIDs(ctx, tx, membership.GroupID, currentRoleIDs, roles, groupPermissions)
+		roleIDs, err := legacyAssignmentRoleIDs(membership.GroupID, currentRoleIDs, roles, groupPermissions)
 		if err != nil {
 			return err
 		}
@@ -1685,39 +1676,40 @@ func legacyAuthorizationForRoleIDs(ctx context.Context, queryer roleQueryer, gro
 	for _, roleID := range roleIDs {
 		selected[roleID] = struct{}{}
 	}
-	rows, err := queryer.QueryContext(ctx, `SELECT id,coalesce(preset_key,'') FROM roles WHERE group_id=? ORDER BY id`, groupID)
+	rows, err := queryer.QueryContext(ctx, `
+		SELECT r.id,coalesce(r.preset_key,''),coalesce(g.permission_key,'')
+		FROM roles r
+		LEFT JOIN role_permission_grants g
+		  ON g.group_id=r.group_id AND g.role_id=r.id AND g.scope_type='GROUP'
+		WHERE r.group_id=?
+		ORDER BY r.id,g.permission_key`, groupID)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer rows.Close()
-	legacyRoles := make(map[domain.Role]struct{})
+	hasReservedAdministrator := false
+	grants := make([]domain.PermissionGrant, 0)
 	for rows.Next() {
 		var roleID string
 		var preset domain.RolePresetKey
-		if err := rows.Scan(&roleID, &preset); err != nil {
+		var permission domain.PermissionKey
+		if err := rows.Scan(&roleID, &preset, &permission); err != nil {
 			return nil, nil, err
 		}
 		if _, assigned := selected[roleID]; !assigned {
 			continue
 		}
-		switch preset {
-		case domain.RolePresetGroupAdministrator:
-			legacyRoles[domain.RoleAdmin] = struct{}{}
-		case domain.RolePresetFinanceManager:
-			legacyRoles[domain.RoleFinanceManager] = struct{}{}
-		case domain.RolePresetCatalogManager:
-			legacyRoles[domain.RoleCatalogManager] = struct{}{}
+		if preset == domain.RolePresetGroupAdministrator {
+			hasReservedAdministrator = true
+		}
+		if permission != "" {
+			grants = append(grants, domain.PermissionGrant{Permission: permission, Scope: domain.PermissionScope{Type: domain.PermissionScopeGroup}})
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, nil, err
 	}
-	roles := make([]domain.Role, 0, len(legacyRoles))
-	for _, role := range []domain.Role{domain.RoleAdmin, domain.RoleCatalogManager, domain.RoleFinanceManager} {
-		if _, assigned := legacyRoles[role]; assigned {
-			roles = append(roles, role)
-		}
-	}
+	roles := authorization.LegacyRoles(hasReservedAdministrator, grants)
 	permissions := make([]domain.GroupPermission, 0, 1)
 	if _, assigned := selected["role:LEGACY_SELF_PAYMENT:"+groupID]; assigned {
 		permissions = append(permissions, domain.PermissionSelfRecordPayment)

@@ -148,7 +148,7 @@ func (s Service) Bootstrap(ctx context.Context, email, displayName, password, gr
 		}{
 			{`INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES(?,?,?,?,?,?)`, []any{userID, email, displayName, passwordHash, now, now}},
 			{`INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES(?,?,?,?,?)`, []any{groupID, groupName, currency, now, now}},
-			{`INSERT INTO group_settings(group_id,members_can_view_all_bookings,default_role_id,updated_at) VALUES(?,0,?,?)`, []any{groupID, authorization.PresetRoleID(groupID, domain.RolePresetMember), now}},
+			{`INSERT INTO group_settings(group_id,members_can_view_all_bookings,default_role_id,updated_at) VALUES(?,0,?,?)`, []any{groupID, authorization.GuestRoleID(groupID), now}},
 			{`INSERT INTO memberships(id,group_id,user_id,status,joined_at) VALUES(?,?,?,'ACTIVE',?)`, []any{membershipID, groupID, userID, now}},
 			{`INSERT INTO periods(id,group_id,label,status,starts_at,created_at) VALUES(?,?,?,'OPEN',?,?)`, []any{periodID, groupID, domain.DefaultOpenPeriodLabel, now, now}},
 		}
@@ -405,26 +405,52 @@ func assignInvitationRolesTx(ctx context.Context, tx *sql.Tx, groupID, membershi
 		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO membership_role_assignments(group_id,membership_id,role_id,version,assigned_at,assigned_by) VALUES(?,?,?,1,?,?)`, groupID, membershipID, roleID, now, assignedBy); err != nil {
 			return err
 		}
-		var preset sql.NullString
-		if err := tx.QueryRowContext(ctx, `SELECT preset_key FROM roles WHERE id=? AND group_id=?`, roleID, groupID).Scan(&preset); err != nil {
+		legacyRoles, err := legacyRolesForAssignedRoleTx(ctx, tx, groupID, roleID)
+		if err != nil {
 			return err
 		}
-		legacyRole := domain.Role("")
-		switch domain.RolePresetKey(preset.String) {
-		case domain.RolePresetGroupAdministrator:
-			legacyRole = domain.RoleAdmin
-		case domain.RolePresetFinanceManager:
-			legacyRole = domain.RoleFinanceManager
-		case domain.RolePresetCatalogManager:
-			legacyRole = domain.RoleCatalogManager
-		}
-		if legacyRole != "" {
+		for _, legacyRole := range legacyRoles {
 			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO membership_roles(group_id,membership_id,role,granted_at,granted_by) VALUES(?,?,?,?,?)`, groupID, membershipID, legacyRole, now, assignedBy); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+// legacyRolesForAssignedRoleTx derives deprecated fixed-role labels for one
+// assigned dynamic role. The protected administrator label follows role
+// identity, while finance and catalog labels follow group-scoped grants.
+//
+// Parameters:
+//   - ctx: Bounds the role lookup.
+//   - tx: Transaction containing the role and grant rows.
+//   - groupID: Group that owns the role.
+//   - roleID: Assigned dynamic role identifier.
+//
+// Returns:
+//   - []domain.Role: Deprecated compatibility labels for the role.
+//   - error: Database lookup failures, including an unknown role.
+//
+// Example: a custom role granting FINANCE_MANAGEMENT returns FINANCE_MANAGER.
+func legacyRolesForAssignedRoleTx(ctx context.Context, tx *sql.Tx, groupID, roleID string) ([]domain.Role, error) {
+	var preset domain.RolePresetKey
+	var grantsFinance, grantsCatalog int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT coalesce(r.preset_key,''),
+			exists(SELECT 1 FROM role_permission_grants g WHERE g.group_id=r.group_id AND g.role_id=r.id AND g.permission_key='FINANCE_MANAGEMENT' AND g.scope_type='GROUP'),
+			exists(SELECT 1 FROM role_permission_grants g WHERE g.group_id=r.group_id AND g.role_id=r.id AND g.permission_key='CATALOG_MANAGEMENT' AND g.scope_type='GROUP')
+		FROM roles r WHERE r.group_id=? AND r.id=?`, groupID, roleID).Scan(&preset, &grantsFinance, &grantsCatalog); err != nil {
+		return nil, err
+	}
+	grants := make([]domain.PermissionGrant, 0, 2)
+	if grantsFinance != 0 {
+		grants = append(grants, domain.PermissionGrant{Permission: domain.PermissionFinanceManagement, Scope: domain.PermissionScope{Type: domain.PermissionScopeGroup}})
+	}
+	if grantsCatalog != 0 {
+		grants = append(grants, domain.PermissionGrant{Permission: domain.PermissionCatalogManagement, Scope: domain.PermissionScope{Type: domain.PermissionScopeGroup}})
+	}
+	return authorization.LegacyRoles(preset == domain.RolePresetGroupAdministrator, grants), nil
 }
 
 // acceptClaimInvitationIdentityTx upgrades one temporary identity in place or
@@ -551,7 +577,7 @@ func (s Service) hydrateMembershipAuthorization(ctx context.Context, membership 
 		return err
 	}
 	defer rows.Close()
-	legacyRoles := make(map[domain.Role]struct{})
+	hasReservedAdministrator := false
 	membership.RoleIDs = membership.RoleIDs[:0]
 	for rows.Next() {
 		var roleID string
@@ -560,29 +586,19 @@ func (s Service) hydrateMembershipAuthorization(ctx context.Context, membership 
 			return err
 		}
 		membership.RoleIDs = append(membership.RoleIDs, roleID)
-		switch preset {
-		case domain.RolePresetGroupAdministrator:
-			legacyRoles[domain.RoleAdmin] = struct{}{}
-		case domain.RolePresetFinanceManager:
-			legacyRoles[domain.RoleFinanceManager] = struct{}{}
-		case domain.RolePresetCatalogManager:
-			legacyRoles[domain.RoleCatalogManager] = struct{}{}
+		if preset == domain.RolePresetGroupAdministrator {
+			hasReservedAdministrator = true
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return err
 	}
 	sort.Strings(membership.RoleIDs)
-	membership.Roles = membership.Roles[:0]
-	for _, role := range []domain.Role{domain.RoleAdmin, domain.RoleCatalogManager, domain.RoleFinanceManager} {
-		if _, ok := legacyRoles[role]; ok {
-			membership.Roles = append(membership.Roles, role)
-		}
-	}
 	membership.EffectiveGrants, err = authorization.NewPolicy(s.DB).EffectiveGrants(ctx, membership.GroupID, membership.ID)
 	if err != nil {
 		return err
 	}
+	membership.Roles = authorization.LegacyRoles(hasReservedAdministrator, membership.EffectiveGrants)
 	membership.GroupPermissions = membership.GroupPermissions[:0]
 	for _, grant := range membership.EffectiveGrants {
 		if grant.Permission == domain.PermissionRecordOwnPayment && grant.Scope.Type == domain.PermissionScopeGroup {

@@ -49,6 +49,7 @@ import type {
   InvitationPreview,
   LedgerEntry,
   LoginCommand,
+  GroupPreference,
   GroupSettings,
   GroupSettingsUpdateInput,
   TransactionSettings,
@@ -277,6 +278,8 @@ export const api = {
     clearAuthenticatedClientState();
   },
   updateProfile: async (displayName: string): Promise<User> => adaptUser(await request<unknown>('/me/profile', { method: 'PATCH', body: json({ displayName }) })),
+  updateDefaultGroup: async (defaultGroupId: string | null): Promise<GroupPreference> => request<GroupPreference>('/me/group-preference', { method: 'PUT', body: json({ defaultGroupId }) }),
+  recordLastUsedGroup: async (groupId: string): Promise<void> => request<void>('/me/group-preference/last-used', { method: 'PUT', body: json({ groupId }) }),
   changePassword: async (currentPassword: string, newPassword: string): Promise<void> => {
     await request<void>('/me/password', { method: 'PUT', body: json({ currentPassword, newPassword }) });
     clearAuthenticatedClientState();

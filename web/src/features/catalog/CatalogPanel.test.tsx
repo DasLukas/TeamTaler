@@ -53,6 +53,7 @@ const session: Session = {
   user: { id: 'user-a', displayName: 'Alex', email: 'alex@example.test' },
   groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', roles: ['CATALOG_MANAGER', 'MEMBER'], groupPermissions: [] } }],
   activeGroupId: 'group-a',
+  defaultGroupId: null,
 };
 
 function renderCatalog(): void {

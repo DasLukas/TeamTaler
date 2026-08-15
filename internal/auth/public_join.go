@@ -444,22 +444,14 @@ func assignCurrentDefaultRole(ctx context.Context, tx *sql.Tx, actorUserID, grou
 	if _, err := tx.ExecContext(ctx, `INSERT INTO membership_role_assignments(group_id,membership_id,role_id,version,assigned_at,assigned_by) VALUES(?,?,?,1,?,?)`, groupID, membershipID, roleID, now, actorUserID); err != nil {
 		return err
 	}
-	var preset sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT preset_key FROM roles WHERE group_id=? AND id=?`, groupID, roleID).Scan(&preset); err != nil {
+	legacyRoles, err := legacyRolesForAssignedRoleTx(ctx, tx, groupID, roleID)
+	if err != nil {
 		return err
 	}
-	legacyRole := ""
-	switch domain.RolePresetKey(preset.String) {
-	case domain.RolePresetGroupAdministrator:
-		legacyRole = string(domain.RoleAdmin)
-	case domain.RolePresetFinanceManager:
-		legacyRole = string(domain.RoleFinanceManager)
-	case domain.RolePresetCatalogManager:
-		legacyRole = string(domain.RoleCatalogManager)
-	}
-	if legacyRole != "" {
-		_, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO membership_roles(group_id,membership_id,role,granted_at,granted_by) VALUES(?,?,?,?,?)`, groupID, membershipID, legacyRole, now, actorUserID)
-		return err
+	for _, legacyRole := range legacyRoles {
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO membership_roles(group_id,membership_id,role,granted_at,granted_by) VALUES(?,?,?,?,?)`, groupID, membershipID, legacyRole, now, actorUserID); err != nil {
+			return err
+		}
 	}
 	return nil
 }

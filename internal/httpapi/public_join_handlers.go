@@ -213,7 +213,11 @@ func (s *Server) handleConfirmPublicJoinRegistration(response http.ResponseWrite
 		writeProblem(response, request, err)
 		return
 	}
-	sessionPayload := newSessionResponse(session.Principal, session.CSRFToken, groupItems)
+	sessionPayload, err := s.newSessionResponse(request.Context(), session.Principal, session.CSRFToken, groupItems)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
 	sessionPayload.ActiveGroupID = &joinedMembership.GroupID
 	writeJSON(response, http.StatusCreated, sessionPayload)
 }
@@ -247,7 +251,11 @@ func (s *Server) handleAcceptPublicJoinLink(response http.ResponseWriter, reques
 		writeProblem(response, request, fmt.Errorf("%w: missing CSRF session", domain.ErrForbidden))
 		return
 	}
-	sessionPayload := newSessionResponse(principal, principal.CSRFToken, groupsForUser)
+	sessionPayload, err := s.newSessionResponse(request.Context(), principal, principal.CSRFToken, groupsForUser)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
 	sessionPayload.ActiveGroupID = &joinedMembership.GroupID
 	writeJSON(response, http.StatusOK, sessionPayload)
 }
