@@ -3,17 +3,20 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AdminPage } from './AdminPage';
 
-const mocks = vi.hoisted(() => ({ useActiveGroup: vi.fn() }));
+const mocks = vi.hoisted(() => ({ useActiveGroup: vi.fn(), session: { systemRoles: [] as string[] } }));
 
-vi.mock('@/app/useActiveGroup', () => ({ useActiveGroup: () => mocks.useActiveGroup() }));
+vi.mock('@/app/useActiveGroup', () => ({ useOptionalActiveGroup: () => mocks.useActiveGroup() }));
+vi.mock('@/app/useSession', () => ({ useSession: () => mocks.session, isSystemAdministrator: (session: { systemRoles?: string[] }) => session.systemRoles?.includes('SYSTEM_ADMINISTRATOR') === true }));
 vi.mock('./AuditPanel', () => ({ AuditPanel: () => <div>audit-panel</div> }));
 vi.mock('./BehaviorSettingsPanel', () => ({ BehaviorSettingsPanel: () => <div>settings-panel</div> }));
 vi.mock('./MembersPanel', () => ({ MembersPanel: () => <div>members-panel</div> }));
 vi.mock('./RightsPanel', () => ({ RightsPanel: () => <div>rights-panel</div> }));
+vi.mock('./SystemSettingsPanel', () => ({ SystemSettingsPanel: () => <div>system-panel</div> }));
 
 describe('AdminPage workspace separation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.session.systemRoles = [];
     mocks.useActiveGroup.mockReturnValue({ activeGroup: { membership: { effectiveGrants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }] } } });
   });
 
@@ -107,5 +110,26 @@ describe('AdminPage workspace separation', () => {
 
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Mitglieder']);
     expect(screen.getByText('members-panel')).toBeVisible();
+  });
+
+  it('places the system workspace first for a system administrator with a group', async () => {
+    mocks.session.systemRoles = ['SYSTEM_ADMINISTRATOR'];
+
+    render(<AdminPage />);
+
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['System', 'Allgemein', 'Mitglieder', 'Rollen & Rechte', 'Audit']);
+    expect(await screen.findByText('system-panel')).toBeVisible();
+    expect(screen.queryByText('settings-panel')).not.toBeInTheDocument();
+  });
+
+  it('mounts only the system workspace without a group context', async () => {
+    mocks.session.systemRoles = ['SYSTEM_ADMINISTRATOR'];
+    mocks.useActiveGroup.mockReturnValue(null);
+
+    render(<AdminPage />);
+
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['System']);
+    expect(await screen.findByText('system-panel')).toBeVisible();
+    expect(screen.queryByText('members-panel')).not.toBeInTheDocument();
   });
 });

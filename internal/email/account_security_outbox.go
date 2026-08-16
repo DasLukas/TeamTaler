@@ -69,9 +69,6 @@ func (d *AccountSecurityDispatcher) Run(ctx context.Context) error {
 	if d == nil || d.db == nil || d.sender == nil || d.tokenOpener == nil || d.now == nil || d.workerCount < 1 || d.workerCount > defaultWorkerCount || d.pollInterval <= 0 || d.leaseDuration <= 0 {
 		return errors.New("run account security dispatcher: dispatcher is not fully configured")
 	}
-	if !d.sender.Available() {
-		return fmt.Errorf("run account security dispatcher: %w", ErrUnavailable)
-	}
 	var workers sync.WaitGroup
 	workers.Add(d.workerCount)
 	for index := 0; index < d.workerCount; index++ {
@@ -120,6 +117,9 @@ func (d *AccountSecurityDispatcher) runWorker(ctx context.Context) {
 }
 
 func (d *AccountSecurityDispatcher) processOne(ctx context.Context) (bool, error) {
+	if !d.sender.Available() {
+		return false, nil
+	}
 	job, found, err := d.claimNext(ctx)
 	if err != nil || !found {
 		return found, err
@@ -167,12 +167,12 @@ func (d *AccountSecurityDispatcher) processOne(ctx context.Context) (bool, error
 		d.releaseAfterCancellation(job)
 		return true, nil
 	}
-	code := FailureCodeDeliveryFailed
 	if errors.Is(err, ErrUnavailable) {
-		code = FailureCodeEmailUnavailable
+		d.releaseAfterCancellation(job)
+		return true, nil
 	}
 	return true, withCompletionContext(func(completionContext context.Context) error {
-		return d.recordFailure(completionContext, job, code)
+		return d.recordFailure(completionContext, job, FailureCodeDeliveryFailed)
 	})
 }
 

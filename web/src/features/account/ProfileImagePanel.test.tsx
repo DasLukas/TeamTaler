@@ -5,6 +5,8 @@ import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Membership, Session } from '@/api/types';
 import { ActiveGroupContext } from '@/app/active-group-context';
+import { SessionProvider } from '@/app/SessionContext';
+import { DEFAULT_INSTANCE_CAPABILITIES } from '@/app/useSession';
 import i18n from '@/i18n';
 import { ProfileImagePanel } from './ProfileImagePanel';
 
@@ -25,9 +27,10 @@ const baseSession: Session = {
   groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', roles: ['MEMBER'], groupPermissions: [] } }],
   activeGroupId: 'group-a',
   defaultGroupId: null,
+  systemRoles: [],
 };
 
-function renderProfileImage(session: Session = baseSession): QueryClient {
+function renderProfileImage(session: Session = baseSession, mediaUploadMaxBytes = DEFAULT_INSTANCE_CAPABILITIES.mediaUploadMaxBytes): QueryClient {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const member: Membership = {
     id: 'member-a',
@@ -46,9 +49,11 @@ function renderProfileImage(session: Session = baseSession): QueryClient {
   queryClient.setQueryData(['members', 'group-a'], [member]);
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>
-      <ActiveGroupContext.Provider value={{ session, activeGroup: session.groups[0], activeGroupId: 'group-a', setActiveGroupId: vi.fn() }}>
-        {children}
-      </ActiveGroupContext.Provider>
+      <SessionProvider instanceCapabilities={{ ...DEFAULT_INSTANCE_CAPABILITIES, mediaUploadMaxBytes }} session={session}>
+        <ActiveGroupContext.Provider value={{ session, activeGroup: session.groups[0], activeGroupId: 'group-a', setActiveGroupId: vi.fn() }}>
+          {children}
+        </ActiveGroupContext.Provider>
+      </SessionProvider>
     </QueryClientProvider>
   );
   render(<ProfileImagePanel />, { wrapper });
@@ -120,6 +125,16 @@ describe('ProfileImagePanel', () => {
 
     expect(await screen.findByText(i18n.t('account.profileImage.invalidType'))).toHaveAttribute('role', 'alert');
     expect(screen.getByRole('button', { name: i18n.t('account.profileImage.save') })).toBeDisabled();
+    expect(apiMock.uploadProfileAvatar).not.toHaveBeenCalled();
+  });
+
+  it('uses the effective instance media limit instead of a hard-coded browser limit', async () => {
+    renderProfileImage(baseSession, 512 * 1024);
+    const oversizedImage = new File([new Uint8Array(600 * 1024)], 'large.png', { type: 'image/png' });
+
+    fireEvent.change(screen.getByLabelText('Eigenes Profilbild auswählen'), { target: { files: [oversizedImage] } });
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Das Bild darf höchstens 512 KiB groß sein.');
     expect(apiMock.uploadProfileAvatar).not.toHaveBeenCalled();
   });
 });

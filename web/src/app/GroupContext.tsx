@@ -14,9 +14,12 @@ import { preferredMemberPath } from './groupCapabilities';
  */
 export function GroupProvider({ session, children }: { session: Session; children: ReactNode }) {
   const navigate = useNavigate();
-  const [activeGroupId, setActiveGroupId] = useState(session.activeGroupId);
+  const initialGroupId = session.activeGroupId ?? session.groups[0]?.id;
+  if (!initialGroupId) throw new Error('GroupProvider requires at least one group.');
+  const [activeGroupId, setActiveGroupId] = useState(initialGroupId);
   const preferenceWrite = useRef<Promise<void>>(Promise.resolve());
   const activeGroup = session.groups.find((group) => group.id === activeGroupId) ?? session.groups[0];
+  if (!activeGroup) throw new Error('GroupProvider requires an active group.');
   const selectActiveGroup = useCallback((groupId: string) => {
     const group = session.groups.find((candidate) => candidate.id === groupId);
     if (!group) return;

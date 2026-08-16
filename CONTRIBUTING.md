@@ -6,13 +6,52 @@ Thank you for helping improve TeamTaler. Contributions must preserve its account
 
 All source code, code comments, documentation, commit messages, issue text, and pull request text must be written in English. User-facing German copy belongs in the translation catalog rather than directly in reusable components.
 
+## Documentation ownership
+
+Every document has one primary audience and must remain within that boundary:
+
+- `README.md` is the canonical first-run and operations guide for a production instance administrator. It must remain understandable without repository or architecture knowledge and contain the short product scope, supported production requirements, installation, host and runtime configuration, operator CLI, routine backup/upgrade guidance, health checks, and basic troubleshooting.
+- `deploy/README.md` contains detailed deployment topology, reverse-proxy, storage, backup, restore, upgrade, and monitoring procedures.
+- `ARCHITECTURE.md` contains module boundaries, internal data flows, persistence and migration details, authorization design, UI architecture constraints, dependencies, development-runtime topology, and extension policy.
+- `SECURITY.md` contains vulnerability reporting, security properties, trust boundaries, and operational hardening.
+- `CONTRIBUTING.md` contains local development, test fixtures, quality gates, branch workflow, and contributor conventions.
+- `CHANGELOG.md` contains release-specific behavior and migration notes.
+- `api/openapi.yaml` contains the complete public HTTP contract.
+
+Do not turn `README.md` into a member user manual, feature-by-feature UI walkthrough, repository map, architecture specification, migration ledger, development fixture guide, design rationale, or AI/agent instruction surface. Codex or other agent-environment mechanics belong in repository-scoped agent instructions or, when they describe the shared development runtime, in `ARCHITECTURE.md`. When a change crosses audiences, update each owning document with the smallest information needed by that audience instead of duplicating one long explanation across files.
+
 ## Development setup
 
 1. Install Go 1.26.x, Node.js 24.x, and npm 11.x. If you use NVM, run `nvm use` from the repository root.
 2. Run `make install`.
-3. Start the API with `make dev-backend`.
+3. Start the API with `TEAMTALER_PUBLIC_URL=http://127.0.0.1:5173 make dev-backend`.
 4. Start the frontend with `make dev-frontend`.
 5. Run `make verify` before opening a pull request.
+
+Vite listens on `127.0.0.1:5173`, proxies `/api` to `127.0.0.1:8080`, and requires the backend public URL to match the browser-facing Vite origin so mutation-origin validation succeeds.
+
+For frontend-only visual development, copy `web/.env.example` to `web/.env.local` and set `VITE_DEMO_MODE=true`. Demo transport and sample assets are available only in Vite development mode and are excluded from production builds.
+
+### Disposable full-stack test server
+
+Run the real API, Vite frontend, and an isolated seeded SQLite database with:
+
+```sh
+make test-server
+```
+
+The runtime binds only to loopback and deletes its temporary database when stopped. The fixture contains `TeamTaler Demo Club` and `TeamTaler Weekend Club`. Every seeded login uses `TeamTaler-Test-2026!`:
+
+- `admin@example.test` is a protected group administrator in both groups.
+- `jonas@example.test` has finance and catalogue management roles.
+- `marie@example.test` has ordinary member, self-payment, and third-party booking access.
+- `lena@example.test` belongs to both groups with deliberately mixed booking permissions.
+- `noah@example.test` belongs only to `TeamTaler Weekend Club`.
+- `systemonly@example.test` is a global system administrator without group membership.
+
+Optional SMTP delivery is read from the ignored `.env.test-server.local` file. The test-server script accepts only the documented SMTP variables and never evaluates the file as shell code. Incomplete credentials disable delivery without blocking startup.
+
+The Codex **Start test server** environment action calls the same `make test-server` target. Its process ownership, readiness probes, fixture composition, and cleanup boundaries are documented in [ARCHITECTURE.md](ARCHITECTURE.md#development-test-runtime).
 
 ## Branch workflow
 
@@ -33,7 +72,7 @@ Do not force-push shared branches or commit generated runtime data, local config
 - Add a forward migration and integration test for every schema change.
 - Keep API changes documented and backward compatible within a version.
 - Document every exported Go symbol, public TypeScript interface, public component, and central function with complete GoDoc or JSDoc.
-- Update README and ARCHITECTURE whenever setup, modules, APIs, data flow, dependencies, or deployment behavior changes.
+- Update the owning documents from the documentation matrix whenever operator setup, configuration, CLI behavior, modules, APIs, data flow, dependencies, security, or deployment behavior changes. Only operator-visible information belongs in `README.md`.
 - Preserve keyboard operation, accessible names, visible focus, semantic markup, and WCAG AA contrast.
 - Preserve the accepted true-white/navy/teal TeamTaler design system. New component families require a documented product need.
 - Treat regular-member workflows as mobile-first: design and verify narrow phone layouts before adding desktop enhancements.
@@ -52,6 +91,21 @@ At minimum, pull requests must pass:
 - Mobile-viewport interaction-count verification for every booking-flow change.
 - Migration and container smoke tests when persistence or deployment changes.
 - Accessibility and visual regression checks for user-interface changes.
+
+Run the standard formatter, linter, static analysis, unit tests, and production builds with:
+
+```sh
+make verify
+```
+
+Run the stricter race-enabled verification and the desktop/mobile Playwright acceptance suite with:
+
+```sh
+./scripts/verify.sh
+make test-e2e
+```
+
+Install Playwright's Chromium runtime once with `cd web && npx playwright install chromium` when no compatible browser is present. Build distributable artifacts without running tests with `make build`; the binary is written to `bin/teamtaler` and the frontend to `web/dist`.
 
 ## Commit messages
 

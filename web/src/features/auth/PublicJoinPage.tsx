@@ -7,7 +7,7 @@ import { useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import type { LoginCommand } from '@/api/types';
-import { preferredMemberPath } from '@/app/groupCapabilities';
+import { preferredAuthenticatedPath } from '@/app/groupCapabilities';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
 import { AuthLayout } from './AuthLayout';
@@ -46,8 +46,7 @@ export function PublicJoinPage() {
   const finishJoin = async (session: Awaited<ReturnType<typeof api.acceptPublicJoinLink>>) => {
     queryClient.setQueryData(['session'], session);
     window.history.replaceState(null, '', '/join');
-    const group = session.groups.find((candidate) => candidate.id === session.activeGroupId) ?? session.groups[0];
-    await navigate({ to: preferredMemberPath(group?.membership?.effectiveGrants) });
+    await navigate({ to: preferredAuthenticatedPath(session) });
   };
   const acceptMutation = useMutation({ mutationFn: () => api.acceptPublicJoinLink(token), onSuccess: finishJoin });
   const loginMutation = useMutation({

@@ -1,7 +1,8 @@
-import { type KeyboardEvent, useId, useRef, useState } from 'react';
+import { lazy, Suspense, type KeyboardEvent, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { can } from '@/app/permissions';
-import { useActiveGroup } from '@/app/useActiveGroup';
+import { useOptionalActiveGroup } from '@/app/useActiveGroup';
+import { isSystemAdministrator, useSession } from '@/app/useSession';
 import { Page } from '@/components/layout/Page';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { AuditPanel } from './AuditPanel';
@@ -10,9 +11,12 @@ import { MembersPanel } from './MembersPanel';
 import { RightsPanel } from './RightsPanel';
 import styles from './AdminPage.module.css';
 
-type AdminTab = 'settings' | 'members' | 'rights' | 'audit';
+const SystemSettingsPanel = lazy(() => import('./SystemSettingsPanel').then((module) => ({ default: module.SystemSettingsPanel })));
+
+type AdminTab = 'system' | 'settings' | 'members' | 'rights' | 'audit';
 
 const tabs: Array<{ id: AdminTab; labelKey: string }> = [
+  { id: 'system', labelKey: 'admin.tabs.system' },
   { id: 'settings', labelKey: 'admin.tabs.settings' },
   { id: 'members', labelKey: 'admin.tabs.members' },
   { id: 'rights', labelKey: 'admin.tabs.rights' },
@@ -26,15 +30,20 @@ const tabs: Array<{ id: AdminTab; labelKey: string }> = [
  */
 export function AdminPage() {
   const { t } = useTranslation();
-  const { activeGroup } = useActiveGroup();
-  const grants = activeGroup.membership?.effectiveGrants;
+  const session = useSession();
+  const groupContext = useOptionalActiveGroup();
+  const activeGroup = groupContext?.activeGroup;
+  const systemAdministrator = isSystemAdministrator(session);
+  const grants = activeGroup?.membership?.effectiveGrants;
   const canManageGroup = can(grants, 'GROUP_ADMINISTRATION');
   const canManageMembers = can(grants, 'MEMBER_MANAGEMENT');
   const canManageRoles = can(grants, 'ROLE_MANAGEMENT');
   const tabGroupId = useId();
   const tabRefs = useRef<Partial<Record<AdminTab, HTMLButtonElement | null>>>({});
-  const [requestedTab, setRequestedTab] = useState<AdminTab>('settings');
+  const [requestedTab, setRequestedTab] = useState<AdminTab>(systemAdministrator ? 'system' : 'settings');
   const availableTabs = tabs.filter((tab) => {
+    if (tab.id === 'system') return systemAdministrator;
+    if (!activeGroup) return false;
     if (tab.id === 'rights') return canManageRoles;
     if (tab.id === 'members') return canManageMembers;
     return canManageGroup;
@@ -62,10 +71,11 @@ export function AdminPage() {
         })}
       </div>
       <section aria-labelledby={`${tabGroupId}-tab-${activeTab}`} className={styles.panel} id={`${tabGroupId}-panel-${activeTab}`} role="tabpanel" tabIndex={0}>
-        {activeTab === 'settings' ? <BehaviorSettingsPanel key={activeGroup.id} /> : null}
-        {activeTab === 'members' ? <MembersPanel key={activeGroup.id} /> : null}
-        {activeTab === 'rights' ? <RightsPanel key={activeGroup.id} /> : null}
-        {activeTab === 'audit' ? <AuditPanel key={activeGroup.id} /> : null}
+        {activeTab === 'system' ? <Suspense fallback={<StatePanel kind="loading" />}><SystemSettingsPanel /></Suspense> : null}
+        {activeTab === 'settings' && activeGroup ? <BehaviorSettingsPanel key={activeGroup.id} /> : null}
+        {activeTab === 'members' && activeGroup ? <MembersPanel key={activeGroup.id} /> : null}
+        {activeTab === 'rights' && activeGroup ? <RightsPanel key={activeGroup.id} /> : null}
+        {activeTab === 'audit' && activeGroup ? <AuditPanel key={activeGroup.id} /> : null}
       </section>
     </Page>
   );

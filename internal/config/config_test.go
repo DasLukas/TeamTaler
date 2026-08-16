@@ -16,6 +16,7 @@ var smtpEnvironmentVariables = []string{
 	"TEAMTALER_SMTP_FROM_ADDRESS",
 	"TEAMTALER_SMTP_FROM_NAME",
 	"TEAMTALER_SMTP_TLS_MODE",
+	"TEAMTALER_SMTP_ALLOW_PRIVATE_NETWORK",
 	"TEAMTALER_EMAIL_TOKEN_KEY",
 }
 
@@ -120,6 +121,9 @@ func TestLoadAcceptsCompleteSMTPConfigurationWithSecureDefaults(t *testing.T) {
 	if loaded.SMTP.TLSMode != SMTPTLSModeStartTLS {
 		t.Fatalf("SMTP TLS mode = %q, want %q", loaded.SMTP.TLSMode, SMTPTLSModeStartTLS)
 	}
+	if loaded.SMTP.AllowPrivateNetwork || loaded.SMTP.AllowedPrivateHost != loaded.SMTP.Host || loaded.SMTP.AllowedPrivatePort != loaded.SMTP.Port {
+		t.Fatalf("unexpected SMTP private-network policy: %#v", loaded.SMTP)
+	}
 	if !bytes.Equal(loaded.EmailTokenKey, bytes.Repeat([]byte{0x5a}, 32)) {
 		t.Fatal("email token key was not decoded")
 	}
@@ -137,6 +141,19 @@ func TestLoadAcceptsImplicitSMTPTransportTLS(t *testing.T) {
 	}
 	if loaded.SMTP.TLSMode != SMTPTLSModeTLS {
 		t.Fatalf("SMTP TLS mode = %q, want %q", loaded.SMTP.TLSMode, SMTPTLSModeTLS)
+	}
+}
+
+func TestLoadRequiresExplicitBooleanForPrivateSMTPNetworks(t *testing.T) {
+	clearSMTPEnvironment(t)
+	setCompleteSMTPEnvironment(t)
+	t.Setenv("TEAMTALER_SMTP_ALLOW_PRIVATE_NETWORK", "true")
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !loaded.SMTP.AllowPrivateNetwork {
+		t.Fatal("explicit private SMTP network policy was not enabled")
 	}
 }
 
@@ -175,6 +192,7 @@ func TestLoadRejectsUnsafeOrMalformedSMTPConfiguration(t *testing.T) {
 		{name: "host includes port", variable: "TEAMTALER_SMTP_HOST", value: "smtp.example.test:587"},
 		{name: "sender display form", variable: "TEAMTALER_SMTP_FROM_ADDRESS", value: "TeamTaler <teamtaler@example.test>"},
 		{name: "sender header injection", variable: "TEAMTALER_SMTP_FROM_NAME", value: "TeamTaler\r\nBcc: attacker@example.test"},
+		{name: "private network boolean", variable: "TEAMTALER_SMTP_ALLOW_PRIVATE_NETWORK", value: "yes"},
 		{name: "malformed token key", variable: "TEAMTALER_EMAIL_TOKEN_KEY", value: "not-base64"},
 		{name: "short token key", variable: "TEAMTALER_EMAIL_TOKEN_KEY", value: base64.StdEncoding.EncodeToString(make([]byte, 16))},
 	}
@@ -204,6 +222,65 @@ func TestLoadAcceptsOptionalEmailTokenKeyWithoutSMTP(t *testing.T) {
 	}
 	if !bytes.Equal(loaded.EmailTokenKey, expected) {
 		t.Fatal("optional email token key was not decoded")
+	}
+}
+
+func TestLoadReadsMutableInstanceDefaults(t *testing.T) {
+	clearSMTPEnvironment(t)
+	t.Setenv("TEAMTALER_MAX_REQUEST_BYTES", "12582912")
+	t.Setenv("TEAMTALER_INSTANCE_NAME", "Example TeamTaler")
+	t.Setenv("TEAMTALER_DEFAULT_CURRENCY", "usd")
+	t.Setenv("TEAMTALER_MEDIA_UPLOAD_MAX_BYTES", "10485760")
+	t.Setenv("TEAMTALER_PUBLIC_JOIN_ENABLED", "false")
+	t.Setenv("TEAMTALER_MAINTENANCE_MODE", "true")
+	t.Setenv("TEAMTALER_MAINTENANCE_MESSAGE", "Scheduled maintenance")
+
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := InstanceDefaults{
+		InstanceName:        "Example TeamTaler",
+		DefaultCurrency:     "USD",
+		MediaUploadMaxBytes: 10 << 20,
+		PublicJoinEnabled:   false,
+		MaintenanceMode:     true,
+		MaintenanceMessage:  "Scheduled maintenance",
+	}
+	if loaded.InstanceDefaults != want {
+		t.Fatalf("instance defaults = %#v, want %#v", loaded.InstanceDefaults, want)
+	}
+}
+
+func TestLoadRejectsUnsafeMutableInstanceDefaults(t *testing.T) {
+	clearSMTPEnvironment(t)
+	tests := []struct {
+		name     string
+		variable string
+		value    string
+	}{
+		{name: "instance controls", variable: "TEAMTALER_INSTANCE_NAME", value: "Unsafe\nName"},
+		{name: "currency", variable: "TEAMTALER_DEFAULT_CURRENCY", value: "EURO"},
+		{name: "media too small", variable: "TEAMTALER_MEDIA_UPLOAD_MAX_BYTES", value: "1024"},
+		{name: "public join boolean", variable: "TEAMTALER_PUBLIC_JOIN_ENABLED", value: "yes"},
+		{name: "maintenance boolean", variable: "TEAMTALER_MAINTENANCE_MODE", value: "1"},
+		{name: "maintenance controls", variable: "TEAMTALER_MAINTENANCE_MESSAGE", value: "Unsafe\rMessage"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv(test.variable, test.value)
+			if _, err := Load(); err == nil {
+				t.Fatalf("unsafe %s value %q was accepted", test.variable, test.value)
+			}
+		})
+	}
+}
+
+func TestLoadRequiresMultipartHeadroomForMediaDefault(t *testing.T) {
+	clearSMTPEnvironment(t)
+	t.Setenv("TEAMTALER_MAX_REQUEST_BYTES", "5242880")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "TEAMTALER_MEDIA_UPLOAD_MAX_BYTES") {
+		t.Fatalf("insufficient request ceiling error = %v", err)
 	}
 }
 

@@ -103,7 +103,7 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, name, curre
 func (s Service) List(ctx context.Context, userID string) ([]domain.Group, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT g.id,g.name,g.currency,g.logo_key,m.id,m.status,u.email,u.display_name,u.avatar_key
 		FROM memberships m JOIN groups g ON g.id=m.group_id JOIN users u ON u.id=m.user_id
-		WHERE m.user_id=? AND m.status='ACTIVE' ORDER BY lower(g.name)`, userID)
+		WHERE m.user_id=? AND m.status='ACTIVE' AND g.status='ACTIVE' ORDER BY lower(g.name)`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -670,8 +670,8 @@ func (s Service) MembershipForUser(ctx context.Context, groupID, userID string) 
 	var membership domain.Membership
 	var avatarKey sql.NullString
 	err := s.DB.QueryRowContext(ctx, `SELECT m.id,m.group_id,m.user_id,u.email,u.display_name,u.avatar_key,m.status
-		FROM memberships m JOIN users u ON u.id=m.user_id
-		WHERE m.group_id=? AND m.user_id=? AND m.status='ACTIVE'`, groupID, userID).
+		FROM memberships m JOIN users u ON u.id=m.user_id JOIN groups g ON g.id=m.group_id
+		WHERE m.group_id=? AND m.user_id=? AND m.status='ACTIVE' AND g.status='ACTIVE'`, groupID, userID).
 		Scan(&membership.ID, &membership.GroupID, &membership.UserID, &membership.Email, &membership.DisplayName, &avatarKey, &membership.Status)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Membership{}, domain.ErrForbidden

@@ -145,17 +145,15 @@ func NewDispatcher(db *sql.DB, sender Sender, tokenOpener TokenOpener, publicURL
 // four workers, polls when no job is ready, and waits for every worker before
 // returning. Sender failures are converted into durable retry state and are not
 // returned. Processing errors are logged and retried on the next poll. Run
-// returns ErrUnavailable when delivery is disabled, a configuration error for an
-// incomplete Dispatcher, and nil for orderly context cancellation.
+// pauses without claiming jobs while delivery is disabled, returns a
+// configuration error for an incomplete Dispatcher, and returns nil for an
+// orderly context cancellation.
 func (d *Dispatcher) Run(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("run email dispatcher: context is required")
 	}
 	if d == nil || d.db == nil || d.sender == nil || d.tokenOpener == nil || d.now == nil || d.workerCount < 1 || d.workerCount > defaultWorkerCount || d.pollInterval <= 0 || d.leaseDuration <= 0 {
 		return errors.New("run email dispatcher: dispatcher is not fully configured")
-	}
-	if !d.sender.Available() {
-		return fmt.Errorf("run email dispatcher: %w", ErrUnavailable)
 	}
 	if ctx.Err() != nil {
 		return nil
@@ -213,6 +211,9 @@ func (d *Dispatcher) runWorker(ctx context.Context) {
 }
 
 func (d *Dispatcher) processOne(ctx context.Context) (bool, error) {
+	if !d.sender.Available() {
+		return false, nil
+	}
 	job, found, err := d.claimNext(ctx)
 	if err != nil || !found {
 		return found, err
@@ -238,12 +239,6 @@ func (d *Dispatcher) processOne(ctx context.Context) (bool, error) {
 		}
 		return true, nil
 	}
-	if !d.sender.Available() {
-		return true, withCompletionContext(func(completionContext context.Context) error {
-			return d.recordFailure(completionContext, job, FailureCodeEmailUnavailable)
-		})
-	}
-
 	token, err := d.tokenOpener.Open(job.tokenCiphertext)
 	if err != nil || strings.TrimSpace(token) == "" {
 		token = ""
@@ -274,9 +269,8 @@ func (d *Dispatcher) processOne(ctx context.Context) (bool, error) {
 		return true, nil
 	}
 	if errors.Is(err, ErrUnavailable) {
-		return true, withCompletionContext(func(completionContext context.Context) error {
-			return d.recordFailure(completionContext, job, FailureCodeEmailUnavailable)
-		})
+		d.releaseAfterCancellation(job)
+		return true, nil
 	}
 	return true, withCompletionContext(func(completionContext context.Context) error {
 		return d.recordFailure(completionContext, job, FailureCodeDeliveryFailed)

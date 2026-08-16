@@ -7,6 +7,7 @@ import (
 
 	"github.com/DasLukas/TeamTaler/internal/auth"
 	"github.com/DasLukas/TeamTaler/internal/domain"
+	systemadmin "github.com/DasLukas/TeamTaler/internal/system"
 )
 
 type loginRequest struct {
@@ -15,11 +16,12 @@ type loginRequest struct {
 }
 
 type sessionResponse struct {
-	User           userResponse `json:"user"`
-	CSRFToken      string       `json:"csrfToken"`
-	Groups         any          `json:"groups"`
-	ActiveGroupID  *string      `json:"activeGroupId"`
-	DefaultGroupID *string      `json:"defaultGroupId"`
+	User           userResponse       `json:"user"`
+	CSRFToken      string             `json:"csrfToken"`
+	Groups         any                `json:"groups"`
+	ActiveGroupID  *string            `json:"activeGroupId"`
+	DefaultGroupID *string            `json:"defaultGroupId"`
+	SystemRoles    []systemadmin.Role `json:"systemRoles"`
 }
 
 type userResponse struct {
@@ -171,6 +173,14 @@ func (s *Server) handlePreviewInvitation(response http.ResponseWriter, request *
 }
 
 func (s *Server) newSessionResponse(ctx context.Context, principal domain.Principal, csrf string, groupItems []domain.Group) (sessionResponse, error) {
+	systemRoles := make([]systemadmin.Role, 0)
+	if s.systemConfigured {
+		var err error
+		systemRoles, err = s.systemAdmin.RolesForUser(ctx, principal.UserID)
+		if err != nil {
+			return sessionResponse{}, err
+		}
+	}
 	preference, err := s.auth.ReadGroupPreference(ctx, principal.UserID)
 	if err != nil {
 		return sessionResponse{}, err
@@ -200,7 +210,7 @@ func (s *Server) newSessionResponse(ctx context.Context, principal domain.Princi
 		value := groupItems[0].ID
 		activeGroupID = &value
 	}
-	return sessionResponse{User: userResponse{ID: principal.UserID, Email: principal.Email, DisplayName: principal.DisplayName, AvatarURL: principal.AvatarURL}, CSRFToken: csrf, Groups: groupItems, ActiveGroupID: activeGroupID, DefaultGroupID: defaultGroupID}, nil
+	return sessionResponse{User: userResponse{ID: principal.UserID, Email: principal.Email, DisplayName: principal.DisplayName, AvatarURL: principal.AvatarURL}, CSRFToken: csrf, Groups: groupItems, ActiveGroupID: activeGroupID, DefaultGroupID: defaultGroupID, SystemRoles: systemRoles}, nil
 }
 
 func (s *Server) acquirePasswordSlot() bool {

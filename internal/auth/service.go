@@ -17,6 +17,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/media"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/storage"
+	systemadmin "github.com/DasLukas/TeamTaler/internal/system"
 )
 
 // Service manages local accounts and opaque server-side sessions. DB must point
@@ -80,8 +81,9 @@ func (s Service) PreviewInvitation(ctx context.Context, token string) (Invitatio
 	var expiresAt string
 	var userID sql.NullString
 	err := s.DB.QueryRowContext(ctx, `SELECT i.display_name,u.display_name,i.expires_at,u.id
-		FROM invitations i LEFT JOIN users u ON u.email=i.email COLLATE NOCASE AND u.active=1
-		WHERE i.token_hash=? AND i.accepted_at IS NULL AND i.revoked_at IS NULL`, platform.HashSecret(token)).
+		FROM invitations i JOIN groups g ON g.id=i.group_id
+		LEFT JOIN users u ON u.email=i.email COLLATE NOCASE AND u.active=1
+		WHERE i.token_hash=? AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND g.status IN ('ACTIVE','PROVISIONING')`, platform.HashSecret(token)).
 		Scan(&invitationDisplayName, &accountDisplayName, &expiresAt, &userID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return InvitationPreview{}, domain.ErrNotFound
@@ -163,6 +165,9 @@ func (s Service) Bootstrap(ctx context.Context, email, displayName, password, gr
 		if _, err := tx.ExecContext(ctx, `INSERT INTO membership_roles(group_id,membership_id,role,granted_at,granted_by) VALUES(?,?,'ADMIN',?,?)`, groupID, membershipID, now, userID); err != nil {
 			return err
 		}
+		if _, err := systemadmin.GrantAdministratorInTx(ctx, tx, userID, ""); err != nil {
+			return err
+		}
 		return audit.Record(ctx, tx, groupID, userID, membershipID, "system.bootstrapped", "group", groupID, map[string]any{"email": email})
 	})
 }
@@ -217,11 +222,12 @@ func (s Service) AcceptInvitation(ctx context.Context, input InvitationAcceptanc
 	var session Session
 	var membership domain.Membership
 	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
-		var invitationID, groupID, email, expiresAt, invitationCreatedBy string
+		var invitationID, groupID, email, expiresAt, invitationCreatedBy, groupStatus string
 		var targetMembershipID sql.NullString
-		err := tx.QueryRowContext(ctx, `SELECT id,group_id,email,expires_at,created_by,target_membership_id FROM invitations
-			WHERE token_hash=? AND accepted_at IS NULL AND revoked_at IS NULL`, platform.HashSecret(input.Token)).
-			Scan(&invitationID, &groupID, &email, &expiresAt, &invitationCreatedBy, &targetMembershipID)
+		err := tx.QueryRowContext(ctx, `SELECT i.id,i.group_id,i.email,i.expires_at,i.created_by,i.target_membership_id,g.status
+			FROM invitations i JOIN groups g ON g.id=i.group_id
+			WHERE i.token_hash=? AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND g.status IN ('ACTIVE','PROVISIONING')`, platform.HashSecret(input.Token)).
+			Scan(&invitationID, &groupID, &email, &expiresAt, &invitationCreatedBy, &targetMembershipID, &groupStatus)
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.ErrNotFound
 		}
@@ -247,6 +253,19 @@ func (s Service) AcceptInvitation(ctx context.Context, input InvitationAcceptanc
 		}
 		if err := assignmentRows.Close(); err != nil {
 			return err
+		}
+		if groupStatus == "PROVISIONING" {
+			administratorRoleID := authorization.PresetRoleID(groupID, domain.RolePresetGroupAdministrator)
+			foundAdministratorRole := false
+			for _, roleID := range invitationRoleIDs {
+				if roleID == administratorRoleID {
+					foundAdministratorRole = true
+					break
+				}
+			}
+			if !foundAdministratorRole || targetMembershipID.Valid {
+				return fmt.Errorf("%w: provisioning invitation is not a valid initial-administrator invitation", domain.ErrConflict)
+			}
 		}
 		now := platform.Timestamp(platform.Now())
 		var principal domain.Principal
@@ -283,6 +302,15 @@ func (s Service) AcceptInvitation(ctx context.Context, input InvitationAcceptanc
 			lease_token=NULL,lease_until=NULL,last_error_code='invitation_accepted',updated_at=?
 			WHERE invitation_id=? AND status IN ('PENDING','SENDING','FAILED')`, now, invitationID); err != nil {
 			return err
+		}
+		if groupStatus == "PROVISIONING" {
+			activated, err := tx.ExecContext(ctx, `UPDATE groups SET status='ACTIVE',version=version+1,updated_at=? WHERE id=? AND status='PROVISIONING'`, now, groupID)
+			if err != nil {
+				return err
+			}
+			if changed, _ := activated.RowsAffected(); changed != 1 {
+				return domain.ErrConflict
+			}
 		}
 		token, err := platform.NewSecret()
 		if err != nil {

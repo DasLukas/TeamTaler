@@ -6,11 +6,12 @@ import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import type { Session } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
+import { useInstanceCapabilities } from '@/app/useSession';
 import { ImageCropEditor } from '@/components/media/ImageCropEditor';
 import {
   ACCEPTED_IMAGE_TYPES,
   DEFAULT_IMAGE_TRANSFORM,
-  MAX_IMAGE_BYTES,
+  formatMediaUploadLimit,
   prepareSquareImage,
   type ImageTransform,
 } from '@/components/media/imageUpload';
@@ -85,6 +86,8 @@ function GroupNameForm({ groupId, currentName, embedded }: { groupId: string; cu
 export function GroupSettingsPanel({ embedded = false }: GroupSettingsPanelProps) {
   const { t } = useTranslation();
   const { activeGroup, activeGroupId } = useActiveGroup();
+  const { mediaUploadMaxBytes } = useInstanceCapabilities();
+  const uploadLimit = formatMediaUploadLimit(mediaUploadMaxBytes);
   const queryClient = useQueryClient();
   const [selectedFile, setSelectedFile] = useState<File>();
   const [imageTransform, setImageTransform] = useState<ImageTransform>(DEFAULT_IMAGE_TRANSFORM);
@@ -97,7 +100,9 @@ export function GroupSettingsPanel({ embedded = false }: GroupSettingsPanelProps
       if (change.kind === 'remove') {
         return api.removeGroupLogo(activeGroupId).then(() => ({ logoUrl: undefined }));
       }
-      return api.uploadGroupLogo(activeGroupId, await prepareSquareImage(change.file, imageTransform));
+      const prepared = await prepareSquareImage(change.file, imageTransform);
+      if (prepared.size > mediaUploadMaxBytes) throw new Error(t('groupSettings.tooLarge', { limit: uploadLimit }));
+      return api.uploadGroupLogo(activeGroupId, prepared);
     },
     onSuccess: ({ logoUrl }, change) => {
       queryClient.setQueryData<Session>(['session'], (session) => session ? {
@@ -126,9 +131,9 @@ export function GroupSettingsPanel({ embedded = false }: GroupSettingsPanelProps
       setFileError(t('groupSettings.invalidType'));
       return;
     }
-    if (file.size > MAX_IMAGE_BYTES) {
+    if (file.size > mediaUploadMaxBytes) {
       setSelectedFile(undefined);
-      setFileError(t('groupSettings.tooLarge'));
+      setFileError(t('groupSettings.tooLarge', { limit: uploadLimit }));
       return;
     }
     setFileError('');
@@ -164,7 +169,7 @@ export function GroupSettingsPanel({ embedded = false }: GroupSettingsPanelProps
             <div>
               {embedded ? <h4>{t('groupSettings.logoTitle')}</h4> : <h3>{t('groupSettings.logoTitle')}</h3>}
             </div>
-            <Field error={fileError || undefined} hint={t('groupSettings.imageHint')} htmlFor="group-logo" label={t('groupSettings.imageLabel')}>
+          <Field error={fileError || undefined} hint={t('groupSettings.imageHint', { limit: uploadLimit })} htmlFor="group-logo" label={t('groupSettings.imageLabel')}>
               <TextInput accept="image/jpeg,image/png,image/webp" id="group-logo" key={fileInputKey} onChange={(event) => selectFile(event.target.files?.[0])} type="file" />
             </Field>
             {logoMutation.isError ? <p className={styles.error} role="alert">{t('groupSettings.uploadError')} {logoMutation.error.message}</p> : null}

@@ -45,6 +45,7 @@ function session(userId: string): Session {
     groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: `member-${userId}`, roles: ['MEMBER'], groupPermissions: [] } }],
     activeGroupId: 'group-a',
     defaultGroupId: null,
+    systemRoles: [],
   };
 }
 
@@ -965,5 +966,67 @@ describe('public join-link API', () => {
     expect(requestBody(fetchMock.mock.calls[0])).toEqual({ joinToken: 'join-token', email: 'new@example.test', displayName: 'New Member', password: 'new-password-long' });
     expect(requestBody(fetchMock.mock.calls[1])).toEqual({ joinToken: 'join-token', email: 'new@example.test' });
     expect(requestBody(fetchMock.mock.calls[2])).toEqual({ token: 'verification-token' });
+  });
+});
+
+describe('system-administration API contract', () => {
+  beforeEach(() => vi.restoreAllMocks());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('resets scalar overrides with core keys and a strong settings revision', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ revision: 8 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.resetSystemSetting('instanceName', 7);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/system/settings/reset');
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' });
+    expect(new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers).get('If-Match')).toBe('"v7"');
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ keys: ['instance.name'] });
+  });
+
+  it('uses the TLS-only SMTP PUT and keeps a successful test revision', async () => {
+    const smtp = { enabled: false, host: 'smtp.example.test', port: 587, tlsMode: 'starttls' as const, username: 'mailer', fromAddress: 'mail@example.test', fromName: 'TeamTaler' };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ revision: 4, smtp: { revision: 2 } }))
+      .mockResolvedValueOnce(jsonResponse({ revision: 5, smtp: { revision: 2, testedRevision: 2, requiresTest: false, configurationValid: true } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.updateSystemSmtp(smtp, 3);
+    await expect(api.testSystemSmtp(4)).resolves.toMatchObject({ revision: 5, smtp: { testedRevision: 2 } });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/system/settings/smtp');
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'PUT' });
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual(smtp);
+    expect(new Headers((fetchMock.mock.calls[1][1] as RequestInit).headers).get('If-Match')).toBe('"v4"');
+  });
+
+  it('adapts purpose-bound step-up and posts purge confirmations to the lifecycle endpoint', async () => {
+    const impact = { groupId: 'group/a', groupName: 'Group A', version: 6, memberCount: 2, invitationCount: 1, bookingCount: 4, financialRecordCount: 3, auditEventCount: 5, mediaCount: 1 };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ token: 'one-use-token', expiresAt: '2026-08-15T12:05:00Z' }, 201))
+      .mockResolvedValueOnce(jsonResponse(impact));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.createSystemStepUp('current-password')).resolves.toEqual({ stepUpToken: 'one-use-token', expiresAt: '2026-08-15T12:05:00Z' });
+    await api.purgeSystemGroup('group/a', 6, { stepUpToken: 'one-use-token', groupName: 'Group A', confirmationPhrase: 'ENDGÜLTIG LÖSCHEN' });
+
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ password: 'current-password', purpose: 'GROUP_PURGE' });
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/system/groups/group%2Fa/purge');
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: 'POST' });
+    expect(new Headers((fetchMock.mock.calls[1][1] as RequestInit).headers).get('If-Match')).toBe('"v6"');
+    expect(requestBody(fetchMock.mock.calls[1])).toEqual({ stepUpToken: 'one-use-token', groupName: 'Group A', confirmationPhrase: 'ENDGÜLTIG LÖSCHEN' });
+  });
+
+  it('resends a provisioning invitation through the versioned group endpoint', async () => {
+    const group = { id: 'group/pending', name: 'Group Pending', currency: 'EUR', status: 'PROVISIONING', version: 3 };
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(group));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.resendSystemGroupInvitation('group/pending', 2)).resolves.toMatchObject({ id: 'group/pending', status: 'PROVISIONING', version: 3 });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/system/groups/group%2Fpending/invitation/resend');
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' });
+    expect(new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers).get('If-Match')).toBe('"v2"');
   });
 });

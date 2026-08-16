@@ -56,8 +56,10 @@ func TestRunSeedsTwoIsolatedGroups(t *testing.T) {
 	assertCount(t, ctx, db, `SELECT count(*) FROM products p JOIN categories c ON c.id=p.category_id JOIN groups g ON g.id=c.group_id WHERE g.name=? AND p.name=? AND p.price_minor=180`, []any{secondaryGroupName, secondaryProduct}, 1)
 	assertCount(t, ctx, db, `SELECT count(*) FROM products WHERE deleted_at IS NULL`, nil, 6)
 	assertCount(t, ctx, db, `SELECT count(*) FROM products WHERE deleted_at IS NULL AND image_key IS NOT NULL`, nil, 6)
-	assertCount(t, ctx, db, `SELECT count(*) FROM users WHERE active=1 AND email IS NOT NULL`, nil, 5)
+	assertCount(t, ctx, db, `SELECT count(*) FROM users WHERE active=1 AND email IS NOT NULL`, nil, 6)
 	assertCount(t, ctx, db, `SELECT count(*) FROM users WHERE active=1 AND email IS NOT NULL AND avatar_key IS NOT NULL`, nil, 5)
+	assertCount(t, ctx, db, `SELECT count(*) FROM memberships m JOIN users u ON u.id=m.user_id WHERE u.email=?`, []any{systemOnlyAdminEmail}, 0)
+	assertCount(t, ctx, db, `SELECT count(*) FROM system_role_assignments assignment JOIN users u ON u.id=assignment.user_id WHERE u.email=? AND assignment.role='SYSTEM_ADMINISTRATOR'`, []any{systemOnlyAdminEmail}, 1)
 	for _, groupName := range []string{"TeamTaler Demo Club", secondaryGroupName} {
 		assertCount(t, ctx, db, `SELECT count(*) FROM group_reason_suggestions r JOIN groups g ON g.id=r.group_id WHERE g.name=? AND r.kind='BOOKING'`, []any{groupName}, 2)
 		assertCount(t, ctx, db, `SELECT count(*) FROM group_reason_suggestions r JOIN groups g ON g.id=r.group_id WHERE g.name=? AND r.kind='PAYMENT'`, []any{groupName}, 2)

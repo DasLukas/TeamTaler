@@ -11,8 +11,10 @@ info:
     create or reverse bookings, payments, or periods additionally require an
     `Idempotency-Key`. A batch-booking idempotency scope includes every managed
     guest created by that command. Versioned role and assignment replacement
-    or deletion, public join-link updates, and public join-link rotation require
-    a strong `If-Match` ETag.
+    or deletion, public join-link updates, system-setting and SMTP revision
+    mutations, provisioning-invitation replacement, and global group lifecycle
+    commands require a strong `If-Match` ETag where they target an existing
+    versioned resource.
   license:
     name: AGPL-3.0-only
     identifier: AGPL-3.0-only
@@ -23,6 +25,7 @@ security:
 tags:
   - name: Authentication
   - name: Authorization
+  - name: System
   - name: Groups
   - name: Catalog
   - name: Bookings
@@ -71,6 +74,22 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthenticationCapabilities'
+  /instance/capabilities:
+    get:
+      tags: [System]
+      summary: Read non-sensitive effective instance capabilities
+      description: |
+        Public presentation and policy hints. The response contains no setting
+        source metadata, SMTP data, account information, or authorization
+        state. Clients must still handle policy changes on later commands.
+      security: []
+      responses:
+        '200':
+          description: Current public instance capabilities
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstanceCapabilities'
   /auth/password-reset/request:
     post:
       tags: [Authentication]
@@ -334,6 +353,7 @@ paths:
                   avatarUrl: { type: string }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
     delete:
       tags: [Authentication]
@@ -542,6 +562,415 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /system/settings:
+    get:
+      tags: [System]
+      summary: Read effective instance settings
+      description: Requires a current `SYSTEM_ADMINISTRATOR` database assignment.
+      responses:
+        '200':
+          description: Effective settings and their current aggregate version
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SystemSettings' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+    patch:
+      tags: [System]
+      summary: Persist instance-setting overrides
+      description: |
+        Only supplied fields change. A persisted override wins over its current
+        environment and code defaults. Authorization and the ETag are
+        revalidated in the serialized write transaction.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SystemSettingsUpdate' }
+      responses:
+        '200':
+          description: Updated effective settings
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SystemSettings' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /system/settings/reset:
+    post:
+      tags: [System]
+      summary: Remove selected persisted setting overrides
+      description: The effective value immediately falls back to the current environment or code default.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SystemSettingsReset' }
+      responses:
+        '200':
+          description: Effective settings after reset
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SystemSettings' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /system/settings/smtp:
+    put:
+      tags: [System]
+      summary: Apply persisted SMTP configuration overrides
+      description: |
+        Applies supplied fields to the TLS-only SMTP override document. A content change creates
+        an untested revision and leaves it disabled. Enabling is accepted only
+        for the otherwise unchanged current revision after its test succeeds.
+        The password is write-only; omit it only to retain an already persisted
+        password.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SystemSMTPUpdate' }
+      responses:
+        '200':
+          description: Effective settings with the new disabled SMTP revision
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SystemSettings' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [System]
+      summary: Remove the persisted SMTP override
+      description: Restores the current complete environment SMTP configuration or disabled code default.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      responses:
+        '200':
+          description: Effective settings after SMTP reset
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SystemSettings' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+  /system/settings/smtp/test:
+    post:
+      tags: [System]
+      summary: Test the current persisted SMTP revision
+      description: |
+        Sends a test message to the current system administrator account and
+        marks only the unchanged persisted revision as tested. This command is
+        rate limited and never returns SMTP credentials.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      responses:
+        '200':
+          description: SMTP test succeeded and updated settings carry the new aggregate revision
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SystemSettings' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /system/administrators:
+    get:
+      tags: [System]
+      summary: List global system administrators
+      description: Read-only HTTP projection. Role assignment is available only through the local CLI.
+      responses:
+        '200':
+          description: Current global assignments
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/SystemAdministrator' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /system/accounts:
+    get:
+      tags: [System]
+      summary: Search credentialed local accounts for group provisioning
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema: { type: string, minLength: 1, maxLength: 254 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
+      responses:
+        '200':
+          description: Matching accounts without group-domain data
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/SystemAccount' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /system/groups:
+    get:
+      tags: [System]
+      summary: List every group and lifecycle impact summary
+      responses:
+        '200':
+          description: Global lifecycle list
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/SystemGroup' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [System]
+      summary: Create or provision a group with its initial administrator
+      description: |
+        An existing account produces an active group immediately. An unknown
+        email address requires available SMTP and produces a provisioning group
+        plus a protected first-administrator invitation. The acting system
+        administrator is never joined implicitly.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SystemGroupCreate' }
+      responses:
+        '201':
+          description: Active or provisioning group
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SystemGroup' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /system/groups/{groupId}/archive:
+    post:
+      tags: [System]
+      summary: Archive an active or provisioning group
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      responses:
+        '200':
+          description: Archived group
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SystemGroup' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+  /system/groups/{groupId}/restore:
+    post:
+      tags: [System]
+      summary: Restore an archived group without re-enabling old external links
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      responses:
+        '200':
+          description: Group restored to its active or provisioning pre-archive state
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SystemGroup' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+  /system/groups/{groupId}/invitation/resend:
+    post:
+      tags: [System]
+      summary: Replace and resend a provisioning group's first-administrator invitation
+      description: |
+        Requires a live `SYSTEM_ADMINISTRATOR` assignment and is available only
+        while the group is `PROVISIONING` and effective SMTP is active. The
+        command atomically revokes every open invitation for the group, cancels
+        its pending or retryable invitation-email work, creates a fresh
+        seven-day first-administrator invitation with a newly generated token,
+        queues that token for encrypted email delivery, and increments the
+        managed-group version. Every older invitation link remains invalid.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      responses:
+        '200':
+          description: Managed provisioning group after invitation replacement
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SystemGroup' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /system/groups/{groupId}/deletion-impact:
+    get:
+      tags: [System]
+      summary: Read permanent-deletion impact counts before archival or purge
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Current impact counts
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GroupDeletionImpact' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /system/groups/{groupId}/purge:
+    post:
+      tags: [System]
+      summary: Permanently purge an archived group
+      description: |
+        Requires a current strong ETag, a five-minute one-use password step-up
+        token, the exact current group name, and the fixed German confirmation
+        phrase. Only a minimal global deletion receipt remains in system audit.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GroupPurgeCommand' }
+      responses:
+        '200':
+          description: Deleted-row and media impact retained in the minimal global audit receipt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GroupDeletionImpact' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /system/step-up:
+    post:
+      tags: [System]
+      summary: Verify the current password for a destructive system action
+      description: Issues a purpose-bound, single-use token that expires after five minutes. This command is rate limited.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SystemStepUpCommand' }
+      responses:
+        '201':
+          description: Short-lived one-use proof
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SystemStepUpProof' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+  /system/audit:
+    get:
+      tags: [System]
+      summary: List append-only global system audit events
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Newest global events, including minimal purge receipts
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/SystemAuditEvent' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
   /groups:
     get:
       tags: [Groups]
@@ -555,27 +984,30 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/Group' }
     post:
-      tags: [Groups]
-      summary: Create a group owned by the current user
+      tags: [System]
+      summary: Create a group through the system-administration compatibility alias
+      description: |
+        Compatibility alias for `POST /system/groups`. It requires a live
+        `SYSTEM_ADMINISTRATOR` assignment and never joins the acting account
+        implicitly.
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              required: [name, currency]
-              properties:
-                name: { type: string, minLength: 1, maxLength: 120 }
-                currency: { type: string, pattern: '^[A-Z]{3}$' }
+            schema: { $ref: '#/components/schemas/SystemGroupCreate' }
       responses:
         '201':
-          description: Created group
+          description: Active or provisioning group
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Group' }
+              schema: { $ref: '#/components/schemas/SystemGroup' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}:
     patch:
       tags: [Groups]
@@ -702,6 +1134,7 @@ paths:
                 properties:
                   logoUrl: { type: string }
         '403': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
     delete:
       tags: [Groups]
@@ -1603,6 +2036,7 @@ paths:
                 properties:
                   imageUrl: { type: string }
         '403': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/images/{imageKey}:
     get:
@@ -2255,6 +2689,335 @@ components:
           type: boolean
           readOnly: true
           description: Whether verified email-address changes are currently configured.
+    InstanceCapabilities:
+      type: object
+      additionalProperties: false
+      required: [instanceName, maintenanceMode, publicJoinEnabled, mediaUploadMaxBytes]
+      properties:
+        instanceName:
+          type: string
+          minLength: 1
+          maxLength: 120
+        maintenanceMode:
+          type: boolean
+        maintenanceMessage:
+          type: string
+          maxLength: 240
+        publicJoinEnabled:
+          type: boolean
+          description: Effective global policy; a group link may impose additional restrictions.
+        mediaUploadMaxBytes:
+          type: integer
+          format: int64
+          minimum: 262144
+          maximum: 26214400
+    SystemRole:
+      type: string
+      enum: [SYSTEM_ADMINISTRATOR]
+    SystemSettingSource:
+      type: string
+      enum: [DATABASE, ENVIRONMENT, CODE]
+    EffectiveStringSetting:
+      type: object
+      additionalProperties: false
+      required: [value, source]
+      properties:
+        value: { type: string }
+        source: { $ref: '#/components/schemas/SystemSettingSource' }
+        overrideVersion:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Present only when the value comes from a persisted database override.
+        updatedAt:
+          type: string
+          format: date-time
+          description: Present only when a persisted override supplies the value.
+    EffectiveBooleanSetting:
+      type: object
+      additionalProperties: false
+      required: [value, source]
+      properties:
+        value: { type: boolean }
+        source: { $ref: '#/components/schemas/SystemSettingSource' }
+        overrideVersion:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Present only when the value comes from a persisted database override.
+        updatedAt:
+          type: string
+          format: date-time
+          description: Present only when a persisted override supplies the value.
+    EffectiveIntegerSetting:
+      type: object
+      additionalProperties: false
+      required: [value, source]
+      properties:
+        value: { type: integer, format: int64 }
+        source: { $ref: '#/components/schemas/SystemSettingSource' }
+        overrideVersion:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Present only when the value comes from a persisted database override.
+        updatedAt:
+          type: string
+          format: date-time
+          description: Present only when a persisted override supplies the value.
+    SystemSecretSetting:
+      type: object
+      additionalProperties: false
+      required: [configured, source]
+      properties:
+        configured: { type: boolean }
+        source: { $ref: '#/components/schemas/SystemSettingSource' }
+        overrideVersion: { type: integer, format: int64, minimum: 1 }
+        updatedAt: { type: string, format: date-time }
+    SystemSMTPConfiguration:
+      type: object
+      additionalProperties: false
+      required: [enabled, host, port, tlsMode, username, password, fromAddress, fromName, revision, testStatus, requiresTest, configurationValid, active]
+      properties:
+        enabled: { $ref: '#/components/schemas/EffectiveBooleanSetting' }
+        host: { $ref: '#/components/schemas/EffectiveStringSetting' }
+        port: { $ref: '#/components/schemas/EffectiveIntegerSetting' }
+        tlsMode:
+          allOf:
+            - $ref: '#/components/schemas/EffectiveStringSetting'
+          description: Effective value is `starttls` or `tls`; plaintext SMTP is unsupported.
+        username: { $ref: '#/components/schemas/EffectiveStringSetting' }
+        fromAddress: { $ref: '#/components/schemas/EffectiveStringSetting' }
+        fromName: { $ref: '#/components/schemas/EffectiveStringSetting' }
+        password:
+          $ref: '#/components/schemas/SystemSecretSetting'
+        revision:
+          type: integer
+          format: int64
+          minimum: 0
+        testedRevision:
+          type: integer
+          format: int64
+          minimum: 1
+        testedAt:
+          type: string
+          format: date-time
+        testStatus:
+          type: string
+          enum: [UNTESTED, VERIFIED, FAILED]
+          description: Persisted result for the current database-backed SMTP revision.
+        requiresTest:
+          type: boolean
+          description: True when persisted SMTP connection settings must be tested before activation.
+        configurationValid:
+          type: boolean
+          description: Whether the redacted effective fields form a complete TLS-secured configuration.
+        active:
+          type: boolean
+          description: True only when enabled, complete, and trusted or tested at the current SMTP revision.
+    SystemSettings:
+      type: object
+      additionalProperties: false
+      required: [revision, instanceName, defaultCurrency, mediaUploadMaxBytes, mediaUploadHardLimitBytes, publicJoinEnabled, maintenanceMode, maintenanceMessage, smtp, updatedAt]
+      properties:
+        revision:
+          type: integer
+          format: int64
+          minimum: 1
+        instanceName: { $ref: '#/components/schemas/EffectiveStringSetting' }
+        defaultCurrency: { $ref: '#/components/schemas/EffectiveStringSetting' }
+        mediaUploadMaxBytes: { $ref: '#/components/schemas/EffectiveIntegerSetting' }
+        mediaUploadHardLimitBytes:
+          type: integer
+          format: int64
+          readOnly: true
+          description: Effective immutable ceiling derived from the process request limit and compiled media maximum.
+        publicJoinEnabled: { $ref: '#/components/schemas/EffectiveBooleanSetting' }
+        maintenanceMode: { $ref: '#/components/schemas/EffectiveBooleanSetting' }
+        maintenanceMessage: { $ref: '#/components/schemas/EffectiveStringSetting' }
+        smtp: { $ref: '#/components/schemas/SystemSMTPConfiguration' }
+        updatedAt: { type: string, format: date-time }
+        updatedByUserId: { type: string }
+    SystemSettingsUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        instanceName: { type: string, minLength: 1, maxLength: 120 }
+        defaultCurrency: { type: string, pattern: '^[A-Z]{3}$' }
+        mediaUploadMaxBytes: { type: integer, format: int64, minimum: 262144, maximum: 26214400 }
+        publicJoinEnabled: { type: boolean }
+        maintenanceMode: { type: boolean }
+        maintenanceMessage: { type: string, maxLength: 240 }
+    SystemSettingKey:
+      type: string
+      enum:
+        - instance.name
+        - instance.default_currency
+        - media.upload_max_bytes
+        - access.public_join_enabled
+        - maintenance.enabled
+        - maintenance.message
+        - smtp.enabled
+        - smtp.host
+        - smtp.port
+        - smtp.tls_mode
+        - smtp.username
+        - smtp.from_address
+        - smtp.from_name
+        - smtp.password
+    SystemSettingsReset:
+      type: object
+      additionalProperties: false
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/SystemSettingKey' }
+    SystemSMTPUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        enabled:
+          type: boolean
+          description: True is accepted only when the otherwise unchanged current persisted revision is verified.
+        host: { type: string, minLength: 1, maxLength: 253 }
+        port: { type: integer, minimum: 1, maximum: 65535 }
+        tlsMode: { type: string, enum: [starttls, tls] }
+        username: { type: string, minLength: 1, maxLength: 254 }
+        password:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 1024
+          writeOnly: true
+          description: Omit only to retain an already persisted password; it is never returned.
+        fromAddress: { type: string, format: email, maxLength: 254 }
+        fromName: { type: string, maxLength: 120 }
+    SystemAdministrator:
+      type: object
+      additionalProperties: false
+      required: [userId, email, displayName, active, role, grantedAt]
+      properties:
+        userId: { type: string }
+        email: { type: string, format: email }
+        displayName: { type: string }
+        active: { type: boolean }
+        role: { $ref: '#/components/schemas/SystemRole' }
+        grantedAt: { type: string, format: date-time }
+        grantedByUserId: { type: string }
+    SystemAccount:
+      type: object
+      additionalProperties: false
+      required: [id, email, displayName, active]
+      properties:
+        id: { type: string }
+        email: { type: string, format: email }
+        displayName: { type: string }
+        active: { type: boolean }
+    GroupLifecycleStatus:
+      type: string
+      enum: [PROVISIONING, ACTIVE, ARCHIVED]
+      description: "`PURGING` is an internal transaction state and is never a usable API representation."
+    SystemGroup:
+      type: object
+      additionalProperties: false
+      required: [id, name, currency, status, version, createdAt, memberCount, invitationCount, bookingCount, financialRecordCount, auditEventCount, mediaCount]
+      properties:
+        id: { type: string }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        status: { $ref: '#/components/schemas/GroupLifecycleStatus' }
+        version: { type: integer, format: int64, minimum: 1 }
+        archivedAt: { type: string, format: date-time }
+        archivedByUserId: { type: string }
+        administratorEmail: { type: string, format: email }
+        createdAt: { type: string, format: date-time }
+        memberCount: { type: integer, format: int64, minimum: 0 }
+        invitationCount: { type: integer, format: int64, minimum: 0 }
+        bookingCount: { type: integer, format: int64, minimum: 0 }
+        financialRecordCount: { type: integer, format: int64, minimum: 0 }
+        auditEventCount: { type: integer, format: int64, minimum: 0 }
+        mediaCount: { type: integer, format: int64, minimum: 0 }
+    SystemGroupCreate:
+      type: object
+      additionalProperties: false
+      required: [name, initialAdministratorEmail]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+          description: Omit to use the current effective new-group default.
+        initialAdministratorEmail: { type: string, format: email, maxLength: 254 }
+    GroupDeletionImpact:
+      type: object
+      additionalProperties: false
+      required: [groupId, groupName, version, memberCount, invitationCount, bookingCount, financialRecordCount, auditEventCount, mediaCount]
+      properties:
+        groupId: { type: string }
+        groupName: { type: string }
+        version: { type: integer, format: int64, minimum: 1 }
+        memberCount: { type: integer, format: int64, minimum: 0 }
+        invitationCount: { type: integer, format: int64, minimum: 0 }
+        bookingCount: { type: integer, format: int64, minimum: 0 }
+        financialRecordCount:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Ledger-backed financial records selected by the purge impact query.
+        auditEventCount: { type: integer, format: int64, minimum: 0 }
+        mediaCount: { type: integer, format: int64, minimum: 0 }
+    GroupPurgeCommand:
+      type: object
+      additionalProperties: false
+      required: [stepUpToken, groupName, confirmationPhrase]
+      properties:
+        stepUpToken:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: One-use proof issued for `GROUP_PURGE` by `/system/step-up`.
+        groupName: { type: string, minLength: 1, maxLength: 120 }
+        confirmationPhrase:
+          type: string
+          const: ENDGÜLTIG LÖSCHEN
+    SystemStepUpCommand:
+      type: object
+      additionalProperties: false
+      required: [password, purpose]
+      properties:
+        password: { type: string, format: password, minLength: 1, maxLength: 1024, writeOnly: true }
+        purpose: { type: string, const: GROUP_PURGE }
+    SystemStepUpProof:
+      type: object
+      additionalProperties: false
+      required: [token, expiresAt]
+      properties:
+        token:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: Purpose-bound to `GROUP_PURGE` by the server.
+        expiresAt: { type: string, format: date-time }
+    SystemAuditEvent:
+      type: object
+      additionalProperties: false
+      required: [id, action, resourceType, metadata, occurredAt]
+      properties:
+        id: { type: string }
+        actorUserId: { type: string }
+        action: { type: string }
+        resourceType: { type: string }
+        resourceId: { type: string }
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Secret-free bounded metadata; purge events retain only group identity, actor, time, and deletion counts.
+        occurredAt: { type: string, format: date-time }
     PasswordResetRequest:
       type: object
       additionalProperties: false
@@ -2440,7 +3203,7 @@ components:
           description: Null means unlimited while enabled; finite values must be between one hour and 365 days in the future.
     Session:
       type: object
-      required: [user, csrfToken, groups, activeGroupId, defaultGroupId]
+      required: [user, csrfToken, groups, activeGroupId, defaultGroupId, systemRoles]
       properties:
         user: { $ref: '#/components/schemas/User' }
         csrfToken: { type: string }
@@ -2449,9 +3212,16 @@ components:
           items: { $ref: '#/components/schemas/Group' }
         activeGroupId:
           type: [string, 'null']
+          description: Current active group, or null for an authenticated account with no available group.
         defaultGroupId:
           type: [string, 'null']
           description: Fixed active group selected for login, or null for most-recently-used behavior.
+        systemRoles:
+          type: array
+          uniqueItems: true
+          maxItems: 1
+          items: { $ref: '#/components/schemas/SystemRole' }
+          description: Client-navigation hint only; protected endpoints reload current assignments from SQLite.
     User:
       type: object
       required: [id, email, displayName]

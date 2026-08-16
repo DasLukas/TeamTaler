@@ -21,11 +21,12 @@ func (s *Server) handleProfileAvatar(response http.ResponseWriter, request *http
 		writeProblem(response, request, err)
 		return
 	}
-	imageKey, err := s.storeUploadedImage(response, request)
+	imageKey, releaseImage, err := s.storeUploadedImage(response, request)
 	if err != nil {
 		writeProblem(response, request, err)
 		return
 	}
+	defer releaseImage()
 	avatarURL, _, err := s.auth.SetAvatar(request.Context(), principal, imageKey)
 	if err != nil {
 		writeProblem(response, request, err)
@@ -69,6 +70,7 @@ func (s *Server) handleUserAvatar(response http.ResponseWriter, request *http.Re
 			FROM users target
 			WHERE target.id=? AND target.active=1 AND EXISTS (
 				SELECT 1 FROM memberships viewer
+				JOIN groups team ON team.id=viewer.group_id AND team.status='ACTIVE'
 				JOIN memberships subject ON subject.group_id=viewer.group_id
 				WHERE viewer.user_id=? AND viewer.status='ACTIVE' AND subject.user_id=target.id
 				AND (subject.status='ACTIVE' OR EXISTS (

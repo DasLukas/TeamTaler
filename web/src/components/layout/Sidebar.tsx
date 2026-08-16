@@ -15,6 +15,7 @@ import { useTranslation } from 'react-i18next';
 import { memberPaths } from '@/app/paths';
 import { canOpenBooking, hasGroupCapability } from '@/app/groupCapabilities';
 import { useActiveGroup } from '@/app/useActiveGroup';
+import { isSystemAdministrator, useInstanceCapabilities } from '@/app/useSession';
 import { Brand } from '@/components/brand/Brand';
 import { LogoutButton } from '@/components/auth/LogoutButton';
 import styles from './Sidebar.module.css';
@@ -46,18 +47,19 @@ export interface SidebarProps {
 export function Sidebar({ collapsed, onCollapsedChange, onNavigate }: SidebarProps) {
   const { t } = useTranslation();
   const { session, activeGroupId, setActiveGroupId } = useActiveGroup();
+  const instanceCapabilities = useInstanceCapabilities();
   const activeGroup = session.groups.find((group) => group.id === activeGroupId);
   const grants = activeGroup?.membership?.effectiveGrants;
   const canManageCatalog = hasGroupCapability(grants, 'catalog');
   const canManageFinance = hasGroupCapability(grants, 'finance');
-  const canManageAdministration = hasGroupCapability(grants, 'administration');
+  const canManageAdministration = hasGroupCapability(grants, 'administration') || isSystemAdministrator(session);
   const canBook = canOpenBooking(grants);
   const unreadCount = useUnreadNotificationCount();
 
   return (
     <aside className={`${styles.sidebar} ${collapsed ? styles.collapsed : ''}`} data-collapsed={collapsed} id="desktop-sidebar">
       <div className={styles.sidebarHeader}>
-        <Brand className={styles.brand} imageAlt={activeGroup?.logoUrl ? t('brand.groupMarkAlt', { group: activeGroup.name }) : undefined} imageUrl={activeGroup?.logoUrl} />
+        <Brand className={styles.brand} imageAlt={activeGroup?.logoUrl ? t('brand.groupMarkAlt', { group: activeGroup.name }) : undefined} imageUrl={activeGroup?.logoUrl} name={instanceCapabilities.instanceName} />
         <button
           aria-controls="desktop-sidebar"
           aria-expanded={!collapsed}

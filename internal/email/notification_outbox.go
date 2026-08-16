@@ -59,18 +59,15 @@ func NewNotificationDispatcher(db *sql.DB, sender Sender, publicURL *url.URL, lo
 }
 
 // Run processes notification email jobs until ctx is cancelled. ctx is required.
-// Delivery failures are persisted and retried rather than returned. It returns
-// a configuration error before starting, ErrUnavailable when SMTP is disabled,
-// or nil after cancellation and worker shutdown.
+// Delivery failures are persisted and retried rather than returned. It pauses
+// without claiming jobs while SMTP is disabled and returns nil after
+// cancellation and worker shutdown.
 func (d *NotificationDispatcher) Run(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("run notification email dispatcher: context is required")
 	}
 	if d == nil || d.db == nil || d.sender == nil || d.now == nil || d.workerCount < 1 || d.workerCount > defaultWorkerCount || d.pollInterval <= 0 || d.leaseDuration <= 0 {
 		return errors.New("run notification email dispatcher: dispatcher is not fully configured")
-	}
-	if !d.sender.Available() {
-		return fmt.Errorf("run notification email dispatcher: %w", ErrUnavailable)
 	}
 	var workers sync.WaitGroup
 	workers.Add(d.workerCount)
@@ -120,6 +117,9 @@ func (d *NotificationDispatcher) runWorker(ctx context.Context) {
 }
 
 func (d *NotificationDispatcher) processOne(ctx context.Context) (bool, error) {
+	if !d.sender.Available() {
+		return false, nil
+	}
 	job, found, err := d.claimNext(ctx)
 	if err != nil || !found {
 		return found, err
@@ -156,11 +156,13 @@ func (d *NotificationDispatcher) processOne(ctx context.Context) (bool, error) {
 		d.releaseAfterCancellation(job)
 		return true, nil
 	}
-	code := FailureCodeDeliveryFailed
 	if errors.Is(err, ErrUnavailable) {
-		code = FailureCodeEmailUnavailable
+		d.releaseAfterCancellation(job)
+		return true, nil
 	}
-	return true, withCompletionContext(func(completionContext context.Context) error { return d.recordFailure(completionContext, job, code) })
+	return true, withCompletionContext(func(completionContext context.Context) error {
+		return d.recordFailure(completionContext, job, FailureCodeDeliveryFailed)
+	})
 }
 
 func (d *NotificationDispatcher) claimNext(ctx context.Context) (claimedNotification, bool, error) {

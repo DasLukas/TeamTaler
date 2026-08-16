@@ -45,7 +45,7 @@ The proxy must:
 
 - forward the original method, path, query, request body, cookies, `Origin`, and `X-CSRF-Token` header;
 - append the client address to `X-Forwarded-For` when per-client throttling through a trusted proxy is required;
-- allow request bodies large enough for `TEAMTALER_MAX_REQUEST_BYTES`;
+- allow request bodies large enough for the host ceiling `TEAMTALER_MAX_REQUEST_BYTES`; the editable media-upload limit is lower and includes multipart reserve;
 - use timeouts longer than the application's 30-second request read/write limits.
 
 Preserving `Host` and setting `X-Forwarded-Proto` are recommended conventional proxy behavior and are shown in the templates. The current server uses the configured public URL—not forwarded scheme/host values—as its canonical origin and secure-cookie signal. It consumes `X-Forwarded-For` only when the direct connection originates from a configured trusted CIDR.
@@ -83,6 +83,13 @@ docker compose exec app teamtaler admin bootstrap \
   --group "My Team"
 ```
 
+Bootstrap creates the first local account, assigns its global `SYSTEM_ADMINISTRATOR` role, and creates the initial active group with that account as its protected group administrator. Upgrades never promote an existing account implicitly. For an existing installation, grant the first global role locally:
+
+```sh
+docker compose exec app teamtaler admin system-admin grant \
+  --email admin@example.com
+```
+
 Verify startup:
 
 ```sh
@@ -91,6 +98,31 @@ curl --fail --silent --show-error http://127.0.0.1:8080/health/ready
 ```
 
 Adjust the readiness URL when `TEAMTALER_HOST_PORT` is not `8080`.
+
+## Instance administration
+
+The host remains authoritative for the public URL, listener, trusted proxy CIDRs, database/data/web paths, container port and image, `TEAMTALER_EMAIL_TOKEN_KEY`, and `TEAMTALER_MAX_REQUEST_BYTES`. Changing those environment values requires a container restart. The environment also provides defaults for the live instance settings:
+
+```text
+TEAMTALER_INSTANCE_NAME=TeamTaler
+TEAMTALER_DEFAULT_CURRENCY=EUR
+TEAMTALER_MEDIA_UPLOAD_MAX_BYTES=5242880
+TEAMTALER_PUBLIC_JOIN_ENABLED=true
+TEAMTALER_MAINTENANCE_MODE=false
+TEAMTALER_MAINTENANCE_MESSAGE=
+```
+
+A system administrator may persist versioned overrides from the System settings tab or the local `teamtaler admin system` CLI. Persisted values take precedence and become effective without restarting; reset removes the override and reveals the current environment or code default. Keep the proxy request limit at or above `TEAMTALER_MAX_REQUEST_BYTES`, and leave at least 1 MiB between that host ceiling and the selected media limit for multipart overhead. The effective media limit is still constrained to 256 KiB through 25 MiB and by the image decoder and normalized-output protections.
+
+Persisted SMTP credentials require `TEAMTALER_EMAIL_TOKEN_KEY`. The application derives a separate encryption key for the SMTP password and never returns it from the API or CLI. Every changed persisted SMTP revision starts disabled, must successfully send a test message to the current system administrator, and may be enabled only while that exact revision remains tested. Existing complete environment SMTP defaults remain available without this migration-time test. Email workers re-read effective settings before each job and pause without consuming attempts while SMTP is disabled or maintenance mode is active.
+
+Runtime SMTP targets resolve through a dial-time network policy. Public addresses are allowed, while private, loopback, link-local, carrier-grade NAT, benchmarking, and other non-public ranges are blocked to prevent the settings UI from becoming an internal network probe. The exact relay host and port supplied through the immutable SMTP environment block remain allowed for existing private relay deployments. Set the host-only `TEAMTALER_SMTP_ALLOW_PRIVATE_NETWORK=true` switch only when administrators are trusted to configure other private relays; DNS is still resolved and pinned to the checked address for each connection.
+
+System roles are independent of group membership and can be granted, listed, or revoked only through the local CLI. The last active system administrator cannot be revoked normally. A system administrator who does not belong to any group can still log in and use the System and Account views; the role itself does not grant access to group business data.
+
+If a `PROVISIONING` group's first-administrator invitation expires or must be invalidated, use the resend action in the System workspace while SMTP is active. It requires the group's current ETag and atomically replaces the invitation and pending delivery; all prior links remain invalid. Restoring an archived provisioning group never re-enables an older invitation, so issue a fresh one explicitly after restoration when onboarding must continue.
+
+Group archive is reversible and blocks regular access immediately. Permanent purge requires an archived group, current optimistic version, exact group-name confirmation, and either a password step-up proof in the web interface or explicit local CLI confirmation. Review the deletion-impact counts and create a verified backup before purging. The purge removes group-owned rows and unreferenced managed media from the active application data, retaining only a minimal global deletion receipt. It cannot erase copies already present in application archives, off-host backups, volume snapshots, or storage-device remanence; delete those copies according to the deployment's retention policy.
 
 ## Backup
 

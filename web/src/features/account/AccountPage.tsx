@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { Page } from '@/components/layout/Page';
+import { useOptionalActiveGroup } from '@/app/useActiveGroup';
 import { AccountDetailsPanel } from './AccountDetailsPanel';
 import { AccountFinanceSection } from './AccountFinanceSection';
 import { ProfileImagePanel } from './ProfileImagePanel';
@@ -11,11 +12,12 @@ import { ProfileImagePanel } from './ProfileImagePanel';
  */
 export function AccountPage() {
   const { t } = useTranslation();
+  const hasActiveGroup = useOptionalActiveGroup() !== null;
   return (
-    <Page intro={t('account.intro')} title={t('account.title')} wide>
+    <Page intro={t(hasActiveGroup ? 'account.intro' : 'account.systemOnlyIntro')} title={t('account.title')} wide>
       <AccountDetailsPanel />
       <ProfileImagePanel />
-      <AccountFinanceSection />
+      {hasActiveGroup ? <AccountFinanceSection /> : null}
     </Page>
   );
 }

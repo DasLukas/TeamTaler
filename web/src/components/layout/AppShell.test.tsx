@@ -27,6 +27,7 @@ vi.mock('./Sidebar', () => ({
     <button onClick={() => onCollapsedChange(!collapsed)} type="button">{collapsed ? 'expand rail' : 'collapse rail'}</button>
   ),
 }));
+vi.mock('./SystemNavigation', () => ({ SystemNavigation: () => <nav>system-only-navigation</nav> }));
 
 describe('AppShell empty group state', () => {
   beforeEach(() => {
@@ -49,6 +50,26 @@ describe('AppShell empty group state', () => {
     expect(screen.getByRole('heading', { name: 'Keine aktive Gruppe' })).toBeVisible();
     expect(screen.getByText('Du wurdest noch keiner Gruppe hinzugefügt oder deine Mitgliedschaft wurde archiviert.')).toBeVisible();
     expect(screen.queryByText(/CLI/i)).not.toBeInTheDocument();
+  });
+
+  it('renders the restricted system shell for a group-less system administrator', () => {
+    mocks.useQuery.mockReturnValue({
+      data: {
+        user: { id: 'system-user', displayName: 'System Admin', email: 'admin@example.test' },
+        groups: [],
+        activeGroupId: null,
+        defaultGroupId: null,
+        systemRoles: ['SYSTEM_ADMINISTRATOR'],
+      },
+      isError: false,
+      isLoading: false,
+    });
+
+    render(<AppShell />);
+
+    expect(screen.getByRole('navigation')).toHaveTextContent('system-only-navigation');
+    expect(screen.getByText('outlet')).toBeVisible();
+    expect(screen.queryByText('Keine aktive Gruppe')).not.toBeInTheDocument();
   });
 
   it('persists the tablet navigation-rail preference across remounts', () => {

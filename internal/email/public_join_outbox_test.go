@@ -48,7 +48,7 @@ func TestPublicJoinDispatcherSendsProofAndClearsCiphertext(t *testing.T) {
 	}
 	if err := authService.StartPublicJoinRegistration(ctx, auth.PublicJoinRegistration{
 		JoinToken: link.Token, Email: "new@example.test", DisplayName: "New Member", Password: "new-member-password-long",
-	}); err != nil {
+	}, 0); err != nil {
 		t.Fatalf("start public registration: %v", err)
 	}
 

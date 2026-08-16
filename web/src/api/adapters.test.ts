@@ -1,8 +1,52 @@
 import { describe, expect, it } from 'vitest';
 import i18n from '@/i18n';
-import { adaptAccountSummaries, adaptBooking, adaptCategories, adaptDashboard, adaptGroupSettings, adaptLedger, adaptMembership, adaptNotification, adaptPermissionDefinition, adaptPermissionGrants, adaptProduct, adaptRole, adaptSession, adaptSettlement, adaptTransactionSettings } from './adapters';
+import { adaptAccountSummaries, adaptBooking, adaptCategories, adaptDashboard, adaptGroupSettings, adaptInstanceCapabilities, adaptLedger, adaptMembership, adaptNotification, adaptPermissionDefinition, adaptPermissionGrants, adaptProduct, adaptRole, adaptSession, adaptSettlement, adaptSystemAudit, adaptSystemGroupDeletionImpact, adaptSystemGroups, adaptSystemSettings, adaptTransactionSettings } from './adapters';
 
 describe('API adapters', () => {
+  it('keeps group-less system-administrator sessions valid', () => {
+    expect(adaptSession({
+      user: { id: 'system-user', displayName: 'System Admin', email: 'admin@example.test' },
+      groups: [],
+      activeGroupId: null,
+      defaultGroupId: null,
+      systemRoles: ['SYSTEM_ADMINISTRATOR', 'UNSUPPORTED'],
+    })).toMatchObject({ activeGroupId: null, groups: [], systemRoles: ['SYSTEM_ADMINISTRATOR'] });
+  });
+
+  it('adapts public capabilities and exact system settings without exposing SMTP secrets', () => {
+    expect(adaptInstanceCapabilities({ instanceName: 'Club Cloud', maintenanceMode: true, publicJoinEnabled: false, mediaUploadMaxBytes: 786432 })).toEqual({
+      instanceName: 'Club Cloud', maintenanceMode: true, maintenanceMessage: '', publicJoinEnabled: false, mediaUploadMaxBytes: 786432,
+    });
+    const settings = adaptSystemSettings({
+      revision: 9,
+      instanceName: { value: 'Club Cloud', source: 'DATABASE', overrideVersion: 3, updatedAt: '2026-08-15T10:00:00Z' },
+      defaultCurrency: { value: 'CHF', source: 'ENVIRONMENT' },
+      mediaUploadMaxBytes: { value: 786432, source: 'DATABASE', overrideVersion: 1 },
+      mediaUploadHardLimitBytes: 1048576,
+      publicJoinEnabled: { value: false, source: 'DATABASE' },
+      maintenanceMode: { value: true, source: 'DATABASE' },
+      maintenanceMessage: { value: 'Upgrade', source: 'DATABASE' },
+      smtp: {
+        enabled: { value: false, source: 'DATABASE' }, host: { value: 'smtp.example.test', source: 'DATABASE' },
+        port: { value: 587, source: 'DATABASE' }, tlsMode: { value: 'starttls', source: 'DATABASE' },
+        username: { value: 'mailer', source: 'DATABASE' }, password: { configured: true, source: 'DATABASE' },
+        fromAddress: { value: 'mail@example.test', source: 'DATABASE' }, fromName: { value: 'Club Cloud', source: 'DATABASE' },
+        revision: 4, testedRevision: 4, testedAt: '2026-08-15T11:00:00Z', requiresTest: true, configurationValid: true, active: false,
+      },
+      updatedAt: '2026-08-15T11:00:00Z',
+    });
+    expect(settings).toMatchObject({ revision: 9, mediaUploadHardLimitBytes: 1048576, smtp: { passwordConfigured: true, passwordSource: 'DATABASE', tlsMode: { value: 'starttls' }, testStatus: 'VERIFIED', revision: 4 } });
+    expect(settings.smtp).not.toHaveProperty('password');
+  });
+
+  it('adapts item envelopes, flat managed-group counts, deletion impact, and system audit', () => {
+    expect(adaptSystemGroups({ items: [{ id: 'group-a', name: 'Group A', currency: 'EUR', status: 'ARCHIVED', version: 4, memberCount: 3, pendingInvitationCount: 2, bookingCount: 8, financialRecordCount: 5, auditEventCount: 7, mediaCount: 1 }] })[0]).toMatchObject({
+      id: 'group-a', status: 'ARCHIVED', impact: { members: 3, invitations: 2, bookings: 8, financialRecords: 5, auditEntries: 7, mediaFiles: 1 },
+    });
+    expect(adaptSystemGroupDeletionImpact({ groupId: 'group-a', groupName: 'Group A', version: 5, memberCount: 3, invitationCount: 2, bookingCount: 8, financialRecordCount: 5, auditEventCount: 7, mediaCount: 1 })).toMatchObject({ groupId: 'group-a', version: 5, financialRecords: 5 });
+    expect(adaptSystemAudit({ items: [{ id: 'audit-a', actorUserId: 'user-a', action: 'group.purged', resourceType: 'group', resourceId: 'group-a', metadata: { groupName: 'Group A' }, occurredAt: '2026-08-15T12:00:00Z' }] })[0]).toMatchObject({ actorDisplayName: 'user-a', targetType: 'group', targetId: 'group-a', createdAt: '2026-08-15T12:00:00Z' });
+  });
+
   it('defaults optional settlement flags to disabled for older API responses', () => {
     expect(adaptGroupSettings({}).settlementsEnabled).toBe(false);
     expect(adaptTransactionSettings({}).settlementsEnabled).toBe(false);

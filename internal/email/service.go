@@ -12,6 +12,7 @@ import (
 	"mime/quotedprintable"
 	"net"
 	"net/mail"
+	"net/netip"
 	"net/smtp"
 	"net/url"
 	"strconv"
@@ -148,11 +149,83 @@ func NewSMTP(configuration config.SMTPConfig) (*SMTP, error) {
 	configuration.FromAddress = strings.TrimSpace(configuration.FromAddress)
 	configuration.FromName = strings.TrimSpace(configuration.FromName)
 	dialer := &net.Dialer{Timeout: connectionTimeout, KeepAlive: 30 * time.Second}
-	return &SMTP{
+	sender := &SMTP{
 		configuration: configuration,
-		dialContext:   dialer.DialContext,
 		now:           time.Now,
-	}, nil
+	}
+	sender.dialContext = sender.policyDialContext(dialer)
+	return sender, nil
+}
+
+func (s *SMTP) policyDialContext(dialer *net.Dialer) func(context.Context, string, string) (net.Conn, error) {
+	return func(ctx context.Context, network, endpoint string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(endpoint)
+		if err != nil {
+			return nil, fmt.Errorf("parse SMTP endpoint: %w", err)
+		}
+		addresses, err := resolveSMTPAddresses(ctx, host)
+		if err != nil {
+			return nil, err
+		}
+		allowedPrivatePort := strconv.Itoa(s.configuration.AllowedPrivatePort)
+		allowRestricted := s.configuration.AllowPrivateNetwork ||
+			(strings.EqualFold(host, s.configuration.AllowedPrivateHost) && port == allowedPrivatePort)
+		attempted := false
+		var dialErrors []error
+		for _, address := range addresses {
+			if isRestrictedSMTPAddress(address) && !allowRestricted {
+				continue
+			}
+			attempted = true
+			connection, err := dialer.DialContext(ctx, network, net.JoinHostPort(address.String(), port))
+			if err == nil {
+				return connection, nil
+			}
+			dialErrors = append(dialErrors, err)
+			if ctx.Err() != nil {
+				break
+			}
+		}
+		if !attempted {
+			return nil, fmt.Errorf("%w: SMTP target is blocked by the immutable host network policy", ErrUnavailable)
+		}
+		return nil, errors.Join(dialErrors...)
+	}
+}
+
+func resolveSMTPAddresses(ctx context.Context, host string) ([]netip.Addr, error) {
+	if address, err := netip.ParseAddr(host); err == nil {
+		return []netip.Addr{address.Unmap()}, nil
+	}
+	addresses, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	if err != nil {
+		return nil, fmt.Errorf("resolve SMTP host: %w", err)
+	}
+	if len(addresses) == 0 {
+		return nil, errors.New("resolve SMTP host: no addresses returned")
+	}
+	for index := range addresses {
+		addresses[index] = addresses[index].Unmap()
+	}
+	return addresses, nil
+}
+
+func isRestrictedSMTPAddress(address netip.Addr) bool {
+	if !address.IsValid() || !address.IsGlobalUnicast() || address.IsPrivate() || address.IsLoopback() || address.IsLinkLocalUnicast() || address.IsUnspecified() {
+		return true
+	}
+	for _, prefix := range restrictedSMTPPrefixes {
+		if prefix.Contains(address) {
+			return true
+		}
+	}
+	return false
+}
+
+var restrictedSMTPPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"),
 }
 
 // Available reports whether this sender has a complete enabled SMTP

@@ -75,6 +75,18 @@ describe('authentication form policies', () => {
     await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith({ to: '/book' }));
   });
 
+  it('opens the System workspace for a system administrator without a group', async () => {
+    const user = userEvent.setup();
+    mocks.login.mockResolvedValue({ ...session, groups: [], activeGroupId: null, systemRoles: ['SYSTEM_ADMINISTRATOR'] });
+    renderPage(<LoginPage />);
+
+    await user.type(screen.getByLabelText(i18n.t('auth.email')), 'system@example.test');
+    await user.type(screen.getByLabelText(i18n.t('auth.password')), 'operator-password');
+    await user.click(screen.getByRole('button', { name: i18n.t('auth.loginAction') }));
+
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith({ to: '/admin' }));
+  });
+
   it('shows a safe localized message for invalid credentials', async () => {
     const user = userEvent.setup();
     mocks.login.mockRejectedValue({ problem: { status: 401, detail: 'authentication required' } });

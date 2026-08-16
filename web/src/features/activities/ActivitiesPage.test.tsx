@@ -21,6 +21,7 @@ const session: Session = {
   groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-viewer', roles: ['MEMBER'], groupPermissions: [] } }],
   activeGroupId: 'group-a',
   defaultGroupId: null,
+  systemRoles: [],
 };
 
 const thirdPartyBooking: Booking = {

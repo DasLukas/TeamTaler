@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ApiError, api } from '@/api/client';
 import type { Membership, Session, User } from '@/api/types';
-import { useActiveGroup } from '@/app/useActiveGroup';
+import { useSession } from '@/app/useSession';
 import { Button } from '@/components/ui/Button';
 import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { Modal } from '@/components/ui/Modal';
@@ -41,7 +41,7 @@ function updateUserProjections(queryClient: ReturnType<typeof useQueryClient>, u
 
 function NameChangeForm({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const { t } = useTranslation();
-  const { session } = useActiveGroup();
+  const session = useSession();
   const queryClient = useQueryClient();
   const { register, handleSubmit, formState: { errors } } = useForm<NameForm>({ defaultValues: { displayName: session.user.displayName } });
   const mutation = useMutation({
@@ -169,7 +169,7 @@ function DefaultGroupSetting({ session }: { session: Session }) {
  */
 export function AccountDetailsPanel() {
   const { t } = useTranslation();
-  const { session } = useActiveGroup();
+  const session = useSession();
   const [dialog, setDialog] = useState<AccountDialog>();
   const [successMessage, setSuccessMessage] = useState('');
   const capabilities = useQuery({ queryKey: authenticationCapabilitiesQueryKey, queryFn: api.getAuthenticationCapabilities, retry: false, staleTime: Infinity });

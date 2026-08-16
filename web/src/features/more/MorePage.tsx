@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next';
 import { hasGroupCapability } from '@/app/groupCapabilities';
 import { memberPaths } from '@/app/paths';
 import { useActiveGroup } from '@/app/useActiveGroup';
+import { isSystemAdministrator } from '@/app/useSession';
 import { Page } from '@/components/layout/Page';
 import { Avatar } from '@/components/ui/Avatar';
 import { LogoutButton } from '@/components/auth/LogoutButton';
@@ -41,7 +42,7 @@ export function MorePage() {
       </section>
       <nav aria-label={t('nav.additional')} className={styles.links}>
         <Link to={memberPaths.notifications}><Bell aria-hidden="true" size={23} /><span>{t('nav.notifications')}</span><span className={styles.end}><NotificationBadge count={unreadCount} /><ChevronRight aria-hidden="true" size={20} /></span></Link>
-        {links.filter((item) => item.capability === null || hasGroupCapability(grants, item.capability)).map(({ to, labelKey, icon: Icon }) => <Link key={to} to={to}><Icon aria-hidden="true" size={23} /><span>{t(labelKey)}</span><ChevronRight aria-hidden="true" size={20} /></Link>)}
+        {links.filter((item) => item.capability === null || hasGroupCapability(grants, item.capability) || item.to === '/admin' && isSystemAdministrator(session)).map(({ to, labelKey, icon: Icon }) => <Link key={to} to={to}><Icon aria-hidden="true" size={23} /><span>{t(labelKey)}</span><ChevronRight aria-hidden="true" size={20} /></Link>)}
         <LogoutButton className={styles.logout} showChevron />
       </nav>
     </Page>

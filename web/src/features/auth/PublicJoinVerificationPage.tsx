@@ -4,7 +4,7 @@ import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2';
 import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
-import { preferredMemberPath } from '@/app/groupCapabilities';
+import { preferredAuthenticatedPath } from '@/app/groupCapabilities';
 import { AuthLayout } from './AuthLayout';
 import formStyles from './AuthForms.module.css';
 import styles from './PublicJoinPage.module.css';
@@ -26,8 +26,7 @@ export function PublicJoinVerificationPage() {
     onSuccess: async (session) => {
       queryClient.setQueryData(['session'], session);
       window.history.replaceState(null, '', '/join/verify');
-      const group = session.groups.find((candidate) => candidate.id === session.activeGroupId) ?? session.groups[0];
-      await navigate({ to: preferredMemberPath(group?.membership?.effectiveGrants) });
+      await navigate({ to: preferredAuthenticatedPath(session) });
     },
   });
   useEffect(() => {

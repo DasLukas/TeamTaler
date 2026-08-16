@@ -15,6 +15,17 @@ import (
 	"time"
 )
 
+const (
+	// MinimumMediaUploadBytes is the smallest configurable raw media upload.
+	MinimumMediaUploadBytes int64 = 256 << 10
+	// MaximumMediaUploadBytes is the compiled safety ceiling for raw media uploads.
+	MaximumMediaUploadBytes int64 = 25 << 20
+	// DefaultMediaUploadBytes preserves TeamTaler's original five MiB upload limit.
+	DefaultMediaUploadBytes int64 = 5 << 20
+	// MultipartRequestReserve leaves room for multipart headers and boundaries.
+	MultipartRequestReserve int64 = 1 << 20
+)
+
 // SMTPTLSMode identifies the mandatory transport-security negotiation used for
 // an SMTP connection. Supported values are SMTPTLSModeStartTLS and
 // SMTPTLSModeTLS; no plaintext mode exists.
@@ -49,6 +60,33 @@ type SMTPConfig struct {
 	FromName string
 	// TLSMode selects required STARTTLS or implicit TLS negotiation.
 	TLSMode SMTPTLSMode
+	// AllowPrivateNetwork permits resolved private, loopback, link-local, or
+	// otherwise non-public targets. It is immutable host trust configuration.
+	AllowPrivateNetwork bool
+	// AllowedPrivateHost preserves backward compatibility for one host-provided
+	// SMTP relay without authorizing other runtime-configured private targets.
+	AllowedPrivateHost string
+	// AllowedPrivatePort restricts the host-provided private relay exception to
+	// its configured TCP port.
+	AllowedPrivatePort int
+}
+
+// InstanceDefaults contains mutable instance-setting defaults supplied by the
+// process environment. Persisted settings may override these values without a
+// restart, while clearing an override restores the corresponding value here.
+type InstanceDefaults struct {
+	// InstanceName is the operator-defined label shown on public and system pages.
+	InstanceName string
+	// DefaultCurrency is preselected when a system administrator creates a group.
+	DefaultCurrency string
+	// MediaUploadMaxBytes limits raw image input before decoding.
+	MediaUploadMaxBytes int64
+	// PublicJoinEnabled is the installation-wide public-registration kill switch.
+	PublicJoinEnabled bool
+	// MaintenanceMode blocks non-system mutations while preserving reads and login.
+	MaintenanceMode bool
+	// MaintenanceMessage is the optional public explanation shown during maintenance.
+	MaintenanceMessage string
 }
 
 // Config contains validated, immutable process-level configuration.
@@ -64,6 +102,8 @@ type Config struct {
 	SecureCookies     bool
 	SessionLifetime   time.Duration
 	MaxRequestBytes   int64
+	// InstanceDefaults supplies environment-backed defaults for mutable settings.
+	InstanceDefaults InstanceDefaults
 	// SMTP contains validated invitation-delivery configuration.
 	SMTP SMTPConfig
 	// EmailTokenKey is an optional decoded 32-byte AES key and is required when SMTP is enabled.
@@ -102,6 +142,10 @@ func Load() (Config, error) {
 	if err != nil || maxRequestBytes < 1024 {
 		return Config{}, fmt.Errorf("TEAMTALER_MAX_REQUEST_BYTES must be at least 1024")
 	}
+	instanceDefaults, err := loadInstanceDefaults(maxRequestBytes)
+	if err != nil {
+		return Config{}, err
+	}
 
 	trusted, err := parsePrefixes(os.Getenv("TEAMTALER_TRUSTED_PROXY_CIDRS"))
 	if err != nil {
@@ -129,9 +173,74 @@ func Load() (Config, error) {
 		SecureCookies:     publicURL.Scheme == "https",
 		SessionLifetime:   30 * 24 * time.Hour,
 		MaxRequestBytes:   maxRequestBytes,
+		InstanceDefaults:  instanceDefaults,
 		SMTP:              smtpConfig,
 		EmailTokenKey:     emailTokenKey,
 	}, nil
+}
+
+func loadInstanceDefaults(maxRequestBytes int64) (InstanceDefaults, error) {
+	instanceName := env("TEAMTALER_INSTANCE_NAME", "TeamTaler")
+	if len(instanceName) > 120 || containsControlCharacter(instanceName) {
+		return InstanceDefaults{}, fmt.Errorf("TEAMTALER_INSTANCE_NAME must contain 1 to 120 characters without control characters")
+	}
+	defaultCurrency := strings.ToUpper(env("TEAMTALER_DEFAULT_CURRENCY", "EUR"))
+	if !isCurrencyCode(defaultCurrency) {
+		return InstanceDefaults{}, fmt.Errorf("TEAMTALER_DEFAULT_CURRENCY must be a three-letter uppercase currency code")
+	}
+	mediaUploadMaxBytes, err := strconv.ParseInt(env("TEAMTALER_MEDIA_UPLOAD_MAX_BYTES", strconv.FormatInt(DefaultMediaUploadBytes, 10)), 10, 64)
+	if err != nil || mediaUploadMaxBytes < MinimumMediaUploadBytes || mediaUploadMaxBytes > MaximumMediaUploadBytes {
+		return InstanceDefaults{}, fmt.Errorf("TEAMTALER_MEDIA_UPLOAD_MAX_BYTES must be between %d and %d", MinimumMediaUploadBytes, MaximumMediaUploadBytes)
+	}
+	if mediaUploadMaxBytes > maxRequestBytes-MultipartRequestReserve {
+		return InstanceDefaults{}, fmt.Errorf("TEAMTALER_MEDIA_UPLOAD_MAX_BYTES must leave at least %d bytes below TEAMTALER_MAX_REQUEST_BYTES", MultipartRequestReserve)
+	}
+	publicJoinEnabled, err := parseBoolEnvironment("TEAMTALER_PUBLIC_JOIN_ENABLED", true)
+	if err != nil {
+		return InstanceDefaults{}, err
+	}
+	maintenanceMode, err := parseBoolEnvironment("TEAMTALER_MAINTENANCE_MODE", false)
+	if err != nil {
+		return InstanceDefaults{}, err
+	}
+	maintenanceMessage := strings.TrimSpace(os.Getenv("TEAMTALER_MAINTENANCE_MESSAGE"))
+	if len(maintenanceMessage) > 240 || containsControlCharacter(maintenanceMessage) {
+		return InstanceDefaults{}, fmt.Errorf("TEAMTALER_MAINTENANCE_MESSAGE must contain at most 240 characters without control characters")
+	}
+	return InstanceDefaults{
+		InstanceName:        instanceName,
+		DefaultCurrency:     defaultCurrency,
+		MediaUploadMaxBytes: mediaUploadMaxBytes,
+		PublicJoinEnabled:   publicJoinEnabled,
+		MaintenanceMode:     maintenanceMode,
+		MaintenanceMessage:  maintenanceMessage,
+	}, nil
+}
+
+func parseBoolEnvironment(name string, fallback bool) (bool, error) {
+	raw := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
+	if raw == "" {
+		return fallback, nil
+	}
+	if raw == "true" {
+		return true, nil
+	}
+	if raw == "false" {
+		return false, nil
+	}
+	return false, fmt.Errorf("%s must be true or false", name)
+}
+
+func isCurrencyCode(value string) bool {
+	if len(value) != 3 {
+		return false
+	}
+	for _, character := range value {
+		if character < 'A' || character > 'Z' {
+			return false
+		}
+	}
+	return true
 }
 
 func loadEmailTokenKey() ([]byte, error) {
@@ -147,6 +256,10 @@ func loadEmailTokenKey() ([]byte, error) {
 }
 
 func loadSMTPConfig() (SMTPConfig, error) {
+	allowPrivateNetwork, err := parseBoolEnvironment("TEAMTALER_SMTP_ALLOW_PRIVATE_NETWORK", false)
+	if err != nil {
+		return SMTPConfig{}, err
+	}
 	variables := []string{
 		"TEAMTALER_SMTP_HOST",
 		"TEAMTALER_SMTP_PORT",
@@ -164,7 +277,7 @@ func loadSMTPConfig() (SMTPConfig, error) {
 		}
 	}
 	if !configured {
-		return SMTPConfig{}, nil
+		return SMTPConfig{AllowPrivateNetwork: allowPrivateNetwork}, nil
 	}
 
 	required := []string{
@@ -237,14 +350,17 @@ func loadSMTPConfig() (SMTPConfig, error) {
 	}
 
 	return SMTPConfig{
-		Enabled:     true,
-		Host:        host,
-		Port:        port,
-		Username:    username,
-		Password:    password,
-		FromAddress: fromAddress,
-		FromName:    fromName,
-		TLSMode:     tlsMode,
+		Enabled:             true,
+		Host:                host,
+		Port:                port,
+		Username:            username,
+		Password:            password,
+		FromAddress:         fromAddress,
+		FromName:            fromName,
+		TLSMode:             tlsMode,
+		AllowPrivateNetwork: allowPrivateNetwork,
+		AllowedPrivateHost:  host,
+		AllowedPrivatePort:  port,
 	}, nil
 }
 

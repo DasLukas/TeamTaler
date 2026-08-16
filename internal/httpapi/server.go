@@ -32,6 +32,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/notifications"
 	"github.com/DasLukas/TeamTaler/internal/periods"
 	"github.com/DasLukas/TeamTaler/internal/platform"
+	systemadmin "github.com/DasLukas/TeamTaler/internal/system"
 )
 
 const (
@@ -42,23 +43,26 @@ const (
 type contextKey string
 
 const principalKey contextKey = "principal"
+const systemSettingsKey contextKey = "system-settings"
 
 // Server composes versioned HTTP handlers with application services.
 // Use New to construct it; fields intentionally remain private so middleware and
 // authorization cannot be bypassed by external packages.
 type Server struct {
-	config        config.Config
-	db            *sql.DB
-	auth          auth.Service
-	groups        groups.Service
-	catalog       catalog.Service
-	bookings      bookings.Service
-	finance       finance.Service
-	periods       periods.Service
-	notifications notifications.Service
-	loginLimiter  *loginLimiter
-	passwordSlots chan struct{}
-	logger        *slog.Logger
+	config           config.Config
+	db               *sql.DB
+	auth             auth.Service
+	groups           groups.Service
+	catalog          catalog.Service
+	bookings         bookings.Service
+	finance          finance.Service
+	periods          periods.Service
+	notifications    notifications.Service
+	systemAdmin      systemadmin.Service
+	systemConfigured bool
+	loginLimiter     *loginLimiter
+	passwordSlots    chan struct{}
+	logger           *slog.Logger
 }
 
 // New builds a hardened same-origin handler from cfg, db, and an optional logger.
@@ -71,7 +75,7 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	}
 	var tokenSealer groups.TokenSealer
 	var tokenOpener groups.TokenOpener
-	if cfg.SMTP.Enabled {
+	if len(cfg.EmailTokenKey) == 32 {
 		box, err := platform.NewSecretBox(cfg.EmailTokenKey)
 		if err != nil {
 			logger.Error("invitation email token encryption is unavailable", "error", err)
@@ -80,25 +84,41 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 			tokenOpener = box
 		}
 	}
-	groupService := groups.Service{DB: db, TokenSealer: tokenSealer, TokenOpener: tokenOpener, EmailDeliveryAvailable: cfg.SMTP.Enabled}
-	notificationService := notifications.Service{DB: db, EmailDeliveryAvailable: cfg.SMTP.Enabled}
+	var smtpPasswordCipher systemadmin.PasswordCipher
+	if len(cfg.EmailTokenKey) == 32 {
+		cipher, err := systemadmin.NewSMTPPasswordCipher(cfg.EmailTokenKey)
+		if err != nil {
+			panic(fmt.Sprintf("configure SMTP password encryption: %v", err))
+		}
+		smtpPasswordCipher = cipher
+	}
+	systemService, err := systemadmin.NewService(db, systemadmin.DefaultsFromConfig(cfg), smtpPasswordCipher)
+	if err != nil {
+		panic(fmt.Sprintf("configure system administration: %v", err))
+	}
+	emailInfrastructureAvailable := len(cfg.EmailTokenKey) == 32
+	groupService := groups.Service{DB: db, TokenSealer: tokenSealer, TokenOpener: tokenOpener, EmailDeliveryAvailable: emailInfrastructureAvailable}
+	notificationService := notifications.Service{DB: db, EmailDeliveryAvailable: emailInfrastructureAvailable}
 	server := &Server{
-		config:        cfg,
-		db:            db,
-		auth:          auth.Service{DB: db, SessionLifetime: cfg.SessionLifetime, TokenSealer: tokenSealer, EmailDeliveryAvailable: cfg.SMTP.Enabled},
-		groups:        groupService,
-		catalog:       catalog.Service{DB: db},
-		bookings:      bookings.Service{DB: db, Groups: groupService, Notifications: notificationService},
-		finance:       finance.Service{DB: db, Notifications: notificationService},
-		periods:       periods.Service{DB: db, Notifications: notificationService},
-		notifications: notificationService,
-		loginLimiter:  newLoginLimiter(),
-		passwordSlots: make(chan struct{}, 2),
-		logger:        logger,
+		config:           cfg,
+		db:               db,
+		auth:             auth.Service{DB: db, SessionLifetime: cfg.SessionLifetime, TokenSealer: tokenSealer, EmailDeliveryAvailable: emailInfrastructureAvailable},
+		groups:           groupService,
+		catalog:          catalog.Service{DB: db},
+		bookings:         bookings.Service{DB: db, Groups: groupService, Notifications: notificationService},
+		finance:          finance.Service{DB: db, Notifications: notificationService},
+		periods:          periods.Service{DB: db, Notifications: notificationService},
+		notifications:    notificationService,
+		systemAdmin:      systemService,
+		systemConfigured: true,
+		loginLimiter:     newLoginLimiter(),
+		passwordSlots:    make(chan struct{}, 2),
+		logger:           logger,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", server.handleLive)
 	mux.HandleFunc("GET /health/ready", server.handleReady)
+	mux.HandleFunc("GET /api/v1/instance/capabilities", server.handleInstanceCapabilities)
 	mux.HandleFunc("POST /api/v1/auth/login", server.handleLogin)
 	mux.HandleFunc("POST /api/v1/auth/logout", server.handleLogout)
 	mux.HandleFunc("GET /api/v1/auth/capabilities", server.handleAccountCapabilities)
@@ -125,6 +145,23 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /api/v1/public-join-links/accept", server.handleAcceptPublicJoinLink)
 	mux.HandleFunc("GET /api/v1/groups", server.handleListGroups)
 	mux.HandleFunc("POST /api/v1/groups", server.handleCreateGroup)
+	mux.HandleFunc("GET /api/v1/system/settings", server.handleSystemSettings)
+	mux.HandleFunc("PATCH /api/v1/system/settings", server.handleUpdateSystemSettings)
+	mux.HandleFunc("POST /api/v1/system/settings/reset", server.handleResetSystemSettings)
+	mux.HandleFunc("PUT /api/v1/system/settings/smtp", server.handleUpdateSystemSMTP)
+	mux.HandleFunc("DELETE /api/v1/system/settings/smtp", server.handleResetSystemSMTP)
+	mux.HandleFunc("POST /api/v1/system/settings/smtp/test", server.handleTestSystemSMTP)
+	mux.HandleFunc("GET /api/v1/system/administrators", server.handleListSystemAdministrators)
+	mux.HandleFunc("GET /api/v1/system/accounts", server.handleSearchSystemAccounts)
+	mux.HandleFunc("GET /api/v1/system/groups", server.handleListSystemGroups)
+	mux.HandleFunc("POST /api/v1/system/groups", server.handleCreateSystemGroup)
+	mux.HandleFunc("GET /api/v1/system/groups/{groupID}/deletion-impact", server.handleSystemGroupDeletionImpact)
+	mux.HandleFunc("POST /api/v1/system/groups/{groupID}/archive", server.handleArchiveSystemGroup)
+	mux.HandleFunc("POST /api/v1/system/groups/{groupID}/restore", server.handleRestoreSystemGroup)
+	mux.HandleFunc("POST /api/v1/system/groups/{groupID}/invitation/resend", server.handleResendSystemGroupInvitation)
+	mux.HandleFunc("POST /api/v1/system/groups/{groupID}/purge", server.handlePurgeSystemGroup)
+	mux.HandleFunc("POST /api/v1/system/step-up", server.handleSystemStepUp)
+	mux.HandleFunc("GET /api/v1/system/audit", server.handleSystemAudit)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}", server.handleUpdateGroup)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/settings", server.handleGetGroupSettings)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/settings", server.handleUpdateGroupSettings)
@@ -193,7 +230,7 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 		writeProblem(response, request, domain.ErrNotFound)
 	})
 	mux.Handle("/", spaHandler(cfg.WebDirectory))
-	return server.recover(server.securityHeaders(server.requestContext(server.originCheck(server.sessionContext(server.csrfCheck(server.limitBody(mux)))))))
+	return server.recover(server.securityHeaders(server.requestContext(server.originCheck(server.sessionContext(server.runtimeSettings(server.maintenanceGate(server.csrfCheck(server.limitBody(mux)))))))))
 }
 
 func (s *Server) principal(request *http.Request) (domain.Principal, error) {
@@ -229,6 +266,49 @@ func (s *Server) sessionContext(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(response, request)
 	})
+}
+
+// runtimeSettings resolves one consistent instance-settings snapshot for each
+// API request. Downstream handlers and gates reuse it instead of issuing
+// independent queries that could observe different revisions.
+func (s *Server) runtimeSettings(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if !strings.HasPrefix(request.URL.Path, "/api/") || strings.HasPrefix(request.URL.Path, "/api/v1/instance/capabilities") {
+			next.ServeHTTP(response, request)
+			return
+		}
+		settings, err := s.systemAdmin.GetSettings(request.Context())
+		if err != nil {
+			s.logger.Error("load runtime system settings", "error", err)
+			writeProblem(response, request, domain.ErrServiceUnavailable)
+			return
+		}
+		request = request.WithContext(context.WithValue(request.Context(), systemSettingsKey, settings))
+		next.ServeHTTP(response, request)
+	})
+}
+
+func effectiveSystemSettings(request *http.Request) (systemadmin.Settings, bool) {
+	settings, ok := request.Context().Value(systemSettingsKey).(systemadmin.Settings)
+	return settings, ok
+}
+
+func (s *Server) maintenanceGate(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		settings, loaded := effectiveSystemSettings(request)
+		if !loaded || !settings.MaintenanceMode.Value || request.Method == http.MethodGet || request.Method == http.MethodHead || request.Method == http.MethodOptions || maintenanceMutationAllowed(request.URL.Path) {
+			next.ServeHTTP(response, request)
+			return
+		}
+		writeProblem(response, request, fmt.Errorf("%w: the instance is in maintenance mode", domain.ErrServiceUnavailable))
+	})
+}
+
+func maintenanceMutationAllowed(requestPath string) bool {
+	return requestPath == "/api/v1/auth/login" ||
+		requestPath == "/api/v1/auth/logout" ||
+		requestPath == "/api/v1/groups" ||
+		strings.HasPrefix(requestPath, "/api/v1/system/")
 }
 
 func (s *Server) csrfCheck(next http.Handler) http.Handler {

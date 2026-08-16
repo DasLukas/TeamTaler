@@ -186,8 +186,9 @@ echo
 echo "TeamTaler test server is ready at http://127.0.0.1:5173"
 echo "Shared password: TeamTaler-Test-2026!"
 echo "Groups: TeamTaler Demo Club, TeamTaler Weekend Club"
-echo "Accounts: admin@example.test, marie@example.test, jonas@example.test, lena@example.test, noah@example.test"
+echo "Accounts: admin@example.test, marie@example.test, jonas@example.test, lena@example.test, noah@example.test, systemonly@example.test"
 echo "Second-group-only account: noah@example.test"
+echo "Group-less system administrator: systemonly@example.test"
 echo "Second-group catalog: Refreshments / Club Coffee (EUR 1.80)"
 echo "Stop the action to remove its disposable database."
 

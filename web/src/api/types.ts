@@ -156,6 +156,21 @@ export interface AuthenticationCapabilities {
   emailChangeAvailable: boolean;
 }
 
+/** Global roles assigned outside every group and managed exclusively by the host CLI. */
+export type SystemRole = 'SYSTEM_ADMINISTRATOR';
+
+/** Browser fallback used only while public instance capabilities are unavailable. */
+export const DEFAULT_MEDIA_UPLOAD_MAX_BYTES = 5 * 1024 * 1024;
+
+/** Public, non-sensitive instance behavior required before authenticated features render. */
+export interface InstanceCapabilities {
+  instanceName: string;
+  maintenanceMode: boolean;
+  maintenanceMessage: string;
+  publicJoinEnabled: boolean;
+  mediaUploadMaxBytes: number;
+}
+
 /** Confirmation returned after an email-change request has been accepted. */
 export interface EmailChangeRequestResult {
   verificationRequired: true;
@@ -274,9 +289,167 @@ export interface PublicJoinRegistrationInput {
 export interface Session {
   user: User;
   groups: Group[];
-  activeGroupId: string;
+  activeGroupId: string | null;
   defaultGroupId: string | null;
+  systemRoles: SystemRole[];
   demo?: boolean;
+}
+
+/** Provenance of one effective instance-setting value. */
+export type SystemSettingSource = 'CODE' | 'ENVIRONMENT' | 'DATABASE';
+
+/** Effective value and provenance returned for one instance setting. */
+export interface SystemSetting<T> {
+  value: T;
+  source: SystemSettingSource;
+  overrideVersion: number | null;
+  updatedAt: string | null;
+}
+
+/** Supported transport-security policies for outgoing SMTP connections. */
+export type SmtpTlsMode = 'starttls' | 'tls';
+
+/** Verification state of the currently persisted SMTP revision. */
+export type SmtpTestStatus = 'UNTESTED' | 'VERIFIED' | 'FAILED';
+
+/** Redacted, effective SMTP configuration exposed to system administrators. */
+export interface SystemSmtpSettings {
+  enabled: SystemSetting<boolean>;
+  host: SystemSetting<string>;
+  port: SystemSetting<number>;
+  tlsMode: SystemSetting<SmtpTlsMode>;
+  username: SystemSetting<string>;
+  fromAddress: SystemSetting<string>;
+  fromName: SystemSetting<string>;
+  passwordConfigured: boolean;
+  passwordSource: SystemSettingSource;
+  passwordUpdatedAt: string | null;
+  testStatus: SmtpTestStatus;
+  testedRevision: number | null;
+  testedAt: string | null;
+  revision: number;
+  requiresTest: boolean;
+  configurationValid: boolean;
+  active: boolean;
+}
+
+/** Complete effective, versioned instance settings document. */
+export interface SystemSettings {
+  revision: number;
+  instanceName: SystemSetting<string>;
+  defaultCurrency: SystemSetting<string>;
+  mediaUploadMaxBytes: SystemSetting<number>;
+  publicJoinEnabled: SystemSetting<boolean>;
+  maintenanceMode: SystemSetting<boolean>;
+  maintenanceMessage: SystemSetting<string>;
+  smtp: SystemSmtpSettings;
+  mediaUploadHardLimitBytes: number;
+  updatedAt: string;
+  updatedByUserId: string | null;
+}
+
+/** Scalar instance-setting keys that can be reset to their host-defined default. */
+export type ResettableSystemSettingKey =
+  | 'instanceName'
+  | 'defaultCurrency'
+  | 'mediaUploadMaxBytes'
+  | 'publicJoinEnabled'
+  | 'maintenanceMode'
+  | 'maintenanceMessage';
+
+/** Partial scalar update accepted by the versioned system-settings endpoint. */
+export interface SystemSettingsUpdate {
+  instanceName?: string;
+  defaultCurrency?: string;
+  mediaUploadMaxBytes?: number;
+  publicJoinEnabled?: boolean;
+  maintenanceMode?: boolean;
+  maintenanceMessage?: string;
+}
+
+/** Complete SMTP update; an omitted password preserves the configured secret. */
+export interface SystemSmtpSettingsUpdate {
+  enabled?: boolean;
+  host?: string;
+  port?: number;
+  tlsMode?: SmtpTlsMode;
+  username?: string;
+  fromAddress?: string;
+  fromName?: string;
+  password?: string;
+}
+
+/** Non-sensitive account projection available to system administrators. */
+export interface SystemAccount {
+  id: string;
+  displayName: string;
+  email: string;
+  active: boolean;
+}
+
+/** Public lifecycle states used by the system group-management surface. */
+export type SystemGroupStatus = 'PROVISIONING' | 'ACTIVE' | 'ARCHIVED';
+
+/** Deletion-impact counters calculated by the server for one group. */
+export interface SystemGroupImpact {
+  members: number;
+  invitations: number;
+  bookings: number;
+  financialRecords: number;
+  auditEntries: number;
+  mediaFiles: number;
+}
+
+/** Current, versioned impact document required immediately before purge. */
+export interface SystemGroupDeletionImpact extends SystemGroupImpact {
+  groupId: string;
+  groupName: string;
+  version: number;
+}
+
+/** System-administrator projection of one group and its lifecycle metadata. */
+export interface SystemGroup {
+  id: string;
+  name: string;
+  currency: string;
+  status: SystemGroupStatus;
+  version: number;
+  administratorEmail: string | null;
+  archivedAt: string | null;
+  createdAt: string;
+  impact: SystemGroupImpact;
+}
+
+/** Input used to create an active or provisioning group. */
+export interface SystemGroupCreateInput {
+  name: string;
+  currency: string;
+  administratorEmail: string;
+}
+
+/** Immutable global system-audit entry. */
+export interface SystemAuditEntry {
+  id: string;
+  action: string;
+  actorUserId: string;
+  actorDisplayName: string;
+  targetType: string;
+  targetId: string | null;
+  summary: string;
+  createdAt: string;
+}
+
+/** Short-lived, single-use proof returned after password reauthentication. */
+export interface SystemStepUpChallenge {
+  stepUpToken: string;
+  expiresAt: string;
+}
+
+/** Confirmation payload required to permanently purge one archived group. */
+export interface SystemGroupPurgeInput {
+  stepUpToken: string;
+  groupName: string;
+  confirmationPhrase: 'ENDGÜLTIG LÖSCHEN';
 }
 
 /** Persisted account preference controlling the group selected after login. */
