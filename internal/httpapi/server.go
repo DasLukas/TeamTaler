@@ -155,12 +155,12 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /api/v1/system/accounts", server.handleSearchSystemAccounts)
 	mux.HandleFunc("GET /api/v1/system/groups", server.handleListSystemGroups)
 	mux.HandleFunc("POST /api/v1/system/groups", server.handleCreateSystemGroup)
+	mux.HandleFunc("GET /api/v1/system/groups/{groupID}/logo", server.handleSystemGroupLogo)
 	mux.HandleFunc("GET /api/v1/system/groups/{groupID}/deletion-impact", server.handleSystemGroupDeletionImpact)
 	mux.HandleFunc("POST /api/v1/system/groups/{groupID}/archive", server.handleArchiveSystemGroup)
 	mux.HandleFunc("POST /api/v1/system/groups/{groupID}/restore", server.handleRestoreSystemGroup)
 	mux.HandleFunc("POST /api/v1/system/groups/{groupID}/invitation/resend", server.handleResendSystemGroupInvitation)
 	mux.HandleFunc("POST /api/v1/system/groups/{groupID}/purge", server.handlePurgeSystemGroup)
-	mux.HandleFunc("POST /api/v1/system/step-up", server.handleSystemStepUp)
 	mux.HandleFunc("GET /api/v1/system/audit", server.handleSystemAudit)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}", server.handleUpdateGroup)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/settings", server.handleGetGroupSettings)
@@ -365,9 +365,35 @@ func (s *Server) originCheck(next http.Handler) http.Handler {
 
 func (s *Server) limitBody(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		request.Body = http.MaxBytesReader(response, request.Body, s.config.MaxRequestBytes)
+		limit := s.config.MaxRequestBytes
+		if isMediaUploadRequest(request) {
+			if settings, loaded := effectiveSystemSettings(request); loaded {
+				limit = settings.MediaUploadMaxBytes.Value + systemadmin.MultipartRequestReserveBytes
+			} else {
+				limit = config.DefaultMediaUploadBytes + config.MultipartRequestReserve
+			}
+		}
+		request.Body = http.MaxBytesReader(response, request.Body, limit)
 		next.ServeHTTP(response, request)
 	})
+}
+
+// isMediaUploadRequest identifies the three multipart routes whose request
+// ceiling follows the live instance media setting instead of the general JSON
+// request ceiling.
+func isMediaUploadRequest(request *http.Request) bool {
+	if request.Method != http.MethodPost {
+		return false
+	}
+	if request.URL.Path == "/api/v1/me/avatar" {
+		return true
+	}
+	segments := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
+	if len(segments) == 5 {
+		return segments[0] == "api" && segments[1] == "v1" && segments[2] == "groups" && segments[4] == "logo"
+	}
+	return len(segments) == 7 && segments[0] == "api" && segments[1] == "v1" && segments[2] == "groups" &&
+		segments[4] == "products" && segments[6] == "image"
 }
 
 func (s *Server) requestContext(next http.Handler) http.Handler {
@@ -445,6 +471,8 @@ type problem struct {
 func writeProblem(response http.ResponseWriter, request *http.Request, err error) {
 	status, title, problemType := http.StatusInternalServerError, "Internal Server Error", "https://teamtaler.dev/problems/internal"
 	switch {
+	case errors.Is(err, auth.ErrInvitationAccountStateChanged):
+		status, title, problemType = http.StatusConflict, "Invitation Account State Changed", "https://teamtaler.dev/problems/invitation-account-state-changed"
 	case errors.Is(err, domain.ErrUnauthenticated):
 		status, title, problemType = http.StatusUnauthorized, "Authentication Required", "https://teamtaler.dev/problems/unauthenticated"
 	case errors.Is(err, domain.ErrForbidden):

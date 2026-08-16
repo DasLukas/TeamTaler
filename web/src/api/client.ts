@@ -24,6 +24,7 @@ import {
   adaptSystemAccounts,
   adaptSystemAudit,
   adaptSystemGroups,
+  adaptSystemGroupInvitationResult,
   adaptSystemGroupDeletionImpact,
   adaptSystemSettings,
   adaptUser,
@@ -89,13 +90,13 @@ import type {
   SystemAuditEntry,
   SystemGroup,
   SystemGroupCreateInput,
+  SystemGroupInvitationResult,
   SystemGroupPurgeInput,
   SystemGroupDeletionImpact,
   ResettableSystemSettingKey,
   SystemSettings,
   SystemSettingsUpdate,
   SystemSmtpSettingsUpdate,
-  SystemStepUpChallenge,
   User,
 } from './types';
 import i18n from '@/i18n';
@@ -300,9 +301,8 @@ async function idempotentRequest<T>(groupId: string, operation: string, path: st
  *   `If-Match: "v{revision}"` header;
  * - scalar reset posts `{ keys: [coreSettingKey] }`, SMTP PUT never returns a
  *   password, and an omitted SMTP password preserves the stored secret;
- * - step-up posts `{ password, purpose: "GROUP_PURGE" }` and adapts
- *   `{ token, expiresAt }`; purge posts `{ stepUpToken, groupName,
- *   confirmationPhrase }` and returns the final deletion-impact receipt.
+ * - purge posts the exact current group name and returns the final
+ *   deletion-impact receipt.
  */
 export const api = {
   getSession: async (): Promise<Session> => setSessionActor(adaptSession(await request<unknown>('/session'))),
@@ -318,10 +318,10 @@ export const api = {
     headers: versionHeaders(revision),
     body: json(update),
   })),
-  resetSystemSetting: async (key: ResettableSystemSettingKey, revision: number): Promise<SystemSettings> => adaptSystemSettings(await request<unknown>('/system/settings/reset', {
+  resetSystemSettings: async (keys: ResettableSystemSettingKey[], revision: number): Promise<SystemSettings> => adaptSystemSettings(await request<unknown>('/system/settings/reset', {
     method: 'POST',
     headers: versionHeaders(revision),
-    body: json({ keys: [systemSettingKeys[key]] }),
+    body: json({ keys: keys.map((key) => systemSettingKeys[key]) }),
   })),
   updateSystemSmtp: async (update: SystemSmtpSettingsUpdate, revision: number): Promise<SystemSettings> => adaptSystemSettings(await request<unknown>('/system/settings/smtp', {
     method: 'PUT',
@@ -345,7 +345,7 @@ export const api = {
   getSystemAdministrators: async (): Promise<SystemAccount[]> => adaptSystemAccounts(await request<unknown>('/system/administrators')),
   getSystemGroups: async (): Promise<SystemGroup[]> => adaptSystemGroups(await request<unknown>('/system/groups')),
   getSystemGroupDeletionImpact: async (groupId: string): Promise<SystemGroupDeletionImpact> => adaptSystemGroupDeletionImpact(await request<unknown>(systemGroupPath(groupId, 'deletion-impact'))),
-  createSystemGroup: async (input: SystemGroupCreateInput): Promise<SystemGroup> => adaptSystemGroups([await request<unknown>('/system/groups', { method: 'POST', body: json({ name: input.name, currency: input.currency, initialAdministratorEmail: input.administratorEmail }) })])[0],
+  createSystemGroup: async (input: SystemGroupCreateInput): Promise<SystemGroupInvitationResult> => adaptSystemGroupInvitationResult(await request<unknown>('/system/groups', { method: 'POST', body: json({ name: input.name, currency: input.currency, initialAdministratorEmail: input.administratorEmail }) })),
   archiveSystemGroup: async (groupId: string, version: number): Promise<SystemGroup> => adaptSystemGroups([await request<unknown>(systemGroupPath(groupId, 'archive'), {
     method: 'POST',
     headers: versionHeaders(version),
@@ -354,17 +354,10 @@ export const api = {
     method: 'POST',
     headers: versionHeaders(version),
   })])[0],
-  resendSystemGroupInvitation: async (groupId: string, version: number): Promise<SystemGroup> => adaptSystemGroups([await request<unknown>(systemGroupPath(groupId, 'invitation/resend'), {
+  resendSystemGroupInvitation: async (groupId: string, version: number): Promise<SystemGroupInvitationResult> => adaptSystemGroupInvitationResult(await request<unknown>(systemGroupPath(groupId, 'invitation/resend'), {
     method: 'POST',
     headers: versionHeaders(version),
-  })])[0],
-  createSystemStepUp: async (password: string): Promise<SystemStepUpChallenge> => {
-    const response = await request<{ token: string; expiresAt: string }>('/system/step-up', {
-      method: 'POST',
-      body: json({ password, purpose: 'GROUP_PURGE' }),
-    });
-    return { stepUpToken: response.token, expiresAt: response.expiresAt };
-  },
+  })),
   purgeSystemGroup: async (groupId: string, version: number, input: SystemGroupPurgeInput): Promise<SystemGroupDeletionImpact> => adaptSystemGroupDeletionImpact(await request<unknown>(systemGroupPath(groupId, 'purge'), {
     method: 'POST',
     headers: versionHeaders(version),

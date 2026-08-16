@@ -89,7 +89,7 @@ func TestAcceptClaimInvitationRebindsExistingAccountWithoutMergingMemberships(t 
 	}
 	seedClaimTarget(t, ctx, db, "managed-user", "managed-member", "Managed Guest", "managed guest", "claim-existing", "existing@example.test")
 
-	_, membership, err := service.AcceptInvitation(ctx, InvitationAcceptance{Token: "claim-existing", Password: "existing-password-long"})
+	_, membership, err := service.AcceptInvitation(ctx, InvitationAcceptance{Token: "claim-existing", Password: "existing-password-long", ExpectedAccountState: InvitationAccountExisting})
 	if err != nil {
 		t.Fatalf("accept existing-account claim: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestAcceptClaimInvitationRejectsExistingSameGroupMembership(t *testing.T) {
 			}
 			seedClaimTarget(t, ctx, db, "managed-user", "managed-member", "Managed Guest", "managed guest", "claim-conflict", "existing@example.test")
 
-			_, _, err = service.AcceptInvitation(ctx, InvitationAcceptance{Token: "claim-conflict", Password: "existing-password-long"})
+			_, _, err = service.AcceptInvitation(ctx, InvitationAcceptance{Token: "claim-conflict", Password: "existing-password-long", ExpectedAccountState: InvitationAccountExisting})
 			if !errors.Is(err, domain.ErrConflict) {
 				t.Fatalf("same-group %s claim error=%v, want conflict", membershipStatus, err)
 			}

@@ -46,6 +46,7 @@ export function AdminPage() {
     if (!activeGroup) return false;
     if (tab.id === 'rights') return canManageRoles;
     if (tab.id === 'members') return canManageMembers;
+    if (tab.id === 'settings') return canManageGroup || canManageMembers;
     return canManageGroup;
   });
   const activeTab = availableTabs.some((tab) => tab.id === requestedTab) ? requestedTab : availableTabs[0]?.id;

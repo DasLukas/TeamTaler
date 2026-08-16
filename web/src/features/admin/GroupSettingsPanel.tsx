@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import ImageUp from 'lucide-react/dist/esm/icons/image-up';
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
+import Save from 'lucide-react/dist/esm/icons/save';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
@@ -64,7 +65,7 @@ function GroupNameForm({ groupId, currentName, embedded }: { groupId: string; cu
         {nameMutation.isError ? <p className={styles.error} role="alert">{t('groupSettings.nameUpdateError')} {nameMutation.error.message}</p> : null}
         {nameMutation.isSuccess ? <p className={styles.success} role="status">{t('groupSettings.nameSaved')}</p> : null}
         <div className={styles.actions}>
-          <Button disabled={!normalizedName || normalizedName === savedName || nameMutation.isPending} type="submit">
+          <Button disabled={!normalizedName || normalizedName === savedName || nameMutation.isPending} leadingIcon={<Save size={17} />} type="submit">
             {nameMutation.isPending ? t('groupSettings.nameSaving') : t('groupSettings.nameSave')}
           </Button>
         </div>

@@ -14,6 +14,13 @@ import (
 // Example: defaults := DefaultsFromConfig(cfg).
 func DefaultsFromConfig(configuration config.Config) Defaults {
 	instanceDefaults := configuration.InstanceDefaults
+	smtpDefaults := configuration.SMTP
+	if !smtpDefaults.Enabled && smtpDefaults.Port == 0 {
+		smtpDefaults.Port = config.DefaultSMTPPort
+	}
+	if smtpDefaults.TLSMode == "" {
+		smtpDefaults.TLSMode = config.SMTPTLSModeStartTLS
+	}
 	legacyLiteral := instanceDefaults.InstanceName == ""
 	if legacyLiteral {
 		// Preserve construction compatibility for embedded/test callers that build
@@ -36,17 +43,17 @@ func DefaultsFromConfig(configuration config.Config) Defaults {
 		MaintenanceMessage:  instanceDefaults.MaintenanceMessage,
 		MaxRequestBytes:     maxRequestBytes,
 		SMTP: SMTPConfiguration{
-			Enabled:             configuration.SMTP.Enabled,
-			Host:                configuration.SMTP.Host,
-			Port:                configuration.SMTP.Port,
-			TLSMode:             SMTPTLSMode(configuration.SMTP.TLSMode),
-			Username:            configuration.SMTP.Username,
-			Password:            configuration.SMTP.Password,
-			FromAddress:         configuration.SMTP.FromAddress,
-			FromName:            configuration.SMTP.FromName,
-			AllowPrivateNetwork: configuration.SMTP.AllowPrivateNetwork,
-			AllowedPrivateHost:  configuration.SMTP.AllowedPrivateHost,
-			AllowedPrivatePort:  configuration.SMTP.AllowedPrivatePort,
+			Enabled:             smtpDefaults.Enabled,
+			Host:                smtpDefaults.Host,
+			Port:                smtpDefaults.Port,
+			TLSMode:             SMTPTLSMode(smtpDefaults.TLSMode),
+			Username:            smtpDefaults.Username,
+			Password:            smtpDefaults.Password,
+			FromAddress:         smtpDefaults.FromAddress,
+			FromName:            smtpDefaults.FromName,
+			AllowPrivateNetwork: smtpDefaults.AllowPrivateNetwork,
+			AllowedPrivateHost:  smtpDefaults.AllowedPrivateHost,
+			AllowedPrivatePort:  smtpDefaults.AllowedPrivatePort,
 		},
 		Sources: make(map[SettingKey]SettingSource),
 	}

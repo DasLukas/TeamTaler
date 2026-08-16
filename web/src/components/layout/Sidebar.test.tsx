@@ -53,6 +53,31 @@ describe('Sidebar role navigation', () => {
     expect(screen.getByRole('link', { name: 'Einstellungen' })).toHaveAttribute('href', '/admin');
   });
 
+  it('shows group logos and initial fallbacks in the keyboard-operable custom selector', () => {
+    const setActiveGroupId = vi.fn();
+    mocks.useActiveGroup.mockReturnValue({
+      session: {
+        groups: [
+          { id: 'group-a', name: 'Group A', currency: 'EUR', logoUrl: '/api/v1/groups/group-a/logo', membership: { id: 'member-a', effectiveGrants: [] } },
+          { id: 'group-b', name: 'Beta Club', currency: 'EUR', membership: { id: 'member-b', effectiveGrants: [] } },
+        ],
+        systemRoles: [],
+      },
+      activeGroupId: 'group-a',
+      setActiveGroupId,
+    });
+    render(<Sidebar collapsed={false} onCollapsedChange={vi.fn()} />);
+
+    const selector = screen.getByRole('combobox', { name: 'Gruppe auswählen' });
+    expect(selector.querySelector('img')).toHaveAttribute('src', '/api/v1/groups/group-a/logo');
+    fireEvent.keyDown(selector, { key: 'ArrowDown' });
+    const fallbackOption = screen.getByRole('option', { name: 'Beta Club' });
+    expect(fallbackOption).toHaveTextContent('B');
+    fireEvent.keyDown(selector, { key: 'ArrowDown' });
+    fireEvent.keyDown(selector, { key: 'Enter' });
+    expect(setActiveGroupId).toHaveBeenCalledWith('group-b');
+  });
+
   it('exposes an accessible tablet-rail toggle and preserves icon destinations', () => {
     const onCollapsedChange = vi.fn();
     usePermissions(['CREATE_OWN_BOOKING', 'CATALOG_MANAGEMENT', 'FINANCE_MANAGEMENT', 'GROUP_ADMINISTRATION']);

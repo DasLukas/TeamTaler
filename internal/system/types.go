@@ -166,8 +166,9 @@ type SMTPSettings struct {
 
 // Defaults contains the validated host-level values underneath database
 // overrides. Sources may mark individual values as ENVIRONMENT; omitted entries
-// are treated as CODE. MaxRequestBytes is the immutable HTTP request ceiling
-// used to derive MediaUploadHardLimitBytes.
+// are treated as CODE. MaxRequestBytes is retained for compatibility with
+// embedded configurations; media endpoints derive their request limit from the
+// live MediaUploadMaxBytes setting.
 type Defaults struct {
 	InstanceName        string
 	DefaultCurrency     string
@@ -235,13 +236,14 @@ type RoleAssignment struct {
 
 // AuditEvent is an immutable instance-wide security or administration event.
 type AuditEvent struct {
-	ID           string         `json:"id"`
-	ActorUserID  *string        `json:"actorUserId,omitempty"`
-	Action       string         `json:"action"`
-	ResourceType string         `json:"resourceType"`
-	ResourceID   *string        `json:"resourceId,omitempty"`
-	Metadata     map[string]any `json:"metadata"`
-	OccurredAt   string         `json:"occurredAt"`
+	ID               string         `json:"id"`
+	ActorUserID      *string        `json:"actorUserId,omitempty"`
+	ActorDisplayName string         `json:"actorDisplayName,omitempty"`
+	Action           string         `json:"action"`
+	ResourceType     string         `json:"resourceType"`
+	ResourceID       *string        `json:"resourceId,omitempty"`
+	Metadata         map[string]any `json:"metadata"`
+	OccurredAt       string         `json:"occurredAt"`
 }
 
 // PasswordCipher authenticates SMTP passwords before durable storage. Seal

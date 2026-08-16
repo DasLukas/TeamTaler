@@ -7,6 +7,7 @@ import type {
   Category,
   ConfigurableItem,
   Dashboard,
+  EmailDeliveryStatus,
   Group,
   GroupSettings,
   GroupRole,
@@ -28,6 +29,7 @@ import type {
   SystemAccount,
   SystemAuditEntry,
   SystemGroup,
+  SystemGroupInvitationResult,
   SystemGroupDeletionImpact,
   SystemGroupImpact,
   SystemSetting,
@@ -74,6 +76,7 @@ function setting<T>(input: unknown, fallback: T, coerce: (value: unknown) => T):
 const stringSetting = (input: unknown, fallback = '') => setting(input, fallback, (value) => String(value));
 const booleanSetting = (input: unknown, fallback = false) => setting(input, fallback, (value) => value === true || String(value).toLowerCase() === 'true');
 const numberSetting = (input: unknown, fallback = 0) => setting(input, fallback, (value) => Number(value));
+const DEFAULT_SMTP_PORT = 587;
 
 /**
  * Adapts the public instance-capabilities document with safe deployment defaults.
@@ -112,10 +115,12 @@ export function adaptSystemSettings(input: unknown): SystemSettings {
   const smtpRevision = Number(smtpSource.revision ?? 0);
   const testedRevision = Number.isFinite(Number(smtpSource.testedRevision)) ? Number(smtpSource.testedRevision) : null;
   const exactRevisionTested = smtpRevision > 0 && testedRevision === smtpRevision;
+  const smtpPort = numberSetting(smtpSource.port, DEFAULT_SMTP_PORT);
+  if (!Number.isInteger(smtpPort.value) || smtpPort.value < 1 || smtpPort.value > 65535) smtpPort.value = DEFAULT_SMTP_PORT;
   const smtp: SystemSmtpSettings = {
     enabled: booleanSetting(smtpSource.enabled),
     host: stringSetting(smtpSource.host),
-    port: numberSetting(smtpSource.port, 587),
+    port: smtpPort,
     tlsMode: tlsModeSetting,
     username: stringSetting(smtpSource.username),
     fromAddress: stringSetting(smtpSource.fromAddress),
@@ -176,6 +181,7 @@ export function adaptSystemGroupDeletionImpact(input: unknown): SystemGroupDelet
     groupId: String(source.groupId ?? ''),
     groupName: String(source.groupName ?? ''),
     version: Number(source.version ?? 0),
+    openBalance: money(source.openBalanceMinor, source.currency),
     ...adaptSystemGroupImpact(source),
   };
 }
@@ -196,9 +202,26 @@ export function adaptSystemGroups(input: unknown): SystemGroup[] {
       administratorEmail: typeof group.administratorEmail === 'string' ? group.administratorEmail : null,
       archivedAt: typeof group.archivedAt === 'string' ? group.archivedAt : null,
       createdAt: typeof group.createdAt === 'string' ? group.createdAt : '',
+      logoUrl: typeof group.logoUrl === 'string' && group.logoUrl ? group.logoUrl : undefined,
       impact: adaptSystemGroupImpact(group.impact ?? group),
     };
   });
+}
+
+/** Adapts the immediate system-group invitation result without retaining a plaintext token. */
+export function adaptSystemGroupInvitationResult(input: unknown): SystemGroupInvitationResult {
+  const source = asRecord(input);
+  const group = adaptSystemGroups([source.group ?? source])[0];
+  const status = String(source.emailDeliveryStatus ?? '');
+  const validStatus: EmailDeliveryStatus | null = ['NOT_REQUESTED', 'PENDING', 'SENDING', 'SENT', 'FAILED', 'CANCELLED'].includes(status)
+    ? status as EmailDeliveryStatus
+    : null;
+  return {
+    group,
+    acceptUrl: typeof source.acceptUrl === 'string' && source.acceptUrl ? source.acceptUrl : null,
+    emailDeliveryStatus: validStatus,
+    expiresAt: typeof source.expiresAt === 'string' && source.expiresAt ? source.expiresAt : null,
+  };
 }
 
 /** Adapts the immutable global system-audit response. */

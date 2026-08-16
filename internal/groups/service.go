@@ -1281,6 +1281,11 @@ func createInvitationTx(ctx context.Context, tx *sql.Tx, actor domain.Principal,
 	if existing > 0 {
 		return Invitation{}, fmt.Errorf("%w: %w", domain.ErrConflict, ErrInvitationEmailExists)
 	}
+	var targetUserID sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM users
+		WHERE email=? COLLATE NOCASE AND active=1 AND email IS NOT NULL AND password_hash IS NOT NULL`, email).Scan(&targetUserID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return Invitation{}, err
+	}
 
 	id, err := platform.NewID("inv")
 	if err != nil {
@@ -1310,8 +1315,8 @@ func createInvitationTx(ctx context.Context, tx *sql.Tx, actor domain.Principal,
 		Roles: roles, GroupPermissions: groupPermissions, CategoryGrants: categoryGrants, ExpiresAt: platform.Timestamp(now.Add(7 * 24 * time.Hour)),
 		EmailDeliveryStatus: EmailDeliveryNotRequested, Token: token,
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO invitations(id,group_id,email,display_name,token_hash,roles_json,group_permissions_json,category_grants_json,expires_at,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-		item.ID, membership.GroupID, email, nullable(displayName), platform.HashSecret(token), string(encoded), string(encodedPermissions), string(encodedGrants), item.ExpiresAt, actor.UserID, nowText); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO invitations(id,group_id,email,display_name,token_hash,roles_json,group_permissions_json,category_grants_json,expires_at,created_by,created_at,target_user_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+		item.ID, membership.GroupID, email, nullable(displayName), platform.HashSecret(token), string(encoded), string(encodedPermissions), string(encodedGrants), item.ExpiresAt, actor.UserID, nowText, targetUserID); err != nil {
 		if strings.Contains(err.Error(), activeInvitationEmailConstraint) {
 			return Invitation{}, fmt.Errorf("%w: %w", domain.ErrConflict, ErrInvitationEmailExists)
 		}

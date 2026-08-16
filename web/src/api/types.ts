@@ -405,6 +405,7 @@ export interface SystemGroupDeletionImpact extends SystemGroupImpact {
   groupId: string;
   groupName: string;
   version: number;
+  openBalance: Money;
 }
 
 /** System-administrator projection of one group and its lifecycle metadata. */
@@ -417,6 +418,7 @@ export interface SystemGroup {
   administratorEmail: string | null;
   archivedAt: string | null;
   createdAt: string;
+  logoUrl?: string;
   impact: SystemGroupImpact;
 }
 
@@ -425,6 +427,14 @@ export interface SystemGroupCreateInput {
   name: string;
   currency: string;
   administratorEmail: string;
+}
+
+/** Immediate result of creating or replacing a first-administrator invitation. */
+export interface SystemGroupInvitationResult {
+  group: SystemGroup;
+  acceptUrl: string | null;
+  emailDeliveryStatus: EmailDeliveryStatus | null;
+  expiresAt: string | null;
 }
 
 /** Immutable global system-audit entry. */
@@ -439,17 +449,9 @@ export interface SystemAuditEntry {
   createdAt: string;
 }
 
-/** Short-lived, single-use proof returned after password reauthentication. */
-export interface SystemStepUpChallenge {
-  stepUpToken: string;
-  expiresAt: string;
-}
-
 /** Confirmation payload required to permanently purge one archived group. */
 export interface SystemGroupPurgeInput {
-  stepUpToken: string;
   groupName: string;
-  confirmationPhrase: 'ENDGÜLTIG LÖSCHEN';
 }
 
 /** Persisted account preference controlling the group selected after login. */
@@ -814,12 +816,16 @@ export interface InvitationCommand {
   token: string;
   displayName: string;
   password: string;
+  expectedAccountState: InvitationAccountState;
 }
+
+/** Credential state bound to an invitation at preview time. */
+export type InvitationAccountState = 'NEW' | 'EXISTING';
 
 /** Safe onboarding hints resolved from a valid invitation token. */
 export interface InvitationPreview {
   displayName: string;
-  existingAccount: boolean;
+  accountState: InvitationAccountState;
 }
 
 /** Outbound email lifecycle state for a group invitation. */
@@ -902,7 +908,7 @@ export type InvitationUpdateInput =
 /** Result of rotating and resending an invitation email. */
 export interface InvitationEmailResendResult {
   invitationId: string;
-  emailDeliveryStatus: 'PENDING';
+  emailDeliveryStatus: EmailDeliveryStatus;
   expiresAt: string;
   acceptUrl: string;
 }

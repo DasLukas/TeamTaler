@@ -166,7 +166,7 @@ func TestRegularMemberLifecyclePreservesHistoryAndDetachesOnlyOneGroup(t *testin
 	if err != nil {
 		t.Fatalf("invite original account after permanent deletion: %v", err)
 	}
-	_, rejoinedMembership, err := f.auth.AcceptInvitation(f.ctx, auth.InvitationAcceptance{Token: invitation.Token, DisplayName: "Lifecycle Member Rejoined", Password: testPassword})
+	_, rejoinedMembership, err := f.auth.AcceptInvitation(f.ctx, auth.InvitationAcceptance{Token: invitation.Token, DisplayName: "Lifecycle Member Rejoined", Password: testPassword, ExpectedAccountState: auth.InvitationAccountExisting})
 	if err != nil {
 		t.Fatalf("accept invitation after permanent deletion: %v", err)
 	}

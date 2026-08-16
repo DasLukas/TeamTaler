@@ -17,13 +17,17 @@ import (
 
 const (
 	// MinimumMediaUploadBytes is the smallest configurable raw media upload.
-	MinimumMediaUploadBytes int64 = 256 << 10
+	MinimumMediaUploadBytes int64 = 1 << 20
 	// MaximumMediaUploadBytes is the compiled safety ceiling for raw media uploads.
 	MaximumMediaUploadBytes int64 = 25 << 20
+	// MediaUploadUnitBytes is the only supported increment for raw media limits.
+	MediaUploadUnitBytes int64 = 1 << 20
 	// DefaultMediaUploadBytes preserves TeamTaler's original five MiB upload limit.
 	DefaultMediaUploadBytes int64 = 5 << 20
 	// MultipartRequestReserve leaves room for multipart headers and boundaries.
 	MultipartRequestReserve int64 = 1 << 20
+	// DefaultSMTPPort is the standard submission port offered for new STARTTLS configurations.
+	DefaultSMTPPort = 587
 )
 
 // SMTPTLSMode identifies the mandatory transport-security negotiation used for
@@ -142,7 +146,7 @@ func Load() (Config, error) {
 	if err != nil || maxRequestBytes < 1024 {
 		return Config{}, fmt.Errorf("TEAMTALER_MAX_REQUEST_BYTES must be at least 1024")
 	}
-	instanceDefaults, err := loadInstanceDefaults(maxRequestBytes)
+	instanceDefaults, err := loadInstanceDefaults()
 	if err != nil {
 		return Config{}, err
 	}
@@ -179,7 +183,7 @@ func Load() (Config, error) {
 	}, nil
 }
 
-func loadInstanceDefaults(maxRequestBytes int64) (InstanceDefaults, error) {
+func loadInstanceDefaults() (InstanceDefaults, error) {
 	instanceName := env("TEAMTALER_INSTANCE_NAME", "TeamTaler")
 	if len(instanceName) > 120 || containsControlCharacter(instanceName) {
 		return InstanceDefaults{}, fmt.Errorf("TEAMTALER_INSTANCE_NAME must contain 1 to 120 characters without control characters")
@@ -189,11 +193,8 @@ func loadInstanceDefaults(maxRequestBytes int64) (InstanceDefaults, error) {
 		return InstanceDefaults{}, fmt.Errorf("TEAMTALER_DEFAULT_CURRENCY must be a three-letter uppercase currency code")
 	}
 	mediaUploadMaxBytes, err := strconv.ParseInt(env("TEAMTALER_MEDIA_UPLOAD_MAX_BYTES", strconv.FormatInt(DefaultMediaUploadBytes, 10)), 10, 64)
-	if err != nil || mediaUploadMaxBytes < MinimumMediaUploadBytes || mediaUploadMaxBytes > MaximumMediaUploadBytes {
-		return InstanceDefaults{}, fmt.Errorf("TEAMTALER_MEDIA_UPLOAD_MAX_BYTES must be between %d and %d", MinimumMediaUploadBytes, MaximumMediaUploadBytes)
-	}
-	if mediaUploadMaxBytes > maxRequestBytes-MultipartRequestReserve {
-		return InstanceDefaults{}, fmt.Errorf("TEAMTALER_MEDIA_UPLOAD_MAX_BYTES must leave at least %d bytes below TEAMTALER_MAX_REQUEST_BYTES", MultipartRequestReserve)
+	if err != nil || mediaUploadMaxBytes < MinimumMediaUploadBytes || mediaUploadMaxBytes > MaximumMediaUploadBytes || mediaUploadMaxBytes%MediaUploadUnitBytes != 0 {
+		return InstanceDefaults{}, fmt.Errorf("TEAMTALER_MEDIA_UPLOAD_MAX_BYTES must be a whole MiB value between %d and %d", MinimumMediaUploadBytes, MaximumMediaUploadBytes)
 	}
 	publicJoinEnabled, err := parseBoolEnvironment("TEAMTALER_PUBLIC_JOIN_ENABLED", true)
 	if err != nil {
@@ -277,7 +278,11 @@ func loadSMTPConfig() (SMTPConfig, error) {
 		}
 	}
 	if !configured {
-		return SMTPConfig{AllowPrivateNetwork: allowPrivateNetwork}, nil
+		return SMTPConfig{
+			Port:                DefaultSMTPPort,
+			TLSMode:             SMTPTLSModeStartTLS,
+			AllowPrivateNetwork: allowPrivateNetwork,
+		}, nil
 	}
 
 	required := []string{

@@ -298,7 +298,7 @@ func TestImportInvitationsCreatesEncryptedOutboxAndReplays(t *testing.T) {
 	}
 }
 
-func TestInvitationEmailOperationsRequireConfiguredTokenSealer(t *testing.T) {
+func TestInvitationEmailQueueOperationsRequireSealerWhileRenewalFallsBackToLink(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -329,9 +329,20 @@ func TestInvitationEmailOperationsRequireConfiguredTokenSealer(t *testing.T) {
 	if !errors.Is(err, domain.ErrServiceUnavailable) {
 		t.Fatalf("RetryInvitationEmail error = %v, want unavailable", err)
 	}
-	_, err = service.ResendInvitationEmail(ctx, session.Principal, membership, "resend-key-two", "inv_test")
-	if !errors.Is(err, domain.ErrServiceUnavailable) {
-		t.Fatalf("ResendInvitationEmail error = %v, want unavailable", err)
+	linkOnly, err := createStarterInvitation(ctx, service, session.Principal, membership, "link-only@example.test", "Link Only")
+	if err != nil {
+		t.Fatalf("create link-only invitation: %v", err)
+	}
+	renewed, err := service.ResendInvitationEmail(ctx, session.Principal, membership, "resend-key-two", linkOnly.ID)
+	if err != nil {
+		t.Fatalf("ResendInvitationEmail: %v", err)
+	}
+	if renewed.Token == "" || renewed.Token == linkOnly.Token || renewed.EmailDeliveryStatus != EmailDeliveryNotRequested || renewed.ExpiresAt == "" {
+		t.Fatalf("link-only resend = %#v", renewed)
+	}
+	var jobs int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM invitation_email_outbox WHERE invitation_id=?`, linkOnly.ID).Scan(&jobs); err != nil || jobs != 0 {
+		t.Fatalf("link-only resend jobs = %d err=%v, want 0", jobs, err)
 	}
 }
 

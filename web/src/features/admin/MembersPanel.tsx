@@ -1,24 +1,27 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { TFunction } from 'i18next';
+import CircleCheck from 'lucide-react/dist/esm/icons/circle-check';
 import Copy from 'lucide-react/dist/esm/icons/copy';
 import Download from 'lucide-react/dist/esm/icons/download';
 import FileUp from 'lucide-react/dist/esm/icons/file-up';
 import MailPlus from 'lucide-react/dist/esm/icons/mail-plus';
 import Pencil from 'lucide-react/dist/esm/icons/pencil';
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
+import Save from 'lucide-react/dist/esm/icons/save';
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
 import UserMinus from 'lucide-react/dist/esm/icons/user-minus';
 import UserRoundPlus from 'lucide-react/dist/esm/icons/user-round-plus';
 import QrCode from 'lucide-react/dist/esm/icons/qr-code';
-import { useMemo, useState, type ChangeEvent, type FormEvent } from 'react';
+import X from 'lucide-react/dist/esm/icons/x';
+import { useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, ApiError } from '@/api/client';
 import type {
   CreatedInvitation,
   EmailDeliveryStatus,
-  GroupSettings,
   InvitationImportRow,
   InvitationImportStatus,
+  InvitationEmailResendResult,
   InvitationInput,
   InvitationMetadata,
   Membership,
@@ -28,7 +31,9 @@ import { can } from '@/app/permissions';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
-import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
+import { Field, TextInput } from '@/components/ui/FormField';
+import { InvitationReady } from '@/components/ui/InvitationReady';
+import { ItemAction } from '@/components/ui/ItemAction';
 import { Modal } from '@/components/ui/Modal';
 import { StatePanel } from '@/components/ui/StatePanel';
 import tableStyles from '@/features/shared/Table.module.css';
@@ -189,6 +194,18 @@ function deliveryBadgeClass(status: EmailDeliveryStatus): string {
 }
 
 /**
+ * Renders an actionable email-delivery state while omitting the neutral manual-link state.
+ *
+ * @param status - Current outbound email state.
+ * @param t - Active localization function.
+ * @returns A localized status badge, or nothing when no email delivery was requested.
+ */
+function renderInvitationDeliveryBadge(status: EmailDeliveryStatus, t: TFunction): ReactNode {
+  if (status === 'NOT_REQUESTED') return null;
+  return <span className={deliveryBadgeClass(status)}>{t(DELIVERY_STATUS_KEYS[status])}</span>;
+}
+
+/**
  * Renders the file selection and row-level result flow for member invitations.
  *
  * @param props - Active group scope and modal close callback.
@@ -322,9 +339,9 @@ function MemberImportDialog({ activeGroupId, defaultRole, onClose }: MemberImpor
                       <div className={styles.rowDetail}>
                         <span>{deliveryStatus === 'FAILED' ? t('members.csvImport.errors.deliveryFailed') : importRowDetail(row, t)}</span>
                         {deliveryStatus === 'FAILED' && invitationId ? (
-                          <Button aria-label={t('members.csvImport.retryFor', { email: row.email ?? '' })} disabled={retryMutation.isPending} onClick={() => retryMutation.mutate(invitationId)} size="small" variant="ghost">
+                          <ItemAction aria-label={t('members.csvImport.retryFor', { email: row.email ?? '' })} disabled={retryMutation.isPending} leadingIcon={<RotateCcw size={16} />} onClick={() => retryMutation.mutate(invitationId)}>
                             {retryMutation.isPending && retryMutation.variables === invitationId ? t('members.csvImport.retryPending') : t('members.csvImport.retry')}
-                          </Button>
+                          </ItemAction>
                         ) : null}
                       </div>
                     </td>
@@ -333,7 +350,7 @@ function MemberImportDialog({ activeGroupId, defaultRole, onClose }: MemberImpor
               })}</tbody>
             </table>
           </div>
-          <div className={styles.actions}><Button onClick={startAnotherImport} variant="secondary">{t('members.csvImport.importAnother')}</Button><Button onClick={onClose}>{t('common.done')}</Button></div>
+          <div className={styles.actions}><Button leadingIcon={<FileUp size={17} />} onClick={startAnotherImport} variant="secondary">{t('members.csvImport.importAnother')}</Button><Button leadingIcon={<CircleCheck size={17} />} onClick={onClose}>{t('common.done')}</Button></div>
         </div>
       ) : (
         <form className={styles.importForm} onSubmit={submitImport}>
@@ -351,7 +368,7 @@ function MemberImportDialog({ activeGroupId, defaultRole, onClose }: MemberImpor
           </Field>
           {selectedFile ? <p className={styles.selectedFile} role="status">{t('members.csvImport.selectedFile', { name: selectedFile.name })}</p> : null}
           {importMutation.isError ? <p className={styles.error} role="alert">{t('members.csvImport.requestError', { message: importMutation.error.message })}</p> : null}
-          <div className={styles.actions}><Button onClick={onClose} variant="secondary">{t('common.cancel')}</Button><Button disabled={!selectedFile || importMutation.isPending} leadingIcon={<FileUp size={17} />} type="submit">{importMutation.isPending ? t('members.csvImport.pending') : t('members.csvImport.submit')}</Button></div>
+          <div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={onClose} variant="secondary">{t('common.cancel')}</Button><Button disabled={!selectedFile || importMutation.isPending} leadingIcon={<FileUp size={17} />} type="submit">{importMutation.isPending ? t('members.csvImport.pending') : t('members.csvImport.submit')}</Button></div>
         </form>
       )}
     </Modal>
@@ -359,51 +376,6 @@ function MemberImportDialog({ activeGroupId, defaultRole, onClose }: MemberImpor
 }
 
 const emptyInvitationInput = (): InvitationInput => ({ email: '', displayName: '', roleIds: [], roles: ['MEMBER'], groupPermissions: [], categoryPermissions: [] });
-
-interface DefaultRoleSettingProps {
-  groupId: string;
-  roles: Role[];
-  settings: GroupSettings;
-}
-
-/**
- * Renders the member-manager-owned default role setting.
- *
- * @param props - Active group, assignable roles, and persisted settings.
- * @returns An explicit default-role selector with save feedback.
- */
-function DefaultRoleSetting({ groupId, roles, settings }: DefaultRoleSettingProps) {
-  const { t } = useTranslation();
-  const queryClient = useQueryClient();
-  const [roleId, setRoleId] = useState(settings.defaultRoleId ?? '');
-  const candidates = roles.filter((role) => !role.grants.some((grant) => grant.permission === 'GROUP_ADMINISTRATION' || grant.permission === 'MEMBER_MANAGEMENT'));
-  const mutation = useMutation({
-    mutationFn: () => api.updateGroupSettings(groupId, { defaultRoleId: roleId }),
-    onSuccess: async (persisted) => {
-      queryClient.setQueryData<GroupSettings>(['group-settings', groupId], persisted);
-      await queryClient.invalidateQueries({ queryKey: ['roles', groupId] });
-    },
-  });
-
-  return (
-    <section aria-labelledby="default-role-setting-title" className={styles.defaultRoleCard}>
-      <div>
-        <h3 id="default-role-setting-title">{t('behaviorSettings.defaultRoleTitle')}</h3>
-        <Field hint={!settings.defaultRoleId ? t('behaviorSettings.defaultRoleMissing') : undefined} htmlFor="default-membership-role" label={t('behaviorSettings.defaultRoleFieldLabel')}>
-          <SelectInput id="default-membership-role" onChange={(event) => { setRoleId(event.target.value); mutation.reset(); }} value={roleId}>
-            <option disabled value="">{t('behaviorSettings.defaultRolePlaceholder')}</option>
-            {candidates.map((role) => <option key={role.id} value={role.id}>{roleDisplayName(role)}</option>)}
-          </SelectInput>
-        </Field>
-      </div>
-      <div className={styles.defaultRoleActions}>
-        {mutation.isError ? <p className={styles.error} role="alert">{t('behaviorSettings.saveError')}</p> : null}
-        {mutation.isSuccess ? <p className={styles.success} role="status">{t('behaviorSettings.saved')}</p> : null}
-        <Button disabled={!roleId || roleId === settings.defaultRoleId || mutation.isPending} onClick={() => mutation.mutate()}>{mutation.isPending ? t('behaviorSettings.saving') : t('common.save')}</Button>
-      </div>
-    </section>
-  );
-}
 
 /**
  * Renders open invitations, active members, archived members, and all
@@ -435,7 +407,7 @@ export function MembersPanel() {
   const [createdInvitation, setCreatedInvitation] = useState<CreatedInvitation | null>(null);
   const [selectedInvitation, setSelectedInvitation] = useState<InvitationMetadata | null>(null);
   const [selectedMember, setSelectedMember] = useState<Membership | null>(null);
-  const [resendResult, setResendResult] = useState<{ acceptUrl: string; expiresAt: string } | null>(null);
+  const [resendResult, setResendResult] = useState<InvitationEmailResendResult | null>(null);
   const [guestDisplayName, setGuestDisplayName] = useState('');
   const [guestClaimEmail, setGuestClaimEmail] = useState('');
   const [guestClaimRoleIds, setGuestClaimRoleIds] = useState<string[]>([]);
@@ -475,7 +447,7 @@ export function MembersPanel() {
   const resendMutation = useMutation({
     mutationFn: () => selectedInvitation ? api.resendInvitationEmail(activeGroupId, selectedInvitation.id) : Promise.reject(new Error(t('members.noInvitationSelected'))),
     onSuccess: async (result) => {
-      setResendResult({ acceptUrl: result.acceptUrl, expiresAt: result.expiresAt });
+      setResendResult(result);
       await queryClient.invalidateQueries({ queryKey: invitationQueryKey });
     },
   });
@@ -655,16 +627,14 @@ export function MembersPanel() {
     if (claimPending) return <span className={styles.claimPending}>{t('members.claimPending')}</span>;
     const descriptionId = `claim-unavailable-${member.id}`;
     return <span className={styles.claimAction}>
-      <Button
+      <ItemAction
         aria-describedby={guestClaimRoleConfigured ? undefined : descriptionId}
         aria-label={t('members.claimGuestFor', { name: member.displayName })}
         disabled={!guestClaimRoleConfigured}
         leadingIcon={<MailPlus size={16} />}
         onClick={() => openGuestClaim(member)}
-        size="small"
         title={guestClaimRoleConfigured ? undefined : t('members.claimUnavailableNoRole')}
-        variant="ghost"
-      >{t('members.claimGuest')}</Button>
+      >{t('members.claimGuest')}</ItemAction>
       {!guestClaimRoleConfigured ? <span className={styles.claimUnavailable} id={descriptionId}>{t('members.claimUnavailableNoRole')}</span> : null}
     </span>;
   };
@@ -674,13 +644,11 @@ export function MembersPanel() {
       <header className={styles.header}>
         <h2>{t('members.title')}</h2>
         {canManageMembers ? <div className={styles.headerActions}>
-          <Button aria-label={t('publicJoin.action')} className={styles.headerAction} leadingIcon={<QrCode size={18} />} onClick={() => setPublicJoinOpen(true)} title={t('publicJoin.action')} variant="secondary">{t('publicJoin.action')}</Button>
-          <Button aria-label={t('members.csvImport.action')} className={styles.headerAction} leadingIcon={<FileUp size={18} />} onClick={() => setDialog('import')} title={t('members.csvImport.action')} variant="secondary">{t('members.csvImport.action')}</Button>
-          <Button aria-label={t('members.invite')} className={styles.headerAction} leadingIcon={<UserRoundPlus size={18} />} onClick={() => openInvite()} title={t('members.invite')}>{t('members.invite')}</Button>
+          <Button aria-label={t('publicJoin.action')} collapseLabelAt="tablet" leadingIcon={<QrCode size={18} />} onClick={() => setPublicJoinOpen(true)} title={t('publicJoin.action')} variant="secondary">{t('publicJoin.action')}</Button>
+          <Button aria-label={t('members.csvImport.action')} collapseLabelAt="tablet" leadingIcon={<FileUp size={18} />} onClick={() => setDialog('import')} title={t('members.csvImport.action')} variant="secondary">{t('members.csvImport.action')}</Button>
+          <Button aria-label={t('members.invite')} collapseLabelAt="tablet" leadingIcon={<UserRoundPlus size={18} />} onClick={() => openInvite()} title={t('members.invite')}>{t('members.invite')}</Button>
         </div> : null}
       </header>
-
-      <DefaultRoleSetting groupId={activeGroupId} key={`${activeGroupId}:${settingsQuery.data.defaultRoleId ?? ''}`} roles={roles} settings={settingsQuery.data} />
 
       <section className={styles.section}>
         <div className={styles.sectionHeading}><h3>{t('members.openInvitations')}</h3><span>{openInvitations.length}</span></div>
@@ -690,33 +658,33 @@ export function MembersPanel() {
             const resendBlocked = ACTIVE_DELIVERY_STATUSES.has(item.emailDeliveryStatus);
             const claimInvitation = Boolean(item.targetMembershipId);
             return <article className={styles.mobileCard} key={item.id}>
-              <header className={styles.mobileCardHeader}><div><strong>{item.displayName || item.email}</strong><small>{item.email}</small></div><span className={deliveryBadgeClass(item.emailDeliveryStatus)}>{t(DELIVERY_STATUS_KEYS[item.emailDeliveryStatus])}</span></header>
+              <header className={styles.mobileCardHeader}><div><strong>{item.displayName || item.email}</strong><small>{item.email}</small></div>{renderInvitationDeliveryBadge(item.emailDeliveryStatus, t)}</header>
               <p className={expired ? styles.expired : styles.mobileMetadata}>{expired ? t('members.expired') : t('members.validUntilDate', { date: new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(item.expiresAt)) })}</p>
               {claimInvitation ? <p className={styles.temporaryGuestRole}>{t('members.claimInvitationRoleLocked')}</p> : <RoleAssignmentPicker canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} onApply={(roleIds) => applyInvitationRoles(item, roleIds)} roleIds={item.roleIds ?? []} roles={roles} subjectName={item.displayName || item.email} />}
               {canManageMembers ? <div className={styles.mobileActions}>
-                {!claimInvitation ? <Button aria-label={t('members.editInvitationFor', { email: item.email })} leadingIcon={<Pencil size={16} />} onClick={() => openEdit(item)} size="small" variant="ghost">{t('common.edit')}</Button> : null}
-                <Button aria-label={t('members.resendFor', { email: item.email })} disabled={resendBlocked} leadingIcon={<RotateCcw size={16} />} onClick={() => { setSelectedInvitation(item); setResendResult(null); setDialog('resend'); }} size="small" variant="ghost">{t('members.resend')}</Button>
-                <Button aria-label={t('members.deleteInvitationFor', { email: item.email })} leadingIcon={<Trash2 size={16} />} onClick={() => { setSelectedInvitation(item); setDialog('revoke'); }} size="small" variant="ghost">{t('common.delete')}</Button>
+                {!claimInvitation ? <ItemAction aria-label={t('members.editInvitationFor', { email: item.email })} leadingIcon={<Pencil size={16} />} onClick={() => openEdit(item)}>{t('common.edit')}</ItemAction> : null}
+                <ItemAction aria-label={t('members.resendFor', { email: item.email })} disabled={resendBlocked} leadingIcon={<RotateCcw size={16} />} onClick={() => { setSelectedInvitation(item); setResendResult(null); setDialog('resend'); }}>{t('members.resend')}</ItemAction>
+                <ItemAction aria-label={t('members.deleteInvitationFor', { email: item.email })} leadingIcon={<Trash2 size={16} />} onClick={() => { setSelectedInvitation(item); setDialog('revoke'); }}>{t('common.delete')}</ItemAction>
               </div> : null}
             </article>;
           })}</div> : <div className={tableStyles.tableWrap}>
             <table className={tableStyles.table}>
-              <thead><tr><th>{t('members.email')}</th><th>{t('common.name')}</th><th>{t('members.roles')}</th><th>{t('members.delivery')}</th><th>{t('members.validUntil')}</th>{canManageMembers ? <th><span className="sr-only">{t('common.action')}</span></th> : null}</tr></thead>
+              <thead><tr><th>{t('common.name')}</th><th>{t('members.email')}</th><th>{t('members.roles')}</th><th>{t('members.delivery')}</th><th>{t('members.validUntil')}</th>{canManageMembers ? <th><span className="sr-only">{t('common.action')}</span></th> : null}</tr></thead>
               <tbody>{openInvitations.map((item) => {
                 const expired = Date.parse(item.expiresAt) <= invitationsQuery.dataUpdatedAt;
                 const resendBlocked = ACTIVE_DELIVERY_STATUSES.has(item.emailDeliveryStatus);
                 const claimInvitation = Boolean(item.targetMembershipId);
                 return (
                   <tr key={item.id}>
-                    <td>{canManageMembers && !claimInvitation ? <button className={styles.rowLink} onClick={() => openEdit(item)} type="button"><strong>{item.email}</strong></button> : <strong>{item.email}</strong>}</td>
                     <td>{item.displayName || '–'}</td>
+                    <td>{canManageMembers && !claimInvitation ? <button className={styles.rowLink} onClick={() => openEdit(item)} type="button"><strong>{item.email}</strong></button> : <strong>{item.email}</strong>}</td>
                     <td className={styles.roleCell}>{claimInvitation ? <span className={styles.temporaryGuestRole}>{t('members.claimInvitationRoleLocked')}</span> : <RoleAssignmentPicker canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} onApply={(roleIds) => applyInvitationRoles(item, roleIds)} roleIds={item.roleIds ?? []} roles={roles} subjectName={item.displayName || item.email} />}</td>
-                    <td><span className={deliveryBadgeClass(item.emailDeliveryStatus)}>{t(DELIVERY_STATUS_KEYS[item.emailDeliveryStatus])}</span></td>
+                    <td>{renderInvitationDeliveryBadge(item.emailDeliveryStatus, t)}</td>
                     <td><span className={expired ? styles.expired : ''}>{expired ? t('members.expired') : new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(item.expiresAt))}</span></td>
                     {canManageMembers ? <td><div className={styles.tableActions}>
-                      {!claimInvitation ? <Button aria-label={t('members.editInvitationFor', { email: item.email })} leadingIcon={<Pencil size={16} />} onClick={() => openEdit(item)} size="small" variant="ghost">{t('common.edit')}</Button> : null}
-                      <Button aria-label={t('members.resendFor', { email: item.email })} disabled={resendBlocked} leadingIcon={<RotateCcw size={16} />} onClick={() => { setSelectedInvitation(item); setResendResult(null); setDialog('resend'); }} size="small" variant="ghost">{t('members.resend')}</Button>
-                      <Button aria-label={t('members.deleteInvitationFor', { email: item.email })} leadingIcon={<Trash2 size={16} />} onClick={() => { setSelectedInvitation(item); setDialog('revoke'); }} size="small" variant="ghost">{t('common.delete')}</Button>
+                      {!claimInvitation ? <ItemAction aria-label={t('members.editInvitationFor', { email: item.email })} leadingIcon={<Pencil size={16} />} onClick={() => openEdit(item)}>{t('common.edit')}</ItemAction> : null}
+                      <ItemAction aria-label={t('members.resendFor', { email: item.email })} disabled={resendBlocked} leadingIcon={<RotateCcw size={16} />} onClick={() => { setSelectedInvitation(item); setResendResult(null); setDialog('resend'); }}>{t('members.resend')}</ItemAction>
+                      <ItemAction aria-label={t('members.deleteInvitationFor', { email: item.email })} leadingIcon={<Trash2 size={16} />} onClick={() => { setSelectedInvitation(item); setDialog('revoke'); }}>{t('common.delete')}</ItemAction>
                     </div></td> : null}
                   </tr>
                 );
@@ -735,9 +703,9 @@ export function MembersPanel() {
             <header className={styles.mobileCardHeader}><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /><span><span className={styles.memberName}><strong>{member.displayName}</strong>{temporaryGuest ? <span className={styles.guestBadge}>{t('members.temporaryGuestBadge')}</span> : null}</span>{member.email ? <small>{member.email}</small> : null}</span></span></header>
             {!temporaryGuest ? <RoleAssignmentPicker canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} lockedRoleIds={lockedAdministratorRoleIds(member.roleIds ?? [])} onApply={(roleIds) => applyMemberRoles(member, roleIds)} roleIds={member.roleIds ?? []} roles={roles} subjectName={member.displayName} /> : null}
             {canManageMembers ? <div className={styles.mobileActions}>
-              {temporaryGuest ? <Button aria-label={t('members.renameGuestFor', { name: member.displayName })} leadingIcon={<Pencil size={16} />} onClick={() => openGuestRename(member)} size="small" variant="ghost">{t('members.renameGuest')}</Button> : null}
+              {temporaryGuest ? <ItemAction aria-label={t('members.renameGuestFor', { name: member.displayName })} leadingIcon={<Pencil size={16} />} onClick={() => openGuestRename(member)}>{t('members.renameGuest')}</ItemAction> : null}
               {temporaryGuest ? renderGuestClaimAction(member, claimPending) : null}
-              <Button aria-label={t('members.archiveFor', { name: member.displayName })} leadingIcon={<UserMinus size={16} />} onClick={() => { setSelectedMember(member); setDialog('archive'); }} size="small" variant="ghost">{t('members.archive')}</Button>
+              <ItemAction aria-label={t('members.archiveFor', { name: member.displayName })} leadingIcon={<UserMinus size={16} />} onClick={() => { setSelectedMember(member); setDialog('archive'); }}>{t('members.archive')}</ItemAction>
             </div> : null}
           </article>;
         })}</div> : <div className={tableStyles.tableWrap}>
@@ -751,9 +719,9 @@ export function MembersPanel() {
                 <td>{member.email}</td>
                 <td className={styles.roleCell}>{!temporaryGuest ? <RoleAssignmentPicker canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} lockedRoleIds={lockedAdministratorRoleIds(member.roleIds ?? [])} onApply={(roleIds) => applyMemberRoles(member, roleIds)} roleIds={member.roleIds ?? []} roles={roles} subjectName={member.displayName} /> : null}</td>
                 {canManageMembers ? <td><div className={styles.tableActions}>
-                  {temporaryGuest ? <Button aria-label={t('members.renameGuestFor', { name: member.displayName })} leadingIcon={<Pencil size={16} />} onClick={() => openGuestRename(member)} size="small" variant="ghost">{t('members.renameGuest')}</Button> : null}
+                  {temporaryGuest ? <ItemAction aria-label={t('members.renameGuestFor', { name: member.displayName })} leadingIcon={<Pencil size={16} />} onClick={() => openGuestRename(member)}>{t('members.renameGuest')}</ItemAction> : null}
                   {temporaryGuest ? renderGuestClaimAction(member, claimPending) : null}
-                  <Button aria-label={t('members.archiveFor', { name: member.displayName })} leadingIcon={<UserMinus size={16} />} onClick={() => { setSelectedMember(member); setDialog('archive'); }} size="small" variant="ghost">{t('members.archive')}</Button>
+                  <ItemAction aria-label={t('members.archiveFor', { name: member.displayName })} leadingIcon={<UserMinus size={16} />} onClick={() => { setSelectedMember(member); setDialog('archive'); }}>{t('members.archive')}</ItemAction>
                 </div></td> : null}
               </tr>;
             })}</tbody>
@@ -767,16 +735,16 @@ export function MembersPanel() {
           <article className={styles.mobileCard} key={member.id}>
             <header className={styles.mobileCardHeader}><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /><span><span className={styles.memberName}><strong>{member.displayName}</strong>{isTemporaryGuest(member) ? <span className={styles.guestBadge}>{t('members.temporaryGuestBadge')}</span> : null}</span>{member.email ? <small>{member.email}</small> : null}</span></span></header>
             <div className={styles.mobileActions}>
-              <Button leadingIcon={<RotateCcw size={16} />} onClick={() => openReactivation(member)} size="small" variant="ghost">{t('members.reactivate')}</Button>
-              <Button leadingIcon={<Trash2 size={16} />} onClick={() => { setSelectedMember(member); setDialog('permanent-delete'); }} size="small" variant="ghost">{t('common.delete')}</Button>
+              <ItemAction aria-label={t('members.reactivateFor', { name: member.displayName })} leadingIcon={<RotateCcw size={16} />} onClick={() => openReactivation(member)}>{t('members.reactivate')}</ItemAction>
+              <ItemAction aria-label={t('members.permanentDeleteFor', { name: member.displayName })} leadingIcon={<Trash2 size={16} />} onClick={() => { setSelectedMember(member); setDialog('permanent-delete'); }}>{t('common.delete')}</ItemAction>
             </div>
           </article>
         ))}</div> : (
           <div className={tableStyles.tableWrap}><table className={tableStyles.table}>
             <thead><tr><th>{t('common.member')}</th><th>{t('members.email')}</th><th><span className="sr-only">{t('common.action')}</span></th></tr></thead>
             <tbody>{formerMembers.map((member) => <tr key={member.id}><td><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /> <span className={styles.memberName}><strong>{member.displayName}</strong>{isTemporaryGuest(member) ? <span className={styles.guestBadge}>{t('members.temporaryGuestBadge')}</span> : null}</span></span></td><td>{member.email}</td><td><div className={styles.tableActions}>
-              <Button leadingIcon={<RotateCcw size={16} />} onClick={() => openReactivation(member)} size="small" variant="ghost">{t('members.reactivate')}</Button>
-              <Button leadingIcon={<Trash2 size={16} />} onClick={() => { setSelectedMember(member); setDialog('permanent-delete'); }} size="small" variant="ghost">{t('common.delete')}</Button>
+              <ItemAction aria-label={t('members.reactivateFor', { name: member.displayName })} leadingIcon={<RotateCcw size={16} />} onClick={() => openReactivation(member)}>{t('members.reactivate')}</ItemAction>
+              <ItemAction aria-label={t('members.permanentDeleteFor', { name: member.displayName })} leadingIcon={<Trash2 size={16} />} onClick={() => { setSelectedMember(member); setDialog('permanent-delete'); }}>{t('common.delete')}</ItemAction>
             </div></td></tr>)}</tbody>
           </table></div>
         )}
@@ -784,14 +752,19 @@ export function MembersPanel() {
 
       <Modal className={styles.permissionDialog} onClose={closeDialog} open={dialog === 'invite'} title={t('members.invite')}>
         {createdInvitation ? (
-          <div className={styles.invitationReady}>
-            <MailPlus aria-hidden="true" size={38} />
-            {invitationDeliveryStatus ? <section aria-live="polite" className={`${styles.deliveryNotice} ${invitationDeliveryStatus === 'FAILED' || invitationDeliveryStatus === 'CANCELLED' ? styles.deliveryNoticeError : ''}`} role="status"><h3>{t(MANUAL_DELIVERY_COPY_KEYS[invitationDeliveryStatus].title)}</h3><p>{t(MANUAL_DELIVERY_COPY_KEYS[invitationDeliveryStatus].description, { email: createdInvitation.email })}</p></section> : null}
-            {invitationsQuery.isError ? <p className={styles.error} role="alert">{t('members.invitationStatus.statusError')}</p> : null}
-            <p>{t('members.invitationExpiry', { date: new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(createdInvitation.expiresAt)) })}</p>
-            <div className={styles.fallbackLink}><p>{t('members.fallbackHint')}</p><div className={styles.copyRow}><TextInput aria-label={t('members.invitationLink')} readOnly value={createdInvitation.acceptUrl} /><Button leadingIcon={<Copy size={17} />} onClick={() => void navigator.clipboard.writeText(createdInvitation.acceptUrl)} variant="secondary">{t('common.copy')}</Button></div></div>
-            <Button fullWidth onClick={closeDialog}>{t('common.done')}</Button>
-          </div>
+          invitationDeliveryStatus ? <InvitationReady
+            acceptUrl={createdInvitation.acceptUrl}
+            deliveryStatus={{
+              title: t(MANUAL_DELIVERY_COPY_KEYS[invitationDeliveryStatus].title),
+              description: t(MANUAL_DELIVERY_COPY_KEYS[invitationDeliveryStatus].description, { email: createdInvitation.email }),
+              error: invitationDeliveryStatus === 'FAILED' || invitationDeliveryStatus === 'CANCELLED',
+            }}
+            errorMessage={invitationsQuery.isError ? t('members.invitationStatus.statusError') : undefined}
+            expiresAt={createdInvitation.expiresAt}
+            fallbackHint={invitationDeliveryStatus === 'PENDING' || invitationDeliveryStatus === 'SENDING' || invitationDeliveryStatus === 'SENT' ? t('members.fallbackHint') : undefined}
+            linkLabel={t('members.invitationLink')}
+            onDone={closeDialog}
+          /> : null
         ) : (
           <form className={styles.form} onSubmit={(event) => { event.preventDefault(); createMutation.mutate(); }}>
             <div className={styles.formGrid}>
@@ -801,7 +774,7 @@ export function MembersPanel() {
             <RoleMultiSelect canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} label={t('roleManagement.invitationRoles')} onChange={(roleIds) => setDraft((current) => ({ ...current, roleIds }))} roleIds={draft.roleIds ?? []} roles={roles} />
             <p className={styles.expiry}>{t('members.expiry')}</p>
             {createMutation.isError ? <p className={styles.error} role="alert">{createMutation.error.message}</p> : null}
-            <div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!draft.email.trim() || (draft.roleIds?.length ?? 0) === 0 || createMutation.isPending} type="submit">{t('members.createInvitation')}</Button></div>
+            <div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!draft.email.trim() || (draft.roleIds?.length ?? 0) === 0 || createMutation.isPending} leadingIcon={<MailPlus size={17} />} type="submit">{t('members.createInvitation')}</Button></div>
           </form>
         )}
       </Modal>
@@ -812,18 +785,31 @@ export function MembersPanel() {
           <Field hint={t('members.displayNameHint')} htmlFor="edit-invitation-display-name" label={t('auth.displayName')}><TextInput id="edit-invitation-display-name" maxLength={120} onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))} value={draft.displayName} /></Field>
           <RoleMultiSelect canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} label={t('roleManagement.invitationRoles')} onChange={(roleIds) => setDraft((current) => ({ ...current, roleIds }))} roleIds={draft.roleIds ?? []} roles={roles} />
           {updateMutation.isError ? <p className={styles.error} role="alert">{updateMutation.error.message}</p> : null}
-          <div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={(draft.roleIds?.length ?? 0) === 0 || updateMutation.isPending} type="submit">{t('common.save')}</Button></div>
+          <div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={(draft.roleIds?.length ?? 0) === 0 || updateMutation.isPending} leadingIcon={<Save size={17} />} type="submit">{t('common.save')}</Button></div>
         </form>
       </Modal>
 
       <Modal onClose={closeDialog} open={dialog === 'revoke'} title={t('members.deleteInvitationTitle')}>
-        <div className={styles.confirmDialog}><p>{t('members.deleteInvitationExplanation', { email: selectedInvitation?.email ?? '' })}</p>{revokeMutation.isError ? <p className={styles.error} role="alert">{revokeMutation.error.message}</p> : null}<div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={revokeMutation.isPending} onClick={() => revokeMutation.mutate()} variant="danger">{t('common.delete')}</Button></div></div>
+        <div className={styles.confirmDialog}><p>{t('members.deleteInvitationExplanation', { email: selectedInvitation?.email ?? '' })}</p>{revokeMutation.isError ? <p className={styles.error} role="alert">{revokeMutation.error.message}</p> : null}<div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={revokeMutation.isPending} leadingIcon={<Trash2 size={17} />} onClick={() => revokeMutation.mutate()} variant="danger">{t('common.delete')}</Button></div></div>
       </Modal>
 
       <Modal onClose={closeDialog} open={dialog === 'resend'} title={t('members.resendTitle')}>
-        <div className={styles.confirmDialog}>
-          {resendResult ? <><p>{t('members.resendSuccess', { email: selectedInvitation?.email ?? '', date: new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(resendResult.expiresAt)) })}</p><p className={styles.warning}>{t('members.oldLinksInvalid')}</p>{resendResult.acceptUrl ? <div className={styles.copyRow}><TextInput aria-label={t('members.invitationLink')} readOnly value={resendResult.acceptUrl} /><Button leadingIcon={<Copy size={17} />} onClick={() => void navigator.clipboard.writeText(resendResult.acceptUrl)} variant="secondary">{t('common.copy')}</Button></div> : <p className={styles.warning}>{t('members.resendFallbackUnavailable')}</p>}<Button fullWidth onClick={closeDialog}>{t('common.done')}</Button></> : <><p>{t('members.resendExplanation', { email: selectedInvitation?.email ?? '' })}</p>{resendMutation.isError ? <p className={styles.error} role="alert">{resendMutation.error.message}</p> : null}<div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={resendMutation.isPending} onClick={() => resendMutation.mutate()}>{t('members.resend')}</Button></div></>}
-        </div>
+        {resendResult?.acceptUrl ? <InvitationReady
+          acceptUrl={resendResult.acceptUrl}
+          deliveryStatus={{
+            title: t(MANUAL_DELIVERY_COPY_KEYS[resendResult.emailDeliveryStatus].title),
+            description: t(MANUAL_DELIVERY_COPY_KEYS[resendResult.emailDeliveryStatus].description, { email: selectedInvitation?.email ?? '' }),
+            error: resendResult.emailDeliveryStatus === 'FAILED' || resendResult.emailDeliveryStatus === 'CANCELLED',
+          }}
+          expiresAt={resendResult.expiresAt}
+          fallbackHint={t('members.oldLinksInvalid')}
+          linkLabel={t('members.invitationLink')}
+          onDone={closeDialog}
+        /> : <div className={styles.confirmDialog}>
+          <p>{t(settingsQuery.data.notificationEmailDeliveryAvailable ? 'members.resendExplanationEmail' : 'members.resendExplanationManual', { email: selectedInvitation?.email ?? '' })}</p>
+          {resendMutation.isError ? <p className={styles.error} role="alert">{resendMutation.error.message}</p> : null}
+          <div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={resendMutation.isPending} leadingIcon={<RotateCcw size={17} />} onClick={() => resendMutation.mutate()}>{t('members.resend')}</Button></div>
+        </div>}
       </Modal>
 
       <Modal onClose={closeDialog} open={dialog === 'rename-guest'} title={t('members.renameGuestTitle')}>
@@ -833,7 +819,7 @@ export function MembersPanel() {
             <TextInput autoComplete="off" id="temporary-guest-display-name" maxLength={120} onChange={(event) => { setGuestDisplayName(event.target.value); renameGuestMutation.reset(); }} required value={guestDisplayName} />
           </Field>
           {renameGuestMutation.isError ? <p className={styles.error} role="alert">{renameGuestMutation.error.message}</p> : null}
-          <div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!guestDisplayName.trim() || guestDisplayName.trim() === selectedMember?.displayName || renameGuestMutation.isPending} type="submit">{renameGuestMutation.isPending ? t('members.renameGuestPending') : t('common.save')}</Button></div>
+          <div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!guestDisplayName.trim() || guestDisplayName.trim() === selectedMember?.displayName || renameGuestMutation.isPending} leadingIcon={<Save size={17} />} type="submit">{renameGuestMutation.isPending ? t('members.renameGuestPending') : t('common.save')}</Button></div>
         </form>
       </Modal>
 
@@ -844,7 +830,7 @@ export function MembersPanel() {
           <p>{t('members.claimGuestReadyDescription', { name: selectedMember?.displayName ?? '', email: guestClaimInvitation.email })}</p>
           <p>{t('members.invitationExpiry', { date: new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(guestClaimInvitation.expiresAt)) })}</p>
           {guestClaimInvitation.acceptUrl ? <div className={styles.fallbackLink}><p>{t('members.fallbackHint')}</p><div className={styles.copyRow}><TextInput aria-label={t('members.invitationLink')} readOnly value={guestClaimInvitation.acceptUrl} /><Button leadingIcon={<Copy size={17} />} onClick={() => void navigator.clipboard.writeText(guestClaimInvitation.acceptUrl)} variant="secondary">{t('common.copy')}</Button></div></div> : null}
-          <Button fullWidth onClick={closeDialog}>{t('common.done')}</Button>
+          <Button fullWidth leadingIcon={<CircleCheck size={17} />} onClick={closeDialog}>{t('common.done')}</Button>
         </div> : <form className={styles.form} onSubmit={(event) => { event.preventDefault(); claimGuestMutation.mutate(); }}>
           <p className={styles.expiry}>{t('members.claimGuestDescription', { name: selectedMember?.displayName ?? '' })}</p>
           <Field hint={t('members.claimGuestEmailHint')} htmlFor="temporary-guest-claim-email" label={t('auth.email')}>
@@ -853,12 +839,12 @@ export function MembersPanel() {
           <RoleMultiSelect canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} label={t('roleManagement.memberRoles')} onChange={(roleIds) => { setGuestClaimRoleIds(roleIds); claimGuestMutation.reset(); }} roleIds={guestClaimRoleIds} roles={roles} />
           <p className={styles.claimNotice}>{t('members.claimGuestHistoryNotice')}</p>
           {claimGuestMutation.isError ? <p className={styles.error} role="alert">{claimGuestMutation.error.message}</p> : null}
-          <div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!guestClaimEmail.trim() || guestClaimRoleIds.length === 0 || claimGuestMutation.isPending} type="submit">{claimGuestMutation.isPending ? t('members.claimGuestPending') : t('members.claimGuestCreate')}</Button></div>
+          <div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!guestClaimEmail.trim() || guestClaimRoleIds.length === 0 || claimGuestMutation.isPending} leadingIcon={<UserRoundPlus size={17} />} type="submit">{claimGuestMutation.isPending ? t('members.claimGuestPending') : t('members.claimGuestCreate')}</Button></div>
         </form>}
       </Modal>
 
       <Modal onClose={closeDialog} open={dialog === 'archive'} title={t('members.archiveTitle')}>
-        <div className={styles.confirmDialog}><p>{selectedMember?.userId === session.user.id ? t('members.archiveSelfExplanation') : t('members.archiveExplanation', { name: selectedMember?.displayName ?? '' })}</p>{archiveMutation.isError ? <p className={styles.error} role="alert">{archiveMutation.error.message}</p> : null}<div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={archiveMutation.isPending} onClick={() => archiveMutation.mutate()} variant="danger">{t('members.archive')}</Button></div></div>
+        <div className={styles.confirmDialog}><p>{selectedMember?.userId === session.user.id ? t('members.archiveSelfExplanation') : t('members.archiveExplanation', { name: selectedMember?.displayName ?? '' })}</p>{archiveMutation.isError ? <p className={styles.error} role="alert">{archiveMutation.error.message}</p> : null}<div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={archiveMutation.isPending} leadingIcon={<UserMinus size={17} />} onClick={() => archiveMutation.mutate()} variant="danger">{t('members.archive')}</Button></div></div>
       </Modal>
 
       <Modal onClose={closeDialog} open={dialog === 'reactivate'} title={t('members.reactivateTitle')}>
@@ -868,7 +854,7 @@ export function MembersPanel() {
             <TextInput id="reactivation-display-name" maxLength={120} onChange={(event) => { setReactivationDisplayName(event.target.value); reactivateMutation.reset(); }} required value={reactivationDisplayName} />
           </Field> : <RoleMultiSelect canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} label={t('roleManagement.memberRoles')} onChange={(roleIds) => { setReactivationRoleIds(roleIds); reactivateMutation.reset(); }} roleIds={reactivationRoleIds} roles={roles} />}
           {reactivateMutation.isError ? <p className={styles.error} role="alert">{reactivateMutation.error.message}</p> : null}
-          <div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={reactivateMutation.isPending || (selectedMember && isTemporaryGuest(selectedMember) ? !reactivationDisplayName.trim() : reactivationRoleIds.length === 0)} type="submit">{t('members.reactivate')}</Button></div>
+          <div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={reactivateMutation.isPending || (selectedMember && isTemporaryGuest(selectedMember) ? !reactivationDisplayName.trim() : reactivationRoleIds.length === 0)} leadingIcon={<RotateCcw size={17} />} type="submit">{t('members.reactivate')}</Button></div>
         </form>
       </Modal>
 
@@ -876,7 +862,7 @@ export function MembersPanel() {
         <div className={styles.confirmDialog}>
           <p>{t('members.permanentDeleteExplanation', { name: selectedMember?.displayName ?? '' })}</p>
           {permanentDeleteMutation.isError ? <p className={styles.error} role="alert">{permanentDeleteMutation.error instanceof ApiError && permanentDeleteMutation.error.problem.status === 409 ? t('members.permanentDeleteBalanceConflict') : permanentDeleteMutation.error.message}</p> : null}
-          <div className={styles.actions}><Button onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={permanentDeleteMutation.isPending} onClick={() => permanentDeleteMutation.mutate()} variant="danger">{t('common.delete')}</Button></div>
+          <div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={permanentDeleteMutation.isPending} leadingIcon={<Trash2 size={17} />} onClick={() => permanentDeleteMutation.mutate()} variant="danger">{t('common.delete')}</Button></div>
         </div>
       </Modal>
 

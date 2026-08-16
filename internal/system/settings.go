@@ -461,11 +461,7 @@ func (s Service) patchMutations(patch SettingsPatch) ([]settingMutation, bool, e
 		mutations = append(mutations, textMutation(SettingDefaultCurrency, value))
 	}
 	if patch.MediaUploadMaxBytes != nil {
-		hardLimit, err := mediaUploadHardLimit(s.defaults.MaxRequestBytes)
-		if err != nil {
-			return nil, false, err
-		}
-		if err := validateMediaUploadLimit(*patch.MediaUploadMaxBytes, hardLimit); err != nil {
+		if err := validateMediaUploadLimit(*patch.MediaUploadMaxBytes, MaximumMediaUploadBytes); err != nil {
 			return nil, false, err
 		}
 		mutations = append(mutations, integerMutation(SettingMediaUploadMaxBytes, *patch.MediaUploadMaxBytes))
@@ -570,16 +566,12 @@ func (s Service) loadSettings(ctx context.Context, queryer settingsQueryer) (loa
 	if err != nil {
 		return loadedSettings{}, err
 	}
-	hardLimit, err := mediaUploadHardLimit(s.defaults.MaxRequestBytes)
-	if err != nil {
-		return loadedSettings{}, err
-	}
 	settings := Settings{
 		Revision:                  state.revision,
 		InstanceName:              stringSetting(s.defaults, overrides, SettingInstanceName, s.defaults.InstanceName),
 		DefaultCurrency:           stringSetting(s.defaults, overrides, SettingDefaultCurrency, s.defaults.DefaultCurrency),
 		MediaUploadMaxBytes:       int64Setting(s.defaults, overrides, SettingMediaUploadMaxBytes, s.defaults.MediaUploadMaxBytes),
-		MediaUploadHardLimitBytes: hardLimit,
+		MediaUploadHardLimitBytes: MaximumMediaUploadBytes,
 		PublicJoinEnabled:         boolSetting(s.defaults, overrides, SettingPublicJoinEnabled, s.defaults.PublicJoinEnabled),
 		MaintenanceMode:           boolSetting(s.defaults, overrides, SettingMaintenanceEnabled, s.defaults.MaintenanceMode),
 		MaintenanceMessage:        stringSetting(s.defaults, overrides, SettingMaintenanceMessage, s.defaults.MaintenanceMessage),
@@ -878,8 +870,8 @@ func validateCurrency(value string) error {
 }
 
 func validateMediaUploadLimit(value, hardLimit int64) error {
-	if value < MinimumMediaUploadBytes || value > hardLimit {
-		return domain.ValidationError{Field: "mediaUploadMaxBytes", Message: fmt.Sprintf("must be between %d and %d bytes", MinimumMediaUploadBytes, hardLimit)}
+	if value < MinimumMediaUploadBytes || value > hardLimit || value%MediaUploadUnitBytes != 0 {
+		return domain.ValidationError{Field: "mediaUploadMaxBytes", Message: fmt.Sprintf("must be a whole MiB value between %d and %d bytes", MinimumMediaUploadBytes, hardLimit)}
 	}
 	return nil
 }

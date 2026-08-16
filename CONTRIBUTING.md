@@ -13,6 +13,7 @@ Every document has one primary audience and must remain within that boundary:
 - `README.md` is the canonical first-run and operations guide for a production instance administrator. It must remain understandable without repository or architecture knowledge and contain the short product scope, supported production requirements, installation, host and runtime configuration, operator CLI, routine backup/upgrade guidance, health checks, and basic troubleshooting.
 - `deploy/README.md` contains detailed deployment topology, reverse-proxy, storage, backup, restore, upgrade, and monitoring procedures.
 - `ARCHITECTURE.md` contains module boundaries, internal data flows, persistence and migration details, authorization design, UI architecture constraints, dependencies, development-runtime topology, and extension policy.
+- `DESIGN.md` is the durable source of truth for visual language, reusable interaction patterns, button anatomy, and responsive component behavior.
 - `SECURITY.md` contains vulnerability reporting, security properties, trust boundaries, and operational hardening.
 - `CONTRIBUTING.md` contains local development, test fixtures, quality gates, branch workflow, and contributor conventions.
 - `CHANGELOG.md` contains release-specific behavior and migration notes.
@@ -75,6 +76,7 @@ Do not force-push shared branches or commit generated runtime data, local config
 - Update the owning documents from the documentation matrix whenever operator setup, configuration, CLI behavior, modules, APIs, data flow, dependencies, security, or deployment behavior changes. Only operator-visible information belongs in `README.md`.
 - Preserve keyboard operation, accessible names, visible focus, semantic markup, and WCAG AA contrast.
 - Preserve the accepted true-white/navy/teal TeamTaler design system. New component families require a documented product need.
+- Use the shared action components and follow the icon, text-label, responsive-compaction, and accessibility rules in `DESIGN.md`.
 - Treat regular-member workflows as mobile-first: design and verify narrow phone layouts before adding desktop enhancements.
 - Preserve the standard fixed-price self-booking interaction budget: after a product is visible, selection and confirmation are the only required actions unless the command requires additional data.
 - Document the product, accounting, security, or safety reason for every new step, dialog, or confirmation added to the standard booking path.

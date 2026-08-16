@@ -381,14 +381,18 @@ func (s *Server) handleCreateInvitation(response http.ResponseWriter, request *h
 		return
 	}
 	var item groups.Invitation
+	invitationService := s.groups
+	if settings, loaded := effectiveSystemSettings(request); loaded && !settings.SMTP.Active {
+		invitationService.TokenSealer = nil
+	}
 	if input.RoleIDs != nil {
 		if len(input.Roles) > 0 || len(input.GroupPermissions) > 0 || len(input.CategoryGrants) > 0 {
 			writeProblem(response, request, domain.ValidationError{Field: "roleIds", Message: "cannot be combined with deprecated roles, groupPermissions, or categoryGrants"})
 			return
 		}
-		item, err = s.groups.CreateInvitationWithRoles(request.Context(), principal, membership, input.Email, input.DisplayName, input.RoleIDs)
+		item, err = invitationService.CreateInvitationWithRoles(request.Context(), principal, membership, input.Email, input.DisplayName, input.RoleIDs)
 	} else {
-		item, err = s.groups.CreateInvitation(request.Context(), principal, membership, input.Email, input.DisplayName, input.Roles, input.GroupPermissions, input.CategoryGrants)
+		item, err = invitationService.CreateInvitation(request.Context(), principal, membership, input.Email, input.DisplayName, input.Roles, input.GroupPermissions, input.CategoryGrants)
 	}
 	if err != nil {
 		writeProblem(response, request, err)

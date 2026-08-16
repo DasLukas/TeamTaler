@@ -2,9 +2,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Copy from 'lucide-react/dist/esm/icons/copy';
 import LockKeyhole from 'lucide-react/dist/esm/icons/lock-keyhole';
 import Plus from 'lucide-react/dist/esm/icons/plus';
+import Save from 'lucide-react/dist/esm/icons/save';
 import Star from 'lucide-react/dist/esm/icons/star';
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
 import UsersRound from 'lucide-react/dist/esm/icons/users-round';
+import X from 'lucide-react/dist/esm/icons/x';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
@@ -105,10 +107,10 @@ function RoleEditor({ groupId, definitions, role, initial, canManageProtectedRol
       <div className={styles.editorActions}>
         {role && isDeletable ? (
           confirmingDelete
-            ? <><Button onClick={() => setConfirmingDelete(false)} variant="secondary">{t('common.cancel')}</Button><Button disabled={deleteMutation.isPending} onClick={() => deleteMutation.mutate()} variant="danger">{t('roleManagement.confirmDelete')}</Button></>
+            ? <><Button leadingIcon={<X size={17} />} onClick={() => setConfirmingDelete(false)} variant="secondary">{t('common.cancel')}</Button><Button disabled={deleteMutation.isPending} leadingIcon={<Trash2 size={17} />} onClick={() => deleteMutation.mutate()} variant="danger">{t('roleManagement.confirmDelete')}</Button></>
             : <Button disabled={assignmentCount > 0 || isDefaultRole} leadingIcon={<Trash2 size={17} />} onClick={() => setConfirmingDelete(true)} title={isDefaultRole ? t('roleManagement.defaultRoleDeleteBlocked') : undefined} variant="ghost">{t('common.delete')}</Button>
         ) : <span />}
-        <Button disabled={!name.trim() || !changed || saveMutation.isPending || protectedChangeBlocked} onClick={() => saveMutation.mutate()}>{saveMutation.isPending ? t('roleManagement.saving') : t('common.save')}</Button>
+        <Button disabled={!name.trim() || !changed || saveMutation.isPending || protectedChangeBlocked} leadingIcon={<Save size={17} />} onClick={() => saveMutation.mutate()}>{saveMutation.isPending ? t('roleManagement.saving') : t('common.save')}</Button>
       </div>
     </section>
   );

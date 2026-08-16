@@ -45,7 +45,7 @@ The proxy must:
 
 - forward the original method, path, query, request body, cookies, `Origin`, and `X-CSRF-Token` header;
 - append the client address to `X-Forwarded-For` when per-client throttling through a trusted proxy is required;
-- allow request bodies large enough for the host ceiling `TEAMTALER_MAX_REQUEST_BYTES`; the editable media-upload limit is lower and includes multipart reserve;
+- allow request bodies of at least 26 MiB so the live media-upload setting can use its full 25 MiB range plus multipart reserve;
 - use timeouts longer than the application's 30-second request read/write limits.
 
 Preserving `Host` and setting `X-Forwarded-Proto` are recommended conventional proxy behavior and are shown in the templates. The current server uses the configured public URL—not forwarded scheme/host values—as its canonical origin and secure-cookie signal. It consumes `X-Forwarded-For` only when the direct connection originates from a configured trusted CIDR.
@@ -112,7 +112,7 @@ TEAMTALER_MAINTENANCE_MODE=false
 TEAMTALER_MAINTENANCE_MESSAGE=
 ```
 
-A system administrator may persist versioned overrides from the System settings tab or the local `teamtaler admin system` CLI. Persisted values take precedence and become effective without restarting; reset removes the override and reveals the current environment or code default. Keep the proxy request limit at or above `TEAMTALER_MAX_REQUEST_BYTES`, and leave at least 1 MiB between that host ceiling and the selected media limit for multipart overhead. The effective media limit is still constrained to 256 KiB through 25 MiB and by the image decoder and normalized-output protections.
+A system administrator may persist versioned overrides from the System settings tab or the local `teamtaler admin system` CLI. Persisted values take precedence and become effective without restarting; reset removes the override and reveals the current environment or code default. Media endpoints derive their request ceiling from the live media setting and are not capped by `TEAMTALER_MAX_REQUEST_BYTES`; that variable remains the ordinary API request ceiling. Configure an optional reverse proxy to accept at least 26 MiB so the full runtime range of whole MiB values from 1 MiB through 25 MiB remains usable. Image decoder and normalized-output protections remain fixed.
 
 Persisted SMTP credentials require `TEAMTALER_EMAIL_TOKEN_KEY`. The application derives a separate encryption key for the SMTP password and never returns it from the API or CLI. Every changed persisted SMTP revision starts disabled, must successfully send a test message to the current system administrator, and may be enabled only while that exact revision remains tested. Existing complete environment SMTP defaults remain available without this migration-time test. Email workers re-read effective settings before each job and pause without consuming attempts while SMTP is disabled or maintenance mode is active.
 
@@ -120,9 +120,9 @@ Runtime SMTP targets resolve through a dial-time network policy. Public addresse
 
 System roles are independent of group membership and can be granted, listed, or revoked only through the local CLI. The last active system administrator cannot be revoked normally. A system administrator who does not belong to any group can still log in and use the System and Account views; the role itself does not grant access to group business data.
 
-If a `PROVISIONING` group's first-administrator invitation expires or must be invalidated, use the resend action in the System workspace while SMTP is active. It requires the group's current ETag and atomically replaces the invitation and pending delivery; all prior links remain invalid. Restoring an archived provisioning group never re-enables an older invitation, so issue a fresh one explicitly after restoration when onboarding must continue.
+If a `PROVISIONING` group's first-administrator invitation expires or must be invalidated, use the renewal action in the System workspace. It requires the group's current ETag, atomically replaces the invitation and pending delivery, and returns a new manually shareable link; active SMTP additionally queues email delivery. All prior links remain invalid. Restoring an archived provisioning group never re-enables an older invitation, so issue a fresh one explicitly after restoration when onboarding must continue.
 
-Group archive is reversible and blocks regular access immediately. Permanent purge requires an archived group, current optimistic version, exact group-name confirmation, and either a password step-up proof in the web interface or explicit local CLI confirmation. Review the deletion-impact counts and create a verified backup before purging. The purge removes group-owned rows and unreferenced managed media from the active application data, retaining only a minimal global deletion receipt. It cannot erase copies already present in application archives, off-host backups, volume snapshots, or storage-device remanence; delete those copies according to the deployment's retention policy.
+Group archive is reversible and blocks regular access immediately. Permanent purge requires an archived group, the current optimistic version, and exact group-name confirmation in the web interface or local CLI. Review the deletion-impact counts and create a verified backup before purging. The purge removes group-owned rows and unreferenced managed media from the active application data, retaining only a minimal global deletion receipt. It cannot erase copies already present in application archives, off-host backups, volume snapshots, or storage-device remanence; delete those copies according to the deployment's retention policy.
 
 ## Backup
 

@@ -106,3 +106,63 @@ func TestSystemAdministrationMigrationPreservesGroupsAndConstrainsGlobalState(t 
 		t.Fatal("system administration migration left a foreign-key violation")
 	}
 }
+
+func TestWholeMiBMediaLimitMigrationNormalizesLegacyOverrideAndConstrainsWriters(t *testing.T) {
+	ctx := context.Background()
+	db := openDatabaseThroughMigration(t, "0031_system_group_purge.sql")
+	defer db.Close()
+
+	const now = "2026-08-16T12:00:00Z"
+	if _, err := db.ExecContext(ctx, `INSERT INTO system_setting_overrides(setting_key,value_type,value_text,version,updated_at)
+		VALUES('media.upload_max_bytes','INTEGER','25427968',1,?)`, now); err != nil {
+		t.Fatalf("insert legacy fractional-MiB override: %v", err)
+	}
+	body, err := migrations.Files.ReadFile("0032_whole_mib_media_limit.sql")
+	if err != nil {
+		t.Fatalf("read whole-MiB migration: %v", err)
+	}
+	if err := applyMigration(ctx, db, "0032_whole_mib_media_limit.sql", body); err != nil {
+		t.Fatalf("apply whole-MiB migration: %v", err)
+	}
+
+	var value string
+	var overrideVersion, settingsRevision int64
+	if err := db.QueryRowContext(ctx, `SELECT value_text,version FROM system_setting_overrides WHERE setting_key='media.upload_max_bytes'`).Scan(&value, &overrideVersion); err != nil {
+		t.Fatalf("read normalized media override: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT revision FROM system_settings_state WHERE singleton=1`).Scan(&settingsRevision); err != nil {
+		t.Fatalf("read normalized settings revision: %v", err)
+	}
+	if value != "25165824" || overrideVersion != 2 || settingsRevision != 2 {
+		t.Fatalf("normalized media override=%s version=%d settings revision=%d", value, overrideVersion, settingsRevision)
+	}
+
+	if _, err := db.ExecContext(ctx, `UPDATE system_setting_overrides SET value_text='26476544' WHERE setting_key='media.upload_max_bytes'`); err == nil {
+		t.Fatal("fractional-MiB direct update unexpectedly passed database trigger")
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE system_setting_overrides SET value_text='26214400' WHERE setting_key='media.upload_max_bytes'`); err != nil {
+		t.Fatalf("whole-MiB direct update: %v", err)
+	}
+}
+
+func TestRemoveSystemStepUpChallengesMigrationDropsObsoleteSecrets(t *testing.T) {
+	ctx := context.Background()
+	db := openDatabaseThroughMigration(t, "0033_invitation_identity_binding.sql")
+	defer db.Close()
+
+	body, err := migrations.Files.ReadFile("0034_remove_system_step_up_challenges.sql")
+	if err != nil {
+		t.Fatalf("read step-up removal migration: %v", err)
+	}
+	if err := applyMigration(ctx, db, "0034_remove_system_step_up_challenges.sql", body); err != nil {
+		t.Fatalf("apply step-up removal migration: %v", err)
+	}
+
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='table' AND name='system_step_up_challenges'`).Scan(&count); err != nil {
+		t.Fatalf("inspect removed step-up table: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("step-up table count=%d, want 0", count)
+	}
+}

@@ -103,13 +103,14 @@ describe('AdminPage workspace separation', () => {
     expect(screen.queryByRole('tab', { name: 'Rollen & Rechte' })).not.toBeInTheDocument();
   });
 
-  it('mounts only members for pure member management', () => {
+  it('mounts general defaults and members for pure member management', () => {
     mocks.useActiveGroup.mockReturnValue({ activeGroup: { membership: { effectiveGrants: [{ permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }] } } });
 
     render(<AdminPage />);
 
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Mitglieder']);
-    expect(screen.getByText('members-panel')).toBeVisible();
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Allgemein', 'Mitglieder']);
+    expect(screen.getByText('settings-panel')).toBeVisible();
+    expect(screen.queryByText('members-panel')).not.toBeInTheDocument();
   });
 
   it('places the system workspace first for a system administrator with a group', async () => {

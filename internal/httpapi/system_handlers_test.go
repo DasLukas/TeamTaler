@@ -11,7 +11,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,15 +64,54 @@ func TestSystemRoutesUseLiveGlobalAuthorizationAndDelegatedGroupCreation(t *test
 		t.Fatalf("system-only settings status=%d ETag=%q body=%s", response.Code, response.Header().Get("ETag"), response.Body.String())
 	}
 
+	provisioningBody := `{"name":"Provisioning Group","currency":"EUR","initialAdministratorEmail":"new-account@example.test"}`
+	response = fixture.serve(groupFreeAdministrator, http.MethodPost, "/api/v1/system/groups", provisioningBody, "")
+	if response.Code != http.StatusCreated {
+		t.Fatalf("manual group provisioning status=%d body=%s, want 201", response.Code, response.Body.String())
+	}
+	var provisioningResult struct {
+		Group               systemadmin.ManagedGroup `json:"group"`
+		AcceptURL           string                   `json:"acceptUrl"`
+		EmailDeliveryStatus string                   `json:"emailDeliveryStatus"`
+		ExpiresAt           string                   `json:"expiresAt"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &provisioningResult); err != nil {
+		t.Fatalf("decode manual provisioning result: %v", err)
+	}
+	if provisioningResult.Group.Status != systemadmin.GroupStatusProvisioning || provisioningResult.EmailDeliveryStatus != "NOT_REQUESTED" || !strings.HasPrefix(provisioningResult.AcceptURL, fixture.baseURL+"/invite#token=") || provisioningResult.ExpiresAt == "" {
+		t.Fatalf("manual provisioning result=%#v", provisioningResult)
+	}
+	if _, err := time.Parse(time.RFC3339, provisioningResult.ExpiresAt); err != nil {
+		t.Fatalf("parse provisioning expiry %q: %v", provisioningResult.ExpiresAt, err)
+	}
+	parsedInvitationURL, err := url.Parse(provisioningResult.AcceptURL)
+	if err != nil {
+		t.Fatalf("parse manual provisioning URL: %v", err)
+	}
+	invitationFragment, err := url.ParseQuery(parsedInvitationURL.Fragment)
+	if err != nil {
+		t.Fatalf("parse manual provisioning fragment: %v", err)
+	}
+	if _, err := fixture.auth.PreviewInvitation(context.Background(), invitationFragment.Get("token")); err != nil {
+		t.Fatalf("preview manual provisioning invitation: %v", err)
+	}
+	var provisioningOutboxCount int
+	if err := fixture.db.QueryRowContext(context.Background(), `SELECT count(*) FROM invitation_email_outbox WHERE group_id=?`, provisioningResult.Group.ID).Scan(&provisioningOutboxCount); err != nil || provisioningOutboxCount != 0 {
+		t.Fatalf("manual provisioning outbox count=%d err=%v", provisioningOutboxCount, err)
+	}
+
 	groupBody := `{"name":"Delegated Group","currency":"EUR","initialAdministratorEmail":"member@example.test"}`
 	response = fixture.serve(groupFreeAdministrator, http.MethodPost, "/api/v1/groups", groupBody, "")
 	if response.Code != http.StatusCreated {
 		t.Fatalf("legacy group alias status=%d body=%s", response.Code, response.Body.String())
 	}
-	var created systemadmin.ManagedGroup
-	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
+	var delegatedResult struct {
+		Group systemadmin.ManagedGroup `json:"group"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &delegatedResult); err != nil {
 		t.Fatalf("decode delegated group: %v", err)
 	}
+	created := delegatedResult.Group
 	var targetMemberships, actorMemberships int
 	if err := fixture.db.QueryRowContext(context.Background(), `SELECT count(*) FROM memberships WHERE group_id=? AND user_id=?`, created.ID, member.Principal.UserID).Scan(&targetMemberships); err != nil {
 		t.Fatalf("count delegated administrator membership: %v", err)
@@ -80,6 +121,29 @@ func TestSystemRoutesUseLiveGlobalAuthorizationAndDelegatedGroupCreation(t *test
 	}
 	if targetMemberships != 1 || actorMemberships != 0 {
 		t.Fatalf("delegated memberships target=%d actor=%d", targetMemberships, actorMemberships)
+	}
+	logoKey := strings.Repeat("a", 64) + ".png"
+	logoBody := []byte("managed-group-logo")
+	if err := os.MkdirAll(filepath.Join(fixture.dataDirectory, "images"), 0o750); err != nil {
+		t.Fatalf("create managed logo directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(fixture.dataDirectory, "images", logoKey), logoBody, 0o640); err != nil {
+		t.Fatalf("write managed group logo: %v", err)
+	}
+	if _, err := fixture.db.ExecContext(context.Background(), `UPDATE groups SET logo_key=? WHERE id=?`, logoKey, created.ID); err != nil {
+		t.Fatalf("attach managed group logo: %v", err)
+	}
+	response = fixture.serve(groupFreeAdministrator, http.MethodGet, "/api/v1/system/groups", "", "")
+	if response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte(`"logoUrl":"/api/v1/system/groups/`+created.ID+`/logo"`)) {
+		t.Fatalf("managed group list logo status=%d body=%s", response.Code, response.Body.String())
+	}
+	response = fixture.serve(groupFreeAdministrator, http.MethodGet, "/api/v1/system/groups/"+created.ID+"/logo", "", "")
+	if response.Code != http.StatusOK || !bytes.Equal(response.Body.Bytes(), logoBody) || response.Header().Get("Content-Type") != "image/png" {
+		t.Fatalf("managed group logo status=%d type=%q body=%q", response.Code, response.Header().Get("Content-Type"), response.Body.Bytes())
+	}
+	response = fixture.serve(member, http.MethodGet, "/api/v1/system/groups/"+created.ID+"/logo", "", "")
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("non-system managed logo status=%d body=%s, want 403", response.Code, response.Body.String())
 	}
 
 	if err := fixture.system.RevokeAdministrator(context.Background(), groupFreeAdministrator.Principal.UserID, fixture.bootstrap.Principal.UserID); err != nil {
@@ -245,12 +309,13 @@ func TestFailedSMTPTestPersistsRedactedRevisionStatus(t *testing.T) {
 }
 
 type systemHTTPFixture struct {
-	db        *sql.DB
-	handler   http.Handler
-	auth      auth.Service
-	system    systemadmin.Service
-	bootstrap auth.Session
-	baseURL   string
+	db            *sql.DB
+	handler       http.Handler
+	auth          auth.Service
+	system        systemadmin.Service
+	bootstrap     auth.Session
+	baseURL       string
+	dataDirectory string
 }
 
 func newSystemHTTPFixture(t *testing.T) *systemHTTPFixture {
@@ -291,7 +356,7 @@ func newSystemHTTPFixture(t *testing.T) *systemHTTPFixture {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	return &systemHTTPFixture{
 		db: database, handler: New(configuration, database, logger), auth: authentication,
-		system: systemService, bootstrap: bootstrap, baseURL: publicURL.String(),
+		system: systemService, bootstrap: bootstrap, baseURL: publicURL.String(), dataDirectory: dataDirectory,
 	}
 }
 

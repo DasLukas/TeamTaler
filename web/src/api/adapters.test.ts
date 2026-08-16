@@ -37,14 +37,17 @@ describe('API adapters', () => {
     });
     expect(settings).toMatchObject({ revision: 9, mediaUploadHardLimitBytes: 1048576, smtp: { passwordConfigured: true, passwordSource: 'DATABASE', tlsMode: { value: 'starttls' }, testStatus: 'VERIFIED', revision: 4 } });
     expect(settings.smtp).not.toHaveProperty('password');
+
+	const unconfiguredSMTP = adaptSystemSettings({ smtp: { port: { value: 0, source: 'CODE' } } }).smtp;
+	expect(unconfiguredSMTP.port).toMatchObject({ value: 587, source: 'CODE' });
   });
 
   it('adapts item envelopes, flat managed-group counts, deletion impact, and system audit', () => {
-    expect(adaptSystemGroups({ items: [{ id: 'group-a', name: 'Group A', currency: 'EUR', status: 'ARCHIVED', version: 4, memberCount: 3, pendingInvitationCount: 2, bookingCount: 8, financialRecordCount: 5, auditEventCount: 7, mediaCount: 1 }] })[0]).toMatchObject({
-      id: 'group-a', status: 'ARCHIVED', impact: { members: 3, invitations: 2, bookings: 8, financialRecords: 5, auditEntries: 7, mediaFiles: 1 },
+    expect(adaptSystemGroups({ items: [{ id: 'group-a', name: 'Group A', currency: 'EUR', status: 'ARCHIVED', version: 4, logoUrl: '/api/v1/system/groups/group-a/logo', memberCount: 3, pendingInvitationCount: 2, bookingCount: 8, financialRecordCount: 5, auditEventCount: 7, mediaCount: 1 }] })[0]).toMatchObject({
+      id: 'group-a', status: 'ARCHIVED', logoUrl: '/api/v1/system/groups/group-a/logo', impact: { members: 3, invitations: 2, bookings: 8, financialRecords: 5, auditEntries: 7, mediaFiles: 1 },
     });
-    expect(adaptSystemGroupDeletionImpact({ groupId: 'group-a', groupName: 'Group A', version: 5, memberCount: 3, invitationCount: 2, bookingCount: 8, financialRecordCount: 5, auditEventCount: 7, mediaCount: 1 })).toMatchObject({ groupId: 'group-a', version: 5, financialRecords: 5 });
-    expect(adaptSystemAudit({ items: [{ id: 'audit-a', actorUserId: 'user-a', action: 'group.purged', resourceType: 'group', resourceId: 'group-a', metadata: { groupName: 'Group A' }, occurredAt: '2026-08-15T12:00:00Z' }] })[0]).toMatchObject({ actorDisplayName: 'user-a', targetType: 'group', targetId: 'group-a', createdAt: '2026-08-15T12:00:00Z' });
+    expect(adaptSystemGroupDeletionImpact({ groupId: 'group-a', groupName: 'Group A', currency: 'EUR', version: 5, memberCount: 3, openBalanceMinor: '1234', invitationCount: 2, bookingCount: 8, financialRecordCount: 5, auditEventCount: 7, mediaCount: 1 })).toMatchObject({ groupId: 'group-a', version: 5, financialRecords: 5, openBalance: { minorUnits: '1234', currency: 'EUR' } });
+    expect(adaptSystemAudit({ items: [{ id: 'audit-a', actorUserId: 'user-a', actorDisplayName: 'Ada Admin', action: 'group.purged', resourceType: 'group', resourceId: 'group-a', metadata: { groupName: 'Group A' }, occurredAt: '2026-08-15T12:00:00Z' }] })[0]).toMatchObject({ actorDisplayName: 'Ada Admin', targetType: 'group', targetId: 'group-a', createdAt: '2026-08-15T12:00:00Z' });
   });
 
   it('defaults optional settlement flags to disabled for older API responses', () => {

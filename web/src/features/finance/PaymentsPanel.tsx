@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import CircleDollarSign from 'lucide-react/dist/esm/icons/circle-dollar-sign';
 import Plus from 'lucide-react/dist/esm/icons/plus';
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
+import X from 'lucide-react/dist/esm/icons/x';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
@@ -102,7 +103,7 @@ export function PaymentsPanel() {
           <Field htmlFor="payment-method" label={t('finance.paymentType')}><SelectInput id="payment-method" onChange={(event) => setMethod(event.target.value)} required value={method}>{transactionSettingsQuery.data.paymentMethods.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</SelectInput></Field>
           {reasonEnabled ? <Field htmlFor="payment-reference" label={`${t('finance.reason')}${reasonRequired ? ' *' : ''}`}><TextInput id="payment-reference" list="payment-reason-suggestions" maxLength={120} onChange={(event) => setReference(event.target.value)} required={reasonRequired} value={reference} /><datalist id="payment-reason-suggestions">{transactionSettingsQuery.data.paymentReasons.map((item) => <option key={item.id} value={item.label} />)}</datalist></Field> : null}
           {paymentMutation.isError ? <p className={styles.error} role="alert">{paymentMutation.error.message}</p> : null}
-          <div className={styles.actions}><Button onClick={() => setDialogOpen(false)} variant="secondary">{t('common.cancel')}</Button><Button disabled={!amount || !method || (reasonRequired && !reference.trim()) || paymentMutation.isPending} type="submit">{t('finance.bookPayment')}</Button></div>
+          <div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={() => setDialogOpen(false)} variant="secondary">{t('common.cancel')}</Button><Button disabled={!amount || !method || (reasonRequired && !reference.trim()) || paymentMutation.isPending} leadingIcon={<CircleDollarSign size={17} />} type="submit">{t('finance.bookPayment')}</Button></div>
         </form>
       </Modal>
       <Modal onClose={() => setPaymentToReverse(null)} open={Boolean(paymentToReverse)} title={t('finance.reverseTitle')}>
@@ -110,7 +111,7 @@ export function PaymentsPanel() {
           <p className={styles.explanation}>{t('finance.reverseExplanation')}</p>
           <Field htmlFor="payment-reversal-reason" label={t('finance.reason')}><TextInput id="payment-reversal-reason" onChange={(event) => setReversalReason(event.target.value)} required value={reversalReason} /></Field>
           {reversalMutation.isError ? <p className={styles.error} role="alert">{reversalMutation.error.message}</p> : null}
-          <div className={styles.actions}><Button onClick={() => setPaymentToReverse(null)} variant="secondary">{t('common.cancel')}</Button><Button disabled={!reversalReason.trim() || reversalMutation.isPending} type="submit">{t('finance.confirmReverse')}</Button></div>
+          <div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={() => setPaymentToReverse(null)} variant="secondary">{t('common.cancel')}</Button><Button disabled={!reversalReason.trim() || reversalMutation.isPending} leadingIcon={<RotateCcw size={17} />} type="submit">{t('finance.confirmReverse')}</Button></div>
         </form>
       </Modal>
     </div>

@@ -416,7 +416,13 @@ paths:
         `targetMembershipId`, preserves that membership's accounting identity,
         and applies exactly the invitation's stored roles. A conflicting
         existing membership returns `409` rather than
-        merging financial histories.
+        merging financial histories. The client must echo the previewed account
+        state. If another invitation creates the same global account before
+        acceptance, this endpoint returns the typed `invitation-account-state-changed`
+        conflict without consuming the token. The client then reloads the
+        preview and requests the current account password. Open invitations for
+        one canonical email address are atomically bound to the first account
+        created for that mailbox; their group-specific roles remain independent.
       security: []
       requestBody:
         required: true
@@ -783,9 +789,10 @@ paths:
       summary: Create or provision a group with its initial administrator
       description: |
         An existing account produces an active group immediately. An unknown
-        email address requires available SMTP and produces a provisioning group
-        plus a protected first-administrator invitation. The acting system
-        administrator is never joined implicitly.
+        email address produces a provisioning group plus a protected
+        first-administrator invitation and returns its one-time acceptance URL.
+        When effective SMTP is active, the same invitation is also queued for
+        email delivery. The acting system administrator is never joined implicitly.
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
       requestBody:
@@ -801,12 +808,11 @@ paths:
               schema: { type: string }
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/SystemGroup' }
+              schema: { $ref: '#/components/schemas/SystemGroupInvitationResult' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
-        '503': { $ref: '#/components/responses/Problem' }
   /system/groups/{groupId}/archive:
     post:
       tags: [System]
@@ -829,6 +835,22 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
+  /system/groups/{groupId}/logo:
+    get:
+      tags: [System]
+      summary: Read the current group logo for the system group list
+      description: This resource exposes only the group logo and grants no access to other group-scoped data.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Normalized PNG group logo
+          content:
+            image/png:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /system/groups/{groupId}/restore:
     post:
       tags: [System]
@@ -854,15 +876,16 @@ paths:
   /system/groups/{groupId}/invitation/resend:
     post:
       tags: [System]
-      summary: Replace and resend a provisioning group's first-administrator invitation
+      summary: Replace a provisioning group's first-administrator invitation
       description: |
         Requires a live `SYSTEM_ADMINISTRATOR` assignment and is available only
-        while the group is `PROVISIONING` and effective SMTP is active. The
+        while the group is `PROVISIONING`. The
         command atomically revokes every open invitation for the group, cancels
         its pending or retryable invitation-email work, creates a fresh
         seven-day first-administrator invitation with a newly generated token,
-        queues that token for encrypted email delivery, and increments the
-        managed-group version. Every older invitation link remains invalid.
+        returns its one-time acceptance URL, optionally queues encrypted email
+        delivery when SMTP is active, and increments the managed-group version.
+        Every older invitation link remains invalid.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/CSRFToken'
@@ -875,12 +898,11 @@ paths:
               schema: { type: string }
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/SystemGroup' }
+              schema: { $ref: '#/components/schemas/SystemGroupInvitationResult' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
-        '503': { $ref: '#/components/responses/Problem' }
   /system/groups/{groupId}/deletion-impact:
     get:
       tags: [System]
@@ -904,9 +926,8 @@ paths:
       tags: [System]
       summary: Permanently purge an archived group
       description: |
-        Requires a current strong ETag, a five-minute one-use password step-up
-        token, the exact current group name, and the fixed German confirmation
-        phrase. Only a minimal global deletion receipt remains in system audit.
+        Requires a current strong ETag and the exact current group name. Only a
+        minimal global deletion receipt remains in system audit.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/CSRFToken'
@@ -928,28 +949,6 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
-  /system/step-up:
-    post:
-      tags: [System]
-      summary: Verify the current password for a destructive system action
-      description: Issues a purpose-bound, single-use token that expires after five minutes. This command is rate limited.
-      parameters:
-        - $ref: '#/components/parameters/CSRFToken'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/SystemStepUpCommand' }
-      responses:
-        '201':
-          description: Short-lived one-use proof
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/SystemStepUpProof' }
-        '401': { $ref: '#/components/responses/Problem' }
-        '403': { $ref: '#/components/responses/Problem' }
-        '422': { $ref: '#/components/responses/Problem' }
-        '429': { $ref: '#/components/responses/Problem' }
   /system/audit:
     get:
       tags: [System]
@@ -1002,12 +1001,11 @@ paths:
           description: Active or provisioning group
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/SystemGroup' }
+              schema: { $ref: '#/components/schemas/SystemGroupInvitationResult' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
-        '503': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}:
     patch:
       tags: [Groups]
@@ -1836,8 +1834,8 @@ paths:
   /groups/{groupId}/invitations/{invitationId}/email/resend:
     post:
       tags: [Groups]
-      summary: Rotate and resend an open invitation
-      description: Requires `MEMBER_MANAGEMENT`. Creates a new token and seven-day expiry. Older links become invalid; PENDING and SENDING deliveries are rejected.
+      summary: Renew an open invitation
+      description: Requires `MEMBER_MANAGEMENT`. Creates a new token and seven-day expiry and always returns its one-time manual fallback URL. Older links become invalid; PENDING and SENDING deliveries are rejected. Active SMTP additionally queues the renewed invitation for email delivery.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - name: invitationId
@@ -1848,7 +1846,7 @@ paths:
         - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '200':
-          description: Rotated invitation queued for delivery
+          description: Renewed invitation with optional queued email delivery
           content:
             application/json:
               schema: { $ref: '#/components/schemas/InvitationEmailResendResult' }
@@ -2781,7 +2779,10 @@ components:
       properties:
         enabled: { $ref: '#/components/schemas/EffectiveBooleanSetting' }
         host: { $ref: '#/components/schemas/EffectiveStringSetting' }
-        port: { $ref: '#/components/schemas/EffectiveIntegerSetting' }
+        port:
+          allOf:
+            - $ref: '#/components/schemas/EffectiveIntegerSetting'
+          description: Effective SMTP submission port. The code default is `587`.
         tlsMode:
           allOf:
             - $ref: '#/components/schemas/EffectiveStringSetting'
@@ -2831,7 +2832,7 @@ components:
           type: integer
           format: int64
           readOnly: true
-          description: Effective immutable ceiling derived from the process request limit and compiled media maximum.
+          description: Compiled application safety ceiling for the runtime-editable media upload limit.
         publicJoinEnabled: { $ref: '#/components/schemas/EffectiveBooleanSetting' }
         maintenanceMode: { $ref: '#/components/schemas/EffectiveBooleanSetting' }
         maintenanceMessage: { $ref: '#/components/schemas/EffectiveStringSetting' }
@@ -2845,7 +2846,7 @@ components:
       properties:
         instanceName: { type: string, minLength: 1, maxLength: 120 }
         defaultCurrency: { type: string, pattern: '^[A-Z]{3}$' }
-        mediaUploadMaxBytes: { type: integer, format: int64, minimum: 262144, maximum: 26214400 }
+        mediaUploadMaxBytes: { type: integer, format: int64, minimum: 1048576, maximum: 26214400, multipleOf: 1048576 }
         publicJoinEnabled: { type: boolean }
         maintenanceMode: { type: boolean }
         maintenanceMessage: { type: string, maxLength: 240 }
@@ -2936,6 +2937,7 @@ components:
         archivedByUserId: { type: string }
         administratorEmail: { type: string, format: email }
         createdAt: { type: string, format: date-time }
+        logoUrl: { type: string }
         memberCount: { type: integer, format: int64, minimum: 0 }
         invitationCount: { type: integer, format: int64, minimum: 0 }
         bookingCount: { type: integer, format: int64, minimum: 0 }
@@ -2953,15 +2955,35 @@ components:
           pattern: '^[A-Z]{3}$'
           description: Omit to use the current effective new-group default.
         initialAdministratorEmail: { type: string, format: email, maxLength: 254 }
+    SystemGroupInvitationResult:
+      type: object
+      additionalProperties: false
+      required: [group]
+      properties:
+        group: { $ref: '#/components/schemas/SystemGroup' }
+        acceptUrl:
+          type: string
+          format: uri
+          description: Present only for a newly created or replaced provisioning invitation. The token remains in the URL fragment and is returned once.
+        emailDeliveryStatus:
+          $ref: '#/components/schemas/EmailDeliveryStatus'
+        expiresAt:
+          type: string
+          format: date-time
+          description: Present with a newly created or replaced provisioning invitation.
     GroupDeletionImpact:
       type: object
       additionalProperties: false
-      required: [groupId, groupName, version, memberCount, invitationCount, bookingCount, financialRecordCount, auditEventCount, mediaCount]
+      required: [groupId, groupName, currency, version, memberCount, openBalanceMinor, invitationCount, bookingCount, financialRecordCount, auditEventCount, mediaCount]
       properties:
         groupId: { type: string }
         groupName: { type: string }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
         version: { type: integer, format: int64, minimum: 1 }
         memberCount: { type: integer, format: int64, minimum: 0 }
+        openBalanceMinor:
+          $ref: '#/components/schemas/MinorUnits'
+          description: Signed consolidated balance of all member receivable accounts in the group's smallest currency unit.
         invitationCount: { type: integer, format: int64, minimum: 0 }
         bookingCount: { type: integer, format: int64, minimum: 0 }
         financialRecordCount:
@@ -2974,35 +2996,9 @@ components:
     GroupPurgeCommand:
       type: object
       additionalProperties: false
-      required: [stepUpToken, groupName, confirmationPhrase]
+      required: [groupName]
       properties:
-        stepUpToken:
-          type: string
-          minLength: 1
-          maxLength: 256
-          description: One-use proof issued for `GROUP_PURGE` by `/system/step-up`.
         groupName: { type: string, minLength: 1, maxLength: 120 }
-        confirmationPhrase:
-          type: string
-          const: ENDGÜLTIG LÖSCHEN
-    SystemStepUpCommand:
-      type: object
-      additionalProperties: false
-      required: [password, purpose]
-      properties:
-        password: { type: string, format: password, minLength: 1, maxLength: 1024, writeOnly: true }
-        purpose: { type: string, const: GROUP_PURGE }
-    SystemStepUpProof:
-      type: object
-      additionalProperties: false
-      required: [token, expiresAt]
-      properties:
-        token:
-          type: string
-          minLength: 1
-          maxLength: 256
-          description: Purpose-bound to `GROUP_PURGE` by the server.
-        expiresAt: { type: string, format: date-time }
     SystemAuditEvent:
       type: object
       additionalProperties: false
@@ -3010,6 +3006,9 @@ components:
       properties:
         id: { type: string }
         actorUserId: { type: string }
+        actorDisplayName:
+          type: string
+          description: Current display name of the actor account; absent for system-generated events.
         action: { type: string }
         resourceType: { type: string }
         resourceId: { type: string }
@@ -3089,7 +3088,8 @@ components:
         currentPassword: { type: string, format: password, minLength: 1, maxLength: 1024 }
     InvitationAcceptance:
       type: object
-      required: [token, password]
+      required: [token, password, expectedAccountState]
+      additionalProperties: false
       properties:
         token: { type: string, minLength: 1 }
         displayName:
@@ -3097,6 +3097,8 @@ components:
           maxLength: 120
           description: Required for a new account and ignored for an existing account.
         password: { type: string, format: password, minLength: 12, maxLength: 1024 }
+        expectedAccountState:
+          $ref: '#/components/schemas/InvitationAccountState'
     InvitationPreviewCommand:
       type: object
       required: [token]
@@ -3104,11 +3106,16 @@ components:
         token: { type: string, minLength: 1 }
     InvitationPreview:
       type: object
-      required: [displayName, existingAccount]
+      required: [displayName, accountState]
       additionalProperties: false
       properties:
         displayName: { type: string, maxLength: 120 }
-        existingAccount: { type: boolean }
+        accountState:
+          $ref: '#/components/schemas/InvitationAccountState'
+    InvitationAccountState:
+      type: string
+      enum: [NEW, EXISTING]
+      description: Credential state observed for the invitation's stable global identity.
     PublicJoinTokenCommand:
       type: object
       additionalProperties: false
@@ -3798,8 +3805,7 @@ components:
       properties:
         invitationId: { type: string }
         emailDeliveryStatus:
-          type: string
-          const: PENDING
+          $ref: '#/components/schemas/EmailDeliveryStatus'
         expiresAt: { type: string, format: date-time }
         acceptUrl:
           type: string

@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '@/api/client';
 import i18n from '@/i18n';
 import { InvitationPage } from './InvitationPage';
 import { LoginPage } from './LoginPage';
@@ -23,6 +24,11 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/api/client', () => ({
   api: { login: mocks.login, previewInvitation: mocks.previewInvitation, acceptInvitation: mocks.acceptInvitation, getAuthenticationCapabilities: mocks.getAuthenticationCapabilities, requestPasswordReset: mocks.requestPasswordReset, confirmPasswordReset: mocks.confirmPasswordReset, confirmEmailChange: mocks.confirmEmailChange },
+  ApiError: class ApiError extends Error {
+    constructor(public readonly problem: { type: string; title: string; status: number; detail: string }) {
+      super(problem.detail);
+    }
+  },
   clearAuthenticatedClientState: vi.fn(),
   isDevelopmentDemoEnabled: false,
 }));
@@ -48,7 +54,7 @@ describe('authentication form policies', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.login.mockResolvedValue(session);
-    mocks.previewInvitation.mockResolvedValue({ displayName: '', existingAccount: false });
+    mocks.previewInvitation.mockResolvedValue({ displayName: '', accountState: 'NEW' });
     mocks.acceptInvitation.mockResolvedValue(session);
     mocks.getAuthenticationCapabilities.mockResolvedValue({ passwordResetAvailable: true, emailChangeAvailable: true });
     mocks.requestPasswordReset.mockResolvedValue(undefined);
@@ -169,7 +175,7 @@ describe('authentication form policies', () => {
   });
 
   it('rejects an existing account password below the invitation contract minimum', async () => {
-  mocks.previewInvitation.mockResolvedValue({ displayName: 'Alex', existingAccount: true });
+  mocks.previewInvitation.mockResolvedValue({ displayName: 'Alex', accountState: 'EXISTING' });
     window.history.replaceState(null, '', '/invite#token=invite-token');
     const user = userEvent.setup();
     renderPage(<InvitationPage />);
@@ -185,7 +191,7 @@ describe('authentication form policies', () => {
   });
 
   it('accepts a contract-valid current password for an existing account', async () => {
-  mocks.previewInvitation.mockResolvedValue({ displayName: 'Alex', existingAccount: true });
+  mocks.previewInvitation.mockResolvedValue({ displayName: 'Alex', accountState: 'EXISTING' });
     window.history.replaceState(null, '', '/invite#token=invite-token');
     const user = userEvent.setup();
     renderPage(<InvitationPage />);
@@ -193,12 +199,12 @@ describe('authentication form policies', () => {
     await user.type(screen.getByLabelText(i18n.t('auth.existingPasswordLabel')), 'existing-pass');
     await user.click(screen.getByRole('button', { name: i18n.t('auth.acceptInvitation') }));
 
-    await waitFor(() => expect(mocks.acceptInvitation).toHaveBeenCalledWith({ token: 'invite-token', displayName: 'Alex', password: 'existing-pass' }));
+    await waitFor(() => expect(mocks.acceptInvitation).toHaveBeenCalledWith({ token: 'invite-token', displayName: 'Alex', password: 'existing-pass', expectedAccountState: 'EXISTING' }));
     await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith({ to: '/book' }));
   });
 
   it('pre-fills an invited display name and lets a new account change it', async () => {
-    mocks.previewInvitation.mockResolvedValue({ displayName: 'Suggested Name', existingAccount: false });
+    mocks.previewInvitation.mockResolvedValue({ displayName: 'Suggested Name', accountState: 'NEW' });
     window.history.replaceState(null, '', '/invite#token=invite-token');
     const user = userEvent.setup();
     renderPage(<InvitationPage />);
@@ -209,6 +215,33 @@ describe('authentication form policies', () => {
     await user.type(screen.getByLabelText(i18n.t('auth.password')), 'new-passphrase');
     await user.type(screen.getByLabelText(i18n.t('auth.passwordConfirmation')), 'new-passphrase');
     await user.click(screen.getByRole('button', { name: i18n.t('auth.acceptInvitation') }));
-    await waitFor(() => expect(mocks.acceptInvitation).toHaveBeenCalledWith({ token: 'invite-token', displayName: 'Chosen Name', password: 'new-passphrase' }));
+    await waitFor(() => expect(mocks.acceptInvitation).toHaveBeenCalledWith({ token: 'invite-token', displayName: 'Chosen Name', password: 'new-passphrase', expectedAccountState: 'NEW' }));
+  });
+
+  it('refreshes a stale new-account form when another invitation creates the account', async () => {
+    mocks.previewInvitation
+      .mockResolvedValueOnce({ displayName: 'Parallel User', accountState: 'NEW' })
+      .mockResolvedValueOnce({ displayName: 'Parallel User', accountState: 'EXISTING' });
+    mocks.acceptInvitation.mockRejectedValueOnce(new ApiError({
+      type: 'https://teamtaler.dev/problems/invitation-account-state-changed',
+      title: 'Invitation Account State Changed',
+      status: 409,
+      detail: 'invitation account state changed',
+      instance: '/api/v1/invitations/accept',
+    }));
+    window.history.replaceState(null, '', '/invite#token=parallel-token');
+    const user = userEvent.setup();
+    const queryClient = renderPage(<InvitationPage />);
+
+    await user.type(await screen.findByLabelText(i18n.t('auth.displayName')), 'Parallel User');
+    await user.type(screen.getByLabelText(i18n.t('auth.password')), 'parallel-password');
+    await user.type(screen.getByLabelText(i18n.t('auth.passwordConfirmation')), 'parallel-password');
+    await user.click(screen.getByRole('button', { name: i18n.t('auth.acceptInvitation') }));
+
+    expect(await screen.findByText(i18n.t('auth.invitationAccountStateChanged'))).toBeVisible();
+    expect(await screen.findByRole('checkbox', { name: i18n.t('auth.existingAccountDetected') })).toBeChecked();
+    expect(screen.getByLabelText(i18n.t('auth.existingPasswordLabel'))).toHaveValue('');
+    expect(screen.queryByLabelText(i18n.t('auth.passwordConfirmation'))).not.toBeInTheDocument();
+    expect(queryClient.getQueryData(['invitation-preview', 'parallel-token'])).toMatchObject({ accountState: 'EXISTING' });
   });
 });

@@ -25,11 +25,19 @@ const (
 	// GroupStatusArchived identifies a reversible, inaccessible group.
 	GroupStatusArchived = "ARCHIVED"
 	// GroupStatusPurging identifies the private in-transaction deletion state.
-	GroupStatusPurging = "PURGING"
-	// GroupPurgeConfirmationPhrase is the mandatory destructive-action phrase.
-	GroupPurgeConfirmationPhrase = "ENDGÜLTIG LÖSCHEN"
-	stepUpLifetime               = 5 * time.Minute
-	referencedMediaRetryDelay    = 5 * time.Minute
+	GroupStatusPurging        = "PURGING"
+	referencedMediaRetryDelay = 5 * time.Minute
+)
+
+// InvitationEmailDeliveryStatus describes optional delivery for an immediate
+// first-administrator invitation result.
+type InvitationEmailDeliveryStatus string
+
+const (
+	// InvitationEmailDeliveryNotRequested means the returned link must be shared manually.
+	InvitationEmailDeliveryNotRequested InvitationEmailDeliveryStatus = "NOT_REQUESTED"
+	// InvitationEmailDeliveryPending means encrypted email delivery was queued.
+	InvitationEmailDeliveryPending InvitationEmailDeliveryStatus = "PENDING"
 )
 
 // SecretSealer encrypts a provisioning invitation token before it enters the
@@ -50,20 +58,36 @@ type ManagedGroup struct {
 	ArchivedByUserID     *string `json:"archivedByUserId,omitempty"`
 	AdministratorEmail   *string `json:"administratorEmail,omitempty"`
 	CreatedAt            string  `json:"createdAt"`
+	LogoURL              string  `json:"logoUrl,omitempty"`
 	MemberCount          int64   `json:"memberCount"`
 	InvitationCount      int64   `json:"invitationCount"`
 	BookingCount         int64   `json:"bookingCount"`
 	FinancialRecordCount int64   `json:"financialRecordCount"`
 	AuditEventCount      int64   `json:"auditEventCount"`
 	MediaCount           int64   `json:"mediaCount"`
+	OpenBalanceMinor     int64   `json:"-"`
+	// InvitationToken is populated only by an immediate provisioning create or
+	// replacement result. It is never serialized as part of a managed group.
+	InvitationToken string `json:"-"`
+	// InvitationEmailDeliveryStatus reports whether the immediate invitation
+	// was queued for optional email delivery.
+	InvitationEmailDeliveryStatus InvitationEmailDeliveryStatus `json:"-"`
+	// InvitationExpiresAt is populated only with an immediate provisioning
+	// invitation result so every client can display its exact lifetime.
+	InvitationExpiresAt string `json:"-"`
 }
 
-// DeletionImpact contains the exact counts shown before a permanent purge.
+// DeletionImpact contains the exact operational summary returned before and
+// after a permanent purge. OpenBalanceMinor uses the group's smallest currency
+// unit and the ledger sign convention: positive amounts are owed to the group
+// and negative amounts are member credit.
 type DeletionImpact struct {
 	GroupID              string `json:"groupId"`
 	GroupName            string `json:"groupName"`
+	Currency             string `json:"currency"`
 	Version              int64  `json:"version"`
 	MemberCount          int64  `json:"memberCount"`
+	OpenBalanceMinor     int64  `json:"openBalanceMinor,string"`
 	InvitationCount      int64  `json:"invitationCount"`
 	BookingCount         int64  `json:"bookingCount"`
 	FinancialRecordCount int64  `json:"financialRecordCount"`
@@ -89,12 +113,11 @@ type CreateGroupInput struct {
 	InitialAdministratorEmail string `json:"initialAdministratorEmail"`
 }
 
-// PurgeGroupInput carries every server-enforced destructive confirmation.
+// PurgeGroupInput carries the version and exact-name confirmation required for
+// permanent deletion of an archived group.
 type PurgeGroupInput struct {
-	ExpectedVersion    int64  `json:"-"`
-	StepUpToken        string `json:"stepUpToken"`
-	GroupName          string `json:"groupName"`
-	ConfirmationPhrase string `json:"confirmationPhrase"`
+	ExpectedVersion int64  `json:"-"`
+	GroupName       string `json:"groupName"`
 }
 
 // PurgePostCommitWarning reports maintenance work that remains after the
@@ -112,10 +135,6 @@ func (warning *PurgePostCommitWarning) Error() string {
 
 // Unwrap exposes the underlying checkpoint error for diagnostics.
 func (warning *PurgePostCommitWarning) Unwrap() error { return warning.Cause }
-
-// PasswordVerifier verifies a password against one encoded account hash. It is
-// supplied by the authentication module to avoid storing plaintext credentials.
-type PasswordVerifier func(encodedHash, password string) bool
 
 // SearchAccounts returns at most limit active accounts matching email or
 // display name. actorUserID must remain a live system administrator.
@@ -196,6 +215,7 @@ const managedGroupQuery = `SELECT g.id,g.name,g.currency,g.status,g.version,g.ar
 		 JOIN roles role ON role.group_id=assignment.group_id AND role.id=assignment.role_id AND role.preset_key='GROUP_ADMINISTRATOR'
 		 WHERE membership.group_id=g.id ORDER BY membership.status='ACTIVE' DESC,membership.joined_at,membership.id LIMIT 1)
 	),g.created_at,
+	CASE WHEN g.logo_key IS NOT NULL THEN '/api/v1/system/groups/'||g.id||'/logo' ELSE '' END,
 	(SELECT count(*) FROM memberships m WHERE m.group_id=g.id),
 	(SELECT count(*) FROM invitations i WHERE i.group_id=g.id),
 	(SELECT count(*) FROM bookings b WHERE b.group_id=g.id),
@@ -208,7 +228,9 @@ const managedGroupQuery = `SELECT g.id,g.name,g.currency,g.status,g.version,g.ar
 	(SELECT count(DISTINCT image_key) FROM (
 		SELECT logo_key AS image_key FROM groups WHERE id=g.id AND logo_key IS NOT NULL
 		UNION ALL SELECT image_key FROM products WHERE group_id=g.id AND image_key IS NOT NULL
-	))
+	)),
+	(SELECT coalesce(sum(l.amount_minor),0) FROM ledger_entries l
+		WHERE l.group_id=g.id AND l.account='MEMBER_RECEIVABLE')
 	FROM groups g`
 
 type rowScanner interface {
@@ -219,24 +241,24 @@ func scanManagedGroup(row rowScanner) (ManagedGroup, error) {
 	var item ManagedGroup
 	err := row.Scan(&item.ID, &item.Name, &item.Currency, &item.Status, &item.Version,
 		&item.ArchivedAt, &item.ArchivedByUserID, &item.AdministratorEmail, &item.CreatedAt,
-		&item.MemberCount, &item.InvitationCount, &item.BookingCount, &item.FinancialRecordCount,
-		&item.AuditEventCount, &item.MediaCount)
+		&item.LogoURL, &item.MemberCount, &item.InvitationCount, &item.BookingCount, &item.FinancialRecordCount,
+		&item.AuditEventCount, &item.MediaCount, &item.OpenBalanceMinor)
 	return item, err
 }
 
 func deletionImpact(item ManagedGroup) DeletionImpact {
 	return DeletionImpact{
-		GroupID: item.ID, GroupName: item.Name, Version: item.Version,
-		MemberCount: item.MemberCount, InvitationCount: item.InvitationCount,
+		GroupID: item.ID, GroupName: item.Name, Currency: item.Currency, Version: item.Version,
+		MemberCount: item.MemberCount, OpenBalanceMinor: item.OpenBalanceMinor, InvitationCount: item.InvitationCount,
 		BookingCount: item.BookingCount, FinancialRecordCount: item.FinancialRecordCount,
 		AuditEventCount: item.AuditEventCount, MediaCount: item.MediaCount,
 	}
 }
 
 // CreateGroup creates an ACTIVE group for an existing account or a
-// PROVISIONING group with an emailed first-administrator invitation. sealer is
-// required only for the latter. The caller receives safe group metadata; the
-// one-time invitation token is never returned.
+// PROVISIONING group plus protected first-administrator invitation for a new
+// address. The immediate provisioning result contains the one-time token for
+// manual sharing; active SMTP additionally uses sealer for queued email delivery.
 func (s Service) CreateGroup(ctx context.Context, actorUserID string, input CreateGroupInput, sealer SecretSealer) (ManagedGroup, error) {
 	if err := s.RequireAdministrator(ctx, actorUserID); err != nil {
 		return ManagedGroup{}, err
@@ -260,27 +282,34 @@ func (s Service) CreateGroup(ctx context.Context, actorUserID string, input Crea
 	}
 	provisioning := errors.Is(err, sql.ErrNoRows)
 	var invitationToken, invitationCiphertext string
+	emailDeliveryStatus := InvitationEmailDeliveryNotRequested
+	queueInvitationEmail := false
 	if provisioning {
 		settings, settingsErr := s.GetSettings(ctx)
 		if settingsErr != nil {
 			return ManagedGroup{}, settingsErr
 		}
-		if !settings.SMTP.Active || sealer == nil {
-			return ManagedGroup{}, fmt.Errorf("%w: SMTP must be active before provisioning a new account", domain.ErrServiceUnavailable)
-		}
 		invitationToken, err = platform.NewSecret()
 		if err != nil {
 			return ManagedGroup{}, err
 		}
-		invitationCiphertext, err = sealer.Seal(invitationToken)
-		if err != nil {
-			return ManagedGroup{}, fmt.Errorf("seal provisioning invitation: %w", err)
+		if settings.SMTP.Active && sealer != nil {
+			invitationCiphertext, err = sealer.Seal(invitationToken)
+			if err != nil {
+				return ManagedGroup{}, fmt.Errorf("seal provisioning invitation: %w", err)
+			}
+			queueInvitationEmail = true
+			emailDeliveryStatus = InvitationEmailDeliveryPending
 		}
 	}
 	groupID, _ := platform.NewID("grp")
 	periodID, _ := platform.NewID("per")
 	nowValue := platform.Now()
 	now := platform.Timestamp(nowValue)
+	invitationExpiresAt := ""
+	if provisioning {
+		invitationExpiresAt = platform.Timestamp(nowValue.Add(7 * 24 * time.Hour))
+	}
 	status := GroupStatusActive
 	if provisioning {
 		status = GroupStatusProvisioning
@@ -308,8 +337,7 @@ func (s Service) CreateGroup(ctx context.Context, actorUserID string, input Crea
 		}
 		if provisioning {
 			invitationID, _ := platform.NewID("inv")
-			expiresAt := platform.Timestamp(nowValue.Add(7 * 24 * time.Hour))
-			if _, err := tx.ExecContext(ctx, `INSERT INTO invitations(id,group_id,email,token_hash,expires_at,created_by,created_at) VALUES(?,?,?,?,?,?,?)`, invitationID, groupID, email, platform.HashSecret(invitationToken), expiresAt, actorUserID, now); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO invitations(id,group_id,email,token_hash,expires_at,created_by,created_at,target_user_id) VALUES(?,?,?,?,?,?,?,NULL)`, invitationID, groupID, email, platform.HashSecret(invitationToken), invitationExpiresAt, actorUserID, now); err != nil {
 				return err
 			}
 			if _, err := tx.ExecContext(ctx, `INSERT INTO invitation_role_assignments(group_id,invitation_id,role_id,version,assigned_at,assigned_by) VALUES(?,?,?,1,?,?)`, groupID, invitationID, authorization.PresetRoleID(groupID, domain.RolePresetGroupAdministrator), now, actorUserID); err != nil {
@@ -318,8 +346,10 @@ func (s Service) CreateGroup(ctx context.Context, actorUserID string, input Crea
 			if _, err := tx.ExecContext(ctx, `DELETE FROM invitation_role_assignments WHERE group_id=? AND invitation_id=? AND role_id!=?`, groupID, invitationID, authorization.PresetRoleID(groupID, domain.RolePresetGroupAdministrator)); err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO invitation_email_outbox(invitation_id,group_id,token_ciphertext,status,attempt_count,next_attempt_at,created_at,updated_at) VALUES(?,?,?,'PENDING',0,?,?,?)`, invitationID, groupID, invitationCiphertext, now, now, now); err != nil {
-				return err
+			if queueInvitationEmail {
+				if _, err := tx.ExecContext(ctx, `INSERT INTO invitation_email_outbox(invitation_id,group_id,token_ciphertext,status,attempt_count,next_attempt_at,created_at,updated_at) VALUES(?,?,?,'PENDING',0,?,?,?)`, invitationID, groupID, invitationCiphertext, now, now, now); err != nil {
+					return err
+				}
 			}
 		} else {
 			membershipID, _ := platform.NewID("mem")
@@ -339,17 +369,23 @@ func (s Service) CreateGroup(ctx context.Context, actorUserID string, input Crea
 		}
 		return RecordAudit(ctx, tx, actorUserID, "system.group.created", "group", groupID, map[string]any{"name": input.Name, "status": status})
 	})
-	invitationToken = ""
 	if err != nil {
 		return ManagedGroup{}, fmt.Errorf("create system group: %w", err)
 	}
-	return s.managedGroupByID(ctx, groupID)
+	item, err := s.managedGroupByID(ctx, groupID)
+	if err != nil {
+		return ManagedGroup{}, err
+	}
+	item.InvitationToken = invitationToken
+	item.InvitationEmailDeliveryStatus = emailDeliveryStatus
+	item.InvitationExpiresAt = invitationExpiresAt
+	return item, nil
 }
 
 // ResendProvisioningInvitation replaces the current first-administrator token
-// and queues a fresh seven-day invitation for a PROVISIONING group. The old
-// token and pending job are invalidated atomically. expectedVersion and the
-// caller's system role are revalidated inside the write transaction.
+// with a fresh seven-day invitation for a PROVISIONING group and returns that
+// token once for manual sharing. Active SMTP additionally queues encrypted
+// email delivery. The old token and pending job are invalidated atomically.
 func (s Service) ResendProvisioningInvitation(ctx context.Context, actorUserID, groupID string, expectedVersion int64, sealer SecretSealer) (ManagedGroup, error) {
 	if err := s.RequireAdministrator(ctx, actorUserID); err != nil {
 		return ManagedGroup{}, err
@@ -361,19 +397,24 @@ func (s Service) ResendProvisioningInvitation(ctx context.Context, actorUserID, 
 	if err != nil {
 		return ManagedGroup{}, err
 	}
-	if !settings.SMTP.Active || sealer == nil {
-		return ManagedGroup{}, fmt.Errorf("%w: SMTP must be active before resending a provisioning invitation", domain.ErrServiceUnavailable)
-	}
 	token, err := platform.NewSecret()
 	if err != nil {
 		return ManagedGroup{}, err
 	}
-	ciphertext, err := sealer.Seal(token)
-	if err != nil {
-		return ManagedGroup{}, fmt.Errorf("seal provisioning invitation: %w", err)
+	var ciphertext string
+	emailDeliveryStatus := InvitationEmailDeliveryNotRequested
+	queueInvitationEmail := false
+	if settings.SMTP.Active && sealer != nil {
+		ciphertext, err = sealer.Seal(token)
+		if err != nil {
+			return ManagedGroup{}, fmt.Errorf("seal provisioning invitation: %w", err)
+		}
+		queueInvitationEmail = true
+		emailDeliveryStatus = InvitationEmailDeliveryPending
 	}
 	nowValue := platform.Now()
 	now := platform.Timestamp(nowValue)
+	invitationExpiresAt := platform.Timestamp(nowValue.Add(7 * 24 * time.Hour))
 	err = storage.WithTx(ctx, s.db, func(tx *sql.Tx) error {
 		if err := requireAdministratorTx(ctx, tx, actorUserID); err != nil {
 			return err
@@ -397,8 +438,13 @@ func (s Service) ResendProvisioningInvitation(ctx context.Context, actorUserID, 
 		if _, err := tx.ExecContext(ctx, `UPDATE invitation_email_outbox SET status='CANCELLED',token_ciphertext=NULL,next_attempt_at=NULL,lease_token=NULL,lease_until=NULL,last_error_code='invitation_replaced',updated_at=? WHERE group_id=? AND status IN ('PENDING','SENDING','FAILED')`, now, groupID); err != nil {
 			return err
 		}
+		var targetUserID sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM users
+			WHERE email=? COLLATE NOCASE AND active=1 AND email IS NOT NULL AND password_hash IS NOT NULL`, email).Scan(&targetUserID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
 		invitationID, _ := platform.NewID("inv")
-		if _, err := tx.ExecContext(ctx, `INSERT INTO invitations(id,group_id,email,token_hash,expires_at,created_by,created_at) VALUES(?,?,?,?,?,?,?)`, invitationID, groupID, email, platform.HashSecret(token), platform.Timestamp(nowValue.Add(7*24*time.Hour)), actorUserID, now); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO invitations(id,group_id,email,token_hash,expires_at,created_by,created_at,target_user_id) VALUES(?,?,?,?,?,?,?,?)`, invitationID, groupID, email, platform.HashSecret(token), invitationExpiresAt, actorUserID, now, targetUserID); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO invitation_role_assignments(group_id,invitation_id,role_id,version,assigned_at,assigned_by) VALUES(?,?,?,1,?,?)`, groupID, invitationID, authorization.PresetRoleID(groupID, domain.RolePresetGroupAdministrator), now, actorUserID); err != nil {
@@ -407,8 +453,10 @@ func (s Service) ResendProvisioningInvitation(ctx context.Context, actorUserID, 
 		if _, err := tx.ExecContext(ctx, `DELETE FROM invitation_role_assignments WHERE group_id=? AND invitation_id=? AND role_id!=?`, groupID, invitationID, authorization.PresetRoleID(groupID, domain.RolePresetGroupAdministrator)); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO invitation_email_outbox(invitation_id,group_id,token_ciphertext,status,attempt_count,next_attempt_at,created_at,updated_at) VALUES(?,?,?,'PENDING',0,?,?,?)`, invitationID, groupID, ciphertext, now, now, now); err != nil {
-			return err
+		if queueInvitationEmail {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO invitation_email_outbox(invitation_id,group_id,token_ciphertext,status,attempt_count,next_attempt_at,created_at,updated_at) VALUES(?,?,?,'PENDING',0,?,?,?)`, invitationID, groupID, ciphertext, now, now, now); err != nil {
+				return err
+			}
 		}
 		updated, err := tx.ExecContext(ctx, `UPDATE groups SET version=version+1,updated_at=? WHERE id=? AND status='PROVISIONING' AND version=?`, now, groupID, version)
 		if err != nil {
@@ -422,11 +470,17 @@ func (s Service) ResendProvisioningInvitation(ctx context.Context, actorUserID, 
 		}
 		return RecordAudit(ctx, tx, actorUserID, "system.group.provisioning_invitation_replaced", "group", groupID, map[string]any{"name": name})
 	})
-	token = ""
 	if err != nil {
 		return ManagedGroup{}, err
 	}
-	return s.managedGroupByID(ctx, groupID)
+	item, err := s.managedGroupByID(ctx, groupID)
+	if err != nil {
+		return ManagedGroup{}, err
+	}
+	item.InvitationToken = token
+	item.InvitationEmailDeliveryStatus = emailDeliveryStatus
+	item.InvitationExpiresAt = invitationExpiresAt
+	return item, nil
 }
 
 // ArchiveGroup makes an ACTIVE or PROVISIONING group inaccessible and
@@ -532,78 +586,26 @@ func (s Service) RestoreGroup(ctx context.Context, actorUserID, groupID string, 
 	return s.managedGroupByID(ctx, groupID)
 }
 
-// IssueStepUp verifies the current password and returns a one-time token valid
-// for five minutes and one GROUP_PURGE operation. Only the token hash is stored.
-func (s Service) IssueStepUp(ctx context.Context, actorUserID, password string, verify PasswordVerifier) (string, time.Time, error) {
-	if err := s.RequireAdministrator(ctx, actorUserID); err != nil {
-		return "", time.Time{}, err
-	}
-	if verify == nil || password == "" || len(password) > 1024 {
-		return "", time.Time{}, domain.ErrUnauthenticated
-	}
-	var passwordHash string
-	if err := s.db.QueryRowContext(ctx, `SELECT password_hash FROM users WHERE id=? AND active=1 AND password_hash IS NOT NULL`, actorUserID).Scan(&passwordHash); errors.Is(err, sql.ErrNoRows) {
-		return "", time.Time{}, domain.ErrUnauthenticated
-	} else if err != nil {
-		return "", time.Time{}, err
-	}
-	if !verify(passwordHash, password) {
-		return "", time.Time{}, domain.ErrUnauthenticated
-	}
-	token, err := platform.NewSecret()
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	now := platform.Now()
-	expiresAt := now.Add(stepUpLifetime)
-	err = storage.WithTx(ctx, s.db, func(tx *sql.Tx) error {
-		if err := requireAdministratorTx(ctx, tx, actorUserID); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM system_step_up_challenges WHERE expires_at<=? OR used_at IS NOT NULL`, platform.Timestamp(now)); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO system_step_up_challenges(token_hash,user_id,purpose,expires_at,created_at) VALUES(?,?,'GROUP_PURGE',?,?)`, platform.HashSecret(token), actorUserID, platform.Timestamp(expiresAt), platform.Timestamp(now)); err != nil {
-			return err
-		}
-		return RecordAudit(ctx, tx, actorUserID, "system.step_up.issued", "step_up_challenge", "", map[string]any{
-			"purpose":   "GROUP_PURGE",
-			"expiresAt": platform.Timestamp(expiresAt),
-		})
-	})
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	return token, expiresAt, nil
-}
-
 // PurgeGroup permanently removes one archived group's managed database content,
 // schedules unreferenced media cleanup, writes the minimal global receipt, and
-// checkpoints the WAL. It requires every confirmation in PurgeGroupInput.
+// checkpoints the WAL. It requires a current version and exact group name.
 func (s Service) PurgeGroup(ctx context.Context, actorUserID, groupID string, input PurgeGroupInput) (DeletionImpact, error) {
-	return s.purgeGroup(ctx, actorUserID, groupID, input, true)
+	return s.purgeGroup(ctx, actorUserID, groupID, input)
 }
 
 // PurgeGroupLocally permanently removes an archived group for a trusted local
-// operator. It enforces the live system role, version, exact name, and
-// confirmation phrase but deliberately does not require a web step-up token.
+// operator. It enforces the live system role, version, and exact name.
 // Callers must identify the real operator account for immutable audit records.
 func (s Service) PurgeGroupLocally(ctx context.Context, actorUserID, groupID string, input PurgeGroupInput) (DeletionImpact, error) {
-	return s.purgeGroup(ctx, actorUserID, groupID, input, false)
+	return s.purgeGroup(ctx, actorUserID, groupID, input)
 }
 
-func (s Service) purgeGroup(ctx context.Context, actorUserID, groupID string, input PurgeGroupInput, requireStepUp bool) (DeletionImpact, error) {
+func (s Service) purgeGroup(ctx context.Context, actorUserID, groupID string, input PurgeGroupInput) (DeletionImpact, error) {
 	if err := s.RequireAdministrator(ctx, actorUserID); err != nil {
 		return DeletionImpact{}, err
 	}
 	if input.ExpectedVersion < 1 {
 		return DeletionImpact{}, domain.ErrPrecondition
-	}
-	if input.ConfirmationPhrase != GroupPurgeConfirmationPhrase {
-		return DeletionImpact{}, domain.ValidationError{Field: "confirmationPhrase", Message: "does not match the required permanent-deletion phrase"}
-	}
-	if requireStepUp && strings.TrimSpace(input.StepUpToken) == "" {
-		return DeletionImpact{}, domain.ValidationError{Field: "stepUpToken", Message: "is required"}
 	}
 	connection, err := s.db.Conn(ctx)
 	if err != nil {
@@ -642,15 +644,6 @@ func (s Service) purgeGroup(ctx context.Context, actorUserID, groupID string, in
 		return DeletionImpact{}, domain.ValidationError{Field: "groupName", Message: "must exactly match the current group name"}
 	}
 	now := platform.Timestamp(platform.Now())
-	if requireStepUp {
-		challenge, err := tx.ExecContext(ctx, `UPDATE system_step_up_challenges SET used_at=? WHERE token_hash=? AND user_id=? AND purpose='GROUP_PURGE' AND used_at IS NULL AND expires_at>?`, now, platform.HashSecret(input.StepUpToken), actorUserID, now)
-		if err != nil {
-			return DeletionImpact{}, err
-		}
-		if changed, _ := challenge.RowsAffected(); changed != 1 {
-			return DeletionImpact{}, fmt.Errorf("%w: step-up challenge is invalid, expired, or already used", domain.ErrForbidden)
-		}
-	}
 	if _, err := tx.ExecContext(ctx, `UPDATE groups SET status='PURGING',version=version+1,updated_at=? WHERE id=? AND status='ARCHIVED' AND version=?`, now, groupID, item.Version); err != nil {
 		return DeletionImpact{}, err
 	}
@@ -692,8 +685,9 @@ func (s Service) purgeGroup(ctx context.Context, actorUserID, groupID string, in
 	impact := deletionImpact(item)
 	if err := RecordAudit(ctx, tx, actorUserID, "system.group.purged", "group_purge_receipt", groupID, map[string]any{
 		"groupId": groupID, "groupName": item.Name, "purgedAt": now,
-		"memberCount": impact.MemberCount, "invitationCount": impact.InvitationCount,
-		"bookingCount": impact.BookingCount, "financialRecordCount": impact.FinancialRecordCount,
+		"memberCount": impact.MemberCount, "openBalanceMinor": impact.OpenBalanceMinor, "currency": impact.Currency,
+		"invitationCount": impact.InvitationCount,
+		"bookingCount":    impact.BookingCount, "financialRecordCount": impact.FinancialRecordCount,
 		"auditEventCount": impact.AuditEventCount, "mediaCount": impact.MediaCount,
 	}); err != nil {
 		return DeletionImpact{}, err

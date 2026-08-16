@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -26,6 +27,22 @@ type localSystemRuntime struct {
 	database      *sql.DB
 	service       systemadmin.Service
 	tokenBox      *platform.SecretBox
+}
+
+type localGroupInvitationResult struct {
+	Group               systemadmin.ManagedGroup `json:"group"`
+	AcceptURL           string                   `json:"acceptUrl,omitempty"`
+	EmailDeliveryStatus string                   `json:"emailDeliveryStatus,omitempty"`
+}
+
+func (runtime *localSystemRuntime) groupInvitationResult(item systemadmin.ManagedGroup) localGroupInvitationResult {
+	result := localGroupInvitationResult{Group: item}
+	if item.InvitationToken == "" {
+		return result
+	}
+	result.AcceptURL = strings.TrimSuffix(runtime.configuration.PublicURL.String(), "/") + "/invite#token=" + url.QueryEscape(item.InvitationToken)
+	result.EmailDeliveryStatus = string(item.InvitationEmailDeliveryStatus)
+	return result
 }
 
 func openLocalSystemRuntime(ctx context.Context) (*localSystemRuntime, error) {
@@ -160,7 +177,7 @@ func systemSettingsCommand(ctx context.Context, runtime *localSystemRuntime, arg
 		if *jsonOutput {
 			return writeCommandJSON(settings)
 		}
-		fmt.Printf("Revision: %d\nInstance name: %s (%s)\nDefault currency: %s (%s)\nMedia upload bytes: %d (%s; host maximum %d)\nPublic join: %t\nMaintenance: %t\n",
+		fmt.Printf("Revision: %d\nInstance name: %s (%s)\nDefault currency: %s (%s)\nMedia upload bytes: %d (%s; allowed maximum %d)\nPublic join: %t\nMaintenance: %t\n",
 			settings.Revision, settings.InstanceName.Value, settings.InstanceName.Source,
 			settings.DefaultCurrency.Value, settings.DefaultCurrency.Source,
 			settings.MediaUploadMaxBytes.Value, settings.MediaUploadMaxBytes.Source, settings.MediaUploadHardLimitBytes,
@@ -171,7 +188,7 @@ func systemSettingsCommand(ctx context.Context, runtime *localSystemRuntime, arg
 		revision := flags.Int64("revision", 0, "expected settings revision (defaults to current)")
 		instanceName := flags.String("instance-name", "", "instance display name")
 		currency := flags.String("default-currency", "", "default three-letter currency")
-		mediaBytes := flags.Int64("media-upload-max-bytes", 0, "raw media upload byte limit")
+		mediaBytes := flags.Int64("media-upload-max-bytes", 0, "whole-MiB raw media limit in bytes (1048576 through 26214400)")
 		publicJoin := flags.String("public-join-enabled", "", "true or false")
 		maintenance := flags.String("maintenance-mode", "", "true or false")
 		maintenanceMessage := flags.String("maintenance-message", "", "short maintenance notice")
@@ -472,10 +489,19 @@ func systemGroupsCommand(ctx context.Context, runtime *localSystemRuntime, argum
 		if err != nil {
 			return err
 		}
+		result := runtime.groupInvitationResult(item)
 		if *jsonOutput {
-			return writeCommandJSON(item)
+			return writeCommandJSON(result)
 		}
 		fmt.Printf("Group %s created with status %s.\n", item.ID, item.Status)
+		if result.AcceptURL != "" {
+			fmt.Printf("Invitation link: %s\n", result.AcceptURL)
+			if result.EmailDeliveryStatus == "PENDING" {
+				fmt.Println("Email delivery queued.")
+			} else {
+				fmt.Println("Email delivery was not requested; share the invitation link manually.")
+			}
+		}
 		return nil
 	case "archive", "restore":
 		flags := flag.NewFlagSet("admin system groups "+arguments[0], flag.ContinueOnError)
@@ -525,7 +551,6 @@ func systemGroupsCommand(ctx context.Context, runtime *localSystemRuntime, argum
 		}
 		impact, err := runtime.service.PurgeGroupLocally(ctx, actor.UserID, *groupID, systemadmin.PurgeGroupInput{
 			ExpectedVersion: *revision, GroupName: *confirmName,
-			ConfirmationPhrase: systemadmin.GroupPurgeConfirmationPhrase,
 		})
 		var maintenanceWarning *systemadmin.PurgePostCommitWarning
 		if err != nil && !errors.As(err, &maintenanceWarning) {

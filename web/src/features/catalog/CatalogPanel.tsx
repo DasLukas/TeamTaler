@@ -1,6 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Plus from 'lucide-react/dist/esm/icons/plus';
+import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
+import Save from 'lucide-react/dist/esm/icons/save';
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
+import X from 'lucide-react/dist/esm/icons/x';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
@@ -334,7 +337,7 @@ export function CatalogPanel() {
           {categoryMutation.isError ? <p className={styles.error} role="alert">{categoryMutation.error.message}</p> : null}
           <div className={styles.actions}>
             {editingCategory && !editingCategory.active ? <Button className={styles.deleteAction} disabled={categoryMutation.isPending} leadingIcon={<Trash2 size={16} />} onClick={() => openCategoryDeletion(editingCategory)} variant="danger">{t('catalog.deletePermanently')}</Button> : null}
-            <Button onClick={clearCategoryDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!categoryName.trim() || categoryMutation.isPending} type="submit">{editingCategory ? t('common.save') : t('catalog.createCategoryAction')}</Button>
+            <Button leadingIcon={<X size={17} />} onClick={clearCategoryDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!categoryName.trim() || categoryMutation.isPending} leadingIcon={editingCategory ? <Save size={17} /> : <Plus size={17} />} type="submit">{editingCategory ? t('common.save') : t('catalog.createCategoryAction')}</Button>
           </div>
         </form>
       </Modal>
@@ -372,8 +375,8 @@ export function CatalogPanel() {
           {persistedProduct && imageMutation.isError ? <p className={styles.error} role="alert">{editingProduct ? t('catalog.imageUpdateError') : t('catalog.imageUploadError')} {imageMutation.error.message}</p> : null}
           <div className={styles.actions}>
             {editingProduct && !editingProduct.active && !persistedProduct ? <Button className={styles.deleteAction} disabled={productMutation.isPending} leadingIcon={<Trash2 size={16} />} onClick={() => openProductDeletion(editingProduct)} variant="danger">{t('catalog.deletePermanently')}</Button> : null}
-            <Button onClick={clearProductDialog} variant="secondary">{persistedProduct ? t('catalog.finishWithoutImage') : t('common.cancel')}</Button>
-            <Button disabled={!productName.trim() || !productPriceValid || productMutation.isPending || imageMutation.isPending || Boolean(persistedProduct && !productImage)} type="submit">
+            <Button leadingIcon={<X size={17} />} onClick={clearProductDialog} variant="secondary">{persistedProduct ? t('catalog.finishWithoutImage') : t('common.cancel')}</Button>
+            <Button disabled={!productName.trim() || !productPriceValid || productMutation.isPending || imageMutation.isPending || Boolean(persistedProduct && !productImage)} leadingIcon={persistedProduct ? <RotateCcw size={17} /> : editingProduct ? <Save size={17} /> : <Plus size={17} />} type="submit">
               {persistedProduct ? imageMutation.isPending ? t('catalog.imageUploadPending') : t('catalog.retryImage') : editingProduct ? t('common.save') : t('catalog.createProductAction')}
             </Button>
           </div>
@@ -385,7 +388,7 @@ export function CatalogPanel() {
           {deleteTarget?.kind === 'category' && deleteTarget.item.products.length > 0 ? <p className={styles.hint}>{t('catalog.deleteCategoryProductsHint')}</p> : null}
           {deleteMutation.isError ? <p className={styles.error} role="alert">{deleteError}</p> : null}
           <div className={styles.actions}>
-            <Button disabled={deleteMutation.isPending} onClick={closeDeleteDialog} variant="secondary">{t('common.cancel')}</Button>
+            <Button disabled={deleteMutation.isPending} leadingIcon={<X size={17} />} onClick={closeDeleteDialog} variant="secondary">{t('common.cancel')}</Button>
             <Button disabled={!deleteTarget || deleteMutation.isPending} leadingIcon={<Trash2 size={16} />} onClick={() => { if (deleteTarget) deleteMutation.mutate(deleteTarget); }} variant="danger">{deleteMutation.isPending ? t('catalog.deleting') : t('catalog.confirmDelete')}</Button>
           </div>
         </div>

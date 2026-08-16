@@ -1,0 +1,22 @@
+.mark {
+  position: relative;
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  color: var(--color-teal-700);
+  background: var(--color-surface-muted);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.mark img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.withImage { background: transparent; }

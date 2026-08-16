@@ -2,13 +2,14 @@ package httpapi
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
-	"github.com/DasLukas/TeamTaler/internal/auth"
 	"github.com/DasLukas/TeamTaler/internal/config"
 	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/email"
@@ -21,6 +22,24 @@ type instanceCapabilitiesResponse struct {
 	MaintenanceMessage  string `json:"maintenanceMessage,omitempty"`
 	PublicJoinEnabled   bool   `json:"publicJoinEnabled"`
 	MediaUploadMaxBytes int64  `json:"mediaUploadMaxBytes"`
+}
+
+type systemGroupInvitationResponse struct {
+	Group               systemadmin.ManagedGroup `json:"group"`
+	AcceptURL           string                   `json:"acceptUrl,omitempty"`
+	EmailDeliveryStatus string                   `json:"emailDeliveryStatus,omitempty"`
+	ExpiresAt           string                   `json:"expiresAt,omitempty"`
+}
+
+func (s *Server) systemGroupInvitationResponse(item systemadmin.ManagedGroup) systemGroupInvitationResponse {
+	result := systemGroupInvitationResponse{Group: item}
+	if item.InvitationToken == "" {
+		return result
+	}
+	result.AcceptURL = strings.TrimSuffix(s.config.PublicURL.String(), "/") + "/invite#token=" + url.QueryEscape(item.InvitationToken)
+	result.EmailDeliveryStatus = string(item.InvitationEmailDeliveryStatus)
+	result.ExpiresAt = item.InvitationExpiresAt
+	return result
 }
 
 func (s *Server) handleInstanceCapabilities(response http.ResponseWriter, request *http.Request) {
@@ -292,6 +311,25 @@ func (s *Server) handleListSystemGroups(response http.ResponseWriter, request *h
 	writeJSON(response, http.StatusOK, map[string]any{"items": items})
 }
 
+// handleSystemGroupLogo serves the current logo of one managed group to a
+// live system administrator without granting access to other group resources.
+func (s *Server) handleSystemGroupLogo(response http.ResponseWriter, request *http.Request) {
+	if _, err := s.systemAdministrator(request); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	var imageKey string
+	if err := s.db.QueryRowContext(request.Context(), `SELECT logo_key FROM groups WHERE id=? AND logo_key IS NOT NULL`, request.PathValue("groupID")).Scan(&imageKey); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeProblem(response, request, domain.ErrNotFound)
+			return
+		}
+		writeProblem(response, request, err)
+		return
+	}
+	s.serveStoredImage(response, request, imageKey)
+}
+
 func (s *Server) handleCreateSystemGroup(response http.ResponseWriter, request *http.Request) {
 	principal, err := s.systemAdministrator(request)
 	if err != nil {
@@ -317,7 +355,7 @@ func (s *Server) handleCreateSystemGroup(response http.ResponseWriter, request *
 		return
 	}
 	response.Header().Set("ETag", versionETag(item.Version))
-	writeJSON(response, http.StatusCreated, item)
+	writeJSON(response, http.StatusCreated, s.systemGroupInvitationResponse(item))
 }
 
 func (s *Server) handleSystemGroupDeletionImpact(response http.ResponseWriter, request *http.Request) {
@@ -360,7 +398,7 @@ func (s *Server) handleResendSystemGroupInvitation(response http.ResponseWriter,
 		return
 	}
 	response.Header().Set("ETag", versionETag(item.Version))
-	writeJSON(response, http.StatusOK, item)
+	writeJSON(response, http.StatusOK, s.systemGroupInvitationResponse(item))
 }
 
 func (s *Server) handleSystemGroupLifecycle(response http.ResponseWriter, request *http.Request, operation func(context.Context, string, string, int64) (systemadmin.ManagedGroup, error)) {
@@ -381,39 +419,6 @@ func (s *Server) handleSystemGroupLifecycle(response http.ResponseWriter, reques
 	}
 	response.Header().Set("ETag", versionETag(item.Version))
 	writeJSON(response, http.StatusOK, item)
-}
-
-func (s *Server) handleSystemStepUp(response http.ResponseWriter, request *http.Request) {
-	principal, err := s.systemAdministrator(request)
-	if err != nil {
-		writeProblem(response, request, err)
-		return
-	}
-	var input struct {
-		Password string `json:"password"`
-		Purpose  string `json:"purpose"`
-	}
-	if err := decodeJSON(response, request, &input); err != nil {
-		writeProblem(response, request, err)
-		return
-	}
-	if input.Purpose != "GROUP_PURGE" {
-		writeProblem(response, request, domain.ValidationError{Field: "purpose", Message: "must be GROUP_PURGE"})
-		return
-	}
-	key := s.clientIP(request) + "|system-step-up|" + principal.UserID
-	if !s.loginLimiter.allow(key) || !s.acquirePasswordSlot() {
-		response.Header().Set("Retry-After", "900")
-		writeProblem(response, request, domain.ErrRateLimited)
-		return
-	}
-	defer s.releasePasswordSlot()
-	token, expiresAt, err := s.systemAdmin.IssueStepUp(request.Context(), principal.UserID, input.Password, auth.VerifyPassword)
-	if err != nil {
-		writeProblem(response, request, err)
-		return
-	}
-	writeJSON(response, http.StatusCreated, map[string]any{"token": token, "expiresAt": expiresAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00")})
 }
 
 func (s *Server) handlePurgeSystemGroup(response http.ResponseWriter, request *http.Request) {

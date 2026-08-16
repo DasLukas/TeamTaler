@@ -519,8 +519,12 @@ func createMember(ctx context.Context, authService auth.Service, groupService gr
 	if err != nil {
 		return seededMember{}, fmt.Errorf("invite %s: %w", seed.email, err)
 	}
+	preview, err := authService.PreviewInvitation(ctx, invitation.Token)
+	if err != nil {
+		return seededMember{}, fmt.Errorf("preview invitation for %s: %w", seed.email, err)
+	}
 	session, membership, err := authService.AcceptInvitation(ctx, auth.InvitationAcceptance{
-		Token: invitation.Token, DisplayName: seed.displayName, Password: testPassword,
+		Token: invitation.Token, DisplayName: seed.displayName, Password: testPassword, ExpectedAccountState: preview.AccountState,
 	})
 	if err != nil {
 		return seededMember{}, fmt.Errorf("accept invitation for %s: %w", seed.email, err)

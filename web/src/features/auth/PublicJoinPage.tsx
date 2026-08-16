@@ -2,6 +2,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2';
 import MailCheck from 'lucide-react/dist/esm/icons/mail-check';
+import LogIn from 'lucide-react/dist/esm/icons/log-in';
+import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
+import UserRoundPlus from 'lucide-react/dist/esm/icons/user-round-plus';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
@@ -80,14 +83,14 @@ export function PublicJoinPage() {
             <section className={styles.accountCard}>
               <CheckCircle2 aria-hidden="true" size={28} />
               <div><strong>{session.user.displayName}</strong><span>{t('publicJoin.signedInAs', { email: session.user.email })}</span></div>
-              <Button disabled={acceptMutation.isPending} onClick={() => acceptMutation.mutate()}>{t('publicJoin.joinCurrentAccount')}</Button>
+              <Button disabled={acceptMutation.isPending} leadingIcon={<UserRoundPlus size={17} />} onClick={() => acceptMutation.mutate()}>{t('publicJoin.joinCurrentAccount')}</Button>
             </section>
           ) : registrationEmail ? (
             <section className={styles.checkEmail} role="status">
               <MailCheck aria-hidden="true" size={42} />
               <h2>{t('publicJoin.checkEmailTitle')}</h2>
               <p>{t('publicJoin.checkEmailDescription')}</p>
-              <Button disabled={resendMutation.isPending} onClick={() => resendMutation.mutate()} variant="secondary">{t('publicJoin.resend')}</Button>
+              <Button disabled={resendMutation.isPending} leadingIcon={<RefreshCw size={17} />} onClick={() => resendMutation.mutate()} variant="secondary">{t('publicJoin.resend')}</Button>
               {resendSent ? <small>{t('publicJoin.resendSent')}</small> : null}
             </section>
           ) : (
@@ -101,7 +104,7 @@ export function PublicJoinPage() {
                   <p className={styles.hint}>{t('publicJoin.loginHint')}</p>
                   <Field error={loginForm.formState.errors.email?.message} htmlFor="join-login-email" label={t('auth.email')}><TextInput autoComplete="email" id="join-login-email" type="email" {...loginForm.register('email', { required: t('auth.emailRequired') })} /></Field>
                   <Field error={loginForm.formState.errors.password?.message} htmlFor="join-login-password" label={t('auth.password')}><TextInput autoComplete="current-password" id="join-login-password" type="password" {...loginForm.register('password', { required: t('auth.passwordRequired'), maxLength: { value: 1024, message: t('auth.passwordMax') } })} /></Field>
-                  <Button disabled={loginMutation.isPending} fullWidth size="large" type="submit">{t('auth.loginAction')}</Button>
+                  <Button disabled={loginMutation.isPending} fullWidth leadingIcon={<LogIn size={19} />} size="large" type="submit">{t('auth.loginAction')}</Button>
                 </form>
               ) : (
                 <form className={formStyles.form} onSubmit={registrationForm.handleSubmit((values) => registrationMutation.mutate(values))}>
@@ -110,7 +113,7 @@ export function PublicJoinPage() {
                   <Field error={registrationForm.formState.errors.displayName?.message} htmlFor="join-register-name" label={t('auth.displayName')}><TextInput autoComplete="name" id="join-register-name" maxLength={120} {...registrationForm.register('displayName', { required: t('auth.displayNameRequired') })} /></Field>
                   <Field error={registrationForm.formState.errors.password?.message} hint={t('auth.passwordHint')} htmlFor="join-register-password" label={t('auth.password')}><TextInput autoComplete="new-password" id="join-register-password" type="password" {...registrationForm.register('password', { required: t('auth.newPasswordRequired'), minLength: { value: 12, message: t('auth.passwordMinTwelve') }, maxLength: { value: 1024, message: t('auth.passwordMax') } })} /></Field>
                   <Field error={registrationForm.formState.errors.passwordConfirmation?.message} htmlFor="join-register-confirmation" label={t('auth.passwordConfirmation')}><TextInput autoComplete="new-password" id="join-register-confirmation" type="password" {...registrationForm.register('passwordConfirmation', { validate: (value) => value === registrationForm.getValues('password') || t('auth.passwordMismatch') })} /></Field>
-                  <Button disabled={registrationMutation.isPending} fullWidth size="large" type="submit">{t('publicJoin.register')}</Button>
+                  <Button disabled={registrationMutation.isPending} fullWidth leadingIcon={<UserRoundPlus size={19} />} size="large" type="submit">{t('publicJoin.register')}</Button>
                 </form>
               )}
             </>

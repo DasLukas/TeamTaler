@@ -3,16 +3,20 @@ package system
 import (
 	"database/sql"
 	"fmt"
+
+	"github.com/DasLukas/TeamTaler/internal/config"
 )
 
 const (
 	// MinimumMediaUploadBytes is the smallest configurable source upload limit.
-	MinimumMediaUploadBytes int64 = 256 << 10
+	MinimumMediaUploadBytes int64 = config.MinimumMediaUploadBytes
 	// MaximumMediaUploadBytes is the application-level source upload ceiling.
-	MaximumMediaUploadBytes int64 = 25 << 20
+	MaximumMediaUploadBytes int64 = config.MaximumMediaUploadBytes
+	// MediaUploadUnitBytes is the required increment for source upload limits.
+	MediaUploadUnitBytes int64 = config.MediaUploadUnitBytes
 	// MultipartRequestReserveBytes leaves space for multipart framing and HTTP
-	// fields below the immutable whole-request ceiling.
-	MultipartRequestReserveBytes int64 = 1 << 20
+	// fields when the HTTP layer derives a request limit from the live media limit.
+	MultipartRequestReserveBytes int64 = config.MultipartRequestReserve
 )
 
 // NewService constructs an instance-administration service. db must reference a
@@ -38,11 +42,7 @@ func validateDefaults(defaults Defaults) error {
 	if err := validateCurrency(defaults.DefaultCurrency); err != nil {
 		return fmt.Errorf("invalid default currency: %w", err)
 	}
-	hardLimit, err := mediaUploadHardLimit(defaults.MaxRequestBytes)
-	if err != nil {
-		return err
-	}
-	if err := validateMediaUploadLimit(defaults.MediaUploadMaxBytes, hardLimit); err != nil {
+	if err := validateMediaUploadLimit(defaults.MediaUploadMaxBytes, MaximumMediaUploadBytes); err != nil {
 		return fmt.Errorf("invalid default media upload limit: %w", err)
 	}
 	if err := validateMaintenanceMessage(defaults.MaintenanceMessage); err != nil {
@@ -73,20 +73,6 @@ func cloneSources(sources map[SettingKey]SettingSource) map[SettingKey]SettingSo
 		cloned[key] = source
 	}
 	return cloned
-}
-
-func mediaUploadHardLimit(maxRequestBytes int64) (int64, error) {
-	if maxRequestBytes == 0 {
-		return MaximumMediaUploadBytes, nil
-	}
-	hardLimit := maxRequestBytes - MultipartRequestReserveBytes
-	if hardLimit > MaximumMediaUploadBytes {
-		hardLimit = MaximumMediaUploadBytes
-	}
-	if hardLimit < MinimumMediaUploadBytes {
-		return 0, fmt.Errorf("maximum request size must leave at least %d bytes for media after multipart reserve", MinimumMediaUploadBytes)
-	}
-	return hardLimit, nil
 }
 
 func defaultSource(defaults Defaults, key SettingKey) SettingSource {

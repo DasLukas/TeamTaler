@@ -7,10 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/DasLukas/TeamTaler/internal/auth"
+	"github.com/DasLukas/TeamTaler/internal/authorization"
 	"github.com/DasLukas/TeamTaler/internal/config"
 	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/groups"
@@ -82,6 +84,14 @@ func TestSystemGroupLifecycleAndPurge(t *testing.T) {
 	if initialAdministratorAssignments != 1 {
 		t.Fatalf("initial administrator assignments=%d, want protected administrator role only", initialAdministratorAssignments)
 	}
+	var initialAdministratorMembershipID string
+	if err := database.QueryRowContext(ctx, `SELECT id FROM memberships WHERE group_id=? AND user_id=?`, created.ID, memberID).Scan(&initialAdministratorMembershipID); err != nil {
+		t.Fatalf("load initial administrator membership: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO ledger_entries(id,group_id,membership_id,account,amount_minor,description,created_at)
+		VALUES(?,?,?,?,?,?,?)`, "ledger-system-purge-impact", created.ID, initialAdministratorMembershipID, "MEMBER_RECEIVABLE", 1234, "Purge impact fixture", now); err != nil {
+		t.Fatalf("insert purge impact balance: %v", err)
+	}
 
 	archived, err := service.ArchiveGroup(ctx, administrator.Principal.UserID, created.ID, created.Version)
 	if err != nil {
@@ -125,18 +135,13 @@ func TestSystemGroupLifecycleAndPurge(t *testing.T) {
 	if err := guardTx.Rollback(); err != nil {
 		t.Fatalf("rollback scoped purge-guard test: %v", err)
 	}
-	stepUpToken, _, err := service.IssueStepUp(ctx, administrator.Principal.UserID, password, auth.VerifyPassword)
-	if err != nil {
-		t.Fatalf("issue step-up: %v", err)
-	}
 	impact, err := service.PurgeGroup(ctx, administrator.Principal.UserID, created.ID, systemadmin.PurgeGroupInput{
-		ExpectedVersion: archived.Version, StepUpToken: stepUpToken, GroupName: created.Name,
-		ConfirmationPhrase: systemadmin.GroupPurgeConfirmationPhrase,
+		ExpectedVersion: archived.Version, GroupName: created.Name,
 	})
 	if err != nil {
 		t.Fatalf("purge group: %v", err)
 	}
-	if impact.GroupID != created.ID || impact.MemberCount != 1 {
+	if impact.GroupID != created.ID || impact.MemberCount != 1 || impact.Currency != "EUR" || impact.OpenBalanceMinor != 1234 {
 		t.Fatalf("purge impact = %#v", impact)
 	}
 	var remaining int
@@ -167,16 +172,16 @@ func TestSystemGroupLifecycleAndPurge(t *testing.T) {
 		t.Fatalf("archive locally purged group: %v", err)
 	}
 	if _, err := service.PurgeGroupLocally(ctx, administrator.Principal.UserID, localGroup.ID, systemadmin.PurgeGroupInput{
-		ExpectedVersion: localGroup.Version, GroupName: "wrong name", ConfirmationPhrase: systemadmin.GroupPurgeConfirmationPhrase,
+		ExpectedVersion: localGroup.Version, GroupName: "wrong name",
 	}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("local purge with wrong name error=%v, want validation", err)
 	}
 	if _, err := service.PurgeGroupLocally(ctx, administrator.Principal.UserID, localGroup.ID, systemadmin.PurgeGroupInput{
-		ExpectedVersion: localGroup.Version, GroupName: localGroup.Name, ConfirmationPhrase: systemadmin.GroupPurgeConfirmationPhrase,
+		ExpectedVersion: localGroup.Version, GroupName: localGroup.Name,
 	}); err != nil {
 		var warning *systemadmin.PurgePostCommitWarning
 		if !errors.As(err, &warning) {
-			t.Fatalf("local purge without web step-up: %v", err)
+			t.Fatalf("local purge: %v", err)
 		}
 	}
 }
@@ -214,16 +219,16 @@ func TestProvisioningGroupActivatesWhenInitialAdministratorAccepts(t *testing.T)
 	if err != nil {
 		t.Fatalf("create provisioning group: %v", err)
 	}
-	if created.Status != systemadmin.GroupStatusProvisioning || sealer.plaintext == "" {
+	if created.Status != systemadmin.GroupStatusProvisioning || created.InvitationToken == "" || created.InvitationToken != sealer.plaintext || created.InvitationEmailDeliveryStatus != systemadmin.InvitationEmailDeliveryPending || created.InvitationExpiresAt == "" {
 		t.Fatalf("provisioning result=%#v tokenCaptured=%t", created, sealer.plaintext != "")
 	}
-	originalToken := sealer.plaintext
+	originalToken := created.InvitationToken
 	resent, err := service.ResendProvisioningInvitation(ctx, administrator.Principal.UserID, created.ID, created.Version, sealer)
 	if err != nil {
 		t.Fatalf("resend provisioning invitation: %v", err)
 	}
-	if resent.Version != created.Version+1 || sealer.plaintext == "" || sealer.plaintext == originalToken {
-		t.Fatalf("resent result=%#v tokenReplaced=%t", resent, sealer.plaintext != originalToken)
+	if resent.Version != created.Version+1 || resent.InvitationToken == "" || resent.InvitationToken != sealer.plaintext || resent.InvitationToken == originalToken || resent.InvitationEmailDeliveryStatus != systemadmin.InvitationEmailDeliveryPending || resent.InvitationExpiresAt == "" {
+		t.Fatalf("resent result=%#v tokenReplaced=%t", resent, resent.InvitationToken != originalToken)
 	}
 	var invitationAssignments int
 	if err := database.QueryRowContext(ctx, `SELECT count(*) FROM invitation_role_assignments assignment
@@ -238,7 +243,7 @@ func TestProvisioningGroupActivatesWhenInitialAdministratorAccepts(t *testing.T)
 		t.Fatalf("preview replaced invitation error=%v, want not found", err)
 	}
 	if _, _, err := authentication.AcceptInvitation(ctx, auth.InvitationAcceptance{
-		Token: sealer.plaintext, DisplayName: "New Admin", Password: "new-administrator-password",
+		Token: resent.InvitationToken, DisplayName: "New Admin", Password: "new-administrator-password",
 	}); err != nil {
 		t.Fatalf("accept initial administrator invitation: %v", err)
 	}
@@ -257,6 +262,193 @@ func TestProvisioningGroupActivatesWhenInitialAdministratorAccepts(t *testing.T)
 	}
 	if administratorAssignments != 1 {
 		t.Fatalf("administrator assignments=%d", administratorAssignments)
+	}
+}
+
+func TestConcurrentCrossGroupInvitationsConvergeOnOneStableAccount(t *testing.T) {
+	ctx := context.Background()
+	database, err := storage.Open(ctx, filepath.Join(t.TempDir(), "teamtaler.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer database.Close()
+
+	password := "parallel-invitation-password"
+	authentication := auth.Service{DB: database, SessionLifetime: 24 * time.Hour}
+	if err := authentication.Bootstrap(ctx, "system@example.test", "System", "correct-horse-battery-staple", "Bootstrap", "EUR"); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	administrator, err := authentication.Login(ctx, "system@example.test", "correct-horse-battery-staple")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	systemService, err := systemadmin.NewService(database, systemadmin.Defaults{
+		InstanceName: "TeamTaler", DefaultCurrency: "EUR", MediaUploadMaxBytes: config.DefaultMediaUploadBytes,
+		PublicJoinEnabled: true, MaxRequestBytes: 6 << 20,
+	}, nil)
+	if err != nil {
+		t.Fatalf("new system service: %v", err)
+	}
+	groupService := groups.Service{DB: database}
+	bootstrapGroups, err := groupService.List(ctx, administrator.Principal.UserID)
+	if err != nil || len(bootstrapGroups) != 1 {
+		t.Fatalf("list bootstrap group: groups=%#v err=%v", bootstrapGroups, err)
+	}
+	bootstrapGroup := bootstrapGroups[0]
+	memberRoleID := authorization.TemplateRoleID(bootstrapGroup.ID, domain.RoleTemplateMember)
+	memberInvitation, err := groupService.CreateInvitationWithRoles(ctx, administrator.Principal, bootstrapGroup.Membership, "parallel@example.test", "Parallel User", []string{memberRoleID})
+	if err != nil {
+		t.Fatalf("create member invitation: %v", err)
+	}
+	firstAdminGroup, err := systemService.CreateGroup(ctx, administrator.Principal.UserID, systemadmin.CreateGroupInput{
+		Name: "Parallel Admin One", Currency: "EUR", InitialAdministratorEmail: "parallel@example.test",
+	}, nil)
+	if err != nil {
+		t.Fatalf("create first provisioning group: %v", err)
+	}
+	secondAdminGroup, err := systemService.CreateGroup(ctx, administrator.Principal.UserID, systemadmin.CreateGroupInput{
+		Name: "Parallel Admin Two", Currency: "EUR", InitialAdministratorEmail: "PARALLEL@example.test",
+	}, nil)
+	if err != nil {
+		t.Fatalf("create second provisioning group: %v", err)
+	}
+	for name, token := range map[string]string{
+		"member":               memberInvitation.Token,
+		"first administrator":  firstAdminGroup.InvitationToken,
+		"second administrator": secondAdminGroup.InvitationToken,
+	} {
+		preview, err := authentication.PreviewInvitation(ctx, token)
+		if err != nil || preview.AccountState != auth.InvitationAccountNew {
+			t.Fatalf("%s preview=%#v err=%v, want NEW", name, preview, err)
+		}
+	}
+
+	type acceptanceResult struct {
+		token string
+		err   error
+	}
+	results := make([]acceptanceResult, 2)
+	tokens := []string{memberInvitation.Token, firstAdminGroup.InvitationToken}
+	start := make(chan struct{})
+	var wait sync.WaitGroup
+	for index, token := range tokens {
+		wait.Add(1)
+		go func(index int, token string) {
+			defer wait.Done()
+			<-start
+			_, _, acceptErr := authentication.AcceptInvitation(ctx, auth.InvitationAcceptance{
+				Token: token, DisplayName: "Parallel User", Password: password, ExpectedAccountState: auth.InvitationAccountNew,
+			})
+			results[index] = acceptanceResult{token: token, err: acceptErr}
+		}(index, token)
+	}
+	close(start)
+	wait.Wait()
+
+	successes := 0
+	stateChanges := 0
+	staleToken := ""
+	for _, result := range results {
+		switch {
+		case result.err == nil:
+			successes++
+		case errors.Is(result.err, auth.ErrInvitationAccountStateChanged):
+			stateChanges++
+			staleToken = result.token
+		default:
+			t.Fatalf("parallel acceptance returned unexpected error: %v", result.err)
+		}
+	}
+	if successes != 1 || stateChanges != 1 {
+		t.Fatalf("parallel results successes/stateChanges=%d/%d, want 1/1", successes, stateChanges)
+	}
+	stalePreview, err := authentication.PreviewInvitation(ctx, staleToken)
+	if err != nil || stalePreview.AccountState != auth.InvitationAccountExisting {
+		t.Fatalf("stale invitation preview=%#v err=%v, want EXISTING", stalePreview, err)
+	}
+	if _, _, err := authentication.AcceptInvitation(ctx, auth.InvitationAcceptance{
+		Token: staleToken, Password: password, ExpectedAccountState: auth.InvitationAccountExisting,
+	}); err != nil {
+		t.Fatalf("accept refreshed stale invitation: %v", err)
+	}
+	if _, _, err := authentication.AcceptInvitation(ctx, auth.InvitationAcceptance{
+		Token: secondAdminGroup.InvitationToken, Password: password, ExpectedAccountState: auth.InvitationAccountExisting,
+	}); err != nil {
+		t.Fatalf("accept second administrator invitation: %v", err)
+	}
+
+	var userID string
+	var accountCount, membershipCount, boundInvitationCount int
+	if err := database.QueryRowContext(ctx, `SELECT count(*),min(id) FROM users WHERE email='parallel@example.test' COLLATE NOCASE`).Scan(&accountCount, &userID); err != nil {
+		t.Fatalf("load converged account: %v", err)
+	}
+	if err := database.QueryRowContext(ctx, `SELECT count(*) FROM memberships WHERE user_id=? AND group_id IN (?,?,?)`, userID, bootstrapGroup.ID, firstAdminGroup.ID, secondAdminGroup.ID).Scan(&membershipCount); err != nil {
+		t.Fatalf("count independent memberships: %v", err)
+	}
+	if err := database.QueryRowContext(ctx, `SELECT count(*) FROM invitations WHERE email='parallel@example.test' COLLATE NOCASE AND target_user_id=?`, userID).Scan(&boundInvitationCount); err != nil {
+		t.Fatalf("count stable invitation bindings: %v", err)
+	}
+	if accountCount != 1 || membershipCount != 3 || boundInvitationCount != 3 {
+		t.Fatalf("accounts/memberships/bindings=%d/%d/%d, want 1/3/3", accountCount, membershipCount, boundInvitationCount)
+	}
+
+	roleChecks := []struct {
+		groupID string
+		roleID  string
+	}{
+		{groupID: bootstrapGroup.ID, roleID: memberRoleID},
+		{groupID: firstAdminGroup.ID, roleID: authorization.PresetRoleID(firstAdminGroup.ID, domain.RolePresetGroupAdministrator)},
+		{groupID: secondAdminGroup.ID, roleID: authorization.PresetRoleID(secondAdminGroup.ID, domain.RolePresetGroupAdministrator)},
+	}
+	for _, check := range roleChecks {
+		var assignmentCount, expectedCount int
+		if err := database.QueryRowContext(ctx, `SELECT count(*),sum(CASE WHEN assignment.role_id=? THEN 1 ELSE 0 END)
+			FROM membership_role_assignments assignment
+			JOIN memberships membership ON membership.group_id=assignment.group_id AND membership.id=assignment.membership_id
+			WHERE assignment.group_id=? AND membership.user_id=?`, check.roleID, check.groupID, userID).Scan(&assignmentCount, &expectedCount); err != nil {
+			t.Fatalf("read role assignments for %s: %v", check.groupID, err)
+		}
+		if assignmentCount != 1 || expectedCount != 1 {
+			t.Fatalf("group %s role assignments=%d/%d, want only %s", check.groupID, assignmentCount, expectedCount, check.roleID)
+		}
+	}
+
+	bindingGroup, err := groupService.Create(ctx, administrator.Principal, "Stable Binding", "EUR")
+	if err != nil {
+		t.Fatalf("create stable-binding group: %v", err)
+	}
+	boundInvitation, err := groupService.CreateInvitationWithRoles(ctx, administrator.Principal, bindingGroup.Membership, "parallel@example.test", "Parallel User", []string{
+		authorization.TemplateRoleID(bindingGroup.ID, domain.RoleTemplateMember),
+	})
+	if err != nil {
+		t.Fatalf("create stable-bound invitation: %v", err)
+	}
+	var storedTargetUserID string
+	if err := database.QueryRowContext(ctx, `SELECT target_user_id FROM invitations WHERE id=?`, boundInvitation.ID).Scan(&storedTargetUserID); err != nil || storedTargetUserID != userID {
+		t.Fatalf("stored stable target=%q err=%v, want %s", storedTargetUserID, err, userID)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE users SET email='renamed@example.test',updated_at=? WHERE id=?`, platform.Timestamp(platform.Now()), userID); err != nil {
+		t.Fatalf("rename bound account email: %v", err)
+	}
+	replacementPasswordHash, err := auth.HashPassword("replacement-account-password")
+	if err != nil {
+		t.Fatalf("hash replacement password: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('replacement-user','parallel@example.test','Replacement',?,?,?)`, replacementPasswordHash, platform.Timestamp(platform.Now()), platform.Timestamp(platform.Now())); err != nil {
+		t.Fatalf("insert replacement mailbox account: %v", err)
+	}
+	preview, err := authentication.PreviewInvitation(ctx, boundInvitation.Token)
+	if err != nil || preview.AccountState != auth.InvitationAccountExisting || preview.DisplayName != "Parallel User" {
+		t.Fatalf("stable-bound preview=%#v err=%v", preview, err)
+	}
+	_, boundMembership, err := authentication.AcceptInvitation(ctx, auth.InvitationAcceptance{
+		Token: boundInvitation.Token, Password: password, ExpectedAccountState: auth.InvitationAccountExisting,
+	})
+	if err != nil {
+		t.Fatalf("accept invitation after mailbox reuse: %v", err)
+	}
+	if boundMembership.UserID != userID {
+		t.Fatalf("bound invitation joined user=%s, want original %s", boundMembership.UserID, userID)
 	}
 }
 

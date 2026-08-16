@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import CalendarCheck from 'lucide-react/dist/esm/icons/calendar-check';
 import LockKeyhole from 'lucide-react/dist/esm/icons/lock-keyhole';
 import Printer from 'lucide-react/dist/esm/icons/printer';
+import X from 'lucide-react/dist/esm/icons/x';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
@@ -76,7 +77,7 @@ export function SettlementsPanel({ settlements, settlementsEnabled }: Settlement
           <Field htmlFor="period-label" label={t('periods.label')}><TextInput id="period-label" onChange={(event) => setLabel(event.target.value)} required value={label} /></Field>
           <Field htmlFor="period-due" label={t('periods.paymentDue')}><TextInput id="period-due" onChange={(event) => setDueAt(event.target.value)} required type="date" value={dueAt} /></Field>
           {closeMutation.isError ? <p className={styles.error} role="alert">{closeMutation.error.message}</p> : null}
-          <div className={styles.actions}><Button onClick={() => setPeriodToClose(null)} variant="secondary">{t('common.cancel')}</Button><Button disabled={!label.trim() || !dueAt || closeMutation.isPending} type="submit">{t('periods.confirmClose')}</Button></div>
+          <div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={() => setPeriodToClose(null)} variant="secondary">{t('common.cancel')}</Button><Button disabled={!label.trim() || !dueAt || closeMutation.isPending} leadingIcon={<LockKeyhole size={17} />} type="submit">{t('periods.confirmClose')}</Button></div>
         </form>
       </Modal>
     </div>

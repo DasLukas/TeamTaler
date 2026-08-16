@@ -105,7 +105,7 @@ Adjust the port in the readiness URL when `TEAMTALER_HOST_PORT` is not `8080`.
 
 Forward the public HTTPS origin to `http://127.0.0.1:8080` when the proxy runs on the Docker host. A proxy in Docker should share a dedicated external network with TeamTaler and use `http://app:8080` as its upstream.
 
-The proxy must preserve the request method, path, query, body, cookies, `Origin`, and `X-CSRF-Token`. Its body-size limit must be at least as large as `TEAMTALER_MAX_REQUEST_BYTES`.
+The proxy must preserve the request method, path, query, body, cookies, `Origin`, and `X-CSRF-Token`. Its body-size limit must be at least 26 MiB to preserve the full runtime-configurable media range, and at least as large as `TEAMTALER_MAX_REQUEST_BYTES` when that ordinary API ceiling is configured above 26 MiB.
 
 Ready-to-adapt Caddy, Nginx, Traefik, and shared-Docker-network examples are documented in [deploy/README.md](deploy/README.md).
 
@@ -150,7 +150,7 @@ TeamTaler separates immutable host configuration from runtime-editable instance 
 | `TEAMTALER_HOST_PORT` | `8080` | Host-loopback port published by Docker Compose. |
 | `TEAMTALER_IMAGE` | `ghcr.io/daslukas/teamtaler` | Container image repository used by Compose. |
 | `TEAMTALER_VERSION` | current release | Pinned image tag and application version. |
-| `TEAMTALER_MAX_REQUEST_BYTES` | `6291456` | Hard HTTP request-body ceiling. Leave at least 1 MiB above the effective media limit for multipart overhead. |
+| `TEAMTALER_MAX_REQUEST_BYTES` | `6291456` | Request-body ceiling for ordinary API operations. Media routes instead follow the live media setting plus a fixed multipart reserve. |
 | `TEAMTALER_EMAIL_TOKEN_KEY` | unset | Base64-encoded 32-byte key for encrypted email proofs and stored SMTP credentials. |
 | `TEAMTALER_SMTP_ALLOW_PRIVATE_NETWORK` | `false` | Allows web-configured SMTP targets on private or local networks. Enable only for a trusted private relay requirement. |
 
@@ -167,11 +167,13 @@ The standard container also uses fixed runtime paths from `.env.example`. Detail
 | `TEAMTALER_MAINTENANCE_MODE` | `false` | Read-only maintenance policy. Login, reads, logout, health checks, and system administration remain available. |
 | `TEAMTALER_MAINTENANCE_MESSAGE` | empty | Short public maintenance notice. |
 
-The media limit must be between 256 KiB and 25 MiB and below `TEAMTALER_MAX_REQUEST_BYTES` by at least 1 MiB. Immutable image-decoder protections still limit dimensions, pixel count, and normalized output size. Keep the reverse proxy body limit compatible; requests rejected at any layer return or surface an upload-too-large response.
+The media limit is editable without a restart through the System tab or `teamtaler admin system settings set --media-upload-max-bytes ...`. It must be a whole MiB value from 1 MiB through 25 MiB. The server automatically applies that live value plus multipart reserve to avatar, group-logo, and product-image requests; `TEAMTALER_MAX_REQUEST_BYTES` does not cap those routes. Immutable image-decoder protections still limit dimensions, pixel count, and normalized output size. If a reverse proxy is used, configure its body limit for at least 26 MiB so it does not override TeamTaler's runtime setting.
 
 ### SMTP and email delivery
 
-SMTP enables automatic invitation delivery, provisioning a group for a new email address, public-join email verification, password recovery, verified email changes, and optional notification email.
+SMTP enables automatic invitation delivery, public-join email verification, password recovery, verified email changes, and optional notification email. Group and member invitations remain manually shareable through their one-time links without SMTP. Renewing an open invitation always rotates and displays a new link; if SMTP has been enabled since the invitation was created, that renewal is also queued for email delivery.
+
+Several groups may invite the same previously unknown email address independently, including as an ordinary member or first group administrator. The first accepted invitation creates the single global TeamTaler account. Every other invitation remains valid for its own group and role set, but acceptance then requires that account's current password. If two forms are submitted concurrently, one creates the account and the other refreshes safely into existing-account mode; TeamTaler never creates duplicate accounts or combines permissions across groups.
 
 Configure SMTP either as an environment default or from **Einstellungen → System → E-Mail (SMTP)**. The required values are:
 
@@ -185,7 +187,7 @@ TEAMTALER_SMTP_FROM_NAME=TeamTaler
 TEAMTALER_SMTP_TLS_MODE=starttls
 ```
 
-Use `starttls` for explicit TLS, commonly on port 587, or `tls` for implicit TLS, commonly on port 465. Plaintext SMTP is unsupported. Supplying only part of the required environment block prevents startup.
+Use `starttls` for explicit TLS, commonly on port 587, or `tls` for implicit TLS, commonly on port 465. The System tab and CLI prefill port 587 with `starttls` when no SMTP default exists. Plaintext SMTP is unsupported. Supplying only part of the required environment block prevents startup.
 
 A complete environment SMTP configuration is active after startup. A configuration stored through the System tab or CLI is encrypted, starts disabled, and must send a successful test message to the current system administrator. Enable it only after the exact stored revision is marked as tested.
 
@@ -206,7 +208,7 @@ The target account must already exist. Keep at least two active system administr
 
 A system administrator without group membership can still log in and sees only System, Account, and Logout. Global administration does not widen access to group business data.
 
-Groups created for an existing account become active immediately and assign that account only the protected group-administrator role. A group created for a new email address remains in `PROVISIONING` until its protected first-administrator invitation is accepted; working SMTP is required for this flow. Archival is reversible. Permanent purge is available only after archival and requires impact review, current version checks, exact confirmations, and—through the web interface—a five-minute password step-up proof.
+Groups created for an existing account become active immediately and assign that account only the protected group-administrator role. A group created for a new email address remains in `PROVISIONING` until its protected first-administrator invitation is accepted. TeamTaler always returns a one-time link for manual sharing; active SMTP additionally sends the same invitation by email. Archival is reversible. Permanent purge is available only after archival and requires impact review, a current version check, and the exact current group name.
 
 ## Operator CLI
 
@@ -331,6 +333,8 @@ teamtaler admin system groups purge \
 
 Read the current group ID, status, and version with `groups list` before a lifecycle mutation. When several active system administrators exist, `--actor-email` identifies the audit actor.
 
+When `groups create` provisions a previously unknown address, the command prints the one-time invitation link. JSON output includes `group`, `acceptUrl`, `emailDeliveryStatus`, and the exact `expiresAt` timestamp. Share the link manually; when effective SMTP is active, TeamTaler also queues the same invitation for email delivery.
+
 Interactive purge prompts for the exact group name. Non-interactive use requires `--confirm-name`. Purge succeeds only for an archived group at the supplied version and permanently removes its active application data. Review the web deletion-impact report and create a verified off-host backup first.
 
 ### General operations
@@ -403,7 +407,7 @@ Confirm the direct peer address seen by TeamTaler. Configure only that proxy add
 
 ### Uploads fail with HTTP 413
 
-Check all three limits: the reverse proxy body limit, `TEAMTALER_MAX_REQUEST_BYTES`, and the effective media limit in the System tab. The host ceiling must leave at least 1 MiB of multipart reserve above the media limit.
+Check the effective media limit in the System tab. If a reverse proxy is used, its body limit must allow at least 26 MiB for the maximum 25 MiB media setting plus multipart overhead. `TEAMTALER_MAX_REQUEST_BYTES` applies only to ordinary non-media API requests.
 
 ### The System tab is missing after an upgrade
 

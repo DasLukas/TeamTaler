@@ -95,6 +95,9 @@ func TestLoadDisablesSMTPWhenUnconfigured(t *testing.T) {
 	if loaded.SMTP.Enabled {
 		t.Fatal("SMTP was enabled without any SMTP environment variables")
 	}
+	if loaded.SMTP.Port != DefaultSMTPPort || loaded.SMTP.TLSMode != SMTPTLSModeStartTLS {
+		t.Fatalf("unexpected disabled SMTP defaults: %#v", loaded.SMTP)
+	}
 }
 
 func TestLoadAcceptsCompleteSMTPConfigurationWithSecureDefaults(t *testing.T) {
@@ -262,6 +265,7 @@ func TestLoadRejectsUnsafeMutableInstanceDefaults(t *testing.T) {
 		{name: "instance controls", variable: "TEAMTALER_INSTANCE_NAME", value: "Unsafe\nName"},
 		{name: "currency", variable: "TEAMTALER_DEFAULT_CURRENCY", value: "EURO"},
 		{name: "media too small", variable: "TEAMTALER_MEDIA_UPLOAD_MAX_BYTES", value: "1024"},
+		{name: "media fractional MiB", variable: "TEAMTALER_MEDIA_UPLOAD_MAX_BYTES", value: "1310720"},
 		{name: "public join boolean", variable: "TEAMTALER_PUBLIC_JOIN_ENABLED", value: "yes"},
 		{name: "maintenance boolean", variable: "TEAMTALER_MAINTENANCE_MODE", value: "1"},
 		{name: "maintenance controls", variable: "TEAMTALER_MAINTENANCE_MESSAGE", value: "Unsafe\rMessage"},
@@ -276,11 +280,16 @@ func TestLoadRejectsUnsafeMutableInstanceDefaults(t *testing.T) {
 	}
 }
 
-func TestLoadRequiresMultipartHeadroomForMediaDefault(t *testing.T) {
+func TestLoadAllowsMediaDefaultAboveGeneralRequestLimit(t *testing.T) {
 	clearSMTPEnvironment(t)
 	t.Setenv("TEAMTALER_MAX_REQUEST_BYTES", "5242880")
-	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "TEAMTALER_MEDIA_UPLOAD_MAX_BYTES") {
-		t.Fatalf("insufficient request ceiling error = %v", err)
+	t.Setenv("TEAMTALER_MEDIA_UPLOAD_MAX_BYTES", "26214400")
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.InstanceDefaults.MediaUploadMaxBytes != MaximumMediaUploadBytes {
+		t.Fatalf("media default = %d, want %d", loaded.InstanceDefaults.MediaUploadMaxBytes, MaximumMediaUploadBytes)
 	}
 }
 

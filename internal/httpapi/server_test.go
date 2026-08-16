@@ -1,13 +1,54 @@
 package httpapi
 
 import (
+	"bytes"
+	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/DasLukas/TeamTaler/internal/config"
+	systemadmin "github.com/DasLukas/TeamTaler/internal/system"
 )
+
+func TestLimitBodyUsesLiveMediaLimitForUploadRoutes(t *testing.T) {
+	server := &Server{config: config.Config{MaxRequestBytes: 1 << 20}}
+	handler := server.limitBody(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if _, err := io.Copy(io.Discard, request.Body); err != nil {
+			response.WriteHeader(http.StatusRequestEntityTooLarge)
+			return
+		}
+		response.WriteHeader(http.StatusNoContent)
+	}))
+	settings := systemadmin.Settings{MediaUploadMaxBytes: systemadmin.Setting[int64]{Value: 2 << 20}}
+	tests := []struct {
+		name       string
+		method     string
+		path       string
+		wantStatus int
+	}{
+		{name: "avatar", method: http.MethodPost, path: "/api/v1/me/avatar", wantStatus: http.StatusNoContent},
+		{name: "group logo", method: http.MethodPost, path: "/api/v1/groups/grp_1/logo", wantStatus: http.StatusNoContent},
+		{name: "product image", method: http.MethodPost, path: "/api/v1/groups/grp_1/products/prd_1/image", wantStatus: http.StatusNoContent},
+		{name: "ordinary API request", method: http.MethodPost, path: "/api/v1/groups", wantStatus: http.StatusRequestEntityTooLarge},
+		{name: "non-upload method", method: http.MethodPut, path: "/api/v1/groups/grp_1/logo", wantStatus: http.StatusRequestEntityTooLarge},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(test.method, "http://teamtaler.test"+test.path, bytes.NewReader(make([]byte, 1536<<10)))
+			request = request.WithContext(context.WithValue(request.Context(), systemSettingsKey, settings))
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != test.wantStatus {
+				t.Fatalf("status=%d, want %d", response.Code, test.wantStatus)
+			}
+		})
+	}
+}
 
 func TestSPAHandlerServesFilesAndClientRoutes(t *testing.T) {
 	root := t.TempDir()

@@ -973,16 +973,16 @@ describe('system-administration API contract', () => {
   beforeEach(() => vi.restoreAllMocks());
   afterEach(() => vi.unstubAllGlobals());
 
-  it('resets scalar overrides with core keys and a strong settings revision', async () => {
+  it('resets a settings section with core keys and a strong settings revision', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ revision: 8 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await api.resetSystemSetting('instanceName', 7);
+    await api.resetSystemSettings(['instanceName', 'mediaUploadMaxBytes'], 7);
 
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/system/settings/reset');
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' });
     expect(new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers).get('If-Match')).toBe('"v7"');
-    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ keys: ['instance.name'] });
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ keys: ['instance.name', 'media.upload_max_bytes'] });
   });
 
   it('uses the TLS-only SMTP PUT and keeps a successful test revision', async () => {
@@ -1001,29 +1001,46 @@ describe('system-administration API contract', () => {
     expect(new Headers((fetchMock.mock.calls[1][1] as RequestInit).headers).get('If-Match')).toBe('"v4"');
   });
 
-  it('adapts purpose-bound step-up and posts purge confirmations to the lifecycle endpoint', async () => {
-    const impact = { groupId: 'group/a', groupName: 'Group A', version: 6, memberCount: 2, invitationCount: 1, bookingCount: 4, financialRecordCount: 3, auditEventCount: 5, mediaCount: 1 };
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ token: 'one-use-token', expiresAt: '2026-08-15T12:05:00Z' }, 201))
-      .mockResolvedValueOnce(jsonResponse(impact));
+  it('posts the exact group-name confirmation to the purge endpoint', async () => {
+    const impact = { groupId: 'group/a', groupName: 'Group A', currency: 'EUR', version: 6, memberCount: 2, openBalanceMinor: '1234', invitationCount: 1, bookingCount: 4, financialRecordCount: 3, auditEventCount: 5, mediaCount: 1 };
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(impact));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(api.createSystemStepUp('current-password')).resolves.toEqual({ stepUpToken: 'one-use-token', expiresAt: '2026-08-15T12:05:00Z' });
-    await api.purgeSystemGroup('group/a', 6, { stepUpToken: 'one-use-token', groupName: 'Group A', confirmationPhrase: 'ENDGÜLTIG LÖSCHEN' });
+    await api.purgeSystemGroup('group/a', 6, { groupName: 'Group A' });
 
-    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ password: 'current-password', purpose: 'GROUP_PURGE' });
-    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/system/groups/group%2Fa/purge');
-    expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: 'POST' });
-    expect(new Headers((fetchMock.mock.calls[1][1] as RequestInit).headers).get('If-Match')).toBe('"v6"');
-    expect(requestBody(fetchMock.mock.calls[1])).toEqual({ stepUpToken: 'one-use-token', groupName: 'Group A', confirmationPhrase: 'ENDGÜLTIG LÖSCHEN' });
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/system/groups/group%2Fa/purge');
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' });
+    expect(new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers).get('If-Match')).toBe('"v6"');
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ groupName: 'Group A' });
   });
 
-  it('resends a provisioning invitation through the versioned group endpoint', async () => {
-    const group = { id: 'group/pending', name: 'Group Pending', currency: 'EUR', status: 'PROVISIONING', version: 3 };
-    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(group));
+  it('returns the immediate manual link when a system group provisions a new administrator', async () => {
+    const group = { id: 'group/pending', name: 'Group Pending', currency: 'EUR', status: 'PROVISIONING', version: 1, administratorEmail: 'new@example.test' };
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ group, acceptUrl: 'https://teamtaler.example/invite#token=manual', emailDeliveryStatus: 'NOT_REQUESTED', expiresAt: '2026-08-23T12:00:00Z' }, 201));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(api.resendSystemGroupInvitation('group/pending', 2)).resolves.toMatchObject({ id: 'group/pending', status: 'PROVISIONING', version: 3 });
+    await expect(api.createSystemGroup({ name: 'Group Pending', currency: 'EUR', administratorEmail: 'new@example.test' })).resolves.toMatchObject({
+      group: { id: 'group/pending', status: 'PROVISIONING' },
+      acceptUrl: 'https://teamtaler.example/invite#token=manual',
+      emailDeliveryStatus: 'NOT_REQUESTED',
+      expiresAt: '2026-08-23T12:00:00Z',
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/system/groups');
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ name: 'Group Pending', currency: 'EUR', initialAdministratorEmail: 'new@example.test' });
+  });
+
+  it('renews a provisioning invitation through the versioned group endpoint', async () => {
+    const group = { id: 'group/pending', name: 'Group Pending', currency: 'EUR', status: 'PROVISIONING', version: 3 };
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ group, acceptUrl: 'https://teamtaler.example/invite#token=replaced', emailDeliveryStatus: 'PENDING', expiresAt: '2026-08-23T12:00:00Z' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.resendSystemGroupInvitation('group/pending', 2)).resolves.toMatchObject({
+      group: { id: 'group/pending', status: 'PROVISIONING', version: 3 },
+      acceptUrl: 'https://teamtaler.example/invite#token=replaced',
+      emailDeliveryStatus: 'PENDING',
+      expiresAt: '2026-08-23T12:00:00Z',
+    });
 
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/system/groups/group%2Fpending/invitation/resend');
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' });

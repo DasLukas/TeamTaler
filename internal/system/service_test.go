@@ -73,6 +73,18 @@ func TestSystemAdministratorAssignmentsAreGlobalLiveAndProtectFinalActiveAdminis
 	if len(events) != 4 {
 		t.Fatalf("audit event count=%d, want 4", len(events))
 	}
+	for _, event := range events {
+		if event.ActorUserID == nil {
+			if event.ActorDisplayName != "" {
+				t.Fatalf("system actor display name=%q, want empty", event.ActorDisplayName)
+			}
+			continue
+		}
+		want := map[string]string{"user-one": "user-one", "user-two": "user-two"}[*event.ActorUserID]
+		if event.ActorDisplayName != want {
+			t.Fatalf("actor %q display name=%q, want %q", *event.ActorUserID, event.ActorDisplayName, want)
+		}
+	}
 }
 
 func TestSettingsUseTypedOverridesOptimisticConcurrencyAndReset(t *testing.T) {
@@ -94,7 +106,7 @@ func TestSettingsUseTypedOverridesOptimisticConcurrencyAndReset(t *testing.T) {
 	}
 	name := "Runtime TeamTaler"
 	currency := "usd"
-	uploadLimit := int64(3 << 20)
+	uploadLimit := int64(24 << 20)
 	publicJoin := false
 	maintenance := true
 	message := "Short maintenance"
@@ -115,8 +127,8 @@ func TestSettingsUseTypedOverridesOptimisticConcurrencyAndReset(t *testing.T) {
 	if updated.DefaultCurrency.Value != "USD" || updated.MediaUploadMaxBytes.Value != uploadLimit || updated.PublicJoinEnabled.Value || !updated.MaintenanceMode.Value {
 		t.Fatalf("unexpected typed settings snapshot: %#v", updated)
 	}
-	if updated.MediaUploadHardLimitBytes != 5<<20 {
-		t.Fatalf("media hard limit=%d, want %d", updated.MediaUploadHardLimitBytes, 5<<20)
+	if updated.MediaUploadHardLimitBytes != MaximumMediaUploadBytes {
+		t.Fatalf("media hard limit=%d, want %d", updated.MediaUploadHardLimitBytes, MaximumMediaUploadBytes)
 	}
 	if _, err := service.UpdateSettings(ctx, "admin", initial.Revision, SettingsPatch{InstanceName: &name}); !errors.Is(err, domain.ErrPrecondition) {
 		t.Fatalf("stale update error=%v, want precondition", err)
@@ -124,9 +136,13 @@ func TestSettingsUseTypedOverridesOptimisticConcurrencyAndReset(t *testing.T) {
 	if _, err := service.UpdateSettings(ctx, "member", updated.Revision, SettingsPatch{InstanceName: &name}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("non-administrator update error=%v, want forbidden", err)
 	}
-	tooLarge := int64(5<<20) + 1
+	tooLarge := MaximumMediaUploadBytes + 1
 	if _, err := service.UpdateSettings(ctx, "admin", updated.Revision, SettingsPatch{MediaUploadMaxBytes: &tooLarge}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("over-hard-limit update error=%v, want validation", err)
+	}
+	fractionalMiB := int64(24<<20) + (256 << 10)
+	if _, err := service.UpdateSettings(ctx, "admin", updated.Revision, SettingsPatch{MediaUploadMaxBytes: &fractionalMiB}); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("fractional-MiB update error=%v, want validation", err)
 	}
 
 	reset, err := service.ResetSettings(ctx, "admin", updated.Revision, []SettingKey{SettingInstanceName, SettingDefaultCurrency})
@@ -308,6 +324,16 @@ func TestDefaultsFromConfigTracksEnvironmentSources(t *testing.T) {
 	}
 	if _, found := defaults.Sources[SettingDefaultCurrency]; found {
 		t.Fatal("unset default currency unexpectedly marked as environment-backed")
+	}
+}
+
+func TestDefaultsFromConfigProvidesSMTPSubmissionDefaults(t *testing.T) {
+	defaults := DefaultsFromConfig(config.Config{})
+	if defaults.SMTP.Enabled {
+		t.Fatal("unconfigured SMTP defaults unexpectedly enabled delivery")
+	}
+	if defaults.SMTP.Port != config.DefaultSMTPPort || defaults.SMTP.TLSMode != SMTPTLSModeStartTLS {
+		t.Fatalf("unexpected SMTP submission defaults: %#v", defaults.SMTP)
 	}
 }
 
