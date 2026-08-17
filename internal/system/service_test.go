@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -334,6 +335,26 @@ func TestDefaultsFromConfigProvidesSMTPSubmissionDefaults(t *testing.T) {
 	}
 	if defaults.SMTP.Port != config.DefaultSMTPPort || defaults.SMTP.TLSMode != SMTPTLSModeStartTLS {
 		t.Fatalf("unexpected SMTP submission defaults: %#v", defaults.SMTP)
+	}
+}
+
+func TestIntSettingRejectsStoredValuesOutsidePlatformRange(t *testing.T) {
+	oversized := "2147483648"
+	if strconv.IntSize == 64 {
+		oversized = "9223372036854775808"
+	}
+	overrides := map[SettingKey]storedOverride{
+		SettingSMTPPort: {
+			key:       SettingSMTPPort,
+			valueType: settingTypeInteger,
+			valueText: sql.NullString{String: oversized, Valid: true},
+			version:   1,
+		},
+	}
+
+	setting := intSetting(Defaults{}, overrides, SettingSMTPPort, 587)
+	if setting.Value != -1 || setting.Source != SettingSourceDatabase {
+		t.Fatalf("out-of-range stored integer resolved as %#v", setting)
 	}
 }
 

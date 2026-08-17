@@ -788,8 +788,19 @@ func int64Setting(defaults Defaults, overrides map[SettingKey]storedOverride, ke
 }
 
 func intSetting(defaults Defaults, overrides map[SettingKey]storedOverride, key SettingKey, fallback int) Setting[int] {
-	resolved := int64Setting(defaults, overrides, key, int64(fallback))
-	return Setting[int]{Value: int(resolved.Value), Source: resolved.Source, OverrideVersion: resolved.OverrideVersion, UpdatedAt: resolved.UpdatedAt}
+	setting := Setting[int]{Value: fallback, Source: defaultSource(defaults, key)}
+	if override, found := overrides[key]; found {
+		value, err := strconv.Atoi(override.valueText.String)
+		if err == nil {
+			setting.Value = value
+		} else {
+			setting.Value = -1
+		}
+		setting.Source = SettingSourceDatabase
+		setting.OverrideVersion = override.version
+		setting.UpdatedAt = override.updatedAt
+	}
+	return setting
 }
 
 func boolSetting(defaults Defaults, overrides map[SettingKey]storedOverride, key SettingKey, fallback bool) Setting[bool] {
