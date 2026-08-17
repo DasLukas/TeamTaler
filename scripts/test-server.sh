@@ -121,17 +121,18 @@ fi
 if [[ "${TEAMTALER_TEST_DISABLE_SMTP:-false}" == "true" ]]; then
   unset TEAMTALER_SMTP_HOST TEAMTALER_SMTP_PORT TEAMTALER_SMTP_USERNAME \
     TEAMTALER_SMTP_PASSWORD TEAMTALER_SMTP_FROM_ADDRESS TEAMTALER_SMTP_FROM_NAME \
-    TEAMTALER_SMTP_TLS_MODE
+    TEAMTALER_SMTP_TLS_MODE TEAMTALER_SMTP_TEST_RECIPIENT
   echo "Local SMTP delivery is disabled for this test run."
 elif [[ -f "${local_env_file}" ]]; then
   load_local_environment
   if [[ -n "${TEAMTALER_SMTP_USERNAME:-}" && -n "${TEAMTALER_SMTP_PASSWORD:-}" ]]; then
     export TEAMTALER_SMTP_FROM_ADDRESS="${TEAMTALER_SMTP_FROM_ADDRESS:-${TEAMTALER_SMTP_USERNAME}}"
+    export TEAMTALER_SMTP_TEST_RECIPIENT="${TEAMTALER_SMTP_FROM_ADDRESS}"
     echo "Local SMTP delivery is enabled for the test server."
   else
     unset TEAMTALER_SMTP_HOST TEAMTALER_SMTP_PORT TEAMTALER_SMTP_USERNAME \
       TEAMTALER_SMTP_PASSWORD TEAMTALER_SMTP_FROM_ADDRESS TEAMTALER_SMTP_FROM_NAME \
-      TEAMTALER_SMTP_TLS_MODE
+      TEAMTALER_SMTP_TLS_MODE TEAMTALER_SMTP_TEST_RECIPIENT
     echo "Local SMTP delivery is disabled. Add username and password to .env.test-server.local to enable it."
   fi
 fi

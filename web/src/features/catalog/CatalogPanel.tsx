@@ -1,16 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import Camera from 'lucide-react/dist/esm/icons/camera';
+import FolderOpen from 'lucide-react/dist/esm/icons/folder-open';
 import Plus from 'lucide-react/dist/esm/icons/plus';
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
 import Save from 'lucide-react/dist/esm/icons/save';
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
 import X from 'lucide-react/dist/esm/icons/x';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { majorUnitsInputPattern, majorUnitsInputValue, majorUnitsPlaceholder, validatePositiveMajorUnits } from '@/api/money';
 import type { Category, CategoryIcon as CategoryIconName, Product, ProductPricingMode } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { useInstanceCapabilities } from '@/app/useSession';
+import { CameraCapture } from '@/components/media/CameraCapture';
+import { supportsLiveCamera } from '@/components/media/cameraCaptureUtils';
 import { ImageCropEditor } from '@/components/media/ImageCropEditor';
 import {
   ACCEPTED_IMAGE_TYPES,
@@ -63,8 +67,11 @@ export function CatalogPanel() {
   const [productImageTransform, setProductImageTransform] = useState<ImageTransform>(DEFAULT_IMAGE_TRANSFORM);
   const [productImageInputKey, setProductImageInputKey] = useState(0);
   const [productImageError, setProductImageError] = useState('');
+  const [productCameraOpen, setProductCameraOpen] = useState(false);
   const [persistedProduct, setPersistedProduct] = useState<Product | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const productImageInputRef = useRef<HTMLInputElement>(null);
+  const productCameraInputRef = useRef<HTMLInputElement>(null);
 
   const invalidateCatalog = () => queryClient.invalidateQueries({ queryKey: ['categories', activeGroupId] });
 
@@ -73,10 +80,12 @@ export function CatalogPanel() {
     setProductImageTransform(DEFAULT_IMAGE_TRANSFORM);
     setProductImageInputKey((current) => current + 1);
     setProductImageError('');
+    setProductCameraOpen(false);
   };
 
   const selectProductImage = (file?: File) => {
     imageMutation.reset();
+    setProductCameraOpen(false);
     if (!file) {
       resetProductImageInput();
       return;
@@ -98,6 +107,16 @@ export function CatalogPanel() {
     setProductImage(file);
     setProductImageTransform(DEFAULT_IMAGE_TRANSFORM);
     setProductImageError('');
+  };
+
+  const openProductCamera = () => {
+    imageMutation.reset();
+    setProductImageError('');
+    if (supportsLiveCamera()) {
+      setProductCameraOpen(true);
+      return;
+    }
+    productCameraInputRef.current?.click();
   };
 
   const clearCategoryDialog = () => {
@@ -366,10 +385,16 @@ export function CatalogPanel() {
                 />
               ) : null}
               <div className={styles.imageUploadControls}>
-                <TextInput accept="image/jpeg,image/png,image/webp" id="product-image" key={productImageInputKey} onChange={(event) => selectProductImage(event.target.files?.[0])} type="file" />
+                <div className={styles.imageSourceActions}>
+                  <Button leadingIcon={<FolderOpen size={17} />} onClick={() => productImageInputRef.current?.click()} size="small" variant="secondary">{t('catalog.chooseImageFile')}</Button>
+                  <Button leadingIcon={<Camera size={17} />} onClick={openProductCamera} size="small" variant="secondary">{t('catalog.useCamera')}</Button>
+                </div>
+                <input accept="image/jpeg,image/png,image/webp" aria-label={t('catalog.imageFileInput')} hidden id="product-image" key={`file-${productImageInputKey}`} onChange={(event) => selectProductImage(event.target.files?.[0])} ref={productImageInputRef} type="file" />
+                <input accept="image/jpeg,image/png,image/webp" aria-label={t('catalog.cameraFileInput')} capture="environment" hidden key={`camera-${productImageInputKey}`} onChange={(event) => selectProductImage(event.target.files?.[0])} ref={productCameraInputRef} type="file" />
                 {productImage ? <Button leadingIcon={<Trash2 size={16} />} onClick={() => { resetProductImageInput(); imageMutation.reset(); }} size="small" variant="ghost">{t('catalog.removeSelectedImage')}</Button> : null}
               </div>
             </div>
+            {productCameraOpen ? <CameraCapture onCancel={() => setProductCameraOpen(false)} onCapture={selectProductImage} onFallback={() => { setProductCameraOpen(false); productCameraInputRef.current?.click(); }} /> : null}
           </Field>
           {productMutation.isError ? <p className={styles.error} role="alert">{productMutation.error.message}</p> : null}
           {persistedProduct && imageMutation.isError ? <p className={styles.error} role="alert">{editingProduct ? t('catalog.imageUpdateError') : t('catalog.imageUploadError')} {imageMutation.error.message}</p> : null}

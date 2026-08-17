@@ -21,7 +21,7 @@ vi.mock('@/api/client', () => ({ api: apiMock }));
 
 const session: Session = {
   user: { id: 'user-a', displayName: 'Admin', email: 'admin@example.test' },
-  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', roles: ['ADMIN', 'MEMBER'], groupPermissions: [], effectiveGrants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }] } }],
+  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', roles: ['ADMIN', 'MEMBER'], groupPermissions: [], effectiveGrants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } }] } }],
   activeGroupId: 'group-a',
   defaultGroupId: null,
   systemRoles: [],
@@ -70,7 +70,7 @@ describe('BehaviorSettingsPanel', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    session.groups[0]!.membership!.effectiveGrants = [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }];
+    session.groups[0]!.membership!.effectiveGrants = [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } }];
     apiMock.getGroupSettings.mockResolvedValue(settings);
     apiMock.getRoles.mockResolvedValue(roles);
   });
@@ -165,14 +165,49 @@ describe('BehaviorSettingsPanel', () => {
     await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { defaultRoleId: 'role-finance' }));
   });
 
-  it('shows only the membership default to a pure member manager', async () => {
+  it('hides the membership default from a pure member manager', async () => {
     session.groups[0]!.membership!.effectiveGrants = [{ permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }];
+    renderPanel();
+
+    await waitFor(() => expect(apiMock.getGroupSettings).toHaveBeenCalled());
+    expect(screen.queryByRole('region', { name: i18n.t('behaviorSettings.defaultRoleTitle') })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(i18n.t('groupSettings.nameLabel'))).not.toBeInTheDocument();
+    expect(screen.queryByRole('switch', { name: i18n.t('behaviorSettings.notificationEmailToggle') })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: i18n.t('behaviorSettings.financeSectionTitle') })).not.toBeInTheDocument();
+    expect(apiMock.getRoles).not.toHaveBeenCalled();
+  });
+
+  it('shows group, finance, and booking settings to a pure group administrator', async () => {
+    session.groups[0]!.membership!.effectiveGrants = [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }];
+    renderPanel();
+
+    expect(await screen.findByLabelText(i18n.t('groupSettings.nameLabel'))).toBeVisible();
+    expect(await screen.findByRole('region', { name: i18n.t('behaviorSettings.defaultRoleTitle') })).toBeVisible();
+    expect(screen.getByRole('region', { name: i18n.t('behaviorSettings.financeSectionTitle') })).toBeVisible();
+    expect(screen.getByRole('region', { name: i18n.t('behaviorSettings.bookingTitle') })).toBeVisible();
+    expect(apiMock.getRoles).toHaveBeenCalled();
+  });
+
+  it('shows only finance and booking settings to a pure finance manager', async () => {
+    session.groups[0]!.membership!.effectiveGrants = [{ permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } }];
+    renderPanel();
+
+    expect(await screen.findByRole('region', { name: i18n.t('behaviorSettings.financeSectionTitle') })).toBeVisible();
+    expect(await screen.findByRole('region', { name: i18n.t('behaviorSettings.bookingTitle') })).toBeVisible();
+    expect(screen.queryByLabelText(i18n.t('groupSettings.nameLabel'))).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: i18n.t('behaviorSettings.defaultRoleTitle') })).not.toBeInTheDocument();
+    expect(screen.queryByRole('switch', { name: i18n.t('behaviorSettings.notificationEmailToggle') })).not.toBeInTheDocument();
+    expect(apiMock.getRoles).not.toHaveBeenCalled();
+  });
+
+  it('shows only the membership default to a pure role manager', async () => {
+    session.groups[0]!.membership!.effectiveGrants = [{ permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }];
     renderPanel();
 
     expect(await screen.findByRole('region', { name: i18n.t('behaviorSettings.defaultRoleTitle') })).toBeVisible();
     expect(screen.queryByLabelText(i18n.t('groupSettings.nameLabel'))).not.toBeInTheDocument();
     expect(screen.queryByRole('switch', { name: i18n.t('behaviorSettings.notificationEmailToggle') })).not.toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: i18n.t('behaviorSettings.financeSectionTitle') })).not.toBeInTheDocument();
+    expect(apiMock.getRoles).toHaveBeenCalled();
   });
 
   it('renders compact icon-only add controls with accessible names', async () => {

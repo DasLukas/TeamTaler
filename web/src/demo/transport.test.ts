@@ -484,7 +484,7 @@ describe('DemoTransport group settings', () => {
     await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings')).resolves.toMatchObject({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-finance' });
   });
 
-  it('authorizes default-role and group-configuration fields independently', async () => {
+  it('accepts either role or group management for the default role', async () => {
     const groupTransport = new DemoTransport();
     const groupOnly = await groupTransport.request<Role>('/groups/group-sv-adler/roles', jsonRequest('POST', {
       name: 'Group configuration',
@@ -492,17 +492,37 @@ describe('DemoTransport group settings', () => {
     }));
     await demoteCurrentAdministrator(groupTransport, ['role-member', groupOnly.id]);
     await expect(groupTransport.request('/groups/group-sv-adler/settings', jsonRequest('PATCH', { settlementsEnabled: true }))).resolves.toMatchObject({ settlementsEnabled: true });
-    await expect(groupTransport.request('/groups/group-sv-adler/settings', jsonRequest('PATCH', { defaultRoleId: 'role-finance' }))).rejects.toThrow(i18n.t('admin.noAccessMessage'));
+    await expect(groupTransport.request('/groups/group-sv-adler/settings', jsonRequest('PATCH', { defaultRoleId: 'role-finance' }))).resolves.toMatchObject({ defaultRoleId: 'role-finance' });
 
-    const memberTransport = new DemoTransport();
-    const memberOnly = await memberTransport.request<Role>('/groups/group-sv-adler/roles', jsonRequest('POST', {
-      name: 'Membership lifecycle',
-      grants: [{ permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }],
+    const roleTransport = new DemoTransport();
+    const roleOnly = await roleTransport.request<Role>('/groups/group-sv-adler/roles', jsonRequest('POST', {
+      name: 'Role definitions',
+      grants: [{ permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }],
     }));
-    await demoteCurrentAdministrator(memberTransport, ['role-member', memberOnly.id]);
-    await expect(memberTransport.request('/groups/group-sv-adler/settings', jsonRequest('PATCH', { defaultRoleId: 'role-finance' }))).resolves.toMatchObject({ defaultRoleId: 'role-finance' });
-    await expect(memberTransport.request('/groups/group-sv-adler/settings', jsonRequest('PATCH', { settlementsEnabled: true }))).rejects.toThrow(i18n.t('admin.noAccessMessage'));
-    await expect(memberTransport.request('/groups/group-sv-adler/settings', jsonRequest('PATCH', { defaultRoleId: 'role-member', settlementsEnabled: true }))).rejects.toThrow(i18n.t('admin.noAccessMessage'));
+    await demoteCurrentAdministrator(roleTransport, ['role-member', roleOnly.id]);
+    await expect(roleTransport.request('/groups/group-sv-adler/settings', jsonRequest('PATCH', { defaultRoleId: 'role-finance' }))).resolves.toMatchObject({ defaultRoleId: 'role-finance' });
+    await expect(roleTransport.request('/groups/group-sv-adler/settings', jsonRequest('PATCH', { settlementsEnabled: true }))).rejects.toThrow(i18n.t('admin.noAccessMessage'));
+
+    const financeTransport = new DemoTransport();
+    const financeOnly = await financeTransport.request<Role>('/groups/group-sv-adler/roles', jsonRequest('POST', {
+      name: 'Finance configuration',
+      grants: [{ permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } }],
+    }));
+    await demoteCurrentAdministrator(financeTransport, ['role-member', financeOnly.id]);
+    await expect(financeTransport.request('/groups/group-sv-adler/settings', jsonRequest('PATCH', { settlementsEnabled: true }))).resolves.toMatchObject({ settlementsEnabled: true });
+    await expect(financeTransport.request('/groups/group-sv-adler/settings', jsonRequest('PATCH', { defaultRoleId: 'role-finance' }))).rejects.toThrow(i18n.t('admin.noAccessMessage'));
+
+    const combinedTransport = new DemoTransport();
+    const combined = await combinedTransport.request<Role>('/groups/group-sv-adler/roles', jsonRequest('POST', {
+      name: 'Default role administration',
+      grants: [
+        { permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } },
+        { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } },
+      ],
+    }));
+    await demoteCurrentAdministrator(combinedTransport, ['role-member', combined.id]);
+    await expect(combinedTransport.request('/groups/group-sv-adler/settings', jsonRequest('PATCH', { defaultRoleId: 'role-finance' }))).resolves.toMatchObject({ defaultRoleId: 'role-finance' });
+    await expect(combinedTransport.request('/groups/group-sv-adler/settings', jsonRequest('PATCH', { defaultRoleId: 'role-member', settlementsEnabled: true }))).resolves.toMatchObject({ defaultRoleId: 'role-member', settlementsEnabled: true });
   });
 
   it('rejects period closing until settlements are enabled', async () => {

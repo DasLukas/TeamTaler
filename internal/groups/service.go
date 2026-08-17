@@ -175,11 +175,11 @@ func (s Service) UpdateName(ctx context.Context, actor domain.Principal, members
 	return name, nil
 }
 
-// Settings returns the current group's typed behavior settings. Group and
-// member managers may read the shared resource; field-level authorization is
-// enforced separately for updates.
+// Settings returns the current group's typed behavior settings. Group, member,
+// and role managers may read the shared resource; field-level authorization
+// is enforced separately for updates.
 func (s Service) Settings(ctx context.Context, membership domain.Membership) (domain.GroupSettings, error) {
-	if err := requireAnyCurrentPermission(ctx, s.DB, membership, domain.PermissionGroupAdministration, domain.PermissionMemberManagement); err != nil {
+	if err := requireAnyCurrentPermission(ctx, s.DB, membership, domain.PermissionGroupAdministration, domain.PermissionMemberManagement, domain.PermissionRoleManagement, domain.PermissionFinanceManagement); err != nil {
 		return domain.GroupSettings{}, err
 	}
 	return s.settingsForGroup(ctx, membership.GroupID)
@@ -203,8 +203,9 @@ type SettingsUpdate struct {
 }
 
 // UpdateSettings atomically applies the supplied group-wide behavior changes.
-// MEMBER_MANAGEMENT protects the default role; GROUP_ADMINISTRATION protects
-// every technical and behavioral field. Mixed updates require both rights.
+// ROLE_MANAGEMENT or GROUP_ADMINISTRATION protects the default role;
+// GROUP_ADMINISTRATION protects notification delivery, while either
+// GROUP_ADMINISTRATION or FINANCE_MANAGEMENT protects finance and booking configuration.
 func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, membership domain.Membership, update SettingsUpdate) (domain.GroupSettings, error) {
 	if update.NotificationEmailsEnabled == nil && update.SettlementsEnabled == nil && update.DefaultRoleID == nil &&
 		update.OwnBookingReasonMode == nil && update.ForeignBookingReasonMode == nil &&
@@ -352,18 +353,23 @@ func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, mem
 
 func requireSettingsUpdatePermissions(ctx context.Context, queryer authorization.Queryer, membership domain.Membership, update SettingsUpdate) error {
 	if update.DefaultRoleID != nil {
-		if err := requireCurrentPermission(ctx, queryer, membership, domain.PermissionMemberManagement); err != nil {
+		if err := requireAnyCurrentPermission(ctx, queryer, membership, domain.PermissionRoleManagement, domain.PermissionGroupAdministration); err != nil {
 			return err
 		}
 	}
-	updatesGroupConfiguration := update.NotificationEmailsEnabled != nil || update.SettlementsEnabled != nil ||
+	updatesFinancialConfiguration := update.SettlementsEnabled != nil ||
 		update.OwnBookingReasonMode != nil || update.ForeignBookingReasonMode != nil ||
 		update.OwnPaymentReasonMode != nil || update.OtherPaymentReasonMode != nil ||
 		update.ForeignBookingReasonRequired != nil || update.OwnPaymentReasonRequired != nil ||
 		update.OtherPaymentReasonRequired != nil || update.PaymentMethods != nil ||
 		update.BookingReasons != nil || update.PaymentReasons != nil
-	if updatesGroupConfiguration {
-		return requireCurrentPermission(ctx, queryer, membership, domain.PermissionGroupAdministration)
+	if update.NotificationEmailsEnabled != nil {
+		if err := requireCurrentPermission(ctx, queryer, membership, domain.PermissionGroupAdministration); err != nil {
+			return err
+		}
+	}
+	if updatesFinancialConfiguration {
+		return requireAnyCurrentPermission(ctx, queryer, membership, domain.PermissionGroupAdministration, domain.PermissionFinanceManagement)
 	}
 	return nil
 }

@@ -17,6 +17,8 @@ import styles from './BehaviorSettingsPanel.module.css';
 
 /** Properties for the editable group behavior settings form. */
 interface SettingsFormProps {
+  canManageDefaultRole: boolean;
+  canManageFinancialSettings: boolean;
   canManageGroup: boolean;
   groupId: string;
   roles?: Role[];
@@ -109,7 +111,7 @@ function DefaultRoleSetting({ groupId, roles, settings }: DefaultRoleSettingProp
  * @param props - Group identifier and persisted settings.
  * @returns An accessible settings form with explicit save feedback.
  */
-function SettingsForm({ canManageGroup, groupId, roles, settings }: SettingsFormProps) {
+function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canManageGroup, groupId, roles, settings }: SettingsFormProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [settlementsEnabled, setSettlementsEnabled] = useState(settings.settlementsEnabled);
@@ -173,7 +175,7 @@ function SettingsForm({ canManageGroup, groupId, roles, settings }: SettingsForm
       <section aria-labelledby="group-settings-section-title" className={styles.settingsSection}>
         <header><h3 id="group-settings-section-title">{t('behaviorSettings.groupSectionTitle')}</h3></header>
         {canManageGroup ? <GroupSettingsPanel embedded /> : null}
-        {roles ? <DefaultRoleSetting groupId={groupId} key={`${groupId}:${settings.defaultRoleId ?? ''}`} roles={roles} settings={settings} /> : null}
+        {canManageDefaultRole && roles ? <DefaultRoleSetting groupId={groupId} key={`${groupId}:${settings.defaultRoleId ?? ''}`} roles={roles} settings={settings} /> : null}
         {canManageGroup ? <section aria-labelledby="notification-email-setting-title" className={styles.card}>
           <div className={styles.settingRow}>
             <div>
@@ -186,7 +188,7 @@ function SettingsForm({ canManageGroup, groupId, roles, settings }: SettingsForm
         </section> : null}
       </section>
 
-      {canManageGroup ? <section aria-labelledby="finance-settings-title" className={styles.settingsSection}>
+      {canManageFinancialSettings ? <section aria-labelledby="finance-settings-title" className={styles.settingsSection}>
         <header><h3 id="finance-settings-title">{t('behaviorSettings.financeSectionTitle')}</h3></header>
         <section aria-labelledby="settlements-setting-title" className={styles.card}>
           <div className={styles.settingRow}>
@@ -200,7 +202,7 @@ function SettingsForm({ canManageGroup, groupId, roles, settings }: SettingsForm
         </section>
       </section> : null}
 
-      {canManageGroup ? <section aria-labelledby="booking-settings-title" className={styles.bookingSection}>
+      {canManageFinancialSettings ? <section aria-labelledby="booking-settings-title" className={styles.bookingSection}>
         <header><h3 id="booking-settings-title">{t('behaviorSettings.bookingTitle')}</h3></header>
         <section className={styles.card}>
           <h4 className={styles.cardTitle}>{t('behaviorSettings.reasonRulesTitle')}</h4>
@@ -243,14 +245,15 @@ export function BehaviorSettingsPanel() {
   const { t } = useTranslation();
   const { activeGroup, activeGroupId } = useActiveGroup();
   const canManageGroup = can(activeGroup.membership?.effectiveGrants, 'GROUP_ADMINISTRATION');
-  const canManageMembers = can(activeGroup.membership?.effectiveGrants, 'MEMBER_MANAGEMENT');
+  const canManageDefaultRole = canManageGroup || can(activeGroup.membership?.effectiveGrants, 'ROLE_MANAGEMENT');
+  const canManageFinancialSettings = canManageGroup || can(activeGroup.membership?.effectiveGrants, 'FINANCE_MANAGEMENT');
   const settingsQuery = useQuery({ queryKey: ['group-settings', activeGroupId], queryFn: () => api.getGroupSettings(activeGroupId) });
-  const rolesQuery = useQuery({ queryKey: ['roles', activeGroupId], queryFn: () => api.getRoles(activeGroupId), enabled: canManageMembers });
+  const rolesQuery = useQuery({ queryKey: ['roles', activeGroupId], queryFn: () => api.getRoles(activeGroupId), enabled: canManageDefaultRole });
 
-  if (settingsQuery.isLoading || canManageMembers && rolesQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
-  if (settingsQuery.isError || !settingsQuery.data || canManageMembers && (rolesQuery.isError || !rolesQuery.data)) return <div className={styles.state}><StatePanel kind="error" message={t('behaviorSettings.loadError')} /></div>;
+  if (settingsQuery.isLoading || canManageDefaultRole && rolesQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
+  if (settingsQuery.isError || !settingsQuery.data || canManageDefaultRole && (rolesQuery.isError || !rolesQuery.data)) return <div className={styles.state}><StatePanel kind="error" message={t('behaviorSettings.loadError')} /></div>;
 
   return <div className={styles.content}>
-    <SettingsForm canManageGroup={canManageGroup} groupId={activeGroupId} key={`${activeGroupId}:${JSON.stringify(settingsQuery.data)}`} roles={rolesQuery.data} settings={settingsQuery.data} />
+    <SettingsForm canManageDefaultRole={canManageDefaultRole} canManageFinancialSettings={canManageFinancialSettings} canManageGroup={canManageGroup} groupId={activeGroupId} key={`${activeGroupId}:${JSON.stringify(settingsQuery.data)}`} roles={rolesQuery.data} settings={settingsQuery.data} />
   </div>;
 }

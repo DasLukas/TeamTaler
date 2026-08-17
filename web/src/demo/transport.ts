@@ -68,7 +68,7 @@ interface DemoRoutePolicy {
 }
 
 const DEMO_ROUTE_POLICIES: readonly DemoRoutePolicy[] = [
-  { methods: ['GET', 'PATCH'], resource: /^settings$/, anyOf: ['GROUP_ADMINISTRATION', 'MEMBER_MANAGEMENT'] },
+  { methods: ['GET', 'PATCH'], resource: /^settings$/, anyOf: ['GROUP_ADMINISTRATION', 'MEMBER_MANAGEMENT', 'ROLE_MANAGEMENT', 'FINANCE_MANAGEMENT'] },
   { methods: ['POST', 'DELETE'], resource: /^logo$/, anyOf: ['GROUP_ADMINISTRATION'] },
   { methods: ['GET'], resource: /^members$/, anyOf: ['VIEW_MEMBER_DIRECTORY'] },
   { methods: ['PATCH', 'DELETE'], resource: /^members\/[^/]+$/, anyOf: ['MEMBER_MANAGEMENT'] },
@@ -367,8 +367,11 @@ export class DemoTransport {
         || update.bookingReasons !== undefined
         || update.paymentReasons !== undefined;
       if (!updatesSettlements && !updatesNotificationEmails && !updatesDefaultRole && !updatesTransactionSettings) throw new Error('At least one group setting is required.');
-      if (updatesDefaultRole) this.requirePermission(groupId, 'MEMBER_MANAGEMENT');
-      if (updatesSettlements || updatesNotificationEmails || updatesTransactionSettings) this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
+      if (updatesDefaultRole) {
+        this.requireAnyPermission(groupId, ['ROLE_MANAGEMENT', 'GROUP_ADMINISTRATION']);
+      }
+      if (updatesNotificationEmails) this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
+      if (updatesSettlements || updatesTransactionSettings) this.requireAnyPermission(groupId, ['GROUP_ADMINISTRATION', 'FINANCE_MANAGEMENT']);
       if (updatesSettlements && typeof update.settlementsEnabled !== 'boolean') throw new Error('Settlement availability must be a boolean.');
       if (updatesNotificationEmails && typeof update.notificationEmailsEnabled !== 'boolean') throw new Error('Notification email delivery must be a boolean.');
       const submittedReasonModes = [update.ownBookingReasonMode, update.foreignBookingReasonMode, update.ownPaymentReasonMode, update.otherPaymentReasonMode].filter((value) => value !== undefined);

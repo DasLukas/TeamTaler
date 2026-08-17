@@ -110,6 +110,9 @@ type Config struct {
 	InstanceDefaults InstanceDefaults
 	// SMTP contains validated invitation-delivery configuration.
 	SMTP SMTPConfig
+	// SMTPTestRecipient optionally routes operator-triggered SMTP test messages
+	// to one immutable mailbox instead of the authenticated administrator.
+	SMTPTestRecipient string
 	// EmailTokenKey is an optional decoded 32-byte AES key and is required when SMTP is enabled.
 	EmailTokenKey []byte
 }
@@ -159,6 +162,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	smtpTestRecipient, err := loadOptionalMailbox("TEAMTALER_SMTP_TEST_RECIPIENT")
+	if err != nil {
+		return Config{}, err
+	}
 	emailTokenKey, err := loadEmailTokenKey()
 	if err != nil {
 		return Config{}, err
@@ -179,6 +186,7 @@ func Load() (Config, error) {
 		MaxRequestBytes:   maxRequestBytes,
 		InstanceDefaults:  instanceDefaults,
 		SMTP:              smtpConfig,
+		SMTPTestRecipient: smtpTestRecipient,
 		EmailTokenKey:     emailTokenKey,
 	}, nil
 }
@@ -333,8 +341,7 @@ func loadSMTPConfig() (SMTPConfig, error) {
 		return SMTPConfig{}, fmt.Errorf("TEAMTALER_SMTP_FROM_ADDRESS must not contain control characters")
 	}
 	fromAddress := strings.TrimSpace(rawFromAddress)
-	parsedAddress, err := mail.ParseAddress(fromAddress)
-	if err != nil || len(fromAddress) > 254 || parsedAddress.Name != "" || parsedAddress.Address != fromAddress || !strings.Contains(fromAddress, "@") || !isASCII(fromAddress) {
+	if !isMailbox(fromAddress) {
 		return SMTPConfig{}, fmt.Errorf("TEAMTALER_SMTP_FROM_ADDRESS must be one ASCII mailbox address without a display name")
 	}
 	rawFromName := os.Getenv("TEAMTALER_SMTP_FROM_NAME")
@@ -367,6 +374,25 @@ func loadSMTPConfig() (SMTPConfig, error) {
 		AllowedPrivateHost:  host,
 		AllowedPrivatePort:  port,
 	}, nil
+}
+
+// loadOptionalMailbox reads one optional ASCII mailbox from the process
+// environment. name identifies the variable. It returns an empty string when
+// unset and an error when the value is not exactly one bare mailbox address.
+func loadOptionalMailbox(name string) (string, error) {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return "", nil
+	}
+	if containsControlCharacter(os.Getenv(name)) || !isMailbox(value) {
+		return "", fmt.Errorf("%s must be one ASCII mailbox address without a display name", name)
+	}
+	return value, nil
+}
+
+func isMailbox(value string) bool {
+	parsedAddress, err := mail.ParseAddress(value)
+	return err == nil && len(value) <= 254 && parsedAddress.Name == "" && parsedAddress.Address == value && strings.Contains(value, "@") && isASCII(value)
 }
 
 func isASCII(value string) bool {

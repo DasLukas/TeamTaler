@@ -38,6 +38,7 @@ export function AdminPage() {
   const canManageGroup = can(grants, 'GROUP_ADMINISTRATION');
   const canManageMembers = can(grants, 'MEMBER_MANAGEMENT');
   const canManageRoles = can(grants, 'ROLE_MANAGEMENT');
+  const canManageFinances = can(grants, 'FINANCE_MANAGEMENT');
   const tabGroupId = useId();
   const tabRefs = useRef<Partial<Record<AdminTab, HTMLButtonElement | null>>>({});
   const [requestedTab, setRequestedTab] = useState<AdminTab>(systemAdministrator ? 'system' : 'settings');
@@ -46,7 +47,7 @@ export function AdminPage() {
     if (!activeGroup) return false;
     if (tab.id === 'rights') return canManageRoles;
     if (tab.id === 'members') return canManageMembers;
-    if (tab.id === 'settings') return canManageGroup || canManageMembers;
+    if (tab.id === 'settings') return canManageGroup || canManageRoles || canManageFinances;
     return canManageGroup;
   });
   const activeTab = availableTabs.some((tab) => tab.id === requestedTab) ? requestedTab : availableTabs[0]?.id;

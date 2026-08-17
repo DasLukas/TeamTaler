@@ -230,31 +230,42 @@ func (s *Server) handleTestSystemSMTP(response http.ResponseWriter, request *htt
 		writeProblem(response, request, err)
 		return
 	}
-	if settings.Revision != expected || settings.SMTP.Revision < 1 || !settings.SMTP.RequiresTest || !settings.SMTP.ConfigurationValid {
+	if settings.Revision != expected || !settings.SMTP.ConfigurationValid ||
+		(settings.SMTP.RequiresTest && settings.SMTP.Revision < 1) {
 		writeProblem(response, request, domain.ErrPrecondition)
 		return
 	}
 	configuration.Enabled = true
+	testRecipient := principal.Email
+	testRecipientName := principal.DisplayName
+	if s.config.SMTPTestRecipient != "" {
+		testRecipient = s.config.SMTPTestRecipient
+		testRecipientName = ""
+	}
 	sender, err := email.NewSMTP(toSMTPConfig(configuration))
 	if err == nil {
 		err = sender.SendNotification(request.Context(), email.NotificationMessage{
-			ToAddress: principal.Email, ToName: principal.DisplayName,
+			ToAddress: testRecipient, ToName: testRecipientName,
 			GroupName: settings.InstanceName.Value, Title: "SMTP configuration test",
-			Body:      "This message confirms that the current TeamTaler SMTP revision can deliver email.",
+			Body:      "This message confirms that the current TeamTaler SMTP configuration can deliver email.",
 			ActionURL: strings.TrimSuffix(s.config.PublicURL.String(), "/") + "/admin",
 		})
 	}
 	if err != nil {
-		if _, stateErr := s.systemAdmin.MarkSMTPTestFailed(request.Context(), principal.UserID, expected, settings.SMTP.Revision); stateErr != nil {
-			s.logger.Error("record failed SMTP configuration test", "error", stateErr)
+		if settings.SMTP.RequiresTest {
+			if _, stateErr := s.systemAdmin.MarkSMTPTestFailed(request.Context(), principal.UserID, expected, settings.SMTP.Revision); stateErr != nil {
+				s.logger.Error("record failed SMTP configuration test", "error", stateErr)
+			}
 		}
 		writeProblem(response, request, fmt.Errorf("%w: SMTP test delivery failed", domain.ErrServiceUnavailable))
 		return
 	}
-	settings, err = s.systemAdmin.MarkSMTPTested(request.Context(), principal.UserID, expected, settings.SMTP.Revision)
-	if err != nil {
-		writeProblem(response, request, err)
-		return
+	if settings.SMTP.RequiresTest {
+		settings, err = s.systemAdmin.MarkSMTPTested(request.Context(), principal.UserID, expected, settings.SMTP.Revision)
+		if err != nil {
+			writeProblem(response, request, err)
+			return
+		}
 	}
 	response.Header().Set("ETag", versionETag(settings.Revision))
 	writeJSON(response, http.StatusOK, settings)

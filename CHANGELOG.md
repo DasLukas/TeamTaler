@@ -4,9 +4,14 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-17
+
 ### Added
 
 - Multi-group accounts can select a fixed default group or the most recently used group in account settings; the server validates membership ownership and resolves that preference for subsequent sessions.
+- Global system administration now provides versioned instance settings, encrypted SMTP overrides and delivery tests, system-administrator assignments, account lookup, group provisioning and lifecycle management, and a global audit trail through both the web interface and operator CLI.
+- System administrators can archive, restore, inspect, and permanently purge groups with explicit impact previews, optimistic concurrency, exact-name confirmation, and retained purge audit receipts.
+- Product image editing now supports live browser-camera capture with front/rear camera switching, bounded JPEG encoding, permission recovery, and a native device-camera fallback.
 
 ### Changed
 
@@ -14,6 +19,20 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Migration `0028` makes `GROUP_ADMINISTRATOR` the only preset-backed system role, clears only the historical non-administrator preset metadata in existing groups, and seeds `Mitglied`, `Finanzverwaltung`, `Katalogverwaltung`, and default `Gast` as ordinary editable roles in new groups.
 - New reserved administrator roles now start with the three protected management grants and `VIEW_MEMBER_DIRECTORY`; finance, catalog, statistics, and booking capabilities require additional role assignments. Existing group roles, grants, assignments, and defaults remain unchanged during migration.
 - Persisted role names now render verbatim in role editors, selectors, summaries, and assignment controls instead of being replaced by frontend translations.
+- Group settings are exposed by capability: role managers control the default role, finance managers control settlement and transaction behavior, and group administrators retain identity, branding, notification, finance, and audit controls.
+- SMTP tests now work for immutable environment configuration as well as database overrides; only database-backed connection revisions participate in persisted verification state.
+- The administration shell, lifecycle dialogs, audit tables, action primitives, group selector, and narrow-viewport layouts use shared accessible components and consistent responsive behavior.
+
+### Fixed
+
+- SMTP test delivery can use an operator-configured recipient without changing the stable test-fixture administrator identity, and configured passwords remain visually masked without being copied into form state.
+- Product-image controls no longer rely on a visible browser file input and retain the existing crop and recoverable upload workflow for both files and camera captures.
+
+### Security
+
+- Runtime SMTP passwords are encrypted at rest with purpose-derived keys, override hosts are subject to private-network restrictions by default, and sensitive values are never returned by settings APIs.
+- System-role, settings, group-lifecycle, and purge mutations revalidate authority and current versions inside serialized transactions while preserving last-administrator and accounting invariants.
+- Group deletion requires archival, current impact review, exact confirmation, and a verified backup workflow before permanently removing application data.
 
 ## [0.8.0] - 2026-08-14
 
@@ -243,7 +262,8 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Explicit acting and charged membership display for every booking, including searchable third-party-assignment cues.
 - Canonical backup-entry allowlisting, target-width Argon2 parameter parsing, and directory-confined SPA asset serving with traversal regression coverage.
 
-[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/DasLukas/TeamTaler/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/DasLukas/TeamTaler/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/DasLukas/TeamTaler/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/DasLukas/TeamTaler/compare/v0.5.1...v0.6.0

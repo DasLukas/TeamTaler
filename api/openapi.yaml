@@ -694,17 +694,19 @@ paths:
   /system/settings/smtp/test:
     post:
       tags: [System]
-      summary: Test the current persisted SMTP revision
+      summary: Test the current effective SMTP configuration
       description: |
-        Sends a test message to the current system administrator account and
-        marks only the unchanged persisted revision as tested. This command is
-        rate limited and never returns SMTP credentials.
+        Sends a test message to the current system administrator account or an
+        immutable operator-configured test recipient, then marks only an
+        unchanged persisted revision as tested. A host-provided configuration
+        is exercised without creating revision state. This command is rate
+        limited and never returns SMTP credentials or the recipient override.
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
         - $ref: '#/components/parameters/RequiredIfMatch'
       responses:
         '200':
-          description: SMTP test succeeded and updated settings carry the new aggregate revision
+          description: SMTP test succeeded; persisted settings carry a new aggregate revision when verification was required
           headers:
             ETag:
               schema: { type: string }
@@ -1038,7 +1040,7 @@ paths:
     get:
       tags: [Groups]
       summary: Read shared group and membership settings
-      description: Requires `GROUP_ADMINISTRATION` or `MEMBER_MANAGEMENT`.
+      description: Requires `GROUP_ADMINISTRATION`, `MEMBER_MANAGEMENT`, `ROLE_MANAGEMENT`, or `FINANCE_MANAGEMENT`.
       parameters:
         - $ref: '#/components/parameters/GroupId'
       responses:
@@ -1052,9 +1054,10 @@ paths:
       tags: [Groups]
       summary: Partially update group or membership settings
       description: |
-        `defaultRoleId` requires `MEMBER_MANAGEMENT`. Every other field requires
-        `GROUP_ADMINISTRATION`; a request mixing both field classes requires both
-        permissions.
+        `defaultRoleId` requires `ROLE_MANAGEMENT` or
+        `GROUP_ADMINISTRATION`. `notificationEmailsEnabled` requires
+        `GROUP_ADMINISTRATION`. Finance and booking fields require
+        `GROUP_ADMINISTRATION` or `FINANCE_MANAGEMENT`.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/CSRFToken'

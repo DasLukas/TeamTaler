@@ -40,6 +40,7 @@ const SETTINGS_QUERY_KEY = ['system-settings'] as const;
 const GROUPS_QUERY_KEY = ['system-groups'] as const;
 const AUDIT_QUERY_KEY = ['system-audit'] as const;
 const MEBIBYTE = 1024 * 1024;
+const SMTP_PASSWORD_MASK = '••••••••••••';
 const COMMON_CURRENCIES = ['EUR', 'CHF', 'USD', 'GBP', 'PLN', 'CZK', 'DKK', 'NOK', 'SEK'] as const;
 type SmtpForm = Omit<Required<SystemSmtpSettingsUpdate>, 'password' | 'port'> & { port: number | '' };
 
@@ -268,7 +269,7 @@ function SmtpSettingsSection({ settings }: { settings: SystemSettings }) {
           <div className={styles.fieldBlock}><Field htmlFor="system-smtp-port" label={t('systemSettings.smtp.port')}><TextInput id="system-smtp-port" max={65535} min={1} onChange={(event) => setValue('port', event.target.value === '' ? '' : event.target.valueAsNumber)} required type="number" value={form.port} /></Field></div>
           <div className={styles.fieldBlock}><Field htmlFor="system-smtp-tls" label={t('systemSettings.smtp.tlsMode')}><SelectInput id="system-smtp-tls" onChange={(event) => setValue('tlsMode', event.target.value as SmtpForm['tlsMode'])} value={form.tlsMode}><option value="starttls">STARTTLS</option><option value="tls">TLS</option></SelectInput></Field></div>
           <div className={styles.fieldBlock}><Field htmlFor="system-smtp-username" label={t('systemSettings.smtp.username')}><TextInput autoComplete="username" id="system-smtp-username" onChange={(event) => setValue('username', event.target.value)} value={form.username} /></Field></div>
-          <div className={styles.fieldBlock}><Field hint={smtp.passwordConfigured ? t('systemSettings.smtp.passwordPreserved') : undefined} htmlFor="system-smtp-password" label={t('systemSettings.smtp.password')}><TextInput autoComplete="new-password" id="system-smtp-password" onChange={(event) => setPassword(event.target.value)} type="password" value={password} /></Field></div>
+          <div className={styles.fieldBlock}><Field htmlFor="system-smtp-password" label={t('systemSettings.smtp.password')}><TextInput autoComplete="new-password" id="system-smtp-password" onChange={(event) => setPassword(event.target.value)} placeholder={smtp.passwordConfigured ? SMTP_PASSWORD_MASK : undefined} type="password" value={password} /></Field></div>
           <div className={styles.fieldBlock}><Field htmlFor="system-smtp-from-address" label={t('systemSettings.smtp.fromAddress')}><TextInput id="system-smtp-from-address" onChange={(event) => setValue('fromAddress', event.target.value)} required type="email" value={form.fromAddress} /></Field></div>
           <div className={styles.fieldBlock}><Field htmlFor="system-smtp-from-name" label={t('systemSettings.smtp.fromName')}><TextInput id="system-smtp-from-name" onChange={(event) => setValue('fromName', event.target.value)} value={form.fromName} /></Field></div>
         </fieldset>

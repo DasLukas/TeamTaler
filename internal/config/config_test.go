@@ -17,6 +17,7 @@ var smtpEnvironmentVariables = []string{
 	"TEAMTALER_SMTP_FROM_NAME",
 	"TEAMTALER_SMTP_TLS_MODE",
 	"TEAMTALER_SMTP_ALLOW_PRIVATE_NETWORK",
+	"TEAMTALER_SMTP_TEST_RECIPIENT",
 	"TEAMTALER_EMAIL_TOKEN_KEY",
 }
 
@@ -129,6 +130,23 @@ func TestLoadAcceptsCompleteSMTPConfigurationWithSecureDefaults(t *testing.T) {
 	}
 	if !bytes.Equal(loaded.EmailTokenKey, bytes.Repeat([]byte{0x5a}, 32)) {
 		t.Fatal("email token key was not decoded")
+	}
+}
+
+func TestLoadValidatesOptionalSMTPTestRecipient(t *testing.T) {
+	clearSMTPEnvironment(t)
+	t.Setenv("TEAMTALER_SMTP_TEST_RECIPIENT", "delivery@example.test")
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.SMTPTestRecipient != "delivery@example.test" {
+		t.Fatalf("SMTP test recipient=%q, want delivery@example.test", loaded.SMTPTestRecipient)
+	}
+
+	t.Setenv("TEAMTALER_SMTP_TEST_RECIPIENT", "Delivery <delivery@example.test>")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "TEAMTALER_SMTP_TEST_RECIPIENT") {
+		t.Fatalf("invalid SMTP test recipient error=%v", err)
 	}
 }
 

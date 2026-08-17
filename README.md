@@ -8,7 +8,7 @@ This README is the primary entry point for the person who installs and operates 
 
 - Multiple isolated groups in one installation.
 - Group-owned roles and granular permissions for administration, bookings, finance, catalogue management, and reporting.
-- Fixed-price and user-defined-price products with category, image, archive, and ordering support.
+- Fixed-price and user-defined-price products with category, file or camera image capture, archive, and ordering support.
 - Account balances, incoming payments, immutable corrections, optional accounting periods, and settlement history.
 - Individual invitations, CSV invitation imports, public join links, and temporary guest accounts.
 - Local accounts with profile images, password recovery, verified email changes, and server-side sessions.
@@ -58,7 +58,7 @@ At minimum, edit these values:
 
 ```dotenv
 TEAMTALER_PUBLIC_URL=https://teamtaler.example.com
-TEAMTALER_VERSION=0.8.0
+TEAMTALER_VERSION=0.9.0
 TEAMTALER_HOST_PORT=8080
 TEAMTALER_TRUSTED_PROXY_CIDRS=
 ```
@@ -153,6 +153,7 @@ TeamTaler separates immutable host configuration from runtime-editable instance 
 | `TEAMTALER_MAX_REQUEST_BYTES` | `6291456` | Request-body ceiling for ordinary API operations. Media routes instead follow the live media setting plus a fixed multipart reserve. |
 | `TEAMTALER_EMAIL_TOKEN_KEY` | unset | Base64-encoded 32-byte key for encrypted email proofs and stored SMTP credentials. |
 | `TEAMTALER_SMTP_ALLOW_PRIVATE_NETWORK` | `false` | Allows web-configured SMTP targets on private or local networks. Enable only for a trusted private relay requirement. |
+| `TEAMTALER_SMTP_TEST_RECIPIENT` | empty | Optional immutable mailbox for operator-triggered SMTP test messages. Normal application email is unaffected. |
 
 The standard container also uses fixed runtime paths from `.env.example`. Detailed path, proxy-network, and storage guidance is in [deploy/README.md](deploy/README.md).
 
@@ -189,7 +190,11 @@ TEAMTALER_SMTP_TLS_MODE=starttls
 
 Use `starttls` for explicit TLS, commonly on port 587, or `tls` for implicit TLS, commonly on port 465. The System tab and CLI prefill port 587 with `starttls` when no SMTP default exists. Plaintext SMTP is unsupported. Supplying only part of the required environment block prevents startup.
 
-A complete environment SMTP configuration is active after startup. A configuration stored through the System tab or CLI is encrypted, starts disabled, and must send a successful test message to the current system administrator. Enable it only after the exact stored revision is marked as tested.
+A complete environment SMTP configuration is active after startup. A configuration stored through the System tab or CLI is encrypted, starts disabled, and must send a successful test message to the current system administrator or the immutable `TEAMTALER_SMTP_TEST_RECIPIENT` override. Enable it only after the exact stored revision is marked as tested.
+
+The System tab and local CLI can send a test message through either effective configuration source. Testing an environment configuration performs delivery without creating database revision state; testing a stored configuration also verifies its exact unchanged revision.
+
+The disposable `make test-server` fixture always keeps the stable `admin@example.test` administrator login. When complete SMTP credentials are loaded from `.env.test-server.local`, the script routes operator-triggered SMTP test messages to `TEAMTALER_SMTP_FROM_ADDRESS` through `TEAMTALER_SMTP_TEST_RECIPIENT`; other application email flows retain their actual fixture recipients. The shared development password printed by the script remains unchanged.
 
 Runtime SMTP targets are restricted to public network addresses by default. The exact host and port supplied by the immutable environment SMTP block remain allowed for an existing private relay. Set `TEAMTALER_SMTP_ALLOW_PRIVATE_NETWORK=true` only when system administrators must configure additional private targets and are trusted with that network access.
 

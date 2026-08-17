@@ -82,6 +82,10 @@ func requireAnyCurrentPermission(ctx context.Context, queryer authorization.Quer
 }
 
 func requireRoleReadAccess(ctx context.Context, queryer authorization.Queryer, membership domain.Membership) error {
+	canManageGroup, err := hasCurrentPermission(ctx, queryer, membership, domain.PermissionGroupAdministration)
+	if err != nil {
+		return err
+	}
 	canManageRoles, err := hasCurrentPermission(ctx, queryer, membership, domain.PermissionRoleManagement)
 	if err != nil {
 		return err
@@ -90,7 +94,7 @@ func requireRoleReadAccess(ctx context.Context, queryer authorization.Queryer, m
 	if err != nil {
 		return err
 	}
-	if !canManageRoles && !canManageMembers {
+	if !canManageGroup && !canManageRoles && !canManageMembers {
 		return domain.ErrForbidden
 	}
 	return nil

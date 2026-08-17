@@ -308,6 +308,44 @@ func TestFailedSMTPTestPersistsRedactedRevisionStatus(t *testing.T) {
 	}
 }
 
+func TestHostDefaultSMTPTestAttemptsDeliveryWithoutPersistingRevisionStatus(t *testing.T) {
+	fixture := newSystemHTTPFixture(t, func(configuration *config.Config) {
+		configuration.SMTP = config.SMTPConfig{
+			Enabled: true, Host: "127.0.0.1", Port: 1, TLSMode: config.SMTPTLSModeTLS,
+			Username: "mailer", Password: "smtp-secret", FromAddress: "teamtaler@example.test",
+			AllowedPrivateHost: "127.0.0.1", AllowedPrivatePort: 1,
+		}
+	})
+	settingsResponse := fixture.serve(fixture.bootstrap, http.MethodGet, "/api/v1/system/settings", "", "")
+	if settingsResponse.Code != http.StatusOK {
+		t.Fatalf("get settings status=%d body=%s", settingsResponse.Code, settingsResponse.Body.String())
+	}
+	var before systemadmin.Settings
+	if err := json.Unmarshal(settingsResponse.Body.Bytes(), &before); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	if before.SMTP.RequiresTest || before.SMTP.Revision != 0 || !before.SMTP.Active {
+		t.Fatalf("unexpected host-default SMTP state: %#v", before.SMTP)
+	}
+
+	tested := fixture.serve(fixture.bootstrap, http.MethodPost, "/api/v1/system/settings/smtp/test", "", settingsResponse.Header().Get("ETag"))
+	if tested.Code != http.StatusServiceUnavailable {
+		t.Fatalf("host-default SMTP test status=%d body=%s, want attempted delivery failure 503", tested.Code, tested.Body.String())
+	}
+	current := fixture.serve(fixture.bootstrap, http.MethodGet, "/api/v1/system/settings", "", "")
+	var after systemadmin.Settings
+	if err := json.Unmarshal(current.Body.Bytes(), &after); err != nil {
+		t.Fatalf("decode current settings: %v", err)
+	}
+	if after.Revision != before.Revision || after.SMTP.TestStatus != before.SMTP.TestStatus {
+		t.Fatalf("host-default SMTP test persisted revision state: before=%#v after=%#v", before.SMTP, after.SMTP)
+	}
+	var auditCount int
+	if err := fixture.db.QueryRowContext(context.Background(), `SELECT count(*) FROM system_audit_events WHERE action='system.smtp.test_failed'`).Scan(&auditCount); err != nil || auditCount != 0 {
+		t.Fatalf("host-default failed SMTP audit count=%d err=%v", auditCount, err)
+	}
+}
+
 type systemHTTPFixture struct {
 	db            *sql.DB
 	handler       http.Handler
@@ -318,7 +356,7 @@ type systemHTTPFixture struct {
 	dataDirectory string
 }
 
-func newSystemHTTPFixture(t *testing.T) *systemHTTPFixture {
+func newSystemHTTPFixture(t *testing.T, configure ...func(*config.Config)) *systemHTTPFixture {
 	t.Helper()
 	ctx := context.Background()
 	dataDirectory := t.TempDir()
@@ -344,6 +382,9 @@ func newSystemHTTPFixture(t *testing.T) *systemHTTPFixture {
 			InstanceName: "TeamTaler", DefaultCurrency: "EUR", MediaUploadMaxBytes: config.DefaultMediaUploadBytes,
 			PublicJoinEnabled: true,
 		},
+	}
+	for _, apply := range configure {
+		apply(&configuration)
 	}
 	passwordCipher, err := systemadmin.NewSMTPPasswordCipher(configuration.EmailTokenKey)
 	if err != nil {

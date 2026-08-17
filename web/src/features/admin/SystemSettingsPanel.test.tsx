@@ -442,6 +442,31 @@ describe('SystemSettingsPanel', () => {
     expect(portField).toHaveValue(465);
   });
 
+  it('masks a stored SMTP password and only enables saving for a real replacement', async () => {
+    const user = userEvent.setup();
+    apiMock.getSystemSettings.mockResolvedValue({
+      ...settings,
+      smtp: { ...settings.smtp, active: true, enabled: value(true) },
+    });
+    renderPanel();
+    const heading = await screen.findByRole('heading', { name: 'E-Mail (SMTP)' });
+    const section = heading.closest('section');
+    if (!section) throw new Error('Missing SMTP settings section.');
+
+    const password = within(section).getByLabelText('Passwort');
+    const save = within(section).getByRole('button', { name: 'Speichern' });
+    expect(password).toHaveValue('');
+    expect(password).toHaveAttribute('placeholder', '••••••••••••');
+    expect(within(section).queryByText('Leer lassen, um das gespeicherte Passwort beizubehalten.')).not.toBeInTheDocument();
+    expect(save).toBeDisabled();
+
+    await user.type(password, 'replacement-secret');
+    expect(save).toBeEnabled();
+    await user.click(save);
+
+    await waitFor(() => expect(apiMock.updateSystemSmtp).toHaveBeenCalledWith({ password: 'replacement-secret' }, 4));
+  });
+
   it('saves changed SMTP connection values disabled until their revision is tested', async () => {
     const user = userEvent.setup();
     renderPanel();

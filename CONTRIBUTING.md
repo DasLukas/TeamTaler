@@ -29,6 +29,8 @@ Do not turn `README.md` into a member user manual, feature-by-feature UI walkthr
 4. Start the frontend with `make dev-frontend`.
 5. Run `make verify` before opening a pull request.
 
+Keep the checkout on a local, non-cloud-synchronized filesystem. In particular, do not place `node_modules` under iCloud Drive, Dropbox, OneDrive, or a similar file provider: conflict copies and on-demand downloads can corrupt package trees or prevent Vitest workers from starting. If the generated dependency tree becomes inconsistent, restore it from the committed lockfile with `cd web && npm ci` rather than editing or copying individual package files.
+
 Vite listens on `127.0.0.1:5173`, proxies `/api` to `127.0.0.1:8080`, and requires the backend public URL to match the browser-facing Vite origin so mutation-origin validation succeeds.
 
 For frontend-only visual development, copy `web/.env.example` to `web/.env.local` and set `VITE_DEMO_MODE=true`. Demo transport and sample assets are available only in Vite development mode and are excluded from production builds.
