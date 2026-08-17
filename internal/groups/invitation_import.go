@@ -107,8 +107,8 @@ type InvitationEmailRetryResult struct {
 	EmailDeliveryStatus EmailDeliveryStatus `json:"emailDeliveryStatus"`
 }
 
-// InvitationEmailResendResult reports a rotated invitation returned to the
-// durable delivery queue. Token is intentionally excluded from JSON used for
+// InvitationEmailResendResult reports a rotated invitation and whether email
+// delivery was queued. Token is intentionally excluded from JSON used for
 // idempotency storage and is populated only for the first successful command so
 // the HTTP layer can expose one manual fallback URL.
 type InvitationEmailResendResult struct {
@@ -367,18 +367,17 @@ func (s Service) RetryInvitationEmail(ctx context.Context, actor domain.Principa
 }
 
 // ResendInvitationEmail rotates the bearer token and seven-day expiry for one
-// unconsumed invitation and queues exactly one fresh outbox job. idempotencyKey
-// deduplicates administrative commands; invitationID selects an invitation in
-// membership's group. PENDING and SENDING jobs are rejected to prevent duplicate
-// delivery. The plaintext Token is returned once and never persisted in the
-// idempotency response. The method returns authorization, validation, not-found,
-// conflict, configuration, encryption, randomness, audit, or database errors.
+// unconsumed invitation. When TokenSealer is configured, exactly one fresh
+// email job is queued; otherwise the returned link remains available for
+// manual delivery. idempotencyKey deduplicates administrative commands;
+// invitationID selects an invitation in membership's group. PENDING and
+// SENDING jobs are rejected to prevent duplicate delivery. The plaintext Token
+// is returned once and never persisted in the idempotency response. The method
+// returns authorization, validation, not-found, conflict, encryption,
+// randomness, audit, or database errors.
 func (s Service) ResendInvitationEmail(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey, invitationID string) (InvitationEmailResendResult, error) {
 	if err := requireCurrentPermission(ctx, s.DB, membership, domain.PermissionMemberManagement); err != nil {
 		return InvitationEmailResendResult{}, err
-	}
-	if s.TokenSealer == nil {
-		return InvitationEmailResendResult{}, fmt.Errorf("%w: invitation email is not configured", domain.ErrServiceUnavailable)
 	}
 	if err := idempotency.ValidateKey(idempotencyKey); err != nil {
 		return InvitationEmailResendResult{}, err
@@ -391,7 +390,12 @@ func (s Service) ResendInvitationEmail(ctx context.Context, actor domain.Princip
 	if err != nil {
 		return InvitationEmailResendResult{}, fmt.Errorf("hash invitation email resend: %w", err)
 	}
-	result := InvitationEmailResendResult{InvitationID: invitationID, EmailDeliveryStatus: EmailDeliveryPending}
+	queueEmail := s.TokenSealer != nil
+	emailDeliveryStatus := EmailDeliveryNotRequested
+	if queueEmail {
+		emailDeliveryStatus = EmailDeliveryPending
+	}
+	result := InvitationEmailResendResult{InvitationID: invitationID, EmailDeliveryStatus: emailDeliveryStatus}
 	err = storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
 		if err := requireCurrentPermission(ctx, tx, membership, domain.PermissionMemberManagement); err != nil {
 			return err
@@ -433,9 +437,12 @@ func (s Service) ResendInvitationEmail(ctx context.Context, actor domain.Princip
 		if err != nil {
 			return err
 		}
-		encryptedToken, err := s.TokenSealer.Seal(token)
-		if err != nil {
-			return fmt.Errorf("encrypt invitation token: %w", err)
+		var encryptedToken string
+		if queueEmail {
+			encryptedToken, err = s.TokenSealer.Seal(token)
+			if err != nil {
+				return fmt.Errorf("encrypt invitation token: %w", err)
+			}
 		}
 		nowValue := platform.Now()
 		now := platform.Timestamp(nowValue)
@@ -455,18 +462,25 @@ func (s Service) ResendInvitationEmail(ctx context.Context, actor domain.Princip
 		if changed != 1 {
 			return fmt.Errorf("%w: invitation state changed", domain.ErrConflict)
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO invitation_email_outbox(
+		if queueEmail {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO invitation_email_outbox(
 			invitation_id,group_id,token_ciphertext,status,attempt_count,next_attempt_at,created_at,updated_at
 		) VALUES(?,?,?,'PENDING',0,?,?,?)
 		ON CONFLICT(invitation_id) DO UPDATE SET
 			token_ciphertext=excluded.token_ciphertext,status='PENDING',attempt_count=0,next_attempt_at=excluded.next_attempt_at,
 			lease_token=NULL,lease_until=NULL,sent_at=NULL,last_error_code=NULL,updated_at=excluded.updated_at`,
-			invitationID, membership.GroupID, encryptedToken, now, now, now); err != nil {
+				invitationID, membership.GroupID, encryptedToken, now, now, now); err != nil {
+				return err
+			}
+		} else if _, err := tx.ExecContext(ctx, `UPDATE invitation_email_outbox SET
+			status='CANCELLED',token_ciphertext=NULL,next_attempt_at=NULL,lease_token=NULL,lease_until=NULL,
+			last_error_code='smtp_disabled',updated_at=? WHERE invitation_id=? AND group_id=?`,
+			now, invitationID, membership.GroupID); err != nil {
 			return err
 		}
 		result.ExpiresAt = expiresAt
 		result.Token = token
-		if err := audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "invitation.email.resent", "invitation", invitationID, map[string]any{"expiresAt": expiresAt}); err != nil {
+		if err := audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "invitation.renewed", "invitation", invitationID, map[string]any{"expiresAt": expiresAt, "emailDeliveryStatus": emailDeliveryStatus}); err != nil {
 			return err
 		}
 		return idempotency.Store(ctx, tx, membership.GroupID, actor.UserID, idempotencyKey, requestHash, 200, result)

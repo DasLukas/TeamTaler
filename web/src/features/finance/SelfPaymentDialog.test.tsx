@@ -22,6 +22,7 @@ const session: Session = {
   }],
   activeGroupId: 'group-a',
   defaultGroupId: null,
+  systemRoles: [],
 };
 
 /**

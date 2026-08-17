@@ -23,6 +23,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/httpapi"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/storage"
+	systemadmin "github.com/DasLukas/TeamTaler/internal/system"
 	"golang.org/x/term"
 )
 
@@ -82,12 +83,31 @@ func serve(arguments []string) error {
 		return err
 	}
 	defer db.Close()
+	var smtpPasswordCipher systemadmin.PasswordCipher
+	if len(cfg.EmailTokenKey) == 32 {
+		smtpPasswordCipher, err = systemadmin.NewSMTPPasswordCipher(cfg.EmailTokenKey)
+		if err != nil {
+			return fmt.Errorf("configure SMTP password encryption: %w", err)
+		}
+	}
+	systemService, err := systemadmin.NewService(db, systemadmin.DefaultsFromConfig(cfg), smtpPasswordCipher)
+	if err != nil {
+		return fmt.Errorf("configure system administration: %w", err)
+	}
+	go runMediaGarbageCollector(processContext, systemService, cfg.DataDirectory, slog.Default())
 
 	var emailWorkerErrors <-chan error
-	if cfg.SMTP.Enabled {
-		sender, err := email.NewSMTP(cfg.SMTP)
+	if len(cfg.EmailTokenKey) == 32 {
+		sender, err := email.NewDynamicSender(func(ctx context.Context) (config.SMTPConfig, bool, error) {
+			settings, resolved, err := systemService.ResolveRuntime(ctx)
+			if err != nil {
+				return config.SMTPConfig{}, true, err
+			}
+			configuration := cliSMTPConfig(resolved)
+			return configuration, settings.MaintenanceMode.Value || !settings.SMTP.Active, nil
+		})
 		if err != nil {
-			return fmt.Errorf("configure SMTP sender: %w", err)
+			return fmt.Errorf("configure dynamic SMTP sender: %w", err)
 		}
 		tokenBox, err := platform.NewSecretBox(cfg.EmailTokenKey)
 		if err != nil {
@@ -192,28 +212,59 @@ func serve(arguments []string) error {
 	return serveErr
 }
 
-func admin(arguments []string) error {
-	if len(arguments) == 0 || arguments[0] != "bootstrap" {
-		return errors.New("usage: teamtaler admin bootstrap --email EMAIL --display-name NAME --group GROUP [--currency EUR]")
+// runMediaGarbageCollector retries durable content-addressed image deletions at
+// startup and once per minute until ctx is cancelled. Failures are logged with
+// no file keys or paths and remain pending for a later attempt.
+func runMediaGarbageCollector(ctx context.Context, service systemadmin.Service, dataDirectory string, logger *slog.Logger) {
+	process := func() {
+		if err := service.RunPendingWALCheckpoint(ctx); err != nil && ctx.Err() == nil {
+			logger.Error("system WAL checkpoint retry failed", "error", err)
+		}
+		if _, err := service.RunMediaGarbageCollection(ctx, dataDirectory, 100); err != nil && ctx.Err() == nil {
+			logger.Error("system media garbage collection failed", "error", err)
+		}
 	}
+	process()
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			process()
+		}
+	}
+}
+
+func admin(arguments []string) error {
+	if len(arguments) == 0 {
+		return errors.New("usage: teamtaler admin <bootstrap|system-admin|system>")
+	}
+	switch arguments[0] {
+	case "bootstrap":
+		return adminBootstrap(arguments[1:])
+	case "system-admin":
+		return systemAdministratorCommand(arguments[1:])
+	case "system":
+		return systemCommand(arguments[1:])
+	default:
+		return fmt.Errorf("unknown admin command %q", arguments[0])
+	}
+}
+
+func adminBootstrap(arguments []string) error {
 	flags := flag.NewFlagSet("admin bootstrap", flag.ContinueOnError)
 	email := flags.String("email", "", "administrator email address")
 	displayName := flags.String("display-name", "", "administrator display name")
 	groupName := flags.String("group", "", "initial group name")
 	currency := flags.String("currency", "EUR", "three-letter group currency")
-	password := flags.String("password", "", "password (prefer TEAMTALER_BOOTSTRAP_PASSWORD or stdin)")
-	if err := flags.Parse(arguments[1:]); err != nil {
+	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
-	if *password == "" {
-		*password = os.Getenv("TEAMTALER_BOOTSTRAP_PASSWORD")
-	}
-	if *password == "" {
-		value, err := readBootstrapPassword(os.Stdin, os.Stderr)
-		if err != nil {
-			return err
-		}
-		*password = value
+	password, err := readBootstrapPassword(os.Stdin, os.Stderr)
+	if err != nil {
+		return err
 	}
 	cfg, err := config.Load()
 	if err != nil {
@@ -225,7 +276,7 @@ func admin(arguments []string) error {
 	}
 	defer db.Close()
 	service := auth.Service{DB: db, SessionLifetime: cfg.SessionLifetime}
-	if err := service.Bootstrap(context.Background(), *email, *displayName, *password, *groupName, *currency); err != nil {
+	if err := service.Bootstrap(context.Background(), *email, *displayName, password, *groupName, *currency); err != nil {
 		return err
 	}
 	fmt.Println("TeamTaler bootstrap completed.")
@@ -249,9 +300,10 @@ func readBootstrapPassword(input *os.File, output io.Writer) (string, error) {
 		}
 		value = line
 	}
-	value = strings.TrimSpace(value)
+	value = strings.TrimSuffix(value, "\n")
+	value = strings.TrimSuffix(value, "\r")
 	if value == "" {
-		return "", errors.New("password is required through TEAMTALER_BOOTSTRAP_PASSWORD, --password, or stdin")
+		return "", errors.New("password is required through the terminal or standard input")
 	}
 	return value, nil
 }

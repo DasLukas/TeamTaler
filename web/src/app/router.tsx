@@ -17,7 +17,7 @@ import { MorePage } from '@/features/more/MorePage';
 import { NotificationsPage } from '@/features/notifications/NotificationsPage';
 import { NotFoundPage } from './NotFoundPage';
 import { memberPaths } from './paths';
-import { BookingPermissionRoute, PreferredWorkspaceRedirect } from './PermissionRoutes';
+import { BookingPermissionRoute, GroupRequiredRoute, PreferredWorkspaceRedirect } from './PermissionRoutes';
 
 const rootRoute = createRootRoute({
   component: Outlet,
@@ -30,17 +30,23 @@ const authenticatedRoute = createRoute({
   component: AppShell,
 });
 
-const landingRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: memberPaths.landing, component: PreferredWorkspaceRedirect });
-const dashboardRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: memberPaths.overview, component: DashboardPage });
-const bookingRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: memberPaths.booking, component: BookingPermissionRoute });
-const legacyReportsRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: memberPaths.legacyReports, component: () => <Navigate replace to={memberPaths.overview} /> });
-const activitiesRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: '/activities', component: ActivitiesPage });
-const catalogRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: memberPaths.catalog, component: CatalogPage });
-const financeRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: memberPaths.finance, component: FinancePage });
+const groupRequiredRoute = createRoute({
+  getParentRoute: () => authenticatedRoute,
+  id: 'group-required',
+  component: GroupRequiredRoute,
+});
+
+const landingRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: memberPaths.landing, component: PreferredWorkspaceRedirect });
+const dashboardRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: memberPaths.overview, component: DashboardPage });
+const bookingRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: memberPaths.booking, component: BookingPermissionRoute });
+const legacyReportsRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: memberPaths.legacyReports, component: () => <Navigate replace to={memberPaths.overview} /> });
+const activitiesRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: '/activities', component: ActivitiesPage });
+const catalogRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: memberPaths.catalog, component: CatalogPage });
+const financeRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: memberPaths.finance, component: FinancePage });
 const adminRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: '/admin', component: AdminPage });
-const notificationsRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: '/notifications', component: NotificationsPage });
+const notificationsRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: '/notifications', component: NotificationsPage });
 const accountRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: '/account', component: AccountPage });
-const moreRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: '/more', component: MorePage });
+const moreRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: '/more', component: MorePage });
 const loginRoute = createRoute({ getParentRoute: () => rootRoute, path: '/login', component: LoginPage });
 const forgotPasswordRoute = createRoute({ getParentRoute: () => rootRoute, path: '/forgot-password', component: ForgotPasswordPage });
 const resetPasswordRoute = createRoute({ getParentRoute: () => rootRoute, path: '/reset-password', component: ResetPasswordPage });
@@ -50,7 +56,11 @@ const publicJoinRoute = createRoute({ getParentRoute: () => rootRoute, path: '/j
 const publicJoinVerificationRoute = createRoute({ getParentRoute: () => rootRoute, path: '/join/verify', component: PublicJoinVerificationPage });
 
 const routeTree = rootRoute.addChildren([
-  authenticatedRoute.addChildren([landingRoute, dashboardRoute, bookingRoute, legacyReportsRoute, activitiesRoute, catalogRoute, financeRoute, adminRoute, notificationsRoute, accountRoute, moreRoute]),
+  authenticatedRoute.addChildren([
+    groupRequiredRoute.addChildren([landingRoute, dashboardRoute, bookingRoute, legacyReportsRoute, activitiesRoute, catalogRoute, financeRoute, notificationsRoute, moreRoute]),
+    adminRoute,
+    accountRoute,
+  ]),
   loginRoute,
   forgotPasswordRoute,
   resetPasswordRoute,

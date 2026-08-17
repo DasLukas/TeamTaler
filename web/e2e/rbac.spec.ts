@@ -84,7 +84,7 @@ test('dynamic access is granted, revoked immediately, and administrator lockout 
 
   await openRoleAssignment(adminPage, 'Ada Admin');
   const adminAssignments = adminPage.getByRole('dialog', { name: 'Rollen für Ada Admin' });
-  const administratorRole = adminAssignments.getByRole('checkbox', { name: /Gruppenadministrator/ });
+  const administratorRole = adminAssignments.getByRole('checkbox', { name: /Group administrator|Gruppenadministrator/ });
   await expect(administratorRole).toBeChecked();
   await expect(administratorRole).toBeDisabled();
 

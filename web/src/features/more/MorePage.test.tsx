@@ -12,9 +12,9 @@ vi.mock('@tanstack/react-router', () => ({ Link: ({ children, to }: { children: 
 vi.mock('@/components/ui/Avatar', () => ({ Avatar: () => <div>avatar</div> }));
 vi.mock('@/components/auth/LogoutButton', () => ({ LogoutButton: () => <button type="button">Abmelden</button> }));
 
-function usePermissions(permissions: PermissionKey[]): void {
+function usePermissions(permissions: PermissionKey[], systemRoles: string[] = []): void {
   mocks.useActiveGroup.mockReturnValue({
-    session: { user: { displayName: 'Alex', email: 'alex@example.test' } },
+    session: { user: { displayName: 'Alex', email: 'alex@example.test' }, systemRoles },
     activeGroup: { name: 'Group A', membership: { effectiveGrants: permissions.map((permission) => ({ permission, scope: { type: 'GROUP' as const } })) } },
   });
 }
@@ -50,5 +50,12 @@ describe('MorePage role navigation', () => {
     usePermissions([]);
     render(<NotificationSummaryContext.Provider value={7}><MorePage /></NotificationSummaryContext.Provider>);
     expect(screen.getByLabelText('7 ungelesene Benachrichtigungen')).toHaveTextContent('7');
+  });
+
+  it('shows system settings independently from group capabilities', () => {
+    usePermissions([], ['SYSTEM_ADMINISTRATOR']);
+    render(<MorePage />);
+
+    expect(menuItems()).toEqual(['Benachrichtigungen', 'Einstellungen', 'Mein Konto', 'Abmelden']);
   });
 });

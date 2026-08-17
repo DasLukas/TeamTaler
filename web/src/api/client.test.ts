@@ -45,6 +45,7 @@ function session(userId: string): Session {
     groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: `member-${userId}`, roles: ['MEMBER'], groupPermissions: [] } }],
     activeGroupId: 'group-a',
     defaultGroupId: null,
+    systemRoles: [],
   };
 }
 
@@ -965,5 +966,84 @@ describe('public join-link API', () => {
     expect(requestBody(fetchMock.mock.calls[0])).toEqual({ joinToken: 'join-token', email: 'new@example.test', displayName: 'New Member', password: 'new-password-long' });
     expect(requestBody(fetchMock.mock.calls[1])).toEqual({ joinToken: 'join-token', email: 'new@example.test' });
     expect(requestBody(fetchMock.mock.calls[2])).toEqual({ token: 'verification-token' });
+  });
+});
+
+describe('system-administration API contract', () => {
+  beforeEach(() => vi.restoreAllMocks());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('resets a settings section with core keys and a strong settings revision', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ revision: 8 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.resetSystemSettings(['instanceName', 'mediaUploadMaxBytes'], 7);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/system/settings/reset');
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' });
+    expect(new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers).get('If-Match')).toBe('"v7"');
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ keys: ['instance.name', 'media.upload_max_bytes'] });
+  });
+
+  it('uses the TLS-only SMTP PUT and keeps a successful test revision', async () => {
+    const smtp = { enabled: false, host: 'smtp.example.test', port: 587, tlsMode: 'starttls' as const, username: 'mailer', fromAddress: 'mail@example.test', fromName: 'TeamTaler' };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ revision: 4, smtp: { revision: 2 } }))
+      .mockResolvedValueOnce(jsonResponse({ revision: 5, smtp: { revision: 2, testedRevision: 2, requiresTest: false, configurationValid: true } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.updateSystemSmtp(smtp, 3);
+    await expect(api.testSystemSmtp(4)).resolves.toMatchObject({ revision: 5, smtp: { testedRevision: 2 } });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/system/settings/smtp');
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'PUT' });
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual(smtp);
+    expect(new Headers((fetchMock.mock.calls[1][1] as RequestInit).headers).get('If-Match')).toBe('"v4"');
+  });
+
+  it('posts the exact group-name confirmation to the purge endpoint', async () => {
+    const impact = { groupId: 'group/a', groupName: 'Group A', currency: 'EUR', version: 6, memberCount: 2, openBalanceMinor: '1234', invitationCount: 1, bookingCount: 4, financialRecordCount: 3, auditEventCount: 5, mediaCount: 1 };
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(impact));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.purgeSystemGroup('group/a', 6, { groupName: 'Group A' });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/system/groups/group%2Fa/purge');
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' });
+    expect(new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers).get('If-Match')).toBe('"v6"');
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ groupName: 'Group A' });
+  });
+
+  it('returns the immediate manual link when a system group provisions a new administrator', async () => {
+    const group = { id: 'group/pending', name: 'Group Pending', currency: 'EUR', status: 'PROVISIONING', version: 1, administratorEmail: 'new@example.test' };
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ group, acceptUrl: 'https://teamtaler.example/invite#token=manual', emailDeliveryStatus: 'NOT_REQUESTED', expiresAt: '2026-08-23T12:00:00Z' }, 201));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.createSystemGroup({ name: 'Group Pending', currency: 'EUR', administratorEmail: 'new@example.test' })).resolves.toMatchObject({
+      group: { id: 'group/pending', status: 'PROVISIONING' },
+      acceptUrl: 'https://teamtaler.example/invite#token=manual',
+      emailDeliveryStatus: 'NOT_REQUESTED',
+      expiresAt: '2026-08-23T12:00:00Z',
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/system/groups');
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ name: 'Group Pending', currency: 'EUR', initialAdministratorEmail: 'new@example.test' });
+  });
+
+  it('renews a provisioning invitation through the versioned group endpoint', async () => {
+    const group = { id: 'group/pending', name: 'Group Pending', currency: 'EUR', status: 'PROVISIONING', version: 3 };
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ group, acceptUrl: 'https://teamtaler.example/invite#token=replaced', emailDeliveryStatus: 'PENDING', expiresAt: '2026-08-23T12:00:00Z' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.resendSystemGroupInvitation('group/pending', 2)).resolves.toMatchObject({
+      group: { id: 'group/pending', status: 'PROVISIONING', version: 3 },
+      acceptUrl: 'https://teamtaler.example/invite#token=replaced',
+      emailDeliveryStatus: 'PENDING',
+      expiresAt: '2026-08-23T12:00:00Z',
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/system/groups/group%2Fpending/invitation/resend');
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' });
+    expect(new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers).get('If-Match')).toBe('"v2"');
   });
 });

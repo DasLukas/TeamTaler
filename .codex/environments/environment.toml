@@ -8,4 +8,4 @@ script = "make install"
 [[actions]]
 name = "Start test server"
 icon = "run"
-command = "make test-server"
+command = "TEAMTALER_EMAIL_TOKEN_KEY=VGVhbVRhbGVyLUNvZGV4LVRlc3QtS2V5LTIwMjYhISE= make test-server"

@@ -54,6 +54,7 @@ const session: Session = {
   groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', roles: ['CATALOG_MANAGER', 'MEMBER'], groupPermissions: [] } }],
   activeGroupId: 'group-a',
   defaultGroupId: null,
+  systemRoles: [],
 };
 
 function renderCatalog(): void {

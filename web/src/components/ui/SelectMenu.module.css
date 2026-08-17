@@ -24,8 +24,13 @@
 .trigger svg { flex: 0 0 auto; color: var(--color-muted); transition: transform var(--motion-fast); }
 .trigger[aria-expanded='true'] svg { transform: rotate(180deg); }
 
+.value {
+  min-width: 0;
+  flex: 1;
+}
+
 .menu {
-  z-index: 10;
+  z-index: 100;
   margin: 0;
   padding: var(--space-1);
   border: 1px solid var(--color-border-strong);

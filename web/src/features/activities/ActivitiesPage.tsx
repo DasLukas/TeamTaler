@@ -4,6 +4,7 @@ import CircleCheck from 'lucide-react/dist/esm/icons/circle-check';
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
 import Search from 'lucide-react/dist/esm/icons/search';
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
+import X from 'lucide-react/dist/esm/icons/x';
 import { useDeferredValue, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
@@ -174,7 +175,7 @@ export function ActivitiesPage() {
             <TextInput id="reversal-reason" onChange={(event) => setReason(event.target.value)} required={reversal?.voidReasonRequired} value={reason} />
           </Field>
           {reverseMutation.isError ? <p className={styles.error} role="alert">{reverseMutation.error.message}</p> : null}
-          <div className={styles.actions}><Button onClick={() => { setReversal(null); setReason(''); }} variant="secondary">{t('common.cancel')}</Button><Button disabled={Boolean(reversal?.voidReasonRequired && !reason.trim()) || reverseMutation.isPending} type="submit">{t('activities.confirmReverse')}</Button></div>
+          <div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={() => { setReversal(null); setReason(''); }} variant="secondary">{t('common.cancel')}</Button><Button disabled={Boolean(reversal?.voidReasonRequired && !reason.trim()) || reverseMutation.isPending} leadingIcon={<RotateCcw size={17} />} type="submit">{t('activities.confirmReverse')}</Button></div>
         </form>
       </Modal>
     </Page>

@@ -1,4 +1,4 @@
-import type { PermissionGrant } from '@/api/types';
+import type { PermissionGrant, Session } from '@/api/types';
 import { can } from './permissions';
 import { memberPaths } from './paths';
 
@@ -45,4 +45,17 @@ export function preferredMemberPath(grants: readonly PermissionGrant[] | undefin
   if (hasGroupCapability(grants, 'catalog')) return memberPaths.catalog;
   if (hasGroupCapability(grants, 'administration')) return '/admin';
   return memberPaths.overview;
+}
+
+/**
+ * Resolves the first authenticated workspace without assuming group membership.
+ *
+ * @param session - Fresh session returned by login or an onboarding flow.
+ * @returns The System workspace for a group-less system administrator, otherwise
+ * the highest-priority workspace of the active membership.
+ */
+export function preferredAuthenticatedPath(session: Session): string {
+  const group = session.groups.find((candidate) => candidate.id === session.activeGroupId) ?? session.groups[0];
+  if (!group && session.systemRoles.includes('SYSTEM_ADMINISTRATOR')) return '/admin';
+  return preferredMemberPath(group?.membership?.effectiveGrants);
 }

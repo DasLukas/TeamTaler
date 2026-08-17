@@ -1,19 +1,31 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import Save from 'lucide-react/dist/esm/icons/save';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
-import type { GroupSettings, GroupSettingsUpdateInput, ReasonMode } from '@/api/types';
+import type { GroupSettings, GroupSettingsUpdateInput, ReasonMode, Role } from '@/api/types';
+import { can } from '@/app/permissions';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Button } from '@/components/ui/Button';
+import { Field, SelectInput } from '@/components/ui/FormField';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { Toggle } from '@/components/ui/Toggle';
 import { ConfigurableListEditor } from './ConfigurableListEditor';
 import { GroupSettingsPanel } from './GroupSettingsPanel';
+import { roleDisplayName } from './roleDisplayName';
 import styles from './BehaviorSettingsPanel.module.css';
 
 /** Properties for the editable group behavior settings form. */
 interface SettingsFormProps {
+  canManageGroup: boolean;
   groupId: string;
+  roles?: Role[];
+  settings: GroupSettings;
+}
+
+interface DefaultRoleSettingProps {
+  groupId: string;
+  roles: Role[];
   settings: GroupSettings;
 }
 
@@ -53,12 +65,51 @@ function ReasonModeControl({ disabled = false, id, label, onChange, value }: Rea
 }
 
 /**
+ * Renders the default role applied to newly created memberships and invitations.
+ *
+ * @param props - Active group, assignable roles, and persisted group settings.
+ * @returns A role selector with independent save feedback.
+ */
+function DefaultRoleSetting({ groupId, roles, settings }: DefaultRoleSettingProps) {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const [roleId, setRoleId] = useState(settings.defaultRoleId ?? '');
+  const candidates = roles.filter((role) => !role.grants.some((grant) => grant.permission === 'GROUP_ADMINISTRATION' || grant.permission === 'MEMBER_MANAGEMENT'));
+  const mutation = useMutation({
+    mutationFn: () => api.updateGroupSettings(groupId, { defaultRoleId: roleId }),
+    onSuccess: async (persisted) => {
+      queryClient.setQueryData<GroupSettings>(['group-settings', groupId], persisted);
+      await queryClient.invalidateQueries({ queryKey: ['roles', groupId] });
+    },
+  });
+
+  return (
+    <section aria-labelledby="default-role-setting-title" className={`${styles.card} ${styles.defaultRoleCard}`}>
+      <div>
+        <h4 id="default-role-setting-title">{t('behaviorSettings.defaultRoleTitle')}</h4>
+        <Field hint={!settings.defaultRoleId ? t('behaviorSettings.defaultRoleMissing') : undefined} htmlFor="default-membership-role" label={t('behaviorSettings.defaultRoleFieldLabel')}>
+          <SelectInput id="default-membership-role" onChange={(event) => { setRoleId(event.target.value); mutation.reset(); }} value={roleId}>
+            <option disabled value="">{t('behaviorSettings.defaultRolePlaceholder')}</option>
+            {candidates.map((role) => <option key={role.id} value={role.id}>{roleDisplayName(role)}</option>)}
+          </SelectInput>
+        </Field>
+      </div>
+      <div className={styles.defaultRoleActions}>
+        {mutation.isError ? <p className={styles.error} role="alert">{t('behaviorSettings.saveError')}</p> : null}
+        {mutation.isSuccess ? <p className={styles.success} role="status">{t('behaviorSettings.saved')}</p> : null}
+        <Button disabled={!roleId || roleId === settings.defaultRoleId || mutation.isPending} leadingIcon={<Save size={17} />} onClick={() => mutation.mutate()}>{mutation.isPending ? t('behaviorSettings.saving') : t('common.save')}</Button>
+      </div>
+    </section>
+  );
+}
+
+/**
  * Renders grouped identity, notification, finance, and transaction settings for one group.
  *
  * @param props - Group identifier and persisted settings.
  * @returns An accessible settings form with explicit save feedback.
  */
-function SettingsForm({ groupId, settings }: SettingsFormProps) {
+function SettingsForm({ canManageGroup, groupId, roles, settings }: SettingsFormProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [settlementsEnabled, setSettlementsEnabled] = useState(settings.settlementsEnabled);
@@ -121,8 +172,9 @@ function SettingsForm({ groupId, settings }: SettingsFormProps) {
     <div className={styles.form}>
       <section aria-labelledby="group-settings-section-title" className={styles.settingsSection}>
         <header><h3 id="group-settings-section-title">{t('behaviorSettings.groupSectionTitle')}</h3></header>
-        <GroupSettingsPanel embedded />
-        <section aria-labelledby="notification-email-setting-title" className={styles.card}>
+        {canManageGroup ? <GroupSettingsPanel embedded /> : null}
+        {roles ? <DefaultRoleSetting groupId={groupId} key={`${groupId}:${settings.defaultRoleId ?? ''}`} roles={roles} settings={settings} /> : null}
+        {canManageGroup ? <section aria-labelledby="notification-email-setting-title" className={styles.card}>
           <div className={styles.settingRow}>
             <div>
               <h4 id="notification-email-setting-title">{t('behaviorSettings.notificationEmailTitle')}</h4>
@@ -131,10 +183,10 @@ function SettingsForm({ groupId, settings }: SettingsFormProps) {
             <Toggle checked={notificationEmailsEnabled} disabled={mutation.isPending || !settings.notificationEmailDeliveryAvailable} label={t('behaviorSettings.notificationEmailToggle')} onChange={(checked) => { setNotificationEmailsEnabled(checked); mutation.reset(); }} />
           </div>
           <p className={styles.notice}>{settings.notificationEmailDeliveryAvailable ? t('behaviorSettings.notificationEmailNotice') : settings.notificationEmailsEnabled ? t('behaviorSettings.notificationEmailTemporarilyUnavailable') : t('behaviorSettings.notificationEmailUnavailable')}</p>
-        </section>
+        </section> : null}
       </section>
 
-      <section aria-labelledby="finance-settings-title" className={styles.settingsSection}>
+      {canManageGroup ? <section aria-labelledby="finance-settings-title" className={styles.settingsSection}>
         <header><h3 id="finance-settings-title">{t('behaviorSettings.financeSectionTitle')}</h3></header>
         <section aria-labelledby="settlements-setting-title" className={styles.card}>
           <div className={styles.settingRow}>
@@ -146,9 +198,9 @@ function SettingsForm({ groupId, settings }: SettingsFormProps) {
           </div>
           <p className={styles.notice}>{t(settlementsEnabled ? 'behaviorSettings.settlementsEnabledNotice' : 'behaviorSettings.settlementsDisabledNotice')}</p>
         </section>
-      </section>
+      </section> : null}
 
-      <section aria-labelledby="booking-settings-title" className={styles.bookingSection}>
+      {canManageGroup ? <section aria-labelledby="booking-settings-title" className={styles.bookingSection}>
         <header><h3 id="booking-settings-title">{t('behaviorSettings.bookingTitle')}</h3></header>
         <section className={styles.card}>
           <h4 className={styles.cardTitle}>{t('behaviorSettings.reasonRulesTitle')}</h4>
@@ -169,15 +221,15 @@ function SettingsForm({ groupId, settings }: SettingsFormProps) {
         <section className={styles.card}>
           <ConfigurableListEditor addLabel={t('behaviorSettings.addPaymentReason')} emptyLabel={t('behaviorSettings.noReasonSuggestions')} items={paymentReasons} label={t('behaviorSettings.paymentReasons')} onChange={(items) => { setPaymentReasons(items); mutation.reset(); }} />
         </section>
-      </section>
+      </section> : null}
 
-      <div className={styles.formFooter}>
+      {canManageGroup ? <div className={styles.formFooter}>
         <div className={styles.feedback}>
           {mutation.isError ? <p className={styles.error} role="alert">{t('behaviorSettings.saveError')} {mutation.error.message}</p> : null}
           {mutation.isSuccess ? <p className={styles.success} role="status">{t('behaviorSettings.saved')}</p> : null}
         </div>
-        <div className={styles.actions}><Button disabled={!changed || configurationInvalid || mutation.isPending} onClick={() => mutation.mutate()} type="button">{mutation.isPending ? t('behaviorSettings.saving') : t('behaviorSettings.save')}</Button></div>
-      </div>
+        <div className={styles.actions}><Button disabled={!changed || configurationInvalid || mutation.isPending} leadingIcon={<Save size={17} />} onClick={() => mutation.mutate()} type="button">{mutation.isPending ? t('behaviorSettings.saving') : t('behaviorSettings.save')}</Button></div>
+      </div> : null}
     </div>
   );
 }
@@ -189,13 +241,16 @@ function SettingsForm({ groupId, settings }: SettingsFormProps) {
  */
 export function BehaviorSettingsPanel() {
   const { t } = useTranslation();
-  const { activeGroupId } = useActiveGroup();
+  const { activeGroup, activeGroupId } = useActiveGroup();
+  const canManageGroup = can(activeGroup.membership?.effectiveGrants, 'GROUP_ADMINISTRATION');
+  const canManageMembers = can(activeGroup.membership?.effectiveGrants, 'MEMBER_MANAGEMENT');
   const settingsQuery = useQuery({ queryKey: ['group-settings', activeGroupId], queryFn: () => api.getGroupSettings(activeGroupId) });
+  const rolesQuery = useQuery({ queryKey: ['roles', activeGroupId], queryFn: () => api.getRoles(activeGroupId), enabled: canManageMembers });
 
-  if (settingsQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
-  if (settingsQuery.isError || !settingsQuery.data) return <div className={styles.state}><StatePanel kind="error" message={t('behaviorSettings.loadError')} /></div>;
+  if (settingsQuery.isLoading || canManageMembers && rolesQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
+  if (settingsQuery.isError || !settingsQuery.data || canManageMembers && (rolesQuery.isError || !rolesQuery.data)) return <div className={styles.state}><StatePanel kind="error" message={t('behaviorSettings.loadError')} /></div>;
 
   return <div className={styles.content}>
-    <SettingsForm groupId={activeGroupId} key={`${activeGroupId}:${JSON.stringify(settingsQuery.data)}`} settings={settingsQuery.data} />
+    <SettingsForm canManageGroup={canManageGroup} groupId={activeGroupId} key={`${activeGroupId}:${JSON.stringify(settingsQuery.data)}`} roles={rolesQuery.data} settings={settingsQuery.data} />
   </div>;
 }

@@ -5,8 +5,8 @@ import UsersRound from 'lucide-react/dist/esm/icons/users-round';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { BookingTarget } from '@/api/types';
-import { Button } from '@/components/ui/Button';
 import { TextInput } from '@/components/ui/FormField';
+import { IconButton } from '@/components/ui/IconButton';
 import { Modal } from '@/components/ui/Modal';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import styles from './MemberMultiSelect.module.css';
@@ -178,7 +178,7 @@ export function MemberMultiSelect({
               placeholder={t('booking.guestNamePlaceholder')}
               value={guestName}
             />
-            <Button aria-label={t('booking.addGuestAction')} disabled={!guestName.trim() || totalTargetCount >= MAX_BATCH_TARGETS} onClick={addGuest} size="small" variant="secondary"><Plus size={17} /></Button>
+            <IconButton disabled={!guestName.trim() || totalTargetCount >= MAX_BATCH_TARGETS} label={t('booking.addGuestAction')} onClick={addGuest} variant="surface"><Plus size={17} /></IconButton>
           </div>
           {guestNameError ? <p className={styles.guestError} id={`${id}-guest-name-error`} role="alert">{guestNameError}</p> : null}
         </div> : null}

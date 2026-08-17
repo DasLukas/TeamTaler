@@ -1,304 +1,348 @@
 # TeamTaler
 
-TeamTaler is a lightweight, self-hosted web application for shared expenses in clubs, teams, and other groups. Members and invited long-term guests book drinks, penalties, and other products against their own consolidated group account. Authorized members can assign bookings to other members, create temporary guests inline, manage the catalog, record incoming payments, optionally close accounting periods, and review an audit trail.
+TeamTaler is a lightweight, self-hosted web application for managing shared expenses in clubs, teams, and similar groups. It combines bookings, a configurable product catalogue, member accounts, payments, optional settlement periods, roles, invitations, notifications, and audit history in one responsive German-language application.
 
-The application combines a responsive German-language React interface, a Go HTTP API, local content-addressed image storage, and an embedded SQLite database. Production is delivered as one container and is designed for a single application instance behind an existing HTTPS reverse proxy.
+This README is the primary entry point for the person who installs and operates a TeamTaler instance. It explains production installation, host and instance configuration, the local operator CLI, backups, upgrades, and basic troubleshooting. It intentionally does not serve as a member user manual, development guide, API reference, or architecture specification.
 
-## Implemented features
+## What TeamTaler provides
 
-- Multiple isolated groups per installation and multiple group memberships per user, with a self-service fixed or most-recently-used default group for the next login.
-- Local accounts with self-service name, password, and verified email changes; enumeration-resistant password reset; seven-day single-use invitation links; member-manager-owned public join links with local QR codes and mandatory email verification for new accounts; automatic email delivery for individual and CSV invitations; idempotent CSV invitation imports; and server-side sessions.
-- Temporary guests for one-off purchases, represented by credentialless local identities with stable membership and accounting history; member managers can rename, claim, archive, reactivate, or permanently remove them through the same lifecycle used for regular members.
-- Self-service profile images with a drag-and-wheel crop editor, shown consistently in member administration, role assignment, booking activity, dashboards, and account surfaces.
-- Product creation and editing use the same drag-and-wheel square crop editor before uploading catalogue images.
-- Group-owned roles with stable identifiers, multiple roles per member or pending invitation, and cumulative permissions. Effective access is the union of all assigned role grants; roles never deny access granted by another role.
-- Five seeded roles per group: the protected `GROUP_ADMINISTRATOR` system role plus the ordinary editable roles `Mitglied`, `Finanzverwaltung`, `Katalogverwaltung`, and `Gast`; `Gast` is selected as the initial default for new members. The four ordinary roles have no preset key or hidden semantics. `ROLE_MANAGEMENT` creates, duplicates, edits, and deletes role definitions; `MEMBER_MANAGEMENT` assigns existing ordinary roles to members and invitations.
-- Fourteen stable permission keys: `GROUP_ADMINISTRATION`, `MEMBER_MANAGEMENT`, `ROLE_MANAGEMENT`, `FINANCE_MANAGEMENT`, `CATALOG_MANAGEMENT`, `VIEW_MEMBER_DIRECTORY`, `VIEW_GROUP_STATISTICS`, `VIEW_ALL_BOOKING_ACTIVITY`, `RECORD_OWN_PAYMENT`, `CREATE_OWN_BOOKING`, `VOID_OWN_BOOKING`, `VOID_ANY_BOOKING`, `BOOK_FOR_OTHERS`, and `BOOK_FOR_GUESTS`.
-- Permission implications are computed instead of stored redundantly: `VOID_ANY_BOOKING` also grants `VOID_OWN_BOOKING` and `VIEW_ALL_BOOKING_ACTIVITY`, while `MEMBER_MANAGEMENT` and `BOOK_FOR_OTHERS` imply `VIEW_MEMBER_DIRECTORY`.
-- Scope-aware permission grants are ready for group, category, and product resources. The current v1 service accepts only `GROUP` grants; `CATEGORY` and `PRODUCT` remain reserved contract shapes until resource-specific policy and UI support are implemented.
-- User-defined categories with editable visual symbols, fixed-price and user-defined-price products, a two-stage archive/delete lifecycle with history-preserving product tombstones, validated integer minor-unit booking prices, immutable product/price snapshots, and JPEG/PNG/WebP uploads normalized to content-addressed PNG files.
-- Idempotent single, atomic multi-member, and atomic multi-product cart booking creation, including all-or-nothing creation and charging of temporary guests by display name, immutable acting/target membership traceability, a 30-second actor-only reason-free undo window, and reasoned audited reversals.
-- Four independently configurable `OFF`, `OPTIONAL`, or `REQUIRED` reason modes for own bookings, foreign bookings, own payments, and finance-managed payments, plus freely editable ordered suggestions.
-- Activity views display and search both the charged member and the member who made every booking; narrow phone widths reflow the rows into labelled cards, while tablet, split-view, and desktop widths retain the table with horizontal overflow contained inside its own viewport. Dashboard activity highlights third-party assignments.
-- A dedicated overview combines personal account information, recent activity, and one `VIEW_GROUP_STATISTICS`-gated signed net group balance across the complete ledger. It deliberately omits category and period statistics; the mobile-first booking workspace uses a privacy-minimized booking context instead of the member directory or dashboard aggregates.
-- A consolidated member receivable account across all categories and anonymous group category aggregates without exposing other members' balances.
-- Ordered, editable group payment methods seeded with bank transfer, cash, PayPal, and other; the first method is the form default, at least one method is retained, and historical payments preserve their original method label after later edits.
-- A dedicated permission-protected finance workspace at `/finance` with lifecycle-grouped member balances, exact receivable/credit/net totals, payment management, optional period settlements, and immutable settlement history. Archived accounts remain payable; permanently removed accounts appear only while a later correction leaves a non-zero balance.
-- A dedicated permission-protected catalog workspace at `/catalog` with versioned category and product management, persistent pointer/touch/keyboard drag-and-drop ordering, contextual create actions, controlled category symbols, and recoverable image uploads. The same catalog order drives booking and retained statistic responses.
-- Optional accounting-period settlements with immutable close snapshots, due dates, settlement status, and an atomically opened successor period. Settlements are disabled by default; disabling them keeps one technical open period and the complete ledger intact so a group can use a continuous balance or later resume the same period.
-- Context-rich in-app notifications for externally initiated bookings, payments, reversals, and period settlements, with unread badges on desktop navigation and the mobile overflow destination, viewport-based acknowledgement, and cursor-backed history.
-- A `GROUP_ADMINISTRATION`-protected audit view, safe CSV export of recent account entries, and browser print/PDF views.
-- `GROUP_ADMINISTRATION`-managed group names and logos with a drag-and-wheel crop editor that update navigation identity and replace the TeamTaler mark for members of the active group.
-- Typed group settings with a `MEMBER_MANAGEMENT`-owned safe default role plus `GROUP_ADMINISTRATION`-owned notification, settlement, transaction-reason, payment-method, and reason-suggestion configuration.
-- TeamTaler browser-tab and installable-web-app icons for desktop, iOS, iPadOS, and Android launchers.
-- Online backup archives containing a consistent SQLite snapshot and every product, group, and profile image referenced by that snapshot.
+- Multiple isolated groups in one installation.
+- Group-owned roles and granular permissions for administration, bookings, finance, catalogue management, and reporting.
+- Fixed-price and user-defined-price products with category, image, archive, and ordering support.
+- Account balances, incoming payments, immutable corrections, optional accounting periods, and settlement history.
+- Individual invitations, CSV invitation imports, public join links, and temporary guest accounts.
+- Local accounts with profile images, password recovery, verified email changes, and server-side sessions.
+- In-app notifications and optional SMTP delivery.
+- Global system administration for instance settings and the complete group lifecycle.
+- Reversible group archival and strongly protected permanent group deletion.
+- Application-consistent backups containing SQLite data and referenced media.
 
-The administration UI is partitioned by effective permissions. `GROUP_ADMINISTRATION` exposes Settings and Audit for group identity, branding, notification delivery, transaction behavior, and the settlement feature. `MEMBER_MANAGEMENT` independently exposes Members, including the default role, invitations and CSV import, email retry, temporary guests, public join access, lifecycle actions, and ordinary role assignments. `ROLE_MANAGEMENT` independently exposes role creation and editing in Roles & Rights. The switch for settlements is off by default for every new or upgraded group; disabling it removes current-period and close controls without changing the technical period or ledger, and re-enabling resumes the same period. The reserved group-administrator role has the fixed name `Group administrator`, cannot be deleted, always retains direct `GROUP_ADMINISTRATION`, `MEMBER_MANAGEMENT`, and `ROLE_MANAGEMENT` grants, and must remain assigned to at least one active membership. New groups give it only those three management grants plus `VIEW_MEMBER_DIRECTORY`; finance, catalog, statistics, and booking access require additional roles. Assigning or removing that role, or another role containing `GROUP_ADMINISTRATION`, requires both membership and group administration. Every active login-enabled membership and pending invitation explicitly retains at least one role; an active credentialless temporary guest is the sole roleless exception. The safe default role lives in Members, initially selects the ordinary `Gast` role, cannot be deleted or grant `GROUP_ADMINISTRATION` or `MEMBER_MANAGEMENT`, and supplies manual invitations, claims, CSV rows without roles, and public joins. Catalog and finance workspaces remain controlled by `CATALOG_MANAGEMENT` and `FINANCE_MANAGEMENT`.
+## Deployment model
 
-Regular members and temporary guests share one two-stage group lifecycle. Archiving is reversible, removes effective access and booking eligibility, and preserves payment access so an outstanding balance can be settled. Reactivation keeps the membership and history; credentialed members receive an explicit role set, while temporary guests remain roleless and may be renamed to resolve an active-name conflict. Permanent removal is available only after archival and only at an exact zero balance. It removes the subject from member administration, strips email, avatar, roles, access, and guest-name reservations, and retains a credentialless tombstone identity with the last display name and stable membership ID for booking, payment, ledger, statement, and audit history. A credentialed user's account and memberships in other groups remain unchanged. A later join creates a new membership ID; a later financial reversal may temporarily expose the deleted account in finance until it is settled again.
+TeamTaler runs as one application container. The container serves both the web interface and API and stores its SQLite database and managed images in one persistent Docker volume.
 
-Long-term guests are ordinary accounts whose access is defined only by their regular roles. Temporary guests have no credentials and no roles. `BOOK_FOR_GUESTS` permits selecting existing temporary guests and creating new ones inside a booking, without granting access to the member directory. A claim invitation preserves the guest's membership, bookings, balance, statements, and audit history. Its selected regular roles are applied exactly when the account is claimed; the current default role is preselected, and `MEMBER_MANAGEMENT` may replace it with other ordinary roles.
+A supported production deployment requires:
 
-`CREATE_OWN_BOOKING` permits bookings against the current member's account. `BOOK_FOR_OTHERS` independently permits bookings for other credentialed members and implies `VIEW_MEMBER_DIRECTORY`. Administrators configure own and foreign booking reasons separately as hidden, optional, or required; a mixed self-and-foreign command applies the foreign-booking mode. `BOOK_FOR_GUESTS` independently permits bookings for existing or newly created temporary guests and does not require a reason or expose the member directory. The booking context and every write classify targets by their current credentials, so each permission authorizes only its own target class. The batch transaction creates every new credentialless identity, roleless active membership, booking, balanced ledger pair, notification, audit event, and idempotency result together; any invalid target or guest rolls back the entire command. Temporary guests appear after regular members under a visual separator. Active temporary-guest names are case-insensitively unique; a duplicate returns `409` with the existing membership ID for an explicit reuse choice and never merges silently. A role may therefore manage finance or catalog data without receiving any booking capability. `VOID_OWN_BOOKING` applies when the current member is either the booking actor or the charged target. Only a booking created by the current member has a 30-second reason-free window; later actor reversal and reversal of an incoming third-party booking always require a reason. `VOID_ANY_BOOKING` permits reversal of every group booking and always requires a reason when the current member is neither its actor nor target. `VIEW_ALL_BOOKING_ACTIVITY` expands only the activity feed; it does not expose another member's personal account or change mutation permissions. `VIEW_MEMBER_DIRECTORY` protects email, role, and effective-grant listings, while the visible “Group balance” right (`VIEW_GROUP_STATISTICS`) independently protects the current consolidated group receivable.
+- a Linux host with a recent Docker Engine and Docker Compose v2;
+- one TeamTaler application replica;
+- a local persistent filesystem for the `teamtaler-data` volume;
+- an existing HTTPS reverse proxy such as Caddy, Nginx, Traefik, or Nginx Proxy Manager;
+- a DNS name and valid TLS certificate for browser access;
+- optionally, a TLS-capable SMTP relay for automatic email delivery.
 
-The booking workspace places one square recipient icon button beside, rather than inside, the member's open-balance card. The button and balance card share the same height. Its badge exposes the selected target count, while names and target controls remain inside an anchored tablet/desktop dropdown or the shared production bottom sheet on phones. The compact sheet tracks the visual viewport above software keyboards, keeps its header fixed, and gives member and guest controls their own safe-area-aware scroll region. Every shared mobile sheet follows the same downward handle drag, velocity threshold, snap-back, reduced-motion, and accessible tap behavior. The selection applies to every cart line and defaults to the authenticated member when self-booking is allowed, so third-party booking authority adds no extra step to the common self-booking path. Product taps add or increment lines. A selected catalog card exposes a separate decrement action that becomes an explicit remove action at quantity one, while quantities and user-defined prices remain editable in the responsive cart. On compact screens, the first fixed-price product opens the production-style quick-checkout sheet. A later fixed-price product tap collapses it automatically to a 77 px cart peek so the catalogue remains visible; the peek preserves and updates only product count and total and reopens with one tap. A product requiring price input always opens the editable cart, scrolls its exact line into the visible editing region, and focuses the required price input across mobile, tablet, and desktop. The cart-sheet handle supports downward swipe or tap minimization without a separate visible minimize icon. The open cart header omits recipient names. A single-target checkout shows only the resulting booking count and total, while a multi-target checkout leads with the total and places a smaller product, people, and confirmed-booking icon equation on its own line underneath; the complete localized equation remains available to assistive technology. Cart lines and price or quantity details scroll independently when space is limited; while the cart is open, a mandatory shared reason, the resulting product-target count, total, validation state, and primary booking action remain together in the visible checkout footer. Landscape tablet sheets start beside the persistent sidebar so the complete checkout remains visible. The same cart may target one or more authorized members or temporary guests and confirms all product-target combinations through one idempotent bulk command. After a successful write the cart is cleared and the recipient resets to the authenticated member, preventing a later accidental third-party charge.
+SQLite on NFS, SMB, or another network filesystem is unsupported. TeamTaler does not terminate TLS, request certificates, provide an external database, or support horizontal application replicas.
 
-## Binding UI/UX principles
+## Quick start with Docker Compose
 
-TeamTaler is mobile-first for regular members. Member-facing workflows must be designed and reviewed at a narrow mobile viewport before being enhanced for wider screens. Desktop layouts may expose more context, but they must not define the interaction model for everyday member tasks.
+### 1. Download TeamTaler
 
-Interface copy follows a strict "as little as possible, as much as necessary" rule. Labels, hints, empty states, validation messages, and confirmations must use short, familiar German words and direct sentences. Copy must help the user understand the current state or next action without repeating what the interface already shows. Technical implementation details, internal terminology, permission keys, API concepts, and long explanations do not belong in the interface. When an error requires user action, the message describes only the user-visible effect and the simplest next step.
+Clone the repository and enter it:
 
-The canonical member routes are `/book` for the permission-gated booking workflow and `/overview` for personal information, recent activity, and the permission-gated net group receivable. The overview deliberately adapts its information and actions to effective permissions and the settlement setting: personal information remains available to active login accounts, `VIEW_GROUP_STATISTICS` exposes the signed group-wide outstanding amount, and payment, finance, catalog, group-administration, member-management, and role-management actions appear only when their matching permission is effective. Category and period statistics are not rendered on the overview. The consolidated member and group balances always use the complete ledger and therefore do not change when settlements are toggled or a period is closed. Members with `RECORD_OWN_PAYMENT` can start a reviewed own-account payment from the overview balance card or `/account`; narrow screens use a bottom sheet and wider screens use a dialog. `/catalog` is visible and queryable only with `CATALOG_MANAGEMENT`, while `/finance` requires `FINANCE_MANAGEMENT` and uses finance-authorized account summaries rather than the protected member directory. Payment target selectors group regular members before temporary guests using credential-derived summary data. Administration mounts Settings/Audit, Members, and Roles & Rights independently for `GROUP_ADMINISTRATION`, `MEMBER_MANAGEMENT`, and `ROLE_MANAGEMENT`; denied sections do not start protected queries. Booking navigation appears with at least one of `CREATE_OWN_BOOKING`, `BOOK_FOR_OTHERS`, or `BOOK_FOR_GUESTS`; it loads the technical open period, own balance, current membership, filtered minimal targets, and `canBookForGuests` from `/booking-context`, never from the directory or dashboard. After login, invitation acceptance, or group switching, the landing route is selected by the fixed priority booking, finance, catalog, administration, then overview. The overflow menu exposes notifications first, followed by authorized management workspaces in the fixed order finance, catalog, administration, account, and logout. The exact unread count appears on the overflow button until every new notification has intersected the visible notification viewport. The legacy `/reports` route redirects to `/overview`.
+```sh
+git clone https://github.com/DasLukas/TeamTaler.git
+cd TeamTaler
+```
 
-Fast product booking is the primary interaction goal. A regular member must be able to create the common fixed-price self-booking with as few deliberate interactions as possible. Once the desired product is visible, the default flow must require no more than two actions: select the product and confirm the booking. Additional input or confirmation is permitted only when required by the booking itself, such as a user-defined price, non-default quantity, one or more target members, or a mandatory shared reason.
+For a production installation, use a reviewed release tag and keep `TEAMTALER_VERSION` pinned instead of following an unreviewed branch or floating container tag.
 
-Member-facing changes must therefore preserve these constraints:
+### 2. Create the host configuration
 
-- The primary booking action remains immediately discoverable and thumb-reachable on common phone widths without horizontal scrolling.
-- Common defaults select the current member, quantity one, and the catalog price without asking the member to re-enter known information.
-- Secondary information and administrative controls must not obstruct or lengthen the standard self-booking path.
-- Successful booking feedback must be brief and automatically return the interface to a ready-to-book state.
-- The booking workspace may preselect a category for orientation, but it must never preselect a product or open confirmation controls before an explicit product selection.
-- New steps, dialogs, or confirmations in the standard booking path require a documented product, accounting, security, or safety reason.
-- Authorized third-party bookers select the recipient scope once per cart. The interface must state that every cart product applies to every selected recipient and show the resulting product-target booking count before confirmation.
-- Multi-product confirmation must use one atomic server command. Clients must never emulate a cart through a sequence of independent booking requests.
+Copy the supplied template:
 
-## Scope and operating constraints
+```sh
+cp .env.example .env
+chmod 600 .env
+```
 
-- TeamTaler supports one application replica on a local filesystem. SQLite on NFS, SMB, or another network filesystem is unsupported.
-- TLS is terminated by an external reverse proxy. TeamTaler does not create or renew certificates.
-- Individual and temporary-guest claim invitations are sent automatically when the optional TLS-secured SMTP configuration is enabled, while their links remain available for manual fallback sharing. Public join links require this delivery configuration because new accounts must prove mailbox ownership. Manual invitations start with the configured default role but may assign any non-empty multi-role selection. CSV rows may name one or more roles and otherwise use the configured default; no role is added after invitation creation. Temporary-guest claims preselect that same default role and persist the exact authorized role selection. Imports use the same transactional retrying outbox. The same SMTP relay can optionally deliver a short email alongside each in-app notification; credentialless guests never produce an email job, and members with `GROUP_ADMINISTRATION` control the group preference.
-- There is no payment-provider integration, SSO, MFA, offline mutation queue, public plugin loader, or built-in metrics endpoint.
-- The browser interface is German. Reusable interface, error, and accessibility copy is centralized in the i18next resource so additional locales can be added without rewriting feature components.
-- Monetary values are persisted and calculated as signed integer minor units. JSON responses encode monetary fields as exact decimal strings, while command inputs use bounded JSON integers; floating-point amounts are never used for accounting. Fixed prices are server-authoritative, while user-defined product prices must be supplied and validated for each booking.
+At minimum, edit these values:
 
-## Repository structure
+```dotenv
+TEAMTALER_PUBLIC_URL=https://teamtaler.example.com
+TEAMTALER_VERSION=0.8.0
+TEAMTALER_HOST_PORT=8080
+TEAMTALER_TRUSTED_PROXY_CIDRS=
+```
 
-- `cmd/teamtaler` contains the server and operator CLI entry point.
-- `internal` contains the backend modules for authentication, groups, CSV member import, SMTP email delivery, catalog, shared image media, bookings, finance, periods, notifications, audit, backup, HTTP delivery, and SQLite infrastructure.
-- `migrations` contains the forward-only SQLite schema embedded into the Go binary.
-- `web` contains the React/Vite single-page application organized by feature.
-- `api/openapi.yaml` is the machine-readable HTTP contract.
-- `deploy` contains Compose networking and reverse-proxy examples.
-- `scripts` contains verification and Compose backup helpers.
+`TEAMTALER_PUBLIC_URL` must be the exact browser-facing origin. Use HTTPS in production. Do not include a trailing path, credentials, query, or fragment.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for module boundaries, data flow, persistence details, dependencies, and extension policy. Release changes are recorded in [CHANGELOG.md](CHANGELOG.md).
+Leave `TEAMTALER_TRUSTED_PROXY_CIDRS` empty until the direct proxy peer has been identified. When client-address forwarding is required, trust only the proxy address or the narrowest possible CIDR. Forwarded addresses from other peers are ignored.
 
-## Requirements
+Generate the persistent encryption key before enabling SMTP or storing SMTP credentials in the web interface:
 
-For container operation:
+```sh
+openssl rand -base64 32
+```
 
-- A recent Docker Engine with BuildKit.
-- Docker Compose v2.
-- An existing HTTPS reverse proxy such as Caddy, Nginx, Traefik, or Nginx Proxy Manager.
-- A local persistent filesystem for the TeamTaler data volume.
+Store the result in `.env` as `TEAMTALER_EMAIL_TOKEN_KEY`. Keep this value secret, outside version control, and available during restores. Losing or changing it invalidates encrypted pending email material and a stored SMTP password.
 
-For local development:
+The standard Compose deployment supplies the correct container paths. Do not change `TEAMTALER_LISTEN`, `TEAMTALER_DATA_DIR`, `TEAMTALER_DATABASE_PATH`, or `TEAMTALER_WEB_DIR` unless the corresponding mounts and deployment procedures are changed deliberately.
 
-- Go 1.26.x.
-- Node.js 24.x and npm compatible with `web/package-lock.json`.
-- A modern Chromium, Firefox, or Safari browser.
+### 3. Start the application
 
-The repository-level `.nvmrc` pins Node.js 24 for version managers that support it. Run `nvm use` from the repository root before installing or verifying frontend dependencies.
+Pull the pinned image and start TeamTaler:
 
-## Installation with Docker Compose
+```sh
+docker compose pull app
+docker compose up -d app
+```
 
-1. Clone the repository and enter it:
+To build the current checkout locally instead of using the published image:
 
-   ```sh
-   git clone https://github.com/DasLukas/TeamTaler.git
-   cd TeamTaler
-   ```
+```sh
+docker compose up -d --build
+```
 
-2. Create local configuration:
+Verify that the container is healthy:
 
-   ```sh
-   cp .env.example .env
-   ```
+```sh
+docker compose ps
+curl --fail --silent --show-error http://127.0.0.1:8080/health/ready
+```
 
-3. Set `TEAMTALER_PUBLIC_URL` to the exact external origin and restrict `TEAMTALER_TRUSTED_PROXY_CIDRS` to the addresses from which the proxy connects. The public URL must use HTTPS for secure production cookies.
+Adjust the port in the readiness URL when `TEAMTALER_HOST_PORT` is not `8080`.
 
-   To enable automatic invitations, verified public joining, password reset, verified email changes, and optional notification email, configure the complete SMTP block from `.env.example` and generate the email-token encryption key once:
+### 4. Configure the reverse proxy
 
-   ```sh
-   openssl rand -base64 32
-   ```
+Forward the public HTTPS origin to `http://127.0.0.1:8080` when the proxy runs on the Docker host. A proxy in Docker should share a dedicated external network with TeamTaler and use `http://app:8080` as its upstream.
 
-   Store the result in `TEAMTALER_EMAIL_TOKEN_KEY`. Keep this key and the SMTP password outside version control and preserve the key across restores while pending email jobs may exist.
+The proxy must preserve the request method, path, query, body, cookies, `Origin`, and `X-CSRF-Token`. Its body-size limit must be at least 26 MiB to preserve the full runtime-configurable media range, and at least as large as `TEAMTALER_MAX_REQUEST_BYTES` when that ordinary API ceiling is configured above 26 MiB.
 
-4. Build and start the application:
+Ready-to-adapt Caddy, Nginx, Traefik, and shared-Docker-network examples are documented in [deploy/README.md](deploy/README.md).
 
-   ```sh
-   docker compose up -d --build
-   ```
+### 5. Create the first administrator
 
-   To use a published image instead, set `TEAMTALER_VERSION` to a reviewed semantic version, then run `docker compose pull app` followed by `docker compose up -d app`.
+Run bootstrap exactly once:
 
-5. Create the first account, group, administrator membership, and open period:
+```sh
+docker compose exec app teamtaler admin bootstrap \
+  --email admin@example.com \
+  --display-name "Team Admin" \
+  --group "My Team"
+```
 
-   ```sh
-   docker compose exec app teamtaler admin bootstrap \
-     --email admin@example.com \
-     --display-name "Team Admin" \
-     --group "My Team"
-   ```
+The command securely prompts for a password. It creates:
 
-   The command requests a password when one is not provided and suppresses terminal echo on a TTY. It also accepts `TEAMTALER_BOOTSTRAP_PASSWORD` or a password on standard input for controlled automation. Avoid `--password` in shell history. No default account is created, and bootstrap refuses to run after an account already exists.
+- the first local account;
+- its global `SYSTEM_ADMINISTRATOR` assignment;
+- the first active group;
+- the protected group-administrator membership for that account;
+- the initial open accounting period.
 
-6. Configure the reverse proxy to forward the external HTTPS origin to `127.0.0.1:8080`. Templates and container-network instructions are in [deploy/README.md](deploy/README.md).
+Bootstrap refuses to run after an account already exists. It never accepts a password as a command-line argument or environment variable.
 
-The default Compose file binds the application port to host loopback, runs the process as a non-root user, drops Linux capabilities, uses a read-only root filesystem, and stores the database and images in the `teamtaler-data` volume.
+### 6. Open the instance
+
+Open `TEAMTALER_PUBLIC_URL` in a browser and sign in with the bootstrap account. The first settings tab is **System**, where the instance identity, default currency, media limit, SMTP, public joining, maintenance mode, groups, and global system audit are managed.
 
 ## Configuration
 
-| Variable | Required | Default | Purpose |
-| --- | --- | --- | --- |
-| `TEAMTALER_PUBLIC_URL` | Production | `http://127.0.0.1:8080` | Exact root origin used for origin checks, invitation links, and secure-cookie selection. HTTPS is required unless the host is loopback; subpaths, credentials, queries, and fragments are rejected. |
-| `TEAMTALER_TRUSTED_PROXY_CIDRS` | Behind a proxy | empty | Comma-separated CIDRs whose forwarded client-address headers are trusted. |
-| `TEAMTALER_LISTEN` | No | `127.0.0.1:8080` | HTTP listen address. Compose sets `0.0.0.0:8080` inside the container. |
-| `TEAMTALER_DATA_DIR` | No | `./data` | Persistent directory for images, backup/restore staging, and the default database. |
-| `TEAMTALER_DATABASE_PATH` | No | `<data-dir>/teamtaler.db` | SQLite database path. Configuration requires this path to be a direct child of the data directory; a custom filename is supported. |
-| `TEAMTALER_WEB_DIR` | No | `./web/dist` | Compiled frontend directory served by the Go process. |
-| `TEAMTALER_MAX_REQUEST_BYTES` | No | `6291456` | Maximum HTTP request body size in bytes. |
-| `TEAMTALER_SMTP_HOST` | With email | disabled | SMTP hostname or IP address without a scheme or port. |
-| `TEAMTALER_SMTP_PORT` | With email | none | SMTP submission port, commonly `587` for STARTTLS or `465` for implicit TLS. |
-| `TEAMTALER_SMTP_USERNAME` | With email | none | SMTP authentication username. |
-| `TEAMTALER_SMTP_PASSWORD` | With email | none | SMTP authentication secret. Never commit it. |
-| `TEAMTALER_SMTP_FROM_ADDRESS` | With email | none | Single ASCII envelope and message sender mailbox. |
-| `TEAMTALER_SMTP_FROM_NAME` | No | empty | Optional sender display name. |
-| `TEAMTALER_SMTP_TLS_MODE` | With email | `starttls` | Mandatory transport mode: `starttls` or `tls`; plaintext SMTP is unsupported. |
-| `TEAMTALER_EMAIL_TOKEN_KEY` | With email | none | Standard-base64 encoding of exactly 32 random bytes used to encrypt queued invitation, public-join, account-action, and verification tokens. |
+TeamTaler separates immutable host configuration from runtime-editable instance settings.
 
-The application trusts forwarded client addresses only when the direct peer is inside a configured trusted CIDR. Keep both proxy and application request limits compatible; product-image and group-logo input is limited to 5 MiB before normalization.
+- Host configuration is read at process start and changed through `.env` plus a container restart.
+- Instance settings use environment variables as defaults. A system administrator may store versioned SQLite overrides through the System tab or CLI. A reset removes the override and immediately reveals the current environment or built-in default.
 
-SMTP configuration is fail-fast: supplying only part of the required block prevents startup. The relay certificate is verified, TLS 1.2 or newer is required, and authentication never occurs before encryption. TeamTaler considers a message sent after the relay accepts the SMTP `DATA` command; downstream mailbox delivery remains the relay operator's responsibility.
+### Host configuration
 
-## Email delivery
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `TEAMTALER_PUBLIC_URL` | `http://127.0.0.1:8080` | Exact public origin used for links, mutation-origin validation, secure cookies, and HSTS. Use HTTPS in production. |
+| `TEAMTALER_TRUSTED_PROXY_CIDRS` | empty | Comma-separated direct proxy CIDRs allowed to supply forwarded client addresses. |
+| `TEAMTALER_HOST_PORT` | `8080` | Host-loopback port published by Docker Compose. |
+| `TEAMTALER_IMAGE` | `ghcr.io/daslukas/teamtaler` | Container image repository used by Compose. |
+| `TEAMTALER_VERSION` | current release | Pinned image tag and application version. |
+| `TEAMTALER_MAX_REQUEST_BYTES` | `6291456` | Request-body ceiling for ordinary API operations. Media routes instead follow the live media setting plus a fixed multipart reserve. |
+| `TEAMTALER_EMAIL_TOKEN_KEY` | unset | Base64-encoded 32-byte key for encrypted email proofs and stored SMTP credentials. |
+| `TEAMTALER_SMTP_ALLOW_PRIVATE_NETWORK` | `false` | Allows web-configured SMTP targets on private or local networks. Enable only for a trusted private relay requirement. |
 
-When SMTP is configured, creating an individual invitation atomically stores the invitation and its encrypted outbox job. The group-administration dialog follows the delivery state until the relay accepts the message or delivery reaches a terminal failure, and it always displays the one-time acceptance link as a fallback. Without SMTP, individual invitations remain available as manually shareable links and are marked accordingly in the interface.
+The standard container also uses fixed runtime paths from `.env.example`. Detailed path, proxy-network, and storage guidance is in [deploy/README.md](deploy/README.md).
 
-Password reset and verified email changes are available only when the complete SMTP block and `TEAMTALER_EMAIL_TOKEN_KEY` are configured. `GET /api/v1/auth/capabilities` exposes that runtime availability without account information so clients can hide only the unavailable email-dependent actions; local display-name and authenticated password changes remain available. Password-reset requests return the same empty `202` response for known and unknown addresses. Reset and email-change proofs expire after one hour, are consumed once, and are delivered in URL fragments such as `/reset-password#token=...` and `/email-change/confirm#token=...`; they never belong in request paths or query strings. A password change, successful reset, or confirmed email change revokes every session for the account, including the session that initiated an authenticated change. Email confirmation updates the existing user identity in place, so memberships, balances, statements, and audit history remain attached to their existing identifiers.
+### Runtime-editable instance defaults
 
-A member with `MEMBER_MANAGEMENT` can create one active public join link from the Members workspace and share either its URL or its locally generated QR code. The member manager chooses one hour, six hours, one day, seven days, 30 days, a custom duration between one hour and 365 days, or unlimited availability. Lifetime changes preserve the current token; rotation replaces the URL and QR code, while deactivation removes the stored token. Both operations invalidate pending registrations immediately. Existing accounts authenticate before joining. New accounts receive a one-hour, one-time mailbox-verification message and become members only after successful verification. The role assigned at acceptance is always the group's then-current safe default role, including when an archived membership is reactivated. SMTP and `TEAMTALER_EMAIL_TOKEN_KEY` are therefore mandatory before a public link can be enabled.
+| Environment default | Built-in default | System setting |
+| --- | --- | --- |
+| `TEAMTALER_INSTANCE_NAME` | `TeamTaler` | Public instance name. |
+| `TEAMTALER_DEFAULT_CURRENCY` | `EUR` | Currency suggested for newly created groups. Existing groups are unchanged. |
+| `TEAMTALER_MEDIA_UPLOAD_MAX_BYTES` | `5242880` | Shared raw upload limit for product images, group logos, and avatars. |
+| `TEAMTALER_PUBLIC_JOIN_ENABLED` | `true` | Global availability of otherwise valid public join links. |
+| `TEAMTALER_MAINTENANCE_MODE` | `false` | Read-only maintenance policy. Login, reads, logout, health checks, and system administration remain available. |
+| `TEAMTALER_MAINTENANCE_MESSAGE` | empty | Short public maintenance notice. |
 
-The same normalized email address cannot have more than one current invitation in a group. This rule is shared by individual creation and CSV imports, so repeated or mixed requests reuse the existing invitation outcome instead of creating another email job. A database trigger provides a final concurrency guard for simultaneous requests. Expired, revoked, or accepted invitations do not block a later valid invitation; only an active membership blocks another invitation, while an archived membership may be invited for reactivation.
+The media limit is editable without a restart through the System tab or `teamtaler admin system settings set --media-upload-max-bytes ...`. It must be a whole MiB value from 1 MiB through 25 MiB. The server automatically applies that live value plus multipart reserve to avatar, group-logo, and product-image requests; `TEAMTALER_MAX_REQUEST_BYTES` does not cap those routes. Immutable image-decoder protections still limit dimensions, pixel count, and normalized output size. If a reverse proxy is used, configure its body limit for at least 26 MiB so it does not override TeamTaler's runtime setting.
 
-Every externally initiated booking assignment or reversal, group-managed payment or reversal for another member, and generated period settlement creates an in-app notification inside the originating business transaction. When SMTP is configured and a member with `GROUP_ADMINISTRATION` has enabled notification emails for the group, the same transaction also creates a notification-email outbox job. The worker sends short localized event details and a link to the notification inbox, retries temporary failures up to five times, and never delays or replaces in-app delivery. If SMTP is unavailable, the administration switch is visible but disabled.
+### SMTP and email delivery
 
-## CSV invitation import
+SMTP enables automatic invitation delivery, public-join email verification, password recovery, verified email changes, and optional notification email. Group and member invitations remain manually shareable through their one-time links without SMTP. Renewing an open invitation always rotates and displays a new link; if SMTP has been enabled since the invitation was created, that renewal is also queued for email delivery.
 
-Members with `MEMBER_MANAGEMENT` can upload UTF-8 CSV files from the member administration screen. The first row must contain `email` and may additionally contain `display_name` and `roles`. Role names are matched case-insensitively within the group; multiple names use `|`. A missing or blank `roles` value uses the configured default role. If no default is configured, that row is reported as invalid. Comma and semicolon delimiters, LF or CRLF line endings, and an optional UTF-8 BOM are accepted. Unknown columns are rejected. Example:
+Several groups may invite the same previously unknown email address independently, including as an ordinary member or first group administrator. The first accepted invitation creates the single global TeamTaler account. Every other invitation remains valid for its own group and role set, but acceptance then requires that account's current password. If two forms are submitted concurrently, one creates the account and the other refreshes safely into existing-account mode; TeamTaler never creates duplicate accounts or combines permissions across groups.
 
-```csv
-email,display_name,roles
-alex@example.com,Alex Member,
-sam@example.com,Sam Member,Finanzverwaltung|Katalogverwaltung
+Configure SMTP either as an environment default or from **Einstellungen → System → E-Mail (SMTP)**. The required values are:
+
+```dotenv
+TEAMTALER_SMTP_HOST=smtp.example.com
+TEAMTALER_SMTP_PORT=587
+TEAMTALER_SMTP_USERNAME=teamtaler@example.com
+TEAMTALER_SMTP_PASSWORD=replace-with-a-secret
+TEAMTALER_SMTP_FROM_ADDRESS=teamtaler@example.com
+TEAMTALER_SMTP_FROM_NAME=TeamTaler
+TEAMTALER_SMTP_TLS_MODE=starttls
 ```
 
-Each file is limited to 256 KiB and 100 data rows. Unknown role names, a missing fallback, invalid rows, duplicate addresses, existing memberships, and already-pending invitations are reported individually without discarding valid rows. The former repeated `roleId` query parameter remains as a deprecated shared fallback for API compatibility.
+Use `starttls` for explicit TLS, commonly on port 587, or `tls` for implicit TLS, commonly on port 465. The System tab and CLI prefill port 587 with `starttls` when no SMTP default exists. Plaintext SMTP is unsupported. Supplying only part of the required environment block prevents startup.
 
-The import creates invitations, not memberships. A membership appears only after the recipient follows the emailed one-time link and completes the existing invitation flow. The database transaction stores each invitation together with an encrypted email job and the idempotent import result. A background dispatcher retries temporary delivery failures up to five times. The plaintext token is never stored in the outbox or API result, and its encrypted copy is removed after SMTP acceptance.
+A complete environment SMTP configuration is active after startup. A configuration stored through the System tab or CLI is encrypted, starts disabled, and must send a successful test message to the current system administrator. Enable it only after the exact stored revision is marked as tested.
 
-The result dialog follows queued deliveries until they are sent or reach a terminal state. A member with `MEMBER_MANAGEMENT` can explicitly requeue a failed delivery from that dialog; accepted, revoked, expired, pending, or already-sent invitations cannot be retried.
+Runtime SMTP targets are restricted to public network addresses by default. The exact host and port supplied by the immutable environment SMTP block remain allowed for an existing private relay. Set `TEAMTALER_SMTP_ALLOW_PRIVATE_NETWORK=true` only when system administrators must configure additional private targets and are trusted with that network access.
 
-## Local development
+## System administration
 
-Install all dependencies:
+`SYSTEM_ADMINISTRATOR` is a global instance role. It is separate from every group role and does not implicitly grant access to group members, bookings, catalogue data, or finances. The role can be granted or revoked only from the local CLI and never appears in web role editors.
+
+The bootstrap account receives the role automatically on a new installation. Existing installations upgraded to the system-administration release receive no automatic promotion. Grant the first assignment locally:
 
 ```sh
-make install
+docker compose exec app teamtaler admin system-admin grant \
+  --email admin@example.com
 ```
 
-Bootstrap a local database once:
+The target account must already exist. Keep at least two active system administrators where the operating model permits it. The last active assignment cannot be revoked normally.
+
+A system administrator without group membership can still log in and sees only System, Account, and Logout. Global administration does not widen access to group business data.
+
+Groups created for an existing account become active immediately and assign that account only the protected group-administrator role. A group created for a new email address remains in `PROVISIONING` until its protected first-administrator invitation is accepted. TeamTaler always returns a one-time link for manual sharing; active SMTP additionally sends the same invitation by email. Archival is reversible. Permanent purge is available only after archival and requires impact review, a current version check, and the exact current group name.
+
+## Operator CLI
+
+Run operator commands inside the application container:
 
 ```sh
-go run ./cmd/teamtaler admin bootstrap \
-  --email admin@example.test \
-  --display-name "Local Admin" \
-  --group "Local Team"
+docker compose exec app teamtaler <command>
 ```
 
-Run the API and Vite server in separate terminals. The public URL must match the browser-facing Vite origin so mutation origin checks succeed:
+Commands that change SQLite directly should not be run concurrently from multiple operator shells. Scalar setting commands default to the current revision when `--revision` is omitted; automation should pass the previously read revision and use `--json` where supported. Secrets are read from a terminal or standard input and are never accepted as ordinary arguments.
+
+### System administrator assignments
 
 ```sh
-TEAMTALER_PUBLIC_URL=http://127.0.0.1:5173 make dev-backend
+teamtaler admin system-admin list [--json]
+teamtaler admin system-admin grant --email EMAIL [--json]
+teamtaler admin system-admin revoke --email EMAIL [--json]
 ```
+
+Example:
 
 ```sh
-make dev-frontend
+docker compose exec app teamtaler admin system-admin list
 ```
 
-Vite listens on `127.0.0.1:5173` and proxies `/api` to `127.0.0.1:8080`.
-
-For frontend-only visual development, copy `web/.env.example` to `web/.env.local` and run the Vite server without the API. Demo transport and its sample images are loaded only when `VITE_DEMO_MODE=true` and Vite is in development mode. Production builds contain neither demo fixtures nor demo assets.
-
-### Disposable full-stack test server
-
-The Codex environment action **Start test server** starts the real Go backend on `127.0.0.1:8080`, the Vite frontend on `127.0.0.1:5173`, and a fresh isolated SQLite database with representative catalog, role, permission, booking, notification, and payment data. The same workflow is available from a terminal:
+### Instance settings
 
 ```sh
-make test-server
+teamtaler admin system settings show [--json]
+teamtaler admin system settings set \
+  [--revision VERSION] \
+  [--instance-name NAME] \
+  [--default-currency EUR] \
+  [--media-upload-max-bytes BYTES] \
+  [--public-join-enabled true|false] \
+  [--maintenance-mode true|false] \
+  [--maintenance-message MESSAGE] \
+  [--json]
+teamtaler admin system settings reset \
+  --key KEY [--key KEY ...] \
+  [--revision VERSION] [--json]
 ```
 
-The fixture contains `TeamTaler Demo Club` and `TeamTaler Weekend Club`. Every seeded product has a local image, every seeded account has a fictional profile image, and each group includes two predefined booking reasons plus two predefined payment reasons. The second group includes the `Refreshments` category with the fixed-price `Club Coffee` product. All seeded accounts use the password `TeamTaler-Test-2026!`:
+Reset keys are:
 
-- `admin@example.test` has the protected group-administrator role in both groups.
-- `jonas@example.test` has the finance-manager and catalog-manager preset roles.
-- `marie@example.test` has the member starter role plus a dedicated editable role for self-payments and bookings for other members.
-- `lena@example.test` belongs to both groups and has a regular member role in the second group.
-- `noah@example.test` has a regular member role and belongs only to `TeamTaler Weekend Club`.
+- `instance.name`
+- `instance.default_currency`
+- `media.upload_max_bytes`
+- `access.public_join_enabled`
+- `maintenance.enabled`
+- `maintenance.message`
 
-The server binds only to loopback. Stopping the action terminates both processes and removes that run's disposable database. Generated binaries remain below the ignored `tmp/test-server` directory so later starts can reuse Go's build cache. Backend and frontend listener-readiness checks allow 60 seconds by default to accommodate cold Vite starts; the frontend probe uses the static `/health/ready.txt` asset so initial dependency optimization cannot terminate an otherwise healthy server. Set `TEAMTALER_TEST_SERVER_READY_TIMEOUT_SECONDS` to a positive integer when a slower development machine needs a different limit.
-
-Optional SMTP delivery for this disposable server is read from the ignored `.env.test-server.local` file. The file accepts only the documented SMTP variables and is never sourced as shell code. When username or password is empty, the action starts normally with email delivery disabled. For IONOS, use `smtp.ionos.de` on port `587` with `starttls`; the authenticated mailbox is also used as the sender unless `TEAMTALER_SMTP_FROM_ADDRESS` is set explicitly. Restart the action after changing the file.
-
-## Verification, build, and run
-
-Run formatting checks, static analysis, backend and frontend tests, and production builds:
+Examples:
 
 ```sh
-make verify
+docker compose exec app teamtaler admin system settings show
+docker compose exec app teamtaler admin system settings set \
+  --instance-name "My Club" \
+  --default-currency EUR
+docker compose exec app teamtaler admin system settings reset \
+  --key maintenance.enabled \
+  --key maintenance.message
 ```
 
-The stricter CI-equivalent helper also runs Go tests with the race detector:
+### SMTP
 
 ```sh
-./scripts/verify.sh
+teamtaler admin system smtp show [--json]
+teamtaler admin system smtp set \
+  [--revision VERSION] \
+  [--enabled true|false] \
+  [--host HOST] [--port PORT] \
+  [--tls-mode starttls|tls] \
+  [--username USER] \
+  [--from-address EMAIL] [--from-name NAME] \
+  [--password-stdin] [--json]
+teamtaler admin system smtp test [--email ADMIN_EMAIL] [--json]
+teamtaler admin system smtp reset
 ```
 
-Run the focused full-stack role and permission acceptance suite in desktop and
-narrow mobile viewports with:
+Typical stored-SMTP workflow:
 
 ```sh
-make test-e2e
+docker compose exec app teamtaler admin system smtp set \
+  --host smtp.example.com \
+  --port 587 \
+  --tls-mode starttls \
+  --username teamtaler@example.com \
+  --from-address teamtaler@example.com \
+  --from-name TeamTaler \
+  --password-stdin
+
+docker compose exec app teamtaler admin system smtp test \
+  --email admin@example.com
+
+docker compose exec app teamtaler admin system smtp set \
+  --enabled true
 ```
 
-Playwright starts and removes the disposable test server automatically. Install
-its Chromium runtime once with `cd web && npx playwright install chromium` when
-no compatible local browser is available.
+When exactly one active system administrator exists, `smtp test` may omit `--email`. With multiple assignments, select the audited recipient explicitly.
 
-Build without Docker:
+### Group lifecycle
 
 ```sh
-make build
+teamtaler admin system groups list [--actor-email ADMIN_EMAIL] [--json]
+teamtaler admin system groups create \
+  --name NAME \
+  --initial-admin-email EMAIL \
+  [--currency EUR] \
+  [--actor-email ADMIN_EMAIL] [--json]
+teamtaler admin system groups archive \
+  --id GROUP_ID --revision VERSION \
+  [--actor-email ADMIN_EMAIL] [--json]
+teamtaler admin system groups restore \
+  --id GROUP_ID --revision VERSION \
+  [--actor-email ADMIN_EMAIL] [--json]
+teamtaler admin system groups purge \
+  --id GROUP_ID --revision VERSION \
+  [--confirm-name NAME] \
+  [--actor-email ADMIN_EMAIL] [--json]
 ```
 
-The resulting binary is `./bin/teamtaler`, and the frontend output is `./web/dist`. Run them from the repository root:
+Read the current group ID, status, and version with `groups list` before a lifecycle mutation. When several active system administrators exist, `--actor-email` identifies the audit actor.
+
+When `groups create` provisions a previously unknown address, the command prints the one-time invitation link. JSON output includes `group`, `acceptUrl`, `emailDeliveryStatus`, and the exact `expiresAt` timestamp. Share the link manually; when effective SMTP is active, TeamTaler also queues the same invitation for email delivery.
+
+Interactive purge prompts for the exact group name. Non-interactive use requires `--confirm-name`. Purge succeeds only for an archived group at the supplied version and permanently removes its active application data. Review the web deletion-impact report and create a verified off-host backup first.
+
+### General operations
 
 ```sh
-./bin/teamtaler serve
-```
-
-Runtime data is written to `./data` by default and is excluded from Git.
-
-Available operator commands are:
-
-```text
 teamtaler serve
 teamtaler version
 teamtaler healthcheck [--url URL] [--timeout DURATION]
-teamtaler admin bootstrap --email EMAIL --display-name NAME --group GROUP [--currency EUR]
 teamtaler backup create --output FILE.tar.gz
 teamtaler restore --input FILE.tar.gz [--force]
 ```
@@ -311,51 +355,76 @@ Create an online application-consistent backup from the Compose deployment:
 ./scripts/backup.sh
 ```
 
-The archive contains a `VACUUM INTO` SQLite snapshot, referenced content-addressed images, a format manifest, and SHA-256 checksums. Copy completed archives to separate storage and encrypt them with a backup tool such as Restic or Borg.
+The resulting archive contains a consistent SQLite snapshot, referenced images, a format manifest, and SHA-256 checksums. Copy completed archives away from the Docker host and encrypt them with an external backup system. TeamTaler does not schedule backups or enforce retention.
 
-Restore only while the application is stopped. The restore implementation rejects unsafe archive paths, unsupported entries, oversized expanded content, checksum mismatches, invalid image content addresses, SQLite integrity or foreign-key failures, unsupported migration versions, missing referenced images, and unreferenced archived images. It preserves replaced local data in a timestamped recovery directory when `--force` is used.
+Restore only while the application is stopped. A restore validates archive paths, sizes, checksums, images, SQLite integrity, foreign keys, and migration compatibility before replacing data. The exact procedure, including the one-off Compose command and recovery directory, is documented in [deploy/README.md](deploy/README.md#restore).
 
-Migration `0017` upgrades the legacy fixed-role model to group-owned roles. Before installing this upgrade, create and verify an application backup. The migration creates the four preset roles in every group, assigns the base role to active memberships and open invitations, maps legacy administrator, finance, and catalog roles to their corresponding presets, preserves direct self-payment access through a visible editable migration role, and maps the legacy group-wide activity switch to `VIEW_ALL_BOOKING_ACTIVITY` on the base role. Archived memberships retain no assignments. Accepted invitations that reactivate an archived membership replace assignments atomically with the base role plus the invitation's selected roles; a database recovery guard adds the reserved administrator role only when the group would otherwise have no active reserved administrator.
+Before every upgrade:
 
-Migration `0018` makes the post-migration model fully explicit. It adds `CREATE_OWN_BOOKING`, grants it to the administrator and member starter roles, removes special protection from the member role, and requires every active membership and pending invitation to keep at least one role. Existing assignments are preserved. Migration `0021` narrows that invariant only for a credentialless temporary guest; every login-enabled membership and pending invitation still requires a role. New manual and CSV invitations must specify one or more roles, and acceptance or reactivation applies exactly those selected roles. Only the reserved group-administrator role remains immutable and undeletable.
+1. Read [CHANGELOG.md](CHANGELOG.md).
+2. Create and copy an off-host backup.
+3. Verify that the archive can be opened and that a restore procedure is available.
+4. Set `TEAMTALER_VERSION` to the reviewed release.
+5. Pull and restart the application:
 
-Migration `0019` adds the group-owned default role used by new invitations. Existing groups use their `MEMBER` preset when it still exists; groups where that editable starter was deleted remain unset until a group administrator chooses a safe role. At that migration level, new groups default to `MEMBER`. Referential constraints prevent deletion of the selected role, while service and database policy prevent it from granting `GROUP_ADMINISTRATION`.
+   ```sh
+   docker compose pull app
+   docker compose up -d app
+   ```
 
-Migration `0028` establishes the single-system-role model. It removes the historical `MEMBER`, `FINANCE_MANAGER`, and `CATALOG_MANAGER` preset metadata from existing roles without changing their IDs, names, descriptions, grants, assignments, versions, or selected default. Groups created afterward receive the five documented roles, only the protected administrator carries a preset key, and the ordinary editable `Gast` role is selected as their default.
+6. Verify readiness, login, representative balances, images, and audit history.
 
-Migration `0020` adds one versioned public join-link record per group, email-verified pending registrations, and a leased encrypted verification-email outbox. It does not enable a link automatically. Enabling requires complete SMTP configuration and an existing safe default role. Rotation and deactivation invalidate pending registrations, and expired links remain administratively visible without exposing their token.
+Migrations are forward-only. Rollback requires the previous image together with a compatible pre-upgrade backup. Do not run an older binary against a database already migrated by a newer release. Automatic unreviewed container updates are not recommended for financial data.
 
-Migration `0021` adds temporary guests and three permissions. It permits a `users` row to omit email and password only as a coupled pair, keeps every `memberships.user_id` required, allows only credentialless active memberships to omit role assignments, adds the case-insensitive `temporary_guest_name_key`, allows a period-statement email snapshot to be null, and lets a claim invitation target one stable membership. It adds `VIEW_MEMBER_DIRECTORY`, `VIEW_GROUP_STATISTICS`, and `BOOK_FOR_GUESTS` to the permission registry. Every existing role receives the two read grants so upgraded groups retain their former reads; only existing and future group-administrator roles receive `BOOK_FOR_GUESTS` automatically. No group, role, membership, invitation, or account is converted automatically.
+## Monitoring and logs
 
-Migration `0022` adds one-hour account-security actions and a leased encrypted email outbox for password resets and verified email changes. Existing accounts, sessions, memberships, balances, and history remain unchanged. The feature remains unavailable until complete SMTP and token-encryption configuration is present.
+```sh
+docker compose ps
+docker compose logs --tail=200 app
+docker compose exec app teamtaler healthcheck \
+  --url http://127.0.0.1:8080/health/ready
+```
 
-Migration `0023` adds the permanent-removal timestamp and lifecycle indexes to memberships. It does not delete or rewrite historical financial records. Permanent removal requires an archived membership with an exact zero balance, retains its stable membership ID and last display name through a credentialless tombstone identity, and leaves the original account and its memberships in other groups unchanged.
+- `GET /health/live` confirms that the HTTP process responds.
+- `GET /health/ready` confirms that startup and a database ping succeed.
+- Compose rotates application logs at 10 MiB and retains three files by default.
 
-Migration `0025` adds `settlements_enabled` to every group settings record with a required false default. Existing groups therefore move to continuous-balance mode without closing or replacing their current technical period, rewriting ledger entries, or changing consolidated balances. Enabling settlements later continues that same open period, including activity recorded while the feature was disabled; prior statements and closed periods remain immutable.
+Monitor container restarts, readiness, reverse-proxy TLS expiry, data-volume disk usage, backup results, and the host backup directory with external tooling. TeamTaler does not expose Prometheus metrics or built-in alert delivery.
 
-Legacy category grants on memberships and invitations are intentionally removed during `0017`. They are not widened to group grants because doing so would increase access. Review role assignments after the upgrade and create appropriate group-wide roles only where the broader access is intended. The v1 data model already represents category and product scopes, but the service rejects them until resource-specific evaluation and management UI are available. Downgrade migrations are not provided; rollback requires the pre-upgrade backup and a compatible older image.
+## Troubleshooting
 
-The HTTP upgrade keeps the endpoints below `/api/v1` and adds booking context, temporary-guest lifecycle commands, unified member reactivation and permanent removal, three permission definitions, booking display names and lifecycle statuses, and the optional `temporaryGuestDisplayNames` batch field. Existing clients may continue sending only `targetMembershipIds`. `Membership.userId` remains required, while `Membership.email` and statement email snapshots can be null and `Membership.isTemporaryGuest` is derived only from missing credentials. The bundled API and SPA are deployed together, so operators should back up, install one matching release, and verify readiness. Deprecated role strings remain projections of preset assignments; legacy writes preserve custom roles, require the current assignment ETag, and enforce the same non-empty assignment policy as the dynamic API. See [api/openapi.yaml](api/openapi.yaml) for the complete wire contract.
+### The container is unhealthy
 
-Follow the exact backup, restore, upgrade, and rollback procedures in [deploy/README.md](deploy/README.md).
+Inspect `docker compose logs app`. Common causes are an incomplete SMTP environment block, an invalid `TEAMTALER_PUBLIC_URL`, an inaccessible data volume, or a database created by a newer TeamTaler version.
 
-## Security
+### Login works, but mutations fail
 
-TeamTaler uses Argon2id password hashing, hashed opaque server-side session tokens, an HttpOnly session cookie, a readable CSRF cookie, SameSite Strict cookies, the Secure attribute under HTTPS, exact-origin validation for mutations, bounded request bodies, trusted-proxy filtering, and in-process throttling for login and invitation acceptance. Credentialless guest identities satisfy a database constraint requiring both email and password hash to be absent, can never authenticate, never receive synthetic email addresses, and never enqueue notification email. Invitation imports and accounting mutations additionally require an idempotency key, and queued invitation tokens use AES-256-GCM authenticated encryption. Temporary-guest creation shares the batch-booking idempotency and transaction boundary. Image delivery also requires active membership and a product or logo reference inside the requested group.
+Confirm that `TEAMTALER_PUBLIC_URL` exactly matches the browser origin and that the reverse proxy preserves `Origin`, cookies, and `X-CSRF-Token`.
 
-Financial history uses immutable `ledger_entries` plus linked counter-entries for corrections. Closed period snapshots and audit events are protected by SQLite triggers. Disabling settlements is a presentation and close-policy change, not an accounting mutation: consolidated balances still use the complete ledger, the technical open period remains available for writes, and the server rejects period-close commands while the setting is off. The self-payment API derives the target membership exclusively from the authenticated group session, requires CSRF and idempotency protection, records the `SELF_SERVICE` audit source, and never grants payment-list or reversal access. A central backend policy resolves stable permission keys from current role assignments for each request; permission changes are not session-cached. Member-directory and group-statistic reads require positive grants, while the booking context exposes only the actor's own balance and booking-safe target fields. Critical role, claim, assignment, and membership archival operations recheck authorization inside their serialized SQLite write transaction. Database constraints and service checks preserve credential invariants, claim-role preparation, the fixed protected administrator role, and at least one active assignment of that exact role. Frontend capability checks are presentation only.
+### Client addresses or rate limits are incorrect
 
-Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md). Do not open a public issue for an undisclosed vulnerability.
+Confirm the direct peer address seen by TeamTaler. Configure only that proxy address in `TEAMTALER_TRUSTED_PROXY_CIDRS`; do not trust all container networks as a shortcut.
 
-## Development workflow and branch strategy
+### Uploads fail with HTTP 413
 
-- `main` contains publishable releases only.
-- `dev` is the integration branch.
-- Feature and fix branches start from `dev` and return through reviewed pull requests.
-- Release pull requests merge `dev` into `main`; the resulting commit receives a semantic version tag such as `v0.2.0`.
-- Hotfixes start from `main`, are released there, and are merged back into `dev`.
+Check the effective media limit in the System tab. If a reverse proxy is used, its body limit must allow at least 26 MiB for the maximum 25 MiB media setting plus multipart overhead. `TEAMTALER_MAX_REQUEST_BYTES` applies only to ordinary non-media API requests.
 
-All code, comments, project documentation, commit messages, and pull request text are written in English. See [CONTRIBUTING.md](CONTRIBUTING.md) for quality and review requirements.
+### The System tab is missing after an upgrade
+
+Existing accounts are not promoted automatically. Grant `SYSTEM_ADMINISTRATOR` locally with `teamtaler admin system-admin grant --email EMAIL`, then reload the session.
+
+### SMTP cannot be enabled
+
+Verify that the configuration is complete, TLS mode and port match the relay, `TEAMTALER_EMAIL_TOKEN_KEY` is present, and the current stored revision has sent a successful test message. For a private relay, review the host-only private-network policy before enabling it.
+
+## Further documentation
+
+- [Deployment and operations](deploy/README.md) — reverse proxy layouts, storage, backup, restore, upgrade, and monitoring procedures.
+- [Security policy](SECURITY.md) — reporting, security boundaries, and operational hardening.
+- [Architecture](ARCHITECTURE.md) — modules, data flows, persistence, migrations, UI constraints, dependencies, and extension policy.
+- [OpenAPI specification](api/openapi.yaml) — complete HTTP contract.
+- [Contributing](CONTRIBUTING.md) — development environment, testing, branch workflow, and documentation ownership.
+- [Changelog](CHANGELOG.md) — release changes and migration notes.
 
 ## License
 

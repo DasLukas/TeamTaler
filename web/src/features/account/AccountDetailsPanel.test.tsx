@@ -5,6 +5,8 @@ import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Membership, Session } from '@/api/types';
 import { ActiveGroupContext } from '@/app/active-group-context';
+import { SessionProvider } from '@/app/SessionContext';
+import { DEFAULT_INSTANCE_CAPABILITIES } from '@/app/useSession';
 import i18n from '@/i18n';
 import { AccountDetailsPanel } from './AccountDetailsPanel';
 
@@ -28,6 +30,7 @@ const session: Session = {
   ],
   activeGroupId: 'group-a',
   defaultGroupId: null,
+  systemRoles: [],
 };
 
 function renderPanel(sessionValue: Session = session): QueryClient {
@@ -37,7 +40,9 @@ function renderPanel(sessionValue: Session = session): QueryClient {
   queryClient.setQueryData(['members', 'group-a'], [member]);
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>
-      <ActiveGroupContext.Provider value={{ session: sessionValue, activeGroup: sessionValue.groups[0], activeGroupId: 'group-a', setActiveGroupId: vi.fn() }}>{children}</ActiveGroupContext.Provider>
+      <SessionProvider instanceCapabilities={DEFAULT_INSTANCE_CAPABILITIES} session={sessionValue}>
+        <ActiveGroupContext.Provider value={{ session: sessionValue, activeGroup: sessionValue.groups[0], activeGroupId: 'group-a', setActiveGroupId: vi.fn() }}>{children}</ActiveGroupContext.Provider>
+      </SessionProvider>
     </QueryClientProvider>
   );
   render(<AccountDetailsPanel />, { wrapper });

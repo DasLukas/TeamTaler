@@ -7,6 +7,7 @@ import {
   adaptCategories,
   adaptDashboard,
   adaptGroupSettings,
+  adaptInstanceCapabilities,
   adaptTransactionSettings,
   adaptLedger,
   adaptMembership,
@@ -20,6 +21,12 @@ import {
   adaptRoleAssignment,
   adaptSession,
   adaptSettlement,
+  adaptSystemAccounts,
+  adaptSystemAudit,
+  adaptSystemGroups,
+  adaptSystemGroupInvitationResult,
+  adaptSystemGroupDeletionImpact,
+  adaptSystemSettings,
   adaptUser,
 } from './adapters';
 import type {
@@ -52,6 +59,7 @@ import type {
   GroupPreference,
   GroupSettings,
   GroupSettingsUpdateInput,
+  InstanceCapabilities,
   TransactionSettings,
   Membership,
   MemberReactivationCommand,
@@ -78,6 +86,17 @@ import type {
   RoleInput,
   Session,
   Settlement,
+  SystemAccount,
+  SystemAuditEntry,
+  SystemGroup,
+  SystemGroupCreateInput,
+  SystemGroupInvitationResult,
+  SystemGroupPurgeInput,
+  SystemGroupDeletionImpact,
+  ResettableSystemSettingKey,
+  SystemSettings,
+  SystemSettingsUpdate,
+  SystemSmtpSettingsUpdate,
   User,
 } from './types';
 import i18n from '@/i18n';
@@ -176,7 +195,17 @@ async function requestWithMetadata<T>(path: string, init: RequestInit = {}): Pro
 
 const groupPath = (groupId: string, resource: string) => `/groups/${encodeURIComponent(groupId)}/${resource}`;
 const groupRootPath = (groupId: string) => `/groups/${encodeURIComponent(groupId)}`;
+const systemGroupPath = (groupId: string, resource = '') => `/system/groups/${encodeURIComponent(groupId)}${resource ? `/${resource}` : ''}`;
 const json = (value: unknown) => JSON.stringify(value);
+const versionHeaders = (version: number): HeadersInit => ({ 'If-Match': `"v${version}"` });
+const systemSettingKeys: Record<ResettableSystemSettingKey, string> = {
+  instanceName: 'instance.name',
+  defaultCurrency: 'instance.default_currency',
+  mediaUploadMaxBytes: 'media.upload_max_bytes',
+  publicJoinEnabled: 'access.public_join_enabled',
+  maintenanceMode: 'maintenance.enabled',
+  maintenanceMessage: 'maintenance.message',
+};
 
 function setSessionActor(session: Session): Session {
   idempotencyReservations.setActor(session.user.id);
@@ -262,12 +291,79 @@ async function idempotentRequest<T>(groupId: string, operation: string, path: st
  * @example
  * ```ts
  * const session = await api.getSession();
- * const categories = await api.getCategories(session.activeGroupId);
+ * if (session.activeGroupId) await api.getCategories(session.activeGroupId);
  * ```
+ *
+ * System-administration wire contract:
+ * - settings and capabilities are direct camelCase documents; list endpoints
+ *   return `{ items: [...] }`;
+ * - settings, SMTP, invitation resend, archive, restore, and purge mutations require a strong
+ *   `If-Match: "v{revision}"` header;
+ * - scalar reset posts `{ keys: [coreSettingKey] }`, SMTP PUT never returns a
+ *   password, and an omitted SMTP password preserves the stored secret;
+ * - purge posts the exact current group name and returns the final
+ *   deletion-impact receipt.
  */
 export const api = {
   getSession: async (): Promise<Session> => setSessionActor(adaptSession(await request<unknown>('/session'))),
+  getInstanceCapabilities: async (): Promise<InstanceCapabilities> => adaptInstanceCapabilities(await request<unknown>('/instance/capabilities')),
   getAuthenticationCapabilities: async (): Promise<AuthenticationCapabilities> => request<AuthenticationCapabilities>('/auth/capabilities'),
+  /**
+   * Reads the direct or `{ settings }` system document from `GET /system/settings`.
+   * Mutations below send camelCase JSON and require `If-Match: "v{revision}"`.
+   */
+  getSystemSettings: async (): Promise<SystemSettings> => adaptSystemSettings(await request<unknown>('/system/settings')),
+  updateSystemSettings: async (update: SystemSettingsUpdate, revision: number): Promise<SystemSettings> => adaptSystemSettings(await request<unknown>('/system/settings', {
+    method: 'PATCH',
+    headers: versionHeaders(revision),
+    body: json(update),
+  })),
+  resetSystemSettings: async (keys: ResettableSystemSettingKey[], revision: number): Promise<SystemSettings> => adaptSystemSettings(await request<unknown>('/system/settings/reset', {
+    method: 'POST',
+    headers: versionHeaders(revision),
+    body: json({ keys: keys.map((key) => systemSettingKeys[key]) }),
+  })),
+  updateSystemSmtp: async (update: SystemSmtpSettingsUpdate, revision: number): Promise<SystemSettings> => adaptSystemSettings(await request<unknown>('/system/settings/smtp', {
+    method: 'PUT',
+    headers: versionHeaders(revision),
+    body: json(update),
+  })),
+  resetSystemSmtp: async (revision: number): Promise<SystemSettings> => adaptSystemSettings(await request<unknown>('/system/settings/smtp', {
+    method: 'DELETE',
+    headers: versionHeaders(revision),
+  })),
+  testSystemSmtp: async (revision: number): Promise<SystemSettings> => adaptSystemSettings(await request<unknown>('/system/settings/smtp/test', {
+    method: 'POST',
+    headers: versionHeaders(revision),
+  })),
+  searchSystemAccounts: async (query = ''): Promise<SystemAccount[]> => {
+    const parameters = new URLSearchParams();
+    if (query.trim()) parameters.set('q', query.trim());
+    const suffix = parameters.size > 0 ? `?${parameters.toString()}` : '';
+    return adaptSystemAccounts(await request<unknown>(`/system/accounts${suffix}`));
+  },
+  getSystemAdministrators: async (): Promise<SystemAccount[]> => adaptSystemAccounts(await request<unknown>('/system/administrators')),
+  getSystemGroups: async (): Promise<SystemGroup[]> => adaptSystemGroups(await request<unknown>('/system/groups')),
+  getSystemGroupDeletionImpact: async (groupId: string): Promise<SystemGroupDeletionImpact> => adaptSystemGroupDeletionImpact(await request<unknown>(systemGroupPath(groupId, 'deletion-impact'))),
+  createSystemGroup: async (input: SystemGroupCreateInput): Promise<SystemGroupInvitationResult> => adaptSystemGroupInvitationResult(await request<unknown>('/system/groups', { method: 'POST', body: json({ name: input.name, currency: input.currency, initialAdministratorEmail: input.administratorEmail }) })),
+  archiveSystemGroup: async (groupId: string, version: number): Promise<SystemGroup> => adaptSystemGroups([await request<unknown>(systemGroupPath(groupId, 'archive'), {
+    method: 'POST',
+    headers: versionHeaders(version),
+  })])[0],
+  restoreSystemGroup: async (groupId: string, version: number): Promise<SystemGroup> => adaptSystemGroups([await request<unknown>(systemGroupPath(groupId, 'restore'), {
+    method: 'POST',
+    headers: versionHeaders(version),
+  })])[0],
+  resendSystemGroupInvitation: async (groupId: string, version: number): Promise<SystemGroupInvitationResult> => adaptSystemGroupInvitationResult(await request<unknown>(systemGroupPath(groupId, 'invitation/resend'), {
+    method: 'POST',
+    headers: versionHeaders(version),
+  })),
+  purgeSystemGroup: async (groupId: string, version: number, input: SystemGroupPurgeInput): Promise<SystemGroupDeletionImpact> => adaptSystemGroupDeletionImpact(await request<unknown>(systemGroupPath(groupId, 'purge'), {
+    method: 'POST',
+    headers: versionHeaders(version),
+    body: json(input),
+  })),
+  getSystemAudit: async (): Promise<SystemAuditEntry[]> => adaptSystemAudit(await request<unknown>('/system/audit')),
   requestPasswordReset: async (email: string): Promise<void> => request<void>('/auth/password-reset/request', { method: 'POST', body: json({ email }) }),
   confirmPasswordReset: async (token: string, newPassword: string): Promise<void> => {
     await request<void>('/auth/password-reset/confirm', { method: 'POST', body: json({ token, newPassword }) });

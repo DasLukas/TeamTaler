@@ -189,16 +189,34 @@ func TestDisabledSMTPReportsUnavailable(t *testing.T) {
 	}
 }
 
+func TestSMTPBlocksPrivateTargetsWithoutImmutableHostApproval(t *testing.T) {
+	configuration := testSMTPConfiguration(config.SMTPTLSModeTLS, 465)
+	configuration.AllowedPrivateHost = ""
+	sender, err := NewSMTP(configuration)
+	if err != nil {
+		t.Fatalf("NewSMTP: %v", err)
+	}
+	err = sender.SendNotification(context.Background(), NotificationMessage{
+		ToAddress: "admin@example.test", GroupName: "TeamTaler", Title: "SMTP test",
+		Body: "SMTP policy test.", ActionURL: "https://teamtaler.example.test/admin",
+	})
+	if err == nil || !strings.Contains(err.Error(), "immutable host network policy") {
+		t.Fatalf("private SMTP target error=%v, want host-policy rejection", err)
+	}
+}
+
 func testSMTPConfiguration(mode config.SMTPTLSMode, port int) config.SMTPConfig {
 	return config.SMTPConfig{
-		Enabled:     true,
-		Host:        "127.0.0.1",
-		Port:        port,
-		Username:    "smtp-user",
-		Password:    "smtp-password",
-		FromAddress: "teamtaler@example.test",
-		FromName:    "TeamTaler",
-		TLSMode:     mode,
+		Enabled:            true,
+		Host:               "127.0.0.1",
+		Port:               port,
+		Username:           "smtp-user",
+		Password:           "smtp-password",
+		FromAddress:        "teamtaler@example.test",
+		FromName:           "TeamTaler",
+		TLSMode:            mode,
+		AllowedPrivateHost: "127.0.0.1",
+		AllowedPrivatePort: port,
 	}
 }
 

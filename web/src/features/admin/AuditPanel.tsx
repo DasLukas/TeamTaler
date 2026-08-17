@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { StatePanel } from '@/components/ui/StatePanel';
-import tableStyles from '@/features/shared/Table.module.css';
+import { AuditEventTable } from '@/features/shared/AuditEventTable';
 import styles from './AuditPanel.module.css';
 
 /**
@@ -20,7 +20,7 @@ export function AuditPanel() {
   return (
     <div className={styles.content}>
       <header><h2>{t('audit.title')}</h2><p>{t('audit.intro')}</p></header>
-      {auditQuery.data.length === 0 ? <StatePanel kind="empty" message={t('audit.empty')} /> : <div className={tableStyles.tableWrap}><table className={tableStyles.table}><thead><tr><th>{t('audit.time')}</th><th>{t('audit.actor')}</th><th>{t('audit.action')}</th><th>{t('audit.subject')}</th><th>{t('common.details')}</th></tr></thead><tbody>{auditQuery.data.map((entry) => <tr key={entry.id}><td>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(entry.occurredAt))}</td><td><strong>{entry.actorName}</strong></td><td>{entry.action}</td><td>{entry.subject}</td><td>{entry.details}</td></tr>)}</tbody></table></div>}
+      {auditQuery.data.length === 0 ? <StatePanel kind="empty" message={t('audit.empty')} /> : <AuditEventTable entries={auditQuery.data.map((entry) => ({ ...entry, actor: entry.actorName }))} />}
     </div>
   );
 }

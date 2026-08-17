@@ -75,17 +75,22 @@ func (s *Server) handleRetryInvitationEmail(response http.ResponseWriter, reques
 	writeJSON(response, http.StatusOK, result)
 }
 
-// handleResendInvitationEmail rotates an invitation token, queues a fresh
-// delivery, and exposes the new fallback URL only for the first idempotent
-// response. response receives the secret-free delivery result plus an optional
-// acceptUrl; request supplies authenticated group context and Idempotency-Key.
+// handleResendInvitationEmail rotates an invitation token, optionally queues
+// email delivery, and exposes the new fallback URL only for the first
+// idempotent response. response receives the secret-free delivery result plus
+// an optional acceptUrl; request supplies authenticated group context and
+// Idempotency-Key.
 func (s *Server) handleResendInvitationEmail(response http.ResponseWriter, request *http.Request) {
 	principal, membership, err := s.membership(request)
 	if err != nil {
 		writeProblem(response, request, err)
 		return
 	}
-	result, err := s.groups.ResendInvitationEmail(
+	invitationService := s.groups
+	if settings, loaded := effectiveSystemSettings(request); loaded && !settings.SMTP.Active {
+		invitationService.TokenSealer = nil
+	}
+	result, err := invitationService.ResendInvitationEmail(
 		request.Context(), principal, membership, request.Header.Get("Idempotency-Key"), request.PathValue("invitationID"),
 	)
 	if err != nil {

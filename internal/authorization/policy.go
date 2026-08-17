@@ -270,6 +270,7 @@ func (p Policy) EffectiveGrants(ctx context.Context, groupID, membershipID strin
 	rows, err := p.queryer.QueryContext(ctx, `
 		SELECT g.permission_key,g.scope_type,coalesce(g.category_id,''),coalesce(g.product_id,'')
 		FROM memberships m
+		JOIN groups tenant ON tenant.id=m.group_id AND tenant.status='ACTIVE'
 		JOIN membership_role_assignments a
 		  ON a.group_id=m.group_id AND a.membership_id=m.id
 		JOIN role_permission_grants g

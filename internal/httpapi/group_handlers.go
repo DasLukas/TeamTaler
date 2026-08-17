@@ -30,25 +30,10 @@ func (s *Server) handleListGroups(response http.ResponseWriter, request *http.Re
 }
 
 func (s *Server) handleCreateGroup(response http.ResponseWriter, request *http.Request) {
-	principal, err := s.principal(request)
-	if err != nil {
-		writeProblem(response, request, err)
-		return
-	}
-	var input struct {
-		Name     string `json:"name"`
-		Currency string `json:"currency"`
-	}
-	if err := decodeJSON(response, request, &input); err != nil {
-		writeProblem(response, request, err)
-		return
-	}
-	item, err := s.groups.Create(request.Context(), principal, input.Name, input.Currency)
-	if err != nil {
-		writeProblem(response, request, err)
-		return
-	}
-	writeJSON(response, http.StatusCreated, item)
+	// Keep the historical route as an exact alias so it cannot accidentally
+	// reintroduce self-service creation or make the acting system administrator
+	// a group member. New clients use /api/v1/system/groups.
+	s.handleCreateSystemGroup(response, request)
 }
 
 // handleUpdateGroup authorizes an administrator and updates the normalized
@@ -90,9 +75,10 @@ func (s *Server) handleGetGroupSettings(response http.ResponseWriter, request *h
 		writeProblem(response, request, err)
 		return
 	}
+	runtimeSettings, _ := effectiveSystemSettings(request)
 	writeJSON(response, http.StatusOK, map[string]any{
 		"notificationEmailsEnabled":          settings.NotificationEmailsEnabled,
-		"notificationEmailDeliveryAvailable": s.config.SMTP.Enabled,
+		"notificationEmailDeliveryAvailable": runtimeSettings.SMTP.Active,
 		"settlementsEnabled":                 settings.SettlementsEnabled,
 		"defaultRoleId":                      settings.DefaultRoleID,
 		"ownBookingReasonMode":               settings.OwnBookingReasonMode,
@@ -161,7 +147,8 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		writeProblem(response, request, domain.ValidationError{Field: "settings", Message: "must contain at least one supported field"})
 		return
 	}
-	if input.NotificationEmailsEnabled != nil && *input.NotificationEmailsEnabled && !s.config.SMTP.Enabled {
+	runtimeSettings, _ := effectiveSystemSettings(request)
+	if input.NotificationEmailsEnabled != nil && *input.NotificationEmailsEnabled && !runtimeSettings.SMTP.Active {
 		writeProblem(response, request, domain.ValidationError{Field: "notificationEmailsEnabled", Message: "requires configured SMTP delivery"})
 		return
 	}
@@ -186,7 +173,7 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 	}
 	writeJSON(response, http.StatusOK, map[string]any{
 		"notificationEmailsEnabled":          settings.NotificationEmailsEnabled,
-		"notificationEmailDeliveryAvailable": s.config.SMTP.Enabled,
+		"notificationEmailDeliveryAvailable": runtimeSettings.SMTP.Active,
 		"settlementsEnabled":                 settings.SettlementsEnabled,
 		"defaultRoleId":                      settings.DefaultRoleID,
 		"ownBookingReasonMode":               settings.OwnBookingReasonMode,
@@ -216,11 +203,12 @@ func (s *Server) handleGroupLogo(response http.ResponseWriter, request *http.Req
 		writeProblem(response, request, err)
 		return
 	}
-	imageKey, err := s.storeUploadedImage(response, request)
+	imageKey, releaseImage, err := s.storeUploadedImage(response, request)
 	if err != nil {
 		writeProblem(response, request, err)
 		return
 	}
+	defer releaseImage()
 	logoURL, _, err := s.groups.SetLogo(request.Context(), principal, membership, imageKey)
 	if err != nil {
 		writeProblem(response, request, err)
@@ -393,14 +381,18 @@ func (s *Server) handleCreateInvitation(response http.ResponseWriter, request *h
 		return
 	}
 	var item groups.Invitation
+	invitationService := s.groups
+	if settings, loaded := effectiveSystemSettings(request); loaded && !settings.SMTP.Active {
+		invitationService.TokenSealer = nil
+	}
 	if input.RoleIDs != nil {
 		if len(input.Roles) > 0 || len(input.GroupPermissions) > 0 || len(input.CategoryGrants) > 0 {
 			writeProblem(response, request, domain.ValidationError{Field: "roleIds", Message: "cannot be combined with deprecated roles, groupPermissions, or categoryGrants"})
 			return
 		}
-		item, err = s.groups.CreateInvitationWithRoles(request.Context(), principal, membership, input.Email, input.DisplayName, input.RoleIDs)
+		item, err = invitationService.CreateInvitationWithRoles(request.Context(), principal, membership, input.Email, input.DisplayName, input.RoleIDs)
 	} else {
-		item, err = s.groups.CreateInvitation(request.Context(), principal, membership, input.Email, input.DisplayName, input.Roles, input.GroupPermissions, input.CategoryGrants)
+		item, err = invitationService.CreateInvitation(request.Context(), principal, membership, input.Email, input.DisplayName, input.Roles, input.GroupPermissions, input.CategoryGrants)
 	}
 	if err != nil {
 		writeProblem(response, request, err)

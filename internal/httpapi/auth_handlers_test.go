@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/DasLukas/TeamTaler/internal/auth"
 )
 
 func TestPasswordHashCapacityUsesProblemDetails(t *testing.T) {
@@ -60,5 +62,23 @@ func TestPasswordHashCapacityUsesProblemDetails(t *testing.T) {
 				t.Fatalf("unexpected problem details: %#v", body)
 			}
 		})
+	}
+}
+
+func TestInvitationAccountStateChangeUsesTypedConflict(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/invitations/accept", nil)
+	response := httptest.NewRecorder()
+
+	writeProblem(response, request, auth.ErrInvitationAccountStateChanged)
+
+	if response.Code != http.StatusConflict {
+		t.Fatalf("status=%d, want %d", response.Code, http.StatusConflict)
+	}
+	var body problem
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode problem: %v", err)
+	}
+	if body.Type != "https://teamtaler.dev/problems/invitation-account-state-changed" || body.Instance != request.URL.Path {
+		t.Fatalf("problem=%#v", body)
 	}
 }

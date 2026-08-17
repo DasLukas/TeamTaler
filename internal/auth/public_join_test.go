@@ -49,7 +49,7 @@ func TestPublicJoinRegistrationVerifiesEmailAndUsesCurrentDefaultRole(t *testing
 	}
 	if err := authService.StartPublicJoinRegistration(ctx, auth.PublicJoinRegistration{
 		JoinToken: link.Token, Email: "NEW@Example.test", DisplayName: "New Member", Password: "new-member-password-long",
-	}); err != nil {
+	}, 0); err != nil {
 		t.Fatalf("start registration: %v", err)
 	}
 
@@ -65,7 +65,7 @@ func TestPublicJoinRegistrationVerifiesEmailAndUsesCurrentDefaultRole(t *testing
 	if err != nil {
 		t.Fatalf("open verification token: %v", err)
 	}
-	joinedSession, joinedMembership, err := authService.ConfirmPublicJoinRegistration(ctx, verificationToken)
+	joinedSession, joinedMembership, err := authService.ConfirmPublicJoinRegistration(ctx, verificationToken, 0)
 	if err != nil {
 		t.Fatalf("confirm registration: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestPublicJoinRegistrationVerifiesEmailAndUsesCurrentDefaultRole(t *testing
 	if assignedRoleID != financeRoleID {
 		t.Fatalf("assigned role=%q, want current default %q", assignedRoleID, financeRoleID)
 	}
-	if _, _, err := authService.ConfirmPublicJoinRegistration(ctx, verificationToken); !errors.Is(err, domain.ErrNotFound) {
+	if _, _, err := authService.ConfirmPublicJoinRegistration(ctx, verificationToken, 0); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("reused verification token error=%v, want not found", err)
 	}
 	var outboxStatus string
@@ -134,7 +134,21 @@ func TestAuthenticatedPublicJoinReactivatesWithOnlyCurrentDefaultRole(t *testing
 	if err != nil {
 		t.Fatalf("existing login: %v", err)
 	}
-	joined, err := authService.AcceptPublicJoinLink(ctx, existingSession.Principal, link.Token)
+	var staleSettingsRevision int64
+	if err := db.QueryRowContext(ctx, `SELECT revision FROM system_settings_state WHERE singleton=1`).Scan(&staleSettingsRevision); err != nil {
+		t.Fatalf("read settings revision: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE system_settings_state SET revision=revision+1 WHERE singleton=1`); err != nil {
+		t.Fatalf("change public-join policy revision: %v", err)
+	}
+	if _, err := authService.AcceptPublicJoinLink(ctx, existingSession.Principal, link.Token, staleSettingsRevision); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("accept with stale instance policy error=%v, want conflict", err)
+	}
+	var membershipCount int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM memberships WHERE group_id=? AND user_id=?`, adminMembership.GroupID, existingSession.Principal.UserID).Scan(&membershipCount); err != nil || membershipCount != 0 {
+		t.Fatalf("stale policy membership count=%d err=%v", membershipCount, err)
+	}
+	joined, err := authService.AcceptPublicJoinLink(ctx, existingSession.Principal, link.Token, staleSettingsRevision+1)
 	if err != nil {
 		t.Fatalf("join existing account: %v", err)
 	}
@@ -152,7 +166,7 @@ func TestAuthenticatedPublicJoinReactivatesWithOnlyCurrentDefaultRole(t *testing
 	if _, err := groupService.UpdateSettings(ctx, adminSession.Principal, adminMembership, groups.SettingsUpdate{DefaultRoleID: &catalogRoleID}); err != nil {
 		t.Fatalf("change default role: %v", err)
 	}
-	reactivated, err := authService.AcceptPublicJoinLink(ctx, existingSession.Principal, link.Token)
+	reactivated, err := authService.AcceptPublicJoinLink(ctx, existingSession.Principal, link.Token, 0)
 	if err != nil || reactivated.ID != joined.ID || reactivated.Status != "ACTIVE" {
 		t.Fatalf("reactivated membership=%#v err=%v", reactivated, err)
 	}

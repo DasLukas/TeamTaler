@@ -61,8 +61,13 @@ load_local_environment() {
     case "${name}" in
       TEAMTALER_SMTP_HOST | TEAMTALER_SMTP_PORT | TEAMTALER_SMTP_USERNAME | \
         TEAMTALER_SMTP_PASSWORD | TEAMTALER_SMTP_FROM_ADDRESS | TEAMTALER_SMTP_FROM_NAME | \
-        TEAMTALER_SMTP_TLS_MODE | TEAMTALER_EMAIL_TOKEN_KEY)
+      TEAMTALER_SMTP_TLS_MODE)
         export "${name}=${value}"
+        ;;
+      TEAMTALER_EMAIL_TOKEN_KEY)
+        if [[ -n "${value}" ]]; then
+          export "${name}=${value}"
+        fi
         ;;
       *)
         echo "Unsupported variable in ${local_env_file}: ${name}." >&2
@@ -116,7 +121,7 @@ fi
 if [[ "${TEAMTALER_TEST_DISABLE_SMTP:-false}" == "true" ]]; then
   unset TEAMTALER_SMTP_HOST TEAMTALER_SMTP_PORT TEAMTALER_SMTP_USERNAME \
     TEAMTALER_SMTP_PASSWORD TEAMTALER_SMTP_FROM_ADDRESS TEAMTALER_SMTP_FROM_NAME \
-    TEAMTALER_SMTP_TLS_MODE TEAMTALER_EMAIL_TOKEN_KEY
+    TEAMTALER_SMTP_TLS_MODE
   echo "Local SMTP delivery is disabled for this test run."
 elif [[ -f "${local_env_file}" ]]; then
   load_local_environment
@@ -126,7 +131,7 @@ elif [[ -f "${local_env_file}" ]]; then
   else
     unset TEAMTALER_SMTP_HOST TEAMTALER_SMTP_PORT TEAMTALER_SMTP_USERNAME \
       TEAMTALER_SMTP_PASSWORD TEAMTALER_SMTP_FROM_ADDRESS TEAMTALER_SMTP_FROM_NAME \
-      TEAMTALER_SMTP_TLS_MODE TEAMTALER_EMAIL_TOKEN_KEY
+      TEAMTALER_SMTP_TLS_MODE
     echo "Local SMTP delivery is disabled. Add username and password to .env.test-server.local to enable it."
   fi
 fi
@@ -186,8 +191,9 @@ echo
 echo "TeamTaler test server is ready at http://127.0.0.1:5173"
 echo "Shared password: TeamTaler-Test-2026!"
 echo "Groups: TeamTaler Demo Club, TeamTaler Weekend Club"
-echo "Accounts: admin@example.test, marie@example.test, jonas@example.test, lena@example.test, noah@example.test"
+echo "Accounts: admin@example.test, marie@example.test, jonas@example.test, lena@example.test, noah@example.test, systemonly@example.test"
 echo "Second-group-only account: noah@example.test"
+echo "Group-less system administrator: systemonly@example.test"
 echo "Second-group catalog: Refreshments / Club Coffee (EUR 1.80)"
 echo "Stop the action to remove its disposable database."
 

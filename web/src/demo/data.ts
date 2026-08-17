@@ -78,6 +78,7 @@ export const demoSession: Session = {
   ],
   activeGroupId: 'group-sv-adler',
   defaultGroupId: null,
+  systemRoles: [],
   demo: true,
 };
 

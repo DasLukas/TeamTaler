@@ -79,6 +79,25 @@ func TestAccountGroupPreferenceControlsSubsequentSessionSelection(t *testing.T) 
 	if err != nil || payload.ActiveGroupID == nil || *payload.ActiveGroupID != secondGroup.ID || payload.DefaultGroupID != nil {
 		t.Fatalf("restored last-used session payload=%#v err=%v", payload, err)
 	}
+
+	now := "2026-08-15T12:00:00Z"
+	if _, err := db.ExecContext(ctx, `UPDATE groups SET status='ARCHIVED',archived_from_status='ACTIVE',archived_at=?,archived_by=?,version=version+1,updated_at=? WHERE id=?`, now, session.Principal.UserID, now, secondGroup.ID); err != nil {
+		t.Fatalf("archive preference group: %v", err)
+	}
+	for name, request := range map[string]*http.Request{
+		"default":   authenticatedJSONRequest(http.MethodPut, "/api/v1/me/group-preference", `{"defaultGroupId":"`+secondGroup.ID+`"}`, session.Principal),
+		"last-used": authenticatedJSONRequest(http.MethodPut, "/api/v1/me/group-preference/last-used", `{"groupId":"`+secondGroup.ID+`"}`, session.Principal),
+	} {
+		response := httptest.NewRecorder()
+		if name == "default" {
+			server.handleUpdateDefaultGroup(response, request)
+		} else {
+			server.handleRecordLastUsedGroup(response, request)
+		}
+		if response.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("archived %s preference status=%d body=%q, want 422", name, response.Code, response.Body.String())
+		}
+	}
 }
 
 func TestAccountGroupPreferenceRejectsUnavailableGroupsAndMissingMode(t *testing.T) {

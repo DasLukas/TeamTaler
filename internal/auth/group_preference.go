@@ -115,8 +115,9 @@ func (s Service) requireActiveGroupMembership(ctx context.Context, userID, group
 	}
 	var exists int
 	if err := s.DB.QueryRowContext(ctx, `SELECT exists(
-		SELECT 1 FROM memberships
-		WHERE user_id=? AND group_id=? AND status='ACTIVE' AND deleted_at IS NULL
+		SELECT 1 FROM memberships membership
+		JOIN groups team ON team.id=membership.group_id AND team.status='ACTIVE'
+		WHERE membership.user_id=? AND membership.group_id=? AND membership.status='ACTIVE' AND membership.deleted_at IS NULL
 	)`, userID, groupID).Scan(&exists); err != nil {
 		return err
 	}

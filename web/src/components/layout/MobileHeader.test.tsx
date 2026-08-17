@@ -23,15 +23,17 @@ describe('MobileHeader', () => {
     });
   });
 
-  it('keeps the native group selector accessible when its mobile presentation is icon-only', () => {
+  it('keeps the custom group selector accessible when its mobile presentation is compact', () => {
     render(<MobileHeader />);
 
     const selector = screen.getByRole('combobox', { name: i18n.t('nav.selectGroup'), hidden: true });
     expect(selector).toHaveAttribute('title', 'TeamTaler Demo Club');
-    expect(selector).toHaveValue('group-a');
-    expect(screen.getByRole('option', { name: 'Second Club', hidden: true })).toBeInTheDocument();
+    expect(selector).toHaveTextContent('TeamTaler Demo Club');
 
-    fireEvent.change(selector, { target: { value: 'group-b' } });
+    fireEvent.click(selector);
+    const secondGroup = screen.getByRole('option', { name: 'Second Club' });
+    expect(secondGroup).toHaveTextContent('S');
+    fireEvent.click(secondGroup);
     expect(mocks.setActiveGroupId).toHaveBeenCalledWith('group-b');
   });
 });

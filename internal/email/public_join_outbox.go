@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/url"
 	"strings"
@@ -59,17 +58,14 @@ func NewPublicJoinDispatcher(db *sql.DB, sender JoinVerificationSender, tokenOpe
 }
 
 // Run processes public-join verification jobs until ctx is cancelled. Sender
-// failures are retried durably and do not terminate workers. It returns a
-// configuration error, ErrUnavailable, or nil after orderly cancellation.
+// failures are retried durably and do not terminate workers. It pauses without
+// claiming jobs while delivery is disabled and returns nil after cancellation.
 func (d *PublicJoinDispatcher) Run(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("run public join dispatcher: context is required")
 	}
 	if d == nil || d.db == nil || d.sender == nil || d.tokenOpener == nil || d.now == nil || d.workerCount < 1 || d.workerCount > defaultWorkerCount || d.pollInterval <= 0 || d.leaseDuration <= 0 {
 		return errors.New("run public join dispatcher: dispatcher is not fully configured")
-	}
-	if !d.sender.Available() {
-		return fmt.Errorf("run public join dispatcher: %w", ErrUnavailable)
 	}
 	var workers sync.WaitGroup
 	workers.Add(d.workerCount)
@@ -119,6 +115,9 @@ func (d *PublicJoinDispatcher) runWorker(ctx context.Context) {
 }
 
 func (d *PublicJoinDispatcher) processOne(ctx context.Context) (bool, error) {
+	if !d.sender.Available() {
+		return false, nil
+	}
 	job, found, err := d.claimNext(ctx)
 	if err != nil || !found {
 		return found, err
@@ -163,11 +162,13 @@ func (d *PublicJoinDispatcher) processOne(ctx context.Context) (bool, error) {
 		d.releaseAfterCancellation(job)
 		return true, nil
 	}
-	code := FailureCodeDeliveryFailed
 	if errors.Is(err, ErrUnavailable) {
-		code = FailureCodeEmailUnavailable
+		d.releaseAfterCancellation(job)
+		return true, nil
 	}
-	return true, withCompletionContext(func(completionContext context.Context) error { return d.recordFailure(completionContext, job, code) })
+	return true, withCompletionContext(func(completionContext context.Context) error {
+		return d.recordFailure(completionContext, job, FailureCodeDeliveryFailed)
+	})
 }
 
 func (d *PublicJoinDispatcher) claimNext(ctx context.Context) (claimedPublicJoin, bool, error) {

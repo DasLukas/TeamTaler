@@ -642,6 +642,10 @@ export class DemoTransport {
     const invitationId = [...this.invitationTokens].find(([, token]) => token === command.token)?.[0];
     const invitation = this.invitations.find((item) => item.id === invitationId);
     if (invitation) {
+      const accountExists = this.members.some((member) => member.email?.toLowerCase() === invitation.email.toLowerCase());
+      if ((command.expectedAccountState === 'EXISTING') !== accountExists) {
+        throw new Error(i18n.t('auth.invitationAccountStateChanged'));
+      }
       invitation.acceptedAt = new Date().toISOString();
       this.invitationTokens.delete(invitation.id);
       const claimedMember = invitation.targetMembershipId
@@ -680,7 +684,7 @@ export class DemoTransport {
     const invitation = this.invitations.find((item) => item.id === invitationId && !item.acceptedAt && !item.revokedAt);
     if (!invitation || Date.parse(invitation.expiresAt) <= Date.now()) throw new Error('Invitation is invalid or expired.');
     const account = this.members.find((member) => member.email?.toLowerCase() === invitation.email.toLowerCase());
-    return { displayName: invitation.displayName ?? account?.displayName ?? '', existingAccount: Boolean(account) };
+    return { displayName: invitation.displayName ?? account?.displayName ?? '', accountState: account ? 'EXISTING' : 'NEW' };
   }
 
   /** Resolves safe demo metadata for the current public join token. */

@@ -22,13 +22,16 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/finance"
 	"github.com/DasLukas/TeamTaler/internal/groups"
 	"github.com/DasLukas/TeamTaler/internal/media"
+	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/storage"
+	systemadmin "github.com/DasLukas/TeamTaler/internal/system"
 )
 
 const (
 	testPassword         = "TeamTaler-Test-2026!"
 	testDataSeedTimeout  = 2 * time.Minute
 	adminEmail           = "admin@example.test"
+	systemOnlyAdminEmail = "systemonly@example.test"
 	secondaryGroupName   = "TeamTaler Weekend Club"
 	secondaryMemberEmail = "noah@example.test"
 	secondaryCategory    = "Refreshments"
@@ -110,6 +113,9 @@ func run() error {
 	adminSession, err := authService.Login(ctx, adminEmail, testPassword)
 	if err != nil {
 		return fmt.Errorf("login seeded administrator: %w", err)
+	}
+	if err := seedSystemOnlyAdministrator(ctx, db, adminSession.Principal.UserID); err != nil {
+		return err
 	}
 	adminGroup, err := onlyGroup(ctx, groupService, adminSession.Principal.UserID)
 	if err != nil {
@@ -264,6 +270,30 @@ func run() error {
 	}
 	fmt.Println("Development test data created.")
 	return nil
+}
+
+// seedSystemOnlyAdministrator creates one credentialed account with the global
+// administrator assignment and deliberately no group membership. It exercises
+// the authenticated system-only shell without widening any tenant access.
+func seedSystemOnlyAdministrator(ctx context.Context, db *sql.DB, grantingUserID string) error {
+	passwordHash, err := auth.HashPassword(testPassword)
+	if err != nil {
+		return fmt.Errorf("hash system-only administrator password: %w", err)
+	}
+	userID, err := platform.NewID("usr")
+	if err != nil {
+		return fmt.Errorf("create system-only administrator identifier: %w", err)
+	}
+	now := platform.Timestamp(platform.Now())
+	return storage.WithTx(ctx, db, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES(?,?,?,?,?,?)`, userID, systemOnlyAdminEmail, "System Only", passwordHash, now, now); err != nil {
+			return fmt.Errorf("insert system-only administrator: %w", err)
+		}
+		if _, err := systemadmin.GrantAdministratorInTx(ctx, tx, userID, grantingUserID); err != nil {
+			return fmt.Errorf("grant system-only administrator: %w", err)
+		}
+		return nil
+	})
 }
 
 // seedSecondaryGroup creates a second disposable group with one catalog item
@@ -489,8 +519,12 @@ func createMember(ctx context.Context, authService auth.Service, groupService gr
 	if err != nil {
 		return seededMember{}, fmt.Errorf("invite %s: %w", seed.email, err)
 	}
+	preview, err := authService.PreviewInvitation(ctx, invitation.Token)
+	if err != nil {
+		return seededMember{}, fmt.Errorf("preview invitation for %s: %w", seed.email, err)
+	}
 	session, membership, err := authService.AcceptInvitation(ctx, auth.InvitationAcceptance{
-		Token: invitation.Token, DisplayName: seed.displayName, Password: testPassword,
+		Token: invitation.Token, DisplayName: seed.displayName, Password: testPassword, ExpectedAccountState: preview.AccountState,
 	})
 	if err != nil {
 		return seededMember{}, fmt.Errorf("accept invitation for %s: %w", seed.email, err)

@@ -95,6 +95,27 @@
   font-size: var(--font-size-sm);
 }
 
+.defaultRoleCard {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+.defaultRoleCard > div:first-child {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.defaultRoleCard h4,
+.defaultRoleActions p { margin: 0; }
+
+.defaultRoleActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
 .settingRow {
   display: flex;
   align-items: center;
@@ -200,6 +221,14 @@
   .settingRow {
     align-items: flex-start;
   }
+
+  .defaultRoleCard {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .defaultRoleActions { justify-content: stretch; }
+  .defaultRoleActions button { width: 100%; }
 
   .reasonRule {
     align-items: stretch;

@@ -1,0 +1,30 @@
+.content {
+  display: grid;
+  gap: var(--space-5);
+  padding: var(--space-4) var(--space-6) var(--space-6);
+}
+
+.message,
+.error {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.error { color: var(--color-red-600); }
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+@media (max-width: 520px) {
+  .content { padding: var(--space-3) var(--space-5) var(--space-5); }
+
+  .actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+
+  .actions > * { width: 100%; }
+}

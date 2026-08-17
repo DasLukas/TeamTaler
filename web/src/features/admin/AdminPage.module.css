@@ -1,5 +1,6 @@
 .page {
   width: 100%;
+  min-width: 0;
   max-width: none;
   padding-inline: 48px;
 }
@@ -10,10 +11,18 @@
 
 .tabs {
   display: flex;
+  width: 100%;
+  min-width: 0;
   gap: var(--space-8);
   border-bottom: 1px solid var(--color-border);
   overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scroll-snap-type: inline proximity;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
 }
+
+.tabs::-webkit-scrollbar { display: none; }
 
 .tabs button {
   position: relative;
@@ -23,6 +32,7 @@
   color: var(--color-text);
   background: transparent;
   white-space: nowrap;
+  scroll-snap-align: start;
 }
 
 .tabs .activeTab {
@@ -39,10 +49,20 @@
 }
 
 .panel {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   min-height: 560px;
 }
 
 @media (max-width: 767px) {
   .page { padding-inline: var(--space-5); }
-  .tabs { gap: var(--space-6); margin-inline: calc(var(--space-5) * -1); padding-inline: var(--space-5); }
+  .tabs {
+    width: calc(100% + (var(--space-5) * 2));
+    max-width: none;
+    gap: var(--space-6);
+    margin-inline: calc(var(--space-5) * -1);
+    padding-inline: var(--space-5);
+    scroll-padding-inline: var(--space-5);
+  }
 }
