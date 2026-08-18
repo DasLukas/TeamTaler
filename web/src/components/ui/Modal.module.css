@@ -1,5 +1,5 @@
 .dialog {
-  width: min(92vw, 620px);
+  width: min(92vw, var(--modal-max-width));
   max-height: min(88vh, 860px);
   padding: 0;
   border: 0;
@@ -7,13 +7,24 @@
   color: var(--color-text);
   background: var(--color-white);
   box-shadow: var(--shadow-md);
-  overflow: auto;
+  overflow: hidden;
 }
+
+.dialog[open] {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.standard { --modal-max-width: 620px; }
+.wide { --modal-max-width: 760px; }
+.workspace { --modal-max-width: 980px; }
 
 .dialog::backdrop {
   background: rgb(3 24 47 / 42%);
   backdrop-filter: blur(2px);
 }
+
+.chrome { min-width: 0; }
 
 .header {
   display: flex;
@@ -28,13 +39,30 @@
   font-size: var(--font-size-2xl);
 }
 
+.body {
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
+
+.footer {
+  position: relative;
+  z-index: 1;
+  padding: var(--space-3) var(--space-6) var(--space-6);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-white);
+  box-shadow: 0 -10px 24px rgb(3 24 47 / 6%);
+}
+
 .sheetHandle,
 .handle {
   display: none;
 }
 
 @media (max-width: 1023px) {
-  .sheet {
+  .dialog.sheet {
     position: fixed;
     inset: auto 0 var(--modal-visual-viewport-bottom, 0px);
     width: 100%;
@@ -48,10 +76,6 @@
     padding-left: env(safe-area-inset-left, 0px);
     border-radius: 28px 28px 0 0;
     box-shadow: var(--shadow-sheet);
-    overflow-x: hidden;
-    overflow-y: auto;
-    overscroll-behavior-y: contain;
-    scroll-padding-bottom: calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
     transition: transform var(--motion-normal) ease-out;
   }
 
@@ -67,6 +91,10 @@
 
   .sheet .header h2 {
     font-size: var(--font-size-xl);
+  }
+
+  .sheet .footer {
+    padding: var(--space-3) var(--space-5) var(--space-5);
   }
 
   .sheet .sheetHandle {
@@ -109,6 +137,8 @@
   .header h2 {
     font-size: var(--font-size-xl);
   }
+
+  .footer { padding-inline: var(--space-5); }
 }
 
 @keyframes slide-up {

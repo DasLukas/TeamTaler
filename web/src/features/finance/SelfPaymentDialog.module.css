@@ -1,4 +1,3 @@
-.dialog { width: min(100%, 620px); }
 .form,
 .review { display: grid; gap: var(--space-5); padding: var(--space-4) var(--space-6) var(--space-6); }
 .formRow { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }

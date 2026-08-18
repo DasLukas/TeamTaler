@@ -175,7 +175,11 @@ describe('DataTable', () => {
     fireEvent.change(within(dialog).getByLabelText('From'), { target: { value: '2026-08-01' } });
 
     expect(screen.getByRole('button', { name: 'Filters' })).toHaveAccessibleName('Filters');
-    await user.click(within(dialog).getByRole('button', { name: 'Apply filters' }));
+    const applyButton = within(dialog).getByRole('button', { name: 'Apply filters' });
+    const filterForm = dialog.querySelector('form');
+    expect(applyButton.closest('footer')).not.toBeNull();
+    expect(applyButton).toHaveAttribute('form', filterForm?.id);
+    await user.click(applyButton);
 
     const chips = screen.getByRole('list', { name: 'Filter results' });
     expect(within(chips).getByText('Open')).toBeVisible();

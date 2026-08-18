@@ -141,7 +141,6 @@
   gap: var(--space-3);
 }
 
-.permissionDialog { width: min(96vw, 980px); }
 .formGrid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
 .confirmDialog { display: grid; gap: var(--space-5); padding: var(--space-4) var(--space-6) var(--space-6); }
 .confirmDialog p { margin: 0; line-height: 1.55; }
@@ -206,8 +205,6 @@
   grid-template-columns: 1fr auto;
   gap: var(--space-2);
 }
-
-.importDialog { width: min(96vw, 960px); }
 
 .importIntro {
   display: grid;

@@ -29,6 +29,8 @@ export interface ModalProps {
   title: string;
   onClose: () => void;
   children: ReactNode;
+  footer?: ReactNode;
+  size?: 'standard' | 'wide' | 'workspace';
   variant?: 'dialog' | 'sheet';
   className?: string;
 }
@@ -36,10 +38,10 @@ export interface ModalProps {
 /**
  * Renders an accessible modal that can use a compact-screen sheet style.
  *
- * @param props - Visibility, heading, close callback, content, and style mode.
- * @returns A native dialog synchronized with React state.
+ * @param props - Visibility, heading, close callback, scrollable content, optional persistent footer, size, and style mode.
+ * @returns A native dialog with fixed chrome and an independently scrolling content region.
  */
-export function Modal({ open, title, onClose, children, variant = 'dialog', className = '' }: ModalProps) {
+export function Modal({ open, title, onClose, children, footer, size = 'standard', variant = 'dialog', className = '' }: ModalProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const openingElementRef = useRef<HTMLElement | null>(null);
   const dragRef = useRef<{ pointerId: number; startY: number; startTime: number; moved: boolean } | null>(null);
@@ -214,7 +216,7 @@ export function Modal({ open, title, onClose, children, variant = 'dialog', clas
   return (
     <dialog
       aria-labelledby={titleId}
-      className={`${styles.dialog} ${styles[variant]} ${className}`}
+      className={`${styles.dialog} ${styles[variant]} ${styles[size]} ${className}`}
       onCancel={(event) => {
         event.preventDefault();
         onClose();
@@ -223,34 +225,37 @@ export function Modal({ open, title, onClose, children, variant = 'dialog', clas
     >
       {open ? (
         <>
-          {variant === 'sheet' ? (
-            <button
-              aria-label={t('dialog.sheetHandle')}
-              className={styles.sheetHandle}
-              onClick={() => {
-                if (suppressHandleClickRef.current) {
-                  suppressHandleClickRef.current = false;
-                  return;
-                }
-                closeSheet();
-              }}
-              onMouseDown={startMouseSheetDrag}
-              onPointerCancel={(event) => finishSheetDrag(event, true)}
-              onPointerDown={startSheetDrag}
-              onPointerMove={moveSheetDrag}
-              onPointerUp={finishSheetDrag}
-              onTouchCancel={(event) => finishTouchSheetDrag(event, true)}
-              onTouchEnd={finishTouchSheetDrag}
-              onTouchMove={moveTouchSheetDrag}
-              onTouchStart={startTouchSheetDrag}
-              type="button"
-            ><span aria-hidden="true" className={styles.handle} /></button>
-          ) : null}
-          <header className={styles.header}>
-            <h2 id={titleId}>{title}</h2>
-            <IconButton label={t('dialog.close')} onClick={onClose}><X size={28} strokeWidth={1.8} /></IconButton>
-          </header>
-          {children}
+          <div className={styles.chrome}>
+            {variant === 'sheet' ? (
+              <button
+                aria-label={t('dialog.sheetHandle')}
+                className={styles.sheetHandle}
+                onClick={() => {
+                  if (suppressHandleClickRef.current) {
+                    suppressHandleClickRef.current = false;
+                    return;
+                  }
+                  closeSheet();
+                }}
+                onMouseDown={startMouseSheetDrag}
+                onPointerCancel={(event) => finishSheetDrag(event, true)}
+                onPointerDown={startSheetDrag}
+                onPointerMove={moveSheetDrag}
+                onPointerUp={finishSheetDrag}
+                onTouchCancel={(event) => finishTouchSheetDrag(event, true)}
+                onTouchEnd={finishTouchSheetDrag}
+                onTouchMove={moveTouchSheetDrag}
+                onTouchStart={startTouchSheetDrag}
+                type="button"
+              ><span aria-hidden="true" className={styles.handle} /></button>
+            ) : null}
+            <header className={styles.header}>
+              <h2 id={titleId}>{title}</h2>
+              <IconButton label={t('dialog.close')} onClick={onClose}><X size={28} strokeWidth={1.8} /></IconButton>
+            </header>
+          </div>
+          <div className={styles.body}>{children}</div>
+          {footer ? <footer className={styles.footer}>{footer}</footer> : null}
         </>
       ) : null}
     </dialog>

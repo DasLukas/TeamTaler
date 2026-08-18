@@ -141,7 +141,7 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
       <Button className={className} disabled={!transactionSettingsQuery.data?.paymentMethods.length} fullWidth={fullWidth} leadingIcon={<CircleDollarSign size={18} />} onClick={openDialog}>
         {t('selfPayment.action')}
       </Button>
-      <Modal className={styles.dialog} onClose={closeDialog} open={open} title={t(`selfPayment.${step}Title`)} variant={compact ? 'sheet' : 'dialog'}>
+      <Modal onClose={closeDialog} open={open} title={t(`selfPayment.${step}Title`)} variant={compact ? 'sheet' : 'dialog'}>
         {step === 'entry' ? (
           <form className={styles.form} onSubmit={(event) => { event.preventDefault(); prepareReview(); }}>
             <Field error={amountError || undefined} htmlFor="self-payment-amount" label={t('finance.amountIn', { currency: activeGroup.currency })}>

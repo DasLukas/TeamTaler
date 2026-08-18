@@ -374,7 +374,7 @@ function PurgeDialog({ group, onClose, onPurged }: PurgeDialogProps) {
   const currentGroupName = impact.data?.groupName ?? group?.name;
   const valid = Boolean(group) && groupName === currentGroupName;
   return (
-    <Modal className={styles.purgeDialog} onClose={() => { if (!mutation.isPending) close(); }} open={group !== null} title={t('systemSettings.groups.purgeTitle', { name: currentGroupName ?? '' })} variant="sheet">
+    <Modal onClose={() => { if (!mutation.isPending) close(); }} open={group !== null} size="wide" title={t('systemSettings.groups.purgeTitle', { name: currentGroupName ?? '' })} variant="sheet">
       {group ? <form className={styles.purgeForm} onSubmit={(event) => { event.preventDefault(); mutation.mutate(); }}>
         <div className={styles.dangerNotice}><span className={styles.dangerIcon}><ShieldAlert aria-hidden="true" size={26} /></span><div><strong>{t('systemSettings.groups.purgeWarning')}</strong><p>{t('systemSettings.groups.purgeDescription')}</p></div></div>
         {impact.isError ? <p className={styles.error} role="alert">{t('systemSettings.groups.impactError')}</p> : null}
@@ -402,7 +402,7 @@ function SystemGroupInvitationDialog({ invitation, onClose }: { invitation: Syst
   if (!invitation?.acceptUrl || !invitation.expiresAt) return null;
   const emailQueued = invitation.emailDeliveryStatus === 'PENDING';
   return (
-    <Modal className={styles.invitationDialog} onClose={onClose} open title={t('systemSettings.groups.invitationReadyTitle', { group: invitation.group.name })}>
+    <Modal onClose={onClose} open size="workspace" title={t('systemSettings.groups.invitationReadyTitle', { group: invitation.group.name })}>
       <InvitationReady
         acceptUrl={invitation.acceptUrl}
         deliveryStatus={{

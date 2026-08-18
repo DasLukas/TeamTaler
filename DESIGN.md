@@ -37,6 +37,12 @@ Item micro-actions keep their visible labels at every viewport and wrap as a gro
 
 Application actions never use browser-native `confirm`, `alert`, or `prompt` dialogs. Confirmable actions use the shared `ConfirmationDialog` component so focus restoration, keyboard dismissal, pending-state protection, responsive action layout, error presentation, icons, and destructive emphasis remain consistent. Feature-specific multi-step workflows may compose the shared `Modal` primitive when they require inputs or richer state, but simple message-and-action confirmations must not recreate dialog markup inside feature code.
 
+## Modal dialogs and bottom sheets
+
+`web/src/components/ui/Modal.tsx` owns modal width, height, overflow, safe-area handling, and responsive sheet behavior. Feature styles must not set a modal's width, maximum width, height, or overflow. Callers select one of the shared `standard`, `wide`, or `workspace` sizes; every `sheet` becomes exactly viewport-wide below the shared compact breakpoint regardless of its desktop size.
+
+Modal headers and action footers remain visible. Only the body between them may scroll. Persistent cancel, reset, save, apply, and confirmation controls are passed through the shared `footer` property instead of being placed inside the scrolling content. When a footer submit button belongs to a form in the body, the button references that form by its stable `id`. This structure applies equally to centered desktop dialogs and mobile bottom sheets, including when the software keyboard reduces the visual viewport.
+
 ## Responsive administrative workspaces
 
 Administrative pages remain complete and operable down to the application's 320-pixel minimum viewport. Page grids, panels, cards, forms, and flex children use shrinkable tracks so feature content never creates page-level horizontal scrolling. Long account addresses, identifiers, status details, and audit metadata wrap within their owning surface. Multi-column forms collapse to one column, related actions stack or use the shared button's documented compact presentation, and touch targets retain their minimum size.

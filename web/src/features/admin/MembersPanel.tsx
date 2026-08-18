@@ -298,7 +298,7 @@ function MemberImportDialog({ activeGroupId, defaultRole, onClose }: MemberImpor
   };
 
   return (
-    <Modal className={styles.importDialog} onClose={onClose} open title={t('members.csvImport.title')}>
+    <Modal onClose={onClose} open size="workspace" title={t('members.csvImport.title')}>
       {result ? (
         <div className={styles.importResults}>
           <section aria-live="polite" className={styles.importSummary} role="status">
@@ -714,7 +714,7 @@ export function MembersPanel() {
         )}
       </section> : null}
 
-      <Modal className={styles.permissionDialog} onClose={closeDialog} open={dialog === 'invite'} title={t('members.invite')}>
+      <Modal onClose={closeDialog} open={dialog === 'invite'} size="workspace" title={t('members.invite')}>
         {createdInvitation ? (
           invitationDeliveryStatus ? <InvitationReady
             acceptUrl={createdInvitation.acceptUrl}
@@ -743,7 +743,7 @@ export function MembersPanel() {
         )}
       </Modal>
 
-      <Modal className={styles.permissionDialog} onClose={closeDialog} open={dialog === 'edit'} title={t('members.editInvitation')}>
+      <Modal onClose={closeDialog} open={dialog === 'edit'} size="workspace" title={t('members.editInvitation')}>
         <form className={styles.form} onSubmit={(event) => { event.preventDefault(); updateMutation.mutate(); }}>
           <Field hint={t('members.emailImmutable')} htmlFor="edit-invitation-email" label={t('auth.email')}><TextInput disabled id="edit-invitation-email" value={draft.email} /></Field>
           <Field hint={t('members.displayNameHint')} htmlFor="edit-invitation-display-name" label={t('auth.displayName')}><TextInput id="edit-invitation-display-name" maxLength={120} onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))} value={draft.displayName} /></Field>

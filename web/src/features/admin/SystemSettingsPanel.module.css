@@ -224,15 +224,11 @@
 .compactImpact dd,
 .impact dd { margin: 0; font-weight: 700; }
 
-.purgeDialog { width: min(94vw, 720px); }
-
 .purgeForm {
   display: grid;
   gap: var(--space-5);
   padding: var(--space-2) var(--space-6) var(--space-6);
 }
-
-.invitationDialog { width: min(96vw, 980px); }
 
 .dangerNotice {
   display: flex;
@@ -314,7 +310,6 @@
 }
 
 @media (max-width: 1050px) {
-  .purgeDialog { width: 100%; }
   .createGroup { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .groupCard { grid-template-columns: 1fr; }
   .compactImpact { justify-self: start; }

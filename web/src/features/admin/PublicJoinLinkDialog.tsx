@@ -137,7 +137,7 @@ export function PublicJoinLinkDialog({ groupId, onClose }: PublicJoinLinkDialogP
   };
 
   return (
-    <Modal className={styles.modal} onClose={onClose} open title={t('publicJoin.adminTitle')} variant={compact ? 'sheet' : 'dialog'}>
+    <Modal onClose={onClose} open size="wide" title={t('publicJoin.adminTitle')} variant={compact ? 'sheet' : 'dialog'}>
       <div className={styles.content}>
         {linkQuery.isLoading ? <StatePanel kind="loading" /> : null}
         {linkQuery.isError ? <StatePanel kind="error" message={linkQuery.error.message} /> : null}

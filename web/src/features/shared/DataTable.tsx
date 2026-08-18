@@ -261,16 +261,18 @@ export function DataTableViewport({ ariaLabel, children, minTableWidth = '720px'
   }, []);
 
   return (
-    <div className={styles.viewportShell} data-scroll-position={scrollPosition}>
-      <div
-        aria-label={ariaLabel}
-        className={`${tableStyles.tableWrap} ${styles.viewport}`}
-        ref={viewportRef}
-        role="region"
-        style={{ '--data-table-min-width': minTableWidth } as CSSProperties}
-        tabIndex={scrollPosition === 'none' ? undefined : 0}
-      >
-        {children}
+    <div className={styles.viewportShell}>
+      <div className={styles.viewportFrame} data-scroll-position={scrollPosition}>
+        <div
+          aria-label={ariaLabel}
+          className={`${tableStyles.tableWrap} ${styles.viewport}`}
+          ref={viewportRef}
+          role="region"
+          style={{ '--data-table-min-width': minTableWidth } as CSSProperties}
+          tabIndex={scrollPosition === 'none' ? undefined : 0}
+        >
+          {children}
+        </div>
       </div>
       <p aria-hidden={scrollPosition === 'none'} className={styles.scrollHint} hidden={scrollPosition === 'none'}>
         <MoveHorizontal aria-hidden="true" size={16} />
@@ -461,6 +463,7 @@ interface DataTableControlsProps<FilterId extends string> {
 
 /** Renders global search, staged typed filters, and active-filter chips. */
 function DataTableControls<FilterId extends string>({ definitions, filters, labels, onFiltersChange, onSearchChange, searchValue, toolbarActions }: DataTableControlsProps<FilterId>) {
+  const filterFormId = useId();
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
   const [draftFilters, setDraftFilters] = useState<DataTableFilterState<FilterId>>(() => cloneFilters(filters));
   const activeDefinitions = definitions.filter((definition) => isDataTableFilterActive(filters[definition.id]));
@@ -526,9 +529,21 @@ function DataTableControls<FilterId extends string>({ definitions, filters, labe
           <button className={styles.resetLink} onClick={() => onFiltersChange({})} type="button">{labels.resetFilters}</button>
         </div>
       ) : null}
-      <Modal className={styles.filterDialog} onClose={() => setFilterDialogOpen(false)} open={filterDialogOpen} title={labels.filterHeading} variant="sheet">
+      <Modal
+        footer={(
+          <div className={styles.filterActions}>
+            <Button leadingIcon={<X size={17} />} onClick={() => setDraftFilters({})} variant="secondary">{labels.resetFilters}</Button>
+            <Button form={filterFormId} leadingIcon={<Filter size={17} />} type="submit">{labels.applyFilters}</Button>
+          </div>
+        )}
+        onClose={() => setFilterDialogOpen(false)}
+        open={filterDialogOpen}
+        title={labels.filterHeading}
+        variant="sheet"
+      >
         <form
           className={styles.filterForm}
+          id={filterFormId}
           onSubmit={(event) => {
             event.preventDefault();
             onFiltersChange(compactFilters(normalizeDataTableFilters(draftFilters, definitions)));
@@ -545,10 +560,6 @@ function DataTableControls<FilterId extends string>({ definitions, filters, labe
                 value={draftFilters[definition.id]}
               />
             ))}
-          </div>
-          <div className={styles.filterActions}>
-            <Button leadingIcon={<X size={17} />} onClick={() => setDraftFilters({})} variant="secondary">{labels.resetFilters}</Button>
-            <Button leadingIcon={<Filter size={17} />} type="submit">{labels.applyFilters}</Button>
           </div>
         </form>
       </Modal>

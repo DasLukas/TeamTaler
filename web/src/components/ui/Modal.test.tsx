@@ -4,6 +4,7 @@ import { StrictMode, useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import i18n from '@/i18n';
 import { Modal } from './Modal';
+import styles from './Modal.module.css';
 
 /** Renders a modal that is removed from the tree when its parent closes it. */
 function UnmountingModalHarness() {
@@ -78,6 +79,28 @@ describe('Modal lifecycle and focus restoration', () => {
 
     expect(screen.queryByRole('dialog', { name: 'Controlled dialog' })).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
+  });
+
+  it('keeps shared footer actions outside the scrollable body for every modal size', () => {
+    render(
+      <Modal
+        footer={<button type="button">Apply changes</button>}
+        onClose={vi.fn()}
+        open
+        size="workspace"
+        title="Structured dialog"
+        variant="sheet"
+      >
+        <span>Scrollable criteria</span>
+      </Modal>,
+    );
+
+    const dialog = screen.getByRole('dialog', { name: 'Structured dialog' });
+    const action = screen.getByRole('button', { name: 'Apply changes' });
+    expect(dialog.className).toContain(styles.workspace);
+    expect(screen.getByText('Scrollable criteria').parentElement?.className).toContain(styles.body);
+    expect(action.closest('footer')?.className).toContain(styles.footer);
+    expect(action.closest('footer')?.parentElement).toBe(dialog);
   });
 
   it('keeps sheets above the software keyboard visual viewport', () => {

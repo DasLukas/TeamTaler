@@ -80,6 +80,7 @@
   min-width: 22px;
   min-height: 22px;
   place-items: center;
+  margin-inline-start: var(--space-2);
   padding-inline: 6px;
   border-radius: var(--radius-full);
   color: var(--color-white);
@@ -144,11 +145,9 @@
   text-underline-offset: 3px;
 }
 
-.filterDialog.filterDialog { width: min(92vw, 640px); }
-
 .filterForm {
   display: grid;
-  gap: var(--space-5);
+  min-width: 0;
   padding: var(--space-3) var(--space-6) var(--space-6);
 }
 
@@ -158,13 +157,9 @@
 }
 
 .filterActions {
-  position: sticky;
-  bottom: 0;
   display: flex;
   justify-content: flex-end;
   gap: var(--space-3);
-  padding-top: var(--space-3);
-  background: var(--color-white);
 }
 
 .checkboxGroup,
@@ -202,16 +197,21 @@
 .rangeGroup legend { grid-column: 1 / -1; }
 
 .viewportShell {
-  position: relative;
   min-width: 0;
 }
 
-.viewportShell::before,
-.viewportShell::after {
+.viewportFrame {
+  position: relative;
+  min-width: 0;
+  border-radius: var(--radius-md);
+}
+
+.viewportFrame::before,
+.viewportFrame::after {
   position: absolute;
   z-index: 2;
   top: 1px;
-  bottom: 17px;
+  bottom: 1px;
   width: 28px;
   opacity: 0;
   pointer-events: none;
@@ -219,20 +219,20 @@
   content: '';
 }
 
-.viewportShell::before {
+.viewportFrame::before {
   left: 1px;
   background: linear-gradient(90deg, rgb(3 24 47 / 18%), transparent);
 }
 
-.viewportShell::after {
+.viewportFrame::after {
   right: 1px;
   background: linear-gradient(270deg, rgb(3 24 47 / 18%), transparent);
 }
 
-.viewportShell[data-scroll-position='start']::after,
-.viewportShell[data-scroll-position='middle']::before,
-.viewportShell[data-scroll-position='middle']::after,
-.viewportShell[data-scroll-position='end']::before { opacity: 1; }
+.viewportFrame[data-scroll-position='start']::after,
+.viewportFrame[data-scroll-position='middle']::before,
+.viewportFrame[data-scroll-position='middle']::after,
+.viewportFrame[data-scroll-position='end']::before { opacity: 1; }
 
 .viewport.viewport {
   scrollbar-gutter: stable;
@@ -327,7 +327,6 @@
   .searchField { width: 100%; }
   .toolbarButtons { justify-content: stretch; }
   .toolbarButtons > * { flex: 1 1 auto; }
-  .viewport.viewport { margin-inline: calc(var(--space-5) * -1); }
   .scrollHint { display: flex; }
   .filterForm { padding: var(--space-2) var(--space-5) var(--space-5); }
   .filterActions { display: grid; grid-template-columns: 1fr 1fr; }
