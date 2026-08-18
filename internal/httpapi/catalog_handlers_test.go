@@ -41,6 +41,7 @@ func TestImageRequiresMembershipAndGroupReference(t *testing.T) {
 	if err != nil || len(groupItems) != 1 {
 		t.Fatalf("list groups: groups=%d err=%v", len(groupItems), err)
 	}
+	groupItems[0].Membership = assignTestTemplateRoles(t, ctx, groupService, session.Principal, groupItems[0].Membership, domain.RoleTemplateCatalog)
 	catalogService := catalog.Service{DB: db}
 	category, err := catalogService.CreateCategory(ctx, session.Principal, groupItems[0].Membership, catalog.CreateCategoryInput{Name: "Drinks", Icon: domain.CategoryIconDrink})
 	if err != nil {

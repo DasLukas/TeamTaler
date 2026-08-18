@@ -1,5 +1,15 @@
-/** Maximum source-image size accepted by the browser and API. */
-export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+/**
+ * Formats an effective upload limit for concise localized form guidance.
+ *
+ * @param bytes - Positive byte limit returned by instance capabilities.
+ * @param locale - Number-format locale, defaulting to the German interface.
+ * @returns A human-readable KiB or MiB limit.
+ */
+export function formatMediaUploadLimit(bytes: number, locale = 'de-DE'): string {
+  const unit = bytes >= 1024 * 1024 ? 'MiB' : 'KiB';
+  const divisor = unit === 'MiB' ? 1024 * 1024 : 1024;
+  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(bytes / divisor)} ${unit}`;
+}
 
 /** Source-image media types accepted by the browser and API. */
 export const ACCEPTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);

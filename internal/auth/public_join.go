@@ -45,7 +45,7 @@ func (s Service) PreviewPublicJoinLink(ctx context.Context, token string) (Publi
 	}
 	var preview PublicJoinPreview
 	var expiresAt sql.NullString
-	err := s.DB.QueryRowContext(ctx, `SELECT g.name,l.expires_at FROM public_join_links l JOIN groups g ON g.id=l.group_id WHERE l.token_hash=? AND l.enabled=1`, platform.HashSecret(token)).Scan(&preview.GroupName, &expiresAt)
+	err := s.DB.QueryRowContext(ctx, `SELECT g.name,l.expires_at FROM public_join_links l JOIN groups g ON g.id=l.group_id WHERE l.token_hash=? AND l.enabled=1 AND g.status='ACTIVE'`, platform.HashSecret(token)).Scan(&preview.GroupName, &expiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return PublicJoinPreview{}, domain.ErrNotFound
 	}
@@ -70,7 +70,7 @@ func (s Service) PreviewPublicJoinLink(ctx context.Context, token string) (Publi
 // email already belongs to an active account. ctx bounds validation, hashing,
 // and the atomic registration/outbox write. It returns validation, unavailable,
 // invalid-link, hashing, encryption, and database errors.
-func (s Service) StartPublicJoinRegistration(ctx context.Context, input PublicJoinRegistration) error {
+func (s Service) StartPublicJoinRegistration(ctx context.Context, input PublicJoinRegistration, expectedSystemSettingsRevision int64) error {
 	if !s.EmailDeliveryAvailable || s.TokenSealer == nil {
 		return fmt.Errorf("%w: public registration email delivery is unavailable", domain.ErrServiceUnavailable)
 	}
@@ -113,6 +113,9 @@ func (s Service) StartPublicJoinRegistration(ctx context.Context, input PublicJo
 		return fmt.Errorf("seal public registration token: %w", err)
 	}
 	return storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		if err := requirePublicJoinPolicyRevisionTx(ctx, tx, expectedSystemSettingsRevision); err != nil {
+			return err
+		}
 		current, err := loadPublicJoinLink(ctx, tx, input.JoinToken)
 		if err != nil {
 			return err
@@ -164,7 +167,7 @@ func (s Service) StartPublicJoinRegistration(ctx context.Context, input PublicJo
 // pending registration and requeues delivery. Its successful response is
 // deliberately identical when no registration exists, preventing account and
 // registration enumeration. The public join link must remain valid.
-func (s Service) ResendPublicJoinVerification(ctx context.Context, joinToken, emailValue string) error {
+func (s Service) ResendPublicJoinVerification(ctx context.Context, joinToken, emailValue string, expectedSystemSettingsRevision int64) error {
 	if !s.EmailDeliveryAvailable || s.TokenSealer == nil {
 		return fmt.Errorf("%w: public registration email delivery is unavailable", domain.ErrServiceUnavailable)
 	}
@@ -182,6 +185,9 @@ func (s Service) ResendPublicJoinVerification(ctx context.Context, joinToken, em
 		return fmt.Errorf("seal public registration token: %w", err)
 	}
 	return storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		if err := requirePublicJoinPolicyRevisionTx(ctx, tx, expectedSystemSettingsRevision); err != nil {
+			return err
+		}
 		link, err := loadPublicJoinLink(ctx, tx, joinToken)
 		if err != nil {
 			return err
@@ -222,7 +228,7 @@ func (s Service) ResendPublicJoinVerification(ctx context.Context, joinToken, em
 // default role, and issues a session in one transaction. It returns the session
 // and membership or validation, invalid-token, expired-link, conflict, role,
 // audit, and database errors.
-func (s Service) ConfirmPublicJoinRegistration(ctx context.Context, verificationToken string) (Session, domain.Membership, error) {
+func (s Service) ConfirmPublicJoinRegistration(ctx context.Context, verificationToken string, expectedSystemSettingsRevision int64) (Session, domain.Membership, error) {
 	verificationToken = strings.TrimSpace(verificationToken)
 	if verificationToken == "" {
 		return Session{}, domain.Membership{}, domain.ValidationError{Field: "token", Message: "is required"}
@@ -230,6 +236,9 @@ func (s Service) ConfirmPublicJoinRegistration(ctx context.Context, verification
 	var session Session
 	var membership domain.Membership
 	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		if err := requirePublicJoinPolicyRevisionTx(ctx, tx, expectedSystemSettingsRevision); err != nil {
+			return err
+		}
 		var registrationID, groupID, email, displayName, passwordHash, expiresAt string
 		var linkVersion int64
 		err := tx.QueryRowContext(ctx, `SELECT id,group_id,join_link_version,email,display_name,password_hash,expires_at FROM public_join_registrations WHERE verification_token_hash=? AND consumed_at IS NULL AND invalidated_at IS NULL`, platform.HashSecret(verificationToken)).Scan(&registrationID, &groupID, &linkVersion, &email, &displayName, &passwordHash, &expiresAt)
@@ -298,13 +307,16 @@ func (s Service) ConfirmPublicJoinRegistration(ctx context.Context, verification
 // represented by token using the current default role. Existing active
 // memberships are returned unchanged; archived memberships are atomically
 // replaced with the current default-role assignment.
-func (s Service) AcceptPublicJoinLink(ctx context.Context, principal domain.Principal, token string) (domain.Membership, error) {
+func (s Service) AcceptPublicJoinLink(ctx context.Context, principal domain.Principal, token string, expectedSystemSettingsRevision int64) (domain.Membership, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
 		return domain.Membership{}, domain.ValidationError{Field: "token", Message: "is required"}
 	}
 	var membership domain.Membership
 	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		if err := requirePublicJoinPolicyRevisionTx(ctx, tx, expectedSystemSettingsRevision); err != nil {
+			return err
+		}
 		link, err := loadPublicJoinLink(ctx, tx, token)
 		if err != nil {
 			return err
@@ -362,10 +374,24 @@ type publicJoinQueryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
+func requirePublicJoinPolicyRevisionTx(ctx context.Context, tx *sql.Tx, expectedRevision int64) error {
+	if expectedRevision < 1 {
+		return nil
+	}
+	var currentRevision int64
+	if err := tx.QueryRowContext(ctx, `SELECT revision FROM system_settings_state WHERE singleton=1`).Scan(&currentRevision); err != nil {
+		return fmt.Errorf("revalidate public-join policy revision: %w", err)
+	}
+	if currentRevision != expectedRevision {
+		return fmt.Errorf("%w: instance access policy changed; retry the request", domain.ErrConflict)
+	}
+	return nil
+}
+
 func loadPublicJoinLink(ctx context.Context, queryer publicJoinQueryer, token string) (loadedPublicJoinLink, error) {
 	var link loadedPublicJoinLink
 	var expiresAt sql.NullString
-	err := queryer.QueryRowContext(ctx, `SELECT group_id,version,expires_at FROM public_join_links WHERE token_hash=? AND enabled=1`, platform.HashSecret(strings.TrimSpace(token))).Scan(&link.GroupID, &link.Version, &expiresAt)
+	err := queryer.QueryRowContext(ctx, `SELECT l.group_id,l.version,l.expires_at FROM public_join_links l JOIN groups g ON g.id=l.group_id WHERE l.token_hash=? AND l.enabled=1 AND g.status='ACTIVE'`, platform.HashSecret(strings.TrimSpace(token))).Scan(&link.GroupID, &link.Version, &expiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return loadedPublicJoinLink{}, domain.ErrNotFound
 	}
@@ -382,7 +408,7 @@ func loadPublicJoinLinkByGroup(ctx context.Context, queryer publicJoinQueryer, g
 	var link loadedPublicJoinLink
 	var expiresAt sql.NullString
 	var enabled bool
-	err := queryer.QueryRowContext(ctx, `SELECT group_id,version,expires_at,enabled FROM public_join_links WHERE group_id=?`, groupID).Scan(&link.GroupID, &link.Version, &expiresAt, &enabled)
+	err := queryer.QueryRowContext(ctx, `SELECT l.group_id,l.version,l.expires_at,l.enabled FROM public_join_links l JOIN groups g ON g.id=l.group_id WHERE l.group_id=? AND g.status='ACTIVE'`, groupID).Scan(&link.GroupID, &link.Version, &expiresAt, &enabled)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && !enabled {
 		return loadedPublicJoinLink{}, domain.ErrNotFound
 	}
@@ -444,22 +470,14 @@ func assignCurrentDefaultRole(ctx context.Context, tx *sql.Tx, actorUserID, grou
 	if _, err := tx.ExecContext(ctx, `INSERT INTO membership_role_assignments(group_id,membership_id,role_id,version,assigned_at,assigned_by) VALUES(?,?,?,1,?,?)`, groupID, membershipID, roleID, now, actorUserID); err != nil {
 		return err
 	}
-	var preset sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT preset_key FROM roles WHERE group_id=? AND id=?`, groupID, roleID).Scan(&preset); err != nil {
+	legacyRoles, err := legacyRolesForAssignedRoleTx(ctx, tx, groupID, roleID)
+	if err != nil {
 		return err
 	}
-	legacyRole := ""
-	switch domain.RolePresetKey(preset.String) {
-	case domain.RolePresetGroupAdministrator:
-		legacyRole = string(domain.RoleAdmin)
-	case domain.RolePresetFinanceManager:
-		legacyRole = string(domain.RoleFinanceManager)
-	case domain.RolePresetCatalogManager:
-		legacyRole = string(domain.RoleCatalogManager)
-	}
-	if legacyRole != "" {
-		_, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO membership_roles(group_id,membership_id,role,granted_at,granted_by) VALUES(?,?,?,?,?)`, groupID, membershipID, legacyRole, now, actorUserID)
-		return err
+	for _, legacyRole := range legacyRoles {
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO membership_roles(group_id,membership_id,role,granted_at,granted_by) VALUES(?,?,?,?,?)`, groupID, membershipID, legacyRole, now, actorUserID); err != nil {
+			return err
+		}
 	}
 	return nil
 }

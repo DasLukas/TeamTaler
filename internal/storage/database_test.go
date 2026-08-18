@@ -252,6 +252,10 @@ func TestRemoveCategoryTypeMigrationPreservesExistingRows(t *testing.T) {
 		`INSERT INTO schema_migrations(version) VALUES('0024_transaction_settings.sql')`,
 		`INSERT INTO schema_migrations(version) VALUES('0026_member_management.sql')`,
 		`INSERT INTO schema_migrations(version) VALUES('0027_transaction_reason_modes.sql')`,
+		`INSERT INTO schema_migrations(version) VALUES('0028_system_role_semantics.sql')`,
+		`INSERT INTO schema_migrations(version) VALUES('0030_system_administration.sql')`,
+		`INSERT INTO schema_migrations(version) VALUES('0031_system_group_purge.sql')`,
+		`INSERT INTO schema_migrations(version) VALUES('0032_whole_mib_media_limit.sql')`,
 		`CREATE TABLE users(id TEXT PRIMARY KEY) STRICT`,
 		`CREATE TABLE groups(id TEXT PRIMARY KEY) STRICT`,
 		`CREATE TABLE invitations(id TEXT PRIMARY KEY, group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE) STRICT`,
@@ -458,11 +462,11 @@ func TestDynamicRoleMigrationBackfillsLegacyAccessAndDropsCategoryGrants(t *test
 	}
 
 	wantMembershipPresets := map[string][]string{
-		"member-admin":        {"GROUP_ADMINISTRATOR", "MEMBER"},
-		"member-finance":      {"FINANCE_MANAGER", "MEMBER"},
-		"member-regular":      {"CATALOG_MANAGER", "MEMBER"},
+		"member-admin":        {"GROUP_ADMINISTRATOR"},
+		"member-finance":      {},
+		"member-regular":      {},
 		"member-archived":     {},
-		"member-second-admin": {"GROUP_ADMINISTRATOR", "MEMBER"},
+		"member-second-admin": {"GROUP_ADMINISTRATOR"},
 	}
 	for membershipID, want := range wantMembershipPresets {
 		rows, err := db.QueryContext(ctx, `
@@ -570,7 +574,7 @@ func TestDynamicRoleSchemaEnforcesProtectedRoleAndAssignmentInvariants(t *testin
 	assertRejected("remove final active member role", `DELETE FROM membership_role_assignments WHERE membership_id='member-two' AND role_id='role:MEMBER:group-one'`, "credentialed active memberships must retain at least one role")
 	assertRejected("remove last administrator", `DELETE FROM membership_role_assignments WHERE membership_id='member-one' AND role_id='role:GROUP_ADMINISTRATOR:group-one'`, "group must retain an active group administrator")
 	assertRejected("archive last administrator", `UPDATE memberships SET status='ARCHIVED',archived_at='2026-08-07T10:00:00Z' WHERE id='member-one'`, "group must retain an active group administrator")
-	assertRejected("duplicate case-insensitive role name", `INSERT INTO roles(id,group_id,name,created_at,updated_at) VALUES('role-duplicate','group-one','member','2026-08-07T09:00:00Z','2026-08-07T09:00:00Z')`, "UNIQUE constraint failed")
+	assertRejected("duplicate case-insensitive role name", `INSERT INTO roles(id,group_id,name,created_at,updated_at) VALUES('role-duplicate','group-one','mitglied','2026-08-07T09:00:00Z','2026-08-07T09:00:00Z')`, "UNIQUE constraint failed")
 	assertRejected("role name control character", "INSERT INTO roles(id,group_id,name,created_at,updated_at) VALUES('role-control','group-one','Bad\nName','2026-08-07T09:00:00Z','2026-08-07T09:00:00Z')", "CHECK constraint failed")
 
 	if _, err := db.ExecContext(ctx, `INSERT INTO membership_role_assignments(group_id,membership_id,role_id,assigned_at,assigned_by) VALUES('group-one','member-two','role:GROUP_ADMINISTRATOR:group-one',?,'user-one')`, now); err != nil {

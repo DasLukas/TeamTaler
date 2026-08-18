@@ -36,8 +36,8 @@ func TestDashboardGroupOutstandingUsesStatisticsPermission(t *testing.T) {
 		}
 	}
 	administratorRoleID := authorization.PresetRoleID(administrator.GroupID, domain.RolePresetGroupAdministrator)
-	if _, err := server.db.Exec(`DELETE FROM role_permission_grants WHERE group_id=? AND role_id=? AND permission_key='FINANCE_MANAGEMENT'`, administrator.GroupID, administratorRoleID); err != nil {
-		t.Fatalf("remove finance permission: %v", err)
+	if _, err := server.db.Exec(`INSERT INTO role_permission_grants(group_id,role_id,permission_key,scope_type,version,created_at,updated_at) VALUES(?,?,'VIEW_GROUP_STATISTICS','GROUP',1,?,?)`, administrator.GroupID, administratorRoleID, "2026-08-11T12:00:00Z", "2026-08-11T12:00:00Z"); err != nil {
+		t.Fatalf("add statistics permission: %v", err)
 	}
 
 	readDashboard := func() (finance.Dashboard, string) {

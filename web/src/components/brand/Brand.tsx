@@ -7,6 +7,7 @@ export interface BrandProps {
   className?: string;
   imageUrl?: string;
   imageAlt?: string;
+  name?: string;
 }
 
 /**
@@ -15,12 +16,13 @@ export interface BrandProps {
  * @param props - Compact mode, class name, and optional group-logo override.
  * @returns A localized, accessible brand mark.
  */
-export function Brand({ compact = false, className = '', imageUrl, imageAlt }: BrandProps) {
+export function Brand({ compact = false, className = '', imageUrl, imageAlt, name }: BrandProps) {
   const { t } = useTranslation();
+  const displayName = name?.trim() || t('brand.name');
   return (
-    <span aria-label={t('brand.name')} className={`${styles.brand} ${className}`}>
+    <span aria-label={displayName} className={`${styles.brand} ${className}`}>
       <img alt={imageAlt ?? t('brand.markAlt')} className={styles.emblem} src={imageUrl || '/brand/teamtaler-mark.png'} />
-      {compact ? null : <strong>{t('brand.name')}</strong>}
+      {compact ? null : <strong>{displayName}</strong>}
     </span>
   );
 }

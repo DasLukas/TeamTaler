@@ -22,9 +22,8 @@ vi.mock('@/app/useActiveGroup', () => ({ useActiveGroup: () => mocks.useActiveGr
 
 const baseRole: Role = {
   id: 'role-member',
-  presetKey: 'MEMBER',
-  name: 'Member',
-  description: 'Editable starter role for regular group members.',
+  name: 'Mitglied',
+  description: 'Standardrolle für reguläre Gruppenmitglieder',
   grants: [
     { permission: 'CREATE_OWN_BOOKING', scope: { type: 'GROUP' } },
     { permission: 'VOID_OWN_BOOKING', scope: { type: 'GROUP' } },
@@ -76,11 +75,21 @@ describe('RightsPanel role definitions', () => {
     expect(within(roleButton).getByRole('img', { name: 'Standardrolle für neue Mitglieder' })).toHaveAttribute('title', 'Standardrolle für neue Mitglieder');
   });
 
-  it('localizes an unchanged preset description in the editor', async () => {
+  it('shows an ordinary role description unchanged in the editor', async () => {
     renderPanel();
 
-    expect(await screen.findByLabelText('Beschreibung')).toHaveValue('Bearbeitbare Startrolle für reguläre Gruppenmitglieder.');
+    expect(await screen.findByLabelText('Beschreibung')).toHaveValue('Standardrolle für reguläre Gruppenmitglieder');
     expect(screen.queryByText('Vordefiniert')).not.toBeInTheDocument();
+  });
+
+  it('uses the persisted role name verbatim in the rail, heading, and editor field', async () => {
+    mocks.getRoles.mockResolvedValue([{ ...baseRole, name: 'Member' }]);
+    renderPanel();
+
+    const roleButton = await screen.findByRole('button', { name: /Member/ });
+    expect(within(roleButton).getByText('Member')).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Member' })).toBeVisible();
+    expect(screen.getByLabelText('Rollenname')).toHaveValue('Member');
   });
 
   it('uses concise descriptions for booking and balance permissions', async () => {
@@ -139,7 +148,9 @@ describe('RightsPanel role definitions', () => {
     mocks.getRoles.mockResolvedValue([{ ...baseRole, id: 'role-admin', presetKey: 'GROUP_ADMINISTRATOR', name: 'Group administrator', nameLocked: true }]);
     renderPanel();
 
-    expect(await screen.findByLabelText('Rollenname')).toBeDisabled();
+    expect(await screen.findByLabelText('Rollenname')).toHaveValue('Group administrator');
+    expect(screen.getByLabelText('Rollenname')).toBeDisabled();
+    expect(screen.getByRole('heading', { name: 'Group administrator' })).toBeVisible();
     expect(screen.queryByText('Der Name dieser Sicherheitsrolle ist unveränderlich.')).not.toBeInTheDocument();
     expect(screen.queryByText('Vordefiniert')).not.toBeInTheDocument();
   });
@@ -194,8 +205,8 @@ describe('RightsPanel role definitions', () => {
 
     expect(screen.queryByText('Diese Änderung wirkt sofort')).not.toBeInTheDocument();
     await waitFor(() => expect(mocks.updateRole).toHaveBeenCalledWith('group-a', 'role-member', {
-      name: 'Member',
-      description: 'Editable starter role for regular group members.',
+      name: 'Mitglied',
+      description: 'Standardrolle für reguläre Gruppenmitglieder',
       grants: [{ permission: 'CREATE_OWN_BOOKING', scope: { type: 'GROUP' } }],
     }, 1));
   });

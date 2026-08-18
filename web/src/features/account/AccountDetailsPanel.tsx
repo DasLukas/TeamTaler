@@ -1,13 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
+import CircleCheck from 'lucide-react/dist/esm/icons/circle-check';
+import KeyRound from 'lucide-react/dist/esm/icons/key-round';
+import Mail from 'lucide-react/dist/esm/icons/mail';
+import Pencil from 'lucide-react/dist/esm/icons/pencil';
+import Save from 'lucide-react/dist/esm/icons/save';
+import X from 'lucide-react/dist/esm/icons/x';
 import { useForm } from 'react-hook-form';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ApiError, api } from '@/api/client';
 import type { Membership, Session, User } from '@/api/types';
-import { useActiveGroup } from '@/app/useActiveGroup';
+import { useSession } from '@/app/useSession';
 import { Button } from '@/components/ui/Button';
-import { Field, TextInput } from '@/components/ui/FormField';
+import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { Modal } from '@/components/ui/Modal';
 import { authenticationCapabilitiesQueryKey } from '@/features/auth/authenticationCapabilities';
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from '@/features/auth/passwordPolicy';
@@ -19,6 +25,8 @@ type AccountDialog = 'name' | 'password' | 'email';
 interface NameForm { displayName: string }
 interface PasswordForm { currentPassword: string; newPassword: string; passwordConfirmation: string }
 interface EmailForm { newEmail: string; currentPassword: string }
+
+const LAST_USED_GROUP_VALUE = '__LAST_USED_GROUP__';
 
 function accountMutationError(error: unknown, kind: AccountDialog, t: (key: string) => string): string {
   if (error instanceof ApiError) {
@@ -39,7 +47,7 @@ function updateUserProjections(queryClient: ReturnType<typeof useQueryClient>, u
 
 function NameChangeForm({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const { t } = useTranslation();
-  const { session } = useActiveGroup();
+  const session = useSession();
   const queryClient = useQueryClient();
   const { register, handleSubmit, formState: { errors } } = useForm<NameForm>({ defaultValues: { displayName: session.user.displayName } });
   const mutation = useMutation({
@@ -66,7 +74,7 @@ function NameChangeForm({ onClose, onSaved }: { onClose: () => void; onSaved: ()
         } })} />
       </Field>
       {mutation.isError ? <p className={styles.error} role="alert">{accountMutationError(mutation.error, 'name', t)}</p> : null}
-      <div className={styles.dialogActions}><Button onClick={onClose} variant="secondary">{t('common.cancel')}</Button><Button disabled={mutation.isPending} type="submit">{mutation.isPending ? t('common.saving') : t('common.save')}</Button></div>
+      <div className={styles.dialogActions}><Button leadingIcon={<X size={17} />} onClick={onClose} variant="secondary">{t('common.cancel')}</Button><Button disabled={mutation.isPending} leadingIcon={<Save size={17} />} type="submit">{mutation.isPending ? t('common.saving') : t('common.save')}</Button></div>
     </form>
   );
 }
@@ -95,7 +103,7 @@ function PasswordChangeForm() {
         <TextInput autoComplete="new-password" id="account-password-confirmation" type="password" {...register('passwordConfirmation', { required: t('auth.passwordConfirmationRequired'), validate: (value, values) => value === values.newPassword || t('auth.passwordMismatch') })} />
       </Field>
       {mutation.isError ? <p className={styles.error} role="alert">{accountMutationError(mutation.error, 'password', t)}</p> : null}
-      <Button disabled={mutation.isPending} fullWidth type="submit">{mutation.isPending ? t('auth.passwordSavePending') : t('auth.savePassword')}</Button>
+      <Button disabled={mutation.isPending} fullWidth leadingIcon={<KeyRound size={18} />} type="submit">{mutation.isPending ? t('auth.passwordSavePending') : t('auth.savePassword')}</Button>
     </form>
   );
 }
@@ -108,7 +116,7 @@ function EmailChangeForm({ onClose }: { onClose: () => void }) {
     <div aria-live="polite" className={styles.result}>
       <h3>{t('account.details.emailRequestedTitle')}</h3>
       <p>{t('account.details.emailRequestedMessage')}</p>
-      <Button onClick={onClose}>{t('common.done')}</Button>
+      <Button leadingIcon={<CircleCheck size={17} />} onClick={onClose}>{t('common.done')}</Button>
     </div>
   );
   return (
@@ -120,19 +128,54 @@ function EmailChangeForm({ onClose }: { onClose: () => void }) {
         <TextInput autoComplete="current-password" id="account-email-current-password" type="password" {...register('currentPassword', { required: t('auth.passwordRequired'), maxLength: { value: PASSWORD_MAX_LENGTH, message: t('auth.passwordMax') } })} />
       </Field>
       {mutation.isError ? <p className={styles.error} role="alert">{accountMutationError(mutation.error, 'email', t)}</p> : null}
-      <div className={styles.dialogActions}><Button onClick={onClose} variant="secondary">{t('common.cancel')}</Button><Button disabled={mutation.isPending} type="submit">{mutation.isPending ? t('account.details.emailRequestPending') : t('account.details.emailRequest')}</Button></div>
+      <div className={styles.dialogActions}><Button leadingIcon={<X size={17} />} onClick={onClose} variant="secondary">{t('common.cancel')}</Button><Button disabled={mutation.isPending} leadingIcon={<Mail size={17} />} type="submit">{mutation.isPending ? t('account.details.emailRequestPending') : t('account.details.emailRequest')}</Button></div>
     </form>
+  );
+}
+
+function DefaultGroupSetting({ session }: { session: Session }) {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const persistedValue = session.defaultGroupId ?? LAST_USED_GROUP_VALUE;
+  const [selection, setSelection] = useState(persistedValue);
+  const mutation = useMutation({
+    mutationFn: () => api.updateDefaultGroup(selection === LAST_USED_GROUP_VALUE ? null : selection),
+    onSuccess: (preference) => {
+      queryClient.setQueryData<Session>(['session'], (current) => current ? { ...current, defaultGroupId: preference.defaultGroupId } : current);
+    },
+  });
+  return (
+    <div className={styles.preferenceRow}>
+      <dt>{t('account.details.defaultGroup')}</dt>
+      <dd className={styles.preference}>
+        <SelectInput
+          aria-label={t('account.details.defaultGroup')}
+          id="account-default-group"
+          onChange={(event) => { setSelection(event.target.value); mutation.reset(); }}
+          value={selection}
+        >
+          <option value={LAST_USED_GROUP_VALUE}>{t('account.details.lastUsedGroup')}</option>
+          {session.groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+        </SelectInput>
+        <span className={styles.preferenceHint}>{t('account.details.defaultGroupHint')}</span>
+        {mutation.isSuccess ? <span className={styles.success} role="status">{t('account.details.defaultGroupSaved')}</span> : null}
+        {mutation.isError ? <span className={styles.error} role="alert">{t('account.details.saveError')}</span> : null}
+      </dd>
+      <Button disabled={selection === persistedValue || mutation.isPending} leadingIcon={<Save size={16} />} onClick={() => mutation.mutate()} size="small" variant="secondary">
+        {mutation.isPending ? t('common.saving') : t('common.save')}
+      </Button>
+    </div>
   );
 }
 
 /**
  * Renders self-service account data with responsive change dialogs.
  *
- * @returns Name, email, and password controls available for this deployment.
+ * @returns Name, email, password, and multi-group login-preference controls available for this deployment.
  */
 export function AccountDetailsPanel() {
   const { t } = useTranslation();
-  const { session } = useActiveGroup();
+  const session = useSession();
   const [dialog, setDialog] = useState<AccountDialog>();
   const [successMessage, setSuccessMessage] = useState('');
   const capabilities = useQuery({ queryKey: authenticationCapabilitiesQueryKey, queryFn: api.getAuthenticationCapabilities, retry: false, staleTime: Infinity });
@@ -146,9 +189,10 @@ export function AccountDetailsPanel() {
     <section aria-labelledby="account-details-title" className={styles.card}>
       <h2 id="account-details-title">{t('account.details.title')}</h2>
       <dl className={styles.list}>
-        <div><dt>{t('account.details.name')}</dt><dd>{session.user.displayName}</dd><Button onClick={() => setDialog('name')} size="small" variant="secondary">{t('common.edit')}</Button></div>
-        <div><dt>{t('account.details.email')}</dt><dd>{session.user.email}</dd>{capabilities.data?.emailChangeAvailable === true ? <Button onClick={() => setDialog('email')} size="small" variant="secondary">{t('common.edit')}</Button> : null}</div>
-        <div><dt>{t('account.details.password')}</dt><dd aria-label={t('account.details.password')}>••••••••••••</dd><Button onClick={() => setDialog('password')} size="small" variant="secondary">{t('common.edit')}</Button></div>
+        <div><dt>{t('account.details.name')}</dt><dd>{session.user.displayName}</dd><Button leadingIcon={<Pencil size={16} />} onClick={() => setDialog('name')} size="small" variant="secondary">{t('common.edit')}</Button></div>
+        <div><dt>{t('account.details.email')}</dt><dd>{session.user.email}</dd>{capabilities.data?.emailChangeAvailable === true ? <Button leadingIcon={<Pencil size={16} />} onClick={() => setDialog('email')} size="small" variant="secondary">{t('common.edit')}</Button> : null}</div>
+        <div><dt>{t('account.details.password')}</dt><dd aria-label={t('account.details.password')}>••••••••••••</dd><Button leadingIcon={<Pencil size={16} />} onClick={() => setDialog('password')} size="small" variant="secondary">{t('common.edit')}</Button></div>
+        {session.groups.length > 1 ? <DefaultGroupSetting session={session} /> : null}
       </dl>
       {successMessage ? <p className={styles.success} role="status">{successMessage}</p> : null}
       <Modal onClose={closeDialog} open={dialog !== undefined} title={dialog ? dialogTitles[dialog] : ''} variant="sheet">

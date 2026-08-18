@@ -1,5 +1,6 @@
 import { useInfiniteQuery, useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import Bell from 'lucide-react/dist/esm/icons/bell';
+import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
@@ -152,7 +153,7 @@ export function NotificationsPage() {
 
   return (
     <Page intro={t('notifications.intro')} title={t('notifications.title')}>
-      {acknowledgementFailed ? <div className={styles.acknowledgementError} role="alert"><span>{t('notifications.readError')}</span><Button onClick={retryFailed} size="small" variant="ghost">{t('common.retry')}</Button></div> : null}
+      {acknowledgementFailed ? <div className={styles.acknowledgementError} role="alert"><span>{t('notifications.readError')}</span><Button leadingIcon={<RefreshCw size={16} />} onClick={retryFailed} size="small" variant="ghost">{t('common.retry')}</Button></div> : null}
       {notifications.length === 0 ? <StatePanel kind="empty" message={t('notifications.empty')} /> : (
         <div className={styles.list} ref={listRef}>
           {notifications.map((notification) => (

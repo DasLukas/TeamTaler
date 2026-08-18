@@ -1,0 +1,76 @@
+.selector { width: 100%; }
+
+.selector > button[role='combobox'] {
+  min-height: 48px;
+  padding: 0 12px;
+  border-color: rgb(255 255 255 / 24%);
+  color: var(--color-white);
+  background: transparent;
+}
+
+.selector > button[role='combobox']:hover:not(:disabled) {
+  border-color: rgb(255 255 255 / 48%);
+  background: rgb(255 255 255 / 8%);
+}
+
+.selector > button[role='combobox']:focus-visible {
+  border-color: #53d7ce;
+  outline-color: rgb(83 215 206 / 36%);
+}
+
+.selector > button[role='combobox'] > svg { color: rgb(255 255 255 / 80%); }
+
+.choice {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.mark {
+  width: 30px;
+  height: 30px;
+  font-size: var(--font-size-xs);
+}
+
+.label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (min-width: 768px) and (max-width: 1279px) {
+  .compact { width: 48px; }
+
+  .compact > button[role='combobox'] {
+    width: 48px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .compact > button[role='combobox'] > span { flex: 0 0 auto; }
+
+  .compact > button[role='combobox'] > svg,
+  .compact .label { display: none; }
+
+  .compact .mark {
+    width: 32px;
+    height: 32px;
+  }
+}
+
+@media (max-width: 480px) {
+  .responsiveCompact { width: 50px; }
+
+  .responsiveCompact > button[role='combobox'] {
+    width: 50px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .responsiveCompact > button[role='combobox'] > span { flex: 0 0 auto; }
+
+  .responsiveCompact > button[role='combobox'] > svg { display: none; }
+
+  .responsiveCompact .label { display: none; }
+}

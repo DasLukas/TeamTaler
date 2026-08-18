@@ -22,6 +22,9 @@ import waterImageUrl from './assets/water.webp';
 
 const grants = (...permissions: PermissionKey[]): PermissionGrant[] => permissions.map((permission) => ({ permission, scope: { type: 'GROUP' } }));
 
+const demoAdministratorRoleIds = ['role-admin', 'role-member', 'role-finance', 'role-catalog'];
+const demoAdministratorGrants = grants('GROUP_ADMINISTRATION', 'MEMBER_MANAGEMENT', 'ROLE_MANAGEMENT', 'FINANCE_MANAGEMENT', 'CATALOG_MANAGEMENT', 'VIEW_MEMBER_DIRECTORY', 'VIEW_GROUP_STATISTICS', 'VIEW_ALL_BOOKING_ACTIVITY', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING', 'VOID_ANY_BOOKING', 'BOOK_FOR_OTHERS', 'BOOK_FOR_GUESTS');
+
 /** Stable permission registry returned by the development transport. */
 export const demoPermissionDefinitions: PermissionDefinition[] = [
   { key: 'GROUP_ADMINISTRATION' },
@@ -46,18 +49,19 @@ export const demoRoles: Role[] = [
     id: 'role-admin',
     groupId: 'group-sv-adler',
     presetKey: 'GROUP_ADMINISTRATOR',
-    name: 'Gruppenadministrator',
-    description: 'Geschützte Vollzugriffsrolle der Gruppe',
+    name: 'Group administrator',
+    description: 'Standardrolle für Administratorrolle mit vollständigem Zugriff auf die Gruppe',
     nameLocked: true,
     deletable: false,
-    grants: grants('GROUP_ADMINISTRATION', 'MEMBER_MANAGEMENT', 'ROLE_MANAGEMENT', 'FINANCE_MANAGEMENT', 'CATALOG_MANAGEMENT', 'VIEW_MEMBER_DIRECTORY', 'VIEW_GROUP_STATISTICS', 'VIEW_ALL_BOOKING_ACTIVITY', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING', 'VOID_ANY_BOOKING', 'BOOK_FOR_OTHERS', 'BOOK_FOR_GUESTS'),
+    grants: grants('GROUP_ADMINISTRATION', 'MEMBER_MANAGEMENT', 'ROLE_MANAGEMENT', 'VIEW_MEMBER_DIRECTORY'),
     version: 1,
     memberCount: 1,
     pendingInvitationCount: 0,
   },
-  { id: 'role-member', groupId: 'group-sv-adler', presetKey: 'MEMBER', name: 'Mitglied', description: 'Bearbeitbare Startrolle für reguläre Gruppenmitglieder', nameLocked: false, deletable: true, grants: grants('CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING'), version: 1, memberCount: 3, pendingInvitationCount: 0 },
-  { id: 'role-finance', groupId: 'group-sv-adler', presetKey: 'FINANCE_MANAGER', name: 'Finanzverwaltung', description: 'Zahlungen und Abrechnungen verwalten', nameLocked: false, deletable: true, grants: grants('FINANCE_MANAGEMENT', 'VIEW_ALL_BOOKING_ACTIVITY', 'RECORD_OWN_PAYMENT'), version: 1, memberCount: 1, pendingInvitationCount: 0 },
-  { id: 'role-catalog', groupId: 'group-sv-adler', presetKey: 'CATALOG_MANAGER', name: 'Katalogverwaltung', description: 'Kategorien und Produkte verwalten', nameLocked: false, deletable: true, grants: grants('CATALOG_MANAGEMENT'), version: 1, memberCount: 1, pendingInvitationCount: 0 },
+  { id: 'role-member', groupId: 'group-sv-adler', name: 'Mitglied', description: 'Standardrolle für reguläre Gruppenmitglieder', nameLocked: false, deletable: true, grants: grants('CREATE_OWN_BOOKING', 'VIEW_MEMBER_DIRECTORY'), version: 1, memberCount: 3, pendingInvitationCount: 0 },
+  { id: 'role-finance', groupId: 'group-sv-adler', name: 'Finanzverwaltung', description: 'Standardrolle für Finanzverwaltung', nameLocked: false, deletable: true, grants: grants('FINANCE_MANAGEMENT', 'RECORD_OWN_PAYMENT', 'VIEW_ALL_BOOKING_ACTIVITY', 'VIEW_GROUP_STATISTICS', 'VIEW_MEMBER_DIRECTORY'), version: 1, memberCount: 2, pendingInvitationCount: 0 },
+  { id: 'role-catalog', groupId: 'group-sv-adler', name: 'Katalogverwaltung', description: 'Standardrolle für Katalogverwaltung', nameLocked: false, deletable: true, grants: grants('CATALOG_MANAGEMENT', 'VIEW_MEMBER_DIRECTORY'), version: 1, memberCount: 2, pendingInvitationCount: 0 },
+  { id: 'role-guest', groupId: 'group-sv-adler', name: 'Gast', description: 'Standardrolle für Gäste', nameLocked: false, deletable: true, grants: grants('CREATE_OWN_BOOKING'), version: 1, memberCount: 0, pendingInvitationCount: 0 },
   { id: 'role-self-payment', groupId: 'group-sv-adler', name: 'Eigene Einzahlungen', description: 'Aus dem bisherigen Einzelrecht migriert', nameLocked: false, deletable: true, grants: grants('RECORD_OWN_PAYMENT'), version: 1, memberCount: 1, pendingInvitationCount: 0 },
 ];
 
@@ -69,10 +73,12 @@ export const demoSession: Session = {
     email: 'lukas@example.test',
   },
   groups: [
-    { id: 'group-sv-adler', name: 'SV Adler', currency: 'EUR', membership: { id: 'member-lukas', roleIds: ['role-admin', 'role-member'], effectiveGrants: demoRoles[0].grants, roles: ['ADMIN', 'MEMBER'], groupPermissions: ['SELF_RECORD_PAYMENT'] } },
+    { id: 'group-sv-adler', name: 'SV Adler', currency: 'EUR', membership: { id: 'member-lukas', roleIds: demoAdministratorRoleIds, effectiveGrants: demoAdministratorGrants, roles: ['ADMIN', 'MEMBER', 'FINANCE_MANAGER', 'CATALOG_MANAGER'], groupPermissions: ['SELF_RECORD_PAYMENT'] } },
     { id: 'group-freunde', name: 'Kegelclub', currency: 'EUR', membership: { id: 'member-lukas-kegelclub', roleIds: ['role-member-kegel'], effectiveGrants: grants('CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING'), roles: ['MEMBER'], groupPermissions: [] } },
   ],
   activeGroupId: 'group-sv-adler',
+  defaultGroupId: null,
+  systemRoles: [],
   demo: true,
 };
 
@@ -179,9 +185,9 @@ export const demoMembers: Membership[] = [
     email: 'lukas@example.test',
     initials: 'LW',
     isTemporaryGuest: false,
-    roles: ['ADMIN', 'MEMBER'],
-    roleIds: ['role-admin', 'role-member'],
-    effectiveGrants: demoRoles[0].grants,
+    roles: ['ADMIN', 'MEMBER', 'FINANCE_MANAGER', 'CATALOG_MANAGER'],
+    roleIds: demoAdministratorRoleIds,
+    effectiveGrants: demoAdministratorGrants,
     groupPermissions: ['SELF_RECORD_PAYMENT'],
     categoryPermissions: [
       { categoryId: 'category-drinks', assignToOthers: true, voidBookings: true },
@@ -200,7 +206,7 @@ export const demoMembers: Membership[] = [
     isTemporaryGuest: false,
     roles: ['FINANCE_MANAGER', 'MEMBER'],
     roleIds: ['role-finance', 'role-member'],
-    effectiveGrants: grants('FINANCE_MANAGEMENT', 'VIEW_ALL_BOOKING_ACTIVITY', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING'),
+    effectiveGrants: grants('FINANCE_MANAGEMENT', 'RECORD_OWN_PAYMENT', 'VIEW_ALL_BOOKING_ACTIVITY', 'VIEW_GROUP_STATISTICS', 'VIEW_MEMBER_DIRECTORY', 'CREATE_OWN_BOOKING'),
     groupPermissions: [],
     categoryPermissions: [
       { categoryId: 'category-drinks', assignToOthers: false, voidBookings: false },
@@ -219,7 +225,7 @@ export const demoMembers: Membership[] = [
     isTemporaryGuest: false,
     roles: ['CATALOG_MANAGER', 'MEMBER'],
     roleIds: ['role-catalog', 'role-member', 'role-self-payment'],
-    effectiveGrants: grants('CATALOG_MANAGEMENT', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING'),
+    effectiveGrants: grants('CATALOG_MANAGEMENT', 'VIEW_MEMBER_DIRECTORY', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING'),
     groupPermissions: ['SELF_RECORD_PAYMENT'],
     categoryPermissions: [
       { categoryId: 'category-drinks', assignToOthers: false, voidBookings: false },

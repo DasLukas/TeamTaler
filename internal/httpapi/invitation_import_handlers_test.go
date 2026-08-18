@@ -20,6 +20,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/memberimport"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/storage"
+	systemadmin "github.com/DasLukas/TeamTaler/internal/system"
 )
 
 func TestHandleCreateInvitationQueuesEmailAndReturnsFallbackURL(t *testing.T) {
@@ -31,7 +32,7 @@ func TestHandleCreateInvitationQueuesEmailAndReturnsFallbackURL(t *testing.T) {
 		t.Fatalf("parse public URL: %v", err)
 	}
 	server.config.PublicURL = publicURL
-	memberRoleID := authorization.PresetRoleID(membership.GroupID, domain.RolePresetMember)
+	memberRoleID := authorization.TemplateRoleID(membership.GroupID, domain.RoleTemplateMember)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+membership.GroupID+"/invitations", bytes.NewBufferString(fmt.Sprintf(`{"email":"manual@example.test","displayName":"Manual Member","roleIds":[%q]}`, memberRoleID)))
 	request.Header.Set("Content-Type", "application/json")
 	request.SetPathValue("groupID", membership.GroupID)
@@ -61,6 +62,71 @@ func TestHandleCreateInvitationQueuesEmailAndReturnsFallbackURL(t *testing.T) {
 	}
 }
 
+func TestMemberInvitationCanQueueEmailAfterSMTPIsEnabled(t *testing.T) {
+	t.Parallel()
+
+	server, principal, membership := invitationImportServer(t, true)
+	publicURL, err := url.Parse("https://teamtaler.example")
+	if err != nil {
+		t.Fatalf("parse public URL: %v", err)
+	}
+	server.config.PublicURL = publicURL
+	memberRoleID := authorization.TemplateRoleID(membership.GroupID, domain.RoleTemplateMember)
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+membership.GroupID+"/invitations", bytes.NewBufferString(fmt.Sprintf(`{"email":"later-smtp@example.test","displayName":"Later SMTP","roleIds":[%q]}`, memberRoleID)))
+	createRequest.Header.Set("Content-Type", "application/json")
+	createRequest.SetPathValue("groupID", membership.GroupID)
+	createContext := context.WithValue(createRequest.Context(), principalKey, principal)
+	createContext = context.WithValue(createContext, systemSettingsKey, systemadmin.Settings{SMTP: systemadmin.SMTPSettings{Active: false}})
+	createRequest = createRequest.WithContext(createContext)
+	createResponse := httptest.NewRecorder()
+
+	server.handleCreateInvitation(createResponse, createRequest)
+	if createResponse.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, body = %s", createResponse.Code, createResponse.Body.String())
+	}
+	var created struct {
+		Invitation groups.Invitation `json:"invitation"`
+		AcceptURL  string            `json:"acceptUrl"`
+	}
+	if err := json.Unmarshal(createResponse.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if created.Invitation.EmailDeliveryStatus != groups.EmailDeliveryNotRequested || created.AcceptURL == "" {
+		t.Fatalf("created invitation = %#v acceptURL=%q", created.Invitation, created.AcceptURL)
+	}
+
+	resendRequest := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+membership.GroupID+"/invitations/"+created.Invitation.ID+"/email/resend", nil)
+	resendRequest.Header.Set("Idempotency-Key", "enable-smtp-resend")
+	resendRequest.SetPathValue("groupID", membership.GroupID)
+	resendRequest.SetPathValue("invitationID", created.Invitation.ID)
+	resendContext := context.WithValue(resendRequest.Context(), principalKey, principal)
+	resendContext = context.WithValue(resendContext, systemSettingsKey, systemadmin.Settings{SMTP: systemadmin.SMTPSettings{Active: true}})
+	resendRequest = resendRequest.WithContext(resendContext)
+	resendResponse := httptest.NewRecorder()
+
+	server.handleResendInvitationEmail(resendResponse, resendRequest)
+	if resendResponse.Code != http.StatusOK {
+		t.Fatalf("resend status = %d, body = %s", resendResponse.Code, resendResponse.Body.String())
+	}
+	var renewed struct {
+		InvitationID        string                     `json:"invitationId"`
+		EmailDeliveryStatus groups.EmailDeliveryStatus `json:"emailDeliveryStatus"`
+		ExpiresAt           string                     `json:"expiresAt"`
+		AcceptURL           string                     `json:"acceptUrl"`
+	}
+	if err := json.Unmarshal(resendResponse.Body.Bytes(), &renewed); err != nil {
+		t.Fatalf("decode resend response: %v", err)
+	}
+	if renewed.InvitationID != created.Invitation.ID || renewed.EmailDeliveryStatus != groups.EmailDeliveryPending || renewed.ExpiresAt == "" || renewed.AcceptURL == "" || renewed.AcceptURL == created.AcceptURL {
+		t.Fatalf("renewed invitation = %#v", renewed)
+	}
+	var jobs int
+	var status string
+	if err := server.db.QueryRow(`SELECT count(*),max(status) FROM invitation_email_outbox WHERE invitation_id=?`, created.Invitation.ID).Scan(&jobs, &status); err != nil || jobs != 1 || status != "PENDING" {
+		t.Fatalf("outbox jobs=%d status=%q err=%v, want one pending job", jobs, status, err)
+	}
+}
+
 func TestHandlePreviewInvitationReturnsOnlySafeHints(t *testing.T) {
 	t.Parallel()
 
@@ -82,7 +148,7 @@ func TestHandlePreviewInvitationReturnsOnlySafeHints(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &preview); err != nil {
 		t.Fatalf("decode preview: %v", err)
 	}
-	if preview.DisplayName != "Preview Member" || preview.ExistingAccount {
+	if preview.DisplayName != "Preview Member" || preview.AccountState != auth.InvitationAccountNew {
 		t.Fatalf("preview = %#v", preview)
 	}
 	responseText := response.Body.String()
@@ -117,7 +183,7 @@ func TestHandleImportInvitationsUsesDefaultRoleWithoutQueryParameter(t *testing.
 	t.Parallel()
 
 	server, principal, membership := invitationImportServer(t, true)
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+membership.GroupID+"/invitations/import", bytes.NewBufferString("email,roles\ndefault@example.test,\nfinance@example.test,Finance manager\n"))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+membership.GroupID+"/invitations/import", bytes.NewBufferString("email,roles\ndefault@example.test,\nfinance@example.test,Finanzverwaltung\n"))
 	request.Header.Set("Content-Type", "text/csv")
 	request.Header.Set("Idempotency-Key", "csv-default-role-test")
 	request.SetPathValue("groupID", membership.GroupID)
@@ -224,7 +290,7 @@ func invitationImportServer(t *testing.T, emailEnabled bool) (*Server, domain.Pr
 }
 
 func invitationImportRequest(principal domain.Principal, groupID, body, contentType string) *http.Request {
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+groupID+"/invitations/import?roleId="+url.QueryEscape(authorization.PresetRoleID(groupID, domain.RolePresetMember)), bytes.NewBufferString(body))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/groups/"+groupID+"/invitations/import?roleId="+url.QueryEscape(authorization.TemplateRoleID(groupID, domain.RoleTemplateMember)), bytes.NewBufferString(body))
 	request.Header.Set("Content-Type", contentType)
 	request.Header.Set("Idempotency-Key", "csv-import-test-key")
 	request.SetPathValue("groupID", groupID)

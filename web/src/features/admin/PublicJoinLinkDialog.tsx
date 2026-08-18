@@ -1,9 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Check from 'lucide-react/dist/esm/icons/check';
+import Ban from 'lucide-react/dist/esm/icons/ban';
 import Copy from 'lucide-react/dist/esm/icons/copy';
 import Download from 'lucide-react/dist/esm/icons/download';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
 import ShieldAlert from 'lucide-react/dist/esm/icons/shield-alert';
+import Link2 from 'lucide-react/dist/esm/icons/link-2';
+import X from 'lucide-react/dist/esm/icons/x';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
@@ -165,9 +168,9 @@ export function PublicJoinLinkDialog({ groupId, onClose }: PublicJoinLinkDialogP
 			{selectedLifetime === 'custom' ? <Field error={invalidCustomExpiry ? t('publicJoin.customInvalid') : undefined} htmlFor="public-join-custom-expiry" label={t('publicJoin.customExpiry')}><TextInput id="public-join-custom-expiry" max={maxCustomExpiry} min={minCustomExpiry} onChange={(event) => { setCustomExpiry(event.target.value); setCustomExpiryTouched(true); }} type="datetime-local" value={selectedCustomExpiry} /></Field> : null}
 			{selectedLifetime === 'unlimited' ? <p className={styles.securityWarning}><ShieldAlert aria-hidden="true" size={19} />{t('publicJoin.unlimitedWarning')}</p> : null}
             <div className={styles.actions}>
-              {active ? <Button disabled={pending} onClick={() => setConfirmation('disable')} variant="danger">{t('publicJoin.disable')}</Button> : null}
+              {active ? <Button disabled={pending} leadingIcon={<Ban size={17} />} onClick={() => setConfirmation('disable')} variant="danger">{t('publicJoin.disable')}</Button> : null}
               {active ? <Button disabled={pending} leadingIcon={<RefreshCw size={17} />} onClick={() => setConfirmation('rotate')} variant="secondary">{t('publicJoin.rotate')}</Button> : null}
-              <Button disabled={pending || invalidCustomExpiry} onClick={applyLifetime}>{active ? t('publicJoin.saveLifetime') : link.expired ? t('publicJoin.reactivate') : t('publicJoin.create')}</Button>
+              <Button disabled={pending || invalidCustomExpiry} leadingIcon={<Link2 size={17} />} onClick={applyLifetime}>{active ? t('publicJoin.saveLifetime') : link.expired ? t('publicJoin.reactivate') : t('publicJoin.create')}</Button>
             </div>
           </section>
         ) : null}
@@ -176,7 +179,7 @@ export function PublicJoinLinkDialog({ groupId, onClose }: PublicJoinLinkDialogP
           <section className={styles.confirmation} role="alert">
             <h3>{confirmation === 'rotate' ? t('publicJoin.rotateConfirmTitle') : t('publicJoin.disableConfirmTitle')}</h3>
             <p>{confirmation === 'rotate' ? t('publicJoin.rotateConfirmDescription') : t('publicJoin.disableConfirmDescription')}</p>
-            <div className={styles.actions}><Button disabled={pending} onClick={() => setConfirmation(null)} variant="secondary">{t('common.cancel')}</Button><Button disabled={pending} onClick={() => confirmation === 'rotate' ? rotateMutation.mutate() : disable()} variant={confirmation === 'disable' ? 'danger' : 'primary'}>{t('common.confirm')}</Button></div>
+            <div className={styles.actions}><Button disabled={pending} leadingIcon={<X size={17} />} onClick={() => setConfirmation(null)} variant="secondary">{t('common.cancel')}</Button><Button disabled={pending} leadingIcon={confirmation === 'disable' ? <Ban size={17} /> : <RefreshCw size={17} />} onClick={() => confirmation === 'rotate' ? rotateMutation.mutate() : disable()} variant={confirmation === 'disable' ? 'danger' : 'primary'}>{t('common.confirm')}</Button></div>
           </section>
         ) : null}
 

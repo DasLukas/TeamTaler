@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
+import LogIn from 'lucide-react/dist/esm/icons/log-in';
 import { useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { api, isDevelopmentDemoEnabled } from '@/api/client';
 import type { LoginCommand } from '@/api/types';
-import { preferredMemberPath } from '@/app/groupCapabilities';
+import { preferredAuthenticatedPath } from '@/app/groupCapabilities';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
 import { AuthLayout } from './AuthLayout';
@@ -28,8 +29,7 @@ export function LoginPage() {
     mutationFn: api.login,
     onSuccess: async (session) => {
       queryClient.setQueryData(['session'], session);
-      const group = session.groups.find((candidate) => candidate.id === session.activeGroupId) ?? session.groups[0];
-      await navigate({ to: preferredMemberPath(group?.membership?.effectiveGrants) });
+      await navigate({ to: preferredAuthenticatedPath(session) });
     },
   });
 
@@ -44,7 +44,7 @@ export function LoginPage() {
         </Field>
         {capabilities.data?.passwordResetAvailable === true ? <Link className={styles.secondaryLink} to="/forgot-password">{t('auth.forgotPassword')}</Link> : null}
         {loginMutation.isError ? <p className={styles.error} role="alert">{loginErrorMessage(loginMutation.error, t)}</p> : null}
-        <Button disabled={loginMutation.isPending} fullWidth size="large" type="submit">{loginMutation.isPending ? t('auth.loginPending') : t('auth.loginAction')}</Button>
+        <Button disabled={loginMutation.isPending} fullWidth leadingIcon={<LogIn size={19} />} size="large" type="submit">{loginMutation.isPending ? t('auth.loginPending') : t('auth.loginAction')}</Button>
       </form>
     </AuthLayout>
   );

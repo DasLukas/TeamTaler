@@ -1,11 +1,13 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
 	"github.com/DasLukas/TeamTaler/internal/auth"
 	"github.com/DasLukas/TeamTaler/internal/domain"
+	systemadmin "github.com/DasLukas/TeamTaler/internal/system"
 )
 
 type loginRequest struct {
@@ -14,10 +16,12 @@ type loginRequest struct {
 }
 
 type sessionResponse struct {
-	User          userResponse `json:"user"`
-	CSRFToken     string       `json:"csrfToken"`
-	Groups        any          `json:"groups"`
-	ActiveGroupID *string      `json:"activeGroupId"`
+	User           userResponse       `json:"user"`
+	CSRFToken      string             `json:"csrfToken"`
+	Groups         any                `json:"groups"`
+	ActiveGroupID  *string            `json:"activeGroupId"`
+	DefaultGroupID *string            `json:"defaultGroupId"`
+	SystemRoles    []systemadmin.Role `json:"systemRoles"`
 }
 
 type userResponse struct {
@@ -58,7 +62,12 @@ func (s *Server) handleLogin(response http.ResponseWriter, request *http.Request
 		writeProblem(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusOK, newSessionResponse(session.Principal, session.CSRFToken, groupItems))
+	payload, err := s.newSessionResponse(request.Context(), session.Principal, session.CSRFToken, groupItems)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, payload)
 }
 
 func (s *Server) handleLogout(response http.ResponseWriter, request *http.Request) {
@@ -86,7 +95,12 @@ func (s *Server) handleSession(response http.ResponseWriter, request *http.Reque
 		writeProblem(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusOK, newSessionResponse(principal, principal.CSRFToken, groupItems))
+	payload, err := s.newSessionResponse(request.Context(), principal, principal.CSRFToken, groupItems)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, payload)
 }
 
 func (s *Server) setSessionCookies(response http.ResponseWriter, token, csrf string, maxAge int) {
@@ -124,7 +138,12 @@ func (s *Server) handleAcceptInvitation(response http.ResponseWriter, request *h
 		writeProblem(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusCreated, newSessionResponse(session.Principal, session.CSRFToken, groupItems))
+	payload, err := s.newSessionResponse(request.Context(), session.Principal, session.CSRFToken, groupItems)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, payload)
 }
 
 // handlePreviewInvitation rate-limits an unauthenticated invitation-token
@@ -153,13 +172,45 @@ func (s *Server) handlePreviewInvitation(response http.ResponseWriter, request *
 	writeJSON(response, http.StatusOK, preview)
 }
 
-func newSessionResponse(principal domain.Principal, csrf string, groupItems []domain.Group) sessionResponse {
+func (s *Server) newSessionResponse(ctx context.Context, principal domain.Principal, csrf string, groupItems []domain.Group) (sessionResponse, error) {
+	systemRoles := make([]systemadmin.Role, 0)
+	if s.systemConfigured {
+		var err error
+		systemRoles, err = s.systemAdmin.RolesForUser(ctx, principal.UserID)
+		if err != nil {
+			return sessionResponse{}, err
+		}
+	}
+	preference, err := s.auth.ReadGroupPreference(ctx, principal.UserID)
+	if err != nil {
+		return sessionResponse{}, err
+	}
+	available := make(map[string]struct{}, len(groupItems))
+	for _, group := range groupItems {
+		available[group.ID] = struct{}{}
+	}
+	var defaultGroupID *string
+	if preference.DefaultGroupID != nil {
+		if _, exists := available[*preference.DefaultGroupID]; exists {
+			value := *preference.DefaultGroupID
+			defaultGroupID = &value
+		}
+	}
 	var activeGroupID *string
-	if len(groupItems) > 0 {
+	if defaultGroupID != nil {
+		value := *defaultGroupID
+		activeGroupID = &value
+	} else if preference.LastUsedGroupID != nil {
+		if _, exists := available[*preference.LastUsedGroupID]; exists {
+			value := *preference.LastUsedGroupID
+			activeGroupID = &value
+		}
+	}
+	if activeGroupID == nil && len(groupItems) > 0 {
 		value := groupItems[0].ID
 		activeGroupID = &value
 	}
-	return sessionResponse{User: userResponse{ID: principal.UserID, Email: principal.Email, DisplayName: principal.DisplayName, AvatarURL: principal.AvatarURL}, CSRFToken: csrf, Groups: groupItems, ActiveGroupID: activeGroupID}
+	return sessionResponse{User: userResponse{ID: principal.UserID, Email: principal.Email, DisplayName: principal.DisplayName, AvatarURL: principal.AvatarURL}, CSRFToken: csrf, Groups: groupItems, ActiveGroupID: activeGroupID, DefaultGroupID: defaultGroupID, SystemRoles: systemRoles}, nil
 }
 
 func (s *Server) acquirePasswordSlot() bool {

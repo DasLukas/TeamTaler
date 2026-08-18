@@ -150,20 +150,30 @@ type PermissionDefinition struct {
 	ImpliedPermissions []PermissionKey `json:"impliedPermissions"`
 }
 
-// RolePresetKey identifies a seeded role template independently from its editable display name.
-// Only the group-administrator preset has a locked name; preset keys themselves
-// are immutable once a role is created.
+// RolePresetKey identifies a role with reserved system semantics independently
+// from its display name. The protected group administrator is the only system
+// role in the current model.
 type RolePresetKey string
 
 const (
 	// RolePresetGroupAdministrator identifies the required protected administrator role.
 	RolePresetGroupAdministrator RolePresetKey = "GROUP_ADMINISTRATOR"
-	// RolePresetMember identifies the editable starter role seeded for new groups.
-	RolePresetMember RolePresetKey = "MEMBER"
-	// RolePresetFinanceManager identifies the optional seeded finance role.
-	RolePresetFinanceManager RolePresetKey = "FINANCE_MANAGER"
-	// RolePresetCatalogManager identifies the optional seeded catalog role.
-	RolePresetCatalogManager RolePresetKey = "CATALOG_MANAGER"
+)
+
+// RoleTemplateKey identifies one ordinary role template created during group
+// bootstrap. It is used only to derive deterministic seed identifiers and is
+// never persisted as authorization metadata.
+type RoleTemplateKey string
+
+const (
+	// RoleTemplateMember identifies the ordinary member-role template.
+	RoleTemplateMember RoleTemplateKey = "MEMBER"
+	// RoleTemplateFinance identifies the ordinary finance-role template.
+	RoleTemplateFinance RoleTemplateKey = "FINANCE_MANAGER"
+	// RoleTemplateCatalog identifies the ordinary catalog-role template.
+	RoleTemplateCatalog RoleTemplateKey = "CATALOG_MANAGER"
+	// RoleTemplateGuest identifies the ordinary guest-role template.
+	RoleTemplateGuest RoleTemplateKey = "GUEST"
 )
 
 // RoleDefinition is one group-owned, versioned collection of permission grants.

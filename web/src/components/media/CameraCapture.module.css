@@ -1,0 +1,58 @@
+.capture {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-muted);
+}
+
+.preview {
+  position: relative;
+  display: grid;
+  width: 100%;
+  min-height: 220px;
+  max-height: min(48vh, 420px);
+  place-items: center;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  color: var(--color-muted);
+  background: var(--color-ink);
+}
+
+.preview video {
+  display: block;
+  width: 100%;
+  min-height: 220px;
+  max-height: min(48vh, 420px);
+  object-fit: contain;
+}
+
+.preview p {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  max-width: calc(100% - 2 * var(--space-5));
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  color: var(--color-white);
+  background: rgb(3 24 47 / 78%);
+  line-height: 1.45;
+  text-align: center;
+  transform: translate(-50%, -50%);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+@media (max-width: 600px) {
+  .preview,
+  .preview video { min-height: 180px; }
+
+  .actions > button { flex: 1 1 auto; }
+}

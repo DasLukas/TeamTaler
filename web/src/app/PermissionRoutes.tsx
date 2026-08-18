@@ -1,7 +1,7 @@
-import { Navigate } from '@tanstack/react-router';
+import { Navigate, Outlet } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { canOpenBooking, preferredMemberPath } from './groupCapabilities';
-import { useActiveGroup } from './useActiveGroup';
+import { useActiveGroup, useOptionalActiveGroup } from './useActiveGroup';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { BookingPage } from '@/features/bookings/BookingPage';
 
@@ -9,6 +9,11 @@ import { BookingPage } from '@/features/bookings/BookingPage';
 export function PreferredWorkspaceRedirect() {
   const { activeGroup } = useActiveGroup();
   return <Navigate replace to={preferredMemberPath(activeGroup.membership?.effectiveGrants)} />;
+}
+
+/** Prevents group-scoped route components from mounting without an active group. */
+export function GroupRequiredRoute() {
+  return useOptionalActiveGroup() ? <Outlet /> : <Navigate replace to="/admin" />;
 }
 
 /**

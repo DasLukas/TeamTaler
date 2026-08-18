@@ -3,17 +3,20 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AdminPage } from './AdminPage';
 
-const mocks = vi.hoisted(() => ({ useActiveGroup: vi.fn() }));
+const mocks = vi.hoisted(() => ({ useActiveGroup: vi.fn(), session: { systemRoles: [] as string[] } }));
 
-vi.mock('@/app/useActiveGroup', () => ({ useActiveGroup: () => mocks.useActiveGroup() }));
+vi.mock('@/app/useActiveGroup', () => ({ useOptionalActiveGroup: () => mocks.useActiveGroup() }));
+vi.mock('@/app/useSession', () => ({ useSession: () => mocks.session, isSystemAdministrator: (session: { systemRoles?: string[] }) => session.systemRoles?.includes('SYSTEM_ADMINISTRATOR') === true }));
 vi.mock('./AuditPanel', () => ({ AuditPanel: () => <div>audit-panel</div> }));
 vi.mock('./BehaviorSettingsPanel', () => ({ BehaviorSettingsPanel: () => <div>settings-panel</div> }));
 vi.mock('./MembersPanel', () => ({ MembersPanel: () => <div>members-panel</div> }));
 vi.mock('./RightsPanel', () => ({ RightsPanel: () => <div>rights-panel</div> }));
+vi.mock('./SystemSettingsPanel', () => ({ SystemSettingsPanel: () => <div>system-panel</div> }));
 
 describe('AdminPage workspace separation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.session.systemRoles = [];
     mocks.useActiveGroup.mockReturnValue({ activeGroup: { membership: { effectiveGrants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }] } } });
   });
 
@@ -55,13 +58,6 @@ describe('AdminPage workspace separation', () => {
     expect(auditTab).toHaveFocus();
   });
 
-  it('denies the administration workspace to a pure finance manager', () => {
-    mocks.useActiveGroup.mockReturnValue({ activeGroup: { membership: { effectiveGrants: [{ permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } }] } } });
-    render(<AdminPage />);
-    expect(screen.getByText('Kein Zugriff')).toBeVisible();
-    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
-  });
-
   it('denies the administration workspace to a pure catalog manager', () => {
     mocks.useActiveGroup.mockReturnValue({ activeGroup: { membership: { effectiveGrants: [{ permission: 'CATALOG_MANAGEMENT', scope: { type: 'GROUP' } }] } } });
     render(<AdminPage />);
@@ -69,16 +65,26 @@ describe('AdminPage workspace separation', () => {
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
   });
 
-  it('does not mount the protected member directory for a role manager without directory access', () => {
+  it('mounts general defaults and rights for a role manager without directory access', () => {
     mocks.useActiveGroup.mockReturnValue({ activeGroup: { membership: { effectiveGrants: [{ permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }] } } });
 
     render(<AdminPage />);
 
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Rollen & Rechte']);
-    expect(screen.getByText('rights-panel')).toBeVisible();
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Allgemein', 'Rollen & Rechte']);
+    expect(screen.getByText('settings-panel')).toBeVisible();
     expect(screen.queryByText('members-panel')).not.toBeInTheDocument();
-    expect(screen.queryByText('settings-panel')).not.toBeInTheDocument();
     expect(screen.queryByText('audit-panel')).not.toBeInTheDocument();
+  });
+
+  it('mounts only general settings for a pure finance manager', () => {
+    mocks.useActiveGroup.mockReturnValue({ activeGroup: { membership: { effectiveGrants: [{ permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } }] } } });
+
+    render(<AdminPage />);
+
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Allgemein']);
+    expect(screen.getByText('settings-panel')).toBeVisible();
+    expect(screen.queryByText('audit-panel')).not.toBeInTheDocument();
+    expect(screen.queryByText('members-panel')).not.toBeInTheDocument();
   });
 
   it('keeps the legacy directory grant hidden from a role manager', () => {
@@ -86,7 +92,7 @@ describe('AdminPage workspace separation', () => {
 
     render(<AdminPage />);
 
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Rollen & Rechte']);
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Allgemein', 'Rollen & Rechte']);
     expect(screen.queryByText('members-panel')).not.toBeInTheDocument();
   });
 
@@ -100,12 +106,34 @@ describe('AdminPage workspace separation', () => {
     expect(screen.queryByRole('tab', { name: 'Rollen & Rechte' })).not.toBeInTheDocument();
   });
 
-  it('mounts only members for pure member management', () => {
+  it('keeps general settings separate from pure member management', () => {
     mocks.useActiveGroup.mockReturnValue({ activeGroup: { membership: { effectiveGrants: [{ permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }] } } });
 
     render(<AdminPage />);
 
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Mitglieder']);
     expect(screen.getByText('members-panel')).toBeVisible();
+    expect(screen.queryByText('settings-panel')).not.toBeInTheDocument();
+  });
+
+  it('places the system workspace first for a system administrator with a group', async () => {
+    mocks.session.systemRoles = ['SYSTEM_ADMINISTRATOR'];
+
+    render(<AdminPage />);
+
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['System', 'Allgemein', 'Mitglieder', 'Rollen & Rechte', 'Audit']);
+    expect(await screen.findByText('system-panel')).toBeVisible();
+    expect(screen.queryByText('settings-panel')).not.toBeInTheDocument();
+  });
+
+  it('mounts only the system workspace without a group context', async () => {
+    mocks.session.systemRoles = ['SYSTEM_ADMINISTRATOR'];
+    mocks.useActiveGroup.mockReturnValue(null);
+
+    render(<AdminPage />);
+
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['System']);
+    expect(await screen.findByText('system-panel')).toBeVisible();
+    expect(screen.queryByText('members-panel')).not.toBeInTheDocument();
   });
 });

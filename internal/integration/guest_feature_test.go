@@ -202,8 +202,8 @@ func TestTemporaryGuestClaimPreservesHistoryAndAppliesSelectedRoles(t *testing.T
 	if err := f.db.QueryRowContext(f.ctx, `SELECT user_id FROM memberships WHERE id=?`, guestMembershipID).Scan(&originalUserID); err != nil {
 		t.Fatalf("load original temporary identity: %v", err)
 	}
-	memberRoleID := authorization.PresetRoleID(f.membership.GroupID, domain.RolePresetMember)
-	financeRoleID := authorization.PresetRoleID(f.membership.GroupID, domain.RolePresetFinanceManager)
+	memberRoleID := authorization.TemplateRoleID(f.membership.GroupID, domain.RoleTemplateMember)
+	financeRoleID := authorization.TemplateRoleID(f.membership.GroupID, domain.RoleTemplateFinance)
 	invitation, err := f.groups.CreateTemporaryGuestClaimInvitation(f.ctx, f.admin, f.membership, guestMembershipID, "claimed@example.test", []string{memberRoleID, financeRoleID})
 	if err != nil || invitation.Token == "" {
 		t.Fatalf("create claim invitation: invitation=%#v err=%v", invitation, err)
@@ -243,8 +243,8 @@ func TestMemberManagementCanChooseOrdinaryClaimRoles(t *testing.T) {
 	}
 	principal, administrator, _ := f.inviteMember("delegated-claim-admin@example.test", "Delegated Claim Admin", nil)
 	administrator = f.assignPermissionRole(administrator, "Delegated claim administration", domain.PermissionMemberManagement)
-	memberRoleID := authorization.PresetRoleID(f.membership.GroupID, domain.RolePresetMember)
-	financeRoleID := authorization.PresetRoleID(f.membership.GroupID, domain.RolePresetFinanceManager)
+	memberRoleID := authorization.TemplateRoleID(f.membership.GroupID, domain.RoleTemplateMember)
+	financeRoleID := authorization.TemplateRoleID(f.membership.GroupID, domain.RoleTemplateFinance)
 	adminRoleID := authorization.PresetRoleID(f.membership.GroupID, domain.RolePresetGroupAdministrator)
 	if _, err := f.groups.CreateTemporaryGuestClaimInvitation(f.ctx, principal, administrator, created[0].TargetMembershipID, "rejected@example.test", []string{memberRoleID, adminRoleID}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("delegated protected claim role error=%v, want forbidden", err)

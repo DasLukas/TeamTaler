@@ -1,6 +1,7 @@
 import AlertCircle from 'lucide-react/dist/esm/icons/circle-alert';
 import Inbox from 'lucide-react/dist/esm/icons/inbox';
 import LoaderCircle from 'lucide-react/dist/esm/icons/loader-circle';
+import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from './Button';
@@ -32,7 +33,7 @@ export function StatePanel({ kind, title, message, actionLabel, onAction, childr
       <h2>{title ?? defaultTitle}</h2>
       {message ? <p>{message}</p> : null}
       {children}
-      {actionLabel && onAction ? <Button onClick={onAction} variant="secondary">{actionLabel}</Button> : null}
+      {actionLabel && onAction ? <Button leadingIcon={<RefreshCw size={17} />} onClick={onAction} variant="secondary">{actionLabel}</Button> : null}
     </div>
   );
 }

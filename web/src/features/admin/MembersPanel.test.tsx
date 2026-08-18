@@ -8,6 +8,7 @@ import { ActiveGroupContext } from '@/app/active-group-context';
 import i18n from '@/i18n';
 import { MembersPanel } from './MembersPanel';
 
+const mediaQueryMock = vi.hoisted(() => ({ compact: false }));
 const apiMock = vi.hoisted(() => ({
   getMembers: vi.fn(),
   getCategories: vi.fn(),
@@ -33,6 +34,8 @@ const apiMock = vi.hoisted(() => ({
   rotatePublicJoinLink: vi.fn(),
 }));
 
+vi.mock('@/hooks/useMediaQuery', () => ({ useMediaQuery: () => mediaQueryMock.compact }));
+
 vi.mock('@/api/client', () => ({
   api: apiMock,
   ApiError: class MockApiError extends Error {
@@ -48,6 +51,8 @@ const session: Session = {
   user: { id: 'user-admin', displayName: 'Admin', email: 'admin@example.test' },
   groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-admin', roleIds: ['role-admin', 'role-member'], effectiveGrants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }], roles: ['ADMIN', 'MEMBER'], groupPermissions: [] } }],
   activeGroupId: 'group-a',
+  defaultGroupId: null,
+  systemRoles: [],
 };
 
 const members: Membership[] = [{
@@ -81,8 +86,8 @@ const temporaryGuest: Membership = {
 
 const roles: Role[] = [
   { id: 'role-admin', presetKey: 'GROUP_ADMINISTRATOR', name: 'Gruppenadministrator', grants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }], version: 1, memberCount: 1, pendingInvitationCount: 0 },
-  { id: 'role-member', presetKey: 'MEMBER', name: 'Mitglied', grants: [{ permission: 'VOID_OWN_BOOKING', scope: { type: 'GROUP' } }], version: 1, memberCount: 1, pendingInvitationCount: 1 },
-  { id: 'role-finance', presetKey: 'FINANCE_MANAGER', name: 'Finanzverwaltung', grants: [{ permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } }], version: 1, memberCount: 0, pendingInvitationCount: 0 },
+  { id: 'role-member', name: 'Mitglied', grants: [{ permission: 'VOID_OWN_BOOKING', scope: { type: 'GROUP' } }], version: 1, memberCount: 1, pendingInvitationCount: 1 },
+  { id: 'role-finance', name: 'Finanzverwaltung', grants: [{ permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } }], version: 1, memberCount: 0, pendingInvitationCount: 0 },
 ];
 
 const importResult: InvitationImportResult = {
@@ -130,6 +135,7 @@ function renderMembers(activeSession: Session = session): QueryClient {
 describe('MembersPanel invitations', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mediaQueryMock.compact = false;
     apiMock.getMembers.mockResolvedValue(members);
     apiMock.getRoles.mockResolvedValue(roles);
     apiMock.getGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
@@ -177,6 +183,29 @@ describe('MembersPanel invitations', () => {
     Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
   });
 
+  it('omits the neutral email-delivery badge from manual-link invitations', async () => {
+    apiMock.getInvitations.mockResolvedValue([{ ...invitationMetadata[0], emailDeliveryStatus: 'NOT_REQUESTED' }]);
+    renderMembers();
+
+    expect(await screen.findByText('new@example.test')).toBeVisible();
+    expect(screen.queryByText(i18n.t('members.csvImport.deliveryStatus.notRequested'))).not.toBeInTheDocument();
+  });
+
+  it('omits the neutral email-delivery badge from compact invitation cards', async () => {
+    mediaQueryMock.compact = true;
+    apiMock.getInvitations.mockResolvedValue([{ ...invitationMetadata[0], emailDeliveryStatus: 'NOT_REQUESTED' }]);
+    renderMembers();
+
+    expect(await screen.findByText('new@example.test')).toBeVisible();
+    expect(screen.queryByText(i18n.t('members.csvImport.deliveryStatus.notRequested'))).not.toBeInTheDocument();
+  });
+
+  it('keeps relevant email-delivery badges visible', async () => {
+    renderMembers();
+
+    expect(await screen.findByText(i18n.t('members.csvImport.deliveryStatus.sent'))).toBeVisible();
+  });
+
   it('loads public join-link state only after an administrator opens its dialog', async () => {
     const user = userEvent.setup();
     renderMembers();
@@ -188,15 +217,25 @@ describe('MembersPanel invitations', () => {
     await waitFor(() => expect(apiMock.getPublicJoinLink).toHaveBeenCalledWith('group-a'));
   });
 
-  it('owns the default role setting in member management', async () => {
-    const user = userEvent.setup();
+  it('does not render the default-role setting in member management', async () => {
     renderMembers();
 
-    expect(await screen.findByRole('heading', { name: i18n.t('behaviorSettings.defaultRoleTitle') })).toBeVisible();
-    await user.selectOptions(screen.getByLabelText(i18n.t('behaviorSettings.defaultRoleFieldLabel')), 'role-finance');
-    await user.click(screen.getByRole('button', { name: i18n.t('common.save') }));
+    expect(await screen.findByRole('heading', { name: i18n.t('members.openInvitations') })).toBeVisible();
+    expect(screen.queryByLabelText(i18n.t('behaviorSettings.defaultRoleFieldLabel'))).not.toBeInTheDocument();
+  });
 
-    await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { defaultRoleId: 'role-finance' }));
+  it('shows invitation names before email addresses in the desktop table', async () => {
+    renderMembers();
+
+    const invitationsSection = (await screen.findByRole('heading', { name: i18n.t('members.openInvitations') })).closest('section') as HTMLElement;
+    const headers = within(invitationsSection).getAllByRole('columnheader');
+    expect(headers[0]).toHaveTextContent(i18n.t('common.name'));
+    expect(headers[1]).toHaveTextContent(i18n.t('members.email'));
+
+    const invitationRow = within(invitationsSection).getByRole('row', { name: /New Member new@example\.test/ });
+    const cells = within(invitationRow).getAllByRole('cell');
+    expect(cells[0]).toHaveTextContent('New Member');
+    expect(cells[1]).toHaveTextContent('new@example.test');
   });
 
   it('keeps compact header actions explicitly labelled for assistive technology and tooltips', async () => {
@@ -232,6 +271,7 @@ describe('MembersPanel invitations', () => {
     expect(await screen.findByRole('heading', { name: i18n.t('members.invitationStatus.sentTitle') })).toBeVisible();
     expect(screen.getByText(i18n.t('members.invitationStatus.sentDescription', { email: 'manual@example.test' }))).toBeVisible();
     expect(screen.getByText(i18n.t('members.fallbackHint'))).toBeVisible();
+    expect(screen.getByText('Der Link ist einmalig und bis 11.08.2026 gültig.')).toBeVisible();
     expect(screen.getByLabelText(i18n.t('members.invitationLink'))).toHaveValue('https://teamtaler.example/invite#token=manual-token');
   });
 
@@ -315,14 +355,14 @@ describe('MembersPanel invitations', () => {
     await user.click(within(removeDialog).getByRole('button', { name: i18n.t('members.archive') }));
     await waitFor(() => expect(apiMock.archiveMember).toHaveBeenCalledWith('group-a', 'member-admin', true));
 
-    await user.click(screen.getByRole('button', { name: i18n.t('members.reactivate') }));
+    await user.click(screen.getByRole('button', { name: i18n.t('members.reactivateFor', { name: former.displayName }) }));
     const reactivationDialog = screen.getByRole('dialog', { name: i18n.t('members.reactivateTitle') });
     expect(within(reactivationDialog).getByText(i18n.t('roleManagement.memberRoles'))).toBeVisible();
     expect(within(reactivationDialog).queryByText('roleManagement.memberRoles')).not.toBeInTheDocument();
     await user.click(within(reactivationDialog).getByRole('button', { name: i18n.t('members.reactivate') }));
     await waitFor(() => expect(apiMock.reactivateMember).toHaveBeenCalledWith('group-a', 'member-former', { displayName: undefined, roleIds: ['role-member'] }));
 
-    await user.click(screen.getByRole('button', { name: i18n.t('common.delete') }));
+    await user.click(screen.getByRole('button', { name: i18n.t('members.permanentDeleteFor', { name: former.displayName }) }));
     const deleteDialog = screen.getByRole('dialog', { name: i18n.t('members.permanentDeleteTitle') });
     expect(within(deleteDialog).getByText(i18n.t('members.permanentDeleteExplanation', { name: 'Former Member' }))).toBeVisible();
     await user.click(within(deleteDialog).getByRole('button', { name: i18n.t('common.delete') }));
@@ -371,7 +411,7 @@ describe('MembersPanel invitations', () => {
     apiMock.getMembers.mockResolvedValue([...members, archivedGuest]);
     renderMembers();
 
-    await user.click(await screen.findByRole('button', { name: i18n.t('members.reactivate') }));
+    await user.click(await screen.findByRole('button', { name: i18n.t('members.reactivateFor', { name: archivedGuest.displayName }) }));
     const reactivationDialog = screen.getByRole('dialog', { name: i18n.t('members.reactivateTitle') });
     const nameInput = within(reactivationDialog).getByLabelText(i18n.t('auth.displayName'));
     await user.clear(nameInput);
@@ -379,7 +419,7 @@ describe('MembersPanel invitations', () => {
     await user.click(within(reactivationDialog).getByRole('button', { name: i18n.t('members.reactivate') }));
     await waitFor(() => expect(apiMock.reactivateMember).toHaveBeenCalledWith('group-a', archivedGuest.id, { displayName: 'Returning Guest', roleIds: [] }));
 
-    await user.click(screen.getByRole('button', { name: i18n.t('common.delete') }));
+    await user.click(screen.getByRole('button', { name: i18n.t('members.permanentDeleteFor', { name: archivedGuest.displayName }) }));
     const deleteDialog = screen.getByRole('dialog', { name: i18n.t('members.permanentDeleteTitle') });
     await user.click(within(deleteDialog).getByRole('button', { name: i18n.t('common.delete') }));
     await waitFor(() => expect(apiMock.permanentlyDeleteMember).toHaveBeenCalledWith('group-a', archivedGuest.id));
@@ -500,8 +540,63 @@ describe('MembersPanel invitations', () => {
 
     expect(await screen.findByRole('heading', { name: i18n.t('members.invitationStatus.notRequestedTitle') })).toBeVisible();
     expect(screen.getByText(i18n.t('members.invitationStatus.notRequestedDescription', { email: 'link-only@example.test' }))).toBeVisible();
+    expect(screen.queryByText(i18n.t('members.fallbackHint'))).not.toBeInTheDocument();
     expect(screen.getByLabelText(i18n.t('members.invitationLink'))).toHaveValue('https://teamtaler.example/invite#token=link-only-token');
     expect(apiMock.getInvitations).toHaveBeenCalledWith('group-a');
+  });
+
+  it('renews and redisplays a manual invitation link while SMTP remains unavailable', async () => {
+    const user = userEvent.setup();
+    const linkOnlyInvitation: InvitationMetadata = {
+      ...invitationMetadata[0],
+      email: 'link-only@example.test',
+      emailDeliveryStatus: 'NOT_REQUESTED',
+      emailSentAt: undefined,
+    };
+    apiMock.getGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: false, defaultRoleId: 'role-member' });
+    apiMock.getInvitations.mockResolvedValue([linkOnlyInvitation]);
+    apiMock.resendInvitationEmail.mockResolvedValue({
+      invitationId: linkOnlyInvitation.id,
+      emailDeliveryStatus: 'NOT_REQUESTED',
+      expiresAt: '2026-08-13T12:00:00Z',
+      acceptUrl: 'https://teamtaler.example/invite#token=renewed-manual',
+    });
+    renderMembers();
+
+    await user.click(await screen.findByRole('button', { name: i18n.t('members.resendFor', { email: linkOnlyInvitation.email }) }));
+    const dialog = screen.getByRole('dialog', { name: i18n.t('members.resendTitle') });
+    expect(within(dialog).getByText(i18n.t('members.resendExplanationManual', { email: linkOnlyInvitation.email }))).toBeVisible();
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('members.resend') }));
+
+    expect(await within(dialog).findByRole('heading', { name: i18n.t('members.invitationStatus.notRequestedTitle') })).toBeVisible();
+    expect(within(dialog).getByLabelText(i18n.t('members.invitationLink'))).toHaveValue('https://teamtaler.example/invite#token=renewed-manual');
+  });
+
+  it('queues email and still displays the new link when SMTP was enabled after the original invitation', async () => {
+    const user = userEvent.setup();
+    const previouslyManualInvitation: InvitationMetadata = {
+      ...invitationMetadata[0],
+      email: 'later-smtp@example.test',
+      emailDeliveryStatus: 'NOT_REQUESTED',
+      emailSentAt: undefined,
+    };
+    apiMock.getGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
+    apiMock.getInvitations.mockResolvedValue([previouslyManualInvitation]);
+    apiMock.resendInvitationEmail.mockResolvedValue({
+      invitationId: previouslyManualInvitation.id,
+      emailDeliveryStatus: 'PENDING',
+      expiresAt: '2026-08-13T12:00:00Z',
+      acceptUrl: 'https://teamtaler.example/invite#token=renewed-and-queued',
+    });
+    renderMembers();
+
+    await user.click(await screen.findByRole('button', { name: i18n.t('members.resendFor', { email: previouslyManualInvitation.email }) }));
+    const dialog = screen.getByRole('dialog', { name: i18n.t('members.resendTitle') });
+    expect(within(dialog).getByText(i18n.t('members.resendExplanationEmail', { email: previouslyManualInvitation.email }))).toBeVisible();
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('members.resend') }));
+
+    expect(await within(dialog).findByRole('heading', { name: i18n.t('members.invitationStatus.pendingTitle') })).toBeVisible();
+    expect(within(dialog).getByLabelText(i18n.t('members.invitationLink'))).toHaveValue('https://teamtaler.example/invite#token=renewed-and-queued');
   });
 
   it('offers the documented CSV schema and downloads a template', async () => {

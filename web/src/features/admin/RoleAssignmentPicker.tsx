@@ -1,4 +1,6 @@
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down';
+import Check from 'lucide-react/dist/esm/icons/check';
+import X from 'lucide-react/dist/esm/icons/x';
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -162,8 +164,8 @@ export function RoleAssignmentPicker({
       <div className={styles.footer}>
         {error ? <p className={styles.error} role="alert">{error}</p> : null}
         <div className={styles.actions}>
-          <Button disabled={pending} onClick={close} size="small" variant="secondary">{t('common.cancel')}</Button>
-          <Button disabled={!changed || !hasRole || pending} onClick={() => void apply()} size="small">{pending ? t('roleManagement.saving') : t('roleManagement.applyAssignment')}</Button>
+          <Button disabled={pending} leadingIcon={<X size={16} />} onClick={close} size="small" variant="secondary">{t('common.cancel')}</Button>
+          <Button disabled={!changed || !hasRole || pending} leadingIcon={<Check size={16} />} onClick={() => void apply()} size="small">{pending ? t('roleManagement.saving') : t('roleManagement.applyAssignment')}</Button>
         </div>
       </div>
     </div>

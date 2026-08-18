@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Link, Navigate } from '@tanstack/react-router';
+import Send from 'lucide-react/dist/esm/icons/send';
 import { useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
@@ -39,7 +40,7 @@ export function ForgotPasswordPage() {
             <TextInput autoComplete="email" id="forgot-password-email" type="email" {...register('email', { required: t('auth.emailRequired') })} />
           </Field>
           {mutation.isError ? <p className={styles.error} role="alert">{t('auth.resetRequestError')}</p> : null}
-          <Button disabled={mutation.isPending} fullWidth size="large" type="submit">{mutation.isPending ? t('auth.resetRequestPending') : t('auth.sendResetLink')}</Button>
+          <Button disabled={mutation.isPending} fullWidth leadingIcon={<Send size={19} />} size="large" type="submit">{mutation.isPending ? t('auth.resetRequestPending') : t('auth.sendResetLink')}</Button>
         </form>
       )}
     </AuthLayout>

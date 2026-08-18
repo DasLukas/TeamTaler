@@ -1,17 +1,25 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import Camera from 'lucide-react/dist/esm/icons/camera';
+import FolderOpen from 'lucide-react/dist/esm/icons/folder-open';
 import Plus from 'lucide-react/dist/esm/icons/plus';
+import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
+import Save from 'lucide-react/dist/esm/icons/save';
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
-import { useState } from 'react';
+import X from 'lucide-react/dist/esm/icons/x';
+import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { majorUnitsInputPattern, majorUnitsInputValue, majorUnitsPlaceholder, validatePositiveMajorUnits } from '@/api/money';
 import type { Category, CategoryIcon as CategoryIconName, Product, ProductPricingMode } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
+import { useInstanceCapabilities } from '@/app/useSession';
+import { CameraCapture } from '@/components/media/CameraCapture';
+import { supportsLiveCamera } from '@/components/media/cameraCaptureUtils';
 import { ImageCropEditor } from '@/components/media/ImageCropEditor';
 import {
   ACCEPTED_IMAGE_TYPES,
   DEFAULT_IMAGE_TRANSFORM,
-  MAX_IMAGE_BYTES,
+  formatMediaUploadLimit,
   prepareSquareImage,
   type ImageTransform,
 } from '@/components/media/imageUpload';
@@ -39,6 +47,8 @@ type DeleteTarget = { kind: 'category'; item: Category } | { kind: 'product'; it
 export function CatalogPanel() {
   const { t } = useTranslation();
   const { activeGroupId, activeGroup } = useActiveGroup();
+  const { mediaUploadMaxBytes } = useInstanceCapabilities();
+  const uploadLimit = formatMediaUploadLimit(mediaUploadMaxBytes);
   const queryClient = useQueryClient();
   const categoriesQuery = useQuery({ queryKey: ['categories', activeGroupId], queryFn: () => api.getCategories(activeGroupId) });
   const [dialog, setDialog] = useState<CatalogDialog>(null);
@@ -57,8 +67,11 @@ export function CatalogPanel() {
   const [productImageTransform, setProductImageTransform] = useState<ImageTransform>(DEFAULT_IMAGE_TRANSFORM);
   const [productImageInputKey, setProductImageInputKey] = useState(0);
   const [productImageError, setProductImageError] = useState('');
+  const [productCameraOpen, setProductCameraOpen] = useState(false);
   const [persistedProduct, setPersistedProduct] = useState<Product | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const productImageInputRef = useRef<HTMLInputElement>(null);
+  const productCameraInputRef = useRef<HTMLInputElement>(null);
 
   const invalidateCatalog = () => queryClient.invalidateQueries({ queryKey: ['categories', activeGroupId] });
 
@@ -67,10 +80,12 @@ export function CatalogPanel() {
     setProductImageTransform(DEFAULT_IMAGE_TRANSFORM);
     setProductImageInputKey((current) => current + 1);
     setProductImageError('');
+    setProductCameraOpen(false);
   };
 
   const selectProductImage = (file?: File) => {
     imageMutation.reset();
+    setProductCameraOpen(false);
     if (!file) {
       resetProductImageInput();
       return;
@@ -82,16 +97,26 @@ export function CatalogPanel() {
       setProductImageError(t('catalog.imageInvalidType'));
       return;
     }
-    if (file.size > MAX_IMAGE_BYTES) {
+    if (file.size > mediaUploadMaxBytes) {
       setProductImage(undefined);
       setProductImageTransform(DEFAULT_IMAGE_TRANSFORM);
       setProductImageInputKey((current) => current + 1);
-      setProductImageError(t('catalog.imageTooLarge'));
+      setProductImageError(t('catalog.imageTooLarge', { limit: uploadLimit }));
       return;
     }
     setProductImage(file);
     setProductImageTransform(DEFAULT_IMAGE_TRANSFORM);
     setProductImageError('');
+  };
+
+  const openProductCamera = () => {
+    imageMutation.reset();
+    setProductImageError('');
+    if (supportsLiveCamera()) {
+      setProductCameraOpen(true);
+      return;
+    }
+    productCameraInputRef.current?.click();
   };
 
   const clearCategoryDialog = () => {
@@ -202,9 +227,11 @@ export function CatalogPanel() {
   });
 
   const imageMutation = useMutation({
-    mutationFn: async ({ productId, image, transform }: { productId: string; image: File; transform: ImageTransform }) => (
-      api.uploadProductImage(activeGroupId, productId, await prepareSquareImage(image, transform))
-    ),
+    mutationFn: async ({ productId, image, transform }: { productId: string; image: File; transform: ImageTransform }) => {
+      const prepared = await prepareSquareImage(image, transform);
+      if (prepared.size > mediaUploadMaxBytes) throw new Error(t('catalog.imageTooLarge', { limit: uploadLimit }));
+      return api.uploadProductImage(activeGroupId, productId, prepared);
+    },
     onSuccess: async () => {
       clearProductDialog();
       await invalidateCatalog();
@@ -329,7 +356,7 @@ export function CatalogPanel() {
           {categoryMutation.isError ? <p className={styles.error} role="alert">{categoryMutation.error.message}</p> : null}
           <div className={styles.actions}>
             {editingCategory && !editingCategory.active ? <Button className={styles.deleteAction} disabled={categoryMutation.isPending} leadingIcon={<Trash2 size={16} />} onClick={() => openCategoryDeletion(editingCategory)} variant="danger">{t('catalog.deletePermanently')}</Button> : null}
-            <Button onClick={clearCategoryDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!categoryName.trim() || categoryMutation.isPending} type="submit">{editingCategory ? t('common.save') : t('catalog.createCategoryAction')}</Button>
+            <Button leadingIcon={<X size={17} />} onClick={clearCategoryDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!categoryName.trim() || categoryMutation.isPending} leadingIcon={editingCategory ? <Save size={17} /> : <Plus size={17} />} type="submit">{editingCategory ? t('common.save') : t('catalog.createCategoryAction')}</Button>
           </div>
         </form>
       </Modal>
@@ -345,7 +372,7 @@ export function CatalogPanel() {
           <Field htmlFor="product-pricing-mode" label={t('catalog.pricingMode')}><SelectInput disabled={metadataLocked} id="product-pricing-mode" onChange={(event) => { setProductPricingMode(event.target.value as ProductPricingMode); setProductPrice(''); setProductPriceTouched(false); }} value={productPricingMode}><option value="FIXED">{t('catalog.fixedPrice')}</option><option value="USER_DEFINED">{t('catalog.userDefinedPrice')}</option></SelectInput></Field>
           {productPricingMode === 'FIXED' ? <Field error={productPriceTouched ? productPriceValidation.error : undefined} htmlFor="product-price" label={t('catalog.price', { currency: activeGroup.currency })}><TextInput disabled={metadataLocked} id="product-price" inputMode="decimal" onBlur={() => setProductPriceTouched(true)} onChange={(event) => setProductPrice(event.target.value)} pattern={majorUnitsInputPattern(activeGroup.currency)} placeholder={majorUnitsPlaceholder(activeGroup.currency)} required type="text" value={productPrice} /></Field> : null}
           {editingProduct ? <Field htmlFor="product-status" label={t('common.status')}><SelectInput disabled={metadataLocked} id="product-status" onChange={(event) => setProductActive(event.target.value === 'active')} value={productActive ? 'active' : 'archived'}><option value="active">{t('common.active')}</option><option value="archived">{t('common.archived')}</option></SelectInput></Field> : null}
-          <Field error={productImageError || undefined} hint={editingProduct || persistedProduct ? t('catalog.replaceImage') : t('catalog.imageHint')} htmlFor="product-image" label={t('catalog.image')}>
+          <Field error={productImageError || undefined} hint={editingProduct || persistedProduct ? t('catalog.replaceImage', { limit: uploadLimit }) : t('catalog.imageHint', { limit: uploadLimit })} htmlFor="product-image" label={t('catalog.image')}>
             <div className={`${styles.imageSelection} ${productImage ? styles.imageSelectionWithPreview : ''}`}>
               {productImage ? (
                 <ImageCropEditor
@@ -358,17 +385,23 @@ export function CatalogPanel() {
                 />
               ) : null}
               <div className={styles.imageUploadControls}>
-                <TextInput accept="image/jpeg,image/png,image/webp" id="product-image" key={productImageInputKey} onChange={(event) => selectProductImage(event.target.files?.[0])} type="file" />
+                <div className={styles.imageSourceActions}>
+                  <Button leadingIcon={<FolderOpen size={17} />} onClick={() => productImageInputRef.current?.click()} size="small" variant="secondary">{t('catalog.chooseImageFile')}</Button>
+                  <Button leadingIcon={<Camera size={17} />} onClick={openProductCamera} size="small" variant="secondary">{t('catalog.useCamera')}</Button>
+                </div>
+                <input accept="image/jpeg,image/png,image/webp" aria-label={t('catalog.imageFileInput')} hidden id="product-image" key={`file-${productImageInputKey}`} onChange={(event) => selectProductImage(event.target.files?.[0])} ref={productImageInputRef} type="file" />
+                <input accept="image/jpeg,image/png,image/webp" aria-label={t('catalog.cameraFileInput')} capture="environment" hidden key={`camera-${productImageInputKey}`} onChange={(event) => selectProductImage(event.target.files?.[0])} ref={productCameraInputRef} type="file" />
                 {productImage ? <Button leadingIcon={<Trash2 size={16} />} onClick={() => { resetProductImageInput(); imageMutation.reset(); }} size="small" variant="ghost">{t('catalog.removeSelectedImage')}</Button> : null}
               </div>
             </div>
+            {productCameraOpen ? <CameraCapture onCancel={() => setProductCameraOpen(false)} onCapture={selectProductImage} onFallback={() => { setProductCameraOpen(false); productCameraInputRef.current?.click(); }} /> : null}
           </Field>
           {productMutation.isError ? <p className={styles.error} role="alert">{productMutation.error.message}</p> : null}
           {persistedProduct && imageMutation.isError ? <p className={styles.error} role="alert">{editingProduct ? t('catalog.imageUpdateError') : t('catalog.imageUploadError')} {imageMutation.error.message}</p> : null}
           <div className={styles.actions}>
             {editingProduct && !editingProduct.active && !persistedProduct ? <Button className={styles.deleteAction} disabled={productMutation.isPending} leadingIcon={<Trash2 size={16} />} onClick={() => openProductDeletion(editingProduct)} variant="danger">{t('catalog.deletePermanently')}</Button> : null}
-            <Button onClick={clearProductDialog} variant="secondary">{persistedProduct ? t('catalog.finishWithoutImage') : t('common.cancel')}</Button>
-            <Button disabled={!productName.trim() || !productPriceValid || productMutation.isPending || imageMutation.isPending || Boolean(persistedProduct && !productImage)} type="submit">
+            <Button leadingIcon={<X size={17} />} onClick={clearProductDialog} variant="secondary">{persistedProduct ? t('catalog.finishWithoutImage') : t('common.cancel')}</Button>
+            <Button disabled={!productName.trim() || !productPriceValid || productMutation.isPending || imageMutation.isPending || Boolean(persistedProduct && !productImage)} leadingIcon={persistedProduct ? <RotateCcw size={17} /> : editingProduct ? <Save size={17} /> : <Plus size={17} />} type="submit">
               {persistedProduct ? imageMutation.isPending ? t('catalog.imageUploadPending') : t('catalog.retryImage') : editingProduct ? t('common.save') : t('catalog.createProductAction')}
             </Button>
           </div>
@@ -380,7 +413,7 @@ export function CatalogPanel() {
           {deleteTarget?.kind === 'category' && deleteTarget.item.products.length > 0 ? <p className={styles.hint}>{t('catalog.deleteCategoryProductsHint')}</p> : null}
           {deleteMutation.isError ? <p className={styles.error} role="alert">{deleteError}</p> : null}
           <div className={styles.actions}>
-            <Button disabled={deleteMutation.isPending} onClick={closeDeleteDialog} variant="secondary">{t('common.cancel')}</Button>
+            <Button disabled={deleteMutation.isPending} leadingIcon={<X size={17} />} onClick={closeDeleteDialog} variant="secondary">{t('common.cancel')}</Button>
             <Button disabled={!deleteTarget || deleteMutation.isPending} leadingIcon={<Trash2 size={16} />} onClick={() => { if (deleteTarget) deleteMutation.mutate(deleteTarget); }} variant="danger">{deleteMutation.isPending ? t('catalog.deleting') : t('catalog.confirmDelete')}</Button>
           </div>
         </div>

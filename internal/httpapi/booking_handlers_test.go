@@ -44,6 +44,7 @@ func TestBookingBulkRouteCreatesMultiProductCart(t *testing.T) {
 		t.Fatalf("list groups: groups=%d err=%v", len(groupItems), err)
 	}
 	group := groupItems[0]
+	group.Membership = assignTestTemplateRoles(t, ctx, groupService, session.Principal, group.Membership, domain.RoleTemplateMember, domain.RoleTemplateCatalog)
 	catalogService := catalog.Service{DB: db}
 	category, err := catalogService.CreateCategory(ctx, session.Principal, group.Membership, catalog.CreateCategoryInput{Name: "Bulk route", Icon: domain.CategoryIconOther})
 	if err != nil {

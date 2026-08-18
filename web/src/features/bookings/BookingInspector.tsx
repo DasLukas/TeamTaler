@@ -2,6 +2,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2';
 import Minus from 'lucide-react/dist/esm/icons/minus';
 import Plus from 'lucide-react/dist/esm/icons/plus';
+import BookCheck from 'lucide-react/dist/esm/icons/book-check';
+import X from 'lucide-react/dist/esm/icons/x';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
@@ -226,8 +228,8 @@ export function BookingInspector({
       </div>
       {bookingMutation.isError ? <p className={styles.error} role="alert">{bookingMutation.error.message}</p> : null}
       <div className={styles.actions}>
-        <Button fullWidth onClick={onCancel} size="large" variant="secondary">{t('common.cancel')}</Button>
-        <Button disabled={bookingMutation.isPending || targetCount === 0 || (userDefinesPrice && !unitPrice) || (needsReason && !reason.trim())} fullWidth size="large" type="submit">
+        <Button fullWidth leadingIcon={<X size={19} />} onClick={onCancel} size="large" variant="secondary">{t('common.cancel')}</Button>
+        <Button disabled={bookingMutation.isPending || targetCount === 0 || (userDefinesPrice && !unitPrice) || (needsReason && !reason.trim())} fullWidth leadingIcon={<BookCheck size={19} />} size="large" type="submit">
           {bookingMutation.isPending ? t('booking.pending') : targetCount > 1 ? t('booking.submitMultiple', { count: targetCount }) : t('booking.submit')}
         </Button>
       </div>

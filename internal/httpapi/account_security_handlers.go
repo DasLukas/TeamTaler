@@ -2,15 +2,22 @@ package httpapi
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
+	"github.com/DasLukas/TeamTaler/internal/auth"
 	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 )
 
-func (s *Server) handleAccountCapabilities(response http.ResponseWriter, _ *http.Request) {
-	writeJSON(response, http.StatusOK, s.auth.AccountCapabilities())
+func (s *Server) handleAccountCapabilities(response http.ResponseWriter, request *http.Request) {
+	settings, loaded := effectiveSystemSettings(request)
+	available := s.auth.AccountCapabilities().PasswordResetAvailable
+	if loaded {
+		available = settings.SMTP.Active
+	}
+	writeJSON(response, http.StatusOK, auth.AccountCapabilities{PasswordResetAvailable: available, EmailChangeAvailable: available})
 }
 
 func (s *Server) handleUpdateProfile(response http.ResponseWriter, request *http.Request) {
@@ -85,6 +92,10 @@ func (s *Server) handlePasswordResetRequest(response http.ResponseWriter, reques
 		writeProblem(response, request, domain.ErrRateLimited)
 		return
 	}
+	if err := s.requireRuntimeEmail(request); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
 	if err := s.auth.StartPasswordReset(request.Context(), input.Email); err != nil {
 		writeProblem(response, request, err)
 		return
@@ -149,6 +160,10 @@ func (s *Server) handleStartEmailChange(response http.ResponseWriter, request *h
 		return
 	}
 	defer s.releasePasswordSlot()
+	if err := s.requireRuntimeEmail(request); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
 	if err := s.auth.StartEmailChange(request.Context(), principal, input.NewEmail, input.CurrentPassword); err != nil {
 		if errors.Is(err, domain.ErrConflict) {
 			writeJSON(response, http.StatusAccepted, map[string]bool{"verificationRequired": true})
@@ -158,6 +173,18 @@ func (s *Server) handleStartEmailChange(response http.ResponseWriter, request *h
 		return
 	}
 	writeJSON(response, http.StatusAccepted, map[string]bool{"verificationRequired": true})
+}
+
+func (s *Server) requireRuntimeEmail(request *http.Request) error {
+	settings, loaded := effectiveSystemSettings(request)
+	available := s.auth.AccountCapabilities().PasswordResetAvailable
+	if loaded {
+		available = settings.SMTP.Active
+	}
+	if !available {
+		return fmt.Errorf("%w: email delivery is unavailable", domain.ErrServiceUnavailable)
+	}
+	return nil
 }
 
 func (s *Server) handleEmailChangeConfirm(response http.ResponseWriter, request *http.Request) {

@@ -1,6 +1,6 @@
 import Check from 'lucide-react/dist/esm/icons/check';
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down';
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import styles from './SelectMenu.module.css';
 
@@ -12,11 +12,17 @@ export interface SelectMenuOption<Value extends string = string> {
 
 /** Properties accepted by the anchored single-value selection menu. */
 export interface SelectMenuProps<Value extends string = string> {
+  ariaLabel?: string;
+  className?: string;
   id: string;
+  menuMinWidth?: number;
   value: Value;
   options: readonly SelectMenuOption<Value>[];
   onChange: (value: Value) => void;
   disabled?: boolean;
+  renderOption?: (option: SelectMenuOption<Value>) => ReactNode;
+  renderValue?: (option: SelectMenuOption<Value>) => ReactNode;
+  title?: string;
 }
 
 /**
@@ -27,7 +33,7 @@ export interface SelectMenuProps<Value extends string = string> {
  * and optional disabled state.
  * @returns A keyboard-operable combobox trigger and anchored listbox.
  */
-export function SelectMenu<Value extends string>({ id, value, options, onChange, disabled = false }: SelectMenuProps<Value>) {
+export function SelectMenu<Value extends string>({ ariaLabel, className = '', id, menuMinWidth = 0, value, options, onChange, disabled = false, renderOption, renderValue, title }: SelectMenuProps<Value>) {
   const listboxId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLUListElement>(null);
@@ -50,7 +56,7 @@ export function SelectMenu<Value extends string>({ id, value, options, onChange,
   };
   const show = () => {
     if (disabled || options.length === 0) return;
-    setPortalTarget(triggerRef.current?.closest('dialog') ?? null);
+    setPortalTarget(triggerRef.current?.closest('dialog') ?? document.body);
     setActiveIndex(selectedIndex);
     setPanelStyle({ position: 'fixed', visibility: 'hidden' });
     setOpen(true);
@@ -60,9 +66,9 @@ export function SelectMenu<Value extends string>({ id, value, options, onChange,
     if (!open) return;
     const trigger = triggerRef.current;
     const boundary = trigger?.closest('dialog');
-    if (!trigger || !boundary) return;
+    if (!trigger) return;
     const triggerRect = trigger.getBoundingClientRect();
-    const boundaryRect = boundary.getBoundingClientRect();
+    const boundaryRect = boundary?.getBoundingClientRect() ?? { top: 0, left: 0, right: window.innerWidth, bottom: window.innerHeight, width: window.innerWidth };
     const margin = 12;
     const gap = 6;
     const roomBelow = boundaryRect.bottom - triggerRect.bottom - gap - margin;
@@ -70,7 +76,7 @@ export function SelectMenu<Value extends string>({ id, value, options, onChange,
     const openBelow = roomBelow >= 180 || roomBelow >= roomAbove;
     const availableHeight = Math.max(120, openBelow ? roomBelow : roomAbove);
     const maxHeight = Math.min(280, availableHeight);
-    const width = Math.min(triggerRect.width, boundaryRect.width - margin * 2);
+    const width = Math.min(Math.max(triggerRect.width, menuMinWidth), boundaryRect.width - margin * 2);
     const left = Math.min(
       Math.max(boundaryRect.left + margin, triggerRect.left),
       boundaryRect.right - width - margin,
@@ -79,7 +85,7 @@ export function SelectMenu<Value extends string>({ id, value, options, onChange,
       ? triggerRect.bottom + gap
       : Math.max(boundaryRect.top + margin, triggerRect.top - gap - Math.min(panelRef.current?.scrollHeight ?? maxHeight, maxHeight));
     setPanelStyle({ position: 'fixed', top, left, width, maxHeight, visibility: 'visible' });
-  }, [open]);
+  }, [menuMinWidth, open]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -90,9 +96,11 @@ export function SelectMenu<Value extends string>({ id, value, options, onChange,
     const closeForLayoutChange = () => close();
     document.addEventListener('pointerdown', dismiss);
     window.addEventListener('resize', closeForLayoutChange);
+    window.addEventListener('scroll', closeForLayoutChange, true);
     return () => {
       document.removeEventListener('pointerdown', dismiss);
       window.removeEventListener('resize', closeForLayoutChange);
+      window.removeEventListener('scroll', closeForLayoutChange, true);
     };
   }, [open]);
 
@@ -134,12 +142,13 @@ export function SelectMenu<Value extends string>({ id, value, options, onChange,
   };
 
   return (
-    <div className={styles.root}>
+    <div className={`${styles.root} ${className}`}>
       <button
         aria-activedescendant={open ? `${listboxId}-${activeIndex}` : undefined}
         aria-controls={open ? listboxId : undefined}
         aria-expanded={open}
         aria-haspopup="listbox"
+        aria-label={ariaLabel}
         className={styles.trigger}
         disabled={disabled}
         id={id}
@@ -147,13 +156,14 @@ export function SelectMenu<Value extends string>({ id, value, options, onChange,
         onKeyDown={handleKeyDown}
         ref={triggerRef}
         role="combobox"
+        title={title}
         type="button"
       >
-        <span>{selectedOption?.label ?? ''}</span>
+        <span className={styles.value}>{selectedOption ? (renderValue?.(selectedOption) ?? selectedOption.label) : ''}</span>
         <ChevronDown aria-hidden="true" size={18} />
       </button>
       {open && portalTarget ? createPortal(
-        <ul className={styles.menu} id={listboxId} ref={panelRef} role="listbox" style={panelStyle}>
+        <ul aria-label={ariaLabel} className={styles.menu} id={listboxId} ref={panelRef} role="listbox" style={panelStyle}>
           {options.map((option, index) => (
             <li
               aria-selected={option.value === value}
@@ -164,7 +174,7 @@ export function SelectMenu<Value extends string>({ id, value, options, onChange,
               onPointerEnter={() => setActiveIndex(index)}
               role="option"
             >
-              <span>{option.label}</span>
+              <span>{renderOption?.(option) ?? option.label}</span>
               {option.value === value ? <Check aria-hidden="true" size={17} /> : null}
             </li>
           ))}

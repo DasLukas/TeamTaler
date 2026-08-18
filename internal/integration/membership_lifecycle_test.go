@@ -39,7 +39,7 @@ func TestRegularMemberLifecyclePreservesHistoryAndDetachesOnlyOneGroup(t *testin
 	if err := f.groups.ArchiveMember(f.ctx, f.admin, f.membership, member.ID, false); err != nil {
 		t.Fatalf("archive regular member: %v", err)
 	}
-	defaultRoleID := authorization.PresetRoleID(f.group.ID, domain.RolePresetMember)
+	defaultRoleID := authorization.TemplateRoleID(f.group.ID, domain.RoleTemplateMember)
 	reactivated, err := f.groups.ReactivateMember(f.ctx, f.admin, f.membership, member.ID, groups.ReactivateMemberInput{RoleIDs: []string{defaultRoleID}})
 	if err != nil || reactivated.ID != member.ID || reactivated.Status != domain.MembershipStatusActive {
 		t.Fatalf("reactivate regular member=%#v err=%v", reactivated, err)
@@ -166,7 +166,7 @@ func TestRegularMemberLifecyclePreservesHistoryAndDetachesOnlyOneGroup(t *testin
 	if err != nil {
 		t.Fatalf("invite original account after permanent deletion: %v", err)
 	}
-	_, rejoinedMembership, err := f.auth.AcceptInvitation(f.ctx, auth.InvitationAcceptance{Token: invitation.Token, DisplayName: "Lifecycle Member Rejoined", Password: testPassword})
+	_, rejoinedMembership, err := f.auth.AcceptInvitation(f.ctx, auth.InvitationAcceptance{Token: invitation.Token, DisplayName: "Lifecycle Member Rejoined", Password: testPassword, ExpectedAccountState: auth.InvitationAccountExisting})
 	if err != nil {
 		t.Fatalf("accept invitation after permanent deletion: %v", err)
 	}
@@ -221,14 +221,14 @@ func TestTemporaryGuestLifecycleAndReactivationRoleRules(t *testing.T) {
 	if err := f.groups.ArchiveMember(f.ctx, f.admin, f.membership, regular.ID, false); err != nil {
 		t.Fatalf("archive role-rule member: %v", err)
 	}
-	defaultRoleID := authorization.PresetRoleID(f.group.ID, domain.RolePresetMember)
+	defaultRoleID := authorization.TemplateRoleID(f.group.ID, domain.RoleTemplateMember)
 	if _, err := f.groups.ReactivateMember(f.ctx, domain.Principal{UserID: delegated.UserID}, delegated, regular.ID, groups.ReactivateMemberInput{RoleIDs: []string{defaultRoleID}}); err != nil {
 		t.Fatalf("delegated administrator default-role reactivation: %v", err)
 	}
 	if err := f.groups.ArchiveMember(f.ctx, f.admin, f.membership, regular.ID, false); err != nil {
 		t.Fatalf("rearchive role-rule member: %v", err)
 	}
-	financeRoleID := authorization.PresetRoleID(f.group.ID, domain.RolePresetFinanceManager)
+	financeRoleID := authorization.TemplateRoleID(f.group.ID, domain.RoleTemplateFinance)
 	if _, err := f.groups.ReactivateMember(f.ctx, domain.Principal{UserID: delegated.UserID}, delegated, regular.ID, groups.ReactivateMemberInput{RoleIDs: []string{defaultRoleID, financeRoleID}}); err != nil {
 		t.Fatalf("delegated ordinary-role reactivation: %v", err)
 	}

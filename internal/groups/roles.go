@@ -82,6 +82,10 @@ func requireAnyCurrentPermission(ctx context.Context, queryer authorization.Quer
 }
 
 func requireRoleReadAccess(ctx context.Context, queryer authorization.Queryer, membership domain.Membership) error {
+	canManageGroup, err := hasCurrentPermission(ctx, queryer, membership, domain.PermissionGroupAdministration)
+	if err != nil {
+		return err
+	}
 	canManageRoles, err := hasCurrentPermission(ctx, queryer, membership, domain.PermissionRoleManagement)
 	if err != nil {
 		return err
@@ -90,7 +94,7 @@ func requireRoleReadAccess(ctx context.Context, queryer authorization.Queryer, m
 	if err != nil {
 		return err
 	}
-	if !canManageRoles && !canManageMembers {
+	if !canManageGroup && !canManageRoles && !canManageMembers {
 		return domain.ErrForbidden
 	}
 	return nil
@@ -112,7 +116,7 @@ func (s Service) ListRoles(ctx context.Context, membership domain.Membership) ([
 	rows, err := s.DB.QueryContext(ctx, `SELECT r.id,r.group_id,coalesce(r.preset_key,''),r.name,coalesce(r.description,''),r.name_locked,r.deletable,r.version,r.created_at,r.updated_at,
 		(SELECT count(*) FROM membership_role_assignments ma JOIN memberships m ON m.id=ma.membership_id AND m.group_id=ma.group_id WHERE ma.group_id=r.group_id AND ma.role_id=r.id AND m.status='ACTIVE'),
 		(SELECT count(*) FROM invitation_role_assignments ia JOIN invitations i ON i.id=ia.invitation_id AND i.group_id=ia.group_id WHERE ia.group_id=r.group_id AND ia.role_id=r.id AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND julianday(i.expires_at)>julianday('now'))
-		FROM roles r WHERE r.group_id=? ORDER BY CASE r.preset_key WHEN 'GROUP_ADMINISTRATOR' THEN 0 WHEN 'MEMBER' THEN 1 WHEN 'FINANCE_MANAGER' THEN 2 WHEN 'CATALOG_MANAGER' THEN 3 ELSE 4 END,lower(r.name),r.id`, membership.GroupID)
+		FROM roles r WHERE r.group_id=? ORDER BY CASE WHEN r.preset_key='GROUP_ADMINISTRATOR' THEN 0 ELSE 1 END,lower(r.name),r.id`, membership.GroupID)
 	if err != nil {
 		return nil, err
 	}

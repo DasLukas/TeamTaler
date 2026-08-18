@@ -49,11 +49,11 @@ func TestPublicJoinRegistrationVerifiesEmailAndUsesCurrentDefaultRole(t *testing
 	}
 	if err := authService.StartPublicJoinRegistration(ctx, auth.PublicJoinRegistration{
 		JoinToken: link.Token, Email: "NEW@Example.test", DisplayName: "New Member", Password: "new-member-password-long",
-	}); err != nil {
+	}, 0); err != nil {
 		t.Fatalf("start registration: %v", err)
 	}
 
-	financeRoleID := authorization.PresetRoleID(adminMembership.GroupID, domain.RolePresetFinanceManager)
+	financeRoleID := authorization.TemplateRoleID(adminMembership.GroupID, domain.RoleTemplateFinance)
 	if _, err := groupService.UpdateSettings(ctx, adminSession.Principal, adminMembership, groups.SettingsUpdate{DefaultRoleID: &financeRoleID}); err != nil {
 		t.Fatalf("change current default role: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestPublicJoinRegistrationVerifiesEmailAndUsesCurrentDefaultRole(t *testing
 	if err != nil {
 		t.Fatalf("open verification token: %v", err)
 	}
-	joinedSession, joinedMembership, err := authService.ConfirmPublicJoinRegistration(ctx, verificationToken)
+	joinedSession, joinedMembership, err := authService.ConfirmPublicJoinRegistration(ctx, verificationToken, 0)
 	if err != nil {
 		t.Fatalf("confirm registration: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestPublicJoinRegistrationVerifiesEmailAndUsesCurrentDefaultRole(t *testing
 	if assignedRoleID != financeRoleID {
 		t.Fatalf("assigned role=%q, want current default %q", assignedRoleID, financeRoleID)
 	}
-	if _, _, err := authService.ConfirmPublicJoinRegistration(ctx, verificationToken); !errors.Is(err, domain.ErrNotFound) {
+	if _, _, err := authService.ConfirmPublicJoinRegistration(ctx, verificationToken, 0); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("reused verification token error=%v, want not found", err)
 	}
 	var outboxStatus string
@@ -134,25 +134,39 @@ func TestAuthenticatedPublicJoinReactivatesWithOnlyCurrentDefaultRole(t *testing
 	if err != nil {
 		t.Fatalf("existing login: %v", err)
 	}
-	joined, err := authService.AcceptPublicJoinLink(ctx, existingSession.Principal, link.Token)
+	var staleSettingsRevision int64
+	if err := db.QueryRowContext(ctx, `SELECT revision FROM system_settings_state WHERE singleton=1`).Scan(&staleSettingsRevision); err != nil {
+		t.Fatalf("read settings revision: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE system_settings_state SET revision=revision+1 WHERE singleton=1`); err != nil {
+		t.Fatalf("change public-join policy revision: %v", err)
+	}
+	if _, err := authService.AcceptPublicJoinLink(ctx, existingSession.Principal, link.Token, staleSettingsRevision); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("accept with stale instance policy error=%v, want conflict", err)
+	}
+	var membershipCount int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM memberships WHERE group_id=? AND user_id=?`, adminMembership.GroupID, existingSession.Principal.UserID).Scan(&membershipCount); err != nil || membershipCount != 0 {
+		t.Fatalf("stale policy membership count=%d err=%v", membershipCount, err)
+	}
+	joined, err := authService.AcceptPublicJoinLink(ctx, existingSession.Principal, link.Token, staleSettingsRevision+1)
 	if err != nil {
 		t.Fatalf("join existing account: %v", err)
 	}
-	memberRoleID := authorization.PresetRoleID(adminMembership.GroupID, domain.RolePresetMember)
-	assertOnlyAssignedRole(t, db, adminMembership.GroupID, joined.ID, memberRoleID)
+	guestRoleID := authorization.GuestRoleID(adminMembership.GroupID)
+	assertOnlyAssignedRole(t, db, adminMembership.GroupID, joined.ID, guestRoleID)
 
-	financeRoleID := authorization.PresetRoleID(adminMembership.GroupID, domain.RolePresetFinanceManager)
+	financeRoleID := authorization.TemplateRoleID(adminMembership.GroupID, domain.RoleTemplateFinance)
 	if _, err := db.ExecContext(ctx, `INSERT INTO membership_role_assignments(group_id,membership_id,role_id,version,assigned_at,assigned_by) VALUES(?,?,?,1,?,?)`, adminMembership.GroupID, joined.ID, financeRoleID, now, adminSession.Principal.UserID); err != nil {
 		t.Fatalf("assign second role: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `UPDATE memberships SET status='ARCHIVED',archived_at=? WHERE id=? AND group_id=?`, now, joined.ID, adminMembership.GroupID); err != nil {
 		t.Fatalf("archive membership: %v", err)
 	}
-	catalogRoleID := authorization.PresetRoleID(adminMembership.GroupID, domain.RolePresetCatalogManager)
+	catalogRoleID := authorization.TemplateRoleID(adminMembership.GroupID, domain.RoleTemplateCatalog)
 	if _, err := groupService.UpdateSettings(ctx, adminSession.Principal, adminMembership, groups.SettingsUpdate{DefaultRoleID: &catalogRoleID}); err != nil {
 		t.Fatalf("change default role: %v", err)
 	}
-	reactivated, err := authService.AcceptPublicJoinLink(ctx, existingSession.Principal, link.Token)
+	reactivated, err := authService.AcceptPublicJoinLink(ctx, existingSession.Principal, link.Token, 0)
 	if err != nil || reactivated.ID != joined.ID || reactivated.Status != "ACTIVE" {
 		t.Fatalf("reactivated membership=%#v err=%v", reactivated, err)
 	}

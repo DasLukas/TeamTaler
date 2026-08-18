@@ -53,6 +53,8 @@ const session: Session = {
   user: { id: 'user-a', displayName: 'Alex', email: 'alex@example.test' },
   groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', roles: ['CATALOG_MANAGER', 'MEMBER'], groupPermissions: [] } }],
   activeGroupId: 'group-a',
+  defaultGroupId: null,
+  systemRoles: [],
 };
 
 function renderCatalog(): void {
@@ -138,7 +140,7 @@ describe('CatalogPanel', () => {
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.productAction') }));
     await user.type(screen.getByLabelText(i18n.t('catalog.productName')), createdProduct.name);
     await user.type(screen.getByLabelText(i18n.t('catalog.price', { currency: 'EUR' })), '1,00');
-    await user.upload(screen.getByLabelText(i18n.t('catalog.image')), firstImage);
+    await user.upload(screen.getByLabelText(i18n.t('catalog.imageFileInput')), firstImage);
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.createProductAction') }));
 
     expect(await screen.findByText(i18n.t('catalog.partialSuccessTitle'))).toBeVisible();
@@ -146,7 +148,7 @@ describe('CatalogPanel', () => {
     expect(apiMock.createProduct).toHaveBeenCalledTimes(1);
     expect(apiMock.uploadProductImage).toHaveBeenNthCalledWith(1, 'group-a', createdProduct.id, firstImage);
 
-    await user.upload(screen.getByLabelText(i18n.t('catalog.image')), replacementImage);
+    await user.upload(screen.getByLabelText(i18n.t('catalog.imageFileInput')), replacementImage);
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.retryImage') }));
 
     await waitFor(() => expect(screen.queryByText(i18n.t('catalog.partialSuccessTitle'))).not.toBeInTheDocument());
@@ -167,7 +169,7 @@ describe('CatalogPanel', () => {
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.productAction') }));
     await user.type(screen.getByLabelText(i18n.t('catalog.productName')), createdProduct.name);
     await user.type(screen.getByLabelText(i18n.t('catalog.price', { currency: 'EUR' })), '1,00');
-    await user.upload(screen.getByLabelText(i18n.t('catalog.image')), image);
+    await user.upload(screen.getByLabelText(i18n.t('catalog.imageFileInput')), image);
     const preview = screen.getByRole('img', { name: i18n.t('catalog.imagePreviewAlt') });
     expect(createImageBitmap).toHaveBeenCalledWith(image, { imageOrientation: 'from-image' });
     expect(preview.querySelector('canvas')).toBeInTheDocument();
@@ -191,11 +193,11 @@ describe('CatalogPanel', () => {
 
     await screen.findByRole('button', { name: i18n.t('catalog.categoryAction') });
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.productAction') }));
-    await user.upload(screen.getByLabelText(i18n.t('catalog.image')), image);
+    await user.upload(screen.getByLabelText(i18n.t('catalog.imageFileInput')), image);
 
-    expect(screen.getByLabelText(i18n.t('catalog.image'))).toHaveValue('C:\\fakepath\\selected.png');
+    expect(screen.getByLabelText(i18n.t('catalog.imageFileInput'))).toHaveValue('C:\\fakepath\\selected.png');
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.removeSelectedImage') }));
-    expect(screen.getByLabelText(i18n.t('catalog.image'))).toHaveValue('');
+    expect(screen.getByLabelText(i18n.t('catalog.imageFileInput'))).toHaveValue('');
     expect(screen.queryByRole('button', { name: i18n.t('catalog.removeSelectedImage') })).not.toBeInTheDocument();
 
     await user.type(screen.getByLabelText(i18n.t('catalog.productName')), createdProduct.name);
@@ -204,6 +206,35 @@ describe('CatalogPanel', () => {
 
     await waitFor(() => expect(apiMock.createProduct).toHaveBeenCalledTimes(1));
     expect(apiMock.uploadProductImage).not.toHaveBeenCalled();
+  });
+
+  it('offers separate file and camera sources with a native rear-camera fallback', async () => {
+    const user = userEvent.setup();
+    const cameraImage = new File(['camera'], 'camera.jpg', { type: 'image/jpeg' });
+    renderCatalog();
+
+    await screen.findByRole('button', { name: i18n.t('catalog.categoryAction') });
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.productAction') }));
+
+    expect(screen.getByRole('button', { name: i18n.t('catalog.chooseImageFile') })).toBeVisible();
+    expect(screen.getByRole('button', { name: i18n.t('catalog.useCamera') })).toBeVisible();
+    const fileInput = screen.getByLabelText(i18n.t('catalog.imageFileInput'));
+    const cameraInput = screen.getByLabelText(i18n.t('catalog.cameraFileInput'));
+    const openFileDialog = vi.spyOn(fileInput, 'click');
+    const openNativeCamera = vi.spyOn(cameraInput, 'click');
+    expect(cameraInput).toHaveAttribute('capture', 'environment');
+    expect(cameraInput).toHaveAttribute('accept', 'image/jpeg,image/png,image/webp');
+    expect(fileInput).not.toHaveAttribute('capture');
+
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.chooseImageFile') }));
+    expect(openFileDialog).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.useCamera') }));
+    expect(openNativeCamera).toHaveBeenCalledTimes(1);
+
+    await user.upload(cameraInput, cameraImage);
+
+    expect(screen.getByRole('img', { name: i18n.t('catalog.imagePreviewAlt') })).toBeVisible();
+    expect(screen.getByRole('button', { name: i18n.t('catalog.removeSelectedImage') })).toBeVisible();
   });
 
   it('clears the native file input before another product is created', async () => {
@@ -216,14 +247,14 @@ describe('CatalogPanel', () => {
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.productAction') }));
     await user.type(screen.getByLabelText(i18n.t('catalog.productName')), createdProduct.name);
     await user.type(screen.getByLabelText(i18n.t('catalog.price', { currency: 'EUR' })), '1,00');
-    await user.upload(screen.getByLabelText(i18n.t('catalog.image')), image);
+    await user.upload(screen.getByLabelText(i18n.t('catalog.imageFileInput')), image);
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.createProductAction') }));
 
     await waitFor(() => expect(apiMock.uploadProductImage).toHaveBeenCalledWith('group-a', createdProduct.id, image));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.productAction') }));
 
-    expect(screen.getByLabelText(i18n.t('catalog.image'))).toHaveValue('');
+    expect(screen.getByLabelText(i18n.t('catalog.imageFileInput'))).toHaveValue('');
     expect(screen.queryByRole('button', { name: i18n.t('catalog.removeSelectedImage') })).not.toBeInTheDocument();
   });
 
@@ -311,7 +342,7 @@ describe('CatalogPanel', () => {
 
     await screen.findByText(existingProduct.name);
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.editProduct', { name: existingProduct.name }) }));
-    await user.upload(screen.getByLabelText(i18n.t('catalog.image')), replacementImage);
+    await user.upload(screen.getByLabelText(i18n.t('catalog.imageFileInput')), replacementImage);
     const preview = screen.getByRole('img', { name: i18n.t('catalog.imagePreviewAlt') });
     fireEvent.wheel(preview, { deltaY: -202.732554 });
     fireEvent.keyDown(preview, { key: 'ArrowDown' });

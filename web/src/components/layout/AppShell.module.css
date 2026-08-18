@@ -50,6 +50,19 @@
   text-align: center;
 }
 
+.maintenance {
+  position: sticky;
+  z-index: 19;
+  top: 0;
+  padding: 9px var(--space-5);
+  color: #5c2500;
+  background: #fff0df;
+  border-bottom: 1px solid #e7b37d;
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  text-align: center;
+}
+
 @media (max-width: 767px) {
   .main {
     min-height: calc(100vh - var(--bottom-nav-height));

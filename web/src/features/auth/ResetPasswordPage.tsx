@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
+import KeyRound from 'lucide-react/dist/esm/icons/key-round';
 import { useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
@@ -52,7 +53,7 @@ export function ResetPasswordPage() {
             <TextInput autoComplete="new-password" id="reset-password-confirmation" type="password" {...register('passwordConfirmation', { required: t('auth.passwordConfirmationRequired'), validate: (value, values) => value === values.newPassword || t('auth.passwordMismatch') })} />
           </Field>
           {mutation.isError ? <p className={styles.error} role="alert">{t('auth.invalidResetLink')}</p> : null}
-          <Button disabled={mutation.isPending} fullWidth size="large" type="submit">{mutation.isPending ? t('auth.passwordSavePending') : t('auth.savePassword')}</Button>
+          <Button disabled={mutation.isPending} fullWidth leadingIcon={<KeyRound size={19} />} size="large" type="submit">{mutation.isPending ? t('auth.passwordSavePending') : t('auth.savePassword')}</Button>
         </form>
       )}
     </AuthLayout>

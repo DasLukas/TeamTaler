@@ -7,9 +7,11 @@ import type {
   Category,
   ConfigurableItem,
   Dashboard,
+  EmailDeliveryStatus,
   Group,
   GroupSettings,
   GroupRole,
+  InstanceCapabilities,
   LedgerEntry,
   Membership,
   Notification,
@@ -23,10 +25,21 @@ import type {
   ReasonMode,
   Session,
   Settlement,
+  SmtpTlsMode,
+  SystemAccount,
+  SystemAuditEntry,
+  SystemGroup,
+  SystemGroupInvitationResult,
+  SystemGroupDeletionImpact,
+  SystemGroupImpact,
+  SystemSetting,
+  SystemSettingSource,
+  SystemSettings,
+  SystemSmtpSettings,
   TransactionSettings,
   User,
 } from './types';
-import { isCategoryIcon, isPermissionKey } from './types';
+import { DEFAULT_MEDIA_UPLOAD_MAX_BYTES, isCategoryIcon, isPermissionKey } from './types';
 import { formatMoney } from './money';
 import i18n from '@/i18n';
 import { defaultPaymentMethods, historicalPaymentMethodLabel, localizedPaymentMethodLabel } from '@/features/finance/paymentMethods';
@@ -42,6 +55,193 @@ const memberAvatarUrl = (membershipId: string, members?: Membership[]) => member
 const PAYMENT_DESCRIPTION_PREFIX = 'Payment received';
 const REVERSAL_DESCRIPTION_PREFIX = 'Reversal: ';
 const NOTIFICATION_EVENT_TYPES: Notification['eventType'][] = ['BOOKING_ASSIGNED', 'BOOKING_REVERSED', 'PAYMENT_RECORDED', 'PAYMENT_REVERSED', 'SETTLEMENT_CREATED'];
+function settingSource(value: unknown): SystemSettingSource {
+  const normalized = String(value ?? '').toUpperCase();
+  if (normalized === 'ENV' || normalized === 'ENVIRONMENT') return 'ENVIRONMENT';
+  if (normalized === 'DB' || normalized === 'DATABASE' || normalized === 'OVERRIDE') return 'DATABASE';
+  return 'CODE';
+}
+
+function setting<T>(input: unknown, fallback: T, coerce: (value: unknown) => T): SystemSetting<T> {
+  const source = input && typeof input === 'object' ? asRecord(input) : undefined;
+  const value = source && 'value' in source ? source.value : input;
+  return {
+    value: value === undefined || value === null ? fallback : coerce(value),
+    source: settingSource(source?.source),
+    overrideVersion: Number.isFinite(Number(source?.overrideVersion)) ? Number(source?.overrideVersion) : null,
+    updatedAt: typeof source?.updatedAt === 'string' ? source.updatedAt : null,
+  };
+}
+
+const stringSetting = (input: unknown, fallback = '') => setting(input, fallback, (value) => String(value));
+const booleanSetting = (input: unknown, fallback = false) => setting(input, fallback, (value) => value === true || String(value).toLowerCase() === 'true');
+const numberSetting = (input: unknown, fallback = 0) => setting(input, fallback, (value) => Number(value));
+const DEFAULT_SMTP_PORT = 587;
+
+/**
+ * Adapts the public instance-capabilities document with safe deployment defaults.
+ *
+ * @param input - Response from `GET /api/v1/instance/capabilities`.
+ * @returns Non-sensitive instance behavior used by public and authenticated UI.
+ */
+export function adaptInstanceCapabilities(input: unknown): InstanceCapabilities {
+  const source = asRecord(input);
+  return {
+    instanceName: typeof source.instanceName === 'string' && source.instanceName.trim() ? source.instanceName : 'TeamTaler',
+    maintenanceMode: source.maintenanceMode === true,
+    maintenanceMessage: typeof source.maintenanceMessage === 'string' ? source.maintenanceMessage : '',
+    publicJoinEnabled: source.publicJoinEnabled !== false,
+    mediaUploadMaxBytes: Number.isFinite(Number(source.mediaUploadMaxBytes)) && Number(source.mediaUploadMaxBytes) > 0
+      ? Number(source.mediaUploadMaxBytes)
+      : DEFAULT_MEDIA_UPLOAD_MAX_BYTES,
+  };
+}
+
+/**
+ * Adapts the versioned system-settings response while preserving value provenance.
+ *
+ * @param input - Response from `GET /api/v1/system/settings`, either direct or under `settings`.
+ * @returns Canonical settings with a redacted SMTP secret state.
+ */
+export function adaptSystemSettings(input: unknown): SystemSettings {
+  const envelope = asRecord(input);
+  const source = envelope.settings && typeof envelope.settings === 'object' ? asRecord(envelope.settings) : envelope;
+  const smtpSource = source.smtp && typeof source.smtp === 'object' ? asRecord(source.smtp) : {};
+  const tlsModeSetting = setting<SmtpTlsMode>(smtpSource.tlsMode, 'starttls', (value) => {
+    const normalized = String(value).toLowerCase();
+    return normalized === 'tls' ? 'tls' : 'starttls';
+  });
+  const passwordSource = smtpSource.password && typeof smtpSource.password === 'object' ? asRecord(smtpSource.password) : {};
+  const smtpRevision = Number(smtpSource.revision ?? 0);
+  const testedRevision = Number.isFinite(Number(smtpSource.testedRevision)) ? Number(smtpSource.testedRevision) : null;
+  const exactRevisionTested = smtpRevision > 0 && testedRevision === smtpRevision;
+  const smtpPort = numberSetting(smtpSource.port, DEFAULT_SMTP_PORT);
+  if (!Number.isInteger(smtpPort.value) || smtpPort.value < 1 || smtpPort.value > 65535) smtpPort.value = DEFAULT_SMTP_PORT;
+  const smtp: SystemSmtpSettings = {
+    enabled: booleanSetting(smtpSource.enabled),
+    host: stringSetting(smtpSource.host),
+    port: smtpPort,
+    tlsMode: tlsModeSetting,
+    username: stringSetting(smtpSource.username),
+    fromAddress: stringSetting(smtpSource.fromAddress),
+    fromName: stringSetting(smtpSource.fromName, 'TeamTaler'),
+    passwordConfigured: smtpSource.passwordConfigured === true || passwordSource.configured === true,
+    passwordSource: settingSource(passwordSource.source),
+    passwordUpdatedAt: typeof passwordSource.updatedAt === 'string' ? passwordSource.updatedAt : null,
+    testStatus: smtpSource.testStatus === 'FAILED' ? 'FAILED' : smtpSource.active === true || exactRevisionTested ? 'VERIFIED' : 'UNTESTED',
+    testedRevision,
+    testedAt: typeof smtpSource.testedAt === 'string' ? smtpSource.testedAt : null,
+    revision: smtpRevision,
+    requiresTest: smtpSource.requiresTest === true,
+    configurationValid: smtpSource.configurationValid === true,
+    active: smtpSource.active === true,
+  };
+  return {
+    revision: Number(source.revision ?? envelope.revision ?? 1),
+    instanceName: stringSetting(source.instanceName, 'TeamTaler'),
+    defaultCurrency: stringSetting(source.defaultCurrency, 'EUR'),
+    mediaUploadMaxBytes: numberSetting(source.mediaUploadMaxBytes, DEFAULT_MEDIA_UPLOAD_MAX_BYTES),
+    publicJoinEnabled: booleanSetting(source.publicJoinEnabled, true),
+    maintenanceMode: booleanSetting(source.maintenanceMode),
+    maintenanceMessage: stringSetting(source.maintenanceMessage),
+    smtp,
+    mediaUploadHardLimitBytes: Number(source.mediaUploadHardLimitBytes ?? envelope.mediaUploadHardLimitBytes ?? 0),
+    updatedAt: typeof source.updatedAt === 'string' ? source.updatedAt : '',
+    updatedByUserId: typeof source.updatedByUserId === 'string' ? source.updatedByUserId : null,
+  };
+}
+
+/** Adapts the system account-search response. */
+export function adaptSystemAccounts(input: unknown): SystemAccount[] {
+  const source = asRecord(input);
+  const entries = Array.isArray(input) ? input : Array.isArray(source.items) ? source.items : Array.isArray(source.accounts) ? source.accounts : [];
+  return entries.map((entry) => {
+    const account = asRecord(entry);
+    return { id: String(account.id ?? account.userId ?? ''), displayName: String(account.displayName ?? ''), email: String(account.email ?? ''), active: account.active !== false };
+  });
+}
+
+/** Adapts deletion-impact counters from a managed group or impact endpoint. */
+export function adaptSystemGroupImpact(input: unknown): SystemGroupImpact {
+  const source = input && typeof input === 'object' ? asRecord(input) : {};
+  return {
+    members: Number(source.members ?? source.memberCount ?? 0),
+    invitations: Number(source.invitations ?? source.invitationCount ?? source.pendingInvitationCount ?? 0),
+    bookings: Number(source.bookings ?? source.bookingCount ?? 0),
+    financialRecords: Number(source.financialRecords ?? source.financialRecordCount ?? 0),
+    auditEntries: Number(source.auditEntries ?? source.auditEventCount ?? 0),
+    mediaFiles: Number(source.mediaFiles ?? source.mediaCount ?? 0),
+  };
+}
+
+/** Adapts the versioned group-deletion impact endpoint. */
+export function adaptSystemGroupDeletionImpact(input: unknown): SystemGroupDeletionImpact {
+  const source = asRecord(input);
+  return {
+    groupId: String(source.groupId ?? ''),
+    groupName: String(source.groupName ?? ''),
+    version: Number(source.version ?? 0),
+    openBalance: money(source.openBalanceMinor, source.currency),
+    ...adaptSystemGroupImpact(source),
+  };
+}
+
+/** Adapts the global group-management response and deletion-impact counts. */
+export function adaptSystemGroups(input: unknown): SystemGroup[] {
+  const source = asRecord(input);
+  const entries = Array.isArray(input) ? input : Array.isArray(source.items) ? source.items : Array.isArray(source.groups) ? source.groups : [];
+  return entries.map((entry) => {
+    const group = asRecord(entry);
+    const status = group.status === 'PROVISIONING' || group.status === 'ARCHIVED' ? group.status : 'ACTIVE';
+    return {
+      id: String(group.id ?? ''),
+      name: String(group.name ?? ''),
+      currency: String(group.currency ?? 'EUR'),
+      status,
+      version: Number(group.version ?? 1),
+      administratorEmail: typeof group.administratorEmail === 'string' ? group.administratorEmail : null,
+      archivedAt: typeof group.archivedAt === 'string' ? group.archivedAt : null,
+      createdAt: typeof group.createdAt === 'string' ? group.createdAt : '',
+      logoUrl: typeof group.logoUrl === 'string' && group.logoUrl ? group.logoUrl : undefined,
+      impact: adaptSystemGroupImpact(group.impact ?? group),
+    };
+  });
+}
+
+/** Adapts the immediate system-group invitation result without retaining a plaintext token. */
+export function adaptSystemGroupInvitationResult(input: unknown): SystemGroupInvitationResult {
+  const source = asRecord(input);
+  const group = adaptSystemGroups([source.group ?? source])[0];
+  const status = String(source.emailDeliveryStatus ?? '');
+  const validStatus: EmailDeliveryStatus | null = ['NOT_REQUESTED', 'PENDING', 'SENDING', 'SENT', 'FAILED', 'CANCELLED'].includes(status)
+    ? status as EmailDeliveryStatus
+    : null;
+  return {
+    group,
+    acceptUrl: typeof source.acceptUrl === 'string' && source.acceptUrl ? source.acceptUrl : null,
+    emailDeliveryStatus: validStatus,
+    expiresAt: typeof source.expiresAt === 'string' && source.expiresAt ? source.expiresAt : null,
+  };
+}
+
+/** Adapts the immutable global system-audit response. */
+export function adaptSystemAudit(input: unknown): SystemAuditEntry[] {
+  const source = asRecord(input);
+  const entries = Array.isArray(input) ? input : Array.isArray(source.items) ? source.items : Array.isArray(source.entries) ? source.entries : [];
+  return entries.map((entry) => {
+    const audit = asRecord(entry);
+    return {
+      id: String(audit.id ?? ''),
+      action: String(audit.action ?? ''),
+      actorUserId: String(audit.actorUserId ?? ''),
+      actorDisplayName: String(audit.actorDisplayName ?? audit.actorUserId ?? i18n.t('common.system')),
+      targetType: String(audit.targetType ?? audit.resourceType ?? ''),
+      targetId: typeof audit.targetId === 'string' ? audit.targetId : typeof audit.resourceId === 'string' ? audit.resourceId : null,
+      summary: typeof audit.summary === 'string' ? audit.summary : audit.metadata && typeof audit.metadata === 'object' ? JSON.stringify(audit.metadata) : '',
+      createdAt: String(audit.createdAt ?? audit.occurredAt ?? ''),
+    };
+  });
+}
 
 /** Normalizes a reason mode while retaining safe defaults for legacy servers. */
 const reasonMode = (value: unknown, legacyRequired: unknown, fallback: ReasonMode): ReasonMode => {
@@ -257,7 +457,7 @@ function ledgerDescription(wire: JsonRecord): string {
  * Adapts the session wire model to the stable frontend session.
  *
  * @param input - Untrusted session response from `/api/v1/session` or authentication.
- * @returns A session with a deterministic active group identifier.
+ * @returns A session with a nullable active group and validated global roles.
  */
 export function adaptSession(input: unknown): Session {
   const source = asRecord(input);
@@ -282,7 +482,11 @@ export function adaptSession(input: unknown): Session {
   return {
     user: adaptUser(source.user),
     groups,
-    activeGroupId: typeof source.activeGroupId === 'string' ? source.activeGroupId : groups[0]?.id ?? '',
+    activeGroupId: typeof source.activeGroupId === 'string' && groups.some((group) => group.id === source.activeGroupId)
+      ? source.activeGroupId
+      : groups[0]?.id ?? null,
+    defaultGroupId: typeof source.defaultGroupId === 'string' ? source.defaultGroupId : null,
+    systemRoles: Array.isArray(source.systemRoles) && source.systemRoles.includes('SYSTEM_ADMINISTRATOR') ? ['SYSTEM_ADMINISTRATOR'] : [],
     demo: source.demo === true,
   };
 }

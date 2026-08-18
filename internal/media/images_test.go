@@ -2,6 +2,7 @@ package media
 
 import (
 	"bytes"
+	"errors"
 	"image"
 	"image/color"
 	"image/png"
@@ -39,5 +40,12 @@ func TestRejectsInvalidImageAndKey(t *testing.T) {
 	}
 	if _, err := ResolveImage(t.TempDir(), "../unsafe.png"); err == nil {
 		t.Fatal("unsafe image key was resolved")
+	}
+}
+
+func TestNormalizeAndStoreImageWithLimitReportsOversize(t *testing.T) {
+	_, _, err := NormalizeAndStoreImageWithLimit(t.TempDir(), bytes.NewReader(make([]byte, 33)), 32)
+	if !errors.Is(err, ErrImageTooLarge) {
+		t.Fatalf("error = %v, want ErrImageTooLarge", err)
 	}
 }

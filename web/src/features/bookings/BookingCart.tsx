@@ -300,7 +300,7 @@ export function BookingCart({
             </>
           )}
         </div>
-        <Button disabled={submitDisabled || exceedsBookingLimit} fullWidth size="large" type="submit">
+        <Button disabled={submitDisabled || exceedsBookingLimit} fullWidth leadingIcon={<BookCheck size={19} />} size="large" type="submit">
           {pending ? t('booking.pending') : bookingCount === 1 ? t('booking.submit') : t('booking.submitBookings')}
         </Button>
       </footer> : null}

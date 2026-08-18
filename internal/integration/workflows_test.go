@@ -60,25 +60,39 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil || len(groupItems) != 1 {
 		t.Fatalf("list bootstrap group: groups=%d err=%v", len(groupItems), err)
 	}
-	return &fixture{
+	result := &fixture{
 		t: t, ctx: ctx, db: db, auth: authService, groups: groupService,
 		catalog: catalog.Service{DB: db}, bookings: bookings.Service{DB: db, Groups: groupService},
 		finance: finance.Service{DB: db}, periods: periods.Service{DB: db},
 		admin: session.Principal, group: groupItems[0], membership: groupItems[0].Membership,
 	}
+	result.membership = result.assignPermissionRole(result.membership, "Integration fixture capabilities",
+		domain.PermissionFinanceManagement,
+		domain.PermissionCatalogManagement,
+		domain.PermissionViewGroupStatistics,
+		domain.PermissionViewAllBookingActivity,
+		domain.PermissionRecordOwnPayment,
+		domain.PermissionCreateOwnBooking,
+		domain.PermissionVoidOwnBooking,
+		domain.PermissionVoidAnyBooking,
+		domain.PermissionBookForOthers,
+		domain.PermissionBookForGuests,
+	)
+	result.group.Membership = result.membership
+	return result
 }
 
 func (f *fixture) inviteMember(email, name string, roles []domain.Role) (domain.Principal, domain.Membership, string) {
 	f.t.Helper()
-	roleIDs := []string{authorization.PresetRoleID(f.membership.GroupID, domain.RolePresetMember)}
+	roleIDs := []string{authorization.TemplateRoleID(f.membership.GroupID, domain.RoleTemplateMember)}
 	for _, role := range roles {
 		switch role {
 		case domain.RoleAdmin:
 			roleIDs = append(roleIDs, authorization.PresetRoleID(f.membership.GroupID, domain.RolePresetGroupAdministrator))
 		case domain.RoleFinanceManager:
-			roleIDs = append(roleIDs, authorization.PresetRoleID(f.membership.GroupID, domain.RolePresetFinanceManager))
+			roleIDs = append(roleIDs, authorization.TemplateRoleID(f.membership.GroupID, domain.RoleTemplateFinance))
 		case domain.RoleCatalogManager:
-			roleIDs = append(roleIDs, authorization.PresetRoleID(f.membership.GroupID, domain.RolePresetCatalogManager))
+			roleIDs = append(roleIDs, authorization.TemplateRoleID(f.membership.GroupID, domain.RoleTemplateCatalog))
 		}
 	}
 	invitation, err := f.groups.CreateInvitationWithRoles(f.ctx, f.admin, f.membership, email, name, roleIDs)
@@ -94,7 +108,7 @@ func (f *fixture) inviteMember(email, name string, roles []domain.Role) (domain.
 
 func (f *fixture) createStarterInvitation(email, name string) (groups.Invitation, error) {
 	return f.groups.CreateInvitationWithRoles(f.ctx, f.admin, f.membership, email, name, []string{
-		authorization.PresetRoleID(f.membership.GroupID, domain.RolePresetMember),
+		authorization.TemplateRoleID(f.membership.GroupID, domain.RoleTemplateMember),
 	})
 }
 
@@ -118,6 +132,22 @@ func (f *fixture) assignPermissionRole(membership domain.Membership, name string
 	updated, err := f.groups.MembershipForUser(f.ctx, membership.GroupID, membership.UserID)
 	if err != nil {
 		f.t.Fatalf("reload %s role assignment: %v", name, err)
+	}
+	return updated
+}
+
+func (f *fixture) assignTemplateRolesToCreator(membership domain.Membership, templates ...domain.RoleTemplateKey) domain.Membership {
+	f.t.Helper()
+	roleIDs := append([]string(nil), membership.RoleIDs...)
+	for _, template := range templates {
+		roleIDs = append(roleIDs, authorization.TemplateRoleID(membership.GroupID, template))
+	}
+	if _, err := f.groups.ReplaceMemberRoles(f.ctx, f.admin, membership, membership.ID, roleIDs, membership.RoleAssignmentsVersion); err != nil {
+		f.t.Fatalf("assign creator template roles: %v", err)
+	}
+	updated, err := f.groups.MembershipForUser(f.ctx, membership.GroupID, membership.UserID)
+	if err != nil {
+		f.t.Fatalf("reload creator template roles: %v", err)
 	}
 	return updated
 }
@@ -275,6 +305,7 @@ func TestGroupOutstandingIncludesPaymentsAndIgnoresSettlementBoundaries(t *testi
 	wantCredit := int64(-150)
 	assertOutstanding(f.membership, &wantCredit)
 	_, statisticsViewer, _ := f.inviteMember("statistics@example.test", "Statistics Viewer", nil)
+	statisticsViewer = f.assignPermissionRole(statisticsViewer, "Group statistics", domain.PermissionViewGroupStatistics)
 	assertOutstanding(statisticsViewer, &wantCredit)
 
 	f.setSettlementsEnabled(true)
@@ -488,7 +519,7 @@ func TestRoleManagerCannotListInvitationLifecycle(t *testing.T) {
 		t.Fatalf("create invitation privacy guest: bookings=%#v err=%v", guestBookings, err)
 	}
 	claimInvitation, err := f.groups.CreateTemporaryGuestClaimInvitation(f.ctx, f.admin, f.membership, guestBookings[0].TargetMembershipID, "future-login@example.test", []string{
-		authorization.PresetRoleID(f.membership.GroupID, domain.RolePresetMember),
+		authorization.TemplateRoleID(f.membership.GroupID, domain.RoleTemplateMember),
 	})
 	if err != nil {
 		t.Fatalf("create claim invitation: %v", err)
@@ -599,6 +630,7 @@ func TestFinanceAccountSummariesEnforceRolesAndTenantIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create second finance tenant: %v", err)
 	}
+	secondGroup.Membership = f.assignTemplateRolesToCreator(secondGroup.Membership, domain.RoleTemplateFinance)
 	var secondPeriodID string
 	if err := f.db.QueryRowContext(f.ctx, `SELECT id FROM periods WHERE group_id=? AND status='OPEN'`, secondGroup.ID).Scan(&secondPeriodID); err != nil {
 		t.Fatalf("read second tenant period: %v", err)
@@ -670,7 +702,7 @@ func TestOwnPaymentPermissionPostsOnlyForAuthenticatedMembership(t *testing.T) {
 	}
 
 	staleAuthorizedMembership := member
-	memberRoleID := authorization.PresetRoleID(member.GroupID, domain.RolePresetMember)
+	memberRoleID := authorization.TemplateRoleID(member.GroupID, domain.RoleTemplateMember)
 	if _, err := f.groups.ReplaceMemberRoles(f.ctx, f.admin, f.membership, member.ID, []string{memberRoleID}, member.RoleAssignmentsVersion); err != nil {
 		t.Fatalf("revoke self payment permission: %v", err)
 	}
@@ -877,6 +909,7 @@ func TestCatalogDeletionRequiresArchivalAndPreservesHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create second deletion tenant: %v", err)
 	}
+	secondGroup.Membership = f.assignTemplateRolesToCreator(secondGroup.Membership, domain.RoleTemplateCatalog)
 	if err := f.catalog.DeleteProduct(f.ctx, f.admin, secondGroup.Membership, product.ID, product.Version); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("cross-tenant delete product error=%v, want not found", err)
 	}
@@ -1114,6 +1147,7 @@ func TestBookingActivityUsesCurrentAvatarURLs(t *testing.T) {
 func TestBookingCreateReplayRefreshesVoidCapabilitiesAndState(t *testing.T) {
 	f := newFixture(t)
 	memberPrincipal, member, _ := f.inviteMember("booking-replay@example.test", "Booking Replay", nil)
+	member = f.assignPermissionRole(member, "Replay void capability", domain.PermissionVoidOwnBooking)
 	_, product := f.catalogItem("Replay capabilities", 275)
 	input := bookings.CreateInput{
 		ProductID:        product.ID,
@@ -1152,26 +1186,26 @@ func TestBookingCreateReplayRefreshesVoidCapabilitiesAndState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list roles: %v", err)
 	}
-	var baseRole groups.ManagedRole
+	var reversalRole groups.ManagedRole
 	for _, role := range roles {
-		if role.PresetKey == domain.RolePresetMember {
-			baseRole = role
+		if role.Name == "Replay void capability" {
+			reversalRole = role
 			break
 		}
 	}
-	if baseRole.ID == "" {
-		t.Fatal("base role is missing")
+	if reversalRole.ID == "" {
+		t.Fatal("replay reversal role is missing")
 	}
-	grants := make([]domain.PermissionGrant, 0, len(baseRole.Grants))
-	for _, grant := range baseRole.Grants {
+	grants := make([]domain.PermissionGrant, 0, len(reversalRole.Grants))
+	for _, grant := range reversalRole.Grants {
 		if grant.Permission != domain.PermissionVoidOwnBooking {
 			grants = append(grants, grant)
 		}
 	}
-	if _, err := f.groups.UpdateRole(f.ctx, f.admin, f.membership, baseRole.ID, baseRole.Version, groups.RoleCommand{
-		Name: baseRole.Name, Description: baseRole.Description, Grants: grants,
+	if _, err := f.groups.UpdateRole(f.ctx, f.admin, f.membership, reversalRole.ID, reversalRole.Version, groups.RoleCommand{
+		Name: reversalRole.Name, Description: reversalRole.Description, Grants: grants,
 	}); err != nil {
-		t.Fatalf("revoke base-role booking reversal: %v", err)
+		t.Fatalf("revoke replay booking reversal: %v", err)
 	}
 	replayedRevoked, err := f.bookings.Create(f.ctx, memberPrincipal, member, "replay-create-two", input)
 	if err != nil || replayedRevoked.VoidedAt != nil || replayedRevoked.CanVoid || replayedRevoked.VoidReasonRequired || replayedRevoked.VoidWithoutReasonUntil != nil {
@@ -1264,6 +1298,7 @@ func TestBookingBatchCreatesAllTargetsAtomicallyAndReplaysAsOneIntent(t *testing
 func TestBookingUndoAssignmentValidationAndBalancedLedger(t *testing.T) {
 	f := newFixture(t)
 	memberPrincipal, member, _ := f.inviteMember("booker@example.test", "Booker", nil)
+	member = f.assignPermissionRole(member, "Booking undo capability", domain.PermissionVoidOwnBooking)
 	_, primaryProduct := f.catalogItem("Drinks", 125)
 	_, otherProduct := f.catalogItem("Penalties", 500)
 	periodID := f.openPeriodID()

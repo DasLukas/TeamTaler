@@ -2,21 +2,21 @@ import { Link } from '@tanstack/react-router';
 import Bell from 'lucide-react/dist/esm/icons/bell';
 import BookOpenCheck from 'lucide-react/dist/esm/icons/book-open-check';
 import Boxes from 'lucide-react/dist/esm/icons/boxes';
-import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down';
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left';
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
 import CircleUserRound from 'lucide-react/dist/esm/icons/circle-user-round';
 import Clock3 from 'lucide-react/dist/esm/icons/clock-3';
 import Home from 'lucide-react/dist/esm/icons/home';
 import Settings from 'lucide-react/dist/esm/icons/settings';
-import UsersRound from 'lucide-react/dist/esm/icons/users-round';
 import WalletCards from 'lucide-react/dist/esm/icons/wallet-cards';
 import { useTranslation } from 'react-i18next';
 import { memberPaths } from '@/app/paths';
 import { canOpenBooking, hasGroupCapability } from '@/app/groupCapabilities';
 import { useActiveGroup } from '@/app/useActiveGroup';
+import { isSystemAdministrator, useInstanceCapabilities } from '@/app/useSession';
 import { Brand } from '@/components/brand/Brand';
 import { LogoutButton } from '@/components/auth/LogoutButton';
+import { GroupSelector } from './GroupSelector';
 import styles from './Sidebar.module.css';
 import { NotificationBadge } from '@/features/notifications/NotificationBadge';
 import { useUnreadNotificationCount } from '@/features/notifications/NotificationSummaryContext';
@@ -46,18 +46,19 @@ export interface SidebarProps {
 export function Sidebar({ collapsed, onCollapsedChange, onNavigate }: SidebarProps) {
   const { t } = useTranslation();
   const { session, activeGroupId, setActiveGroupId } = useActiveGroup();
+  const instanceCapabilities = useInstanceCapabilities();
   const activeGroup = session.groups.find((group) => group.id === activeGroupId);
   const grants = activeGroup?.membership?.effectiveGrants;
   const canManageCatalog = hasGroupCapability(grants, 'catalog');
   const canManageFinance = hasGroupCapability(grants, 'finance');
-  const canManageAdministration = hasGroupCapability(grants, 'administration');
+  const canManageAdministration = hasGroupCapability(grants, 'administration') || isSystemAdministrator(session);
   const canBook = canOpenBooking(grants);
   const unreadCount = useUnreadNotificationCount();
 
   return (
     <aside className={`${styles.sidebar} ${collapsed ? styles.collapsed : ''}`} data-collapsed={collapsed} id="desktop-sidebar">
       <div className={styles.sidebarHeader}>
-        <Brand className={styles.brand} imageAlt={activeGroup?.logoUrl ? t('brand.groupMarkAlt', { group: activeGroup.name }) : undefined} imageUrl={activeGroup?.logoUrl} />
+        <Brand className={styles.brand} imageAlt={activeGroup?.logoUrl ? t('brand.groupMarkAlt', { group: activeGroup.name }) : undefined} imageUrl={activeGroup?.logoUrl} name={instanceCapabilities.instanceName} />
         <button
           aria-controls="desktop-sidebar"
           aria-expanded={!collapsed}
@@ -72,13 +73,7 @@ export function Sidebar({ collapsed, onCollapsedChange, onNavigate }: SidebarPro
         </button>
       </div>
       <label className={styles.groupLabel} htmlFor="desktop-group">{t('nav.group')}</label>
-      <div className={styles.groupSelectWrap} title={collapsed ? t('nav.selectGroup') : undefined}>
-        <UsersRound aria-hidden="true" className={styles.groupIcon} size={24} strokeWidth={1.8} />
-        <select aria-label={t('nav.selectGroup')} id="desktop-group" onChange={(event) => setActiveGroupId(event.target.value)} value={activeGroupId}>
-          {session.groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
-        </select>
-        <ChevronDown aria-hidden="true" className={styles.groupChevron} size={18} />
-      </div>
+      <GroupSelector ariaLabel={t('nav.selectGroup')} className={styles.groupSelector} compact={collapsed} groups={session.groups} id="desktop-group" onChange={setActiveGroupId} value={activeGroupId} />
       <nav aria-label={t('nav.primary')} className={styles.nav}>
         {primaryNavigation
           .filter((item) => item.key !== 'book' || canBook)

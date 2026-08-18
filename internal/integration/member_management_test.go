@@ -14,39 +14,64 @@ func TestMemberManagementSeparatesGroupMembershipAndRoleResponsibilities(t *test
 	groupPrincipal, groupMember, _ := f.inviteMember("group-manager@example.test", "Group Manager", nil)
 	memberPrincipal, memberManager, _ := f.inviteMember("member-manager@example.test", "Member Manager", nil)
 	rolePrincipal, roleManager, _ := f.inviteMember("role-manager@example.test", "Role Manager", nil)
+	financePrincipal, financeManager, _ := f.inviteMember("finance-manager@example.test", "Finance Manager", nil)
 	bookerPrincipal, booker, _ := f.inviteMember("booker@example.test", "Booker", nil)
 
 	groupMember = assignRoleWithPermissions(t, f, groupMember, "Group configuration", domain.PermissionGroupAdministration)
 	memberManager = assignRoleWithPermissions(t, f, memberManager, "Membership lifecycle", domain.PermissionMemberManagement)
 	roleManager = assignRoleWithPermissions(t, f, roleManager, "Role definitions", domain.PermissionRoleManagement)
+	financeManager = assignRoleWithPermissions(t, f, financeManager, "Finance operations", domain.PermissionFinanceManagement)
 	booker = assignRoleWithPermissions(t, f, booker, "Book for others", domain.PermissionBookForOthers)
 
 	if _, err := f.groups.Settings(f.ctx, groupMember); err != nil {
 		t.Fatalf("group manager reads settings: %v", err)
 	}
+	if _, err := f.groups.ListRoles(f.ctx, groupMember); err != nil {
+		t.Fatalf("group manager lists default-role candidates: %v", err)
+	}
 	notificationEmails := true
 	if _, err := f.groups.UpdateSettings(f.ctx, groupPrincipal, groupMember, groups.SettingsUpdate{NotificationEmailsEnabled: &notificationEmails}); err != nil {
 		t.Fatalf("group manager updates configuration: %v", err)
 	}
-	if _, err := f.groups.CreateInvitationWithRoles(f.ctx, groupPrincipal, groupMember, "blocked-member@example.test", "Blocked", []string{authorization.PresetRoleID(f.group.ID, domain.RolePresetMember)}); !errors.Is(err, domain.ErrForbidden) {
+	if _, err := f.groups.CreateInvitationWithRoles(f.ctx, groupPrincipal, groupMember, "blocked-member@example.test", "Blocked", []string{authorization.TemplateRoleID(f.group.ID, domain.RoleTemplateMember)}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("group manager invitation error=%v, want forbidden", err)
+	}
+	defaultRoleID := authorization.TemplateRoleID(f.group.ID, domain.RoleTemplateFinance)
+	if _, err := f.groups.UpdateSettings(f.ctx, groupPrincipal, groupMember, groups.SettingsUpdate{DefaultRoleID: &defaultRoleID}); err != nil {
+		t.Fatalf("group manager updates default role: %v", err)
+	}
+	settlementsEnabled := true
+	if _, err := f.groups.UpdateSettings(f.ctx, groupPrincipal, groupMember, groups.SettingsUpdate{SettlementsEnabled: &settlementsEnabled}); err != nil {
+		t.Fatalf("group manager updates settlement setting: %v", err)
+	}
+	if _, err := f.groups.Settings(f.ctx, financeManager); err != nil {
+		t.Fatalf("finance manager reads settings: %v", err)
+	}
+	if _, err := f.groups.UpdateSettings(f.ctx, financePrincipal, financeManager, groups.SettingsUpdate{SettlementsEnabled: &settlementsEnabled}); err != nil {
+		t.Fatalf("finance manager updates settlement setting: %v", err)
+	}
+	bookingReasonMode := domain.ReasonModeOptional
+	if _, err := f.groups.UpdateSettings(f.ctx, groupPrincipal, groupMember, groups.SettingsUpdate{OwnBookingReasonMode: &bookingReasonMode}); err != nil {
+		t.Fatalf("group manager updates booking setting: %v", err)
+	}
+	if _, err := f.groups.UpdateSettings(f.ctx, financePrincipal, financeManager, groups.SettingsUpdate{OwnBookingReasonMode: &bookingReasonMode}); err != nil {
+		t.Fatalf("finance manager updates booking setting: %v", err)
 	}
 
 	if _, err := f.groups.Settings(f.ctx, memberManager); err != nil {
 		t.Fatalf("member manager reads shared settings: %v", err)
 	}
-	defaultRoleID := authorization.PresetRoleID(f.group.ID, domain.RolePresetFinanceManager)
-	if _, err := f.groups.UpdateSettings(f.ctx, memberPrincipal, memberManager, groups.SettingsUpdate{DefaultRoleID: &defaultRoleID}); err != nil {
-		t.Fatalf("member manager updates default role: %v", err)
+	if _, err := f.groups.UpdateSettings(f.ctx, memberPrincipal, memberManager, groups.SettingsUpdate{DefaultRoleID: &defaultRoleID}); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("member manager default role error=%v, want forbidden", err)
 	}
 	notificationEmails = false
 	if _, err := f.groups.UpdateSettings(f.ctx, memberPrincipal, memberManager, groups.SettingsUpdate{NotificationEmailsEnabled: &notificationEmails}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("member manager group configuration error=%v, want forbidden", err)
 	}
-	mixedDefaultRoleID := authorization.PresetRoleID(f.group.ID, domain.RolePresetMember)
+	mixedDefaultRoleID := authorization.TemplateRoleID(f.group.ID, domain.RoleTemplateMember)
 	mixedUpdate := groups.SettingsUpdate{DefaultRoleID: &mixedDefaultRoleID, NotificationEmailsEnabled: &notificationEmails}
-	if _, err := f.groups.UpdateSettings(f.ctx, groupPrincipal, groupMember, mixedUpdate); !errors.Is(err, domain.ErrForbidden) {
-		t.Fatalf("group manager mixed settings error=%v, want forbidden", err)
+	if _, err := f.groups.UpdateSettings(f.ctx, groupPrincipal, groupMember, mixedUpdate); err != nil {
+		t.Fatalf("group manager mixed settings update: %v", err)
 	}
 	if _, err := f.groups.UpdateSettings(f.ctx, memberPrincipal, memberManager, mixedUpdate); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("member manager mixed settings error=%v, want forbidden", err)
@@ -57,7 +82,7 @@ func TestMemberManagementSeparatesGroupMembershipAndRoleResponsibilities(t *test
 	if _, err := f.groups.ListMembers(f.ctx, memberManager); err != nil {
 		t.Fatalf("member manager lists members: %v", err)
 	}
-	if _, err := f.groups.CreateInvitationWithRoles(f.ctx, memberPrincipal, memberManager, "new-member@example.test", "New Member", []string{authorization.PresetRoleID(f.group.ID, domain.RolePresetMember)}); err != nil {
+	if _, err := f.groups.CreateInvitationWithRoles(f.ctx, memberPrincipal, memberManager, "new-member@example.test", "New Member", []string{authorization.TemplateRoleID(f.group.ID, domain.RoleTemplateMember)}); err != nil {
 		t.Fatalf("member manager creates invitation: %v", err)
 	}
 	if _, err := f.groups.CreateRole(f.ctx, memberPrincipal, memberManager, groups.RoleCommand{Name: "Blocked role", Grants: nil}); !errors.Is(err, domain.ErrForbidden) {
@@ -70,21 +95,24 @@ func TestMemberManagementSeparatesGroupMembershipAndRoleResponsibilities(t *test
 	if _, err := f.groups.CreateRole(f.ctx, rolePrincipal, roleManager, groups.RoleCommand{Name: "Ordinary role", Grants: nil}); err != nil {
 		t.Fatalf("role manager creates role: %v", err)
 	}
-	if _, err := f.groups.Settings(f.ctx, roleManager); !errors.Is(err, domain.ErrForbidden) {
-		t.Fatalf("role manager settings error=%v, want forbidden", err)
+	if _, err := f.groups.Settings(f.ctx, roleManager); err != nil {
+		t.Fatalf("role manager reads settings: %v", err)
 	}
-	if _, err := f.groups.CreateInvitationWithRoles(f.ctx, rolePrincipal, roleManager, "blocked-role-manager@example.test", "Blocked", []string{authorization.PresetRoleID(f.group.ID, domain.RolePresetMember)}); !errors.Is(err, domain.ErrForbidden) {
+	if _, err := f.groups.UpdateSettings(f.ctx, rolePrincipal, roleManager, groups.SettingsUpdate{DefaultRoleID: &defaultRoleID}); err != nil {
+		t.Fatalf("role manager updates default role: %v", err)
+	}
+	if _, err := f.groups.CreateInvitationWithRoles(f.ctx, rolePrincipal, roleManager, "blocked-role-manager@example.test", "Blocked", []string{authorization.TemplateRoleID(f.group.ID, domain.RoleTemplateMember)}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("role manager invitation error=%v, want forbidden", err)
 	}
 	if _, err := f.groups.ListMembers(f.ctx, booker); err != nil {
 		t.Fatalf("book-for-others compatibility directory read: %v", err)
 	}
-	if _, err := f.groups.CreateInvitationWithRoles(f.ctx, bookerPrincipal, booker, "blocked-booker@example.test", "Blocked", []string{authorization.PresetRoleID(f.group.ID, domain.RolePresetMember)}); !errors.Is(err, domain.ErrForbidden) {
+	if _, err := f.groups.CreateInvitationWithRoles(f.ctx, bookerPrincipal, booker, "blocked-booker@example.test", "Blocked", []string{authorization.TemplateRoleID(f.group.ID, domain.RoleTemplateMember)}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("book-for-others invitation error=%v, want forbidden", err)
 	}
 
 	ordinaryRoleIDs := append([]string(nil), roleManager.RoleIDs...)
-	ordinaryRoleIDs = append(ordinaryRoleIDs, authorization.PresetRoleID(f.group.ID, domain.RolePresetCatalogManager))
+	ordinaryRoleIDs = append(ordinaryRoleIDs, authorization.TemplateRoleID(f.group.ID, domain.RoleTemplateCatalog))
 	assignment, err := f.groups.ReplaceMemberRoles(f.ctx, memberPrincipal, memberManager, roleManager.ID, ordinaryRoleIDs, roleManager.RoleAssignmentsVersion)
 	if err != nil || len(assignment.RoleIDs) != len(ordinaryRoleIDs) {
 		t.Fatalf("member manager ordinary assignment=%#v err=%v", assignment, err)

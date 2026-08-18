@@ -15,9 +15,9 @@ vi.mock('@tanstack/react-router', () => ({
 vi.mock('@/components/brand/Brand', () => ({ Brand: () => <div>brand</div> }));
 vi.mock('@/components/auth/LogoutButton', () => ({ LogoutButton: () => <button type="button">logout</button> }));
 
-function usePermissions(permissions: PermissionKey[]): void {
+function usePermissions(permissions: PermissionKey[], systemRoles: string[] = []): void {
   const group = { id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', effectiveGrants: permissions.map((permission) => ({ permission, scope: { type: 'GROUP' as const } })) } };
-  mocks.useActiveGroup.mockReturnValue({ session: { groups: [group] }, activeGroupId: group.id, setActiveGroupId: vi.fn() });
+  mocks.useActiveGroup.mockReturnValue({ session: { groups: [group], systemRoles }, activeGroupId: group.id, setActiveGroupId: vi.fn() });
 }
 
 describe('Sidebar role navigation', () => {
@@ -44,6 +44,38 @@ describe('Sidebar role navigation', () => {
     const links = screen.getAllByRole('link').map((link) => link.textContent);
     expect(links.indexOf('Katalog')).toBeLessThan(links.indexOf('Finanzen'));
     expect(links.indexOf('Finanzen')).toBeLessThan(links.indexOf('Einstellungen'));
+  });
+
+  it('shows settings to a system administrator without group administration rights', () => {
+    usePermissions([], ['SYSTEM_ADMINISTRATOR']);
+    render(<Sidebar collapsed={false} onCollapsedChange={vi.fn()} />);
+
+    expect(screen.getByRole('link', { name: 'Einstellungen' })).toHaveAttribute('href', '/admin');
+  });
+
+  it('shows group logos and initial fallbacks in the keyboard-operable custom selector', () => {
+    const setActiveGroupId = vi.fn();
+    mocks.useActiveGroup.mockReturnValue({
+      session: {
+        groups: [
+          { id: 'group-a', name: 'Group A', currency: 'EUR', logoUrl: '/api/v1/groups/group-a/logo', membership: { id: 'member-a', effectiveGrants: [] } },
+          { id: 'group-b', name: 'Beta Club', currency: 'EUR', membership: { id: 'member-b', effectiveGrants: [] } },
+        ],
+        systemRoles: [],
+      },
+      activeGroupId: 'group-a',
+      setActiveGroupId,
+    });
+    render(<Sidebar collapsed={false} onCollapsedChange={vi.fn()} />);
+
+    const selector = screen.getByRole('combobox', { name: 'Gruppe auswählen' });
+    expect(selector.querySelector('img')).toHaveAttribute('src', '/api/v1/groups/group-a/logo');
+    fireEvent.keyDown(selector, { key: 'ArrowDown' });
+    const fallbackOption = screen.getByRole('option', { name: 'Beta Club' });
+    expect(fallbackOption).toHaveTextContent('B');
+    fireEvent.keyDown(selector, { key: 'ArrowDown' });
+    fireEvent.keyDown(selector, { key: 'Enter' });
+    expect(setActiveGroupId).toHaveBeenCalledWith('group-b');
   });
 
   it('exposes an accessible tablet-rail toggle and preserves icon destinations', () => {

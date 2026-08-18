@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/DasLukas/TeamTaler/internal/auth"
+	"github.com/DasLukas/TeamTaler/internal/authorization"
 	"github.com/DasLukas/TeamTaler/internal/bookings"
 	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/finance"
@@ -24,12 +25,13 @@ func TestInvitationPermissionsPreviewArchiveAndReactivation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list other-group roles: %v", err)
 	}
-	var otherFinanceRoleID string
+	otherFinanceRoleID := authorization.TemplateRoleID(otherGroup.ID, domain.RoleTemplateFinance)
+	foundOtherFinanceRole := false
 	for _, role := range otherRoles {
-		if role.PresetKey == domain.RolePresetFinanceManager {
-			otherFinanceRoleID = role.ID
-			break
-		}
+		foundOtherFinanceRole = foundOtherFinanceRole || role.ID == otherFinanceRoleID
+	}
+	if !foundOtherFinanceRole {
+		t.Fatalf("other-group finance template role %q not found", otherFinanceRoleID)
 	}
 	if _, err := f.groups.CreateInvitationWithRoles(f.ctx, f.admin, f.membership, "cross-group@example.test", "Cross Group", []string{otherFinanceRoleID}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("cross-group invitation role error = %v, want forbidden", err)
@@ -49,7 +51,7 @@ func TestInvitationPermissionsPreviewArchiveAndReactivation(t *testing.T) {
 		t.Fatalf("create unnamed invitation: %v", err)
 	}
 	unnamedPreview, err := f.auth.PreviewInvitation(f.ctx, unnamed.Token)
-	if err != nil || unnamedPreview.DisplayName != "" || unnamedPreview.ExistingAccount {
+	if err != nil || unnamedPreview.DisplayName != "" || unnamedPreview.AccountState != auth.InvitationAccountNew {
 		t.Fatalf("unnamed preview = %#v err=%v", unnamedPreview, err)
 	}
 	first, err := f.groups.CreateInvitation(f.ctx, f.admin, f.membership, "member@example.test", "Suggested Member", []domain.Role{domain.RoleFinanceManager}, []domain.GroupPermission{domain.PermissionSelfRecordPayment}, nil)
@@ -72,7 +74,7 @@ func TestInvitationPermissionsPreviewArchiveAndReactivation(t *testing.T) {
 		t.Fatalf("updated invitation = %#v err=%v", updated, err)
 	}
 	preview, err := f.auth.PreviewInvitation(f.ctx, first.Token)
-	if err != nil || preview.DisplayName != "Suggested Member" || preview.ExistingAccount {
+	if err != nil || preview.DisplayName != "Suggested Member" || preview.AccountState != auth.InvitationAccountNew {
 		t.Fatalf("preview = %#v err=%v", preview, err)
 	}
 	firstSession, firstMembership, err := f.auth.AcceptInvitation(f.ctx, auth.InvitationAcceptance{
@@ -142,11 +144,11 @@ func TestInvitationPermissionsPreviewArchiveAndReactivation(t *testing.T) {
 		t.Fatalf("create reactivation invitation: %v", err)
 	}
 	preview, err = f.auth.PreviewInvitation(f.ctx, second.Token)
-	if err != nil || preview.DisplayName != "Second Suggestion" || !preview.ExistingAccount {
+	if err != nil || preview.DisplayName != "Second Suggestion" || preview.AccountState != auth.InvitationAccountExisting {
 		t.Fatalf("reactivation preview = %#v err=%v", preview, err)
 	}
 	secondSession, secondMembership, err := f.auth.AcceptInvitation(f.ctx, auth.InvitationAcceptance{
-		Token: second.Token, DisplayName: "Ignored Replacement", Password: testPassword,
+		Token: second.Token, DisplayName: "Ignored Replacement", Password: testPassword, ExpectedAccountState: auth.InvitationAccountExisting,
 	})
 	if err != nil {
 		t.Fatalf("accept reactivation invitation: %v", err)
@@ -212,7 +214,7 @@ func TestDynamicInvitationRolesReplaceArchivedMembershipAssignments(t *testing.T
 	if err != nil {
 		t.Fatalf("create reactivation invitation: %v", err)
 	}
-	_, reactivated, err := f.auth.AcceptInvitation(f.ctx, auth.InvitationAcceptance{Token: secondInvitation.Token, Password: testPassword})
+	_, reactivated, err := f.auth.AcceptInvitation(f.ctx, auth.InvitationAcceptance{Token: secondInvitation.Token, Password: testPassword, ExpectedAccountState: auth.InvitationAccountExisting})
 	if err != nil {
 		t.Fatalf("accept reactivation invitation: %v", err)
 	}
@@ -278,10 +280,7 @@ func TestConcurrentAdministratorDemotionsKeepOneReservedAdministrator(t *testing
 	f := newFixture(t)
 	secondPrincipal, secondMembership, _ := f.inviteMember("concurrent-admin@example.test", "Concurrent Admin", []domain.Role{domain.RoleAdmin})
 
-	var memberRoleID string
-	if err := f.db.QueryRowContext(f.ctx, `SELECT id FROM roles WHERE group_id=? AND preset_key='MEMBER'`, f.group.ID).Scan(&memberRoleID); err != nil {
-		t.Fatalf("load member role: %v", err)
-	}
+	memberRoleID := authorization.TemplateRoleID(f.group.ID, domain.RoleTemplateMember)
 
 	start := make(chan struct{})
 	results := make(chan error, 2)

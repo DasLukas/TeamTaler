@@ -4,13 +4,16 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ApiError, api, isDevelopmentDemoEnabled } from '@/api/client';
 import { GroupProvider } from '@/app/GroupContext';
+import { SessionProvider } from '@/app/SessionContext';
 import { useActiveGroup } from '@/app/useActiveGroup';
+import { DEFAULT_INSTANCE_CAPABILITIES, isSystemAdministrator } from '@/app/useSession';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { NotificationSummaryProvider } from '@/features/notifications/NotificationSummaryProvider';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { BottomNavigation } from './BottomNavigation';
 import { MobileHeader } from './MobileHeader';
 import { Sidebar } from './Sidebar';
+import { SystemNavigation } from './SystemNavigation';
 import styles from './AppShell.module.css';
 
 const SIDEBAR_PREFERENCE_STORAGE_KEY = 'teamtaler:sidebar:v1';
@@ -50,6 +53,12 @@ export function AppShell() {
   const [overlaySidebarExpanded, setOverlaySidebarExpanded] = useState(false);
   const usesOverlaySidebar = useMediaQuery('(min-width: 768px) and (max-width: 959px)');
   const sessionQuery = useQuery({ queryKey: ['session'], queryFn: api.getSession });
+  const instanceCapabilitiesQuery = useQuery({
+    queryKey: ['instance-capabilities'],
+    queryFn: api.getInstanceCapabilities,
+    retry: false,
+    staleTime: 60_000,
+  });
   const displayedSidebarCollapsed = usesOverlaySidebar ? !overlaySidebarExpanded : sidebarCollapsed;
 
   useEffect(() => {
@@ -83,36 +92,55 @@ export function AppShell() {
       </main>
     );
   }
-  if (sessionQuery.data.groups.length === 0) {
+  if (sessionQuery.data.groups.length === 0 && !isSystemAdministrator(sessionQuery.data)) {
     return <main className={styles.center}><StatePanel kind="empty" title={t('appShell.noGroupTitle')} message={t('appShell.noGroupMessage')} /></main>;
   }
 
-  return (
-    <GroupProvider session={sessionQuery.data}>
-      <NotificationSummaryProvider>
-        <div
-          className={`${styles.shell} ${displayedSidebarCollapsed ? styles.sidebarCollapsed : ''} ${usesOverlaySidebar ? styles.sidebarOverlayMode : ''}`}
-          data-sidebar-collapsed={displayedSidebarCollapsed}
-        >
-          <Sidebar collapsed={displayedSidebarCollapsed} onCollapsedChange={changeSidebarCollapsed} onNavigate={() => setOverlaySidebarExpanded(false)} />
-          {usesOverlaySidebar && overlaySidebarExpanded ? (
-            <button
-              aria-label={t('nav.collapseSidebar')}
-              className={styles.sidebarBackdrop}
-              onClick={() => setOverlaySidebarExpanded(false)}
-              type="button"
-            />
-          ) : null}
-          <MobileHeader />
-          <main className={styles.main} id="main-content">
-            {isDevelopmentDemoEnabled && sessionQuery.data.demo ? (
-              <div className={styles.demo} role="status">{t('appShell.demoBanner')}</div>
-            ) : null}
-            <GroupScopedOutlet />
-          </main>
-          <BottomNavigation />
+  const instanceCapabilities = instanceCapabilitiesQuery.data ?? DEFAULT_INSTANCE_CAPABILITIES;
+  const shellClassName = `${styles.shell} ${displayedSidebarCollapsed ? styles.sidebarCollapsed : ''} ${usesOverlaySidebar ? styles.sidebarOverlayMode : ''}`;
+  const navigationProps = {
+    collapsed: displayedSidebarCollapsed,
+    onCollapsedChange: changeSidebarCollapsed,
+    onNavigate: () => setOverlaySidebarExpanded(false),
+  };
+  const sharedContent = (
+    <>
+      {usesOverlaySidebar && overlaySidebarExpanded ? (
+        <button aria-label={t('nav.collapseSidebar')} className={styles.sidebarBackdrop} onClick={() => setOverlaySidebarExpanded(false)} type="button" />
+      ) : null}
+      <main className={styles.main} id="main-content">
+        {isDevelopmentDemoEnabled && sessionQuery.data.demo ? <div className={styles.demo} role="status">{t('appShell.demoBanner')}</div> : null}
+        {instanceCapabilities.maintenanceMode ? (
+          <div className={styles.maintenance} role="status">{instanceCapabilities.maintenanceMessage || t('appShell.maintenanceBanner')}</div>
+        ) : null}
+        {sessionQuery.data.groups.length > 0 ? <GroupScopedOutlet /> : <RouteOutlet />}
+      </main>
+    </>
+  );
+
+  if (sessionQuery.data.groups.length === 0) {
+    return (
+      <SessionProvider instanceCapabilities={instanceCapabilities} session={sessionQuery.data}>
+        <div className={shellClassName} data-sidebar-collapsed={displayedSidebarCollapsed}>
+          <SystemNavigation {...navigationProps} />
+          {sharedContent}
         </div>
-      </NotificationSummaryProvider>
-    </GroupProvider>
+      </SessionProvider>
+    );
+  }
+
+  return (
+    <SessionProvider instanceCapabilities={instanceCapabilities} session={sessionQuery.data}>
+      <GroupProvider session={sessionQuery.data}>
+        <NotificationSummaryProvider>
+          <div className={shellClassName} data-sidebar-collapsed={displayedSidebarCollapsed}>
+            <Sidebar {...navigationProps} />
+            <MobileHeader />
+            {sharedContent}
+            <BottomNavigation />
+          </div>
+        </NotificationSummaryProvider>
+      </GroupProvider>
+    </SessionProvider>
   );
 }

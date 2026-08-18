@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/DasLukas/TeamTaler/internal/auth"
+	"github.com/DasLukas/TeamTaler/internal/authorization"
 	"github.com/DasLukas/TeamTaler/internal/catalog"
 	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/groups"
@@ -39,17 +40,27 @@ func TestCreateAndRestore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("login backup fixture: %v", err)
 	}
-	groupItems, err := (groups.Service{DB: db}).List(ctx, session.Principal.UserID)
+	groupService := groups.Service{DB: db}
+	groupItems, err := groupService.List(ctx, session.Principal.UserID)
 	if err != nil || len(groupItems) != 1 {
 		t.Fatalf("list backup group: groups=%d err=%v", len(groupItems), err)
 	}
+	membership := groupItems[0].Membership
+	roleIDs := append(append([]string(nil), membership.RoleIDs...), authorization.TemplateRoleID(membership.GroupID, domain.RoleTemplateCatalog))
+	if _, err := groupService.ReplaceMemberRoles(ctx, session.Principal, membership, membership.ID, roleIDs, membership.RoleAssignmentsVersion); err != nil {
+		t.Fatalf("assign backup catalog role: %v", err)
+	}
+	membership, err = groupService.MembershipForUser(ctx, membership.GroupID, membership.UserID)
+	if err != nil {
+		t.Fatalf("reload backup membership: %v", err)
+	}
 	categoryService := catalog.Service{DB: db}
-	category, err := categoryService.CreateCategory(ctx, session.Principal, groupItems[0].Membership, catalog.CreateCategoryInput{Name: "Drinks", Icon: domain.CategoryIconDrink})
+	category, err := categoryService.CreateCategory(ctx, session.Principal, membership, catalog.CreateCategoryInput{Name: "Drinks", Icon: domain.CategoryIconDrink})
 	if err != nil {
 		t.Fatalf("create backup category: %v", err)
 	}
 	priceMinor := int64(100)
-	product, err := categoryService.CreateProduct(ctx, session.Principal, groupItems[0].Membership, "backup-product-one", category.ID, catalog.CreateProductInput{Name: "Water", PriceMinor: &priceMinor})
+	product, err := categoryService.CreateProduct(ctx, session.Principal, membership, "backup-product-one", category.ID, catalog.CreateProductInput{Name: "Water", PriceMinor: &priceMinor})
 	if err != nil {
 		t.Fatalf("create backup product: %v", err)
 	}

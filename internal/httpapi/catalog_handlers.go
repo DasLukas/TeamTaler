@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/DasLukas/TeamTaler/internal/authorization"
 	"github.com/DasLukas/TeamTaler/internal/catalog"
+	"github.com/DasLukas/TeamTaler/internal/config"
 	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/media"
 )
@@ -187,11 +189,12 @@ func (s *Server) handleProductImage(response http.ResponseWriter, request *http.
 		writeProblem(response, request, err)
 		return
 	}
-	imageKey, err := s.storeUploadedImage(response, request)
+	imageKey, releaseImage, err := s.storeUploadedImage(response, request)
 	if err != nil {
 		writeProblem(response, request, err)
 		return
 	}
+	defer releaseImage()
 	imageURL, _, err := s.catalog.SetProductImage(request.Context(), principal, membership, request.PathValue("productID"), imageKey)
 	if err != nil {
 		writeProblem(response, request, err)
@@ -226,24 +229,36 @@ func (s *Server) handleImage(response http.ResponseWriter, request *http.Request
 // stores its content-addressed PNG below the configured data directory. The
 // response writer allows net/http to stop oversized request bodies early. It
 // returns the image key or a client-safe validation error.
-func (s *Server) storeUploadedImage(response http.ResponseWriter, request *http.Request) (string, error) {
-	request.Body = http.MaxBytesReader(response, request.Body, 6<<20)
-	if err := request.ParseMultipartForm(5 << 20); err != nil {
-		return "", domain.ValidationError{Field: "image", Message: "must be multipart form data containing an image no larger than 5 MiB"}
+func (s *Server) storeUploadedImage(response http.ResponseWriter, request *http.Request) (string, func(), error) {
+	settings, loaded := effectiveSystemSettings(request)
+	maxImageBytes := config.DefaultMediaUploadBytes
+	if loaded {
+		maxImageBytes = settings.MediaUploadMaxBytes.Value
+	}
+	request.Body = http.MaxBytesReader(response, request.Body, maxImageBytes+config.MultipartRequestReserve)
+	if err := request.ParseMultipartForm(maxImageBytes); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			return "", nil, fmt.Errorf("%w: image exceeds the configured %d-byte upload limit", domain.ErrPayloadTooLarge, maxImageBytes)
+		}
+		return "", nil, domain.ValidationError{Field: "image", Message: "must be multipart form data containing an image"}
 	}
 	if request.MultipartForm != nil {
 		defer request.MultipartForm.RemoveAll()
 	}
 	file, _, err := request.FormFile("image")
 	if err != nil {
-		return "", domain.ValidationError{Field: "image", Message: "is required"}
+		return "", nil, domain.ValidationError{Field: "image", Message: "is required"}
 	}
 	defer file.Close()
-	imageKey, _, err := media.NormalizeAndStoreImage(s.config.DataDirectory, file)
+	imageKey, _, release, err := media.NormalizeAndStoreImageWithLimitLeased(s.config.DataDirectory, file, maxImageBytes)
 	if err != nil {
-		return "", domain.ValidationError{Field: "image", Message: err.Error()}
+		if errors.Is(err, media.ErrImageTooLarge) {
+			return "", nil, fmt.Errorf("%w: image exceeds the configured %d-byte upload limit", domain.ErrPayloadTooLarge, maxImageBytes)
+		}
+		return "", nil, domain.ValidationError{Field: "image", Message: err.Error()}
 	}
-	return imageKey, nil
+	return imageKey, release, nil
 }
 
 func versionETag(version int64) string { return fmt.Sprintf(`"v%d"`, version) }

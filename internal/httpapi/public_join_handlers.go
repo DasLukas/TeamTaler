@@ -113,6 +113,10 @@ func (s *Server) handleRotatePublicJoinLink(response http.ResponseWriter, reques
 // handlePreviewPublicJoinLink rate-limits a token lookup and returns only safe
 // group display metadata.
 func (s *Server) handlePreviewPublicJoinLink(response http.ResponseWriter, request *http.Request) {
+	if _, err := s.requirePublicJoinRuntime(request, false); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
 	var input struct {
 		Token string `json:"token"`
 	}
@@ -136,6 +140,11 @@ func (s *Server) handlePreviewPublicJoinLink(response http.ResponseWriter, reque
 // handleStartPublicJoinRegistration queues mandatory mailbox verification and
 // always returns the same accepted response for existing and new addresses.
 func (s *Server) handleStartPublicJoinRegistration(response http.ResponseWriter, request *http.Request) {
+	settingsRevision, err := s.requirePublicJoinRuntime(request, true)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
 	var input auth.PublicJoinRegistration
 	if err := decodeJSON(response, request, &input); err != nil {
 		writeProblem(response, request, err)
@@ -154,7 +163,7 @@ func (s *Server) handleStartPublicJoinRegistration(response http.ResponseWriter,
 		return
 	}
 	defer s.releasePasswordSlot()
-	if err := s.auth.StartPublicJoinRegistration(request.Context(), input); err != nil {
+	if err := s.auth.StartPublicJoinRegistration(request.Context(), input, settingsRevision); err != nil {
 		writeProblem(response, request, err)
 		return
 	}
@@ -164,6 +173,11 @@ func (s *Server) handleStartPublicJoinRegistration(response http.ResponseWriter,
 // handleResendPublicJoinVerification rotates a pending verification token. Its
 // response shape remains generic when no registration exists.
 func (s *Server) handleResendPublicJoinVerification(response http.ResponseWriter, request *http.Request) {
+	settingsRevision, err := s.requirePublicJoinRuntime(request, true)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
 	var input struct {
 		JoinToken string `json:"joinToken"`
 		Email     string `json:"email"`
@@ -179,7 +193,7 @@ func (s *Server) handleResendPublicJoinVerification(response http.ResponseWriter
 		writeProblem(response, request, domain.ErrRateLimited)
 		return
 	}
-	if err := s.auth.ResendPublicJoinVerification(request.Context(), input.JoinToken, input.Email); err != nil {
+	if err := s.auth.ResendPublicJoinVerification(request.Context(), input.JoinToken, input.Email, settingsRevision); err != nil {
 		writeProblem(response, request, err)
 		return
 	}
@@ -190,6 +204,11 @@ func (s *Server) handleResendPublicJoinVerification(response http.ResponseWriter
 // account and membership, sets session cookies, and returns the normal session
 // resource.
 func (s *Server) handleConfirmPublicJoinRegistration(response http.ResponseWriter, request *http.Request) {
+	settingsRevision, err := s.requirePublicJoinRuntime(request, false)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
 	var input struct {
 		Token string `json:"token"`
 	}
@@ -202,7 +221,7 @@ func (s *Server) handleConfirmPublicJoinRegistration(response http.ResponseWrite
 		writeProblem(response, request, domain.ErrRateLimited)
 		return
 	}
-	session, joinedMembership, err := s.auth.ConfirmPublicJoinRegistration(request.Context(), input.Token)
+	session, joinedMembership, err := s.auth.ConfirmPublicJoinRegistration(request.Context(), input.Token, settingsRevision)
 	if err != nil {
 		writeProblem(response, request, err)
 		return
@@ -213,7 +232,11 @@ func (s *Server) handleConfirmPublicJoinRegistration(response http.ResponseWrite
 		writeProblem(response, request, err)
 		return
 	}
-	sessionPayload := newSessionResponse(session.Principal, session.CSRFToken, groupItems)
+	sessionPayload, err := s.newSessionResponse(request.Context(), session.Principal, session.CSRFToken, groupItems)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
 	sessionPayload.ActiveGroupID = &joinedMembership.GroupID
 	writeJSON(response, http.StatusCreated, sessionPayload)
 }
@@ -221,6 +244,11 @@ func (s *Server) handleConfirmPublicJoinRegistration(response http.ResponseWrite
 // handleAcceptPublicJoinLink joins the group using the current authenticated
 // account. CSRF middleware protects the mutation.
 func (s *Server) handleAcceptPublicJoinLink(response http.ResponseWriter, request *http.Request) {
+	settingsRevision, err := s.requirePublicJoinRuntime(request, false)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
 	principal, err := s.principal(request)
 	if err != nil {
 		writeProblem(response, request, err)
@@ -233,7 +261,7 @@ func (s *Server) handleAcceptPublicJoinLink(response http.ResponseWriter, reques
 		writeProblem(response, request, err)
 		return
 	}
-	joinedMembership, err := s.auth.AcceptPublicJoinLink(request.Context(), principal, input.Token)
+	joinedMembership, err := s.auth.AcceptPublicJoinLink(request.Context(), principal, input.Token, settingsRevision)
 	if err != nil {
 		writeProblem(response, request, err)
 		return
@@ -247,7 +275,30 @@ func (s *Server) handleAcceptPublicJoinLink(response http.ResponseWriter, reques
 		writeProblem(response, request, fmt.Errorf("%w: missing CSRF session", domain.ErrForbidden))
 		return
 	}
-	sessionPayload := newSessionResponse(principal, principal.CSRFToken, groupsForUser)
+	sessionPayload, err := s.newSessionResponse(request.Context(), principal, principal.CSRFToken, groupsForUser)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
 	sessionPayload.ActiveGroupID = &joinedMembership.GroupID
 	writeJSON(response, http.StatusOK, sessionPayload)
+}
+
+func (s *Server) requirePublicJoinRuntime(request *http.Request, requireEmail bool) (int64, error) {
+	settings, loaded := effectiveSystemSettings(request)
+	publicJoinEnabled := true
+	emailAvailable := s.auth.AccountCapabilities().PasswordResetAvailable
+	settingsRevision := int64(0)
+	if loaded {
+		publicJoinEnabled = settings.PublicJoinEnabled.Value
+		emailAvailable = settings.SMTP.Active
+		settingsRevision = settings.Revision
+	}
+	if !publicJoinEnabled {
+		return 0, fmt.Errorf("%w: public join is disabled for this instance", domain.ErrServiceUnavailable)
+	}
+	if requireEmail && !emailAvailable {
+		return 0, fmt.Errorf("%w: public registration email delivery is unavailable", domain.ErrServiceUnavailable)
+	}
+	return settingsRevision, nil
 }

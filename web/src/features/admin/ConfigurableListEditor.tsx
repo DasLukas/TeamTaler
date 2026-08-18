@@ -5,7 +5,7 @@ import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ConfigurableItem } from '@/api/types';
-import { Button } from '@/components/ui/Button';
+import { IconButton } from '@/components/ui/IconButton';
 import { TextInput } from '@/components/ui/FormField';
 import styles from './ConfigurableListEditor.module.css';
 
@@ -49,15 +49,15 @@ export function ConfigurableListEditor({ items, label, addLabel, emptyLabel, min
     <h4>{label}</h4>
     <div className={styles.addRow}>
       <TextInput aria-label={addLabel} maxLength={120} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); add(); } }} value={draft} />
-      <Button aria-label={addLabel} className={styles.addButton} disabled={!draft.trim()} onClick={add} size="small" title={addLabel} type="button" variant="secondary"><Plus aria-hidden="true" size={18} /></Button>
+      <IconButton className={styles.addButton} disabled={!draft.trim()} label={addLabel} onClick={add} type="button" variant="surface"><Plus aria-hidden="true" size={18} /></IconButton>
     </div>
     {items.length === 0 ? <p className={styles.empty}>{emptyLabel}</p> : <ol className={styles.list}>
       {items.map((item, index) => <li className={styles.item} key={item.id}>
         <TextInput aria-label={t('behaviorSettings.editOption', { name: item.label || label })} maxLength={120} onBlur={(event) => rename(index, event.target.value.trim())} onChange={(event) => rename(index, event.target.value)} value={item.label} />
         <div className={styles.actions}>
-          <Button aria-label={t('behaviorSettings.moveUp', { name: item.label })} disabled={index === 0} onClick={() => move(index, -1)} size="small" type="button" variant="ghost"><ArrowUp size={16} /></Button>
-          <Button aria-label={t('behaviorSettings.moveDown', { name: item.label })} disabled={index === items.length - 1} onClick={() => move(index, 1)} size="small" type="button" variant="ghost"><ArrowDown size={16} /></Button>
-          <Button aria-label={t('behaviorSettings.removeOption', { name: item.label })} disabled={items.length <= minimumItems} onClick={() => onChange(items.filter((candidate) => candidate.id !== item.id))} size="small" type="button" variant="ghost"><Trash2 size={16} /></Button>
+          <IconButton disabled={index === 0} label={t('behaviorSettings.moveUp', { name: item.label })} onClick={() => move(index, -1)} type="button"><ArrowUp size={16} /></IconButton>
+          <IconButton disabled={index === items.length - 1} label={t('behaviorSettings.moveDown', { name: item.label })} onClick={() => move(index, 1)} type="button"><ArrowDown size={16} /></IconButton>
+          <IconButton disabled={items.length <= minimumItems} label={t('behaviorSettings.removeOption', { name: item.label })} onClick={() => onChange(items.filter((candidate) => candidate.id !== item.id))} type="button"><Trash2 size={16} /></IconButton>
         </div>
       </li>)}
     </ol>}

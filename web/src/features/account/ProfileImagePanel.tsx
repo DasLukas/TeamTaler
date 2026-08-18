@@ -6,12 +6,12 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import type { Membership, Session } from '@/api/types';
-import { useActiveGroup } from '@/app/useActiveGroup';
+import { useInstanceCapabilities, useSession } from '@/app/useSession';
 import { ImageCropEditor } from '@/components/media/ImageCropEditor';
 import {
   ACCEPTED_IMAGE_TYPES,
   DEFAULT_IMAGE_TRANSFORM,
-  MAX_IMAGE_BYTES,
+  formatMediaUploadLimit,
   prepareSquareImage,
   type ImageTransform,
 } from '@/components/media/imageUpload';
@@ -31,7 +31,9 @@ type AvatarChange = { kind: 'upload'; file: File } | { kind: 'remove' };
  */
 export function ProfileImagePanel() {
   const { t } = useTranslation();
-  const { session } = useActiveGroup();
+  const session = useSession();
+  const { mediaUploadMaxBytes } = useInstanceCapabilities();
+  const uploadLimit = formatMediaUploadLimit(mediaUploadMaxBytes);
   const queryClient = useQueryClient();
   const [selectedFile, setSelectedFile] = useState<File>();
   const [imageTransform, setImageTransform] = useState<ImageTransform>(DEFAULT_IMAGE_TRANSFORM);
@@ -44,7 +46,9 @@ export function ProfileImagePanel() {
       if (change.kind === 'remove') {
         return api.removeProfileAvatar().then(() => ({ avatarUrl: undefined }));
       }
-      return api.uploadProfileAvatar(await prepareSquareImage(change.file, imageTransform));
+      const prepared = await prepareSquareImage(change.file, imageTransform);
+      if (prepared.size > mediaUploadMaxBytes) throw new Error(t('account.profileImage.tooLarge', { limit: uploadLimit }));
+      return api.uploadProfileAvatar(prepared);
     },
     onSuccess: ({ avatarUrl }, change) => {
       queryClient.setQueryData<Session>(['session'], (current) => current ? {
@@ -78,9 +82,9 @@ export function ProfileImagePanel() {
       setFileError(t('account.profileImage.invalidType'));
       return;
     }
-    if (file.size > MAX_IMAGE_BYTES) {
+    if (file.size > mediaUploadMaxBytes) {
       setSelectedFile(undefined);
-      setFileError(t('account.profileImage.tooLarge'));
+      setFileError(t('account.profileImage.tooLarge', { limit: uploadLimit }));
       return;
     }
     setFileError('');
@@ -116,7 +120,7 @@ export function ProfileImagePanel() {
           <h2 id="profile-image-title">{t('account.profileImage.title')}</h2>
           <p>{t('account.profileImage.description')}</p>
         </div>
-        <Field error={fileError || undefined} hint={t('account.profileImage.hint')} htmlFor="profile-image" label={t('account.profileImage.label')}>
+        <Field error={fileError || undefined} hint={t('account.profileImage.hint', { limit: uploadLimit })} htmlFor="profile-image" label={t('account.profileImage.label')}>
           <TextInput accept="image/jpeg,image/png,image/webp" id="profile-image" key={fileInputKey} onChange={(event) => selectFile(event.target.files?.[0])} type="file" />
         </Field>
         {selectedFile ? (

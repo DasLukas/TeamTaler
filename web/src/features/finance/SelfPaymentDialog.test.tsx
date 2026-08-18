@@ -21,6 +21,8 @@ const session: Session = {
     membership: { id: 'member-a', roles: ['MEMBER'], groupPermissions: ['SELF_RECORD_PAYMENT'] },
   }],
   activeGroupId: 'group-a',
+  defaultGroupId: null,
+  systemRoles: [],
 };
 
 /**
