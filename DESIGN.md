@@ -47,6 +47,8 @@ Application actions never use browser-native `confirm`, `alert`, or `prompt` dia
 
 `web/src/components/ui/Modal.tsx` owns modal width, height, overflow, safe-area handling, and responsive sheet behavior. Feature styles must not set a modal's width, maximum width, height, or overflow. Callers select one of the shared `standard`, `wide`, or `workspace` sizes; every `sheet` becomes exactly viewport-wide below the shared compact breakpoint regardless of its desktop size.
 
+On compact screens, input-heavy, selection-heavy, or multi-state workflows use the shared `sheet` variant. This includes creation, editing, import, assignment, and recovery flows whose content may grow or require scrolling. Short decision-only confirmations remain centered dialogs so their visual weight matches the limited decision. Feature code must choose between these two patterns by workflow complexity rather than by the current amount of content.
+
 Modal headers and action footers remain visible. Only the body between them may scroll. Persistent cancel, reset, save, apply, and confirmation controls are passed through the shared `footer` property instead of being placed inside the scrolling content. A nested workflow that owns its own mutation state uses the shared `ModalFooter` compound component to portal those actions into the same fixed footer; feature code must not recreate a fixed or sticky footer. When a footer submit button belongs to a form in the body, the button references that form by its stable `id`. This structure applies equally to centered desktop dialogs and mobile bottom sheets, including when the software keyboard reduces the visual viewport.
 
 ## Responsive administrative workspaces

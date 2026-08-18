@@ -300,7 +300,7 @@ function MemberImportDialog({ activeGroupId, defaultRole, onClose }: MemberImpor
   };
 
   return (
-    <Modal onClose={onClose} open size="workspace" title={t('members.csvImport.title')}>
+    <Modal onClose={onClose} open size="workspace" title={t('members.csvImport.title')} variant="sheet">
       {result ? (
         <div className={styles.importResults}>
           <section aria-live="polite" className={styles.importSummary} role="status">
@@ -721,7 +721,7 @@ export function MembersPanel() {
         )}
       </section> : null}
 
-      <Modal footer={createdInvitation && invitationDeliveryStatus ? <InvitationReadyFooter onDone={closeDialog} /> : undefined} onClose={closeDialog} open={dialog === 'invite'} size="workspace" title={t('members.invite')}>
+      <Modal footer={createdInvitation && invitationDeliveryStatus ? <InvitationReadyFooter onDone={closeDialog} /> : undefined} onClose={closeDialog} open={dialog === 'invite'} size="workspace" title={t('members.invite')} variant="sheet">
         {createdInvitation ? (
           invitationDeliveryStatus ? <InvitationReady
             acceptUrl={createdInvitation.acceptUrl}
@@ -749,7 +749,7 @@ export function MembersPanel() {
         )}
       </Modal>
 
-      <Modal onClose={closeDialog} open={dialog === 'edit'} size="workspace" title={t('members.editInvitation')}>
+      <Modal onClose={closeDialog} open={dialog === 'edit'} size="workspace" title={t('members.editInvitation')} variant="sheet">
         <form className={styles.form} id={editInvitationFormId} onSubmit={(event) => { event.preventDefault(); updateMutation.mutate(); }}>
           <Field hint={t('members.emailImmutable')} htmlFor="edit-invitation-email" label={t('auth.email')}><TextInput disabled id="edit-invitation-email" value={draft.email} /></Field>
           <Field hint={t('members.displayNameHint')} htmlFor="edit-invitation-display-name" label={t('auth.displayName')}><TextInput id="edit-invitation-display-name" maxLength={120} onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))} value={draft.displayName} /></Field>
@@ -761,7 +761,7 @@ export function MembersPanel() {
 
       <ConfirmationDialog confirmIcon={<Trash2 size={17} />} confirmLabel={t('common.delete')} errorMessage={revokeMutation.isError ? revokeMutation.error.message : undefined} message={t('members.deleteInvitationExplanation', { email: selectedInvitation?.email ?? '' })} onClose={closeDialog} onConfirm={() => revokeMutation.mutate()} open={dialog === 'revoke'} pending={revokeMutation.isPending} title={t('members.deleteInvitationTitle')} tone="danger" />
 
-      <Modal footer={resendResult?.acceptUrl ? <InvitationReadyFooter onDone={closeDialog} /> : undefined} onClose={closeDialog} open={dialog === 'resend'} title={t('members.resendTitle')}>
+      <Modal footer={resendResult?.acceptUrl ? <InvitationReadyFooter onDone={closeDialog} /> : undefined} onClose={closeDialog} open={dialog === 'resend'} title={t('members.resendTitle')} variant="sheet">
         {resendResult?.acceptUrl ? <InvitationReady
           acceptUrl={resendResult.acceptUrl}
           deliveryStatus={{
@@ -779,7 +779,7 @@ export function MembersPanel() {
         </div>}
       </Modal>
 
-      <Modal onClose={closeDialog} open={dialog === 'rename-guest'} title={t('members.renameGuestTitle')}>
+      <Modal onClose={closeDialog} open={dialog === 'rename-guest'} title={t('members.renameGuestTitle')} variant="sheet">
         <form className={styles.form} id={renameGuestFormId} onSubmit={(event) => { event.preventDefault(); renameGuestMutation.mutate(); }}>
           <p className={styles.expiry}>{t('members.renameGuestDescription')}</p>
           <Field hint={t('members.renameGuestHint')} htmlFor="temporary-guest-display-name" label={t('auth.displayName')}>
@@ -790,7 +790,7 @@ export function MembersPanel() {
         </form>
       </Modal>
 
-      <Modal onClose={closeDialog} open={dialog === 'claim-guest'} title={t('members.claimGuestTitle')}>
+      <Modal onClose={closeDialog} open={dialog === 'claim-guest'} title={t('members.claimGuestTitle')} variant="sheet">
         {guestClaimInvitation ? <div className={styles.invitationReady}>
           <MailPlus aria-hidden="true" size={38} />
           <h3>{t('members.claimGuestReadyTitle')}</h3>
@@ -812,7 +812,7 @@ export function MembersPanel() {
 
       <ConfirmationDialog confirmIcon={<UserMinus size={17} />} confirmLabel={t('members.archive')} errorMessage={archiveMutation.isError ? archiveMutation.error.message : undefined} message={selectedMember?.userId === session.user.id ? t('members.archiveSelfExplanation') : t('members.archiveExplanation', { name: selectedMember?.displayName ?? '' })} onClose={closeDialog} onConfirm={() => archiveMutation.mutate()} open={dialog === 'archive'} pending={archiveMutation.isPending} title={t('members.archiveTitle')} tone="danger" />
 
-      <Modal onClose={closeDialog} open={dialog === 'reactivate'} title={t('members.reactivateTitle')}>
+      <Modal onClose={closeDialog} open={dialog === 'reactivate'} title={t('members.reactivateTitle')} variant="sheet">
         <form className={styles.form} id={reactivateFormId} onSubmit={(event) => { event.preventDefault(); reactivateMutation.mutate(); }}>
           <p className={styles.expiry}>{t('members.reactivateExplanation', { name: selectedMember?.displayName ?? '' })}</p>
           {selectedMember && isTemporaryGuest(selectedMember) ? <Field htmlFor="reactivation-display-name" label={t('auth.displayName')}>

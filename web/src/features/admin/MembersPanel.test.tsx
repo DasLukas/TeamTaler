@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { InvitationImportResult, InvitationMetadata, InvitationUpdateInput, Membership, Role, Session } from '@/api/types';
 import { ActiveGroupContext } from '@/app/active-group-context';
+import modalStyles from '@/components/ui/Modal.module.css';
 import i18n from '@/i18n';
 import { MembersPanel } from './MembersPanel';
 
@@ -279,6 +280,7 @@ describe('MembersPanel invitations', () => {
     renderMembers();
 
     await user.click(await screen.findByRole('button', { name: i18n.t('members.invite') }));
+    expect(screen.getByRole('dialog', { name: i18n.t('members.invite') })).toHaveClass(modalStyles.sheet);
     await user.type(screen.getByLabelText(i18n.t('auth.email')), 'manual@example.test');
     await user.click(screen.getByRole('button', { name: i18n.t('members.createInvitation') }));
 
