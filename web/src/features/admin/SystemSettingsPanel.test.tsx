@@ -22,7 +22,7 @@ const apiMock = vi.hoisted(() => ({
   resendSystemGroupInvitation: vi.fn(),
   getSystemGroupDeletionImpact: vi.fn(),
   purgeSystemGroup: vi.fn(),
-  getSystemAudit: vi.fn(),
+  getSystemAuditPage: vi.fn(),
 }));
 
 vi.mock('@/api/client', () => ({ api: apiMock }));
@@ -99,6 +99,7 @@ function renderPanel(): void {
 describe('SystemSettingsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.history.replaceState({}, '', '/system');
     apiMock.getSystemSettings.mockResolvedValue(settings);
     apiMock.updateSystemSettings.mockResolvedValue(settings);
     apiMock.resetSystemSettings.mockResolvedValue(settings);
@@ -114,7 +115,7 @@ describe('SystemSettingsPanel', () => {
     apiMock.resendSystemGroupInvitation.mockResolvedValue({ group: { ...provisioningGroup, version: 3 }, acceptUrl: 'https://teamtaler.example/invite#token=replaced', emailDeliveryStatus: 'NOT_REQUESTED', expiresAt: '2026-08-23T12:00:00Z' });
     apiMock.getSystemGroupDeletionImpact.mockResolvedValue({ groupId: 'group-a', groupName: 'Group A', version: 5, openBalance: { minorUnits: '1234', currency: 'EUR' }, ...archivedGroup.impact });
     apiMock.purgeSystemGroup.mockResolvedValue({ groupId: 'group-a', groupName: 'Group A', version: 5, openBalance: { minorUnits: '1234', currency: 'EUR' }, ...archivedGroup.impact });
-    apiMock.getSystemAudit.mockResolvedValue([]);
+    apiMock.getSystemAuditPage.mockResolvedValue({ hasMore: false, items: [], limit: 50 });
   });
 
   it('loads all five instance-administration areas in parallel', async () => {
@@ -136,7 +137,7 @@ describe('SystemSettingsPanel', () => {
   });
 
   it('renders instance activity with the shared audit table columns', async () => {
-    apiMock.getSystemAudit.mockResolvedValue([{
+    apiMock.getSystemAuditPage.mockResolvedValue({ hasMore: false, items: [{
       id: 'audit-1',
       action: 'system.group.archived',
       actorUserId: 'system-user',
@@ -145,7 +146,7 @@ describe('SystemSettingsPanel', () => {
       targetId: 'group-a',
       summary: '{"name":"Group A"}',
       createdAt: '2026-08-16T18:55:00Z',
-    }]);
+    }], limit: 50 });
     renderPanel();
 
     const section = (await screen.findByRole('heading', { name: 'Systemaktivität' })).closest('section');

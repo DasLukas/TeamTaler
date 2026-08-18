@@ -6,8 +6,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/DasLukas/TeamTaler/internal/platform"
+	"github.com/DasLukas/TeamTaler/internal/tablequery"
 )
 
 // Event is a durable, immutable record of a security-sensitive or financial
@@ -17,6 +19,7 @@ type Event struct {
 	GroupID           *string        `json:"groupId,omitempty"`
 	ActorUserID       *string        `json:"actorUserId,omitempty"`
 	ActorMembershipID *string        `json:"actorMembershipId,omitempty"`
+	ActorDisplayName  string         `json:"actorDisplayName,omitempty"`
 	Action            string         `json:"action"`
 	ResourceType      string         `json:"resourceType"`
 	ResourceID        *string        `json:"resourceId,omitempty"`
@@ -51,28 +54,116 @@ func Record(ctx context.Context, tx *sql.Tx, groupID, actorUserID, actorMembersh
 // safe default when limit is invalid. ctx bounds database access. It returns the
 // events or query/scan errors; malformed legacy metadata is marked in-band.
 func List(ctx context.Context, db *sql.DB, groupID string, limit int) ([]Event, error) {
-	if limit < 1 || limit > 200 {
-		limit = 100
-	}
-	rows, err := db.QueryContext(ctx, `SELECT id, group_id, actor_user_id, actor_membership_id,
-		action, resource_type, resource_id, metadata_json, occurred_at
-		FROM audit_events WHERE group_id = ? ORDER BY occurred_at DESC LIMIT ?`, groupID, limit)
+	page, err := Query(ctx, db, groupID, tablequery.AuditQuery{Limit: limit})
+	return page.Items, err
+}
+
+// Page is one stable keyset-paginated group-audit slice. NextCursor is empty
+// when no further matching event exists.
+type Page struct {
+	Items      []Event
+	NextCursor string
+}
+
+// Query returns one filtered and sorted group-audit page. groupID is always
+// applied as the first predicate so search, filters, and cursors cannot widen
+// the authorized tenant scope.
+func Query(ctx context.Context, db *sql.DB, groupID string, input tablequery.AuditQuery) (Page, error) {
+	input, fingerprint, err := tablequery.NormalizeAudit(input, "group:"+groupID, true)
 	if err != nil {
-		return nil, fmt.Errorf("list audit events: %w", err)
+		return Page{}, err
+	}
+	cursorKey, cursorID, err := tablequery.DecodeCursor(input.Cursor, fingerprint, input.Sort, input.Direction)
+	if err != nil {
+		return Page{}, err
+	}
+	occurredExpression := `strftime('%Y-%m-%dT%H:%M:%fZ',event.occurred_at)`
+	sortExpressions := map[string]string{
+		"occurredAt": occurredExpression, "actorName": "lower(coalesce(actor.display_name,''))",
+		"action": "lower(event.action)", "resourceType": "lower(event.resource_type)",
+	}
+	sortExpression := sortExpressions[input.Sort]
+	query := `SELECT event.id,event.group_id,event.actor_user_id,event.actor_membership_id,
+		coalesce(actor.display_name,''),event.action,event.resource_type,event.resource_id,
+		event.metadata_json,event.occurred_at,CAST(` + sortExpression + ` AS TEXT)
+		FROM audit_events event
+		LEFT JOIN users actor ON actor.id=event.actor_user_id
+		WHERE event.group_id=?`
+	args := []any{groupID}
+	if input.ActorUserID != "" {
+		query += ` AND event.actor_user_id=?`
+		args = append(args, input.ActorUserID)
+	}
+	if input.ActorMembershipID != "" {
+		query += ` AND event.actor_membership_id=?`
+		args = append(args, input.ActorMembershipID)
+	}
+	if input.Action != "" {
+		query += ` AND event.action=?`
+		args = append(args, input.Action)
+	}
+	if input.ResourceType != "" {
+		query += ` AND event.resource_type=?`
+		args = append(args, input.ResourceType)
+	}
+	if input.OccurredFrom != "" {
+		query += ` AND ` + occurredExpression + `>=?`
+		args = append(args, input.OccurredFrom)
+	}
+	if input.OccurredTo != "" {
+		query += ` AND ` + occurredExpression + `<?`
+		args = append(args, input.OccurredTo)
+	}
+	if input.Search != "" {
+		pattern := tablequery.LikePattern(input.Search)
+		query += ` AND (coalesce(actor.display_name,'') LIKE ? ESCAPE '\' COLLATE NOCASE
+			OR event.action LIKE ? ESCAPE '\' COLLATE NOCASE
+			OR event.resource_type LIKE ? ESCAPE '\' COLLATE NOCASE
+			OR coalesce(event.resource_id,'') LIKE ? ESCAPE '\' COLLATE NOCASE
+			OR event.metadata_json LIKE ? ESCAPE '\' COLLATE NOCASE)`
+		args = append(args, pattern, pattern, pattern, pattern, pattern)
+	}
+	if cursorID != "" {
+		comparison := ">"
+		if input.Direction == "desc" {
+			comparison = "<"
+		}
+		query += ` AND (` + sortExpression + ` ` + comparison + ` ? OR (` + sortExpression + ` = ? AND event.id ` + comparison + ` ?))`
+		args = append(args, cursorKey, cursorKey, cursorID)
+	}
+	query += ` ORDER BY ` + sortExpression + ` ` + strings.ToUpper(input.Direction) + `,event.id ` + strings.ToUpper(input.Direction) + ` LIMIT ?`
+	args = append(args, input.Limit+1)
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return Page{}, fmt.Errorf("list audit events: %w", err)
 	}
 	defer rows.Close()
 	events := make([]Event, 0)
+	sortKeys := make([]string, 0)
 	for rows.Next() {
 		var event Event
-		var metadata string
+		var metadata, sortKey string
 		if err := rows.Scan(&event.ID, &event.GroupID, &event.ActorUserID, &event.ActorMembershipID,
-			&event.Action, &event.ResourceType, &event.ResourceID, &metadata, &event.OccurredAt); err != nil {
-			return nil, err
+			&event.ActorDisplayName, &event.Action, &event.ResourceType, &event.ResourceID, &metadata, &event.OccurredAt, &sortKey); err != nil {
+			return Page{}, err
 		}
 		if err := json.Unmarshal([]byte(metadata), &event.Metadata); err != nil {
 			event.Metadata = map[string]any{"decodeError": true}
 		}
 		events = append(events, event)
+		sortKeys = append(sortKeys, sortKey)
 	}
-	return events, rows.Err()
+	if err := rows.Err(); err != nil {
+		return Page{}, err
+	}
+	page := Page{Items: events}
+	if len(events) > input.Limit {
+		page.Items = events[:input.Limit]
+		last := page.Items[len(page.Items)-1]
+		page.NextCursor, err = tablequery.EncodeCursor(fingerprint, input.Sort, input.Direction, sortKeys[input.Limit-1], last.ID)
+		if err != nil {
+			return Page{}, err
+		}
+	}
+	return page, nil
 }

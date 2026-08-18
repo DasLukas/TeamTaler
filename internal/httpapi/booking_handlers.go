@@ -28,12 +28,31 @@ func (s *Server) handleListBookings(response http.ResponseWriter, request *http.
 		writeProblem(response, request, err)
 		return
 	}
-	items, err := s.bookings.ListActivity(request.Context(), membership, request.URL.Query().Get("periodId"), queryLimit(request))
+	amountMin, err := optionalInt64Query(request, "amountMin")
 	if err != nil {
 		writeProblem(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusOK, items)
+	amountMax, err := optionalInt64Query(request, "amountMax")
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	values := request.URL.Query()
+	query := bookings.ActivityQuery{
+		Search: values.Get("q"), PeriodID: values.Get("periodId"),
+		ActorMembershipID: values.Get("actorMembershipId"), TargetMembershipID: values.Get("targetMembershipId"),
+		CategoryID: values.Get("categoryId"), ProductID: values.Get("productId"), Status: values.Get("status"),
+		CreatedFrom: values.Get("createdFrom"), CreatedTo: values.Get("createdTo"), AmountMin: amountMin, AmountMax: amountMax,
+		Sort: values.Get("sort"), Direction: values.Get("direction"), Cursor: values.Get("cursor"), Limit: queryLimit(request),
+	}
+	page, err := s.bookings.QueryActivity(request.Context(), membership, query)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeTablePageHeaders(response, page.NextCursor, query.Limit)
+	writeJSON(response, http.StatusOK, page.Items)
 }
 
 func (s *Server) handleCreateBooking(response http.ResponseWriter, request *http.Request) {

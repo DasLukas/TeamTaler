@@ -469,12 +469,14 @@ func (s *Server) handleSystemAudit(response http.ResponseWriter, request *http.R
 		writeProblem(response, request, err)
 		return
 	}
-	items, err := s.systemAdmin.ListAudit(request.Context(), queryLimit(request))
+	query := auditTableQuery(request)
+	page, err := s.systemAdmin.QueryAudit(request.Context(), query)
 	if err != nil {
 		writeProblem(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"items": items})
+	writeTablePageHeaders(response, page.NextCursor, query.Limit)
+	writeJSON(response, http.StatusOK, map[string]any{"items": page.Items})
 }
 
 func parseSMTPRevision(request *http.Request) int64 {

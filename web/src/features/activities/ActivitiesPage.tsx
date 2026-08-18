@@ -1,26 +1,29 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Archive from 'lucide-react/dist/esm/icons/archive';
 import CircleCheck from 'lucide-react/dist/esm/icons/circle-check';
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
-import Search from 'lucide-react/dist/esm/icons/search';
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
 import X from 'lucide-react/dist/esm/icons/x';
 import { useDeferredValue, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
-import { formatMoney } from '@/api/money';
-import type { Booking, MembershipStatus } from '@/api/types';
+import { currencyExponent, formatMoney } from '@/api/money';
+import type { Booking, BookingCollectionQuery, CollectionPage, MembershipStatus } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Page } from '@/components/layout/Page';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
 import { Modal } from '@/components/ui/Modal';
-import { StatePanel } from '@/components/ui/StatePanel';
+import { DataTable, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange } from '@/features/shared/DataTable';
 import tableStyles from '@/features/shared/Table.module.css';
+import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
+import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
 import styles from './ActivitiesPage.module.css';
 
 const activityDateTimeFormatter = new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' });
+const activityPageSize = 50;
+type ActivityFilterId = 'productId' | 'categoryId' | 'status' | 'createdAt' | 'amount';
 
 interface MembershipIdentityProps {
   avatarUrl?: string;
@@ -91,12 +94,79 @@ export function ActivitiesPage() {
   const { t } = useTranslation();
   const { activeGroup, activeGroupId, session } = useActiveGroup();
   const queryClient = useQueryClient();
-  const bookingsQuery = useQuery({ queryKey: ['bookings', activeGroupId], queryFn: () => api.getBookings(activeGroupId) });
   const categoriesQuery = useQuery({ queryKey: ['categories', activeGroupId], queryFn: () => api.getCategories(activeGroupId) });
-  const [search, setSearch] = useState('');
-  const deferredSearch = useDeferredValue(search.toLowerCase());
   const [reversal, setReversal] = useState<Booking | null>(null);
   const [reason, setReason] = useState('');
+  const labels = useDataTableLabels();
+  const filterDefinitions = useMemo<readonly DataTableFilterDefinition<ActivityFilterId>[]>(() => [
+    {
+      allLabel: t('dataTable.allValues'),
+      id: 'productId',
+      kind: 'select',
+      label: t('activities.booking'),
+      options: (categoriesQuery.data ?? []).flatMap((category) => category.products.map((product) => ({ label: product.name, value: product.id }))),
+    },
+    {
+      allLabel: t('dataTable.allValues'),
+      id: 'categoryId',
+      kind: 'select',
+      label: t('common.category'),
+      options: (categoriesQuery.data ?? []).map((category) => ({ label: category.name, value: category.id })),
+    },
+    {
+      allLabel: t('dataTable.allValues'),
+      id: 'status',
+      kind: 'select',
+      label: t('common.status'),
+      options: [{ label: t('common.booked'), value: 'POSTED' }, { label: t('common.reversed'), value: 'VOIDED' }],
+    },
+    { fromLabel: t('dataTable.from'), id: 'createdAt', kind: 'date-range', label: t('activities.time'), toLabel: t('dataTable.to') },
+    {
+      formatValue: (value) => {
+        const range = value as DataTableNumberRange;
+        return [range.min !== undefined ? `${t('dataTable.minimum')}: ${range.min}` : '', range.max !== undefined ? `${t('dataTable.maximum')}: ${range.max}` : ''].filter(Boolean).join(' · ');
+      },
+      id: 'amount',
+      kind: 'number-range',
+      label: `${t('common.amount')} (${activeGroup.currency})`,
+      maximumLabel: t('dataTable.maximum'),
+      minimumLabel: t('dataTable.minimum'),
+      step: 0.01,
+    },
+  ], [activeGroup.currency, categoriesQuery.data, t]);
+  const tableState = useDataTableUrlState<ActivityFilterId>({
+    filterDefinitions,
+    initialSorting: [{ id: 'createdAt', desc: true }],
+    namespace: 'activities',
+    sortableColumnIds: ['targetName', 'actorName', 'productName', 'categoryName', 'createdAt', 'amount', 'status'],
+  });
+  const deferredSearch = useDeferredValue(tableState.searchValue.trim());
+  const collectionQuery = useMemo<BookingCollectionQuery>(() => {
+    const dateRange = tableState.filters.createdAt as DataTableDateRange | undefined;
+    const amountRange = tableState.filters.amount as DataTableNumberRange | undefined;
+    const sorting = tableState.sorting[0];
+    const toMinorUnits = (value: number | undefined) => value === undefined ? undefined : Math.round(value * (10 ** currencyExponent(activeGroup.currency))).toString();
+    return {
+      amountMax: toMinorUnits(amountRange?.max),
+      amountMin: toMinorUnits(amountRange?.min),
+      categoryId: tableState.filters.categoryId as string | undefined,
+      createdFrom: dateRange?.from,
+      createdTo: dateRange?.to,
+      direction: sorting?.desc === false ? 'asc' : 'desc',
+      limit: activityPageSize,
+      productId: tableState.filters.productId as string | undefined,
+      q: deferredSearch || undefined,
+      sort: (sorting?.id ?? 'createdAt') as BookingCollectionQuery['sort'],
+      status: tableState.filters.status as BookingCollectionQuery['status'],
+    };
+  }, [activeGroup.currency, deferredSearch, tableState.filters, tableState.sorting]);
+  const bookingsQuery = useInfiniteQuery({
+    getNextPageParam: (lastPage: CollectionPage<Booking>) => lastPage.nextCursor,
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }): Promise<CollectionPage<Booking>> => api.getBookingsPage(activeGroupId, { ...collectionQuery, cursor: pageParam }),
+    queryKey: ['bookings', activeGroupId, 'collection', collectionQuery],
+  });
+  const bookings = useMemo(() => bookingsQuery.data?.pages.flatMap((page) => page.items) ?? [], [bookingsQuery.data]);
   const productImages = useMemo(() => new Map(
     categoriesQuery.data?.flatMap((category) => category.products.map((product) => [product.id, product.imageUrl] as const)) ?? [],
   ), [categoriesQuery.data]);
@@ -114,59 +184,86 @@ export function ActivitiesPage() {
     },
   });
 
-  if (bookingsQuery.isLoading) return <Page title={t('activities.title')}><StatePanel kind="loading" /></Page>;
-  if (bookingsQuery.isError || !bookingsQuery.data) return <Page title={t('activities.title')}><StatePanel kind="error" message={t('activities.error')} /></Page>;
-
-  const filtered = bookingsQuery.data.filter((booking) => `${booking.memberName} ${booking.bookedByName} ${booking.productName} ${booking.categoryName}`.toLowerCase().includes(deferredSearch));
-  const columnLabels = {
-    bookedFor: t('activities.bookedFor'),
-    bookedBy: t('activities.bookedBy'),
-    booking: t('activities.booking'),
-    category: t('common.category'),
-    time: t('activities.time'),
-    amount: t('common.amount'),
-    status: t('common.status'),
-    action: t('common.action'),
-  };
+  const columns = useMemo<DataTableColumnDef<Booking>[]>(() => [
+    {
+      accessorKey: 'memberName',
+      cell: ({ row }) => <MembershipIdentity avatarUrl={row.original.memberId === activeGroup.membership?.id ? session.user.avatarUrl : row.original.memberAvatarUrl} name={row.original.memberName} status={row.original.memberStatus} />,
+      enableSorting: true,
+      header: t('activities.bookedFor'),
+      id: 'targetName',
+      meta: { label: t('activities.bookedFor') },
+    },
+    {
+      accessorKey: 'bookedByName',
+      cell: ({ row }) => <MembershipIdentity avatarUrl={row.original.bookedByMemberId === activeGroup.membership?.id ? session.user.avatarUrl : row.original.bookedByAvatarUrl} name={row.original.bookedByName} status={row.original.bookedByStatus} />,
+      enableSorting: true,
+      header: t('activities.bookedBy'),
+      id: 'actorName',
+      meta: { label: t('activities.bookedBy') },
+    },
+    {
+      accessorKey: 'productName',
+      cell: ({ row }) => {
+        const booking = row.original;
+        const productImageUrl = productImages.get(booking.productId);
+        return <span className={styles.bookingProduct}>{productImageUrl ? <img alt="" decoding="async" loading="lazy" src={productImageUrl} /> : null}<span><strong>{booking.productName}</strong>{booking.quantity > 1 ? ` × ${booking.quantity}` : ''}{booking.reason ? <small>{booking.reason}</small> : null}</span></span>;
+      },
+      enableSorting: true,
+      header: t('activities.booking'),
+      id: 'productName',
+      meta: { label: t('activities.booking') },
+    },
+    { accessorKey: 'categoryName', enableSorting: true, header: t('common.category'), id: 'categoryName', meta: { label: t('common.category') } },
+    {
+      accessorKey: 'bookedAt',
+      cell: ({ row }) => <time dateTime={row.original.bookedAt}>{activityDateTimeFormatter.format(new Date(row.original.bookedAt))}</time>,
+      enableSorting: true,
+      header: t('activities.time'),
+      id: 'createdAt',
+      meta: { label: t('activities.time') },
+    },
+    {
+      accessorFn: (booking) => booking.total.minorUnits,
+      cell: ({ row }) => formatMoney(row.original.total),
+      enableSorting: true,
+      header: t('common.amount'),
+      id: 'amount',
+      meta: { align: 'end', label: t('common.amount') },
+    },
+    {
+      accessorKey: 'status',
+      cell: ({ row }) => <BookingState status={row.original.status} />,
+      enableSorting: true,
+      header: t('common.status'),
+      id: 'status',
+      meta: { label: t('common.status') },
+    },
+    {
+      cell: ({ row }) => row.original.status === 'POSTED' && row.original.canVoid ? <Button leadingIcon={<RotateCcw size={16} />} onClick={() => setReversal(row.original)} size="small" variant="ghost">{t('activities.reverse')}</Button> : null,
+      enableSorting: false,
+      header: () => <span className="sr-only">{t('common.action')}</span>,
+      id: 'action',
+      meta: { label: t('common.action') },
+    },
+  ], [activeGroup.membership?.id, productImages, session.user.avatarUrl, t]);
 
   return (
     <Page className={styles.page} title={t('activities.title')} wide>
-      <div className={tableStyles.toolbar}>
-        <div className={tableStyles.search}>
-          <Field htmlFor="activity-search" label={t('activities.searchLabel')}>
-            <div className={styles.searchControl}><Search aria-hidden="true" size={19} /><TextInput id="activity-search" onChange={(event) => setSearch(event.target.value)} placeholder={t('activities.searchPlaceholder')} value={search} /></div>
-          </Field>
-        </div>
-      </div>
-      {filtered.length === 0 ? <StatePanel kind="empty" message={t('activities.noResults')} /> : (
-        <div className={`${tableStyles.tableWrap} ${styles.activityList}`}>
-          <table aria-label={t('activities.title')} className={`${tableStyles.table} ${styles.activityTable}`}>
-            <thead><tr><th>{columnLabels.bookedFor}</th><th>{columnLabels.bookedBy}</th><th>{columnLabels.booking}</th><th>{columnLabels.category}</th><th>{columnLabels.time}</th><th className={tableStyles.number}>{columnLabels.amount}</th><th>{columnLabels.status}</th><th><span className="sr-only">{columnLabels.action}</span></th></tr></thead>
-            <tbody>
-              {filtered.map((booking) => {
-                const productImageUrl = productImages.get(booking.productId);
-                const memberAvatarUrl = booking.memberId === activeGroup.membership?.id ? session.user.avatarUrl : booking.memberAvatarUrl;
-                const bookedByAvatarUrl = booking.bookedByMemberId === activeGroup.membership?.id ? session.user.avatarUrl : booking.bookedByAvatarUrl;
-                return <tr key={booking.id}>
-                  <td data-label={columnLabels.bookedFor}><MembershipIdentity avatarUrl={memberAvatarUrl} name={booking.memberName} status={booking.memberStatus} /></td>
-                  <td data-label={columnLabels.bookedBy}><MembershipIdentity avatarUrl={bookedByAvatarUrl} name={booking.bookedByName} status={booking.bookedByStatus} /></td>
-                  <td data-label={columnLabels.booking}>
-                    <span className={styles.bookingProduct}>
-                      {productImageUrl ? <img alt="" decoding="async" loading="lazy" src={productImageUrl} /> : null}
-                      <span><strong>{booking.productName}</strong>{booking.quantity > 1 ? ` × ${booking.quantity}` : ''}{booking.reason ? <small>{booking.reason}</small> : null}</span>
-                    </span>
-                  </td>
-                  <td className={styles.categoryCell} data-label={columnLabels.category} title={booking.categoryName}>{booking.categoryName}</td>
-                  <td className={styles.timeCell} data-label={columnLabels.time}><time dateTime={booking.bookedAt}>{activityDateTimeFormatter.format(new Date(booking.bookedAt))}</time></td>
-                  <td className={`${tableStyles.number} ${styles.amountCell}`} data-label={columnLabels.amount}>{formatMoney(booking.total)}</td>
-                  <td data-label={columnLabels.status}><BookingState status={booking.status} /></td>
-                  <td data-label={columnLabels.action}>{booking.status === 'POSTED' && booking.canVoid ? <Button leadingIcon={<RotateCcw size={16} />} onClick={() => setReversal(booking)} size="small" variant="ghost">{t('activities.reverse')}</Button> : null}</td>
-                </tr>;
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <DataTable
+        ariaLabel={t('activities.title')}
+        columns={columns}
+        data={bookings}
+        emptyContent={bookingsQuery.isError ? t('activities.error') : t('activities.noResults')}
+        filterDefinitions={filterDefinitions}
+        getRowId={(booking) => booking.id}
+        hasMore={bookingsQuery.hasNextPage}
+        isLoading={bookingsQuery.isLoading}
+        isLoadingMore={bookingsQuery.isFetchingNextPage}
+        labels={{ ...labels, searchLabel: t('activities.searchLabel'), searchPlaceholder: t('activities.searchPlaceholder') }}
+        minTableWidth="1120px"
+        onLoadMore={() => void bookingsQuery.fetchNextPage()}
+        {...tableState}
+      />
       <Modal onClose={() => { setReversal(null); setReason(''); }} open={Boolean(reversal)} title={t('activities.reverseTitle')}>
         <form className={styles.reversalForm} onSubmit={(event) => { event.preventDefault(); reverseMutation.mutate(); }}>
           <p>{t('activities.reverseExplanation')}</p>

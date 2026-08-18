@@ -8,7 +8,7 @@ import i18n from '@/i18n';
 import { PaymentsPanel } from './PaymentsPanel';
 
 const apiMock = vi.hoisted(() => ({
-  getPayments: vi.fn(),
+  getPaymentsPage: vi.fn(),
   getAccountSummaries: vi.fn(),
   createPayment: vi.fn(),
   reversePayment: vi.fn(),
@@ -37,7 +37,8 @@ function renderPayments(): void {
 describe('PaymentsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    apiMock.getPayments.mockResolvedValue([]);
+    window.history.replaceState({}, '', '/finance');
+    apiMock.getPaymentsPage.mockResolvedValue({ hasMore: false, items: [], limit: 50 });
     apiMock.getAccountSummaries.mockResolvedValue(accounts);
     apiMock.getTransactionSettings.mockResolvedValue({
       foreignBookingReasonRequired: true,

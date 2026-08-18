@@ -1,20 +1,26 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import CircleDollarSign from 'lucide-react/dist/esm/icons/circle-dollar-sign';
 import Plus from 'lucide-react/dist/esm/icons/plus';
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
 import X from 'lucide-react/dist/esm/icons/x';
-import { useState } from 'react';
+import { useDeferredValue, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
-import { formatMoney, majorUnitsInputPattern, majorUnitsPlaceholder, parseMajorUnits } from '@/api/money';
-import type { Payment } from '@/api/types';
+import { currencyExponent, formatMoney, majorUnitsInputPattern, majorUnitsPlaceholder, parseMajorUnits } from '@/api/money';
+import type { CollectionPage, Payment, PaymentCollectionQuery } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Button } from '@/components/ui/Button';
 import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { Modal } from '@/components/ui/Modal';
 import { StatePanel } from '@/components/ui/StatePanel';
+import { DataTable, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange } from '@/features/shared/DataTable';
 import tableStyles from '@/features/shared/Table.module.css';
+import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
+import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
 import styles from './PaymentsPanel.module.css';
+
+const paymentPageSize = 50;
+type PaymentFilterId = 'membershipId' | 'method' | 'status' | 'receivedAt' | 'amount';
 
 /**
  * Renders the finance workspace for auditable incoming payments.
@@ -25,9 +31,9 @@ export function PaymentsPanel() {
   const { t } = useTranslation();
   const { activeGroupId, activeGroup } = useActiveGroup();
   const queryClient = useQueryClient();
-  const paymentsQuery = useQuery({ queryKey: ['payments', activeGroupId], queryFn: () => api.getPayments(activeGroupId) });
   const accountsQuery = useQuery({ queryKey: ['account-summaries', activeGroupId], queryFn: () => api.getAccountSummaries(activeGroupId) });
   const transactionSettingsQuery = useQuery({ queryKey: ['transaction-settings', activeGroupId], queryFn: () => api.getTransactionSettings(activeGroupId) });
+  const labels = useDataTableLabels();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [membershipId, setMembershipId] = useState('');
   const [amount, setAmount] = useState('');
@@ -36,6 +42,71 @@ export function PaymentsPanel() {
   const [reference, setReference] = useState('');
   const [paymentToReverse, setPaymentToReverse] = useState<Payment | null>(null);
   const [reversalReason, setReversalReason] = useState('');
+  const filterDefinitions = useMemo<readonly DataTableFilterDefinition<PaymentFilterId>[]>(() => [
+    {
+      allLabel: t('dataTable.allValues'),
+      id: 'membershipId',
+      kind: 'select',
+      label: t('common.member'),
+      options: (accountsQuery.data ?? []).map((account) => ({ label: account.displayName, value: account.membershipId })),
+    },
+    {
+      allLabel: t('dataTable.allValues'),
+      id: 'method',
+      kind: 'select',
+      label: t('finance.paymentType'),
+      options: (transactionSettingsQuery.data?.paymentMethods ?? []).map((option) => ({ label: option.label, value: option.id })),
+    },
+    {
+      allLabel: t('dataTable.allValues'),
+      id: 'status',
+      kind: 'select',
+      label: t('common.status'),
+      options: [{ label: t('common.booked'), value: 'POSTED' }, { label: t('common.reversed'), value: 'REVERSED' }],
+    },
+    { fromLabel: t('dataTable.from'), id: 'receivedAt', kind: 'date-range', label: t('common.date'), toLabel: t('dataTable.to') },
+    {
+      id: 'amount',
+      kind: 'number-range',
+      label: `${t('common.amount')} (${activeGroup.currency})`,
+      maximumLabel: t('dataTable.maximum'),
+      minimumLabel: t('dataTable.minimum'),
+      step: 0.01,
+    },
+  ], [accountsQuery.data, activeGroup.currency, t, transactionSettingsQuery.data?.paymentMethods]);
+  const tableState = useDataTableUrlState<PaymentFilterId>({
+    filterDefinitions,
+    initialSorting: [{ id: 'receivedAt', desc: true }],
+    namespace: 'payments',
+    sortableColumnIds: ['receivedAt', 'memberName', 'method', 'amount', 'status'],
+  });
+  const deferredSearch = useDeferredValue(tableState.searchValue.trim());
+  const collectionQuery = useMemo<PaymentCollectionQuery>(() => {
+    const dateRange = tableState.filters.receivedAt as DataTableDateRange | undefined;
+    const amountRange = tableState.filters.amount as DataTableNumberRange | undefined;
+    const sorting = tableState.sorting[0];
+    const toMinorUnits = (value: number | undefined) => value === undefined ? undefined : Math.round(value * (10 ** currencyExponent(activeGroup.currency))).toString();
+    return {
+      amountMax: toMinorUnits(amountRange?.max),
+      amountMin: toMinorUnits(amountRange?.min),
+      direction: sorting?.desc === false ? 'asc' : 'desc',
+      limit: paymentPageSize,
+      membershipId: tableState.filters.membershipId as string | undefined,
+      method: tableState.filters.method as string | undefined,
+      q: deferredSearch || undefined,
+      receivedFrom: dateRange?.from,
+      receivedTo: dateRange?.to,
+      sort: (sorting?.id ?? 'receivedAt') as PaymentCollectionQuery['sort'],
+      status: tableState.filters.status as PaymentCollectionQuery['status'],
+    };
+  }, [activeGroup.currency, deferredSearch, tableState.filters, tableState.sorting]);
+  const paymentsQuery = useInfiniteQuery({
+    getNextPageParam: (lastPage: CollectionPage<Payment>) => lastPage.nextCursor,
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }): Promise<CollectionPage<Payment>> => api.getPaymentsPage(activeGroupId, { ...collectionQuery, cursor: pageParam }),
+    queryKey: ['payments', activeGroupId, 'collection', collectionQuery],
+  });
+  const payments = useMemo(() => paymentsQuery.data?.pages.flatMap((page) => page.items) ?? [], [paymentsQuery.data]);
   const activeAccounts = accountsQuery.data?.filter((account) => account.status === 'ACTIVE') ?? [];
   const regularAccounts = activeAccounts.filter((account) => !account.isTemporaryGuest);
   const temporaryGuestAccounts = activeAccounts.filter((account) => account.isTemporaryGuest);
@@ -76,19 +147,73 @@ export function PaymentsPanel() {
     },
   });
 
-  if (paymentsQuery.isLoading || accountsQuery.isLoading || transactionSettingsQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
-  if (!paymentsQuery.data || !accountsQuery.data || !transactionSettingsQuery.data) return <div className={styles.state}><StatePanel kind="error" message={t('finance.error')} /></div>;
+  const columns = useMemo<DataTableColumnDef<Payment>[]>(() => [
+    {
+      accessorKey: 'receivedAt',
+      cell: ({ row }) => <time dateTime={row.original.receivedAt}>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(row.original.receivedAt))}</time>,
+      enableSorting: true,
+      header: t('common.date'),
+      id: 'receivedAt',
+      meta: { label: t('common.date') },
+    },
+    {
+      accessorKey: 'memberName',
+      cell: ({ row }) => <><strong>{row.original.memberName}</strong>{row.original.membershipStatus === 'DELETED' ? <span className={tableStyles.status}>{t('common.deleted')}</span> : null}</>,
+      enableSorting: true,
+      header: t('common.member'),
+      id: 'memberName',
+      meta: { label: t('common.member') },
+    },
+    { accessorKey: 'methodLabel', enableSorting: true, header: t('finance.paymentType'), id: 'method', meta: { label: t('finance.paymentType') } },
+    { accessorKey: 'reference', cell: ({ row }) => row.original.reference ?? '–', enableSorting: false, header: t('finance.reason'), id: 'reference', meta: { label: t('finance.reason') } },
+    {
+      accessorFn: (payment) => payment.amount.minorUnits,
+      cell: ({ row }) => formatMoney(row.original.amount),
+      enableSorting: true,
+      header: t('common.amount'),
+      id: 'amount',
+      meta: { align: 'end', label: t('common.amount') },
+    },
+    {
+      accessorKey: 'status',
+      cell: ({ row }) => <span className={`${tableStyles.status} ${row.original.status === 'REVERSED' ? tableStyles.statusMuted : ''}`}>{row.original.status === 'POSTED' ? t('common.booked') : t('common.reversed')}</span>,
+      enableSorting: true,
+      header: t('common.status'),
+      id: 'status',
+      meta: { label: t('common.status') },
+    },
+    {
+      cell: ({ row }) => row.original.status === 'POSTED' ? <Button leadingIcon={<RotateCcw size={16} />} onClick={() => setPaymentToReverse(row.original)} size="small" variant="ghost">{t('finance.reverse')}</Button> : null,
+      enableSorting: false,
+      header: () => <span className="sr-only">{t('common.action')}</span>,
+      id: 'action',
+      meta: { label: t('common.action') },
+    },
+  ], [t]);
 
-  const total = paymentsQuery.data.filter((payment) => payment.status === 'POSTED').reduce((sum, payment) => sum + BigInt(payment.amount.minorUnits), 0n);
+  if (accountsQuery.isLoading || transactionSettingsQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
+  if (!accountsQuery.data || !transactionSettingsQuery.data) return <div className={styles.state}><StatePanel kind="error" message={t('finance.error')} /></div>;
+
+  const total = payments.filter((payment) => payment.status === 'POSTED').reduce((sum, payment) => sum + BigInt(payment.amount.minorUnits), 0n);
   return (
     <div className={styles.content}>
       <header className={styles.header}><div><h2>{t('finance.title')}</h2><p>{t('finance.intro')}</p></div><Button leadingIcon={<Plus size={18} />} onClick={openRecordDialog}>{t('finance.record')}</Button></header>
-      <section className={styles.summary}><CircleDollarSign aria-hidden="true" size={28} /><div><span>{t('finance.recorded')}</span><strong>{formatMoney({ minorUnits: total.toString(), currency: activeGroup.currency })}</strong></div><small>{t('finance.transactionCount', { count: paymentsQuery.data.length })}</small></section>
-      {paymentsQuery.data.length === 0 ? <StatePanel actionLabel={t('finance.record')} kind="empty" message={t('finance.empty')} onAction={openRecordDialog} /> : (
-        <div className={tableStyles.tableWrap}>
-          <table className={tableStyles.table}><thead><tr><th>{t('common.date')}</th><th>{t('common.member')}</th><th>{t('finance.paymentType')}</th><th>{t('finance.reason')}</th><th className={tableStyles.number}>{t('common.amount')}</th><th>{t('common.status')}</th><th><span className="sr-only">{t('common.action')}</span></th></tr></thead><tbody>{paymentsQuery.data.map((payment) => <tr key={payment.id}><td>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(payment.receivedAt))}</td><td><strong>{payment.memberName}</strong>{payment.membershipStatus === 'DELETED' ? <span className={tableStyles.status}>{t('common.deleted')}</span> : null}</td><td>{payment.methodLabel}</td><td>{payment.reference ?? '–'}</td><td className={tableStyles.number}>{formatMoney(payment.amount)}</td><td><span className={`${tableStyles.status} ${payment.status === 'REVERSED' ? tableStyles.statusMuted : ''}`}>{payment.status === 'POSTED' ? t('common.booked') : t('common.reversed')}</span></td><td>{payment.status === 'POSTED' ? <Button leadingIcon={<RotateCcw size={16} />} onClick={() => setPaymentToReverse(payment)} size="small" variant="ghost">{t('finance.reverse')}</Button> : null}</td></tr>)}</tbody></table>
-        </div>
-      )}
+      <section className={styles.summary}><CircleDollarSign aria-hidden="true" size={28} /><div><span>{t('finance.recorded')}</span><strong>{formatMoney({ minorUnits: total.toString(), currency: activeGroup.currency })}</strong></div><small>{t('finance.transactionCount', { count: payments.length })}</small></section>
+      <DataTable
+        ariaLabel={t('finance.title')}
+        columns={columns}
+        data={payments}
+        emptyContent={paymentsQuery.isError ? t('finance.error') : t('finance.empty')}
+        filterDefinitions={filterDefinitions}
+        getRowId={(payment) => payment.id}
+        hasMore={paymentsQuery.hasNextPage}
+        isLoading={paymentsQuery.isLoading}
+        isLoadingMore={paymentsQuery.isFetchingNextPage}
+        labels={{ ...labels, searchLabel: t('finance.searchLabel'), searchPlaceholder: t('finance.searchPlaceholder') }}
+        minTableWidth="980px"
+        onLoadMore={() => void paymentsQuery.fetchNextPage()}
+        {...tableState}
+      />
       <Modal onClose={() => setDialogOpen(false)} open={dialogOpen} title={t('finance.record')}>
         <form className={styles.form} onSubmit={(event) => { event.preventDefault(); paymentMutation.mutate(); }}>
           <Field htmlFor="payment-member" label={t('common.member')}>

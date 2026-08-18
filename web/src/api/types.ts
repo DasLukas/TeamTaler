@@ -4,6 +4,64 @@ export interface Money {
   currency: string;
 }
 
+/** Sort direction accepted by every server-backed collection endpoint. */
+export type CollectionSortDirection = 'asc' | 'desc';
+
+/** Shared search, sorting, and cursor options for an immutable collection. */
+export interface CollectionQuery<SortKey extends string> {
+  q?: string;
+  limit?: number;
+  cursor?: string;
+  sort?: SortKey;
+  direction?: CollectionSortDirection;
+}
+
+/** One cursor-based collection page while preserving the API's array response body. */
+export interface CollectionPage<Item> {
+  items: Item[];
+  nextCursor?: string;
+  hasMore: boolean;
+  limit: number;
+}
+
+/** Server-backed activity search, filter, and sort options. */
+export interface BookingCollectionQuery extends CollectionQuery<'createdAt' | 'amount' | 'targetName' | 'actorName' | 'productName' | 'categoryName' | 'status'> {
+  periodId?: string;
+  actorMembershipId?: string;
+  targetMembershipId?: string;
+  categoryId?: string;
+  productId?: string;
+  status?: 'POSTED' | 'VOIDED';
+  createdFrom?: string;
+  createdTo?: string;
+  amountMin?: string;
+  amountMax?: string;
+}
+
+/** Server-backed incoming-payment search, filter, and sort options. */
+export interface PaymentCollectionQuery extends CollectionQuery<'receivedAt' | 'amount' | 'memberName' | 'method' | 'status'> {
+  membershipId?: string;
+  method?: string;
+  status?: 'POSTED' | 'REVERSED';
+  receivedFrom?: string;
+  receivedTo?: string;
+  amountMin?: string;
+  amountMax?: string;
+}
+
+/** Server-backed group-audit search, filter, and sort options. */
+export interface AuditCollectionQuery extends CollectionQuery<'occurredAt' | 'actorName' | 'action' | 'resourceType'> {
+  actorUserId?: string;
+  actorMembershipId?: string;
+  action?: string;
+  resourceType?: string;
+  occurredFrom?: string;
+  occurredTo?: string;
+}
+
+/** Server-backed system-audit search, filter, and sort options. */
+export type SystemAuditCollectionQuery = Omit<AuditCollectionQuery, 'actorMembershipId'>;
+
 /** Determines whether a product price is fixed by the catalog or chosen per booking. */
 export type ProductPricingMode = 'FIXED' | 'USER_DEFINED';
 

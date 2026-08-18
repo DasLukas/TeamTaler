@@ -515,10 +515,12 @@ func (s *Server) handleAudit(response http.ResponseWriter, request *http.Request
 		writeProblem(response, request, err)
 		return
 	}
-	items, err := audit.List(request.Context(), s.db, membership.GroupID, queryLimit(request))
+	query := auditTableQuery(request)
+	page, err := audit.Query(request.Context(), s.db, membership.GroupID, query)
 	if err != nil {
 		writeProblem(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusOK, items)
+	writeTablePageHeaders(response, page.NextCursor, query.Limit)
+	writeJSON(response, http.StatusOK, page.Items)
 }

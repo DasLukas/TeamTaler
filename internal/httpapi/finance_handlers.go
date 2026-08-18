@@ -20,6 +20,40 @@ func (s *Server) handleOwnAccount(response http.ResponseWriter, request *http.Re
 	writeJSON(response, http.StatusOK, account)
 }
 
+// handleOwnAccountMovements returns the authenticated member's complete
+// receivable history through a bounded server-side table query.
+func (s *Server) handleOwnAccountMovements(response http.ResponseWriter, request *http.Request) {
+	_, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	amountMin, err := optionalInt64Query(request, "amountMin")
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	amountMax, err := optionalInt64Query(request, "amountMax")
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	values := request.URL.Query()
+	query := finance.MovementQuery{
+		Search: values.Get("q"), PeriodID: values.Get("periodId"), Type: values.Get("type"),
+		CreatedFrom: values.Get("createdFrom"), CreatedTo: values.Get("createdTo"),
+		AmountMin: amountMin, AmountMax: amountMax, Sort: values.Get("sort"), Direction: values.Get("direction"),
+		Cursor: values.Get("cursor"), Limit: queryLimit(request),
+	}
+	page, err := s.finance.QueryMovements(request.Context(), membership, membership.ID, query)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeTablePageHeaders(response, page.NextCursor, query.Limit)
+	writeJSON(response, http.StatusOK, page.Items)
+}
+
 func (s *Server) handleMemberAccount(response http.ResponseWriter, request *http.Request) {
 	_, membership, err := s.membership(request)
 	if err != nil {
@@ -57,12 +91,30 @@ func (s *Server) handleListPayments(response http.ResponseWriter, request *http.
 		writeProblem(response, request, err)
 		return
 	}
-	items, err := s.finance.ListPayments(request.Context(), membership, queryLimit(request))
+	amountMin, err := optionalInt64Query(request, "amountMin")
 	if err != nil {
 		writeProblem(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusOK, items)
+	amountMax, err := optionalInt64Query(request, "amountMax")
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	values := request.URL.Query()
+	query := finance.PaymentQuery{
+		Search: values.Get("q"), MembershipID: values.Get("membershipId"), Method: values.Get("method"),
+		Status: values.Get("status"), ReceivedFrom: values.Get("receivedFrom"), ReceivedTo: values.Get("receivedTo"),
+		AmountMin: amountMin, AmountMax: amountMax, Sort: values.Get("sort"), Direction: values.Get("direction"),
+		Cursor: values.Get("cursor"), Limit: queryLimit(request),
+	}
+	page, err := s.finance.QueryPayments(request.Context(), membership, query)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeTablePageHeaders(response, page.NextCursor, query.Limit)
+	writeJSON(response, http.StatusOK, page.Items)
 }
 
 func (s *Server) handleCreatePayment(response http.ResponseWriter, request *http.Request) {

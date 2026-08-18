@@ -8,7 +8,6 @@ import { ActiveGroupContext } from '@/app/active-group-context';
 import i18n from '@/i18n';
 import { MembersPanel } from './MembersPanel';
 
-const mediaQueryMock = vi.hoisted(() => ({ compact: false }));
 const apiMock = vi.hoisted(() => ({
   getMembers: vi.fn(),
   getCategories: vi.fn(),
@@ -33,8 +32,6 @@ const apiMock = vi.hoisted(() => ({
   updatePublicJoinLink: vi.fn(),
   rotatePublicJoinLink: vi.fn(),
 }));
-
-vi.mock('@/hooks/useMediaQuery', () => ({ useMediaQuery: () => mediaQueryMock.compact }));
 
 vi.mock('@/api/client', () => ({
   api: apiMock,
@@ -135,7 +132,6 @@ function renderMembers(activeSession: Session = session): QueryClient {
 describe('MembersPanel invitations', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mediaQueryMock.compact = false;
     apiMock.getMembers.mockResolvedValue(members);
     apiMock.getRoles.mockResolvedValue(roles);
     apiMock.getGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
@@ -191,13 +187,34 @@ describe('MembersPanel invitations', () => {
     expect(screen.queryByText(i18n.t('members.csvImport.deliveryStatus.notRequested'))).not.toBeInTheDocument();
   });
 
-  it('omits the neutral email-delivery badge from compact invitation cards', async () => {
-    mediaQueryMock.compact = true;
-    apiMock.getInvitations.mockResolvedValue([{ ...invitationMetadata[0], emailDeliveryStatus: 'NOT_REQUESTED' }]);
+  it('keeps every member collection in a semantic table within a focusable scroll region', async () => {
+    apiMock.getMembers.mockResolvedValue([members[0], {
+      ...members[0],
+      id: 'member-archived',
+      userId: 'user-archived',
+      displayName: 'Archived Member',
+      email: 'archived@example.test',
+      status: 'ARCHIVED',
+      active: false,
+    }]);
     renderMembers();
 
-    expect(await screen.findByText('new@example.test')).toBeVisible();
-    expect(screen.queryByText(i18n.t('members.csvImport.deliveryStatus.notRequested'))).not.toBeInTheDocument();
+    const collections = [
+      { name: i18n.t('members.openInvitations'), columns: 6 },
+      { name: i18n.t('members.activeMembers'), columns: 4 },
+      { name: i18n.t('members.archivedMembers'), columns: 3 },
+    ];
+    await screen.findByText('new@example.test');
+
+    for (const collection of collections) {
+      const region = screen.getByRole('region', { name: collection.name });
+      expect(region).toHaveAttribute('tabindex', '0');
+      const table = within(region).getByRole('table');
+      const headers = within(table).getAllByRole('columnheader');
+      expect(headers).toHaveLength(collection.columns);
+      headers.forEach((header) => expect(header).toHaveAttribute('scope', 'col'));
+      expect(within(table).getAllByRole('cell')).toHaveLength(collection.columns);
+    }
   });
 
   it('keeps relevant email-delivery badges visible', async () => {

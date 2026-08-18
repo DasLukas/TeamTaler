@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Archive from 'lucide-react/dist/esm/icons/archive';
 import ArchiveRestore from 'lucide-react/dist/esm/icons/archive-restore';
 import CircleAlert from 'lucide-react/dist/esm/icons/circle-alert';
@@ -12,12 +12,15 @@ import Save from 'lucide-react/dist/esm/icons/save';
 import ShieldAlert from 'lucide-react/dist/esm/icons/shield-alert';
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
 import X from 'lucide-react/dist/esm/icons/x';
-import { useDeferredValue, useState, type FormEvent } from 'react';
+import { useDeferredValue, useMemo, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { formatMoney } from '@/api/money';
 import type {
+  CollectionPage,
   ResettableSystemSettingKey,
+  SystemAuditCollectionQuery,
+  SystemAuditEntry,
   SystemGroup,
   SystemGroupInvitationResult,
   SystemSettings,
@@ -33,12 +36,15 @@ import { ItemAction } from '@/components/ui/ItemAction';
 import { Modal } from '@/components/ui/Modal';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { Toggle } from '@/components/ui/Toggle';
-import { AuditEventTable } from '@/features/shared/AuditEventTable';
+import { AuditEventTable, type AuditEventFilterId } from '@/features/shared/AuditEventTable';
+import type { DataTableDateRange, DataTableFilterDefinition } from '@/features/shared/DataTable';
+import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
 import styles from './SystemSettingsPanel.module.css';
 
 const SETTINGS_QUERY_KEY = ['system-settings'] as const;
 const GROUPS_QUERY_KEY = ['system-groups'] as const;
 const AUDIT_QUERY_KEY = ['system-audit'] as const;
+const SYSTEM_AUDIT_PAGE_SIZE = 50;
 const MEBIBYTE = 1024 * 1024;
 const SMTP_PASSWORD_MASK = '••••••••••••';
 const COMMON_CURRENCIES = ['EUR', 'CHF', 'USD', 'GBP', 'PLN', 'CZK', 'DKK', 'NOK', 'SEK'] as const;
@@ -511,18 +517,60 @@ function GroupsSettingsSection({ defaultCurrency }: { defaultCurrency: string })
 /** Immutable global activity feed including retained purge receipts. */
 function SystemAuditSection() {
   const { t } = useTranslation();
-  const audit = useQuery({ queryKey: AUDIT_QUERY_KEY, queryFn: api.getSystemAudit });
+  const filterDefinitions = useMemo<readonly DataTableFilterDefinition<AuditEventFilterId>[]>(() => [
+    { id: 'action', kind: 'text', label: t('audit.action'), placeholder: t('audit.actionPlaceholder') },
+    { id: 'resourceType', kind: 'text', label: t('audit.resourceType'), placeholder: t('audit.resourceTypePlaceholder') },
+    { fromLabel: t('dataTable.from'), id: 'occurredAt', kind: 'date-range', label: t('audit.time'), toLabel: t('dataTable.to') },
+  ], [t]);
+  const tableState = useDataTableUrlState<AuditEventFilterId>({
+    filterDefinitions,
+    initialSorting: [{ id: 'occurredAt', desc: true }],
+    namespace: 'system-audit',
+    sortableColumnIds: ['occurredAt', 'actorName', 'action', 'resourceType'],
+  });
+  const deferredSearch = useDeferredValue(tableState.searchValue.trim());
+  const collectionQuery = useMemo<SystemAuditCollectionQuery>(() => {
+    const dateRange = tableState.filters.occurredAt as DataTableDateRange | undefined;
+    const sorting = tableState.sorting[0];
+    return {
+      action: tableState.filters.action as string | undefined,
+      direction: sorting?.desc === false ? 'asc' : 'desc',
+      limit: SYSTEM_AUDIT_PAGE_SIZE,
+      occurredFrom: dateRange?.from,
+      occurredTo: dateRange?.to,
+      q: deferredSearch || undefined,
+      resourceType: tableState.filters.resourceType as string | undefined,
+      sort: (sorting?.id ?? 'occurredAt') as SystemAuditCollectionQuery['sort'],
+    };
+  }, [deferredSearch, tableState.filters, tableState.sorting]);
+  const audit = useInfiniteQuery({
+    getNextPageParam: (lastPage: CollectionPage<SystemAuditEntry>) => lastPage.nextCursor,
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }): Promise<CollectionPage<SystemAuditEntry>> => api.getSystemAuditPage({ ...collectionQuery, cursor: pageParam }),
+    queryKey: [...AUDIT_QUERY_KEY, 'collection', collectionQuery],
+  });
+  const entries = useMemo(() => audit.data?.pages.flatMap((page) => page.items).map((entry) => ({
+    action: entry.action,
+    actor: entry.actorDisplayName,
+    details: entry.summary,
+    id: entry.id,
+    occurredAt: entry.createdAt,
+    subject: [entry.targetType, entry.targetId].filter(Boolean).join(' · ') || '–',
+  })) ?? [], [audit.data]);
   return (
     <section aria-labelledby="system-audit-title" className={styles.section}>
       <header><h3 id="system-audit-title">{t('systemSettings.audit.title')}</h3><p>{t('systemSettings.audit.intro')}</p></header>
-      {audit.isLoading ? <StatePanel kind="loading" /> : audit.isError ? <StatePanel kind="error" message={t('systemSettings.audit.error')} /> : audit.data?.length === 0 ? <StatePanel kind="empty" message={t('systemSettings.audit.empty')} /> : <AuditEventTable entries={audit.data?.map((entry) => ({
-        action: entry.action,
-        actor: entry.actorDisplayName,
-        details: entry.summary,
-        id: entry.id,
-        occurredAt: entry.createdAt,
-        subject: [entry.targetType, entry.targetId].filter(Boolean).join(' · ') || '–',
-      })) ?? []} />}
+      <AuditEventTable
+        emptyMessage={audit.isError ? t('systemSettings.audit.error') : t('systemSettings.audit.empty')}
+        entries={entries}
+        filterDefinitions={filterDefinitions}
+        hasMore={audit.hasNextPage}
+        isLoading={audit.isLoading}
+        isLoadingMore={audit.isFetchingNextPage}
+        onLoadMore={() => void audit.fetchNextPage()}
+        tableState={tableState}
+        title={t('systemSettings.audit.title')}
+      />
     </section>
   );
 }

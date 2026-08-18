@@ -1,7 +1,13 @@
+import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import tableStyles from './Table.module.css';
+import { DataTable, type DataTableColumnDef, type DataTableFilterDefinition } from './DataTable';
+import { useDataTableLabels } from './useDataTableLabels';
+import type { DataTableUrlState } from './useDataTableUrlState';
 
 const auditDateTimeFormatter = new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' });
+
+/** Filter identifiers supported by group and system audit collections. */
+export type AuditEventFilterId = 'action' | 'resourceType' | 'occurredAt';
 
 /** One normalized row rendered by the shared audit-event table. */
 export interface AuditEventTableEntry {
@@ -15,34 +21,59 @@ export interface AuditEventTableEntry {
 
 /** Properties accepted by the shared audit-event table. */
 export interface AuditEventTableProps {
-  entries: readonly AuditEventTableEntry[];
+  emptyMessage: string;
+  entries: AuditEventTableEntry[];
+  filterDefinitions: readonly DataTableFilterDefinition<AuditEventFilterId>[];
+  hasMore?: boolean;
+  isLoading?: boolean;
+  isLoadingMore?: boolean;
+  onLoadMore?: () => void;
+  tableState: DataTableUrlState<AuditEventFilterId>;
+  title: string;
 }
 
 /**
- * Renders immutable audit events in the standard TeamTaler table layout.
+ * Renders immutable audit events with server-controlled search, filters, sorting, and pagination.
  *
- * @param props - Normalized chronological audit entries.
- * @returns A responsive table with time, actor, action, subject, and details columns.
+ * @param props - Normalized events, controlled query state, typed filters, and incremental loading state.
+ * @returns A searchable audit table that keeps every column horizontally available on mobile.
  *
  * @example
- * <AuditEventTable entries={[{ id: 'evt-1', occurredAt: new Date().toISOString(), actor: 'Admin', action: 'group.updated', subject: 'group · grp-1', details: 'Name changed' }]} />
+ * <AuditEventTable title="Audit" entries={events} emptyMessage="No events" filterDefinitions={filters} tableState={tableState} />
  */
-export function AuditEventTable({ entries }: AuditEventTableProps) {
+export function AuditEventTable({ emptyMessage, entries, filterDefinitions, hasMore, isLoading, isLoadingMore, onLoadMore, tableState, title }: AuditEventTableProps) {
   const { t } = useTranslation();
+  const labels = useDataTableLabels();
+  const columns = useMemo<DataTableColumnDef<AuditEventTableEntry>[]>(() => [
+    {
+      accessorKey: 'occurredAt',
+      cell: ({ row }) => <time dateTime={row.original.occurredAt}>{auditDateTimeFormatter.format(new Date(row.original.occurredAt))}</time>,
+      enableSorting: true,
+      header: t('audit.time'),
+      id: 'occurredAt',
+      meta: { label: t('audit.time') },
+    },
+    { accessorKey: 'actor', cell: ({ row }) => <strong>{row.original.actor}</strong>, enableSorting: true, header: t('audit.actor'), id: 'actorName', meta: { label: t('audit.actor') } },
+    { accessorKey: 'action', enableSorting: true, header: t('audit.action'), id: 'action', meta: { label: t('audit.action') } },
+    { accessorKey: 'subject', enableSorting: true, header: t('audit.subject'), id: 'resourceType', meta: { label: t('audit.subject') } },
+    { accessorKey: 'details', enableSorting: false, header: t('common.details'), id: 'details', meta: { label: t('common.details') } },
+  ], [t]);
+
   return (
-    <div className={tableStyles.tableWrap}>
-      <table className={tableStyles.table}>
-        <thead><tr><th>{t('audit.time')}</th><th>{t('audit.actor')}</th><th>{t('audit.action')}</th><th>{t('audit.subject')}</th><th>{t('common.details')}</th></tr></thead>
-        <tbody>{entries.map((entry) => (
-          <tr key={entry.id}>
-            <td><time dateTime={entry.occurredAt}>{auditDateTimeFormatter.format(new Date(entry.occurredAt))}</time></td>
-            <td><strong>{entry.actor}</strong></td>
-            <td>{entry.action}</td>
-            <td>{entry.subject}</td>
-            <td>{entry.details}</td>
-          </tr>
-        ))}</tbody>
-      </table>
-    </div>
+    <DataTable
+      ariaLabel={title}
+      columns={columns}
+      data={entries}
+      emptyContent={emptyMessage}
+      filterDefinitions={filterDefinitions}
+      getRowId={(entry) => entry.id}
+      hasMore={hasMore}
+      isLoading={isLoading}
+      isLoadingMore={isLoadingMore}
+      labels={{ ...labels, searchLabel: t('audit.searchLabel'), searchPlaceholder: t('audit.searchPlaceholder') }}
+      minTableWidth="980px"
+      onLoadMore={onLoadMore}
+      {...tableState}
+    />
   );
 }

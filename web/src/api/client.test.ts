@@ -1047,3 +1047,73 @@ describe('system-administration API contract', () => {
     expect(new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers).get('If-Match')).toBe('"v2"');
   });
 });
+
+describe('server-backed collection API contract', () => {
+  beforeEach(() => vi.restoreAllMocks());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('encodes activity filters and exposes cursor response metadata', async () => {
+    const response = new Response(JSON.stringify([booking]), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Next-Cursor': 'opaque-next-page',
+        'X-Has-More': 'true',
+        'X-Page-Limit': '25',
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValueOnce(response);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const page = await api.getBookingsPage('group/a', {
+      q: 'water',
+      status: 'POSTED',
+      amountMin: '100',
+      sort: 'amount',
+      direction: 'desc',
+      limit: 25,
+    });
+
+    const requestUrl = new URL(String(fetchMock.mock.calls[0][0]), 'https://teamtaler.example');
+    expect(requestUrl.pathname).toBe('/api/v1/groups/group%2Fa/bookings');
+    expect(Object.fromEntries(requestUrl.searchParams)).toMatchObject({
+      q: 'water',
+      status: 'POSTED',
+      amountMin: '100',
+      sort: 'amount',
+      direction: 'desc',
+      limit: '25',
+    });
+    expect(page).toMatchObject({ items: [booking], nextCursor: 'opaque-next-page', hasMore: true, limit: 25 });
+  });
+
+  it('loads group-audit pages and member identities in parallel', async () => {
+    const auditEntry = {
+      id: 'audit-a',
+      actorMembershipId: 'member-a',
+      action: 'payment.created',
+      resourceType: 'payment',
+      resourceId: 'payment-a',
+      metadata: { amountMinor: 100 },
+      occurredAt: '2026-08-18T08:00:00Z',
+    };
+    const member = {
+      id: 'member-a', userId: 'user-a', displayName: 'Alex', email: 'alex@example.test', initials: 'A', isTemporaryGuest: false,
+      roles: ['MEMBER'], groupPermissions: [], categoryPermissions: [], status: 'ACTIVE', active: true,
+    };
+    const fetchMock = vi.fn((url: string) => Promise.resolve(url.includes('/audit')
+      ? jsonResponse([auditEntry])
+      : jsonResponse([member])));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const page = await api.getAuditPage('group-a', { q: 'payment', action: 'payment.created', limit: 50 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map((call) => String(call[0]))).toEqual(expect.arrayContaining([
+      '/api/v1/groups/group-a/audit?q=payment&action=payment.created&limit=50',
+      '/api/v1/groups/group-a/members',
+    ]));
+    expect(page.items[0]).toMatchObject({ actorName: 'Alex', action: 'payment.created', subject: 'payment · payment-a' });
+    expect(page).toMatchObject({ hasMore: false, limit: 50 });
+  });
+});

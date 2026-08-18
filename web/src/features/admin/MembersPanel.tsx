@@ -37,7 +37,6 @@ import { ItemAction } from '@/components/ui/ItemAction';
 import { Modal } from '@/components/ui/Modal';
 import { StatePanel } from '@/components/ui/StatePanel';
 import tableStyles from '@/features/shared/Table.module.css';
-import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { RoleAssignmentPicker } from './RoleAssignmentPicker';
 import { RoleMultiSelect } from './RoleMultiSelect';
 import { PublicJoinLinkDialog } from './PublicJoinLinkDialog';
@@ -389,7 +388,6 @@ export function MembersPanel() {
   const queryClient = useQueryClient();
   const membersQueryKey = ['members', activeGroupId] as const;
   const invitationQueryKey = ['invitations', activeGroupId] as const;
-  const compact = useMediaQuery('(max-width: 767px)');
   const membersQuery = useQuery({ queryKey: membersQueryKey, queryFn: () => api.getMembers(activeGroupId) });
   const canManageMembers = can(activeGroup.membership?.effectiveGrants, 'MEMBER_MANAGEMENT');
   const canManageProtectedRoles = can(activeGroup.membership?.effectiveGrants, 'GROUP_ADMINISTRATION');
@@ -653,23 +651,9 @@ export function MembersPanel() {
       <section className={styles.section}>
         <div className={styles.sectionHeading}><h3>{t('members.openInvitations')}</h3><span>{openInvitations.length}</span></div>
         {openInvitations.length === 0 ? <p className={styles.emptySection}>{t('members.noOpenInvitations')}</p> : (
-          compact ? <div className={styles.mobileCards}>{openInvitations.map((item) => {
-            const expired = Date.parse(item.expiresAt) <= invitationsQuery.dataUpdatedAt;
-            const resendBlocked = ACTIVE_DELIVERY_STATUSES.has(item.emailDeliveryStatus);
-            const claimInvitation = Boolean(item.targetMembershipId);
-            return <article className={styles.mobileCard} key={item.id}>
-              <header className={styles.mobileCardHeader}><div><strong>{item.displayName || item.email}</strong><small>{item.email}</small></div>{renderInvitationDeliveryBadge(item.emailDeliveryStatus, t)}</header>
-              <p className={expired ? styles.expired : styles.mobileMetadata}>{expired ? t('members.expired') : t('members.validUntilDate', { date: new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(item.expiresAt)) })}</p>
-              {claimInvitation ? <p className={styles.temporaryGuestRole}>{t('members.claimInvitationRoleLocked')}</p> : <RoleAssignmentPicker canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} onApply={(roleIds) => applyInvitationRoles(item, roleIds)} roleIds={item.roleIds ?? []} roles={roles} subjectName={item.displayName || item.email} />}
-              {canManageMembers ? <div className={styles.mobileActions}>
-                {!claimInvitation ? <ItemAction aria-label={t('members.editInvitationFor', { email: item.email })} leadingIcon={<Pencil size={16} />} onClick={() => openEdit(item)}>{t('common.edit')}</ItemAction> : null}
-                <ItemAction aria-label={t('members.resendFor', { email: item.email })} disabled={resendBlocked} leadingIcon={<RotateCcw size={16} />} onClick={() => { setSelectedInvitation(item); setResendResult(null); setDialog('resend'); }}>{t('members.resend')}</ItemAction>
-                <ItemAction aria-label={t('members.deleteInvitationFor', { email: item.email })} leadingIcon={<Trash2 size={16} />} onClick={() => { setSelectedInvitation(item); setDialog('revoke'); }}>{t('common.delete')}</ItemAction>
-              </div> : null}
-            </article>;
-          })}</div> : <div className={tableStyles.tableWrap}>
+          <div aria-label={t('members.openInvitations')} className={`${tableStyles.tableWrap} ${styles.tableScrollRegion}`} role="region" tabIndex={0}>
             <table className={tableStyles.table}>
-              <thead><tr><th>{t('common.name')}</th><th>{t('members.email')}</th><th>{t('members.roles')}</th><th>{t('members.delivery')}</th><th>{t('members.validUntil')}</th>{canManageMembers ? <th><span className="sr-only">{t('common.action')}</span></th> : null}</tr></thead>
+              <thead><tr><th scope="col">{t('common.name')}</th><th scope="col">{t('members.email')}</th><th scope="col">{t('members.roles')}</th><th scope="col">{t('members.delivery')}</th><th scope="col">{t('members.validUntil')}</th>{canManageMembers ? <th scope="col"><span className="sr-only">{t('common.action')}</span></th> : null}</tr></thead>
               <tbody>{openInvitations.map((item) => {
                 const expired = Date.parse(item.expiresAt) <= invitationsQuery.dataUpdatedAt;
                 const resendBlocked = ACTIVE_DELIVERY_STATUSES.has(item.emailDeliveryStatus);
@@ -696,21 +680,9 @@ export function MembersPanel() {
 
       <section className={styles.section}>
         <div className={styles.sectionHeading}><h3>{t('members.activeMembers')}</h3><span>{activeMembers.length}</span></div>
-        {compact ? <div className={styles.mobileCards}>{activeMembers.map((member) => {
-          const temporaryGuest = isTemporaryGuest(member);
-          const claimPending = claimInvitationMembershipIds.has(member.id);
-          return <article className={styles.mobileCard} key={member.id}>
-            <header className={styles.mobileCardHeader}><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /><span><span className={styles.memberName}><strong>{member.displayName}</strong>{temporaryGuest ? <span className={styles.guestBadge}>{t('members.temporaryGuestBadge')}</span> : null}</span>{member.email ? <small>{member.email}</small> : null}</span></span></header>
-            {!temporaryGuest ? <RoleAssignmentPicker canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} lockedRoleIds={lockedAdministratorRoleIds(member.roleIds ?? [])} onApply={(roleIds) => applyMemberRoles(member, roleIds)} roleIds={member.roleIds ?? []} roles={roles} subjectName={member.displayName} /> : null}
-            {canManageMembers ? <div className={styles.mobileActions}>
-              {temporaryGuest ? <ItemAction aria-label={t('members.renameGuestFor', { name: member.displayName })} leadingIcon={<Pencil size={16} />} onClick={() => openGuestRename(member)}>{t('members.renameGuest')}</ItemAction> : null}
-              {temporaryGuest ? renderGuestClaimAction(member, claimPending) : null}
-              <ItemAction aria-label={t('members.archiveFor', { name: member.displayName })} leadingIcon={<UserMinus size={16} />} onClick={() => { setSelectedMember(member); setDialog('archive'); }}>{t('members.archive')}</ItemAction>
-            </div> : null}
-          </article>;
-        })}</div> : <div className={tableStyles.tableWrap}>
+        <div aria-label={t('members.activeMembers')} className={`${tableStyles.tableWrap} ${styles.tableScrollRegion}`} role="region" tabIndex={0}>
           <table className={tableStyles.table}>
-            <thead><tr><th>{t('common.member')}</th><th>{t('members.email')}</th><th>{t('members.roles')}</th>{canManageMembers ? <th><span className="sr-only">{t('common.action')}</span></th> : null}</tr></thead>
+            <thead><tr><th scope="col">{t('common.member')}</th><th scope="col">{t('members.email')}</th><th scope="col">{t('members.roles')}</th>{canManageMembers ? <th scope="col"><span className="sr-only">{t('common.action')}</span></th> : null}</tr></thead>
             <tbody>{activeMembers.map((member) => {
               const temporaryGuest = isTemporaryGuest(member);
               const claimPending = claimInvitationMembershipIds.has(member.id);
@@ -726,22 +698,14 @@ export function MembersPanel() {
               </tr>;
             })}</tbody>
           </table>
-        </div>}
+        </div>
       </section>
 
       {canManageMembers ? <section className={styles.section}>
         <div className={styles.sectionHeading}><h3>{t('members.archivedMembers')}</h3><span>{formerMembers.length}</span></div>
-        {formerMembers.length === 0 ? <p className={styles.emptySection}>{t('members.noArchivedMembers')}</p> : compact ? <div className={styles.mobileCards}>{formerMembers.map((member) => (
-          <article className={styles.mobileCard} key={member.id}>
-            <header className={styles.mobileCardHeader}><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /><span><span className={styles.memberName}><strong>{member.displayName}</strong>{isTemporaryGuest(member) ? <span className={styles.guestBadge}>{t('members.temporaryGuestBadge')}</span> : null}</span>{member.email ? <small>{member.email}</small> : null}</span></span></header>
-            <div className={styles.mobileActions}>
-              <ItemAction aria-label={t('members.reactivateFor', { name: member.displayName })} leadingIcon={<RotateCcw size={16} />} onClick={() => openReactivation(member)}>{t('members.reactivate')}</ItemAction>
-              <ItemAction aria-label={t('members.permanentDeleteFor', { name: member.displayName })} leadingIcon={<Trash2 size={16} />} onClick={() => { setSelectedMember(member); setDialog('permanent-delete'); }}>{t('common.delete')}</ItemAction>
-            </div>
-          </article>
-        ))}</div> : (
-          <div className={tableStyles.tableWrap}><table className={tableStyles.table}>
-            <thead><tr><th>{t('common.member')}</th><th>{t('members.email')}</th><th><span className="sr-only">{t('common.action')}</span></th></tr></thead>
+        {formerMembers.length === 0 ? <p className={styles.emptySection}>{t('members.noArchivedMembers')}</p> : (
+          <div aria-label={t('members.archivedMembers')} className={`${tableStyles.tableWrap} ${styles.tableScrollRegion}`} role="region" tabIndex={0}><table className={tableStyles.table}>
+            <thead><tr><th scope="col">{t('common.member')}</th><th scope="col">{t('members.email')}</th><th scope="col"><span className="sr-only">{t('common.action')}</span></th></tr></thead>
             <tbody>{formerMembers.map((member) => <tr key={member.id}><td><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /> <span className={styles.memberName}><strong>{member.displayName}</strong>{isTemporaryGuest(member) ? <span className={styles.guestBadge}>{t('members.temporaryGuestBadge')}</span> : null}</span></span></td><td>{member.email}</td><td><div className={styles.tableActions}>
               <ItemAction aria-label={t('members.reactivateFor', { name: member.displayName })} leadingIcon={<RotateCcw size={16} />} onClick={() => openReactivation(member)}>{t('members.reactivate')}</ItemAction>
               <ItemAction aria-label={t('members.permanentDeleteFor', { name: member.displayName })} leadingIcon={<Trash2 size={16} />} onClick={() => { setSelectedMember(member); setDialog('permanent-delete'); }}>{t('common.delete')}</ItemAction>
