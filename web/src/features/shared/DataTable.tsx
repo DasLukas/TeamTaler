@@ -25,7 +25,8 @@ import {
 import { Button } from '@/components/ui/Button';
 import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { Modal } from '@/components/ui/Modal';
-import { isDataTableFilterActive } from './dataTableFilters';
+import { MultiSelectMenu } from '@/components/ui/MultiSelectMenu';
+import { availableDataTableFilterOptions, isDataTableFilterActive, normalizeDataTableFilters } from './dataTableFilters';
 import styles from './DataTable.module.css';
 import tableStyles from './Table.module.css';
 
@@ -68,6 +69,10 @@ export type DataTableFilterState<FilterId extends string = string> = Partial<Rec
 export interface DataTableFilterOption {
   value: string;
   label: string;
+  /** Optional leading product image or semantic category icon. */
+  visual?: ReactNode;
+  /** Parent option values that make this dependent option available. */
+  parentValues?: readonly string[];
 }
 
 interface DataTableFilterBase<FilterId extends string> {
@@ -92,6 +97,10 @@ export interface DataTableSelectFilter<FilterId extends string = string> extends
 /** Configuration for a multiple-value checkbox filter. */
 export interface DataTableMultiSelectFilter<FilterId extends string = string> extends DataTableFilterBase<FilterId> {
   kind: 'multi-select';
+  allLabel?: string;
+  dependsOn?: FilterId;
+  dropdown?: boolean;
+  emptyLabel?: string;
   options: readonly DataTableFilterOption[];
 }
 
@@ -298,12 +307,13 @@ export function DataTableResultBar({ hasMore = false, isLoadingMore = false, lab
 
 interface FilterEditorProps<FilterId extends string> {
   definition: DataTableFilterDefinition<FilterId>;
+  filters: DataTableFilterState<FilterId>;
   onChange: (value: DataTableFilterValue | undefined) => void;
   value: DataTableFilterValue | undefined;
 }
 
 /** Renders the editor matching one discriminated filter definition. */
-function FilterEditor<FilterId extends string>({ definition, onChange, value }: FilterEditorProps<FilterId>) {
+function FilterEditor<FilterId extends string>({ definition, filters, onChange, value }: FilterEditorProps<FilterId>) {
   const controlId = useId();
 
   if (definition.kind === 'text') {
@@ -333,10 +343,26 @@ function FilterEditor<FilterId extends string>({ definition, onChange, value }: 
 
   if (definition.kind === 'multi-select') {
     const selectedValues = Array.isArray(value) ? value : [];
+    const availableOptions = availableDataTableFilterOptions(definition, filters);
+    if (definition.dropdown) {
+      return (
+        <Field htmlFor={controlId} label={definition.label}>
+          <MultiSelectMenu
+            allLabel={definition.allLabel ?? '—'}
+            emptyLabel={definition.emptyLabel ?? '—'}
+            id={controlId}
+            label={definition.label}
+            onChange={(nextValues) => onChange(nextValues.length > 0 ? nextValues : undefined)}
+            options={availableOptions}
+            values={selectedValues}
+          />
+        </Field>
+      );
+    }
     return (
       <fieldset className={styles.checkboxGroup}>
         <legend>{definition.label}</legend>
-        {definition.options.map((option) => (
+        {availableOptions.map((option) => (
           <label key={option.value}>
             <input
               checked={selectedValues.includes(option.value)}
@@ -505,7 +531,7 @@ function DataTableControls<FilterId extends string>({ definitions, filters, labe
           className={styles.filterForm}
           onSubmit={(event) => {
             event.preventDefault();
-            onFiltersChange(compactFilters(draftFilters));
+            onFiltersChange(compactFilters(normalizeDataTableFilters(draftFilters, definitions)));
             setFilterDialogOpen(false);
           }}
         >
@@ -513,8 +539,9 @@ function DataTableControls<FilterId extends string>({ definitions, filters, labe
             {definitions.map((definition) => (
               <FilterEditor
                 definition={definition}
+                filters={draftFilters}
                 key={definition.id}
-                onChange={(value) => setDraftFilters((current) => ({ ...current, [definition.id]: value }))}
+                onChange={(value) => setDraftFilters((current) => normalizeDataTableFilters({ ...current, [definition.id]: value }, definitions))}
                 value={draftFilters[definition.id]}
               />
             ))}

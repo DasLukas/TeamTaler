@@ -4,6 +4,7 @@ import type { DataTableFilterDefinition } from './DataTable';
 import { useDataTableUrlState } from './useDataTableUrlState';
 
 type FilterId = 'status' | 'period';
+type DependentFilterId = 'categoryId' | 'productId';
 
 const definitions: readonly DataTableFilterDefinition<FilterId>[] = [
   {
@@ -71,6 +72,28 @@ describe('useDataTableUrlState', () => {
     }));
 
     expect(result.current.filters).toEqual({ status: 'open' });
+  });
+
+  it('upgrades legacy single values and removes products outside selected categories', () => {
+    const dependentDefinitions: readonly DataTableFilterDefinition<DependentFilterId>[] = [
+      { id: 'categoryId', kind: 'multi-select', label: 'Category', options: [{ label: 'Snacks', value: 'snacks' }] },
+      {
+        dependsOn: 'categoryId',
+        id: 'productId',
+        kind: 'multi-select',
+        label: 'Product',
+        options: [{ label: 'Water', parentValues: ['drinks'], value: 'water' }],
+      },
+    ];
+    const filters = encodeURIComponent(JSON.stringify({ categoryId: 'snacks', productId: ['water'] }));
+    window.history.replaceState({}, '', `/activities?tt.activities.filters=${filters}`);
+
+    const { result } = renderHook(() => useDataTableUrlState({
+      filterDefinitions: dependentDefinitions,
+      namespace: 'activities',
+    }));
+
+    expect(result.current.filters).toEqual({ categoryId: ['snacks'] });
   });
 
   it('synchronizes state when browser history navigation changes the URL', () => {

@@ -19,6 +19,7 @@ interface TestRow {
 }
 
 type TestFilterId = 'status' | 'period';
+type DependentFilterId = 'categoryId' | 'productId';
 
 const columns: DataTableColumnDef<TestRow>[] = [
   { accessorKey: 'name', enableSorting: true, header: 'Name', meta: { label: 'Name' } },
@@ -95,6 +96,56 @@ function ControlledTable({ hasMore = false, onLoadMore }: ControlledTableProps) 
   );
 }
 
+const dependentFilterDefinitions: readonly DataTableFilterDefinition<DependentFilterId>[] = [
+  {
+    allLabel: 'All categories',
+    dropdown: true,
+    emptyLabel: 'No categories',
+    id: 'categoryId',
+    kind: 'multi-select',
+    label: 'Category',
+    options: [
+      { label: 'Drinks', value: 'drinks', visual: <span data-testid="drinks-visual">D</span> },
+      { label: 'Snacks', value: 'snacks', visual: <span data-testid="snacks-visual">S</span> },
+    ],
+  },
+  {
+    allLabel: 'All products',
+    dependsOn: 'categoryId',
+    dropdown: true,
+    emptyLabel: 'No matching products',
+    id: 'productId',
+    kind: 'multi-select',
+    label: 'Product',
+    options: [
+      { label: 'Water', parentValues: ['drinks'], value: 'water', visual: <span data-testid="water-visual">W</span> },
+      { label: 'Pretzel', parentValues: ['snacks'], value: 'pretzel', visual: <span data-testid="pretzel-visual">P</span> },
+    ],
+  },
+];
+
+/** Supplies dependent dropdown filters so invalid child selections can be tested. */
+function ControlledDependentTable() {
+  const [filters, setFilters] = useState<DataTableFilterState<DependentFilterId>>({});
+  const [sorting, setSorting] = useState<SortingState>([]);
+  return (
+    <DataTable
+      ariaLabel="Products"
+      columns={columns}
+      data={rows}
+      emptyContent="No products"
+      filterDefinitions={dependentFilterDefinitions}
+      filters={filters}
+      labels={labels}
+      onFiltersChange={setFilters}
+      onSearchChange={() => undefined}
+      onSortingChange={setSorting}
+      searchValue=""
+      sorting={sorting}
+    />
+  );
+}
+
 describe('DataTable', () => {
   it('renders semantic rows, search, result feedback, and incremental loading', async () => {
     const user = userEvent.setup();
@@ -147,6 +198,39 @@ describe('DataTable', () => {
     expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveAttribute('aria-sort', 'ascending');
     expect(within(nameHeader).getByRole('button', { name: 'Sort Name descending' })).toBeVisible();
     expect(within(screen.getByRole('table', { name: 'Payments' })).getAllByRole('row')[1]).toHaveTextContent('Ada');
+  });
+
+  it('renders visual custom multi-selects and removes products outside selected categories', async () => {
+    const user = userEvent.setup();
+    render(<ControlledDependentTable />);
+
+    await user.click(screen.getByRole('button', { name: 'Filters' }));
+    const filterDialog = screen.getByRole('dialog', { name: 'Filter results' });
+    const categoryTrigger = within(filterDialog).getByRole('button', { name: 'Category' });
+    const productTrigger = within(filterDialog).getByRole('button', { name: 'Product' });
+
+    await user.click(categoryTrigger);
+    const categoryMenu = screen.getByRole('dialog', { name: 'Category' });
+    expect(within(categoryMenu).getByTestId('drinks-visual')).toBeVisible();
+    await user.click(within(categoryMenu).getByRole('checkbox', { name: 'Drinks' }));
+
+    await user.click(productTrigger);
+    const productMenu = screen.getByRole('dialog', { name: 'Product' });
+    expect(within(productMenu).getByRole('checkbox', { name: 'Water' })).toBeVisible();
+    expect(within(productMenu).queryByRole('checkbox', { name: 'Pretzel' })).not.toBeInTheDocument();
+    await user.click(within(productMenu).getByRole('checkbox', { name: 'Water' }));
+
+    await user.click(categoryTrigger);
+    await user.click(within(screen.getByRole('dialog', { name: 'Category' })).getByRole('checkbox', { name: 'Drinks' }));
+    await user.click(within(screen.getByRole('dialog', { name: 'Category' })).getByRole('checkbox', { name: 'Snacks' }));
+    await user.click(productTrigger);
+
+    const restrictedProductMenu = screen.getByRole('dialog', { name: 'Product' });
+    expect(within(restrictedProductMenu).getByRole('checkbox', { name: 'Pretzel' })).toBeVisible();
+    expect(within(restrictedProductMenu).queryByRole('checkbox', { name: 'Water' })).not.toBeInTheDocument();
+    await user.click(within(filterDialog).getByRole('button', { name: 'Apply filters' }));
+    expect(screen.getByRole('list', { name: 'Filter results' })).toHaveTextContent('Category: Snacks');
+    expect(screen.getByRole('list', { name: 'Filter results' })).not.toHaveTextContent('Product:');
   });
 
   it('makes horizontal overflow and the current scroll edge visually discoverable', () => {

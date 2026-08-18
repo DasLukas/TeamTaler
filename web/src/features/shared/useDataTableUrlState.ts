@@ -7,7 +7,7 @@ import {
   type DataTableFilterValue,
   type DataTableNumberRange,
 } from './DataTable';
-import { isDataTableFilterActive } from './dataTableFilters';
+import { isDataTableFilterActive, normalizeDataTableFilters } from './dataTableFilters';
 
 /** History behavior used when the table writes its current query state. */
 export type DataTableUrlHistoryMode = 'replace' | 'push';
@@ -70,9 +70,10 @@ function parseFilterValue<FilterId extends string>(definition: DataTableFilterDe
     return definition.options.length === 0 || definition.options.some((option) => option.value === value) ? value : undefined;
   }
   if (definition.kind === 'multi-select') {
-    if (!Array.isArray(value)) return undefined;
+    const values = Array.isArray(value) ? value : typeof value === 'string' ? [value] : undefined;
+    if (!values) return undefined;
     const allowedValues = new Set(definition.options.map((option) => option.value));
-    const selectedValues = value.filter((item): item is string => typeof item === 'string' && allowedValues.has(item));
+    const selectedValues = values.filter((item): item is string => typeof item === 'string' && (allowedValues.size === 0 || allowedValues.has(item)));
     return selectedValues.length > 0 ? [...new Set(selectedValues)] : undefined;
   }
   if (!isRangeObject(value)) return undefined;
@@ -100,7 +101,7 @@ function parseFilters<FilterId extends string>(rawValue: string | null, definiti
       const value = parseFilterValue(definition, parsed[definition.id]);
       if (value !== undefined && isDataTableFilterActive(value)) filters[definition.id] = value;
     }
-    return filters;
+    return normalizeDataTableFilters(filters, definitions);
   } catch {
     return fallback;
   }

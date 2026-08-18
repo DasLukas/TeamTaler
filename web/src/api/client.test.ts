@@ -1067,6 +1067,8 @@ describe('server-backed collection API contract', () => {
 
     const page = await api.getBookingsPage('group/a', {
       q: 'water',
+      categoryId: ['category-a', 'category-b'],
+      productId: ['product-a', 'product-b'],
       status: 'POSTED',
       amountMin: '100',
       sort: 'amount',
@@ -1084,6 +1086,8 @@ describe('server-backed collection API contract', () => {
       direction: 'desc',
       limit: '25',
     });
+    expect(requestUrl.searchParams.getAll('categoryId')).toEqual(['category-a', 'category-b']);
+    expect(requestUrl.searchParams.getAll('productId')).toEqual(['product-a', 'product-b']);
     expect(page).toMatchObject({ items: [booking], nextCursor: 'opaque-next-page', hasMore: true, limit: 25 });
   });
 

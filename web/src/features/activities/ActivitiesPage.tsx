@@ -15,6 +15,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
 import { Modal } from '@/components/ui/Modal';
+import { CategoryIcon } from '@/features/shared/CategoryIcon';
 import { DataTable, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange } from '@/features/shared/DataTable';
 import tableStyles from '@/features/shared/Table.module.css';
 import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
@@ -101,17 +102,33 @@ export function ActivitiesPage() {
   const filterDefinitions = useMemo<readonly DataTableFilterDefinition<ActivityFilterId>[]>(() => [
     {
       allLabel: t('dataTable.allValues'),
-      id: 'productId',
-      kind: 'select',
-      label: t('activities.booking'),
-      options: (categoriesQuery.data ?? []).flatMap((category) => category.products.map((product) => ({ label: product.name, value: product.id }))),
+      id: 'categoryId',
+      kind: 'multi-select',
+      label: t('common.category'),
+      dropdown: true,
+      emptyLabel: t('dataTable.noOptions'),
+      options: (categoriesQuery.data ?? []).map((category) => ({
+        label: category.name,
+        value: category.id,
+        visual: <CategoryIcon icon={category.icon} size={21} />,
+      })),
     },
     {
       allLabel: t('dataTable.allValues'),
-      id: 'categoryId',
-      kind: 'select',
-      label: t('common.category'),
-      options: (categoriesQuery.data ?? []).map((category) => ({ label: category.name, value: category.id })),
+      dependsOn: 'categoryId',
+      dropdown: true,
+      emptyLabel: t('activities.noProductsForCategories'),
+      id: 'productId',
+      kind: 'multi-select',
+      label: t('common.product'),
+      options: (categoriesQuery.data ?? []).flatMap((category) => category.products.map((product) => ({
+        label: product.name,
+        parentValues: [category.id],
+        value: product.id,
+        visual: product.imageUrl
+          ? <img alt="" decoding="async" loading="lazy" src={product.imageUrl} />
+          : <CategoryIcon icon={category.icon} size={21} />,
+      }))),
     },
     {
       allLabel: t('dataTable.allValues'),
@@ -144,17 +161,19 @@ export function ActivitiesPage() {
   const collectionQuery = useMemo<BookingCollectionQuery>(() => {
     const dateRange = tableState.filters.createdAt as DataTableDateRange | undefined;
     const amountRange = tableState.filters.amount as DataTableNumberRange | undefined;
+    const categoryIds = Array.isArray(tableState.filters.categoryId) ? tableState.filters.categoryId : undefined;
+    const productIds = Array.isArray(tableState.filters.productId) ? tableState.filters.productId : undefined;
     const sorting = tableState.sorting[0];
     const toMinorUnits = (value: number | undefined) => value === undefined ? undefined : Math.round(value * (10 ** currencyExponent(activeGroup.currency))).toString();
     return {
       amountMax: toMinorUnits(amountRange?.max),
       amountMin: toMinorUnits(amountRange?.min),
-      categoryId: tableState.filters.categoryId as string | undefined,
+      categoryId: categoryIds,
       createdFrom: dateRange?.from,
       createdTo: dateRange?.to,
       direction: sorting?.desc === false ? 'asc' : 'desc',
       limit: activityPageSize,
-      productId: tableState.filters.productId as string | undefined,
+      productId: productIds,
       q: deferredSearch || undefined,
       sort: (sorting?.id ?? 'createdAt') as BookingCollectionQuery['sort'],
       status: tableState.filters.status as BookingCollectionQuery['status'],

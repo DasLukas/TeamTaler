@@ -214,6 +214,12 @@ function collectionQueryParameters(query: object): URLSearchParams {
   const parameters = new URLSearchParams();
   Object.entries(query).forEach(([key, value]) => {
     if (value === undefined || value === null || value === '') return;
+    if (Array.isArray(value)) {
+      value.forEach((item) => {
+        if (item !== undefined && item !== null && item !== '') parameters.append(key, String(item));
+      });
+      return;
+    }
     parameters.set(key, String(value));
   });
   return parameters;

@@ -62,6 +62,14 @@ func TestTableQueryHandlersFilterSortAndPaginateWithoutChangingArrayBodies(t *te
 		}
 	}
 
+	multiActivityResponse := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/bookings?categoryId="+url.QueryEscape(category.ID)+"&categoryId=missing-category&productId="+url.QueryEscape(products[0].ID)+"&productId="+url.QueryEscape(products[2].ID)+"&sort=amount&direction=asc&limit=10",
+		server.handleListBookings)
+	var multiActivity []domain.Booking
+	if err := json.Unmarshal(multiActivityResponse.Body.Bytes(), &multiActivity); err != nil || multiActivityResponse.Code != http.StatusOK || len(multiActivity) != 2 || multiActivity[0].ProductName != "Coffee" || multiActivity[1].ProductName != "Juice" {
+		t.Fatalf("multi-value activity status=%d items=%#v err=%v body=%s", multiActivityResponse.Code, multiActivity, err, multiActivityResponse.Body.String())
+	}
+
 	activityResponse := performTableGET(t, principal, membership.GroupID,
 		"/api/v1/groups/"+membership.GroupID+"/bookings?q=e&createdFrom=2026-08-18&createdTo=2026-08-18&sort=amount&direction=asc&limit=1",
 		server.handleListBookings)

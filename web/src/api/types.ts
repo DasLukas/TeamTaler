@@ -29,8 +29,10 @@ export interface BookingCollectionQuery extends CollectionQuery<'createdAt' | 'a
   periodId?: string;
   actorMembershipId?: string;
   targetMembershipId?: string;
-  categoryId?: string;
-  productId?: string;
+  /** One or more repeated categoryId query values combined with OR semantics. */
+  categoryId?: string | readonly string[];
+  /** One or more repeated productId query values combined with OR semantics. */
+  productId?: string | readonly string[];
   status?: 'POSTED' | 'VOIDED';
   createdFrom?: string;
   createdTo?: string;

@@ -2122,6 +2122,9 @@ paths:
         and keyset pagination execute only after this tenant and visibility scope
         is fixed. The JSON body remains the existing booking array.
 
+        Repeated `categoryId` and `productId` parameters apply OR semantics
+        within their own field and AND semantics across fields.
+
         `createdFrom` is inclusive and `createdTo` is exclusive for RFC 3339
         timestamps. A date-only lower bound starts at 00:00 UTC; a date-only
         upper bound includes the complete selected day and is evaluated as the
@@ -2143,10 +2146,22 @@ paths:
           schema: { type: string }
         - name: categoryId
           in: query
-          schema: { type: string }
+          description: One or more category identifiers. Repeat the parameter for multiple values.
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 200
+            items: { type: string }
         - name: productId
           in: query
-          schema: { type: string }
+          description: One or more product identifiers. Repeat the parameter for multiple values.
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 200
+            items: { type: string }
         - name: status
           in: query
           schema: { type: string, enum: [POSTED, VOIDED] }

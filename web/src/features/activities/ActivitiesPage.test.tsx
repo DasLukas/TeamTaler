@@ -3,7 +3,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Booking, Session } from '@/api/types';
+import type { Booking, Category, Session } from '@/api/types';
 import { ActiveGroupContext } from '@/app/active-group-context';
 import i18n from '@/i18n';
 import { ActivitiesPage } from './ActivitiesPage';
@@ -48,6 +48,48 @@ const thirdPartyBooking: Booking = {
 
 const bookingPage = (items: Booking[]) => ({ hasMore: false, items, limit: 50 });
 
+const penaltiesCategory: Category = {
+  id: thirdPartyBooking.categoryId,
+  version: 1,
+  name: thirdPartyBooking.categoryName,
+  icon: 'penalty',
+  active: true,
+  sortOrder: 1,
+  products: [{
+    id: thirdPartyBooking.productId,
+    categoryId: thirdPartyBooking.categoryId,
+    version: 1,
+    name: thirdPartyBooking.productName,
+    pricingMode: 'FIXED',
+    currency: 'EUR',
+    price: thirdPartyBooking.unitPrice,
+    imageUrl: '/api/v1/groups/group-a/images/late-arrival.png',
+    active: true,
+    sortOrder: 1,
+  }],
+};
+
+const snacksCategory: Category = {
+  id: 'category-snacks',
+  version: 1,
+  name: 'Snacks',
+  icon: 'food',
+  active: true,
+  sortOrder: 2,
+  products: [{
+    id: 'product-pretzel',
+    categoryId: 'category-snacks',
+    version: 1,
+    name: 'Pretzel',
+    pricingMode: 'FIXED',
+    currency: 'EUR',
+    price: { minorUnits: '250', currency: 'EUR' },
+    imageUrl: '/api/v1/groups/group-a/images/pretzel.png',
+    active: true,
+    sortOrder: 1,
+  }],
+};
+
 function renderActivities(sessionValue: Session = session): void {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
@@ -66,26 +108,7 @@ describe('ActivitiesPage booking traceability', () => {
     window.history.replaceState({}, '', '/activities');
     apiMock.reverseBooking.mockResolvedValue(undefined);
     apiMock.getBookingsPage.mockResolvedValue(bookingPage([thirdPartyBooking]));
-    apiMock.getCategories.mockResolvedValue([{
-      id: thirdPartyBooking.categoryId,
-      version: 1,
-      name: thirdPartyBooking.categoryName,
-      icon: 'penalty',
-      active: true,
-      sortOrder: 1,
-      products: [{
-        id: thirdPartyBooking.productId,
-        categoryId: thirdPartyBooking.categoryId,
-        version: 1,
-        name: thirdPartyBooking.productName,
-        pricingMode: 'FIXED',
-        currency: 'EUR',
-        price: thirdPartyBooking.unitPrice,
-        imageUrl: '/api/v1/groups/group-a/images/late-arrival.png',
-        active: true,
-        sortOrder: 1,
-      }],
-    }]);
+    apiMock.getCategories.mockResolvedValue([penaltiesCategory]);
   });
 
   it('shows target and actor distinctly and includes the actor in search', async () => {
@@ -125,6 +148,38 @@ describe('ActivitiesPage booking traceability', () => {
     const rows = within(table).getAllByRole('row');
     expect(rows).toHaveLength(2);
     expect(within(rows[1]).getAllByRole('cell')).toHaveLength(8);
+  });
+
+  it('orders visual category and product multi-selects and sends repeated filters', async () => {
+    const user = userEvent.setup();
+    apiMock.getCategories.mockResolvedValue([penaltiesCategory, snacksCategory]);
+    renderActivities();
+    await screen.findByRole('table', { name: i18n.t('activities.title') });
+
+    await user.click(screen.getByRole('button', { name: i18n.t('dataTable.filterButton') }));
+    const dialog = screen.getByRole('dialog', { name: i18n.t('dataTable.filterHeading') });
+    const categoryTrigger = within(dialog).getByRole('button', { name: i18n.t('common.category') });
+    const productTrigger = within(dialog).getByRole('button', { name: i18n.t('common.product') });
+    expect(categoryTrigger.compareDocumentPosition(productTrigger) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    await user.click(categoryTrigger);
+    const categoryMenu = screen.getByRole('dialog', { name: i18n.t('common.category') });
+    expect(categoryMenu.querySelector('[data-category-icon="penalty"]')).not.toBeNull();
+    await user.click(within(categoryMenu).getByRole('checkbox', { name: penaltiesCategory.name }));
+    await user.click(within(categoryMenu).getByRole('checkbox', { name: snacksCategory.name }));
+
+    await user.click(productTrigger);
+    const productMenu = screen.getByRole('dialog', { name: i18n.t('common.product') });
+    expect(productMenu.querySelector(`img[src="${penaltiesCategory.products[0].imageUrl}"]`)).not.toBeNull();
+    expect(productMenu.querySelector(`img[src="${snacksCategory.products[0].imageUrl}"]`)).not.toBeNull();
+    await user.click(within(productMenu).getByRole('checkbox', { name: penaltiesCategory.products[0].name }));
+    await user.click(within(productMenu).getByRole('checkbox', { name: snacksCategory.products[0].name }));
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('dataTable.applyFilters') }));
+
+    await waitFor(() => expect(apiMock.getBookingsPage).toHaveBeenLastCalledWith('group-a', expect.objectContaining({
+      categoryId: [penaltiesCategory.id, snacksCategory.id],
+      productId: [penaltiesCategory.products[0].id, snacksCategory.products[0].id],
+    })));
   });
 
   it('renders reversed bookings as accessible compact status badges', async () => {

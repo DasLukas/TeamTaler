@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -802,8 +803,8 @@ type ActivityQuery struct {
 	PeriodID           string
 	ActorMembershipID  string
 	TargetMembershipID string
-	CategoryID         string
-	ProductID          string
+	CategoryIDs        []string
+	ProductIDs         []string
 	Status             string
 	CreatedFrom        string
 	CreatedTo          string
@@ -825,6 +826,35 @@ type ActivityPage struct {
 var activitySorts = map[string]struct{}{
 	"createdAt": {}, "amount": {}, "targetName": {}, "actorName": {},
 	"productName": {}, "categoryName": {}, "status": {},
+}
+
+const maxActivityFilterIDs = 200
+
+func normalizeActivityFilterIDs(field string, values []string) ([]string, error) {
+	unique := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if len(value) > 200 {
+			return nil, domain.ValidationError{Field: field, Message: "values must contain at most 200 characters"}
+		}
+		unique[value] = struct{}{}
+		if len(unique) > maxActivityFilterIDs {
+			return nil, domain.ValidationError{Field: field, Message: "must contain at most 200 values"}
+		}
+	}
+	normalized := make([]string, 0, len(unique))
+	for value := range unique {
+		normalized = append(normalized, value)
+	}
+	sort.Strings(normalized)
+	return normalized, nil
+}
+
+func queryPlaceholders(count int) string {
+	return strings.TrimSuffix(strings.Repeat("?,", count), ",")
 }
 
 // QueryActivity returns a filtered, sorted, keyset-paginated activity page.
@@ -880,19 +910,31 @@ func (s Service) queryActivity(ctx context.Context, membership domain.Membership
 	input.PeriodID = strings.TrimSpace(input.PeriodID)
 	input.ActorMembershipID = strings.TrimSpace(input.ActorMembershipID)
 	input.TargetMembershipID = strings.TrimSpace(input.TargetMembershipID)
-	input.CategoryID = strings.TrimSpace(input.CategoryID)
-	input.ProductID = strings.TrimSpace(input.ProductID)
+	input.CategoryIDs, err = normalizeActivityFilterIDs("categoryId", input.CategoryIDs)
+	if err != nil {
+		return ActivityPage{}, err
+	}
+	input.ProductIDs, err = normalizeActivityFilterIDs("productId", input.ProductIDs)
+	if err != nil {
+		return ActivityPage{}, err
+	}
 	if input.Limit < 1 || input.Limit > 200 {
 		input.Limit = 100
 	}
 	fingerprint, err := tablequery.Fingerprint(struct {
-		GroupID, ViewerMembershipID                                                    string
-		Search, PeriodID, ActorMembershipID, TargetMembershipID, CategoryID, ProductID string
-		Status, CreatedFrom, CreatedTo, Sort, Direction                                string
-		AmountMin, AmountMax                                                           *int64
-		ViewAll                                                                        bool
-	}{membership.GroupID, membership.ID, input.Search, input.PeriodID, input.ActorMembershipID, input.TargetMembershipID, input.CategoryID, input.ProductID,
-		input.Status, input.CreatedFrom, input.CreatedTo, input.Sort, input.Direction, input.AmountMin, input.AmountMax, viewAll})
+		GroupID, ViewerMembershipID                             string
+		Search, PeriodID, ActorMembershipID, TargetMembershipID string
+		CategoryIDs, ProductIDs                                 []string
+		Status, CreatedFrom, CreatedTo, Sort, Direction         string
+		AmountMin, AmountMax                                    *int64
+		ViewAll                                                 bool
+	}{
+		GroupID: membership.GroupID, ViewerMembershipID: membership.ID,
+		Search: input.Search, PeriodID: input.PeriodID, ActorMembershipID: input.ActorMembershipID, TargetMembershipID: input.TargetMembershipID,
+		CategoryIDs: input.CategoryIDs, ProductIDs: input.ProductIDs,
+		Status: input.Status, CreatedFrom: input.CreatedFrom, CreatedTo: input.CreatedTo, Sort: input.Sort, Direction: input.Direction,
+		AmountMin: input.AmountMin, AmountMax: input.AmountMax, ViewAll: viewAll,
+	})
 	if err != nil {
 		return ActivityPage{}, err
 	}
@@ -936,13 +978,17 @@ func (s Service) queryActivity(ctx context.Context, membership domain.Membership
 		query += ` AND b.target_membership_id=?`
 		args = append(args, input.TargetMembershipID)
 	}
-	if input.CategoryID != "" {
-		query += ` AND b.category_id=?`
-		args = append(args, input.CategoryID)
+	if len(input.CategoryIDs) > 0 {
+		query += ` AND b.category_id IN (` + queryPlaceholders(len(input.CategoryIDs)) + `)`
+		for _, categoryID := range input.CategoryIDs {
+			args = append(args, categoryID)
+		}
 	}
-	if input.ProductID != "" {
-		query += ` AND b.product_id=?`
-		args = append(args, input.ProductID)
+	if len(input.ProductIDs) > 0 {
+		query += ` AND b.product_id IN (` + queryPlaceholders(len(input.ProductIDs)) + `)`
+		for _, productID := range input.ProductIDs {
+			args = append(args, productID)
+		}
 	}
 	if input.Status == "POSTED" {
 		query += ` AND b.voided_at IS NULL`

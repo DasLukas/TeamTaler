@@ -42,7 +42,7 @@ func (s *Server) handleListBookings(response http.ResponseWriter, request *http.
 	query := bookings.ActivityQuery{
 		Search: values.Get("q"), PeriodID: values.Get("periodId"),
 		ActorMembershipID: values.Get("actorMembershipId"), TargetMembershipID: values.Get("targetMembershipId"),
-		CategoryID: values.Get("categoryId"), ProductID: values.Get("productId"), Status: values.Get("status"),
+		CategoryIDs: values["categoryId"], ProductIDs: values["productId"], Status: values.Get("status"),
 		CreatedFrom: values.Get("createdFrom"), CreatedTo: values.Get("createdTo"), AmountMin: amountMin, AmountMax: amountMax,
 		Sort: values.Get("sort"), Direction: values.Get("direction"), Cursor: values.Get("cursor"), Limit: queryLimit(request),
 	}
