@@ -33,6 +33,7 @@ import type {
   AccountSummary,
   AuthenticationCapabilities,
   AuditEntry,
+  AuditFilterOptions,
   Booking,
   BookingCollectionQuery,
   BookingBatchCommand,
@@ -421,6 +422,7 @@ export const api = {
     body: json(input),
   })),
   getSystemAudit: async (): Promise<SystemAuditEntry[]> => adaptSystemAudit(await request<unknown>('/system/audit')),
+  getSystemAuditFilterOptions: (): Promise<AuditFilterOptions> => request<AuditFilterOptions>('/system/audit/filter-options'),
   getSystemAuditPage: async (query: SystemAuditCollectionQuery = {}): Promise<CollectionPage<SystemAuditEntry>> => {
     const response = await requestWithMetadata<unknown>(collectionPath('/system/audit', query));
     return collectionPage(adaptSystemAudit(response.data), response.headers, query.limit);
@@ -665,6 +667,7 @@ export const api = {
     const adaptedMembers = adaptMemberships(members);
     return entries.map((entry) => adaptAuditEntry(entry, adaptedMembers));
   },
+  getAuditFilterOptions: (groupId: string): Promise<AuditFilterOptions> => request<AuditFilterOptions>(groupPath(groupId, 'audit/filter-options')),
   getAuditPage: async (groupId: string, query: AuditCollectionQuery = {}): Promise<CollectionPage<AuditEntry>> => {
     const [response, members] = await Promise.all([
       requestWithMetadata<unknown[]>(collectionPath(groupPath(groupId, 'audit'), query)),

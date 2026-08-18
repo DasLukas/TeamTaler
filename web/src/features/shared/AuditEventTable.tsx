@@ -1,13 +1,11 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { DataTable, type DataTableColumnDef, type DataTableFilterDefinition } from './DataTable';
+import type { AuditEventFilterId } from './auditFilters';
 import { useDataTableLabels } from './useDataTableLabels';
 import type { DataTableUrlState } from './useDataTableUrlState';
 
 const auditDateTimeFormatter = new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' });
-
-/** Filter identifiers supported by group and system audit collections. */
-export type AuditEventFilterId = 'action' | 'resourceType' | 'occurredAt';
 
 /** One normalized row rendered by the shared audit-event table. */
 export interface AuditEventTableEntry {

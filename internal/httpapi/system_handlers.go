@@ -479,6 +479,19 @@ func (s *Server) handleSystemAudit(response http.ResponseWriter, request *http.R
 	writeJSON(response, http.StatusOK, map[string]any{"items": page.Items})
 }
 
+func (s *Server) handleSystemAuditFilterOptions(response http.ResponseWriter, request *http.Request) {
+	if _, err := s.systemAdministrator(request); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	options, err := s.systemAdmin.ListAuditFilterOptions(request.Context())
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, options)
+}
+
 func parseSMTPRevision(request *http.Request) int64 {
 	value, _ := strconv.ParseInt(request.Header.Get("X-SMTP-Revision"), 10, 64)
 	return value

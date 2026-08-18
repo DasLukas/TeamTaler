@@ -101,7 +101,9 @@ export interface DataTableMultiSelectFilter<FilterId extends string = string> ex
   dependsOn?: FilterId;
   dropdown?: boolean;
   emptyLabel?: string;
+  noResultsLabel?: string;
   options: readonly DataTableFilterOption[];
+  searchLabel?: string;
 }
 
 /** Configuration for an inclusive date-range filter. */
@@ -354,8 +356,10 @@ function FilterEditor<FilterId extends string>({ definition, filters, onChange, 
             emptyLabel={definition.emptyLabel ?? '—'}
             id={controlId}
             label={definition.label}
+            noResultsLabel={definition.noResultsLabel}
             onChange={(nextValues) => onChange(nextValues.length > 0 ? nextValues : undefined)}
             options={availableOptions}
+            searchLabel={definition.searchLabel}
             values={selectedValues}
           />
         </Field>

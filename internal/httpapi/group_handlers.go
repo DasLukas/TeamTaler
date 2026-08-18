@@ -524,3 +524,21 @@ func (s *Server) handleAudit(response http.ResponseWriter, request *http.Request
 	writeTablePageHeaders(response, page.NextCursor, query.Limit)
 	writeJSON(response, http.StatusOK, page.Items)
 }
+
+func (s *Server) handleAuditFilterOptions(response http.ResponseWriter, request *http.Request) {
+	_, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	if err := authorization.Require(request.Context(), s.db, membership.GroupID, membership.ID, domain.PermissionGroupAdministration, authorization.GroupResource(membership.GroupID)); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	options, err := audit.ListFilterOptions(request.Context(), s.db, membership.GroupID)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, options)
+}

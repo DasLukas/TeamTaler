@@ -1,4 +1,5 @@
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down';
+import Search from 'lucide-react/dist/esm/icons/search';
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import styles from './MultiSelectMenu.module.css';
@@ -16,8 +17,10 @@ export interface MultiSelectMenuProps<Value extends string = string> {
   emptyLabel: string;
   id: string;
   label: string;
+  noResultsLabel?: string;
   onChange: (values: Value[]) => void;
   options: readonly MultiSelectMenuOption<Value>[];
+  searchLabel?: string;
   values: readonly Value[];
 }
 
@@ -33,14 +36,19 @@ export interface MultiSelectMenuProps<Value extends string = string> {
  * @example
  * <MultiSelectMenu id="categories" label="Categories" allLabel="All" emptyLabel="No categories" options={options} values={selected} onChange={setSelected} />
  */
-export function MultiSelectMenu<Value extends string>({ allLabel, emptyLabel, id, label, onChange, options, values }: MultiSelectMenuProps<Value>) {
+export function MultiSelectMenu<Value extends string>({ allLabel, emptyLabel, id, label, noResultsLabel = emptyLabel, onChange, options, searchLabel, values }: MultiSelectMenuProps<Value>) {
   const panelId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
+  const [searchValue, setSearchValue] = useState('');
   const [portalTarget, setPortalTarget] = useState<Element | null>(null);
   const [panelStyle, setPanelStyle] = useState<CSSProperties>({ position: 'fixed', visibility: 'hidden' });
   const selectedValues = useMemo(() => new Set(values), [values]);
+  const normalizedSearch = searchValue.trim().toLocaleLowerCase();
+  const visibleOptions = normalizedSearch
+    ? options.filter((option) => option.label.toLocaleLowerCase().includes(normalizedSearch) || option.value.toLocaleLowerCase().includes(normalizedSearch))
+    : options;
   const selectedOptions = options.filter((option) => selectedValues.has(option.value));
   const summary = selectedOptions.length === 0
     ? allLabel
@@ -50,6 +58,7 @@ export function MultiSelectMenu<Value extends string>({ allLabel, emptyLabel, id
 
   const close = (restoreFocus = false) => {
     setOpen(false);
+    setSearchValue('');
     if (restoreFocus) triggerRef.current?.focus();
   };
   const show = () => {
@@ -98,7 +107,10 @@ export function MultiSelectMenu<Value extends string>({ allLabel, emptyLabel, id
       event.preventDefault();
       close(true);
     };
-    const closeForLayoutChange = () => close();
+    const closeForLayoutChange = (event: Event) => {
+      if (event.type === 'scroll' && event.target instanceof Node && panelRef.current?.contains(event.target)) return;
+      close();
+    };
     document.addEventListener('pointerdown', dismiss);
     document.addEventListener('keydown', closeForEscape);
     window.addEventListener('resize', closeForLayoutChange);
@@ -128,13 +140,18 @@ export function MultiSelectMenu<Value extends string>({ allLabel, emptyLabel, id
       </button>
       {open && portalTarget ? createPortal(
         <div aria-label={label} className={styles.menu} id={panelId} ref={panelRef} role="dialog" style={panelStyle}>
-          {options.length > 0 ? options.map((option) => (
+          {searchLabel && options.length > 0 ? <label className={styles.search}>
+            <span className="sr-only">{searchLabel}</span>
+            <Search aria-hidden="true" size={17} />
+            <input aria-label={searchLabel} onChange={(event) => setSearchValue(event.target.value)} placeholder={searchLabel} type="search" value={searchValue} />
+          </label> : null}
+          {visibleOptions.length > 0 ? visibleOptions.map((option) => (
             <label className={styles.option} key={option.value}>
               <input checked={selectedValues.has(option.value)} onChange={(event) => toggle(option.value, event.target.checked)} type="checkbox" />
               {option.visual ? <span aria-hidden="true" className={styles.visual}>{option.visual}</span> : null}
               <span className={styles.optionName}>{option.label}</span>
             </label>
-          )) : <p className={styles.empty}>{emptyLabel}</p>}
+          )) : <p className={styles.empty}>{options.length > 0 ? noResultsLabel : emptyLabel}</p>}
         </div>,
         portalTarget,
       ) : null}

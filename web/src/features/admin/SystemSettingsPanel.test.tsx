@@ -23,6 +23,7 @@ const apiMock = vi.hoisted(() => ({
   getSystemGroupDeletionImpact: vi.fn(),
   purgeSystemGroup: vi.fn(),
   getSystemAuditPage: vi.fn(),
+  getSystemAuditFilterOptions: vi.fn(),
 }));
 
 vi.mock('@/api/client', () => ({ api: apiMock }));
@@ -116,6 +117,7 @@ describe('SystemSettingsPanel', () => {
     apiMock.getSystemGroupDeletionImpact.mockResolvedValue({ groupId: 'group-a', groupName: 'Group A', version: 5, openBalance: { minorUnits: '1234', currency: 'EUR' }, ...archivedGroup.impact });
     apiMock.purgeSystemGroup.mockResolvedValue({ groupId: 'group-a', groupName: 'Group A', version: 5, openBalance: { minorUnits: '1234', currency: 'EUR' }, ...archivedGroup.impact });
     apiMock.getSystemAuditPage.mockResolvedValue({ hasMore: false, items: [], limit: 50 });
+    apiMock.getSystemAuditFilterOptions.mockResolvedValue({ actions: ['system.group.archived', 'system.settings.updated'], resourceTypes: ['group', 'system_settings'] });
   });
 
   it('loads all five instance-administration areas in parallel', async () => {
@@ -158,6 +160,29 @@ describe('SystemSettingsPanel', () => {
     expect(row).toHaveTextContent('system.group.archived');
     expect(row).toHaveTextContent('group · group-a');
     expect(row).toHaveTextContent('{"name":"Group A"}');
+  });
+
+  it('filters system audit with searchable multi-select values discovered from the server', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    const section = (await screen.findByRole('heading', { name: 'Systemaktivität' })).closest('section');
+    if (!section) throw new Error('Missing system activity section.');
+    await user.click(within(section).getByRole('button', { name: 'Filter' }));
+    const filterDialog = screen.getByRole('dialog', { name: 'Ergebnisse filtern' });
+    await user.click(within(filterDialog).getByRole('button', { name: 'Aktion' }));
+    const actionMenu = screen.getByRole('dialog', { name: 'Aktion' });
+    await user.type(within(actionMenu).getByRole('searchbox', { name: 'Aktionen durchsuchen' }), 'system.');
+    await user.click(within(actionMenu).getByRole('checkbox', { name: 'system.group.archived' }));
+    await user.click(within(actionMenu).getByRole('checkbox', { name: 'system.settings.updated' }));
+    await user.click(within(filterDialog).getByRole('button', { name: 'Ressourcentyp' }));
+    await user.click(within(screen.getByRole('dialog', { name: 'Ressourcentyp' })).getByRole('checkbox', { name: 'group' }));
+    await user.click(within(filterDialog).getByRole('button', { name: 'Filter anwenden' }));
+
+    await waitFor(() => expect(apiMock.getSystemAuditPage).toHaveBeenLastCalledWith(expect.objectContaining({
+      action: ['system.group.archived', 'system.settings.updated'],
+      resourceType: ['group'],
+    })));
   });
 
   it('patches only changed general settings with the aggregate revision', async () => {

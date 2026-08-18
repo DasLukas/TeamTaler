@@ -36,8 +36,9 @@ import { ItemAction } from '@/components/ui/ItemAction';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { Toggle } from '@/components/ui/Toggle';
-import { AuditEventTable, type AuditEventFilterId } from '@/features/shared/AuditEventTable';
-import type { DataTableDateRange, DataTableFilterDefinition } from '@/features/shared/DataTable';
+import { AuditEventTable } from '@/features/shared/AuditEventTable';
+import { createAuditFilterDefinitions, type AuditEventFilterId } from '@/features/shared/auditFilters';
+import type { DataTableDateRange } from '@/features/shared/DataTable';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
 import styles from './SystemSettingsPanel.module.css';
 
@@ -517,13 +518,10 @@ function GroupsSettingsSection({ defaultCurrency }: { defaultCurrency: string })
 /** Immutable global activity feed including retained purge receipts. */
 function SystemAuditSection() {
   const { t } = useTranslation();
-  const filterDefinitions = useMemo<readonly DataTableFilterDefinition<AuditEventFilterId>[]>(() => [
-    { id: 'action', kind: 'text', label: t('audit.action'), placeholder: t('audit.actionPlaceholder') },
-    { id: 'resourceType', kind: 'text', label: t('audit.resourceType'), placeholder: t('audit.resourceTypePlaceholder') },
-    { fromLabel: t('dataTable.from'), id: 'occurredAt', kind: 'date-range', label: t('audit.time'), toLabel: t('dataTable.to') },
-  ], [t]);
+  const filterOptionsQuery = useQuery({ queryFn: api.getSystemAuditFilterOptions, queryKey: [...AUDIT_QUERY_KEY, 'filter-options'] });
+  const queryFilterDefinitions = useMemo(() => createAuditFilterDefinitions(t, filterOptionsQuery.data), [filterOptionsQuery.data, t]);
   const tableState = useDataTableUrlState<AuditEventFilterId>({
-    filterDefinitions,
+    filterDefinitions: queryFilterDefinitions,
     initialSorting: [{ id: 'occurredAt', desc: true }],
     namespace: 'system-audit',
     sortableColumnIds: ['occurredAt', 'actorName', 'action', 'resourceType'],
@@ -533,13 +531,13 @@ function SystemAuditSection() {
     const dateRange = tableState.filters.occurredAt as DataTableDateRange | undefined;
     const sorting = tableState.sorting[0];
     return {
-      action: tableState.filters.action as string | undefined,
+      action: tableState.filters.action as string[] | undefined,
       direction: sorting?.desc === false ? 'asc' : 'desc',
       limit: SYSTEM_AUDIT_PAGE_SIZE,
       occurredFrom: dateRange?.from,
       occurredTo: dateRange?.to,
       q: deferredSearch || undefined,
-      resourceType: tableState.filters.resourceType as string | undefined,
+      resourceType: tableState.filters.resourceType as string[] | undefined,
       sort: (sorting?.id ?? 'occurredAt') as SystemAuditCollectionQuery['sort'],
     };
   }, [deferredSearch, tableState.filters, tableState.sorting]);
@@ -557,6 +555,14 @@ function SystemAuditSection() {
     occurredAt: entry.createdAt,
     subject: [entry.targetType, entry.targetId].filter(Boolean).join(' · ') || '–',
   })) ?? [], [audit.data]);
+  const visibleFilterOptions = useMemo(() => {
+    const loadedEntries = audit.data?.pages.flatMap((page) => page.items) ?? [];
+    return {
+      actions: filterOptionsQuery.data?.actions.length ? filterOptionsQuery.data.actions : [...new Set(loadedEntries.map((entry) => entry.action))].sort(),
+      resourceTypes: filterOptionsQuery.data?.resourceTypes.length ? filterOptionsQuery.data.resourceTypes : [...new Set(loadedEntries.map((entry) => entry.targetType))].filter(Boolean).sort(),
+    };
+  }, [audit.data, filterOptionsQuery.data]);
+  const filterDefinitions = useMemo(() => createAuditFilterDefinitions(t, visibleFilterOptions), [t, visibleFilterOptions]);
   return (
     <section aria-labelledby="system-audit-title" className={styles.section}>
       <header><h3 id="system-audit-title">{t('systemSettings.audit.title')}</h3><p>{t('systemSettings.audit.intro')}</p></header>

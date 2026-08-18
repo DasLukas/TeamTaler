@@ -30,8 +30,8 @@ func auditTableQuery(request *http.Request) tablequery.AuditQuery {
 	values := request.URL.Query()
 	return tablequery.AuditQuery{
 		Search: values.Get("q"), ActorUserID: values.Get("actorUserId"),
-		ActorMembershipID: values.Get("actorMembershipId"), Action: values.Get("action"),
-		ResourceType: values.Get("resourceType"), OccurredFrom: values.Get("occurredFrom"),
+		ActorMembershipID: values.Get("actorMembershipId"), Actions: values["action"],
+		ResourceTypes: values["resourceType"], OccurredFrom: values.Get("occurredFrom"),
 		OccurredTo: values.Get("occurredTo"), Sort: values.Get("sort"),
 		Direction: values.Get("direction"), Cursor: values.Get("cursor"), Limit: queryLimit(request),
 	}

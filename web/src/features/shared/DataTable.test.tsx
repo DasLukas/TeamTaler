@@ -104,10 +104,12 @@ const dependentFilterDefinitions: readonly DataTableFilterDefinition<DependentFi
     id: 'categoryId',
     kind: 'multi-select',
     label: 'Category',
+    noResultsLabel: 'No matching categories',
     options: [
       { label: 'Drinks', value: 'drinks', visual: <span data-testid="drinks-visual">D</span> },
       { label: 'Snacks', value: 'snacks', visual: <span data-testid="snacks-visual">S</span> },
     ],
+    searchLabel: 'Search categories',
   },
   {
     allLabel: 'All products',
@@ -117,10 +119,12 @@ const dependentFilterDefinitions: readonly DataTableFilterDefinition<DependentFi
     id: 'productId',
     kind: 'multi-select',
     label: 'Product',
+    noResultsLabel: 'No matching products',
     options: [
       { label: 'Water', parentValues: ['drinks'], value: 'water', visual: <span data-testid="water-visual">W</span> },
       { label: 'Pretzel', parentValues: ['snacks'], value: 'pretzel', visual: <span data-testid="pretzel-visual">P</span> },
     ],
+    searchLabel: 'Search products',
   },
 ];
 
@@ -216,6 +220,10 @@ describe('DataTable', () => {
     await user.click(categoryTrigger);
     const categoryMenu = screen.getByRole('dialog', { name: 'Category' });
     expect(within(categoryMenu).getByTestId('drinks-visual')).toBeVisible();
+    await user.type(within(categoryMenu).getByRole('searchbox', { name: 'Search categories' }), 'drink');
+    expect(within(categoryMenu).queryByRole('checkbox', { name: 'Snacks' })).not.toBeInTheDocument();
+    fireEvent.scroll(categoryMenu);
+    expect(within(categoryMenu).getByRole('searchbox', { name: 'Search categories' })).toBeVisible();
     await user.click(within(categoryMenu).getByRole('checkbox', { name: 'Drinks' }));
 
     await user.click(productTrigger);

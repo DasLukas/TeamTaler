@@ -973,10 +973,22 @@ paths:
           schema: { type: string }
         - name: action
           in: query
-          schema: { type: string, maxLength: 200 }
+          description: Exact action values combined with OR semantics when repeated.
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 100
+            items: { type: string, maxLength: 200 }
         - name: resourceType
           in: query
-          schema: { type: string, maxLength: 200 }
+          description: Exact resource-type values combined with OR semantics when repeated.
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 100
+            items: { type: string, maxLength: 200 }
         - name: occurredFrom
           in: query
           schema:
@@ -1018,6 +1030,19 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /system/audit/filter-options:
+    get:
+      tags: [System]
+      summary: List system-audit filter options
+      description: Returns every distinct action and resource type currently present in the authorized system audit log. Newly recorded values appear automatically.
+      responses:
+        '200':
+          description: Complete data-derived system-audit filter catalog
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditFilterOptions' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
   /groups:
     get:
       tags: [Groups]
@@ -2806,10 +2831,22 @@ paths:
           schema: { type: string }
         - name: action
           in: query
-          schema: { type: string, maxLength: 200 }
+          description: Exact action values combined with OR semantics when repeated.
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 100
+            items: { type: string, maxLength: 200 }
         - name: resourceType
           in: query
-          schema: { type: string, maxLength: 200 }
+          description: Exact resource-type values combined with OR semantics when repeated.
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 100
+            items: { type: string, maxLength: 200 }
         - name: occurredFrom
           in: query
           schema:
@@ -2846,6 +2883,21 @@ paths:
                 items: { $ref: '#/components/schemas/AuditEvent' }
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/audit/filter-options:
+    get:
+      tags: [Groups]
+      summary: List group-audit filter options
+      description: Returns every distinct action and resource type currently present in the authorized group audit log. Newly recorded values appear automatically.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Complete data-derived group-audit filter catalog
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditFilterOptions' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
   /health/live:
     get:
       tags: [Operations]
@@ -3331,6 +3383,19 @@ components:
           additionalProperties: true
           description: Secret-free bounded metadata; purge events retain only group identity, actor, time, and deletion counts.
         occurredAt: { type: string, format: date-time }
+    AuditFilterOptions:
+      type: object
+      additionalProperties: false
+      required: [actions, resourceTypes]
+      properties:
+        actions:
+          type: array
+          description: Distinct persisted action values in stable case-insensitive order.
+          items: { type: string }
+        resourceTypes:
+          type: array
+          description: Distinct persisted resource-type values in stable case-insensitive order.
+          items: { type: string }
     PasswordResetRequest:
       type: object
       additionalProperties: false

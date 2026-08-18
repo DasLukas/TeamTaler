@@ -65,6 +65,44 @@ type Page struct {
 	NextCursor string
 }
 
+// FilterOptions contains every action and resource type currently present in
+// one authorized group audit log. Values are distinct and sorted.
+type FilterOptions struct {
+	Actions       []string `json:"actions"`
+	ResourceTypes []string `json:"resourceTypes"`
+}
+
+// ListFilterOptions returns the complete data-derived filter catalog for one
+// group. Recording a new action or resource type makes it available without a
+// separate registry update.
+func ListFilterOptions(ctx context.Context, db *sql.DB, groupID string) (FilterOptions, error) {
+	rows, err := db.QueryContext(ctx, `SELECT kind,value FROM (
+		SELECT 'action' AS kind,action AS value FROM audit_events WHERE group_id=?
+		UNION
+		SELECT 'resourceType' AS kind,resource_type AS value FROM audit_events WHERE group_id=?
+	) ORDER BY kind,lower(value),value`, groupID, groupID)
+	if err != nil {
+		return FilterOptions{}, fmt.Errorf("list audit filter options: %w", err)
+	}
+	defer rows.Close()
+	options := FilterOptions{Actions: []string{}, ResourceTypes: []string{}}
+	for rows.Next() {
+		var kind, value string
+		if err := rows.Scan(&kind, &value); err != nil {
+			return FilterOptions{}, fmt.Errorf("scan audit filter option: %w", err)
+		}
+		if kind == "action" {
+			options.Actions = append(options.Actions, value)
+		} else {
+			options.ResourceTypes = append(options.ResourceTypes, value)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return FilterOptions{}, fmt.Errorf("iterate audit filter options: %w", err)
+	}
+	return options, nil
+}
+
 // Query returns one filtered and sorted group-audit page. groupID is always
 // applied as the first predicate so search, filters, and cursors cannot widen
 // the authorized tenant scope.
@@ -98,14 +136,8 @@ func Query(ctx context.Context, db *sql.DB, groupID string, input tablequery.Aud
 		query += ` AND event.actor_membership_id=?`
 		args = append(args, input.ActorMembershipID)
 	}
-	if input.Action != "" {
-		query += ` AND event.action=?`
-		args = append(args, input.Action)
-	}
-	if input.ResourceType != "" {
-		query += ` AND event.resource_type=?`
-		args = append(args, input.ResourceType)
-	}
+	query, args = tablequery.AppendExactStringSet(query, args, "event.action", input.Actions)
+	query, args = tablequery.AppendExactStringSet(query, args, "event.resource_type", input.ResourceTypes)
 	if input.OccurredFrom != "" {
 		query += ` AND ` + occurredExpression + `>=?`
 		args = append(args, input.OccurredFrom)

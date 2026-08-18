@@ -55,14 +55,22 @@ export interface PaymentCollectionQuery extends CollectionQuery<'receivedAt' | '
 export interface AuditCollectionQuery extends CollectionQuery<'occurredAt' | 'actorName' | 'action' | 'resourceType'> {
   actorUserId?: string;
   actorMembershipId?: string;
-  action?: string;
-  resourceType?: string;
+  /** One or more repeated action query values combined with OR semantics. */
+  action?: string | readonly string[];
+  /** One or more repeated resourceType query values combined with OR semantics. */
+  resourceType?: string | readonly string[];
   occurredFrom?: string;
   occurredTo?: string;
 }
 
 /** Server-backed system-audit search, filter, and sort options. */
 export type SystemAuditCollectionQuery = Omit<AuditCollectionQuery, 'actorMembershipId'>;
+
+/** Complete data-derived option catalog for one authorized audit scope. */
+export interface AuditFilterOptions {
+  actions: string[];
+  resourceTypes: string[];
+}
 
 /** Determines whether a product price is fixed by the catalog or chosen per booking. */
 export type ProductPricingMode = 'FIXED' | 'USER_DEFINED';
@@ -854,6 +862,7 @@ export interface AuditEntry {
   occurredAt: string;
   actorName: string;
   action: string;
+  resourceType: string;
   subject: string;
   details: string;
 }

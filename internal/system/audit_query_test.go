@@ -30,14 +30,14 @@ func TestQueryAuditFiltersSortsAndPaginates(t *testing.T) {
 	}
 
 	first, err := service.QueryAudit(context.Background(), tablequery.AuditQuery{
-		Search: "group", ResourceType: "group", OccurredFrom: "2026-08-17", OccurredTo: "2026-08-18",
+		Search: "group", Actions: []string{"system.group.archived", "system.group.created"}, ResourceTypes: []string{"group"}, OccurredFrom: "2026-08-17", OccurredTo: "2026-08-18",
 		Sort: "occurredAt", Direction: "asc", Limit: 1,
 	})
 	if err != nil || len(first.Items) != 1 || first.Items[0].ID != "sya_query_1" || first.NextCursor == "" {
 		t.Fatalf("first audit page=%#v err=%v", first, err)
 	}
 	second, err := service.QueryAudit(context.Background(), tablequery.AuditQuery{
-		Search: "group", ResourceType: "group", OccurredFrom: "2026-08-17", OccurredTo: "2026-08-18",
+		Search: "group", Actions: []string{"system.group.created", "system.group.archived"}, ResourceTypes: []string{"group"}, OccurredFrom: "2026-08-17", OccurredTo: "2026-08-18",
 		Sort: "occurredAt", Direction: "asc", Limit: 1, Cursor: first.NextCursor,
 	})
 	if err != nil || len(second.Items) != 1 || second.Items[0].ID != "sya_query_2" || second.NextCursor != "" {
@@ -48,5 +48,12 @@ func TestQueryAuditFiltersSortsAndPaginates(t *testing.T) {
 	})
 	if !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("mismatched audit cursor error=%v, want validation", err)
+	}
+	options, err := service.ListAuditFilterOptions(context.Background())
+	if err != nil {
+		t.Fatalf("list audit filter options: %v", err)
+	}
+	if len(options.Actions) != 3 || options.Actions[0] != "system.group.archived" || len(options.ResourceTypes) != 2 || options.ResourceTypes[0] != "group" {
+		t.Fatalf("audit filter options=%#v", options)
 	}
 }

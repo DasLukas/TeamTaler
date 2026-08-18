@@ -1110,14 +1110,30 @@ describe('server-backed collection API contract', () => {
       : jsonResponse([member])));
     vi.stubGlobal('fetch', fetchMock);
 
-    const page = await api.getAuditPage('group-a', { q: 'payment', action: 'payment.created', limit: 50 });
+    const page = await api.getAuditPage('group-a', { q: 'payment', action: ['payment.created', 'payment.reversed'], resourceType: ['payment'], limit: 50 });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls.map((call) => String(call[0]))).toEqual(expect.arrayContaining([
-      '/api/v1/groups/group-a/audit?q=payment&action=payment.created&limit=50',
+      '/api/v1/groups/group-a/audit?q=payment&action=payment.created&action=payment.reversed&resourceType=payment&limit=50',
       '/api/v1/groups/group-a/members',
     ]));
     expect(page.items[0]).toMatchObject({ actorName: 'Alex', action: 'payment.created', subject: 'payment · payment-a' });
     expect(page).toMatchObject({ hasMore: false, limit: 50 });
+  });
+
+  it('loads data-derived audit filter options for group and system scopes', async () => {
+    const options = { actions: ['payment.created'], resourceTypes: ['payment'] };
+    const fetchMock = vi.fn((url: string) => {
+      void url;
+      return Promise.resolve(jsonResponse(options));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.getAuditFilterOptions('group/a')).resolves.toEqual(options);
+    await expect(api.getSystemAuditFilterOptions()).resolves.toEqual(options);
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      '/api/v1/groups/group%2Fa/audit/filter-options',
+      '/api/v1/system/audit/filter-options',
+    ]);
   });
 });

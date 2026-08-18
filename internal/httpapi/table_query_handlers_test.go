@@ -118,6 +118,30 @@ func TestTableQueryHandlersFilterSortAndPaginateWithoutChangingArrayBodies(t *te
 	if err := json.Unmarshal(auditResponse.Body.Bytes(), &auditItems); err != nil || auditResponse.Code != http.StatusOK || len(auditItems) != 1 || auditResponse.Header().Get("X-Next-Cursor") == "" {
 		t.Fatalf("audit status=%d items=%#v err=%v body=%s", auditResponse.Code, auditItems, err, auditResponse.Body.String())
 	}
+	multiAuditResponse := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/audit?action=booking.created&action=payment.created&resourceType=booking&resourceType=payment&limit=10",
+		server.handleAudit)
+	if err := json.Unmarshal(multiAuditResponse.Body.Bytes(), &auditItems); err != nil || multiAuditResponse.Code != http.StatusOK || len(auditItems) != 6 {
+		t.Fatalf("multi audit status=%d items=%#v err=%v body=%s", multiAuditResponse.Code, auditItems, err, multiAuditResponse.Body.String())
+	}
+	auditOptionsResponse := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/audit/filter-options", server.handleAuditFilterOptions)
+	var auditOptions struct {
+		Actions       []string `json:"actions"`
+		ResourceTypes []string `json:"resourceTypes"`
+	}
+	if err := json.Unmarshal(auditOptionsResponse.Body.Bytes(), &auditOptions); err != nil || auditOptionsResponse.Code != http.StatusOK || !containsString(auditOptions.Actions, "booking.created") || !containsString(auditOptions.ResourceTypes, "payment") {
+		t.Fatalf("audit options status=%d options=%#v err=%v body=%s", auditOptionsResponse.Code, auditOptions, err, auditOptionsResponse.Body.String())
+	}
+}
+
+func containsString(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSystemAuditHandlerUsesCompatibleObjectBodyAndCursorHeaders(t *testing.T) {
@@ -148,6 +172,14 @@ func TestSystemAuditHandlerUsesCompatibleObjectBodyAndCursorHeaders(t *testing.T
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || len(body.Items) != 1 || body.Items[0].ID != "sya_http_b" {
 		t.Fatalf("system audit body=%#v err=%v raw=%s", body, err, response.Body.String())
+	}
+	optionsRequest := httptest.NewRequest(http.MethodGet, "/api/v1/system/audit/filter-options", nil)
+	optionsRequest = optionsRequest.WithContext(context.WithValue(optionsRequest.Context(), principalKey, principal))
+	optionsResponse := httptest.NewRecorder()
+	server.handleSystemAuditFilterOptions(optionsResponse, optionsRequest)
+	var options systemadmin.AuditFilterOptions
+	if err := json.Unmarshal(optionsResponse.Body.Bytes(), &options); err != nil || optionsResponse.Code != http.StatusOK || !containsString(options.Actions, "system.query.test") || !containsString(options.ResourceTypes, "test_resource") {
+		t.Fatalf("system audit options status=%d options=%#v err=%v body=%s", optionsResponse.Code, options, err, optionsResponse.Body.String())
 	}
 }
 

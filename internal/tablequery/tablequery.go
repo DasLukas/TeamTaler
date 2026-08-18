@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -23,8 +24,8 @@ type AuditQuery struct {
 	Search            string
 	ActorUserID       string
 	ActorMembershipID string
-	Action            string
-	ResourceType      string
+	Actions           []string
+	ResourceTypes     []string
 	OccurredFrom      string
 	OccurredTo        string
 	Sort              string
@@ -63,14 +64,19 @@ func NormalizeAudit(input AuditQuery, scope string, allowActorMembership bool) (
 	}
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.ActorMembershipID = strings.TrimSpace(input.ActorMembershipID)
-	input.Action = strings.TrimSpace(input.Action)
-	input.ResourceType = strings.TrimSpace(input.ResourceType)
+	input.Actions, err = normalizeStringSet("action", input.Actions)
+	if err != nil {
+		return AuditQuery{}, "", err
+	}
+	input.ResourceTypes, err = normalizeStringSet("resourceType", input.ResourceTypes)
+	if err != nil {
+		return AuditQuery{}, "", err
+	}
 	if !allowActorMembership && input.ActorMembershipID != "" {
 		return AuditQuery{}, "", domain.ValidationError{Field: "actorMembershipId", Message: "is not supported for system audit"}
 	}
 	for field, value := range map[string]string{
 		"actorUserId": input.ActorUserID, "actorMembershipId": input.ActorMembershipID,
-		"action": input.Action, "resourceType": input.ResourceType,
 	} {
 		if len(value) > 200 {
 			return AuditQuery{}, "", domain.ValidationError{Field: field, Message: "must contain at most 200 characters"}
@@ -84,13 +90,52 @@ func NormalizeAudit(input AuditQuery, scope string, allowActorMembership bool) (
 		AuditQuery
 	}{Scope: scope, AuditQuery: AuditQuery{
 		Search: input.Search, ActorUserID: input.ActorUserID, ActorMembershipID: input.ActorMembershipID,
-		Action: input.Action, ResourceType: input.ResourceType, OccurredFrom: input.OccurredFrom,
+		Actions: input.Actions, ResourceTypes: input.ResourceTypes, OccurredFrom: input.OccurredFrom,
 		OccurredTo: input.OccurredTo, Sort: input.Sort, Direction: input.Direction,
 	}})
 	if err != nil {
 		return AuditQuery{}, "", err
 	}
 	return input, fingerprint, nil
+}
+
+// normalizeStringSet trims, validates, deduplicates, and sorts repeated exact
+// filter values so equivalent URL orders share one cursor fingerprint.
+func normalizeStringSet(field string, values []string) ([]string, error) {
+	unique := make(map[string]struct{}, len(values))
+	for _, rawValue := range values {
+		value := strings.TrimSpace(rawValue)
+		if value == "" {
+			continue
+		}
+		if len(value) > 200 {
+			return nil, domain.ValidationError{Field: field, Message: "must contain values of at most 200 characters"}
+		}
+		unique[value] = struct{}{}
+	}
+	if len(unique) > 100 {
+		return nil, domain.ValidationError{Field: field, Message: "must contain at most 100 values"}
+	}
+	result := make([]string, 0, len(unique))
+	for value := range unique {
+		result = append(result, value)
+	}
+	slices.Sort(result)
+	return result, nil
+}
+
+// AppendExactStringSet appends an IN predicate and its bound values for a
+// normalized repeated filter. Column must be a trusted, static SQL expression;
+// user-provided values are always returned as bind arguments.
+func AppendExactStringSet(query string, args []any, column string, values []string) (string, []any) {
+	if len(values) == 0 {
+		return query, args
+	}
+	query += " AND " + column + " IN (" + strings.TrimSuffix(strings.Repeat("?,", len(values)), ",") + ")"
+	for _, value := range values {
+		args = append(args, value)
+	}
+	return query, args
 }
 
 type cursorPayload struct {

@@ -1,11 +1,12 @@
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useDeferredValue, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import type { AuditCollectionQuery, AuditEntry, CollectionPage } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
-import { AuditEventTable, type AuditEventFilterId } from '@/features/shared/AuditEventTable';
-import type { DataTableDateRange, DataTableFilterDefinition } from '@/features/shared/DataTable';
+import { AuditEventTable } from '@/features/shared/AuditEventTable';
+import { createAuditFilterDefinitions, type AuditEventFilterId } from '@/features/shared/auditFilters';
+import type { DataTableDateRange } from '@/features/shared/DataTable';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
 import styles from './AuditPanel.module.css';
 
@@ -19,13 +20,10 @@ const auditPageSize = 50;
 export function AuditPanel() {
   const { t } = useTranslation();
   const { activeGroupId } = useActiveGroup();
-  const filterDefinitions = useMemo<readonly DataTableFilterDefinition<AuditEventFilterId>[]>(() => [
-    { id: 'action', kind: 'text', label: t('audit.action'), placeholder: t('audit.actionPlaceholder') },
-    { id: 'resourceType', kind: 'text', label: t('audit.resourceType'), placeholder: t('audit.resourceTypePlaceholder') },
-    { fromLabel: t('dataTable.from'), id: 'occurredAt', kind: 'date-range', label: t('audit.time'), toLabel: t('dataTable.to') },
-  ], [t]);
+  const filterOptionsQuery = useQuery({ queryFn: () => api.getAuditFilterOptions(activeGroupId), queryKey: ['audit', activeGroupId, 'filter-options'] });
+  const queryFilterDefinitions = useMemo(() => createAuditFilterDefinitions(t, filterOptionsQuery.data), [filterOptionsQuery.data, t]);
   const tableState = useDataTableUrlState<AuditEventFilterId>({
-    filterDefinitions,
+    filterDefinitions: queryFilterDefinitions,
     initialSorting: [{ id: 'occurredAt', desc: true }],
     namespace: 'group-audit',
     sortableColumnIds: ['occurredAt', 'actorName', 'action', 'resourceType'],
@@ -35,13 +33,13 @@ export function AuditPanel() {
     const dateRange = tableState.filters.occurredAt as DataTableDateRange | undefined;
     const sorting = tableState.sorting[0];
     return {
-      action: tableState.filters.action as string | undefined,
+      action: tableState.filters.action as string[] | undefined,
       direction: sorting?.desc === false ? 'asc' : 'desc',
       limit: auditPageSize,
       occurredFrom: dateRange?.from,
       occurredTo: dateRange?.to,
       q: deferredSearch || undefined,
-      resourceType: tableState.filters.resourceType as string | undefined,
+      resourceType: tableState.filters.resourceType as string[] | undefined,
       sort: (sorting?.id ?? 'occurredAt') as AuditCollectionQuery['sort'],
     };
   }, [deferredSearch, tableState.filters, tableState.sorting]);
@@ -52,6 +50,11 @@ export function AuditPanel() {
     queryKey: ['audit', activeGroupId, 'collection', collectionQuery],
   });
   const entries = useMemo(() => auditQuery.data?.pages.flatMap((page) => page.items).map((entry) => ({ ...entry, actor: entry.actorName })) ?? [], [auditQuery.data]);
+  const visibleFilterOptions = useMemo(() => ({
+    actions: filterOptionsQuery.data?.actions.length ? filterOptionsQuery.data.actions : [...new Set(entries.map((entry) => entry.action))].sort(),
+    resourceTypes: filterOptionsQuery.data?.resourceTypes.length ? filterOptionsQuery.data.resourceTypes : [...new Set(entries.map((entry) => entry.resourceType))].filter(Boolean).sort(),
+  }), [entries, filterOptionsQuery.data]);
+  const filterDefinitions = useMemo(() => createAuditFilterDefinitions(t, visibleFilterOptions), [t, visibleFilterOptions]);
   return (
     <div className={styles.content}>
       <header><h2>{t('audit.title')}</h2><p>{t('audit.intro')}</p></header>
