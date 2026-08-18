@@ -12,7 +12,7 @@ import Save from 'lucide-react/dist/esm/icons/save';
 import ShieldAlert from 'lucide-react/dist/esm/icons/shield-alert';
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
 import X from 'lucide-react/dist/esm/icons/x';
-import { useDeferredValue, useMemo, useState, type FormEvent } from 'react';
+import { useDeferredValue, useId, useMemo, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { formatMoney } from '@/api/money';
@@ -31,9 +31,9 @@ import { Button } from '@/components/ui/Button';
 import { ConfirmationDialog } from '@/components/ui/ConfirmationDialog';
 import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { GroupMark } from '@/components/ui/GroupMark';
-import { InvitationReady } from '@/components/ui/InvitationReady';
+import { InvitationReady, InvitationReadyFooter } from '@/components/ui/InvitationReady';
 import { ItemAction } from '@/components/ui/ItemAction';
-import { Modal } from '@/components/ui/Modal';
+import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { Toggle } from '@/components/ui/Toggle';
 import { AuditEventTable, type AuditEventFilterId } from '@/features/shared/AuditEventTable';
@@ -353,6 +353,7 @@ interface PurgeDialogProps {
 /** Exact-name confirmation and impact review for permanent group deletion. */
 function PurgeDialog({ group, onClose, onPurged }: PurgeDialogProps) {
   const { t } = useTranslation();
+  const formId = useId();
   const impact = useQuery({
     queryKey: ['system-group-deletion-impact', group?.id],
     queryFn: () => api.getSystemGroupDeletionImpact(group?.id ?? ''),
@@ -375,7 +376,7 @@ function PurgeDialog({ group, onClose, onPurged }: PurgeDialogProps) {
   const valid = Boolean(group) && groupName === currentGroupName;
   return (
     <Modal onClose={() => { if (!mutation.isPending) close(); }} open={group !== null} size="wide" title={t('systemSettings.groups.purgeTitle', { name: currentGroupName ?? '' })} variant="sheet">
-      {group ? <form className={styles.purgeForm} onSubmit={(event) => { event.preventDefault(); mutation.mutate(); }}>
+      {group ? <form className={styles.purgeForm} id={formId} onSubmit={(event) => { event.preventDefault(); mutation.mutate(); }}>
         <div className={styles.dangerNotice}><span className={styles.dangerIcon}><ShieldAlert aria-hidden="true" size={26} /></span><div><strong>{t('systemSettings.groups.purgeWarning')}</strong><p>{t('systemSettings.groups.purgeDescription')}</p></div></div>
         {impact.isError ? <p className={styles.error} role="alert">{t('systemSettings.groups.impactError')}</p> : null}
         <section aria-labelledby="system-purge-impact-title" className={styles.impactPanel}>
@@ -390,7 +391,7 @@ function PurgeDialog({ group, onClose, onPurged }: PurgeDialogProps) {
           <Field htmlFor="system-purge-name" label={t('systemSettings.groups.confirmName')}><TextInput autoComplete="off" id="system-purge-name" onChange={(event) => setGroupName(event.target.value)} required value={groupName} /></Field>
         </div>
         {mutation.isError ? <p className={styles.error} role="alert">{t('systemSettings.groups.purgeError')}</p> : null}
-        <div className={`${styles.actions} ${styles.purgeActions}`}><Button disabled={mutation.isPending} leadingIcon={<X size={17} />} onClick={close} variant="secondary">{t('common.cancel')}</Button><Button disabled={!valid || mutation.isPending || impact.isLoading || impact.isError} leadingIcon={<Trash2 size={17} />} type="submit" variant="danger">{mutation.isPending ? t('systemSettings.groups.purging') : t('systemSettings.groups.purge')}</Button></div>
+        <ModalFooter><div className={`${styles.actions} ${styles.purgeActions}`}><Button disabled={mutation.isPending} leadingIcon={<X size={17} />} onClick={close} variant="secondary">{t('common.cancel')}</Button><Button disabled={!valid || mutation.isPending || impact.isLoading || impact.isError} form={formId} leadingIcon={<Trash2 size={17} />} type="submit" variant="danger">{mutation.isPending ? t('systemSettings.groups.purging') : t('systemSettings.groups.purge')}</Button></div></ModalFooter>
       </form> : null}
     </Modal>
   );
@@ -402,7 +403,7 @@ function SystemGroupInvitationDialog({ invitation, onClose }: { invitation: Syst
   if (!invitation?.acceptUrl || !invitation.expiresAt) return null;
   const emailQueued = invitation.emailDeliveryStatus === 'PENDING';
   return (
-    <Modal onClose={onClose} open size="workspace" title={t('systemSettings.groups.invitationReadyTitle', { group: invitation.group.name })}>
+    <Modal footer={<InvitationReadyFooter onDone={onClose} />} onClose={onClose} open size="workspace" title={t('systemSettings.groups.invitationReadyTitle', { group: invitation.group.name })}>
       <InvitationReady
         acceptUrl={invitation.acceptUrl}
         deliveryStatus={{
@@ -412,7 +413,6 @@ function SystemGroupInvitationDialog({ invitation, onClose }: { invitation: Syst
         expiresAt={invitation.expiresAt}
         fallbackHint={emailQueued ? t('members.fallbackHint') : undefined}
         linkLabel={t('members.invitationLink')}
-        onDone={onClose}
       />
     </Modal>
   );

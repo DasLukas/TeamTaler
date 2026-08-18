@@ -56,6 +56,8 @@
   box-shadow: 0 -10px 24px rgb(3 24 47 / 6%);
 }
 
+.footer:empty { display: none; }
+
 .sheetHandle,
 .handle {
   display: none;

@@ -218,7 +218,7 @@ export function MemberMultiSelect({
         )}
       </button>
       {open && useSheet ? (
-        <Modal className={styles.sheetDialog} onClose={() => setOpen(false)} open title={t('booking.selectRecipients')} variant="sheet">
+        <Modal onClose={() => setOpen(false)} open title={t('booking.selectRecipients')} variant="sheet">
           <div className={styles.sheetContent}>{targetEditor}</div>
         </Modal>
       ) : null}

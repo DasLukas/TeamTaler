@@ -3,7 +3,7 @@ import CircleDollarSign from 'lucide-react/dist/esm/icons/circle-dollar-sign';
 import Plus from 'lucide-react/dist/esm/icons/plus';
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
 import X from 'lucide-react/dist/esm/icons/x';
-import { useDeferredValue, useMemo, useState } from 'react';
+import { useDeferredValue, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { currencyExponent, formatMoney, majorUnitsInputPattern, majorUnitsPlaceholder, parseMajorUnits } from '@/api/money';
@@ -11,7 +11,7 @@ import type { CollectionPage, Payment, PaymentCollectionQuery } from '@/api/type
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Button } from '@/components/ui/Button';
 import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
-import { Modal } from '@/components/ui/Modal';
+import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { DataTable, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange } from '@/features/shared/DataTable';
 import tableStyles from '@/features/shared/Table.module.css';
@@ -31,6 +31,8 @@ export function PaymentsPanel() {
   const { t } = useTranslation();
   const { activeGroupId, activeGroup } = useActiveGroup();
   const queryClient = useQueryClient();
+  const paymentFormId = useId();
+  const reversalFormId = useId();
   const accountsQuery = useQuery({ queryKey: ['account-summaries', activeGroupId], queryFn: () => api.getAccountSummaries(activeGroupId) });
   const transactionSettingsQuery = useQuery({ queryKey: ['transaction-settings', activeGroupId], queryFn: () => api.getTransactionSettings(activeGroupId) });
   const labels = useDataTableLabels();
@@ -215,7 +217,7 @@ export function PaymentsPanel() {
         {...tableState}
       />
       <Modal onClose={() => setDialogOpen(false)} open={dialogOpen} title={t('finance.record')}>
-        <form className={styles.form} onSubmit={(event) => { event.preventDefault(); paymentMutation.mutate(); }}>
+        <form className={styles.form} id={paymentFormId} onSubmit={(event) => { event.preventDefault(); paymentMutation.mutate(); }}>
           <Field htmlFor="payment-member" label={t('common.member')}>
             <SelectInput id="payment-member" onChange={(event) => setMembershipId(event.target.value)} value={membershipId || defaultAccount?.membershipId}>
               {regularAccounts.length > 0 ? <optgroup label={t('booking.regularMembers')}>{regularAccounts.map((account) => <option key={account.membershipId} value={account.membershipId}>{account.displayName}</option>)}</optgroup> : null}
@@ -228,15 +230,15 @@ export function PaymentsPanel() {
           <Field htmlFor="payment-method" label={t('finance.paymentType')}><SelectInput id="payment-method" onChange={(event) => setMethod(event.target.value)} required value={method}>{transactionSettingsQuery.data.paymentMethods.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</SelectInput></Field>
           {reasonEnabled ? <Field htmlFor="payment-reference" label={`${t('finance.reason')}${reasonRequired ? ' *' : ''}`}><TextInput id="payment-reference" list="payment-reason-suggestions" maxLength={120} onChange={(event) => setReference(event.target.value)} required={reasonRequired} value={reference} /><datalist id="payment-reason-suggestions">{transactionSettingsQuery.data.paymentReasons.map((item) => <option key={item.id} value={item.label} />)}</datalist></Field> : null}
           {paymentMutation.isError ? <p className={styles.error} role="alert">{paymentMutation.error.message}</p> : null}
-          <div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={() => setDialogOpen(false)} variant="secondary">{t('common.cancel')}</Button><Button disabled={!amount || !method || (reasonRequired && !reference.trim()) || paymentMutation.isPending} leadingIcon={<CircleDollarSign size={17} />} type="submit">{t('finance.bookPayment')}</Button></div>
+          <ModalFooter><div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={() => setDialogOpen(false)} variant="secondary">{t('common.cancel')}</Button><Button disabled={!amount || !method || (reasonRequired && !reference.trim()) || paymentMutation.isPending} form={paymentFormId} leadingIcon={<CircleDollarSign size={17} />} type="submit">{t('finance.bookPayment')}</Button></div></ModalFooter>
         </form>
       </Modal>
       <Modal onClose={() => setPaymentToReverse(null)} open={Boolean(paymentToReverse)} title={t('finance.reverseTitle')}>
-        <form className={styles.form} onSubmit={(event) => { event.preventDefault(); reversalMutation.mutate(); }}>
+        <form className={styles.form} id={reversalFormId} onSubmit={(event) => { event.preventDefault(); reversalMutation.mutate(); }}>
           <p className={styles.explanation}>{t('finance.reverseExplanation')}</p>
           <Field htmlFor="payment-reversal-reason" label={t('finance.reason')}><TextInput id="payment-reversal-reason" onChange={(event) => setReversalReason(event.target.value)} required value={reversalReason} /></Field>
           {reversalMutation.isError ? <p className={styles.error} role="alert">{reversalMutation.error.message}</p> : null}
-          <div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={() => setPaymentToReverse(null)} variant="secondary">{t('common.cancel')}</Button><Button disabled={!reversalReason.trim() || reversalMutation.isPending} leadingIcon={<RotateCcw size={17} />} type="submit">{t('finance.confirmReverse')}</Button></div>
+          <ModalFooter><div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={() => setPaymentToReverse(null)} variant="secondary">{t('common.cancel')}</Button><Button disabled={!reversalReason.trim() || reversalMutation.isPending} form={reversalFormId} leadingIcon={<RotateCcw size={17} />} type="submit">{t('finance.confirmReverse')}</Button></div></ModalFooter>
         </form>
       </Modal>
     </div>

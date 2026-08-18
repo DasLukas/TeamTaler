@@ -27,6 +27,12 @@ Purpose-built icon-only utility controls, including close, disclosure, menu, and
 
 The `ButtonProps` type requires both an icon and children, so newly introduced text-only standard buttons fail TypeScript validation. Responsive icon-only behavior is tested at the shared component level and must also be exercised in the feature that opts into it.
 
+## Selection menus
+
+Domain choices that benefit from branded or visual identity use the shared `SelectMenu` with a rendered value and option. Group choices consistently pair the protected `GroupMark` logo-or-initial visual with the group name, including account preferences and application navigation. Multiple-choice table filters use the shared `MultiSelectMenu` dropdown when the option set is a compact semantic list; persistent exposed checkbox grids are reserved for workflows where comparing every option at once is the primary task.
+
+Both custom menus preserve native form semantics through accessible combobox, listbox, checkbox, and label relationships. Feature code supplies data and optional visuals but does not recreate menu positioning, keyboard behavior, focus handling, overflow, or elevation.
+
 ## Item micro-actions
 
 An action attached to one existing item in a table, list, or card uses the shared `ItemAction` component. It renders a small borderless action with a semantic leading icon and a short visible text label, matching the visual weight of a link while retaining native button behavior. Examples include editing or renewing an invitation, archiving or reactivating a member or group, and opening a permanent-deletion confirmation.
@@ -41,7 +47,7 @@ Application actions never use browser-native `confirm`, `alert`, or `prompt` dia
 
 `web/src/components/ui/Modal.tsx` owns modal width, height, overflow, safe-area handling, and responsive sheet behavior. Feature styles must not set a modal's width, maximum width, height, or overflow. Callers select one of the shared `standard`, `wide`, or `workspace` sizes; every `sheet` becomes exactly viewport-wide below the shared compact breakpoint regardless of its desktop size.
 
-Modal headers and action footers remain visible. Only the body between them may scroll. Persistent cancel, reset, save, apply, and confirmation controls are passed through the shared `footer` property instead of being placed inside the scrolling content. When a footer submit button belongs to a form in the body, the button references that form by its stable `id`. This structure applies equally to centered desktop dialogs and mobile bottom sheets, including when the software keyboard reduces the visual viewport.
+Modal headers and action footers remain visible. Only the body between them may scroll. Persistent cancel, reset, save, apply, and confirmation controls are passed through the shared `footer` property instead of being placed inside the scrolling content. A nested workflow that owns its own mutation state uses the shared `ModalFooter` compound component to portal those actions into the same fixed footer; feature code must not recreate a fixed or sticky footer. When a footer submit button belongs to a form in the body, the button references that form by its stable `id`. This structure applies equally to centered desktop dialogs and mobile bottom sheets, including when the software keyboard reduces the visual viewport.
 
 ## Responsive administrative workspaces
 

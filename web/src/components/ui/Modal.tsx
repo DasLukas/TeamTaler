@@ -1,8 +1,11 @@
 import X from 'lucide-react/dist/esm/icons/x';
-import { useEffect, useId, useRef, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject, type TouchEvent as ReactTouchEvent } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject, type TouchEvent as ReactTouchEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { IconButton } from './IconButton';
 import styles from './Modal.module.css';
+
+const ModalFooterContext = createContext<HTMLElement | null>(null);
 
 /**
  * Restores focus to the element that opened a modal when it remains available.
@@ -35,6 +38,22 @@ export interface ModalProps {
   className?: string;
 }
 
+/** Properties accepted by content-owned persistent modal actions. */
+export interface ModalFooterProps {
+  children: ReactNode;
+}
+
+/**
+ * Moves content-owned actions into the persistent footer of the nearest modal.
+ *
+ * @param props - Actions that need access to state owned inside modal content.
+ * @returns A portal into the shared modal footer, or nothing before the target mounts.
+ */
+export function ModalFooter({ children }: ModalFooterProps) {
+  const target = useContext(ModalFooterContext);
+  return target ? createPortal(children, target) : null;
+}
+
 /**
  * Renders an accessible modal that can use a compact-screen sheet style.
  *
@@ -43,6 +62,7 @@ export interface ModalProps {
  */
 export function Modal({ open, title, onClose, children, footer, size = 'standard', variant = 'dialog', className = '' }: ModalProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const [footerElement, setFooterElement] = useState<HTMLElement | null>(null);
   const openingElementRef = useRef<HTMLElement | null>(null);
   const dragRef = useRef<{ pointerId: number; startY: number; startTime: number; moved: boolean } | null>(null);
   const mouseDragCleanupRef = useRef<(() => void) | null>(null);
@@ -50,6 +70,7 @@ export function Modal({ open, title, onClose, children, footer, size = 'standard
   const suppressHandleClickRef = useRef(false);
   const titleId = useId();
   const { t } = useTranslation();
+  const setFooterNode = useCallback((node: HTMLElement | null) => setFooterElement(node), []);
 
   const clearDragTransform = () => {
     const dialog = dialogRef.current;
@@ -254,8 +275,10 @@ export function Modal({ open, title, onClose, children, footer, size = 'standard
               <IconButton label={t('dialog.close')} onClick={onClose}><X size={28} strokeWidth={1.8} /></IconButton>
             </header>
           </div>
-          <div className={styles.body}>{children}</div>
-          {footer ? <footer className={styles.footer}>{footer}</footer> : null}
+          <ModalFooterContext.Provider value={footerElement}>
+            <div className={styles.body}>{children}</div>
+            <footer className={styles.footer} ref={setFooterNode}>{footer}</footer>
+          </ModalFooterContext.Provider>
         </>
       ) : null}
     </dialog>

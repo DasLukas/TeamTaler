@@ -4,7 +4,7 @@ import CircleCheck from 'lucide-react/dist/esm/icons/circle-check';
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
 import X from 'lucide-react/dist/esm/icons/x';
-import { useDeferredValue, useMemo, useState } from 'react';
+import { useDeferredValue, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { currencyExponent, formatMoney } from '@/api/money';
@@ -14,7 +14,7 @@ import { Page } from '@/components/layout/Page';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
-import { Modal } from '@/components/ui/Modal';
+import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { CategoryIcon } from '@/features/shared/CategoryIcon';
 import { DataTable, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange } from '@/features/shared/DataTable';
 import tableStyles from '@/features/shared/Table.module.css';
@@ -95,6 +95,7 @@ export function ActivitiesPage() {
   const { t } = useTranslation();
   const { activeGroup, activeGroupId, session } = useActiveGroup();
   const queryClient = useQueryClient();
+  const reversalFormId = useId();
   const categoriesQuery = useQuery({ queryKey: ['categories', activeGroupId], queryFn: () => api.getCategories(activeGroupId) });
   const [reversal, setReversal] = useState<Booking | null>(null);
   const [reason, setReason] = useState('');
@@ -284,14 +285,14 @@ export function ActivitiesPage() {
         {...tableState}
       />
       <Modal onClose={() => { setReversal(null); setReason(''); }} open={Boolean(reversal)} title={t('activities.reverseTitle')}>
-        <form className={styles.reversalForm} onSubmit={(event) => { event.preventDefault(); reverseMutation.mutate(); }}>
+        <form className={styles.reversalForm} id={reversalFormId} onSubmit={(event) => { event.preventDefault(); reverseMutation.mutate(); }}>
           <p>{t('activities.reverseExplanation')}</p>
           {reversal?.voidWithoutReasonUntil && !reversal.voidReasonRequired ? <p className={styles.windowNotice}>{t('activities.reasonOptionalUntil', { time: new Intl.DateTimeFormat('de-DE', { timeStyle: 'short' }).format(new Date(reversal.voidWithoutReasonUntil)) })}</p> : null}
           <Field hint={reversal?.voidReasonRequired ? t('activities.reasonRequired') : t('activities.reasonOptional')} htmlFor="reversal-reason" label={t('finance.reason')}>
             <TextInput id="reversal-reason" onChange={(event) => setReason(event.target.value)} required={reversal?.voidReasonRequired} value={reason} />
           </Field>
           {reverseMutation.isError ? <p className={styles.error} role="alert">{reverseMutation.error.message}</p> : null}
-          <div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={() => { setReversal(null); setReason(''); }} variant="secondary">{t('common.cancel')}</Button><Button disabled={Boolean(reversal?.voidReasonRequired && !reason.trim()) || reverseMutation.isPending} leadingIcon={<RotateCcw size={17} />} type="submit">{t('activities.confirmReverse')}</Button></div>
+          <ModalFooter><div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={() => { setReversal(null); setReason(''); }} variant="secondary">{t('common.cancel')}</Button><Button disabled={Boolean(reversal?.voidReasonRequired && !reason.trim()) || reverseMutation.isPending} form={reversalFormId} leadingIcon={<RotateCcw size={17} />} type="submit">{t('activities.confirmReverse')}</Button></div></ModalFooter>
         </form>
       </Modal>
     </Page>

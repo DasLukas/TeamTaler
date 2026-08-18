@@ -176,26 +176,11 @@
 
 .guestError { color: var(--color-red-600); }
 
-.sheetDialog.sheetDialog {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
-  overflow: hidden;
-}
-
 .sheetContent {
   display: grid;
-  min-height: 0;
   align-content: start;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-5) calc(var(--space-5) + env(safe-area-inset-bottom, 0px));
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
-  scroll-padding-bottom: calc(var(--space-5) + env(safe-area-inset-bottom, 0px));
-}
-
-.sheetContent .guestCreator {
-  scroll-margin-bottom: calc(var(--space-5) + env(safe-area-inset-bottom, 0px));
+  padding: var(--space-2) var(--space-5) var(--space-5);
 }
 
 @media (max-width: 767px) {

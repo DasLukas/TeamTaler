@@ -3,7 +3,7 @@ import CalendarCheck from 'lucide-react/dist/esm/icons/calendar-check';
 import LockKeyhole from 'lucide-react/dist/esm/icons/lock-keyhole';
 import Printer from 'lucide-react/dist/esm/icons/printer';
 import X from 'lucide-react/dist/esm/icons/x';
-import { useDeferredValue, useMemo, useState } from 'react';
+import { useDeferredValue, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { currencyExponent, formatMoney } from '@/api/money';
@@ -11,7 +11,7 @@ import type { Period, Settlement } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
-import { Modal } from '@/components/ui/Modal';
+import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { DataTable, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange } from '@/features/shared/DataTable';
 import tableStyles from '@/features/shared/Table.module.css';
@@ -38,6 +38,7 @@ export function SettlementsPanel({ settlements, settlementsEnabled }: Settlement
   const { t } = useTranslation();
   const { activeGroupId } = useActiveGroup();
   const queryClient = useQueryClient();
+  const closePeriodFormId = useId();
   const labels = useDataTableLabels();
   const periodsQuery = useQuery({ queryKey: ['periods', activeGroupId], queryFn: () => api.getPeriods(activeGroupId), enabled: settlementsEnabled });
   const [periodToClose, setPeriodToClose] = useState<Period | null>(null);
@@ -165,12 +166,12 @@ export function SettlementsPanel({ settlements, settlementsEnabled }: Settlement
         {...tableState}
       />
       <Modal onClose={() => setPeriodToClose(null)} open={Boolean(periodToClose)} title={t('periods.closeDialog')}>
-        <form className={styles.form} onSubmit={(event) => { event.preventDefault(); closeMutation.mutate(); }}>
+        <form className={styles.form} id={closePeriodFormId} onSubmit={(event) => { event.preventDefault(); closeMutation.mutate(); }}>
           <p>{t('periods.closeExplanation')}</p>
           <Field htmlFor="period-label" label={t('periods.label')}><TextInput id="period-label" onChange={(event) => setLabel(event.target.value)} required value={label} /></Field>
           <Field htmlFor="period-due" label={t('periods.paymentDue')}><TextInput id="period-due" onChange={(event) => setDueAt(event.target.value)} required type="date" value={dueAt} /></Field>
           {closeMutation.isError ? <p className={styles.error} role="alert">{closeMutation.error.message}</p> : null}
-          <div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={() => setPeriodToClose(null)} variant="secondary">{t('common.cancel')}</Button><Button disabled={!label.trim() || !dueAt || closeMutation.isPending} leadingIcon={<LockKeyhole size={17} />} type="submit">{t('periods.confirmClose')}</Button></div>
+          <ModalFooter><div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={() => setPeriodToClose(null)} variant="secondary">{t('common.cancel')}</Button><Button disabled={!label.trim() || !dueAt || closeMutation.isPending} form={closePeriodFormId} leadingIcon={<LockKeyhole size={17} />} type="submit">{t('periods.confirmClose')}</Button></div></ModalFooter>
         </form>
       </Modal>
     </div>

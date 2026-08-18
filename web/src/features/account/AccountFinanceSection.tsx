@@ -104,6 +104,9 @@ export function AccountFinanceSection() {
   }, [deferredSettlementSearch, ownSettlements, settlementTableState.filters, settlementTableState.sorting]);
   const ledgerFilters = useMemo<readonly DataTableFilterDefinition<LedgerFilterId>[]>(() => [
     {
+      allLabel: t('dataTable.allValues'),
+      dropdown: true,
+      emptyLabel: t('dataTable.noOptions'),
       id: 'kind',
       kind: 'multi-select',
       label: t('account.transaction'),

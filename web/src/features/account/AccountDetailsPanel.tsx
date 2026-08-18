@@ -1,20 +1,23 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import CircleCheck from 'lucide-react/dist/esm/icons/circle-check';
+import History from 'lucide-react/dist/esm/icons/history';
 import KeyRound from 'lucide-react/dist/esm/icons/key-round';
 import Mail from 'lucide-react/dist/esm/icons/mail';
 import Pencil from 'lucide-react/dist/esm/icons/pencil';
 import Save from 'lucide-react/dist/esm/icons/save';
 import X from 'lucide-react/dist/esm/icons/x';
 import { useForm } from 'react-hook-form';
-import { useState } from 'react';
+import { useId, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ApiError, api } from '@/api/client';
 import type { Membership, Session, User } from '@/api/types';
 import { useSession } from '@/app/useSession';
 import { Button } from '@/components/ui/Button';
-import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
-import { Modal } from '@/components/ui/Modal';
+import { Field, TextInput } from '@/components/ui/FormField';
+import { GroupMark } from '@/components/ui/GroupMark';
+import { Modal, ModalFooter } from '@/components/ui/Modal';
+import { SelectMenu, type SelectMenuOption } from '@/components/ui/SelectMenu';
 import { authenticationCapabilitiesQueryKey } from '@/features/auth/authenticationCapabilities';
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from '@/features/auth/passwordPolicy';
 import { clearAuthenticationState } from '@/features/auth/clearAuthenticationState';
@@ -46,6 +49,7 @@ function updateUserProjections(queryClient: ReturnType<typeof useQueryClient>, u
 }
 
 function NameChangeForm({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const formId = useId();
   const { t } = useTranslation();
   const session = useSession();
   const queryClient = useQueryClient();
@@ -65,7 +69,7 @@ function NameChangeForm({ onClose, onSaved }: { onClose: () => void; onSaved: ()
     },
   });
   return (
-    <form className={styles.form} onSubmit={handleSubmit((values) => mutation.mutate(values))}>
+    <form className={styles.form} id={formId} onSubmit={handleSubmit((values) => mutation.mutate(values))}>
       <Field error={errors.displayName?.message} hint={t('account.details.nameScope')} htmlFor="account-display-name" label={t('account.details.name')}>
         <TextInput autoComplete="name" id="account-display-name" {...register('displayName', { validate: {
           present: (value) => value.trim().length > 0 || t('auth.displayNameRequired'),
@@ -74,12 +78,13 @@ function NameChangeForm({ onClose, onSaved }: { onClose: () => void; onSaved: ()
         } })} />
       </Field>
       {mutation.isError ? <p className={styles.error} role="alert">{accountMutationError(mutation.error, 'name', t)}</p> : null}
-      <div className={styles.dialogActions}><Button leadingIcon={<X size={17} />} onClick={onClose} variant="secondary">{t('common.cancel')}</Button><Button disabled={mutation.isPending} leadingIcon={<Save size={17} />} type="submit">{mutation.isPending ? t('common.saving') : t('common.save')}</Button></div>
+      <ModalFooter><div className={styles.dialogActions}><Button leadingIcon={<X size={17} />} onClick={onClose} variant="secondary">{t('common.cancel')}</Button><Button disabled={mutation.isPending} form={formId} leadingIcon={<Save size={17} />} type="submit">{mutation.isPending ? t('common.saving') : t('common.save')}</Button></div></ModalFooter>
     </form>
   );
 }
 
 function PasswordChangeForm() {
+  const formId = useId();
   const { t } = useTranslation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -92,7 +97,7 @@ function PasswordChangeForm() {
     },
   });
   return (
-    <form className={styles.form} onSubmit={handleSubmit((values) => mutation.mutate(values))}>
+    <form className={styles.form} id={formId} onSubmit={handleSubmit((values) => mutation.mutate(values))}>
       <Field error={errors.currentPassword?.message} htmlFor="account-current-password" label={t('account.details.currentPassword')}>
         <TextInput autoComplete="current-password" id="account-current-password" type="password" {...register('currentPassword', { required: t('auth.passwordRequired'), maxLength: { value: PASSWORD_MAX_LENGTH, message: t('auth.passwordMax') } })} />
       </Field>
@@ -103,12 +108,13 @@ function PasswordChangeForm() {
         <TextInput autoComplete="new-password" id="account-password-confirmation" type="password" {...register('passwordConfirmation', { required: t('auth.passwordConfirmationRequired'), validate: (value, values) => value === values.newPassword || t('auth.passwordMismatch') })} />
       </Field>
       {mutation.isError ? <p className={styles.error} role="alert">{accountMutationError(mutation.error, 'password', t)}</p> : null}
-      <Button disabled={mutation.isPending} fullWidth leadingIcon={<KeyRound size={18} />} type="submit">{mutation.isPending ? t('auth.passwordSavePending') : t('auth.savePassword')}</Button>
+      <ModalFooter><Button disabled={mutation.isPending} form={formId} fullWidth leadingIcon={<KeyRound size={18} />} type="submit">{mutation.isPending ? t('auth.passwordSavePending') : t('auth.savePassword')}</Button></ModalFooter>
     </form>
   );
 }
 
 function EmailChangeForm({ onClose }: { onClose: () => void }) {
+  const formId = useId();
   const { t } = useTranslation();
   const { register, handleSubmit, formState: { errors } } = useForm<EmailForm>();
   const mutation = useMutation({ mutationFn: ({ newEmail, currentPassword }: EmailForm) => api.requestEmailChange(newEmail, currentPassword) });
@@ -116,11 +122,11 @@ function EmailChangeForm({ onClose }: { onClose: () => void }) {
     <div aria-live="polite" className={styles.result}>
       <h3>{t('account.details.emailRequestedTitle')}</h3>
       <p>{t('account.details.emailRequestedMessage')}</p>
-      <Button leadingIcon={<CircleCheck size={17} />} onClick={onClose}>{t('common.done')}</Button>
+      <ModalFooter><Button fullWidth leadingIcon={<CircleCheck size={17} />} onClick={onClose}>{t('common.done')}</Button></ModalFooter>
     </div>
   );
   return (
-    <form className={styles.form} onSubmit={handleSubmit((values) => mutation.mutate(values))}>
+    <form className={styles.form} id={formId} onSubmit={handleSubmit((values) => mutation.mutate(values))}>
       <Field error={errors.newEmail?.message} htmlFor="account-new-email" label={t('account.details.newEmail')}>
         <TextInput autoComplete="email" id="account-new-email" maxLength={254} type="email" {...register('newEmail', { required: t('auth.emailRequired'), maxLength: { value: 254, message: t('account.details.emailTooLong') } })} />
       </Field>
@@ -128,7 +134,7 @@ function EmailChangeForm({ onClose }: { onClose: () => void }) {
         <TextInput autoComplete="current-password" id="account-email-current-password" type="password" {...register('currentPassword', { required: t('auth.passwordRequired'), maxLength: { value: PASSWORD_MAX_LENGTH, message: t('auth.passwordMax') } })} />
       </Field>
       {mutation.isError ? <p className={styles.error} role="alert">{accountMutationError(mutation.error, 'email', t)}</p> : null}
-      <div className={styles.dialogActions}><Button leadingIcon={<X size={17} />} onClick={onClose} variant="secondary">{t('common.cancel')}</Button><Button disabled={mutation.isPending} leadingIcon={<Mail size={17} />} type="submit">{mutation.isPending ? t('account.details.emailRequestPending') : t('account.details.emailRequest')}</Button></div>
+      <ModalFooter><div className={styles.dialogActions}><Button leadingIcon={<X size={17} />} onClick={onClose} variant="secondary">{t('common.cancel')}</Button><Button disabled={mutation.isPending} form={formId} leadingIcon={<Mail size={17} />} type="submit">{mutation.isPending ? t('account.details.emailRequestPending') : t('account.details.emailRequest')}</Button></div></ModalFooter>
     </form>
   );
 }
@@ -138,6 +144,22 @@ function DefaultGroupSetting({ session }: { session: Session }) {
   const queryClient = useQueryClient();
   const persistedValue = session.defaultGroupId ?? LAST_USED_GROUP_VALUE;
   const [selection, setSelection] = useState(persistedValue);
+  const groupsById = useMemo(() => new Map(session.groups.map((group) => [group.id, group])), [session.groups]);
+  const options = useMemo<readonly SelectMenuOption[]>(() => [
+    { label: t('account.details.lastUsedGroup'), value: LAST_USED_GROUP_VALUE },
+    ...session.groups.map((group) => ({ label: group.name, value: group.id })),
+  ], [session.groups, t]);
+  const renderChoice = (option: SelectMenuOption): ReactNode => {
+    const group = groupsById.get(option.value);
+    return (
+      <span className={styles.groupChoice}>
+        {group
+          ? <GroupMark className={styles.groupMark} decorative imageUrl={group.logoUrl} name={group.name} />
+          : <span aria-hidden="true" className={styles.groupPreferenceIcon}><History size={18} /></span>}
+        <span>{option.label}</span>
+      </span>
+    );
+  };
   const mutation = useMutation({
     mutationFn: () => api.updateDefaultGroup(selection === LAST_USED_GROUP_VALUE ? null : selection),
     onSuccess: (preference) => {
@@ -148,15 +170,18 @@ function DefaultGroupSetting({ session }: { session: Session }) {
     <div className={styles.preferenceRow}>
       <dt>{t('account.details.defaultGroup')}</dt>
       <dd className={styles.preference}>
-        <SelectInput
-          aria-label={t('account.details.defaultGroup')}
+        <SelectMenu
+          ariaLabel={t('account.details.defaultGroup')}
+          className={styles.groupSelect}
           id="account-default-group"
-          onChange={(event) => { setSelection(event.target.value); mutation.reset(); }}
+          menuMinWidth={280}
+          onChange={(value) => { setSelection(value); mutation.reset(); }}
+          options={options}
+          renderOption={renderChoice}
+          renderValue={renderChoice}
+          title={options.find((option) => option.value === selection)?.label}
           value={selection}
-        >
-          <option value={LAST_USED_GROUP_VALUE}>{t('account.details.lastUsedGroup')}</option>
-          {session.groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
-        </SelectInput>
+        />
         <span className={styles.preferenceHint}>{t('account.details.defaultGroupHint')}</span>
         {mutation.isSuccess ? <span className={styles.success} role="status">{t('account.details.defaultGroupSaved')}</span> : null}
         {mutation.isError ? <span className={styles.error} role="alert">{t('account.details.saveError')}</span> : null}
