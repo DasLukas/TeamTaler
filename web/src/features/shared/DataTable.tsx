@@ -3,6 +3,7 @@ import {
   type OnChangeFn,
   type RowData,
   type SortingState,
+  createSortedRowModel,
   rowSortingFeature,
   tableFeatures,
   useTable,
@@ -41,6 +42,7 @@ export interface DataTableColumnMeta {
 const dataTableFeatures = tableFeatures({
   columnMeta: {} as DataTableColumnMeta,
   rowSortingFeature,
+  sortedRowModel: createSortedRowModel(),
 });
 
 const EMPTY_FILTER_DEFINITIONS: readonly DataTableFilterDefinition[] = [];
@@ -151,7 +153,7 @@ export interface DataTableLabels {
 /** Column definition enriched with optional TeamTaler alignment metadata. */
 export type DataTableColumnDef<Data extends RowData, Value = unknown> = ColumnDef<typeof dataTableFeatures, Data, Value>;
 
-/** Properties accepted by the reusable, server-controlled data table. */
+/** Properties accepted by the reusable data table. */
 export interface DataTableProps<Data extends RowData, FilterId extends string = string> {
   ariaLabel: string;
   columns: DataTableColumnDef<Data>[];
@@ -164,6 +166,8 @@ export interface DataTableProps<Data extends RowData, FilterId extends string = 
   isLoading?: boolean;
   isLoadingMore?: boolean;
   labels: DataTableLabels;
+  /** Keeps sorting server-controlled by default; set to false for complete local collections. */
+  manualSorting?: boolean;
   minTableWidth?: string;
   onFiltersChange?: (filters: DataTableFilterState<FilterId>) => void;
   onLoadMore?: () => void;
@@ -171,6 +175,10 @@ export interface DataTableProps<Data extends RowData, FilterId extends string = 
   onSortingChange: OnChangeFn<SortingState>;
   searchValue: string;
   sorting: SortingState;
+  /** Hides search, filter, and toolbar actions for compact collection tables. */
+  showControls?: boolean;
+  /** Hides loaded-result feedback when a nearby heading already exposes the collection size. */
+  showResultBar?: boolean;
   toolbarActions?: ReactNode;
   totalCount?: number;
 }
@@ -592,12 +600,15 @@ export function DataTable<Data extends RowData, FilterId extends string = string
   isLoading = false,
   isLoadingMore = false,
   labels,
+  manualSorting = true,
   minTableWidth,
   onFiltersChange,
   onLoadMore,
   onSearchChange,
   onSortingChange,
   searchValue,
+  showControls = true,
+  showResultBar = true,
   sorting,
   toolbarActions,
   totalCount,
@@ -610,14 +621,14 @@ export function DataTable<Data extends RowData, FilterId extends string = string
     data,
     enableMultiSort: false,
     getRowId,
-    manualSorting: true,
+    manualSorting,
     onSortingChange,
     state: { sorting },
   });
 
   return (
-    <section aria-label={ariaLabel} className={styles.root}>
-      <DataTableControls
+    <div className={styles.root}>
+      {showControls ? <DataTableControls
         definitions={resolvedFilterDefinitions}
         filters={resolvedFilters}
         labels={labels}
@@ -625,7 +636,7 @@ export function DataTable<Data extends RowData, FilterId extends string = string
         onSearchChange={onSearchChange}
         searchValue={searchValue}
         toolbarActions={toolbarActions}
-      />
+      /> : null}
       <DataTableViewport ariaLabel={ariaLabel} minTableWidth={minTableWidth} scrollHint={labels.scrollHint}>
         <table aria-label={ariaLabel} className={`${tableStyles.table} ${styles.dataTable}`}>
           <thead>
@@ -673,14 +684,14 @@ export function DataTable<Data extends RowData, FilterId extends string = string
           </tbody>
         </table>
       </DataTableViewport>
-      <DataTableResultBar
+      {showResultBar ? <DataTableResultBar
         hasMore={hasMore}
         isLoadingMore={isLoadingMore}
         labels={labels}
         loadedCount={data.length}
         onLoadMore={onLoadMore}
         totalCount={totalCount}
-      />
-    </section>
+      /> : null}
+    </div>
   );
 }

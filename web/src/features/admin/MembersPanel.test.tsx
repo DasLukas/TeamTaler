@@ -188,7 +188,7 @@ describe('MembersPanel invitations', () => {
     expect(screen.queryByText(i18n.t('members.csvImport.deliveryStatus.notRequested'))).not.toBeInTheDocument();
   });
 
-  it('keeps every member collection in a semantic table within a focusable scroll region', async () => {
+  it('keeps every member collection semantic and gives member tables accessible sorting and shared overflow state', async () => {
     apiMock.getMembers.mockResolvedValue([members[0], {
       ...members[0],
       id: 'member-archived',
@@ -201,20 +201,22 @@ describe('MembersPanel invitations', () => {
     renderMembers();
 
     const collections = [
-      { name: i18n.t('members.openInvitations'), columns: 6 },
-      { name: i18n.t('members.activeMembers'), columns: 4 },
-      { name: i18n.t('members.archivedMembers'), columns: 3 },
+      { name: i18n.t('members.openInvitations'), columns: 6, sortableColumns: 0 },
+      { name: i18n.t('members.activeMembers'), columns: 4, sortableColumns: 3 },
+      { name: i18n.t('members.archivedMembers'), columns: 3, sortableColumns: 2 },
     ];
     await screen.findByText('new@example.test');
 
     for (const collection of collections) {
       const region = screen.getByRole('region', { name: collection.name });
-      expect(region).toHaveAttribute('tabindex', '0');
       const table = within(region).getByRole('table');
       const headers = within(table).getAllByRole('columnheader');
       expect(headers).toHaveLength(collection.columns);
       headers.forEach((header) => expect(header).toHaveAttribute('scope', 'col'));
       expect(within(table).getAllByRole('cell')).toHaveLength(collection.columns);
+      expect(within(table).queryAllByRole('button', { name: /sortieren/ })).toHaveLength(collection.sortableColumns);
+      if (collection.sortableColumns > 0) expect(region.parentElement).toHaveAttribute('data-scroll-position', 'none');
+      else expect(region).toHaveAttribute('tabindex', '0');
     }
   });
 

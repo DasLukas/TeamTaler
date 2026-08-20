@@ -150,6 +150,27 @@ function ControlledDependentTable() {
   );
 }
 
+/** Supplies a complete local collection without search, filters, or result feedback. */
+function CompactClientTable() {
+  const [sorting, setSorting] = useState<SortingState>([]);
+  return (
+    <DataTable
+      ariaLabel="Members"
+      columns={columns}
+      data={[rows[1], rows[0]]}
+      emptyContent="No members"
+      labels={labels}
+      manualSorting={false}
+      onSearchChange={() => undefined}
+      onSortingChange={setSorting}
+      searchValue=""
+      showControls={false}
+      showResultBar={false}
+      sorting={sorting}
+    />
+  );
+}
+
 describe('DataTable', () => {
   it('renders semantic rows, search, result feedback, and incremental loading', async () => {
     const user = userEvent.setup();
@@ -206,6 +227,20 @@ describe('DataTable', () => {
     expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveAttribute('aria-sort', 'ascending');
     expect(within(nameHeader).getByRole('button', { name: 'Sort Name descending' })).toBeVisible();
     expect(within(screen.getByRole('table', { name: 'Payments' })).getAllByRole('row')[1]).toHaveTextContent('Ada');
+  });
+
+  it('sorts complete local collections without rendering query controls or result feedback', async () => {
+    const user = userEvent.setup();
+    render(<CompactClientTable />);
+
+    expect(screen.queryByRole('searchbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    const table = screen.getByRole('table', { name: 'Members' });
+    expect(within(table).getAllByRole('row')[1]).toHaveTextContent('Grace');
+
+    await user.click(screen.getByRole('button', { name: 'Sort Name ascending' }));
+    expect(within(table).getAllByRole('row')[1]).toHaveTextContent('Ada');
+    expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveAttribute('aria-sort', 'ascending');
   });
 
   it('renders visual custom multi-selects and removes products outside selected categories', async () => {

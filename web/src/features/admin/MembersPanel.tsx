@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { SortingState } from '@tanstack/react-table';
 import type { TFunction } from 'i18next';
 import CircleCheck from 'lucide-react/dist/esm/icons/circle-check';
 import Copy from 'lucide-react/dist/esm/icons/copy';
@@ -37,7 +38,9 @@ import { InvitationReady, InvitationReadyFooter } from '@/components/ui/Invitati
 import { ItemAction } from '@/components/ui/ItemAction';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { StatePanel } from '@/components/ui/StatePanel';
+import { DataTable, type DataTableColumnDef } from '@/features/shared/DataTable';
 import tableStyles from '@/features/shared/Table.module.css';
+import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
 import { RoleAssignmentPicker } from './RoleAssignmentPicker';
 import { RoleMultiSelect } from './RoleMultiSelect';
 import { PublicJoinLinkDialog } from './PublicJoinLinkDialog';
@@ -58,9 +61,104 @@ interface DeliverySummary {
   failed: number;
 }
 
+interface MemberCollectionTableProps {
+  ariaLabel: string;
+  emptyContent: ReactNode;
+  members: Membership[];
+  minTableWidth: string;
+  renderActions?: (member: Membership) => ReactNode;
+  renderRoles?: (member: Membership) => ReactNode;
+  roleNamesById?: ReadonlyMap<string, string>;
+}
+
 const MAX_CSV_BYTES = 256 * 1024;
 const DELIVERY_POLL_INTERVAL_MS = 1_200;
 const ACTIVE_DELIVERY_STATUSES = new Set<EmailDeliveryStatus>(['PENDING', 'SENDING']);
+const MEMBER_COLLATOR = new Intl.Collator('de-DE', { numeric: true, sensitivity: 'base' });
+const ignoreMemberSearch = () => undefined;
+
+/**
+ * Compares resolved table values with German, case-insensitive, numeric-aware collation.
+ *
+ * @param rowA - First TanStack row exposing resolved cell values.
+ * @param rowB - Second TanStack row exposing resolved cell values.
+ * @param columnId - Column whose accessor values should be compared.
+ * @returns A negative, zero, or positive locale comparison result.
+ */
+const sortMemberText = (rowA: { getValue: (columnId: string) => unknown }, rowB: { getValue: (columnId: string) => unknown }, columnId: string) => MEMBER_COLLATOR.compare(String(rowA.getValue(columnId) ?? ''), String(rowB.getValue(columnId) ?? ''));
+
+/**
+ * Renders one complete member collection with accessible local sorting and shared horizontal overflow feedback.
+ *
+ * @param props - Members, optional role/action cells, accessible copy, and the desktop table width.
+ * @returns A compact TanStack table without search, filters, or duplicate result feedback.
+ */
+function MemberCollectionTable({ ariaLabel, emptyContent, members, minTableWidth, renderActions, renderRoles, roleNamesById }: MemberCollectionTableProps) {
+  const { t } = useTranslation();
+  const labels = useDataTableLabels();
+  const [sorting, setSorting] = useState<SortingState>([]);
+  const columns = useMemo<DataTableColumnDef<Membership>[]>(() => {
+    const definitions: DataTableColumnDef<Membership>[] = [
+      {
+        accessorKey: 'displayName',
+        cell: ({ row }) => <span className={styles.member}><Avatar decorative name={row.original.displayName} src={row.original.avatarUrl} /> <span className={styles.memberName}><strong>{row.original.displayName}</strong>{isTemporaryGuest(row.original) ? <span className={styles.guestBadge}>{t('members.temporaryGuestBadge')}</span> : null}</span></span>,
+        enableSorting: true,
+        header: t('common.member'),
+        id: 'displayName',
+        meta: { label: t('common.member') },
+        sortFn: sortMemberText,
+      },
+      {
+        accessorFn: (member) => member.email ?? '',
+        cell: ({ row }) => row.original.email,
+        enableSorting: true,
+        header: t('members.email'),
+        id: 'email',
+        meta: { label: t('members.email') },
+        sortFn: sortMemberText,
+      },
+    ];
+    if (renderRoles) definitions.push({
+      accessorFn: (member) => (member.roleIds ?? []).map((roleId) => roleNamesById?.get(roleId) ?? '').filter(Boolean).sort(MEMBER_COLLATOR.compare).join(', '),
+      cell: ({ row }) => {
+        const content = renderRoles(row.original);
+        return content ? <div className={styles.roleCell}>{content}</div> : null;
+      },
+      enableSorting: true,
+      header: t('members.roles'),
+      id: 'roles',
+      meta: { label: t('members.roles') },
+      sortFn: sortMemberText,
+    });
+    if (renderActions) definitions.push({
+      cell: ({ row }) => <div className={styles.tableActions}>{renderActions(row.original)}</div>,
+      enableSorting: false,
+      header: () => <span className="sr-only">{t('common.action')}</span>,
+      id: 'actions',
+      meta: { align: 'end', label: t('common.action') },
+    });
+    return definitions;
+  }, [renderActions, renderRoles, roleNamesById, t]);
+
+  return (
+    <DataTable
+      ariaLabel={ariaLabel}
+      columns={columns}
+      data={members}
+      emptyContent={emptyContent}
+      getRowId={(member) => member.id}
+      labels={labels}
+      manualSorting={false}
+      minTableWidth={minTableWidth}
+      onSearchChange={ignoreMemberSearch}
+      onSortingChange={setSorting}
+      searchValue=""
+      showControls={false}
+      showResultBar={false}
+      sorting={sorting}
+    />
+  );
+}
 
 /**
  * Determines whether a membership still represents a temporary guest.
@@ -620,6 +718,7 @@ export function MembersPanel() {
     setDialog('reactivate');
   };
   const roles = rolesQuery.data ?? [];
+  const roleNamesById = new Map(roles.map((role) => [role.id, roleDisplayName(role)]));
   const defaultRole = roles.find((role) => role.id === settingsQuery.data?.defaultRoleId);
   const guestClaimRoleConfigured = Boolean(settingsQuery.data?.defaultRoleId);
   const reservedAdminRole = roles.find((role) => role.presetKey === 'GROUP_ADMINISTRATOR');
@@ -687,37 +786,38 @@ export function MembersPanel() {
 
       <section className={styles.section}>
         <div className={styles.sectionHeading}><h3>{t('members.activeMembers')}</h3><span>{activeMembers.length}</span></div>
-        <div aria-label={t('members.activeMembers')} className={`${tableStyles.tableWrap} ${styles.tableScrollRegion}`} role="region" tabIndex={0}>
-          <table className={tableStyles.table}>
-            <thead><tr><th scope="col">{t('common.member')}</th><th scope="col">{t('members.email')}</th><th scope="col">{t('members.roles')}</th>{canManageMembers ? <th scope="col"><span className="sr-only">{t('common.action')}</span></th> : null}</tr></thead>
-            <tbody>{activeMembers.map((member) => {
-              const temporaryGuest = isTemporaryGuest(member);
-              const claimPending = claimInvitationMembershipIds.has(member.id);
-              return <tr key={member.id}>
-                <td><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /> <span className={styles.memberName}><strong>{member.displayName}</strong>{temporaryGuest ? <span className={styles.guestBadge}>{t('members.temporaryGuestBadge')}</span> : null}</span></span></td>
-                <td>{member.email}</td>
-                <td className={styles.roleCell}>{!temporaryGuest ? <RoleAssignmentPicker canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} lockedRoleIds={lockedAdministratorRoleIds(member.roleIds ?? [])} onApply={(roleIds) => applyMemberRoles(member, roleIds)} roleIds={member.roleIds ?? []} roles={roles} subjectName={member.displayName} /> : null}</td>
-                {canManageMembers ? <td><div className={styles.tableActions}>
-                  {temporaryGuest ? <ItemAction aria-label={t('members.renameGuestFor', { name: member.displayName })} leadingIcon={<Pencil size={16} />} onClick={() => openGuestRename(member)}>{t('members.renameGuest')}</ItemAction> : null}
-                  {temporaryGuest ? renderGuestClaimAction(member, claimPending) : null}
-                  <ItemAction aria-label={t('members.archiveFor', { name: member.displayName })} leadingIcon={<UserMinus size={16} />} onClick={() => { setSelectedMember(member); setDialog('archive'); }}>{t('members.archive')}</ItemAction>
-                </div></td> : null}
-              </tr>;
-            })}</tbody>
-          </table>
-        </div>
+        <MemberCollectionTable
+          ariaLabel={t('members.activeMembers')}
+          emptyContent={t('members.noActiveMembers')}
+          members={activeMembers}
+          minTableWidth={canManageMembers ? '920px' : '680px'}
+          renderActions={canManageMembers ? (member) => {
+            const temporaryGuest = isTemporaryGuest(member);
+            const claimPending = claimInvitationMembershipIds.has(member.id);
+            return <>
+              {temporaryGuest ? <ItemAction aria-label={t('members.renameGuestFor', { name: member.displayName })} leadingIcon={<Pencil size={16} />} onClick={() => openGuestRename(member)}>{t('members.renameGuest')}</ItemAction> : null}
+              {temporaryGuest ? renderGuestClaimAction(member, claimPending) : null}
+              <ItemAction aria-label={t('members.archiveFor', { name: member.displayName })} leadingIcon={<UserMinus size={16} />} onClick={() => { setSelectedMember(member); setDialog('archive'); }}>{t('members.archive')}</ItemAction>
+            </>;
+          } : undefined}
+          renderRoles={(member) => !isTemporaryGuest(member) ? <RoleAssignmentPicker canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} lockedRoleIds={lockedAdministratorRoleIds(member.roleIds ?? [])} onApply={(roleIds) => applyMemberRoles(member, roleIds)} roleIds={member.roleIds ?? []} roles={roles} subjectName={member.displayName} /> : null}
+          roleNamesById={roleNamesById}
+        />
       </section>
 
       {canManageMembers ? <section className={styles.section}>
         <div className={styles.sectionHeading}><h3>{t('members.archivedMembers')}</h3><span>{formerMembers.length}</span></div>
         {formerMembers.length === 0 ? <p className={styles.emptySection}>{t('members.noArchivedMembers')}</p> : (
-          <div aria-label={t('members.archivedMembers')} className={`${tableStyles.tableWrap} ${styles.tableScrollRegion}`} role="region" tabIndex={0}><table className={tableStyles.table}>
-            <thead><tr><th scope="col">{t('common.member')}</th><th scope="col">{t('members.email')}</th><th scope="col"><span className="sr-only">{t('common.action')}</span></th></tr></thead>
-            <tbody>{formerMembers.map((member) => <tr key={member.id}><td><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /> <span className={styles.memberName}><strong>{member.displayName}</strong>{isTemporaryGuest(member) ? <span className={styles.guestBadge}>{t('members.temporaryGuestBadge')}</span> : null}</span></span></td><td>{member.email}</td><td><div className={styles.tableActions}>
+          <MemberCollectionTable
+            ariaLabel={t('members.archivedMembers')}
+            emptyContent={t('members.noArchivedMembers')}
+            members={formerMembers}
+            minTableWidth="680px"
+            renderActions={(member) => <>
               <ItemAction aria-label={t('members.reactivateFor', { name: member.displayName })} leadingIcon={<RotateCcw size={16} />} onClick={() => openReactivation(member)}>{t('members.reactivate')}</ItemAction>
               <ItemAction aria-label={t('members.permanentDeleteFor', { name: member.displayName })} leadingIcon={<Trash2 size={16} />} onClick={() => { setSelectedMember(member); setDialog('permanent-delete'); }}>{t('common.delete')}</ItemAction>
-            </div></td></tr>)}</tbody>
-          </table></div>
+            </>}
+          />
         )}
       </section> : null}
 

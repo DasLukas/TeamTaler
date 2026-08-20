@@ -870,6 +870,7 @@ export const de = {
   openInvitations: 'Offene Einladungen',
   noOpenInvitations: 'Aktuell gibt es keine offenen Einladungen.',
   activeMembers: 'Aktive Mitglieder',
+  noActiveMembers: 'Es gibt keine aktiven Mitglieder.',
   formerMembers: 'Archivierte Mitglieder',
   noFormerMembers: 'Es gibt noch keine archivierten Mitglieder.',
   archivedMembers: 'Archivierte Mitglieder',
