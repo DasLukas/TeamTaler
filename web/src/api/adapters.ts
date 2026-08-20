@@ -9,17 +9,24 @@ import type {
   Dashboard,
   EmailDeliveryStatus,
   Group,
+  GroupNotificationSettings,
   GroupSettings,
   GroupRole,
   InstanceCapabilities,
   LedgerEntry,
   Membership,
   Notification,
+  NotificationChannel,
+  NotificationDestination,
+  NotificationEventDefinition,
+  NotificationEventType,
+  NotificationPreferences,
   PermissionDefinition,
   PermissionGrant,
   Payment,
   Period,
   Product,
+  PushSubscriptionDevice,
   Role,
   RoleAssignment,
   ReasonMode,
@@ -36,6 +43,7 @@ import type {
   SystemSettingSource,
   SystemSettings,
   SystemSmtpSettings,
+  SystemWebPushSettings,
   TransactionSettings,
   User,
 } from './types';
@@ -54,7 +62,24 @@ const memberName = (membershipId: string, members?: Membership[], fallback = i18
 const memberAvatarUrl = (membershipId: string, members?: Membership[]) => members?.find((member) => member.id === membershipId)?.avatarUrl;
 const PAYMENT_DESCRIPTION_PREFIX = 'Payment received';
 const REVERSAL_DESCRIPTION_PREFIX = 'Reversal: ';
-const NOTIFICATION_EVENT_TYPES: Notification['eventType'][] = ['BOOKING_ASSIGNED', 'BOOKING_REVERSED', 'PAYMENT_RECORDED', 'PAYMENT_REVERSED', 'SETTLEMENT_CREATED'];
+const NOTIFICATION_EVENT_TYPES: Notification['eventType'][] = [
+  'BOOKING_ASSIGNED',
+  'BOOKING_REVERSED',
+  'PAYMENT_RECORDED',
+  'PAYMENT_REVERSED',
+  'SETTLEMENT_CREATED',
+  'SETTLEMENT_DUE_SOON',
+  'SETTLEMENT_OVERDUE',
+];
+const CONFIGURABLE_NOTIFICATION_EVENT_TYPES: Array<Exclude<NotificationEventType, 'SYSTEM'>> = [
+  'BOOKING_ASSIGNED',
+  'BOOKING_REVERSED',
+  'PAYMENT_RECORDED',
+  'PAYMENT_REVERSED',
+  'SETTLEMENT_CREATED',
+  'SETTLEMENT_DUE_SOON',
+  'SETTLEMENT_OVERDUE',
+];
 function settingSource(value: unknown): SystemSettingSource {
   const normalized = String(value ?? '').toUpperCase();
   if (normalized === 'ENV' || normalized === 'ENVIRONMENT') return 'ENVIRONMENT';
@@ -86,6 +111,7 @@ const DEFAULT_SMTP_PORT = 587;
  */
 export function adaptInstanceCapabilities(input: unknown): InstanceCapabilities {
   const source = asRecord(input);
+  const webPush = source.webPush && typeof source.webPush === 'object' ? asRecord(source.webPush) : {};
   return {
     instanceName: typeof source.instanceName === 'string' && source.instanceName.trim() ? source.instanceName : 'TeamTaler',
     maintenanceMode: source.maintenanceMode === true,
@@ -94,6 +120,14 @@ export function adaptInstanceCapabilities(input: unknown): InstanceCapabilities 
     mediaUploadMaxBytes: Number.isFinite(Number(source.mediaUploadMaxBytes)) && Number(source.mediaUploadMaxBytes) > 0
       ? Number(source.mediaUploadMaxBytes)
       : DEFAULT_MEDIA_UPLOAD_MAX_BYTES,
+    emailNotificationsAvailable: source.emailNotificationsAvailable === true || source.emailAvailable === true,
+    webPushAvailable: source.webPushAvailable === true || webPush.available === true,
+    webPushPublicKey: typeof source.webPushPublicKey === 'string' && source.webPushPublicKey
+      ? source.webPushPublicKey
+      : typeof webPush.publicKey === 'string' && webPush.publicKey ? webPush.publicKey : null,
+    webPushKeyId: typeof source.webPushKeyId === 'string' && source.webPushKeyId
+      ? source.webPushKeyId
+      : typeof webPush.keyId === 'string' && webPush.keyId ? webPush.keyId : null,
   };
 }
 
@@ -107,6 +141,7 @@ export function adaptSystemSettings(input: unknown): SystemSettings {
   const envelope = asRecord(input);
   const source = envelope.settings && typeof envelope.settings === 'object' ? asRecord(envelope.settings) : envelope;
   const smtpSource = source.smtp && typeof source.smtp === 'object' ? asRecord(source.smtp) : {};
+  const webPushSource = source.webPush && typeof source.webPush === 'object' ? asRecord(source.webPush) : {};
   const tlsModeSetting = setting<SmtpTlsMode>(smtpSource.tlsMode, 'starttls', (value) => {
     const normalized = String(value).toLowerCase();
     return normalized === 'tls' ? 'tls' : 'starttls';
@@ -136,6 +171,25 @@ export function adaptSystemSettings(input: unknown): SystemSettings {
     configurationValid: smtpSource.configurationValid === true,
     active: smtpSource.active === true,
   };
+  const vapidPrivateKey = webPushSource.vapidPrivateKey ?? webPushSource.privateKey;
+  const privateKeySource = vapidPrivateKey && typeof vapidPrivateKey === 'object'
+    ? asRecord(vapidPrivateKey)
+    : {};
+  const webPush: SystemWebPushSettings = {
+    enabled: booleanSetting(webPushSource.enabled),
+    subject: stringSetting(webPushSource.subject),
+    privateKeyConfigured: webPushSource.privateKeyConfigured === true || privateKeySource.configured === true,
+    privateKeySource: settingSource(privateKeySource.source ?? webPushSource.privateKeySource),
+    privateKeyUpdatedAt: typeof privateKeySource.updatedAt === 'string'
+      ? privateKeySource.updatedAt
+      : typeof webPushSource.privateKeyUpdatedAt === 'string' ? webPushSource.privateKeyUpdatedAt : null,
+    storageKeyConfigured: webPushSource.storageKeyConfigured === true || webPushSource.configurationValid === true,
+    publicKey: typeof webPushSource.publicKey === 'string' && webPushSource.publicKey ? webPushSource.publicKey : null,
+    keyId: typeof webPushSource.keyId === 'string' && webPushSource.keyId ? webPushSource.keyId : null,
+    configurationValid: webPushSource.configurationValid === true,
+    active: webPushSource.active === true,
+    revision: Number(webPushSource.revision ?? 0),
+  };
   return {
     revision: Number(source.revision ?? envelope.revision ?? 1),
     instanceName: stringSetting(source.instanceName, 'TeamTaler'),
@@ -145,10 +199,152 @@ export function adaptSystemSettings(input: unknown): SystemSettings {
     maintenanceMode: booleanSetting(source.maintenanceMode),
     maintenanceMessage: stringSetting(source.maintenanceMessage),
     smtp,
+    webPush,
     mediaUploadHardLimitBytes: Number(source.mediaUploadHardLimitBytes ?? envelope.mediaUploadHardLimitBytes ?? 0),
     updatedAt: typeof source.updatedAt === 'string' ? source.updatedAt : '',
     updatedByUserId: typeof source.updatedByUserId === 'string' ? source.updatedByUserId : null,
   };
+}
+
+function configurableNotificationEventType(value: unknown): Exclude<NotificationEventType, 'SYSTEM'> | undefined {
+  return CONFIGURABLE_NOTIFICATION_EVENT_TYPES.find((eventType) => eventType === value);
+}
+
+function notificationChannels(input: unknown): NotificationChannel[] {
+  if (!Array.isArray(input)) return ['EMAIL', 'PUSH'];
+  return input.flatMap((value) => value === 'EMAIL' || value === 'PUSH' ? [value] : []);
+}
+
+function notificationChannelAvailability(source: JsonRecord) {
+  const channels = source.channels && typeof source.channels === 'object' ? asRecord(source.channels) : {};
+  const availableChannels = Array.isArray(source.availableChannels) ? notificationChannels(source.availableChannels) : undefined;
+  return {
+    email: availableChannels ? availableChannels.includes('EMAIL') : channels.email === true || source.emailAvailable === true,
+    push: availableChannels ? availableChannels.includes('PUSH') : channels.push === true || source.pushAvailable === true,
+  };
+}
+
+function notificationEventDefinition(input: unknown, fallbackType?: unknown): NotificationEventDefinition | undefined {
+  const source = input && typeof input === 'object' ? asRecord(input) : {};
+  const eventType = configurableNotificationEventType(source.eventType ?? source.type ?? fallbackType ?? input);
+  if (!eventType) return undefined;
+  return {
+    eventType,
+    category: typeof source.category === 'string' ? source.category : eventType.split('_')[0].toLowerCase(),
+    name: typeof source.name === 'string' ? source.name : typeof source.label === 'string' ? source.label : eventType,
+    description: typeof source.description === 'string' ? source.description : '',
+    supportedChannels: notificationChannels(source.supportedChannels ?? source.channels),
+  };
+}
+
+function notificationEventEntries(source: JsonRecord): unknown[] {
+  if (Array.isArray(source.events)) return source.events;
+  if (Array.isArray(source.catalog)) return source.catalog;
+  return CONFIGURABLE_NOTIFICATION_EVENT_TYPES;
+}
+
+/**
+ * Normalizes the versioned group notification policy and its event catalog.
+ *
+ * @param input - Direct or enveloped response from the group notification-settings endpoint.
+ * @returns A stable policy model with explicit channel availability.
+ */
+export function adaptGroupNotificationSettings(input: unknown): GroupNotificationSettings {
+  const envelope = asRecord(input);
+  const source = envelope.notificationSettings && typeof envelope.notificationSettings === 'object'
+    ? asRecord(envelope.notificationSettings)
+    : envelope.settings && typeof envelope.settings === 'object' ? asRecord(envelope.settings) : envelope;
+  const enabledEvents = new Set(Array.isArray(source.enabledEvents) ? source.enabledEvents.map(String) : []);
+  const events = notificationEventEntries(source).flatMap((entry) => {
+    const definition = notificationEventDefinition(entry);
+    if (!definition) return [];
+    const event = entry && typeof entry === 'object' ? asRecord(entry) : {};
+    return [{ ...definition, enabled: event.enabled === true || enabledEvents.has(definition.eventType) }];
+  });
+  return {
+    version: Number(source.version ?? envelope.version ?? 1),
+    timezone: typeof source.timezone === 'string' && source.timezone ? source.timezone : 'Europe/Berlin',
+    dueSoonLeadDays: Number(source.dueSoonLeadDays ?? 3),
+    overdueRepeatDays: Number(source.overdueRepeatDays ?? 7),
+    channels: notificationChannelAvailability(source),
+    events,
+  };
+}
+
+/**
+ * Normalizes the current member's per-event notification preference matrix.
+ *
+ * @param input - Direct or enveloped response from the notification-preferences endpoint.
+ * @returns Effective group policy and independent Email/Push selections.
+ */
+export function adaptNotificationPreferences(input: unknown): NotificationPreferences {
+  const envelope = asRecord(input);
+  const source = envelope.notificationPreferences && typeof envelope.notificationPreferences === 'object'
+    ? asRecord(envelope.notificationPreferences)
+    : envelope.preferences && !Array.isArray(envelope.preferences) && typeof envelope.preferences === 'object'
+      ? asRecord(envelope.preferences)
+      : envelope;
+  const channels = notificationChannelAvailability(source);
+  const rawEvents = Array.isArray(source.events)
+    ? source.events
+    : Array.isArray(source.preferences) ? source.preferences : CONFIGURABLE_NOTIFICATION_EVENT_TYPES;
+  const events = rawEvents.flatMap((entry) => {
+    const definition = notificationEventDefinition(entry);
+    if (!definition) return [];
+    const event = entry && typeof entry === 'object' ? asRecord(entry) : {};
+    const selectedChannels = Array.isArray(event.channels) ? notificationChannels(event.channels) : [];
+    const enabled = event.enabled !== false && event.groupEnabled !== false;
+    return [{
+      ...definition,
+      enabled,
+      email: event.email === true || selectedChannels.includes('EMAIL'),
+      push: event.push === true || selectedChannels.includes('PUSH'),
+      emailAvailable: enabled && (event.emailAvailable === true || channels.email) && definition.supportedChannels.includes('EMAIL'),
+      pushAvailable: enabled && (event.pushAvailable === true || channels.push) && definition.supportedChannels.includes('PUSH'),
+    }];
+  });
+  return { version: Number(source.version ?? envelope.version ?? 1), channels, events };
+}
+
+/**
+ * Adapts the privacy-minimized destination for an owned notification.
+ *
+ * @param input - Direct or enveloped response from the account destination endpoint.
+ * @returns The active group that owns the opaque notification.
+ * @throws Error when the response omits a non-empty group identifier.
+ */
+export function adaptNotificationDestination(input: unknown): NotificationDestination {
+  const envelope = input && typeof input === 'object' ? asRecord(input) : {};
+  const source = envelope.destination && typeof envelope.destination === 'object'
+    ? asRecord(envelope.destination)
+    : envelope;
+  const groupId = typeof source.groupId === 'string' ? source.groupId.trim() : '';
+  if (!groupId) throw new Error('Notification destination response is missing groupId.');
+  return { groupId };
+}
+
+/**
+ * Removes subscription secrets and normalizes device metadata returned to account UI.
+ *
+ * @param input - Direct array or `{ items }` response from the device endpoint.
+ * @returns Safe account-owned device projections.
+ */
+export function adaptPushSubscriptions(input: unknown): PushSubscriptionDevice[] {
+  const envelope = asRecord(input);
+  const entries = Array.isArray(input) ? input : Array.isArray(envelope.items) ? envelope.items : [];
+  return entries.map((entry) => {
+    const source = asRecord(entry);
+    return {
+      id: String(source.id ?? ''),
+      label: typeof source.deviceLabel === 'string' && source.deviceLabel
+        ? source.deviceLabel
+        : typeof source.label === 'string' && source.label ? source.label : 'Browser',
+      createdAt: typeof source.createdAt === 'string' ? source.createdAt : '',
+      lastUsedAt: typeof source.lastUsedAt === 'string' ? source.lastUsedAt : null,
+      keyId: typeof source.keyId === 'string' ? source.keyId : '',
+      current: source.current === true,
+    };
+  });
 }
 
 /** Adapts the system account-search response. */

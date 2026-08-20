@@ -14,6 +14,7 @@ import { ConfigurableListEditor } from './ConfigurableListEditor';
 import { GroupSettingsPanel } from './GroupSettingsPanel';
 import { roleDisplayName } from './roleDisplayName';
 import styles from './BehaviorSettingsPanel.module.css';
+import { GroupNotificationSettingsSection } from './GroupNotificationSettingsSection';
 
 /** Properties for the editable group behavior settings form. */
 interface SettingsFormProps {
@@ -115,7 +116,6 @@ function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canMan
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [settlementsEnabled, setSettlementsEnabled] = useState(settings.settlementsEnabled);
-  const [notificationEmailsEnabled, setNotificationEmailsEnabled] = useState(settings.notificationEmailsEnabled);
   const [ownBookingReasonMode, setOwnBookingReasonMode] = useState(settings.ownBookingReasonMode);
   const [foreignBookingReasonMode, setForeignBookingReasonMode] = useState(settings.foreignBookingReasonMode);
   const [ownPaymentReasonMode, setOwnPaymentReasonMode] = useState(settings.ownPaymentReasonMode);
@@ -129,7 +129,6 @@ function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canMan
     return labels.some((label) => !label) || new Set(labels).size !== labels.length;
   });
   const changed = settlementsEnabled !== settings.settlementsEnabled
-    || notificationEmailsEnabled !== settings.notificationEmailsEnabled
     || ownBookingReasonMode !== settings.ownBookingReasonMode
     || foreignBookingReasonMode !== settings.foreignBookingReasonMode
     || ownPaymentReasonMode !== settings.ownPaymentReasonMode
@@ -142,7 +141,6 @@ function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canMan
     mutationFn: () => {
       const update: GroupSettingsUpdateInput = {
         ...(settlementsEnabled !== settings.settlementsEnabled ? { settlementsEnabled } : {}),
-        ...(notificationEmailsEnabled !== settings.notificationEmailsEnabled ? { notificationEmailsEnabled } : {}),
         ...(ownBookingReasonMode !== settings.ownBookingReasonMode ? { ownBookingReasonMode } : {}),
         ...(foreignBookingReasonMode !== settings.foreignBookingReasonMode ? { foreignBookingReasonMode } : {}),
         ...(ownPaymentReasonMode !== settings.ownPaymentReasonMode ? { ownPaymentReasonMode } : {}),
@@ -175,17 +173,8 @@ function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canMan
       <section aria-labelledby="group-settings-section-title" className={styles.settingsSection}>
         <header><h3 id="group-settings-section-title">{t('behaviorSettings.groupSectionTitle')}</h3></header>
         {canManageGroup ? <GroupSettingsPanel embedded /> : null}
+        {canManageGroup ? <GroupNotificationSettingsSection groupId={groupId} /> : null}
         {canManageDefaultRole && roles ? <DefaultRoleSetting groupId={groupId} key={`${groupId}:${settings.defaultRoleId ?? ''}`} roles={roles} settings={settings} /> : null}
-        {canManageGroup ? <section aria-labelledby="notification-email-setting-title" className={styles.card}>
-          <div className={styles.settingRow}>
-            <div>
-              <h4 id="notification-email-setting-title">{t('behaviorSettings.notificationEmailTitle')}</h4>
-              <p>{t('behaviorSettings.notificationEmailDescription')}</p>
-            </div>
-            <Toggle checked={notificationEmailsEnabled} disabled={mutation.isPending || !settings.notificationEmailDeliveryAvailable} label={t('behaviorSettings.notificationEmailToggle')} onChange={(checked) => { setNotificationEmailsEnabled(checked); mutation.reset(); }} />
-          </div>
-          <p className={styles.notice}>{settings.notificationEmailDeliveryAvailable ? t('behaviorSettings.notificationEmailNotice') : settings.notificationEmailsEnabled ? t('behaviorSettings.notificationEmailTemporarilyUnavailable') : t('behaviorSettings.notificationEmailUnavailable')}</p>
-        </section> : null}
       </section>
 
       {canManageFinancialSettings ? <section aria-labelledby="finance-settings-title" className={styles.settingsSection}>

@@ -4,6 +4,7 @@ import { useOptionalActiveGroup } from '@/app/useActiveGroup';
 import { AccountDetailsPanel } from './AccountDetailsPanel';
 import { AccountFinanceSection } from './AccountFinanceSection';
 import { ProfileImagePanel } from './ProfileImagePanel';
+import { NotificationPreferencesPanel } from './NotificationPreferencesPanel';
 
 /**
  * Renders independent account settings, profile image, and financial sections.
@@ -17,6 +18,7 @@ export function AccountPage() {
     <Page intro={t(hasActiveGroup ? 'account.intro' : 'account.systemOnlyIntro')} title={t('account.title')} wide>
       <AccountDetailsPanel />
       <ProfileImagePanel />
+      <NotificationPreferencesPanel />
       {hasActiveGroup ? <AccountFinanceSection /> : null}
     </Page>
   );

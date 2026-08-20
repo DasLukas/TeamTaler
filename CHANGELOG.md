@@ -4,6 +4,16 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+### Added
+
+- Standards-based Web Push with VAPID, encrypted per-device subscriptions, privacy-minimized payloads, and a push-only service worker.
+- Versioned system, group, and per-membership notification controls for independent email and push delivery across booking, payment, settlement, due-soon, and overdue events.
+- Time-zone-aware settlement reminder scheduling and a channel-neutral leased notification delivery outbox.
+
+### Security
+
+- Web Push secrets and browser subscription material are encrypted with purpose-separated keys, never returned by administrative APIs, and protected by HTTPS-only endpoint validation plus private-network and DNS-rebinding defenses.
+
 ## [0.9.0] - 2026-08-17
 
 ### Added

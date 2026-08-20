@@ -9,6 +9,10 @@ export const DEFAULT_INSTANCE_CAPABILITIES: InstanceCapabilities = {
   maintenanceMessage: '',
   publicJoinEnabled: true,
   mediaUploadMaxBytes: DEFAULT_MEDIA_UPLOAD_MAX_BYTES,
+  emailNotificationsAvailable: false,
+  webPushAvailable: false,
+  webPushPublicKey: null,
+  webPushKeyId: null,
 };
 
 /**

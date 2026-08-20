@@ -31,6 +31,7 @@ function GroupSelectionProbe() {
       <output aria-label="Active group">{activeGroupId}</output>
       <button onClick={() => setActiveGroupId('group-a')} type="button">Select A</button>
       <button onClick={() => setActiveGroupId('group-b')} type="button">Select B</button>
+      <button onClick={() => setActiveGroupId('group-b', { preserveRoute: true })} type="button">Select B in place</button>
     </div>
   );
 }
@@ -52,5 +53,18 @@ describe('GroupProvider', () => {
     await waitFor(() => expect(mocks.recordLastUsedGroup).toHaveBeenCalledTimes(2));
     expect(mocks.recordLastUsedGroup.mock.calls).toEqual([['group-b'], ['group-a']]);
     expect(mocks.navigate).toHaveBeenCalledTimes(2);
+  });
+
+  it('preserves the current route for a notification-owned group switch', async () => {
+    const user = userEvent.setup();
+    mocks.navigate.mockReset().mockResolvedValue(undefined);
+    mocks.recordLastUsedGroup.mockReset().mockResolvedValue(undefined);
+    render(<GroupProvider session={session}><GroupSelectionProbe /></GroupProvider>);
+
+    await user.click(screen.getByRole('button', { name: 'Select B in place' }));
+
+    expect(screen.getByLabelText('Active group')).toHaveTextContent('group-b');
+    await waitFor(() => expect(mocks.recordLastUsedGroup).toHaveBeenCalledWith('group-b'));
+    expect(mocks.navigate).not.toHaveBeenCalled();
   });
 });

@@ -721,10 +721,10 @@ func (s Service) createBookingForTargetTxWithAllocationRebuild(ctx context.Conte
 		}
 	}
 	if targetID != membership.ID {
-		body := fmt.Sprintf("%s assigned %s to you.", membership.DisplayName, details.productName)
+		body := fmt.Sprintf("%s hat %s auf dein Konto gebucht.", membership.DisplayName, details.productName)
 		if _, err := s.Notifications.CreateTx(ctx, tx, notifications.CreateInput{
 			GroupID: membership.GroupID, MembershipID: targetID,
-			Type: notifications.TypeBookingAssigned, Title: "New booking", Body: body,
+			Type: notifications.TypeBookingAssigned, Title: "Neue Buchung", Body: body,
 			ResourceType: "booking", ResourceID: bookingID, CreatedAt: now,
 			Context: notifications.EventContext{ActorName: membership.DisplayName, ItemName: details.productName, Quantity: quantity, AmountMinor: details.totalMinor, Currency: details.currency},
 		}); err != nil {
@@ -1214,10 +1214,10 @@ func (s Service) Void(ctx context.Context, actor domain.Principal, membership do
 			return err
 		}
 		if membership.ID != booking.TargetMembershipID {
-			body := fmt.Sprintf("%s reversed %s on your account.", membership.DisplayName, booking.ProductName)
+			body := fmt.Sprintf("%s hat %s auf deinem Konto storniert.", membership.DisplayName, booking.ProductName)
 			if _, err := s.Notifications.CreateTx(ctx, tx, notifications.CreateInput{
 				GroupID: membership.GroupID, MembershipID: booking.TargetMembershipID,
-				Type: notifications.TypeBookingReversed, Title: "Booking reversed", Body: body,
+				Type: notifications.TypeBookingReversed, Title: "Buchung storniert", Body: body,
 				ResourceType: "booking", ResourceID: booking.ID, CreatedAt: now,
 				Context: notifications.EventContext{ActorName: membership.DisplayName, ItemName: booking.ProductName, Quantity: booking.Quantity, AmountMinor: booking.TotalMinor, Currency: booking.Currency},
 			}); err != nil {

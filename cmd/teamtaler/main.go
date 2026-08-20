@@ -4,6 +4,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"database/sql"
 	"errors"
 	"flag"
 	"fmt"
@@ -21,9 +22,11 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/config"
 	"github.com/DasLukas/TeamTaler/internal/email"
 	"github.com/DasLukas/TeamTaler/internal/httpapi"
+	"github.com/DasLukas/TeamTaler/internal/notifications"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/storage"
 	systemadmin "github.com/DasLukas/TeamTaler/internal/system"
+	webpushservice "github.com/DasLukas/TeamTaler/internal/webpush"
 	"golang.org/x/term"
 )
 
@@ -90,13 +93,42 @@ func serve(arguments []string) error {
 			return fmt.Errorf("configure SMTP password encryption: %w", err)
 		}
 	}
-	systemService, err := systemadmin.NewService(db, systemadmin.DefaultsFromConfig(cfg), smtpPasswordCipher)
+	var systemOptions []systemadmin.ServiceOption
+	var pushSecrets *webpushservice.Secrets
+	if len(cfg.PushStorageKey) == 32 {
+		var pushErr error
+		pushSecrets, pushErr = webpushservice.NewSecrets(cfg.PushStorageKey)
+		if pushErr != nil {
+			return fmt.Errorf("configure Web Push secret encryption: %w", pushErr)
+		}
+		systemOptions = append(systemOptions, systemadmin.WithWebPushSecretCipher(pushSecrets))
+	}
+	systemService, err := systemadmin.NewService(db, systemadmin.DefaultsFromConfig(cfg), smtpPasswordCipher, systemOptions...)
 	if err != nil {
 		return fmt.Errorf("configure system administration: %w", err)
 	}
 	go runMediaGarbageCollector(processContext, systemService, cfg.DataDirectory, slog.Default())
 
-	var emailWorkerErrors <-chan error
+	emailInfrastructureAvailable := len(cfg.EmailTokenKey) == 32
+	pushInfrastructureAvailable := pushSecrets != nil
+	notificationService := notifications.Service{DB: db, EmailDeliveryAvailable: emailInfrastructureAvailable, PushDeliveryAvailable: pushInfrastructureAvailable}
+	notificationService.ResolveChannelAvailability = func(ctx context.Context, tx *sql.Tx) (notifications.ChannelAvailability, error) {
+		availability, err := systemService.ResolveNotificationChannelsTx(ctx, tx)
+		if err != nil {
+			return notifications.ChannelAvailability{}, err
+		}
+		return notifications.ChannelAvailability{
+			EmailAvailable: emailInfrastructureAvailable && availability.EmailActive,
+			PushAvailable:  pushInfrastructureAvailable && availability.WebPushActive,
+			PushKeyID:      availability.WebPushKeyID,
+		}, nil
+	}
+	reminderWorker, err := notifications.NewReminderWorker(db, notificationService, slog.Default())
+	if err != nil {
+		return fmt.Errorf("configure settlement reminder worker: %w", err)
+	}
+	backgroundRunners := []backgroundRunner{{name: "settlement reminders", run: reminderWorker.Run}}
+
 	if len(cfg.EmailTokenKey) == 32 {
 		sender, err := email.NewDynamicSender(func(ctx context.Context) (config.SMTPConfig, bool, error) {
 			settings, resolved, err := systemService.ResolveRuntime(ctx)
@@ -129,31 +161,35 @@ func serve(arguments []string) error {
 		if err != nil {
 			return err
 		}
-		workerErrors := make(chan error, 1)
-		emailWorkerErrors = workerErrors
-		go func() {
-			dispatchContext, cancelDispatch := context.WithCancel(processContext)
-			defer cancelDispatch()
-			runners := []func(context.Context) error{
-				dispatcher.Run,
-				notificationDispatcher.Run,
-				publicJoinDispatcher.Run,
-				accountSecurityDispatcher.Run,
-			}
-			results := make(chan error, len(runners))
-			for _, runDispatcher := range runners {
-				runDispatcher := runDispatcher
-				go func() { results <- runDispatcher(dispatchContext) }()
-			}
-			dispatchErrors := make([]error, 0, len(runners))
-			dispatchErrors = append(dispatchErrors, <-results)
-			cancelDispatch()
-			for index := 1; index < len(runners); index++ {
-				dispatchErrors = append(dispatchErrors, <-results)
-			}
-			workerErrors <- errors.Join(dispatchErrors...)
-		}()
+		backgroundRunners = append(backgroundRunners,
+			backgroundRunner{name: "invitation email delivery", run: dispatcher.Run},
+			backgroundRunner{name: "notification email delivery", run: notificationDispatcher.Run},
+			backgroundRunner{name: "public-join email delivery", run: publicJoinDispatcher.Run},
+			backgroundRunner{name: "account-security email delivery", run: accountSecurityDispatcher.Run},
+		)
 	}
+	if pushSecrets != nil {
+		pushSubscriptions, err := webpushservice.NewSubscriptionService(db, pushSecrets, nil)
+		if err != nil {
+			return fmt.Errorf("configure Web Push subscriptions: %w", err)
+		}
+		pushDispatcher, err := webpushservice.NewNotificationDispatcher(db, pushSubscriptions, webpushservice.NewSender(nil),
+			func(ctx context.Context) (webpushservice.RuntimeConfiguration, error) {
+				settings, resolved, err := systemService.ResolveWebPush(ctx)
+				if err != nil {
+					return webpushservice.RuntimeConfiguration{}, err
+				}
+				return webpushservice.RuntimeConfiguration{
+					Enabled: resolved.Enabled && !settings.MaintenanceMode.Value, Subject: resolved.Subject,
+					PrivateKey: resolved.VAPIDPrivateKey, KeyID: resolved.KeyID,
+				}, nil
+			}, slog.Default())
+		if err != nil {
+			return fmt.Errorf("configure Web Push dispatcher: %w", err)
+		}
+		backgroundRunners = append(backgroundRunners, backgroundRunner{name: "Web Push delivery", run: pushDispatcher.Run})
+	}
+	workerErrors := superviseBackgroundRunners(processContext, backgroundRunners)
 	server := &http.Server{
 		Addr:              cfg.ListenAddress,
 		Handler:           httpapi.New(cfg, db, slog.Default()),
@@ -169,18 +205,18 @@ func serve(arguments []string) error {
 		errChannel <- server.ListenAndServe()
 	}()
 	var serveErr error
-	emailWorkerStopped := false
+	workersStopped := false
 	select {
 	case listenErr := <-errChannel:
 		if !errors.Is(listenErr, http.ErrServerClosed) {
 			serveErr = fmt.Errorf("serve HTTP: %w", listenErr)
 		}
-	case workerErr := <-emailWorkerErrors:
-		emailWorkerStopped = true
+	case workerErr := <-workerErrors:
+		workersStopped = true
 		if workerErr != nil {
-			serveErr = fmt.Errorf("email dispatchers stopped: %w", workerErr)
+			serveErr = fmt.Errorf("background workers stopped: %w", workerErr)
 		} else if processContext.Err() == nil {
-			serveErr = errors.New("email dispatchers stopped unexpectedly")
+			serveErr = errors.New("background workers stopped unexpectedly")
 		}
 	case <-processContext.Done():
 	}
@@ -191,25 +227,78 @@ func serve(arguments []string) error {
 	if shutdownErr := server.Shutdown(shutdownContext); shutdownErr != nil {
 		serveErr = errors.Join(serveErr, fmt.Errorf("shut down HTTP server: %w", shutdownErr))
 	}
-	if emailWorkerErrors != nil && !emailWorkerStopped {
+	if !workersStopped {
 		recordWorkerError := func(workerErr error) {
 			if workerErr != nil {
-				serveErr = errors.Join(serveErr, fmt.Errorf("shut down email dispatchers: %w", workerErr))
+				serveErr = errors.Join(serveErr, fmt.Errorf("shut down background workers: %w", workerErr))
 			}
 		}
 		select {
-		case workerErr := <-emailWorkerErrors:
+		case workerErr := <-workerErrors:
 			recordWorkerError(workerErr)
 		case <-shutdownContext.Done():
 			select {
-			case workerErr := <-emailWorkerErrors:
+			case workerErr := <-workerErrors:
 				recordWorkerError(workerErr)
 			default:
-				serveErr = errors.Join(serveErr, errors.New("email dispatchers did not stop before the shutdown deadline"))
+				serveErr = errors.Join(serveErr, errors.New("background workers did not stop before the shutdown deadline"))
 			}
 		}
 	}
 	return serveErr
+}
+
+type backgroundRunner struct {
+	name string
+	run  func(context.Context) error
+}
+
+type backgroundResult struct {
+	name string
+	err  error
+}
+
+// superviseBackgroundRunners starts all durable background workers under one
+// child context. The first unexpected stop cancels its peers; the returned
+// channel receives one joined, worker-labelled result after every runner exits.
+func superviseBackgroundRunners(parent context.Context, runners []backgroundRunner) <-chan error {
+	completed := make(chan error, 1)
+	go func() {
+		if len(runners) == 0 {
+			completed <- errors.New("no background workers configured")
+			return
+		}
+		ctx, cancel := context.WithCancel(parent)
+		defer cancel()
+		results := make(chan backgroundResult, len(runners))
+		for _, runner := range runners {
+			runner := runner
+			go func() {
+				if runner.run == nil {
+					results <- backgroundResult{name: runner.name, err: errors.New("runner is unavailable")}
+					return
+				}
+				results <- backgroundResult{name: runner.name, err: runner.run(ctx)}
+			}()
+		}
+		first := <-results
+		unexpectedStop := parent.Err() == nil
+		cancel()
+		errorsByRunner := make([]error, 0, len(runners))
+		if first.err != nil {
+			errorsByRunner = append(errorsByRunner, fmt.Errorf("%s: %w", first.name, first.err))
+		} else if unexpectedStop {
+			errorsByRunner = append(errorsByRunner, fmt.Errorf("%s stopped unexpectedly", first.name))
+		}
+		for index := 1; index < len(runners); index++ {
+			result := <-results
+			if result.err != nil {
+				errorsByRunner = append(errorsByRunner, fmt.Errorf("%s: %w", result.name, result.err))
+			}
+		}
+		completed <- errors.Join(errorsByRunner...)
+	}()
+	return completed
 }
 
 // runMediaGarbageCollector retries durable content-addressed image deletions at

@@ -46,6 +46,12 @@ const (
 	SettingSMTPFromName SettingKey = "smtp.from_name"
 	// SettingSMTPPassword is the write-only encrypted SMTP credential.
 	SettingSMTPPassword SettingKey = "smtp.password"
+	// SettingWebPushEnabled controls standards-based Web Push delivery.
+	SettingWebPushEnabled SettingKey = "web_push.enabled"
+	// SettingWebPushSubject identifies the operator in VAPID assertions.
+	SettingWebPushSubject SettingKey = "web_push.subject"
+	// SettingWebPushVAPIDPrivateKey is the write-only encrypted signing key.
+	SettingWebPushVAPIDPrivateKey SettingKey = "web_push.vapid_private_key"
 )
 
 // AllSettingKeys returns every persistable setting in stable display order.
@@ -69,6 +75,9 @@ var allSettingKeys = []SettingKey{
 	SettingSMTPFromAddress,
 	SettingSMTPFromName,
 	SettingSMTPPassword,
+	SettingWebPushEnabled,
+	SettingWebPushSubject,
+	SettingWebPushVAPIDPrivateKey,
 }
 
 // SettingSource identifies the layer that supplies an effective value.
@@ -116,8 +125,8 @@ type Setting[T any] struct {
 	UpdatedAt       string        `json:"updatedAt,omitempty"`
 }
 
-// SecretSetting reports safe SMTP-password metadata without exposing either
-// plaintext or ciphertext.
+// SecretSetting reports safe secret metadata without exposing either plaintext
+// or ciphertext.
 type SecretSetting struct {
 	Configured      bool          `json:"configured"`
 	Source          SettingSource `json:"source"`
@@ -164,6 +173,30 @@ type SMTPSettings struct {
 	Active             bool                 `json:"active"`
 }
 
+// WebPushConfiguration is the trusted effective VAPID configuration used by
+// delivery code. VAPIDPrivateKey is deliberately omitted from JSON.
+type WebPushConfiguration struct {
+	Enabled         bool   `json:"enabled"`
+	Subject         string `json:"subject"`
+	VAPIDPrivateKey string `json:"-"`
+	PublicKey       string `json:"publicKey"`
+	KeyID           string `json:"keyId"`
+}
+
+// WebPushSettings contains redacted effective Web Push values. Active is true
+// only when delivery is enabled and the VAPID secret can be safely resolved.
+type WebPushSettings struct {
+	Enabled              Setting[bool]   `json:"enabled"`
+	Subject              Setting[string] `json:"subject"`
+	VAPIDPrivateKey      SecretSetting   `json:"vapidPrivateKey"`
+	PublicKey            string          `json:"publicKey,omitempty"`
+	KeyID                string          `json:"keyId,omitempty"`
+	Revision             int64           `json:"revision"`
+	StorageKeyConfigured bool            `json:"storageKeyConfigured"`
+	ConfigurationValid   bool            `json:"configurationValid"`
+	Active               bool            `json:"active"`
+}
+
 // Defaults contains the validated host-level values underneath database
 // overrides. Sources may mark individual values as ENVIRONMENT; omitted entries
 // are treated as CODE. MaxRequestBytes is retained for compatibility with
@@ -177,6 +210,7 @@ type Defaults struct {
 	MaintenanceMode     bool
 	MaintenanceMessage  string
 	SMTP                SMTPConfiguration
+	WebPush             WebPushConfiguration
 	MaxRequestBytes     int64
 	Sources             map[SettingKey]SettingSource
 }
@@ -193,6 +227,7 @@ type Settings struct {
 	MaintenanceMode           Setting[bool]   `json:"maintenanceMode"`
 	MaintenanceMessage        Setting[string] `json:"maintenanceMessage"`
 	SMTP                      SMTPSettings    `json:"smtp"`
+	WebPush                   WebPushSettings `json:"webPush"`
 	UpdatedAt                 string          `json:"updatedAt"`
 	UpdatedByUserID           *string         `json:"updatedByUserId,omitempty"`
 }
@@ -210,16 +245,25 @@ type SMTPPatch struct {
 	FromName    *string      `json:"fromName,omitempty"`
 }
 
+// WebPushPatch contains optional Web Push overrides. VAPIDPrivateKey is
+// write-only and callers remove it through ResetSettings.
+type WebPushPatch struct {
+	Enabled         *bool   `json:"enabled,omitempty"`
+	Subject         *string `json:"subject,omitempty"`
+	VAPIDPrivateKey *string `json:"vapidPrivateKey,omitempty"`
+}
+
 // SettingsPatch contains optional instance-setting overrides. Nil fields are
 // unchanged; explicit zero values are validated and persisted.
 type SettingsPatch struct {
-	InstanceName        *string    `json:"instanceName,omitempty"`
-	DefaultCurrency     *string    `json:"defaultCurrency,omitempty"`
-	MediaUploadMaxBytes *int64     `json:"mediaUploadMaxBytes,omitempty"`
-	PublicJoinEnabled   *bool      `json:"publicJoinEnabled,omitempty"`
-	MaintenanceMode     *bool      `json:"maintenanceMode,omitempty"`
-	MaintenanceMessage  *string    `json:"maintenanceMessage,omitempty"`
-	SMTP                *SMTPPatch `json:"smtp,omitempty"`
+	InstanceName        *string       `json:"instanceName,omitempty"`
+	DefaultCurrency     *string       `json:"defaultCurrency,omitempty"`
+	MediaUploadMaxBytes *int64        `json:"mediaUploadMaxBytes,omitempty"`
+	PublicJoinEnabled   *bool         `json:"publicJoinEnabled,omitempty"`
+	MaintenanceMode     *bool         `json:"maintenanceMode,omitempty"`
+	MaintenanceMessage  *string       `json:"maintenanceMessage,omitempty"`
+	SMTP                *SMTPPatch    `json:"smtp,omitempty"`
+	WebPush             *WebPushPatch `json:"webPush,omitempty"`
 }
 
 // RoleAssignment describes one durable instance-role assignment and its
@@ -254,10 +298,18 @@ type PasswordCipher interface {
 	Open(envelope string) (string, error)
 }
 
+// WebPushSecretCipher authenticates VAPID private keys before storage and
+// exposes plaintext only to trusted runtime integrations.
+type WebPushSecretCipher interface {
+	SealVAPIDPrivateKey(string) (string, error)
+	OpenVAPIDPrivateKey(string) (string, error)
+}
+
 // Service coordinates system-role, setting, and audit persistence. Construct it
 // with NewService so defaults and immutable upload limits are validated.
 type Service struct {
 	db             *sql.DB
 	defaults       Defaults
 	passwordCipher PasswordCipher
+	webPushCipher  WebPushSecretCipher
 }

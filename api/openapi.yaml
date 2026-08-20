@@ -324,6 +324,107 @@ paths:
         '422': { $ref: '#/components/responses/Problem' }
         '429': { $ref: '#/components/responses/Problem' }
         '503': { $ref: '#/components/responses/Problem' }
+  /me/push-subscriptions:
+    get:
+      tags: [Authentication]
+      summary: List redacted browser push devices for the current account
+      responses:
+        '200':
+          description: Active account-owned devices without endpoints or browser keys
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items: { type: array, maxItems: 10, items: { $ref: '#/components/schemas/PushSubscriptionDevice' } }
+        '401': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Authentication]
+      summary: Reconcile the current browser push subscription
+      description: The endpoint and browser keys are validated, encrypted, and never returned. An endpoint already used in a shared browser profile is atomically reassigned to the current account.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PushSubscriptionRegistration' }
+      responses:
+        '201':
+          description: Redacted current device
+          content: { application/json: { schema: { $ref: '#/components/schemas/PushSubscriptionDevice' } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /me/push-subscriptions/{subscriptionId}:
+    parameters:
+      - name: subscriptionId
+        in: path
+        required: true
+        schema: { type: string }
+    patch:
+      tags: [Authentication]
+      summary: Rename an owned browser push device
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [label]
+              properties: { label: { type: string, minLength: 1, maxLength: 80 } }
+      responses:
+        '200':
+          description: Renamed redacted device
+          content: { application/json: { schema: { $ref: '#/components/schemas/PushSubscriptionDevice' } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [Authentication]
+      summary: Revoke an owned browser push device
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204': { description: Device revoked }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /me/notifications/{notificationId}/destination:
+    get:
+      tags: [Authentication]
+      summary: Resolve an owned opaque notification to its group
+      description: |
+        Supports privacy-minimized Web Push navigation without placing a group
+        identifier in the external payload. Unknown, inaccessible, inactive,
+        and archived destinations all return the same `404` response.
+      parameters:
+        - name: notificationId
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: Current active group containing the owned notification
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [groupId]
+                properties:
+                  groupId: { type: string }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /me/avatar:
     post:
       tags: [Authentication]
@@ -716,6 +817,96 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /system/settings/web-push:
+    put:
+      tags: [System]
+      summary: Apply persisted Web Push configuration overrides
+      description: Updates the redacted VAPID configuration. Replacing an existing private key requires explicit rotation confirmation and causes browsers to register against the new public key identifier.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SystemWebPushUpdate' }
+      responses:
+        '200':
+          description: Effective redacted settings
+          headers: { ETag: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/SystemSettings' } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [System]
+      summary: Remove persisted Web Push overrides
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      responses:
+        '200':
+          description: Effective settings after reset
+          headers: { ETag: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/SystemSettings' } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+  /system/settings/web-push/generate-key:
+    post:
+      tags: [System]
+      summary: Generate and persist a VAPID identity
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                confirmRotation: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Effective redacted settings with the generated public key
+          headers: { ETag: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/SystemSettings' } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /system/settings/web-push/test:
+    post:
+      tags: [System]
+      summary: Send a privacy-minimized test to an administrator device
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                subscriptionId: { type: string }
+      responses:
+        '200':
+          description: Test request accepted by the browser push service
+          content: { application/json: { schema: { $ref: '#/components/schemas/SystemSettings' } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
         '429': { $ref: '#/components/responses/Problem' }
         '503': { $ref: '#/components/responses/Problem' }
@@ -1126,8 +1317,8 @@ paths:
       summary: Partially update group or membership settings
       description: |
         `defaultRoleId` requires `ROLE_MANAGEMENT` or
-        `GROUP_ADMINISTRATION`. `notificationEmailsEnabled` requires
-        `GROUP_ADMINISTRATION`. Finance and booking fields require
+        `GROUP_ADMINISTRATION`. The deprecated `notificationEmailsEnabled`
+        compatibility field requires `GROUP_ADMINISTRATION`. Finance and booking fields require
         `GROUP_ADMINISTRATION` or `FINANCE_MANAGEMENT`.
       parameters:
         - $ref: '#/components/parameters/GroupId'
@@ -1144,6 +1335,80 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/GroupSettings' }
         '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/notification-settings:
+    get:
+      tags: [Groups]
+      summary: Read the group notification event policy
+      description: Requires `GROUP_ADMINISTRATION` and returns a strong version ETag.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Versioned event policy and reminder schedule
+          headers: { ETag: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/GroupNotificationSettings' } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    put:
+      tags: [Groups]
+      summary: Replace the group notification event policy
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GroupNotificationSettingsUpdate' }
+      responses:
+        '200':
+          description: Updated policy
+          headers: { ETag: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/GroupNotificationSettings' } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/notification-preferences:
+    get:
+      tags: [Groups]
+      summary: Read the current membership notification matrix
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Group-enabled events with effective channel availability
+          headers: { ETag: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/NotificationPreferences' } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    put:
+      tags: [Groups]
+      summary: Update independent email and push choices
+      description: Disabled group events and unavailable system channels are immutable; retained hidden choices are not deleted.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationPreferencesUpdate' }
+      responses:
+        '200':
+          description: Updated effective matrix
+          headers: { ETag: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/NotificationPreferences' } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/transaction-settings:
     get:
@@ -3056,7 +3321,7 @@ components:
     InstanceCapabilities:
       type: object
       additionalProperties: false
-      required: [instanceName, maintenanceMode, publicJoinEnabled, mediaUploadMaxBytes]
+      required: [instanceName, maintenanceMode, publicJoinEnabled, mediaUploadMaxBytes, emailNotificationsAvailable, webPushAvailable]
       properties:
         instanceName:
           type: string
@@ -3075,6 +3340,42 @@ components:
           format: int64
           minimum: 262144
           maximum: 26214400
+        emailNotificationsAvailable: { type: boolean }
+        webPushAvailable: { type: boolean }
+        webPushPublicKey: { type: string }
+        webPushKeyId: { type: string }
+    PushSubscriptionDevice:
+      type: object
+      additionalProperties: false
+      required: [id, deviceLabel, keyId, current, createdAt, lastUsedAt]
+      properties:
+        id: { type: string }
+        deviceLabel: { type: string, minLength: 1, maxLength: 80 }
+        keyId: { type: string }
+        current: { type: boolean, description: Whether this device uses the current VAPID identity. }
+        createdAt: { type: string, format: date-time }
+        lastUsedAt: { type: string, format: date-time }
+    PushSubscriptionRegistration:
+      type: object
+      additionalProperties: false
+      required: [label, keyId, subscription]
+      properties:
+        label: { type: string, minLength: 1, maxLength: 80 }
+        keyId: { type: string }
+        subscription:
+          type: object
+          additionalProperties: false
+          required: [endpoint, keys]
+          properties:
+            endpoint: { type: string, format: uri, maxLength: 2048 }
+            expirationTime: { type: [integer, 'null'], format: int64 }
+            keys:
+              type: object
+              additionalProperties: false
+              required: [auth, p256dh]
+              properties:
+                auth: { type: string, minLength: 1, maxLength: 128, writeOnly: true }
+                p256dh: { type: string, minLength: 1, maxLength: 256, writeOnly: true }
     SystemRole:
       type: string
       enum: [SYSTEM_ADMINISTRATOR]
@@ -3182,10 +3483,24 @@ components:
         active:
           type: boolean
           description: True only when enabled, complete, and trusted or tested at the current SMTP revision.
+    SystemWebPushConfiguration:
+      type: object
+      additionalProperties: false
+      required: [enabled, subject, vapidPrivateKey, revision, storageKeyConfigured, configurationValid, active]
+      properties:
+        enabled: { $ref: '#/components/schemas/EffectiveBooleanSetting' }
+        subject: { $ref: '#/components/schemas/EffectiveStringSetting' }
+        vapidPrivateKey: { $ref: '#/components/schemas/SystemSecretSetting' }
+        publicKey: { type: string, description: URL-safe VAPID public key derived whenever the effective private key is valid. }
+        keyId: { type: string, description: SHA-256 public-key identifier used for browser reconciliation. }
+        revision: { type: integer, format: int64, minimum: 0 }
+        storageKeyConfigured: { type: boolean }
+        configurationValid: { type: boolean }
+        active: { type: boolean }
     SystemSettings:
       type: object
       additionalProperties: false
-      required: [revision, instanceName, defaultCurrency, mediaUploadMaxBytes, mediaUploadHardLimitBytes, publicJoinEnabled, maintenanceMode, maintenanceMessage, smtp, updatedAt]
+      required: [revision, instanceName, defaultCurrency, mediaUploadMaxBytes, mediaUploadHardLimitBytes, publicJoinEnabled, maintenanceMode, maintenanceMessage, smtp, webPush, updatedAt]
       properties:
         revision:
           type: integer
@@ -3203,6 +3518,7 @@ components:
         maintenanceMode: { $ref: '#/components/schemas/EffectiveBooleanSetting' }
         maintenanceMessage: { $ref: '#/components/schemas/EffectiveStringSetting' }
         smtp: { $ref: '#/components/schemas/SystemSMTPConfiguration' }
+        webPush: { $ref: '#/components/schemas/SystemWebPushConfiguration' }
         updatedAt: { type: string, format: date-time }
         updatedByUserId: { type: string }
     SystemSettingsUpdate:
@@ -3233,6 +3549,9 @@ components:
         - smtp.from_address
         - smtp.from_name
         - smtp.password
+        - web_push.enabled
+        - web_push.subject
+        - web_push.vapid_private_key
     SystemSettingsReset:
       type: object
       additionalProperties: false
@@ -3264,6 +3583,27 @@ components:
           description: Omit only to retain an already persisted password; it is never returned.
         fromAddress: { type: string, format: email, maxLength: 254 }
         fromName: { type: string, maxLength: 120 }
+    SystemWebPushUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        enabled: { type: boolean }
+        subject:
+          type: string
+          maxLength: 512
+          description: VAPID contact as an absolute HTTPS URL or `mailto:` URI.
+        vapidPrivateKey:
+          type: string
+          minLength: 43
+          maxLength: 43
+          pattern: '^[A-Za-z0-9_-]{43}$'
+          writeOnly: true
+          description: Unpadded base64url P-256 scalar; never returned.
+        confirmRotation:
+          type: boolean
+          default: false
+          description: Required when replacing an existing VAPID private key.
     SystemAdministrator:
       type: object
       additionalProperties: false
@@ -3638,7 +3978,8 @@ components:
       properties:
         notificationEmailsEnabled:
           type: boolean
-          description: Persisted group preference for companion emails on future in-app notifications.
+          deprecated: true
+          description: Legacy migration source retained for compatibility; new delivery policy uses `/notification-settings` and `/notification-preferences`.
         notificationEmailDeliveryAvailable:
           type: boolean
           readOnly: true
@@ -3687,7 +4028,10 @@ components:
       additionalProperties: false
       minProperties: 1
       properties:
-        notificationEmailsEnabled: { type: boolean }
+        notificationEmailsEnabled:
+          type: boolean
+          deprecated: true
+          description: Legacy compatibility field; new clients must use the dedicated notification policy endpoints.
         settlementsEnabled:
           type: boolean
           description: Enables or disables period closing without changing periods, ledger entries, balances, or settlement history.
@@ -3721,6 +4065,106 @@ components:
           type: array
           maxItems: 50
           items: { $ref: '#/components/schemas/ConfigurableItem' }
+    NotificationChannel:
+      type: string
+      enum: [EMAIL, PUSH]
+    NotificationEventDefinition:
+      type: object
+      required: [type, category, label, description, route, pushTtlSeconds, pushUrgency, defaultEnabled, reminder, supportedChannels]
+      properties:
+        type:
+          type: string
+          enum: [BOOKING_ASSIGNED, BOOKING_REVERSED, PAYMENT_RECORDED, PAYMENT_REVERSED, SETTLEMENT_CREATED, SETTLEMENT_DUE_SOON, SETTLEMENT_OVERDUE]
+        category: { type: string }
+        label: { type: string }
+        description: { type: string }
+        route:
+          type: string
+          pattern: '^/'
+          description: Same-origin application route used when a delivered notification is opened.
+        pushTtlSeconds:
+          type: integer
+          minimum: 0
+          description: Maximum lifetime of the corresponding Web Push message at the push service.
+        pushUrgency:
+          type: string
+          enum: [very-low, low, normal, high]
+        defaultEnabled: { type: boolean }
+        reminder: { type: boolean }
+        supportedChannels: { type: array, items: { $ref: '#/components/schemas/NotificationChannel' } }
+    GroupNotificationEventSetting:
+      allOf:
+        - $ref: '#/components/schemas/NotificationEventDefinition'
+        - type: object
+          required: [enabled]
+          properties: { enabled: { type: boolean } }
+    GroupNotificationSettings:
+      type: object
+      additionalProperties: false
+      required: [version, timezone, dueSoonLeadDays, overdueRepeatDays, availableChannels, events, updatedAt]
+      properties:
+        version: { type: integer, format: int64, minimum: 1 }
+        timezone: { type: string, default: Europe/Berlin }
+        dueSoonLeadDays: { type: integer, minimum: 1, maximum: 30, default: 3 }
+        overdueRepeatDays: { type: integer, minimum: 0, maximum: 90, default: 7 }
+        availableChannels: { type: array, items: { $ref: '#/components/schemas/NotificationChannel' } }
+        events: { type: array, minItems: 7, maxItems: 7, items: { $ref: '#/components/schemas/GroupNotificationEventSetting' } }
+        updatedAt: { type: string, format: date-time }
+    GroupNotificationSettingsUpdate:
+      type: object
+      additionalProperties: false
+      required: [timezone, dueSoonLeadDays, overdueRepeatDays, events]
+      properties:
+        timezone: { type: string }
+        dueSoonLeadDays: { type: integer, minimum: 1, maximum: 30 }
+        overdueRepeatDays: { type: integer, minimum: 0, maximum: 90 }
+        events:
+          type: array
+          minItems: 7
+          maxItems: 7
+          items:
+            type: object
+            additionalProperties: false
+            required: [type, enabled]
+            properties:
+              type: { $ref: '#/components/schemas/NotificationEventDefinition/properties/type' }
+              enabled: { type: boolean }
+    NotificationEventPreference:
+      allOf:
+        - $ref: '#/components/schemas/NotificationEventDefinition'
+        - type: object
+          required: [enabled, email, push, emailAvailable, pushAvailable]
+          properties:
+            enabled: { type: boolean }
+            email: { type: boolean }
+            push: { type: boolean }
+            emailAvailable: { type: boolean }
+            pushAvailable: { type: boolean }
+    NotificationPreferences:
+      type: object
+      additionalProperties: false
+      required: [version, availableChannels, events]
+      properties:
+        version: { type: integer, format: int64, minimum: 1 }
+        availableChannels: { type: array, items: { $ref: '#/components/schemas/NotificationChannel' } }
+        events: { type: array, minItems: 7, maxItems: 7, items: { $ref: '#/components/schemas/NotificationEventPreference' } }
+    NotificationPreferencesUpdate:
+      type: object
+      additionalProperties: false
+      required: [events]
+      properties:
+        events:
+          type: array
+          minItems: 1
+          maxItems: 7
+          items:
+            type: object
+            additionalProperties: false
+            required: [type]
+            properties:
+              type: { $ref: '#/components/schemas/NotificationEventDefinition/properties/type' }
+              email: { type: boolean }
+              push: { type: boolean }
     ConfigurableItem:
       type: object
       additionalProperties: false
@@ -4677,7 +5121,7 @@ components:
         groupId: { type: string }
         type:
           type: string
-          enum: [BOOKING_ASSIGNED, BOOKING_REVERSED, PAYMENT_RECORDED, PAYMENT_REVERSED, SETTLEMENT_CREATED]
+          enum: [BOOKING_ASSIGNED, BOOKING_REVERSED, PAYMENT_RECORDED, PAYMENT_REVERSED, SETTLEMENT_CREATED, SETTLEMENT_DUE_SOON, SETTLEMENT_OVERDUE]
         title: { type: string }
         body: { type: string }
         resourceType: { type: string }

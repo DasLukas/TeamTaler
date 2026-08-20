@@ -8,6 +8,7 @@ vi.mock('@/app/useActiveGroup', () => ({ useOptionalActiveGroup: () => mocks.act
 vi.mock('./AccountDetailsPanel', () => ({ AccountDetailsPanel: () => <div>account-details</div> }));
 vi.mock('./ProfileImagePanel', () => ({ ProfileImagePanel: () => <div>profile-image</div> }));
 vi.mock('./AccountFinanceSection', () => ({ AccountFinanceSection: () => <div>account-finance</div> }));
+vi.mock('./NotificationPreferencesPanel', () => ({ NotificationPreferencesPanel: () => <div>notification-preferences</div> }));
 
 describe('AccountPage group-independent shell', () => {
   beforeEach(() => mocks.activeGroup.mockReturnValue(null));
@@ -18,6 +19,7 @@ describe('AccountPage group-independent shell', () => {
     expect(screen.getByText('account-details')).toBeVisible();
     expect(screen.getByText('profile-image')).toBeVisible();
     expect(screen.queryByText('account-finance')).not.toBeInTheDocument();
+    expect(screen.getByText('notification-preferences')).toBeVisible();
     expect(screen.getByText('Verwalte dein persönliches Konto und deine Anmeldedaten.')).toBeVisible();
   });
 
@@ -26,5 +28,6 @@ describe('AccountPage group-independent shell', () => {
     render(<AccountPage />);
 
     expect(screen.getByText('account-finance')).toBeVisible();
+    expect(screen.getByText('notification-preferences')).toBeVisible();
   });
 });

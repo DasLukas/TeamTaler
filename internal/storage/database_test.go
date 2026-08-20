@@ -257,6 +257,8 @@ func TestRemoveCategoryTypeMigrationPreservesExistingRows(t *testing.T) {
 		`INSERT INTO schema_migrations(version) VALUES('0031_system_group_purge.sql')`,
 		`INSERT INTO schema_migrations(version) VALUES('0032_whole_mib_media_limit.sql')`,
 		`INSERT INTO schema_migrations(version) VALUES('0035_table_query_indexes.sql')`,
+		`INSERT INTO schema_migrations(version) VALUES('0036_notification_channels.sql')`,
+		`INSERT INTO schema_migrations(version) VALUES('0037_default_push_notifications.sql')`,
 		`CREATE TABLE users(id TEXT PRIMARY KEY) STRICT`,
 		`CREATE TABLE groups(id TEXT PRIMARY KEY) STRICT`,
 		`CREATE TABLE invitations(id TEXT PRIMARY KEY, group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE) STRICT`,

@@ -8,4 +8,4 @@ script = "make install"
 [[actions]]
 name = "Start test server"
 icon = "run"
-command = "TEAMTALER_EMAIL_TOKEN_KEY=VGVhbVRhbGVyLUNvZGV4LVRlc3QtS2V5LTIwMjYhISE= make test-server"
+command = "TEAMTALER_EMAIL_TOKEN_KEY=VGVhbVRhbGVyLUNvZGV4LVRlc3QtS2V5LTIwMjYhISE= TEAMTALER_WEB_PUSH_ENABLED=true TEAMTALER_WEB_PUSH_SUBJECT=mailto:admin@example.test TEAMTALER_WEB_PUSH_VAPID_PRIVATE_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE TEAMTALER_PUSH_STORAGE_KEY=enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6eno= make test-server"

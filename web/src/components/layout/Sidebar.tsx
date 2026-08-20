@@ -98,9 +98,11 @@ export function Sidebar({ collapsed, onCollapsedChange, onNavigate }: SidebarPro
       </nav>
       <div className={styles.bottom}>
         <Link aria-label={t('nav.notifications')} activeProps={{ className: styles.active }} className={styles.link} onClick={onNavigate} title={collapsed ? t('nav.notifications') : undefined} to={memberPaths.notifications}>
-          <Bell aria-hidden="true" size={23} strokeWidth={1.8} />
+          <span className={styles.notificationIcon}>
+            <Bell aria-hidden="true" size={23} strokeWidth={1.8} />
+            <NotificationBadge className={styles.badge} count={unreadCount} />
+          </span>
           <span className={styles.linkLabel}>{t('nav.notifications')}</span>
-          <NotificationBadge className={styles.badge} count={unreadCount} />
         </Link>
         <Link aria-label={t('nav.account')} activeProps={{ className: styles.active }} className={styles.link} onClick={onNavigate} title={collapsed ? t('nav.account') : undefined} to="/account">
           <CircleUserRound aria-hidden="true" size={23} strokeWidth={1.8} />

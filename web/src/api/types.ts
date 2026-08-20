@@ -239,6 +239,14 @@ export interface InstanceCapabilities {
   maintenanceMessage: string;
   publicJoinEnabled: boolean;
   mediaUploadMaxBytes: number;
+  /** Whether SMTP-backed optional notifications can currently be delivered. */
+  emailNotificationsAvailable: boolean;
+  /** Whether this deployment exposes a complete, active Web Push configuration. */
+  webPushAvailable: boolean;
+  /** URL-safe VAPID public key used only by the browser subscription API. */
+  webPushPublicKey: string | null;
+  /** Opaque VAPID revision used to reconcile subscriptions after key rotation. */
+  webPushKeyId: string | null;
 }
 
 /** Confirmation returned after an email-change request has been accepted. */
@@ -403,6 +411,21 @@ export interface SystemSmtpSettings {
   active: boolean;
 }
 
+/** Redacted, effective Web Push configuration exposed to system administrators. */
+export interface SystemWebPushSettings {
+  enabled: SystemSetting<boolean>;
+  subject: SystemSetting<string>;
+  privateKeyConfigured: boolean;
+  privateKeySource: SystemSettingSource;
+  privateKeyUpdatedAt: string | null;
+  storageKeyConfigured: boolean;
+  publicKey: string | null;
+  keyId: string | null;
+  configurationValid: boolean;
+  active: boolean;
+  revision: number;
+}
+
 /** Complete effective, versioned instance settings document. */
 export interface SystemSettings {
   revision: number;
@@ -413,6 +436,7 @@ export interface SystemSettings {
   maintenanceMode: SystemSetting<boolean>;
   maintenanceMessage: SystemSetting<string>;
   smtp: SystemSmtpSettings;
+  webPush: SystemWebPushSettings;
   mediaUploadHardLimitBytes: number;
   updatedAt: string;
   updatedByUserId: string | null;
@@ -447,6 +471,12 @@ export interface SystemSmtpSettingsUpdate {
   fromAddress?: string;
   fromName?: string;
   password?: string;
+}
+
+/** Partial Web Push update; private material is generated and never accepted by this client. */
+export interface SystemWebPushSettingsUpdate {
+  enabled?: boolean;
+  subject?: string;
 }
 
 /** Non-sensitive account projection available to system administrators. */
@@ -817,7 +847,109 @@ export interface Settlement {
 }
 
 /** Stable event types emitted by the financial notification system. */
-export type NotificationEventType = 'BOOKING_ASSIGNED' | 'BOOKING_REVERSED' | 'PAYMENT_RECORDED' | 'PAYMENT_REVERSED' | 'SETTLEMENT_CREATED' | 'SYSTEM';
+export type NotificationEventType =
+  | 'BOOKING_ASSIGNED'
+  | 'BOOKING_REVERSED'
+  | 'PAYMENT_RECORDED'
+  | 'PAYMENT_REVERSED'
+  | 'SETTLEMENT_CREATED'
+  | 'SETTLEMENT_DUE_SOON'
+  | 'SETTLEMENT_OVERDUE'
+  | 'SYSTEM';
+
+/** Optional external delivery channels controlled by system, group, and member policy. */
+export type NotificationChannel = 'EMAIL' | 'PUSH';
+
+/** User-facing metadata for one event from the server-owned notification catalog. */
+export interface NotificationEventDefinition {
+  eventType: Exclude<NotificationEventType, 'SYSTEM'>;
+  category: string;
+  name: string;
+  description: string;
+  supportedChannels: NotificationChannel[];
+}
+
+/** Runtime availability of optional external delivery channels. */
+export interface NotificationChannelAvailability {
+  email: boolean;
+  push: boolean;
+}
+
+/** One administrator-controlled event policy within a group. */
+export interface GroupNotificationEventSetting extends NotificationEventDefinition {
+  enabled: boolean;
+}
+
+/** Versioned group policy that determines which events members may configure. */
+export interface GroupNotificationSettings {
+  version: number;
+  timezone: string;
+  dueSoonLeadDays: number;
+  overdueRepeatDays: number;
+  channels: NotificationChannelAvailability;
+  events: GroupNotificationEventSetting[];
+}
+
+/** Editable group notification-policy fields. */
+export interface GroupNotificationSettingsUpdate {
+  version: number;
+  timezone: string;
+  dueSoonLeadDays: number;
+  overdueRepeatDays: number;
+  events: Array<{ eventType: Exclude<NotificationEventType, 'SYSTEM'>; enabled: boolean }>;
+}
+
+/** One member's effective preferences for a group event. */
+export interface NotificationPreference extends GroupNotificationEventSetting {
+  email: boolean;
+  push: boolean;
+  emailAvailable: boolean;
+  pushAvailable: boolean;
+}
+
+/** Versioned preference matrix for the current membership. */
+export interface NotificationPreferences {
+  version: number;
+  channels: NotificationChannelAvailability;
+  events: NotificationPreference[];
+}
+
+/** Editable external-channel choices for the current membership. */
+export interface NotificationPreferencesUpdate {
+  version: number;
+  events: Array<{
+    eventType: Exclude<NotificationEventType, 'SYSTEM'>;
+    email?: boolean;
+    push?: boolean;
+  }>;
+}
+
+/** Public metadata for one account-owned browser subscription. */
+export interface PushSubscriptionDevice {
+  id: string;
+  label: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  keyId: string;
+  current: boolean;
+}
+
+/** Browser Push API material accepted only during subscription reconciliation. */
+export interface BrowserPushSubscriptionInput {
+  endpoint: string;
+  expirationTime: number | null;
+  keys: {
+    auth: string;
+    p256dh: string;
+  };
+}
+
+/** Registration command that combines safe device metadata with browser key material. */
+export interface PushSubscriptionRegistration {
+  label: string;
+  keyId: string;
+  subscription: BrowserPushSubscriptionInput;
+}
 
 /** Safe structured details used to localize one notification. */
 export interface NotificationContext {
@@ -846,6 +978,11 @@ export interface Notification {
 export interface NotificationPage {
   items: Notification[];
   nextCursor?: string;
+}
+
+/** Active group resolved from an account-owned opaque notification identifier. */
+export interface NotificationDestination {
+  groupId: string;
 }
 
 /** Exact unread count returned by the lightweight navigation endpoint. */

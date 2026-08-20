@@ -8,23 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/storage"
-)
-
-const (
-	// TypeBookingAssigned identifies a booking created for another membership.
-	TypeBookingAssigned = "BOOKING_ASSIGNED"
-	// TypeBookingReversed identifies an externally reversed booking.
-	TypeBookingReversed = "BOOKING_REVERSED"
-	// TypePaymentRecorded identifies an externally recorded payment.
-	TypePaymentRecorded = "PAYMENT_RECORDED"
-	// TypePaymentReversed identifies an externally reversed payment.
-	TypePaymentReversed = "PAYMENT_REVERSED"
-	// TypeSettlementCreated identifies a newly generated period statement.
-	TypeSettlementCreated = "SETTLEMENT_CREATED"
 )
 
 // Service implements notification queries and read-state transitions over a
@@ -34,7 +22,25 @@ type Service struct {
 	DB *sql.DB
 	// EmailDeliveryAvailable allows new notification email jobs to be queued.
 	EmailDeliveryAvailable bool
+	// PushDeliveryAvailable allows new notification push jobs to be queued when
+	// no dynamic resolver was configured.
+	PushDeliveryAvailable bool
+	// ResolveChannelAvailability resolves the effective system channel gates in
+	// the caller's business transaction. A nil resolver uses the static fields.
+	ResolveChannelAvailability ChannelAvailabilityResolver
 }
+
+// ChannelAvailability is the effective instance-wide external delivery state.
+// PushKeyID identifies the VAPID public key accepted by active subscriptions.
+type ChannelAvailability struct {
+	EmailAvailable bool   `json:"emailAvailable"`
+	PushAvailable  bool   `json:"pushAvailable"`
+	PushKeyID      string `json:"-"`
+}
+
+// ChannelAvailabilityResolver calculates instance channel gates using tx so
+// event policy and job creation can share one consistent transaction.
+type ChannelAvailabilityResolver func(context.Context, *sql.Tx) (ChannelAvailability, error)
 
 // EventContext contains safe, structured presentation data for one notification.
 // Fields are optional because each event type requires only a relevant subset.
@@ -53,7 +59,7 @@ type EventContext struct {
 type CreateInput struct {
 	GroupID      string
 	MembershipID string
-	Type         string
+	Type         EventType
 	Title        string
 	Body         string
 	ResourceType string
@@ -90,22 +96,47 @@ type ReadResult struct {
 	ReadAt      string `json:"readAt"`
 }
 
-// CreateTx inserts an in-app notification and, when the recipient has an email
-// address and both delivery switches are enabled, its email job in the same
-// transaction. The caller owns tx and therefore controls commit or rollback.
+// Destination identifies the active group that owns an opaque notification.
+// It deliberately contains no notification content or membership identifier.
+type Destination struct {
+	GroupID string `json:"groupId"`
+}
+
+// CreateTx inserts the canonical in-app notification and independently queues
+// eligible email and Web Push jobs in the same transaction. Group policy,
+// member preferences, effective system gates, recipient state, and current
+// subscriptions are evaluated before each external-channel job is inserted.
+// The caller owns tx and therefore controls commit or rollback.
 func (s Service) CreateTx(ctx context.Context, tx *sql.Tx, input CreateInput) (Notification, error) {
 	if tx == nil {
 		return Notification{}, errors.New("create notification: transaction is required")
 	}
 	input.GroupID = strings.TrimSpace(input.GroupID)
 	input.MembershipID = strings.TrimSpace(input.MembershipID)
-	input.Type = strings.TrimSpace(input.Type)
+	input.Type = EventType(strings.TrimSpace(string(input.Type)))
 	input.Title = strings.TrimSpace(input.Title)
 	input.Body = strings.TrimSpace(input.Body)
 	input.ResourceType = strings.TrimSpace(input.ResourceType)
 	input.ResourceID = strings.TrimSpace(input.ResourceID)
 	if input.GroupID == "" || input.MembershipID == "" || input.Type == "" || input.Title == "" || input.Body == "" || input.CreatedAt == "" {
 		return Notification{}, errors.New("create notification: group, membership, type, copy, and timestamp are required")
+	}
+	definition, supported := Definition(input.Type)
+	if !supported {
+		return Notification{}, domain.ValidationError{Field: "type", Message: "contains an unsupported notification event"}
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, input.CreatedAt)
+	if err != nil {
+		return Notification{}, domain.ValidationError{Field: "createdAt", Message: "must be an RFC 3339 timestamp"}
+	}
+	var groupEnabled bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(
+		SELECT 1 FROM group_notification_events WHERE group_id=? AND event_type=?
+	)`, input.GroupID, input.Type).Scan(&groupEnabled); err != nil {
+		return Notification{}, err
+	}
+	if !groupEnabled {
+		return Notification{}, nil
 	}
 	contextJSON, err := json.Marshal(input.Context)
 	if err != nil {
@@ -121,30 +152,50 @@ func (s Service) CreateTx(ctx context.Context, tx *sql.Tx, input CreateInput) (N
 	if err != nil {
 		return Notification{}, err
 	}
-	if s.EmailDeliveryAvailable {
-		var enabled bool
-		if err := tx.QueryRowContext(ctx, `SELECT notification_emails_enabled FROM group_settings WHERE group_id=?`, input.GroupID).Scan(&enabled); err != nil {
-			return Notification{}, err
-		}
-		if enabled {
-			_, err = tx.ExecContext(ctx, `INSERT INTO notification_email_outbox(
-				notification_id,group_id,status,attempt_count,next_attempt_at,created_at,updated_at
-			)
-			SELECT ?,?,'PENDING',0,?,?,?
-			WHERE EXISTS (
-				SELECT 1
-				FROM memberships membership
-				JOIN users user ON user.id=membership.user_id
-				WHERE membership.id=?
-				  AND membership.group_id=?
-				  AND user.email IS NOT NULL
-			)`, notificationID, input.GroupID, input.CreatedAt, input.CreatedAt, input.CreatedAt, input.MembershipID, input.GroupID)
-			if err != nil {
-				return Notification{}, err
-			}
+	availability := ChannelAvailability{EmailAvailable: s.EmailDeliveryAvailable, PushAvailable: s.PushDeliveryAvailable}
+	if s.ResolveChannelAvailability != nil {
+		availability, err = s.ResolveChannelAvailability(ctx, tx)
+		if err != nil {
+			return Notification{}, fmt.Errorf("resolve notification channel availability: %w", err)
 		}
 	}
-	item := Notification{ID: notificationID, GroupID: input.GroupID, Type: input.Type, Title: input.Title, Body: input.Body, Context: input.Context, CreatedAt: input.CreatedAt}
+	if availability.EmailAvailable {
+		_, err = tx.ExecContext(ctx, `INSERT INTO notification_delivery_jobs(
+			id,notification_id,group_id,channel,target_membership_id,status,attempt_count,next_attempt_at,created_at,updated_at
+		)
+		SELECT ?,?,?,? ,?,'PENDING',0,?,?,?
+		WHERE EXISTS (
+			SELECT 1 FROM membership_notification_channels preference
+			JOIN memberships membership ON membership.group_id=preference.group_id AND membership.id=preference.membership_id
+			JOIN users user ON user.id=membership.user_id
+			WHERE preference.group_id=? AND preference.membership_id=? AND preference.event_type=? AND preference.channel='EMAIL'
+			  AND membership.status='ACTIVE' AND membership.deleted_at IS NULL AND user.active=1 AND user.email IS NOT NULL
+		)`, notificationID+"_email", notificationID, input.GroupID, ChannelEmail, input.MembershipID,
+			input.CreatedAt, input.CreatedAt, input.CreatedAt, input.GroupID, input.MembershipID, input.Type)
+		if err != nil {
+			return Notification{}, err
+		}
+	}
+	if availability.PushAvailable && strings.TrimSpace(availability.PushKeyID) != "" {
+		expiresAt := platform.Timestamp(createdAt.UTC().Add(time.Duration(definition.PushTTLSeconds) * time.Second))
+		_, err = tx.ExecContext(ctx, `INSERT INTO notification_delivery_jobs(
+			id,notification_id,group_id,channel,push_subscription_id,status,attempt_count,next_attempt_at,expires_at,created_at,updated_at
+		)
+		SELECT ? || '_push_' || subscription.id,?,?,?,subscription.id,'PENDING',0,?,?,?,?
+		FROM membership_notification_channels preference
+		JOIN memberships membership ON membership.group_id=preference.group_id AND membership.id=preference.membership_id
+		JOIN users user ON user.id=membership.user_id
+		JOIN web_push_subscriptions subscription ON subscription.user_id=user.id
+		WHERE preference.group_id=? AND preference.membership_id=? AND preference.event_type=? AND preference.channel='PUSH'
+		  AND membership.status='ACTIVE' AND membership.deleted_at IS NULL AND user.active=1
+		  AND subscription.revoked_at IS NULL AND subscription.vapid_key_id=?`,
+			notificationID, notificationID, input.GroupID, ChannelPush, input.CreatedAt, expiresAt, input.CreatedAt, input.CreatedAt,
+			input.GroupID, input.MembershipID, input.Type, availability.PushKeyID)
+		if err != nil {
+			return Notification{}, err
+		}
+	}
+	item := Notification{ID: notificationID, GroupID: input.GroupID, Type: string(input.Type), Title: input.Title, Body: input.Body, Context: input.Context, CreatedAt: input.CreatedAt}
 	if input.ResourceType != "" {
 		item.ResourceType = &input.ResourceType
 	}
@@ -210,6 +261,33 @@ func (s Service) ListPage(ctx context.Context, membership domain.Membership, lim
 		page.NextCursor = page.Items[len(page.Items)-1].ID
 	}
 	return page, nil
+}
+
+// DestinationForUser resolves an opaque notification ID to its active group
+// only when it belongs to a current active membership of userID. Unknown IDs,
+// cross-account IDs, archived memberships, inactive users, and archived groups
+// all return ErrNotFound so callers cannot distinguish inaccessible records.
+func (s Service) DestinationForUser(ctx context.Context, userID, notificationID string) (Destination, error) {
+	userID = strings.TrimSpace(userID)
+	notificationID = strings.TrimSpace(notificationID)
+	if userID == "" || notificationID == "" {
+		return Destination{}, domain.ErrNotFound
+	}
+	var destination Destination
+	err := s.DB.QueryRowContext(ctx, `SELECT notification.group_id
+		FROM notifications notification
+		JOIN memberships membership
+		  ON membership.id=notification.membership_id AND membership.group_id=notification.group_id
+		JOIN users recipient ON recipient.id=membership.user_id
+		JOIN groups group_row ON group_row.id=notification.group_id
+		WHERE notification.id=? AND membership.user_id=?
+		  AND membership.status='ACTIVE' AND membership.deleted_at IS NULL
+		  AND recipient.active=1 AND group_row.status='ACTIVE'`, notificationID, userID).
+		Scan(&destination.GroupID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Destination{}, domain.ErrNotFound
+	}
+	return destination, err
 }
 
 // UnreadCount returns the exact unread notification count for membership.

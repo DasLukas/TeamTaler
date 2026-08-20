@@ -73,7 +73,7 @@ describe('AppShell empty group state', () => {
   });
 
   it('persists the tablet navigation-rail preference across remounts', () => {
-    mocks.useQuery.mockReturnValue({ data: { groups: [{ id: 'group-a' }] }, isError: false, isLoading: false });
+    mocks.useQuery.mockReturnValue({ data: { user: { id: 'user-a' }, groups: [{ id: 'group-a' }] }, isError: false, isLoading: false });
     const firstRender = render(<AppShell />);
 
     fireEvent.click(screen.getByRole('button', { name: 'collapse rail' }));
@@ -87,7 +87,7 @@ describe('AppShell empty group state', () => {
   it('uses a temporary navigation rail when the available tablet width is constrained', () => {
     storedPreferences.set('teamtaler:sidebar:v1', 'expanded');
     mocks.useMediaQuery.mockReturnValue(true);
-    mocks.useQuery.mockReturnValue({ data: { groups: [{ id: 'group-a' }] }, isError: false, isLoading: false });
+    mocks.useQuery.mockReturnValue({ data: { user: { id: 'user-a' }, groups: [{ id: 'group-a' }] }, isError: false, isLoading: false });
 
     render(<AppShell />);
 

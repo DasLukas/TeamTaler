@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"path/filepath"
 	"strconv"
@@ -293,6 +294,38 @@ func TestSMTPPasswordCipherUsesPurposeDerivedAuthenticatedEncryption(t *testing.
 	}
 	if _, err := NewSMTPPasswordCipher([]byte("short")); err == nil {
 		t.Fatal("short SMTP password key unexpectedly accepted")
+	}
+}
+
+func TestWebPushFailsClosedWithoutIndependentStorageEncryption(t *testing.T) {
+	ctx := context.Background()
+	db, baseService := openSystemService(t)
+	defer db.Close()
+	insertSystemTestUser(t, db, "admin", "admin@example.test", true)
+	privateScalar := make([]byte, 32)
+	privateScalar[len(privateScalar)-1] = 1
+	defaults := baseService.defaults
+	defaults.WebPush = WebPushConfiguration{
+		Subject:         "mailto:admin@example.test",
+		VAPIDPrivateKey: base64.RawURLEncoding.EncodeToString(privateScalar),
+	}
+	service, err := NewService(db, defaults, nil)
+	if err != nil {
+		t.Fatalf("create system service without Web Push storage encryption: %v", err)
+	}
+	if _, err := service.GrantAdministrator(ctx, "admin", ""); err != nil {
+		t.Fatalf("grant administrator: %v", err)
+	}
+	settings, err := service.GetSettings(ctx)
+	if err != nil {
+		t.Fatalf("get Web Push settings: %v", err)
+	}
+	if settings.WebPush.StorageKeyConfigured || settings.WebPush.ConfigurationValid || settings.WebPush.Active {
+		t.Fatalf("Web Push remained usable without storage encryption: %#v", settings.WebPush)
+	}
+	enabled := true
+	if _, err := service.UpdateSettings(ctx, "admin", settings.Revision, SettingsPatch{WebPush: &WebPushPatch{Enabled: &enabled}}); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("enable Web Push without storage encryption error=%v, want validation", err)
 	}
 }
 

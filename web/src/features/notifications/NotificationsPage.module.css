@@ -1,6 +1,7 @@
 .list { display: grid; gap: var(--space-3); }
 .notification { display: grid; grid-template-columns: 44px 1fr auto; align-items: center; gap: var(--space-4); padding: var(--space-5); border: 1px solid var(--color-teal-600); border-radius: var(--radius-md); background: var(--color-surface-teal); content-visibility: auto; contain-intrinsic-size: 0 124px; }
 .notification.read { border-color: var(--color-border); background: var(--color-white); }
+.notification[data-focused] { outline: 3px solid color-mix(in srgb, var(--color-orange-500) 45%, transparent); outline-offset: 3px; }
 .notification h2, .notification p { margin: 0; }
 .notification h2 { font-size: var(--font-size-md); }
 .notification p { margin-top: var(--space-1); color: var(--color-muted); line-height: 1.5; }

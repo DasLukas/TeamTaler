@@ -79,9 +79,24 @@ func TestNotificationPaginationBatchReadAndEmailEnqueue(t *testing.T) {
 	if _, err := service.MarkReadMany(ctx, membership, []string{first.Items[0].ID, first.Items[0].ID}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("duplicate IDs error=%v, want validation", err)
 	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO membership_notification_channels(group_id,membership_id,event_type,channel,enabled_at,updated_at)
+		VALUES('grp_a','mem_a','PAYMENT_RECORDED','EMAIL','2026-08-04T12:00:00Z','2026-08-04T12:00:00Z')`); err != nil {
+		t.Fatalf("enable email preference: %v", err)
+	}
+	if err := storage.WithTx(ctx, db, func(tx *sql.Tx) error {
+		_, err := service.CreateTx(ctx, tx, CreateInput{
+			GroupID: "grp_a", MembershipID: "mem_a", Type: TypePaymentRecorded,
+			Title: "Payment recorded", Body: "Payment body", ResourceType: "payment",
+			ResourceID: "pay_email", CreatedAt: "2026-08-04T12:00:05Z",
+			Context: EventContext{ActorName: "Member B", AmountMinor: 150, Currency: "EUR"},
+		})
+		return err
+	}); err != nil {
+		t.Fatalf("create email notification: %v", err)
+	}
 	var outboxCount int
-	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM notification_email_outbox WHERE group_id='grp_a'`).Scan(&outboxCount); err != nil || outboxCount != 3 {
-		t.Fatalf("notification email jobs=%d err=%v, want 3", outboxCount, err)
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM notification_delivery_jobs WHERE group_id='grp_a' AND channel='EMAIL'`).Scan(&outboxCount); err != nil || outboxCount != 1 {
+		t.Fatalf("notification email jobs=%d err=%v, want 1", outboxCount, err)
 	}
 	var managedNotificationCount int
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM notifications WHERE membership_id='mem_managed'`).Scan(&managedNotificationCount); err != nil || managedNotificationCount != 1 {
