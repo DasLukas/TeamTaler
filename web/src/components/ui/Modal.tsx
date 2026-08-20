@@ -1,8 +1,11 @@
 import X from 'lucide-react/dist/esm/icons/x';
-import { useEffect, useId, useRef, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject, type TouchEvent as ReactTouchEvent } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject, type TouchEvent as ReactTouchEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { IconButton } from './IconButton';
 import styles from './Modal.module.css';
+
+const ModalFooterContext = createContext<HTMLElement | null>(null);
 
 /**
  * Restores focus to the element that opened a modal when it remains available.
@@ -29,18 +32,37 @@ export interface ModalProps {
   title: string;
   onClose: () => void;
   children: ReactNode;
+  footer?: ReactNode;
+  size?: 'standard' | 'wide' | 'workspace';
   variant?: 'dialog' | 'sheet';
   className?: string;
+}
+
+/** Properties accepted by content-owned persistent modal actions. */
+export interface ModalFooterProps {
+  children: ReactNode;
+}
+
+/**
+ * Moves content-owned actions into the persistent footer of the nearest modal.
+ *
+ * @param props - Actions that need access to state owned inside modal content.
+ * @returns A portal into the shared modal footer, or nothing before the target mounts.
+ */
+export function ModalFooter({ children }: ModalFooterProps) {
+  const target = useContext(ModalFooterContext);
+  return target ? createPortal(children, target) : null;
 }
 
 /**
  * Renders an accessible modal that can use a compact-screen sheet style.
  *
- * @param props - Visibility, heading, close callback, content, and style mode.
- * @returns A native dialog synchronized with React state.
+ * @param props - Visibility, heading, close callback, scrollable content, optional persistent footer, size, and style mode.
+ * @returns A native dialog with fixed chrome and an independently scrolling content region.
  */
-export function Modal({ open, title, onClose, children, variant = 'dialog', className = '' }: ModalProps) {
+export function Modal({ open, title, onClose, children, footer, size = 'standard', variant = 'dialog', className = '' }: ModalProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const [footerElement, setFooterElement] = useState<HTMLElement | null>(null);
   const openingElementRef = useRef<HTMLElement | null>(null);
   const dragRef = useRef<{ pointerId: number; startY: number; startTime: number; moved: boolean } | null>(null);
   const mouseDragCleanupRef = useRef<(() => void) | null>(null);
@@ -48,6 +70,7 @@ export function Modal({ open, title, onClose, children, variant = 'dialog', clas
   const suppressHandleClickRef = useRef(false);
   const titleId = useId();
   const { t } = useTranslation();
+  const setFooterNode = useCallback((node: HTMLElement | null) => setFooterElement(node), []);
 
   const clearDragTransform = () => {
     const dialog = dialogRef.current;
@@ -214,7 +237,7 @@ export function Modal({ open, title, onClose, children, variant = 'dialog', clas
   return (
     <dialog
       aria-labelledby={titleId}
-      className={`${styles.dialog} ${styles[variant]} ${className}`}
+      className={`${styles.dialog} ${styles[variant]} ${styles[size]} ${className}`}
       onCancel={(event) => {
         event.preventDefault();
         onClose();
@@ -223,34 +246,39 @@ export function Modal({ open, title, onClose, children, variant = 'dialog', clas
     >
       {open ? (
         <>
-          {variant === 'sheet' ? (
-            <button
-              aria-label={t('dialog.sheetHandle')}
-              className={styles.sheetHandle}
-              onClick={() => {
-                if (suppressHandleClickRef.current) {
-                  suppressHandleClickRef.current = false;
-                  return;
-                }
-                closeSheet();
-              }}
-              onMouseDown={startMouseSheetDrag}
-              onPointerCancel={(event) => finishSheetDrag(event, true)}
-              onPointerDown={startSheetDrag}
-              onPointerMove={moveSheetDrag}
-              onPointerUp={finishSheetDrag}
-              onTouchCancel={(event) => finishTouchSheetDrag(event, true)}
-              onTouchEnd={finishTouchSheetDrag}
-              onTouchMove={moveTouchSheetDrag}
-              onTouchStart={startTouchSheetDrag}
-              type="button"
-            ><span aria-hidden="true" className={styles.handle} /></button>
-          ) : null}
-          <header className={styles.header}>
-            <h2 id={titleId}>{title}</h2>
-            <IconButton label={t('dialog.close')} onClick={onClose}><X size={28} strokeWidth={1.8} /></IconButton>
-          </header>
-          {children}
+          <div className={styles.chrome}>
+            {variant === 'sheet' ? (
+              <button
+                aria-label={t('dialog.sheetHandle')}
+                className={styles.sheetHandle}
+                onClick={() => {
+                  if (suppressHandleClickRef.current) {
+                    suppressHandleClickRef.current = false;
+                    return;
+                  }
+                  closeSheet();
+                }}
+                onMouseDown={startMouseSheetDrag}
+                onPointerCancel={(event) => finishSheetDrag(event, true)}
+                onPointerDown={startSheetDrag}
+                onPointerMove={moveSheetDrag}
+                onPointerUp={finishSheetDrag}
+                onTouchCancel={(event) => finishTouchSheetDrag(event, true)}
+                onTouchEnd={finishTouchSheetDrag}
+                onTouchMove={moveTouchSheetDrag}
+                onTouchStart={startTouchSheetDrag}
+                type="button"
+              ><span aria-hidden="true" className={styles.handle} /></button>
+            ) : null}
+            <header className={styles.header}>
+              <h2 id={titleId}>{title}</h2>
+              <IconButton label={t('dialog.close')} onClick={onClose}><X size={28} strokeWidth={1.8} /></IconButton>
+            </header>
+          </div>
+          <ModalFooterContext.Provider value={footerElement}>
+            <div className={styles.body}>{children}</div>
+            <footer className={styles.footer} ref={setFooterNode}>{footer}</footer>
+          </ModalFooterContext.Provider>
         </>
       ) : null}
     </dialog>

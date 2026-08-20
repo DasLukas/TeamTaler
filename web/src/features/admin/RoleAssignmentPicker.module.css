@@ -94,23 +94,15 @@
 }
 
 .error { margin: 0; color: var(--color-red-600); font-size: var(--font-size-sm); }
-.sheetDialog.sheetDialog {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
-  overflow: hidden;
-}
-
 .sheetContent {
   display: grid;
-  min-height: 0;
-  overflow: hidden;
   padding: var(--space-3) var(--space-5) var(--space-5);
 }
 
-.sheetContent .actions { padding-bottom: env(safe-area-inset-bottom, 0); }
+.sheetFooter { width: 100%; }
 
 @media (max-width: 767px) {
   .trigger { min-width: 0; }
-  .sheetContent .actions { align-items: stretch; flex-direction: column-reverse; }
-  .sheetContent .actions > * { width: 100%; }
+  .sheetFooter .actions { align-items: stretch; flex-direction: column-reverse; }
+  .sheetFooter .actions > * { width: 100%; }
 }

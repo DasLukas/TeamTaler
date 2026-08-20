@@ -31,6 +31,10 @@ export interface InvitationReadyProps {
   fallbackHint?: string;
   /** Accessible name for the read-only link field. */
   linkLabel: string;
+}
+
+/** Properties accepted by the persistent invitation-result action. */
+export interface InvitationReadyFooterProps {
   /** Closes the surrounding dialog. */
   onDone: () => void;
 }
@@ -39,9 +43,9 @@ export interface InvitationReadyProps {
  * Renders the canonical TeamTaler invitation success experience.
  *
  * @param props - Link, delivery state, expiry copy, and close callback.
- * @returns A consistent invitation result with copy feedback and a completion action.
+ * @returns A consistent invitation result with copy feedback for use above a persistent modal footer.
  */
-export function InvitationReady({ acceptUrl, deliveryStatus, errorMessage, expiresAt, fallbackHint, linkLabel, onDone }: InvitationReadyProps) {
+export function InvitationReady({ acceptUrl, deliveryStatus, errorMessage, expiresAt, fallbackHint, linkLabel }: InvitationReadyProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const copyLink = async () => {
@@ -65,7 +69,17 @@ export function InvitationReady({ acceptUrl, deliveryStatus, errorMessage, expir
           <Button leadingIcon={<Copy size={17} />} onClick={() => void copyLink()} variant="secondary">{copied ? t('common.copied') : t('common.copy')}</Button>
         </div>
       </div>
-      <Button fullWidth leadingIcon={<CircleCheck size={17} />} onClick={onDone}>{t('common.done')}</Button>
     </div>
   );
+}
+
+/**
+ * Renders the persistent completion action for an invitation result modal.
+ *
+ * @param props - Completion callback owned by the surrounding workflow.
+ * @returns A full-width action intended for the shared modal footer.
+ */
+export function InvitationReadyFooter({ onDone }: InvitationReadyFooterProps) {
+  const { t } = useTranslation();
+  return <Button fullWidth leadingIcon={<CircleCheck size={17} />} onClick={onDone}>{t('common.done')}</Button>;
 }

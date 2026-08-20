@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +25,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/notifications"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/storage"
+	"github.com/DasLukas/TeamTaler/internal/tablequery"
 )
 
 // Service implements booking commands and queries. DB must be migrated and
@@ -786,21 +789,193 @@ func (s Service) List(ctx context.Context, membership domain.Membership, periodI
 // ctx bounds permission and booking queries. It returns visible bookings or
 // policy and SQL errors.
 func (s Service) ListActivity(ctx context.Context, membership domain.Membership, periodID string, limit int) ([]domain.Booking, error) {
+	page, err := s.QueryActivity(ctx, membership, ActivityQuery{PeriodID: periodID, Limit: limit})
+	return page.Items, err
+}
+
+// ActivityQuery describes a server-side activity table query. Empty sort and
+// direction values select createdAt descending. Date bounds accept ISO 8601
+// dates or RFC 3339 timestamps; CreatedFrom is inclusive and CreatedTo is
+// exclusive after date-only upper-bound normalization. Amount bounds are
+// inclusive minor units.
+type ActivityQuery struct {
+	Search             string
+	PeriodID           string
+	ActorMembershipID  string
+	TargetMembershipID string
+	CategoryIDs        []string
+	ProductIDs         []string
+	Status             string
+	CreatedFrom        string
+	CreatedTo          string
+	AmountMin          *int64
+	AmountMax          *int64
+	Sort               string
+	Direction          string
+	Cursor             string
+	Limit              int
+}
+
+// ActivityPage is one stable keyset-paginated activity slice. NextCursor is
+// empty when no further matching visible booking exists.
+type ActivityPage struct {
+	Items      []domain.Booking
+	NextCursor string
+}
+
+var activitySorts = map[string]struct{}{
+	"createdAt": {}, "amount": {}, "targetName": {}, "actorName": {},
+	"productName": {}, "categoryName": {}, "status": {},
+}
+
+const (
+	activityCreatedExpression = `strftime('%Y-%m-%dT%H:%M:%fZ',b.created_at)`
+	activityStatusExpression  = `CASE WHEN b.voided_at IS NULL THEN 'POSTED' ELSE 'VOIDED' END`
+)
+
+// activitySortExpression maps a normalized public sort key to a closed SQL
+// expression. The default is intentionally safe so caller input is never
+// reflected into query text even if validation is accidentally bypassed.
+func activitySortExpression(sortKey string) string {
+	switch sortKey {
+	case "amount":
+		return "b.total_minor"
+	case "targetName":
+		return "lower(target_user.display_name)"
+	case "actorName":
+		return "lower(actor_user.display_name)"
+	case "productName":
+		return "lower(b.product_name)"
+	case "categoryName":
+		return "lower(b.category_name)"
+	case "status":
+		return activityStatusExpression
+	default:
+		return activityCreatedExpression
+	}
+}
+
+const maxActivityFilterIDs = 200
+
+func normalizeActivityFilterIDs(field string, values []string) ([]string, error) {
+	unique := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if len(value) > 200 {
+			return nil, domain.ValidationError{Field: field, Message: "values must contain at most 200 characters"}
+		}
+		unique[value] = struct{}{}
+		if len(unique) > maxActivityFilterIDs {
+			return nil, domain.ValidationError{Field: field, Message: "must contain at most 200 values"}
+		}
+	}
+	normalized := make([]string, 0, len(unique))
+	for value := range unique {
+		normalized = append(normalized, value)
+	}
+	sort.Strings(normalized)
+	return normalized, nil
+}
+
+func queryPlaceholders(count int) string {
+	return strings.TrimSuffix(strings.Repeat("?,", count), ",")
+}
+
+// QueryActivity returns a filtered, sorted, keyset-paginated activity page.
+// Tenant scope and actor/target visibility are applied before user filters;
+// VIEW_ALL_BOOKING_ACTIVITY is the only permission that widens visibility.
+func (s Service) QueryActivity(ctx context.Context, membership domain.Membership, input ActivityQuery) (ActivityPage, error) {
 	viewAll, err := canPermission(ctx, s.DB, membership, domain.PermissionViewAllBookingActivity)
 	if err != nil {
-		return nil, err
+		return ActivityPage{}, err
 	}
-	return s.list(ctx, membership, periodID, limit, viewAll)
+	return s.queryActivity(ctx, membership, input, viewAll)
 }
 
 func (s Service) list(ctx context.Context, membership domain.Membership, periodID string, limit int, viewAll bool) ([]domain.Booking, error) {
-	if limit < 1 || limit > 200 {
-		limit = 100
+	page, err := s.queryActivity(ctx, membership, ActivityQuery{PeriodID: periodID, Limit: limit}, viewAll)
+	return page.Items, err
+}
+
+func (s Service) queryActivity(ctx context.Context, membership domain.Membership, input ActivityQuery, viewAll bool) (ActivityPage, error) {
+	var err error
+	input.Search, err = tablequery.NormalizeSearch(input.Search)
+	if err != nil {
+		return ActivityPage{}, err
 	}
+	input.Sort, input.Direction, err = tablequery.NormalizeSort(input.Sort, input.Direction, "createdAt", "desc", activitySorts)
+	if err != nil {
+		return ActivityPage{}, err
+	}
+	input.CreatedFrom, err = tablequery.NormalizeTimeBound("createdFrom", input.CreatedFrom, false)
+	if err != nil {
+		return ActivityPage{}, err
+	}
+	input.CreatedTo, err = tablequery.NormalizeTimeBound("createdTo", input.CreatedTo, true)
+	if err != nil {
+		return ActivityPage{}, err
+	}
+	if input.CreatedFrom != "" && input.CreatedTo != "" && input.CreatedFrom >= input.CreatedTo {
+		return ActivityPage{}, domain.ValidationError{Field: "createdTo", Message: "must be later than createdFrom"}
+	}
+	if input.AmountMin != nil && *input.AmountMin < 0 {
+		return ActivityPage{}, domain.ValidationError{Field: "amountMin", Message: "must be zero or greater"}
+	}
+	if input.AmountMax != nil && *input.AmountMax < 0 {
+		return ActivityPage{}, domain.ValidationError{Field: "amountMax", Message: "must be zero or greater"}
+	}
+	if input.AmountMin != nil && input.AmountMax != nil && *input.AmountMin > *input.AmountMax {
+		return ActivityPage{}, domain.ValidationError{Field: "amountMax", Message: "must be greater than or equal to amountMin"}
+	}
+	input.Status = strings.ToUpper(strings.TrimSpace(input.Status))
+	if input.Status != "" && input.Status != "POSTED" && input.Status != "VOIDED" {
+		return ActivityPage{}, domain.ValidationError{Field: "status", Message: "must be POSTED or VOIDED"}
+	}
+	input.PeriodID = strings.TrimSpace(input.PeriodID)
+	input.ActorMembershipID = strings.TrimSpace(input.ActorMembershipID)
+	input.TargetMembershipID = strings.TrimSpace(input.TargetMembershipID)
+	input.CategoryIDs, err = normalizeActivityFilterIDs("categoryId", input.CategoryIDs)
+	if err != nil {
+		return ActivityPage{}, err
+	}
+	input.ProductIDs, err = normalizeActivityFilterIDs("productId", input.ProductIDs)
+	if err != nil {
+		return ActivityPage{}, err
+	}
+	if input.Limit < 1 || input.Limit > 200 {
+		input.Limit = 100
+	}
+	fingerprint, err := tablequery.Fingerprint(struct {
+		GroupID, ViewerMembershipID                             string
+		Search, PeriodID, ActorMembershipID, TargetMembershipID string
+		CategoryIDs, ProductIDs                                 []string
+		Status, CreatedFrom, CreatedTo, Sort, Direction         string
+		AmountMin, AmountMax                                    *int64
+		ViewAll                                                 bool
+	}{
+		GroupID: membership.GroupID, ViewerMembershipID: membership.ID,
+		Search: input.Search, PeriodID: input.PeriodID, ActorMembershipID: input.ActorMembershipID, TargetMembershipID: input.TargetMembershipID,
+		CategoryIDs: input.CategoryIDs, ProductIDs: input.ProductIDs,
+		Status: input.Status, CreatedFrom: input.CreatedFrom, CreatedTo: input.CreatedTo, Sort: input.Sort, Direction: input.Direction,
+		AmountMin: input.AmountMin, AmountMax: input.AmountMax, ViewAll: viewAll,
+	})
+	if err != nil {
+		return ActivityPage{}, err
+	}
+	cursorKey, cursorID, err := tablequery.DecodeCursor(input.Cursor, fingerprint, input.Sort, input.Direction)
+	if err != nil {
+		return ActivityPage{}, err
+	}
+
+	sortExpression := activitySortExpression(input.Sort)
+	orderKeyword, comparison := tablequery.SQLOrderFragments(input.Direction)
 	query := `SELECT b.id,b.group_id,b.period_id,b.category_id,b.product_id,b.actor_membership_id,actor_user.display_name,actor_user.id,coalesce(actor_user.avatar_key,''),
 		CASE WHEN actor_member.deleted_at IS NOT NULL THEN 'DELETED' ELSE actor_member.status END,
 		b.target_membership_id,target_user.display_name,target_user.id,coalesce(target_user.avatar_key,''),CASE WHEN target_member.deleted_at IS NOT NULL THEN 'DELETED' ELSE target_member.status END,b.quantity,
-		b.unit_price_minor,b.total_minor,g.currency,b.product_name,b.category_name,coalesce(b.reason,''),b.created_at,b.voided_at,coalesce(b.void_reason,'')
+		b.unit_price_minor,b.total_minor,g.currency,b.product_name,b.category_name,coalesce(b.reason,''),b.created_at,b.voided_at,coalesce(b.void_reason,''),CAST(` + sortExpression + ` AS TEXT)
 		FROM bookings b JOIN groups g ON g.id=b.group_id
 		JOIN memberships actor_member ON actor_member.id=b.actor_membership_id AND actor_member.group_id=b.group_id
 		JOIN users actor_user ON actor_user.id=actor_member.user_id
@@ -808,45 +983,122 @@ func (s Service) list(ctx context.Context, membership domain.Membership, periodI
 		JOIN users target_user ON target_user.id=target_member.user_id
 		WHERE b.group_id=?`
 	args := []any{membership.GroupID}
-	if periodID != "" {
+	if input.PeriodID != "" {
 		query += ` AND b.period_id=?`
-		args = append(args, periodID)
+		args = append(args, input.PeriodID)
 	}
 	if !viewAll {
 		query += ` AND (b.target_membership_id=? OR b.actor_membership_id=?)`
 		args = append(args, membership.ID, membership.ID)
 	}
-	query += ` ORDER BY b.created_at DESC LIMIT ?`
-	args = append(args, limit)
+	if input.ActorMembershipID != "" {
+		query += ` AND b.actor_membership_id=?`
+		args = append(args, input.ActorMembershipID)
+	}
+	if input.TargetMembershipID != "" {
+		query += ` AND b.target_membership_id=?`
+		args = append(args, input.TargetMembershipID)
+	}
+	if len(input.CategoryIDs) > 0 {
+		query += ` AND b.category_id IN (` + queryPlaceholders(len(input.CategoryIDs)) + `)`
+		for _, categoryID := range input.CategoryIDs {
+			args = append(args, categoryID)
+		}
+	}
+	if len(input.ProductIDs) > 0 {
+		query += ` AND b.product_id IN (` + queryPlaceholders(len(input.ProductIDs)) + `)`
+		for _, productID := range input.ProductIDs {
+			args = append(args, productID)
+		}
+	}
+	if input.Status == "POSTED" {
+		query += ` AND b.voided_at IS NULL`
+	} else if input.Status == "VOIDED" {
+		query += ` AND b.voided_at IS NOT NULL`
+	}
+	if input.CreatedFrom != "" {
+		query += ` AND ` + activityCreatedExpression + `>=?`
+		args = append(args, input.CreatedFrom)
+	}
+	if input.CreatedTo != "" {
+		query += ` AND ` + activityCreatedExpression + `<?`
+		args = append(args, input.CreatedTo)
+	}
+	if input.AmountMin != nil {
+		query += ` AND b.total_minor>=?`
+		args = append(args, *input.AmountMin)
+	}
+	if input.AmountMax != nil {
+		query += ` AND b.total_minor<=?`
+		args = append(args, *input.AmountMax)
+	}
+	if input.Search != "" {
+		pattern := tablequery.LikePattern(input.Search)
+		query += ` AND (target_user.display_name LIKE ? ESCAPE '\' COLLATE NOCASE
+			OR actor_user.display_name LIKE ? ESCAPE '\' COLLATE NOCASE
+			OR b.product_name LIKE ? ESCAPE '\' COLLATE NOCASE
+			OR b.category_name LIKE ? ESCAPE '\' COLLATE NOCASE
+			OR coalesce(b.reason,'') LIKE ? ESCAPE '\' COLLATE NOCASE
+			OR CAST(b.total_minor AS TEXT) LIKE ? ESCAPE '\'
+			OR ` + activityStatusExpression + ` LIKE ? ESCAPE '\' COLLATE NOCASE)`
+		args = append(args, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
+	}
+	if cursorID != "" {
+		var boundKey any = cursorKey
+		if input.Sort == "amount" {
+			boundKey, err = strconv.ParseInt(cursorKey, 10, 64)
+			if err != nil {
+				return ActivityPage{}, domain.ValidationError{Field: "cursor", Message: "is invalid or does not match the current query"}
+			}
+		}
+		query += ` AND (` + sortExpression + ` ` + comparison + ` ? OR (` + sortExpression + ` = ? AND b.id ` + comparison + ` ?))`
+		args = append(args, boundKey, boundKey, cursorID)
+	}
+	query += ` ORDER BY ` + sortExpression + ` ` + orderKeyword + `,b.id ` + orderKeyword + ` LIMIT ?`
+	args = append(args, input.Limit+1)
 	rows, err := s.DB.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return ActivityPage{}, err
 	}
 	defer rows.Close()
 	canVoidOwn, err := canPermission(ctx, s.DB, membership, domain.PermissionVoidOwnBooking)
 	if err != nil {
-		return nil, err
+		return ActivityPage{}, err
 	}
 	canVoidAny, err := canPermission(ctx, s.DB, membership, domain.PermissionVoidAnyBooking)
 	if err != nil {
-		return nil, err
+		return ActivityPage{}, err
 	}
 	items := make([]domain.Booking, 0)
+	sortKeys := make([]string, 0)
 	for rows.Next() {
 		var item domain.Booking
-		var actorUserID, actorAvatarKey, targetUserID, targetAvatarKey string
+		var actorUserID, actorAvatarKey, targetUserID, targetAvatarKey, sortKey string
 		if err := rows.Scan(&item.ID, &item.GroupID, &item.PeriodID, &item.CategoryID, &item.ProductID, &item.ActorMembershipID, &item.ActorDisplayName, &actorUserID, &actorAvatarKey, &item.ActorMembershipStatus,
 			&item.TargetMembershipID, &item.TargetDisplayName, &targetUserID, &targetAvatarKey, &item.TargetMembershipStatus,
 			&item.Quantity, &item.UnitPriceMinor, &item.TotalMinor, &item.Currency, &item.ProductName, &item.CategoryName, &item.Reason,
-			&item.CreatedAt, &item.VoidedAt, &item.VoidReason); err != nil {
-			return nil, err
+			&item.CreatedAt, &item.VoidedAt, &item.VoidReason, &sortKey); err != nil {
+			return ActivityPage{}, err
 		}
 		item.ActorAvatarURL = media.UserAvatarURL(actorUserID, actorAvatarKey)
 		item.TargetAvatarURL = media.UserAvatarURL(targetUserID, targetAvatarKey)
 		applyVoidMetadata(&item, membership, canVoidOwn, canVoidAny, platform.Now())
 		items = append(items, item)
+		sortKeys = append(sortKeys, sortKey)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return ActivityPage{}, err
+	}
+	page := ActivityPage{Items: items}
+	if len(items) > input.Limit {
+		page.Items = items[:input.Limit]
+		last := page.Items[len(page.Items)-1]
+		page.NextCursor, err = tablequery.EncodeCursor(fingerprint, input.Sort, input.Direction, sortKeys[input.Limit-1], last.ID)
+		if err != nil {
+			return ActivityPage{}, err
+		}
+	}
+	return page, nil
 }
 
 // Void idempotently reverses bookingID into the currently open period. ctx

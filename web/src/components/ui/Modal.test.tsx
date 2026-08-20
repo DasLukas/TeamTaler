@@ -1,9 +1,10 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { StrictMode, useState } from 'react';
+import { StrictMode, useState, type FormEvent } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import i18n from '@/i18n';
-import { Modal } from './Modal';
+import { Modal, ModalFooter } from './Modal';
+import styles from './Modal.module.css';
 
 /** Renders a modal that is removed from the tree when its parent closes it. */
 function UnmountingModalHarness() {
@@ -78,6 +79,51 @@ describe('Modal lifecycle and focus restoration', () => {
 
     expect(screen.queryByRole('dialog', { name: 'Controlled dialog' })).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
+  });
+
+  it('keeps shared footer actions outside the scrollable body for every modal size', () => {
+    render(
+      <Modal
+        footer={<button type="button">Apply changes</button>}
+        onClose={vi.fn()}
+        open
+        size="workspace"
+        title="Structured dialog"
+        variant="sheet"
+      >
+        <span>Scrollable criteria</span>
+      </Modal>,
+    );
+
+    const dialog = screen.getByRole('dialog', { name: 'Structured dialog' });
+    const action = screen.getByRole('button', { name: 'Apply changes' });
+    expect(dialog.className).toContain(styles.workspace);
+    expect(screen.getByText('Scrollable criteria').parentElement?.className).toContain(styles.body);
+    expect(action.closest('footer')?.className).toContain(styles.footer);
+    expect(action.closest('footer')?.parentElement).toBe(dialog);
+  });
+
+  it('portals content-owned workflow actions into the persistent footer', () => {
+    const onSubmit = vi.fn((event: FormEvent<HTMLFormElement>) => event.preventDefault());
+    render(
+      <Modal onClose={vi.fn()} open title="Compound footer">
+        <form id="profile-form" onSubmit={onSubmit}>
+          <label htmlFor="profile-name">Name</label>
+          <input id="profile-name" />
+          <ModalFooter><button form="profile-form" type="submit">Save profile</button></ModalFooter>
+        </form>
+      </Modal>,
+    );
+
+    const dialog = screen.getByRole('dialog', { name: 'Compound footer' });
+    const form = dialog.querySelector('#profile-form');
+    const action = screen.getByRole('button', { name: 'Save profile' });
+    expect(form?.contains(action)).toBe(false);
+    expect(action).toHaveAttribute('form', 'profile-form');
+    expect(action.closest('footer')?.className).toContain(styles.footer);
+    expect(action.closest('footer')?.parentElement).toBe(dialog);
+    fireEvent.click(action);
+    expect(onSubmit).toHaveBeenCalledOnce();
   });
 
   it('keeps sheets above the software keyboard visual viewport', () => {

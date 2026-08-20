@@ -1,13 +1,15 @@
 import { useQuery } from '@tanstack/react-query';
-import Search from 'lucide-react/dist/esm/icons/search';
-import { useMemo, useState } from 'react';
+import { useDeferredValue, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
-import { formatMoney } from '@/api/money';
+import { currencyExponent, formatMoney } from '@/api/money';
 import type { AccountSummary } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Avatar } from '@/components/ui/Avatar';
 import { StatePanel } from '@/components/ui/StatePanel';
+import { DataTable, type DataTableColumnDef, type DataTableFilterDefinition, type DataTableNumberRange } from '@/features/shared/DataTable';
+import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
+import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
 import { deriveAccountOverview } from './accountOverview';
 import styles from './AccountBalancesPanel.module.css';
 
@@ -18,43 +20,8 @@ function balanceState(account: AccountSummary): 'due' | 'settled' | 'credit' {
   return 'settled';
 }
 
-interface AccountCollectionProps {
-  accounts: AccountSummary[];
-  emptyMessage: string;
-  title: string;
-}
-
-function AccountCollection({ accounts, emptyMessage, title }: AccountCollectionProps) {
-  const { t } = useTranslation();
-  const membershipStatus = (status: AccountSummary['status']) => status === 'ACTIVE'
-    ? t('financeWorkspace.active')
-    : status === 'ARCHIVED' ? t('financeWorkspace.archived') : t('common.deleted');
-  if (accounts.length === 0) return <section className={styles.group}><h3>{title}</h3><p className={styles.empty}>{emptyMessage}</p></section>;
-  return (
-    <section className={styles.group}>
-      <h3>{title} <span>{accounts.length}</span></h3>
-      <div className={styles.desktopTable}>
-        <table>
-          <thead><tr><th>{t('common.member')}</th><th>{t('financeWorkspace.membershipStatus')}</th><th>{t('common.status')}</th><th className={styles.number}>{t('financeWorkspace.balance')}</th></tr></thead>
-          <tbody>{accounts.map((account) => {
-            const state = balanceState(account);
-            return <tr key={account.membershipId}><td><span className={styles.member}><Avatar name={account.displayName} size="small" src={account.avatarUrl} /><strong>{account.displayName}</strong></span></td><td>{membershipStatus(account.status)}</td><td><span className={`${styles.state} ${styles[state]}`}>{t(`financeWorkspace.states.${state}`)}</span></td><td className={`${styles.number} ${styles.balance}`}>{formatMoney(account.balance)}</td></tr>;
-          })}</tbody>
-        </table>
-      </div>
-      <div className={styles.mobileCards}>{accounts.map((account) => {
-        const state = balanceState(account);
-        return (
-          <article className={styles.accountCard} key={account.membershipId}>
-            <Avatar name={account.displayName} src={account.avatarUrl} />
-            <div className={styles.cardIdentity}><strong>{account.displayName}</strong><small>{membershipStatus(account.status)}</small></div>
-            <div className={styles.cardBalance}><strong>{formatMoney(account.balance)}</strong><span className={`${styles.state} ${styles[state]}`}>{t(`financeWorkspace.states.${state}`)}</span></div>
-          </article>
-        );
-      })}</div>
-    </section>
-  );
-}
+type AccountFilterId = 'membershipStatus' | 'balanceState' | 'amount';
+const accountCollator = new Intl.Collator('de-DE', { numeric: true, sensitivity: 'base' });
 
 /**
  * Renders consolidated balances grouped by operational and deleted lifecycle state.
@@ -64,20 +31,89 @@ function AccountCollection({ accounts, emptyMessage, title }: AccountCollectionP
 export function AccountBalancesPanel() {
   const { t } = useTranslation();
   const { activeGroupId, activeGroup } = useActiveGroup();
-  const [search, setSearch] = useState('');
+  const labels = useDataTableLabels();
   const accountsQuery = useQuery({ queryKey: ['account-summaries', activeGroupId], queryFn: () => api.getAccountSummaries(activeGroupId) });
-  const filteredAccounts = useMemo(() => {
-    const normalizedSearch = search.trim().toLocaleLowerCase('de-DE');
-    if (!normalizedSearch) return accountsQuery.data ?? [];
-    return (accountsQuery.data ?? []).filter((account) => account.displayName.toLocaleLowerCase('de-DE').includes(normalizedSearch));
-  }, [accountsQuery.data, search]);
+  const filterDefinitions = useMemo<readonly DataTableFilterDefinition<AccountFilterId>[]>(() => [
+    {
+      id: 'membershipStatus',
+      kind: 'multi-select',
+      label: t('financeWorkspace.membershipStatus'),
+      options: [
+        { label: t('financeWorkspace.active'), value: 'ACTIVE' },
+        { label: t('financeWorkspace.archived'), value: 'ARCHIVED' },
+        { label: t('common.deleted'), value: 'DELETED' },
+      ],
+    },
+    {
+      id: 'balanceState',
+      kind: 'multi-select',
+      label: t('common.status'),
+      options: [
+        { label: t('financeWorkspace.states.due'), value: 'due' },
+        { label: t('financeWorkspace.states.settled'), value: 'settled' },
+        { label: t('financeWorkspace.states.credit'), value: 'credit' },
+      ],
+    },
+    { id: 'amount', kind: 'number-range', label: `${t('financeWorkspace.balance')} (${activeGroup.currency})`, maximumLabel: t('dataTable.maximum'), minimumLabel: t('dataTable.minimum'), step: 0.01 },
+  ], [activeGroup.currency, t]);
+  const tableState = useDataTableUrlState<AccountFilterId>({
+    filterDefinitions,
+    initialSorting: [{ id: 'memberName', desc: false }],
+    namespace: 'account-balances',
+    sortableColumnIds: ['memberName', 'membershipStatus', 'balanceState', 'amount'],
+  });
+  const deferredSearch = useDeferredValue(tableState.searchValue.trim().toLocaleLowerCase('de-DE'));
   const totals = useMemo(() => deriveAccountOverview(accountsQuery.data ?? [], activeGroup.currency), [accountsQuery.data, activeGroup.currency]);
-  const visibleAccounts = useMemo(() => deriveAccountOverview(filteredAccounts, activeGroup.currency), [activeGroup.currency, filteredAccounts]);
+  const visibleAccounts = useMemo(() => {
+    const statuses = Array.isArray(tableState.filters.membershipStatus) ? tableState.filters.membershipStatus : [];
+    const states = Array.isArray(tableState.filters.balanceState) ? tableState.filters.balanceState : [];
+    const amountRange = tableState.filters.amount as DataTableNumberRange | undefined;
+    const factor = BigInt(10 ** currencyExponent(activeGroup.currency));
+    const minimum = amountRange?.min === undefined ? undefined : BigInt(Math.round(amountRange.min * Number(factor)));
+    const maximum = amountRange?.max === undefined ? undefined : BigInt(Math.round(amountRange.max * Number(factor)));
+    const filtered = (accountsQuery.data ?? []).filter((account) => {
+      const amount = BigInt(account.balance.minorUnits);
+      return (!deferredSearch || account.displayName.toLocaleLowerCase('de-DE').includes(deferredSearch))
+        && (statuses.length === 0 || statuses.includes(account.status))
+        && (states.length === 0 || states.includes(balanceState(account)))
+        && (minimum === undefined || amount >= minimum)
+        && (maximum === undefined || amount <= maximum);
+    });
+    const sorting = tableState.sorting[0];
+    if (!sorting) return filtered;
+    return [...filtered].sort((left, right) => {
+      let comparison = 0;
+      if (sorting.id === 'memberName') comparison = accountCollator.compare(left.displayName, right.displayName);
+      else if (sorting.id === 'membershipStatus') comparison = accountCollator.compare(left.status, right.status);
+      else if (sorting.id === 'balanceState') comparison = accountCollator.compare(balanceState(left), balanceState(right));
+      else if (sorting.id === 'amount') comparison = BigInt(left.balance.minorUnits) < BigInt(right.balance.minorUnits) ? -1 : BigInt(left.balance.minorUnits) > BigInt(right.balance.minorUnits) ? 1 : 0;
+      return sorting.desc ? -comparison : comparison;
+    });
+  }, [accountsQuery.data, activeGroup.currency, deferredSearch, tableState.filters, tableState.sorting]);
+  const columns = useMemo<DataTableColumnDef<AccountSummary>[]>(() => [
+    {
+      accessorKey: 'displayName',
+      cell: ({ row }) => <span className={styles.member}><Avatar name={row.original.displayName} size="small" src={row.original.avatarUrl} /><strong>{row.original.displayName}</strong></span>,
+      enableSorting: true,
+      header: t('common.member'),
+      id: 'memberName',
+      meta: { label: t('common.member') },
+    },
+    { accessorKey: 'status', cell: ({ row }) => row.original.status === 'ACTIVE' ? t('financeWorkspace.active') : row.original.status === 'ARCHIVED' ? t('financeWorkspace.archived') : t('common.deleted'), enableSorting: true, header: t('financeWorkspace.membershipStatus'), id: 'membershipStatus', meta: { label: t('financeWorkspace.membershipStatus') } },
+    {
+      accessorFn: balanceState,
+      cell: ({ row }) => { const state = balanceState(row.original); return <span className={`${styles.state} ${styles[state]}`}>{t(`financeWorkspace.states.${state}`)}</span>; },
+      enableSorting: true,
+      header: t('common.status'),
+      id: 'balanceState',
+      meta: { label: t('common.status') },
+    },
+    { accessorFn: (account) => account.balance.minorUnits, cell: ({ row }) => <strong>{formatMoney(row.original.balance)}</strong>, enableSorting: true, header: t('financeWorkspace.balance'), id: 'amount', meta: { align: 'end', label: t('financeWorkspace.balance') } },
+  ], [t]);
 
   if (accountsQuery.isLoading) return <div className={styles.queryState}><StatePanel kind="loading" /></div>;
   if (!accountsQuery.data) return <div className={styles.queryState}><StatePanel kind="error" message={t('financeWorkspace.overviewError')} /></div>;
 
-  const hasMatches = visibleAccounts.active.length > 0 || visibleAccounts.archived.length > 0 || visibleAccounts.deleted.length > 0;
   return (
     <div className={styles.content}>
       <header className={styles.header}><h2>{t('financeWorkspace.overviewTitle')}</h2><p>{t('financeWorkspace.overviewIntro')}</p></header>
@@ -86,8 +122,17 @@ export function AccountBalancesPanel() {
         <article><span>{t('financeWorkspace.credits')}</span><strong>{formatMoney(totals.credits)}</strong></article>
         <article><span>{t('financeWorkspace.netBalance')}</span><strong>{formatMoney(totals.net)}</strong></article>
       </div>
-      <label className={styles.search} htmlFor="finance-member-search"><span>{t('financeWorkspace.search')}</span><div><Search aria-hidden="true" size={19} /><input id="finance-member-search" onChange={(event) => setSearch(event.target.value)} placeholder={t('financeWorkspace.searchPlaceholder')} type="search" value={search} /></div></label>
-      {hasMatches ? <><AccountCollection accounts={visibleAccounts.active} emptyMessage={t('financeWorkspace.noActiveMembers')} title={t('financeWorkspace.activeMembers')} /><AccountCollection accounts={visibleAccounts.archived} emptyMessage={t('financeWorkspace.noArchivedMembers')} title={t('financeWorkspace.archivedMembers')} /><AccountCollection accounts={visibleAccounts.deleted} emptyMessage={t('financeWorkspace.noDeletedAccounts')} title={t('financeWorkspace.deletedAccounts')} /></> : <StatePanel kind="empty" message={search ? t('financeWorkspace.noSearchResults') : t('financeWorkspace.noAccounts')} />}
+      <DataTable
+        ariaLabel={t('financeWorkspace.overviewTitle')}
+        columns={columns}
+        data={visibleAccounts}
+        emptyContent={tableState.searchValue || Object.keys(tableState.filters).length > 0 ? t('financeWorkspace.noSearchResults') : t('financeWorkspace.noAccounts')}
+        filterDefinitions={filterDefinitions}
+        getRowId={(account) => account.membershipId}
+        labels={{ ...labels, searchLabel: t('financeWorkspace.search'), searchPlaceholder: t('financeWorkspace.searchPlaceholder') }}
+        minTableWidth="720px"
+        {...tableState}
+      />
     </div>
   );
 }

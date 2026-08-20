@@ -146,33 +146,39 @@ export function RoleAssignmentPicker({
       setPending(false);
     }
   };
+  const editorContent = (
+    <div className={styles.listViewport}>
+      <RoleSelectionList
+        canManageGroup={canManageGroup}
+        canAssignRoles={canAssignRoles}
+        disabled={pending}
+        hideLegend
+        label={title}
+        lockedRoleIds={lockedRoleIds}
+        onChange={setDraftRoleIds}
+        roleIds={draftRoleIds}
+        roles={roles}
+      />
+    </div>
+  );
+  const editorFooter = (
+    <div className={styles.footer}>
+      {error ? <p className={styles.error} role="alert">{error}</p> : null}
+      <div className={styles.actions}>
+        <Button disabled={pending} leadingIcon={<X size={16} />} onClick={close} size="small" variant="secondary">{t('common.cancel')}</Button>
+        <Button disabled={!changed || !hasRole || pending} leadingIcon={<Check size={16} />} onClick={() => void apply()} size="small">{pending ? t('roleManagement.saving') : t('roleManagement.applyAssignment')}</Button>
+      </div>
+    </div>
+  );
   const editor = (
     <div className={styles.editor}>
-      <div className={styles.listViewport}>
-        <RoleSelectionList
-          canManageGroup={canManageGroup}
-          canAssignRoles={canAssignRoles}
-          disabled={pending}
-          hideLegend
-          label={title}
-          lockedRoleIds={lockedRoleIds}
-          onChange={setDraftRoleIds}
-          roleIds={draftRoleIds}
-          roles={roles}
-        />
-      </div>
-      <div className={styles.footer}>
-        {error ? <p className={styles.error} role="alert">{error}</p> : null}
-        <div className={styles.actions}>
-          <Button disabled={pending} leadingIcon={<X size={16} />} onClick={close} size="small" variant="secondary">{t('common.cancel')}</Button>
-          <Button disabled={!changed || !hasRole || pending} leadingIcon={<Check size={16} />} onClick={() => void apply()} size="small">{pending ? t('roleManagement.saving') : t('roleManagement.applyAssignment')}</Button>
-        </div>
-      </div>
+      {editorContent}
+      {editorFooter}
     </div>
   );
   let overlay: ReactNode = null;
   if (open && compact) {
-    overlay = <Modal className={styles.sheetDialog} onClose={close} open title={title} variant="sheet"><div className={styles.sheetContent}>{editor}</div></Modal>;
+    overlay = <Modal footer={<div className={styles.sheetFooter}>{editorFooter}</div>} onClose={close} open title={title} variant="sheet"><div className={styles.sheetContent}>{editorContent}</div></Modal>;
   } else if (open) {
     overlay = createPortal(
       <div aria-labelledby={titleId} className={styles.panel} id={dialogId} ref={panelRef} role="dialog" style={panelStyle}>

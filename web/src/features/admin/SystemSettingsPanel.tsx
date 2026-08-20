@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Archive from 'lucide-react/dist/esm/icons/archive';
 import ArchiveRestore from 'lucide-react/dist/esm/icons/archive-restore';
 import CircleAlert from 'lucide-react/dist/esm/icons/circle-alert';
@@ -12,12 +12,15 @@ import Save from 'lucide-react/dist/esm/icons/save';
 import ShieldAlert from 'lucide-react/dist/esm/icons/shield-alert';
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
 import X from 'lucide-react/dist/esm/icons/x';
-import { useDeferredValue, useState, type FormEvent } from 'react';
+import { useDeferredValue, useId, useMemo, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { formatMoney } from '@/api/money';
 import type {
+  CollectionPage,
   ResettableSystemSettingKey,
+  SystemAuditCollectionQuery,
+  SystemAuditEntry,
   SystemGroup,
   SystemGroupInvitationResult,
   SystemSettings,
@@ -28,17 +31,21 @@ import { Button } from '@/components/ui/Button';
 import { ConfirmationDialog } from '@/components/ui/ConfirmationDialog';
 import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { GroupMark } from '@/components/ui/GroupMark';
-import { InvitationReady } from '@/components/ui/InvitationReady';
+import { InvitationReady, InvitationReadyFooter } from '@/components/ui/InvitationReady';
 import { ItemAction } from '@/components/ui/ItemAction';
-import { Modal } from '@/components/ui/Modal';
+import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { Toggle } from '@/components/ui/Toggle';
 import { AuditEventTable } from '@/features/shared/AuditEventTable';
+import { createAuditFilterDefinitions, mergeAuditFilterOptions, type AuditEventFilterId } from '@/features/shared/auditFilters';
+import type { DataTableDateRange } from '@/features/shared/DataTable';
+import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
 import styles from './SystemSettingsPanel.module.css';
 
 const SETTINGS_QUERY_KEY = ['system-settings'] as const;
 const GROUPS_QUERY_KEY = ['system-groups'] as const;
 const AUDIT_QUERY_KEY = ['system-audit'] as const;
+const SYSTEM_AUDIT_PAGE_SIZE = 50;
 const MEBIBYTE = 1024 * 1024;
 const SMTP_PASSWORD_MASK = '••••••••••••';
 const COMMON_CURRENCIES = ['EUR', 'CHF', 'USD', 'GBP', 'PLN', 'CZK', 'DKK', 'NOK', 'SEK'] as const;
@@ -347,6 +354,7 @@ interface PurgeDialogProps {
 /** Exact-name confirmation and impact review for permanent group deletion. */
 function PurgeDialog({ group, onClose, onPurged }: PurgeDialogProps) {
   const { t } = useTranslation();
+  const formId = useId();
   const impact = useQuery({
     queryKey: ['system-group-deletion-impact', group?.id],
     queryFn: () => api.getSystemGroupDeletionImpact(group?.id ?? ''),
@@ -368,8 +376,8 @@ function PurgeDialog({ group, onClose, onPurged }: PurgeDialogProps) {
   const currentGroupName = impact.data?.groupName ?? group?.name;
   const valid = Boolean(group) && groupName === currentGroupName;
   return (
-    <Modal className={styles.purgeDialog} onClose={() => { if (!mutation.isPending) close(); }} open={group !== null} title={t('systemSettings.groups.purgeTitle', { name: currentGroupName ?? '' })} variant="sheet">
-      {group ? <form className={styles.purgeForm} onSubmit={(event) => { event.preventDefault(); mutation.mutate(); }}>
+    <Modal onClose={() => { if (!mutation.isPending) close(); }} open={group !== null} size="wide" title={t('systemSettings.groups.purgeTitle', { name: currentGroupName ?? '' })} variant="sheet">
+      {group ? <form className={styles.purgeForm} id={formId} onSubmit={(event) => { event.preventDefault(); mutation.mutate(); }}>
         <div className={styles.dangerNotice}><span className={styles.dangerIcon}><ShieldAlert aria-hidden="true" size={26} /></span><div><strong>{t('systemSettings.groups.purgeWarning')}</strong><p>{t('systemSettings.groups.purgeDescription')}</p></div></div>
         {impact.isError ? <p className={styles.error} role="alert">{t('systemSettings.groups.impactError')}</p> : null}
         <section aria-labelledby="system-purge-impact-title" className={styles.impactPanel}>
@@ -384,7 +392,7 @@ function PurgeDialog({ group, onClose, onPurged }: PurgeDialogProps) {
           <Field htmlFor="system-purge-name" label={t('systemSettings.groups.confirmName')}><TextInput autoComplete="off" id="system-purge-name" onChange={(event) => setGroupName(event.target.value)} required value={groupName} /></Field>
         </div>
         {mutation.isError ? <p className={styles.error} role="alert">{t('systemSettings.groups.purgeError')}</p> : null}
-        <div className={`${styles.actions} ${styles.purgeActions}`}><Button disabled={mutation.isPending} leadingIcon={<X size={17} />} onClick={close} variant="secondary">{t('common.cancel')}</Button><Button disabled={!valid || mutation.isPending || impact.isLoading || impact.isError} leadingIcon={<Trash2 size={17} />} type="submit" variant="danger">{mutation.isPending ? t('systemSettings.groups.purging') : t('systemSettings.groups.purge')}</Button></div>
+        <ModalFooter><div className={`${styles.actions} ${styles.purgeActions}`}><Button disabled={mutation.isPending} leadingIcon={<X size={17} />} onClick={close} variant="secondary">{t('common.cancel')}</Button><Button disabled={!valid || mutation.isPending || impact.isLoading || impact.isError} form={formId} leadingIcon={<Trash2 size={17} />} type="submit" variant="danger">{mutation.isPending ? t('systemSettings.groups.purging') : t('systemSettings.groups.purge')}</Button></div></ModalFooter>
       </form> : null}
     </Modal>
   );
@@ -396,7 +404,7 @@ function SystemGroupInvitationDialog({ invitation, onClose }: { invitation: Syst
   if (!invitation?.acceptUrl || !invitation.expiresAt) return null;
   const emailQueued = invitation.emailDeliveryStatus === 'PENDING';
   return (
-    <Modal className={styles.invitationDialog} onClose={onClose} open title={t('systemSettings.groups.invitationReadyTitle', { group: invitation.group.name })}>
+    <Modal footer={<InvitationReadyFooter onDone={onClose} />} onClose={onClose} open size="workspace" title={t('systemSettings.groups.invitationReadyTitle', { group: invitation.group.name })}>
       <InvitationReady
         acceptUrl={invitation.acceptUrl}
         deliveryStatus={{
@@ -406,7 +414,6 @@ function SystemGroupInvitationDialog({ invitation, onClose }: { invitation: Syst
         expiresAt={invitation.expiresAt}
         fallbackHint={emailQueued ? t('members.fallbackHint') : undefined}
         linkLabel={t('members.invitationLink')}
-        onDone={onClose}
       />
     </Modal>
   );
@@ -511,18 +518,65 @@ function GroupsSettingsSection({ defaultCurrency }: { defaultCurrency: string })
 /** Immutable global activity feed including retained purge receipts. */
 function SystemAuditSection() {
   const { t } = useTranslation();
-  const audit = useQuery({ queryKey: AUDIT_QUERY_KEY, queryFn: api.getSystemAudit });
+  const filterOptionsQuery = useQuery({ queryFn: api.getSystemAuditFilterOptions, queryKey: [...AUDIT_QUERY_KEY, 'filter-options'] });
+  const queryFilterDefinitions = useMemo(() => createAuditFilterDefinitions(t, filterOptionsQuery.data), [filterOptionsQuery.data, t]);
+  const tableState = useDataTableUrlState<AuditEventFilterId>({
+    filterDefinitions: queryFilterDefinitions,
+    initialSorting: [{ id: 'occurredAt', desc: true }],
+    namespace: 'system-audit',
+    sortableColumnIds: ['occurredAt', 'actorName', 'action', 'resourceType'],
+  });
+  const deferredSearch = useDeferredValue(tableState.searchValue.trim());
+  const collectionQuery = useMemo<SystemAuditCollectionQuery>(() => {
+    const dateRange = tableState.filters.occurredAt as DataTableDateRange | undefined;
+    const sorting = tableState.sorting[0];
+    return {
+      action: tableState.filters.action as string[] | undefined,
+      direction: sorting?.desc === false ? 'asc' : 'desc',
+      limit: SYSTEM_AUDIT_PAGE_SIZE,
+      occurredFrom: dateRange?.from,
+      occurredTo: dateRange?.to,
+      q: deferredSearch || undefined,
+      resourceType: tableState.filters.resourceType as string[] | undefined,
+      sort: (sorting?.id ?? 'occurredAt') as SystemAuditCollectionQuery['sort'],
+    };
+  }, [deferredSearch, tableState.filters, tableState.sorting]);
+  const audit = useInfiniteQuery({
+    getNextPageParam: (lastPage: CollectionPage<SystemAuditEntry>) => lastPage.nextCursor,
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }): Promise<CollectionPage<SystemAuditEntry>> => api.getSystemAuditPage({ ...collectionQuery, cursor: pageParam }),
+    queryKey: [...AUDIT_QUERY_KEY, 'collection', collectionQuery],
+  });
+  const entries = useMemo(() => audit.data?.pages.flatMap((page) => page.items).map((entry) => ({
+    action: entry.action,
+    actor: entry.actorDisplayName,
+    details: entry.summary,
+    id: entry.id,
+    occurredAt: entry.createdAt,
+    subject: [entry.targetType, entry.targetId].filter(Boolean).join(' · ') || '–',
+  })) ?? [], [audit.data]);
+  const visibleFilterOptions = useMemo(() => {
+    const loadedEntries = audit.data?.pages.flatMap((page) => page.items) ?? [];
+    return mergeAuditFilterOptions(
+      filterOptionsQuery.data,
+      loadedEntries.map((entry) => ({ action: entry.action, resourceType: entry.targetType })),
+    );
+  }, [audit.data, filterOptionsQuery.data]);
+  const filterDefinitions = useMemo(() => createAuditFilterDefinitions(t, visibleFilterOptions), [t, visibleFilterOptions]);
   return (
     <section aria-labelledby="system-audit-title" className={styles.section}>
       <header><h3 id="system-audit-title">{t('systemSettings.audit.title')}</h3><p>{t('systemSettings.audit.intro')}</p></header>
-      {audit.isLoading ? <StatePanel kind="loading" /> : audit.isError ? <StatePanel kind="error" message={t('systemSettings.audit.error')} /> : audit.data?.length === 0 ? <StatePanel kind="empty" message={t('systemSettings.audit.empty')} /> : <AuditEventTable entries={audit.data?.map((entry) => ({
-        action: entry.action,
-        actor: entry.actorDisplayName,
-        details: entry.summary,
-        id: entry.id,
-        occurredAt: entry.createdAt,
-        subject: [entry.targetType, entry.targetId].filter(Boolean).join(' · ') || '–',
-      })) ?? []} />}
+      <AuditEventTable
+        emptyMessage={audit.isError ? t('systemSettings.audit.error') : t('systemSettings.audit.empty')}
+        entries={entries}
+        filterDefinitions={filterDefinitions}
+        hasMore={audit.hasNextPage}
+        isLoading={audit.isLoading}
+        isLoadingMore={audit.isFetchingNextPage}
+        onLoadMore={() => void audit.fetchNextPage()}
+        tableState={tableState}
+        title={t('systemSettings.audit.title')}
+      />
     </section>
   );
 }

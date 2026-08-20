@@ -15,11 +15,7 @@
 .group { display: grid; gap: var(--space-3); }
 .group h3 { margin: var(--space-2) 0 0; }
 .group h3 span { display: inline-grid; min-width: 26px; min-height: 26px; margin-left: var(--space-2); place-items: center; border-radius: var(--radius-full); color: var(--color-muted); background: var(--color-surface-muted); font-size: var(--font-size-xs); }
-.desktopTable { border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; }
-.desktopTable table { width: 100%; border-collapse: collapse; font-size: var(--font-size-sm); }
-.desktopTable th, .desktopTable td { padding: 15px var(--space-4); border-bottom: 1px solid var(--color-border); text-align: left; }
-.desktopTable th { color: var(--color-muted); background: var(--color-surface-muted); font-size: var(--font-size-xs); letter-spacing: 0.02em; text-transform: uppercase; }
-.desktopTable tr:last-child td { border-bottom: 0; }
+.accountTable table { min-width: 680px; }
 .member { display: flex; align-items: center; gap: var(--space-3); }
 .number { text-align: right !important; }
 .balance { font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -27,7 +23,6 @@
 .due { color: #9a5a00; background: var(--color-orange-100); }
 .settled { color: var(--color-muted); background: var(--color-surface-muted); }
 .credit { color: var(--color-green-600); background: var(--color-green-100); }
-.mobileCards { display: none; }
 .empty { margin: 0; padding: var(--space-5); border: 1px dashed var(--color-border-strong); border-radius: var(--radius-md); color: var(--color-muted); }
 .queryState { padding-top: var(--space-8); }
 
@@ -37,19 +32,4 @@
   .summaries article { grid-template-columns: 1fr auto; align-items: center; padding: var(--space-4); }
   .summaries strong { font-size: 1.65rem; }
   .search { width: 100%; }
-  .desktopTable { display: none; }
-  .mobileCards { display: grid; gap: var(--space-3); }
-  .accountCard { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-white); }
-  .cardIdentity, .cardBalance { display: grid; gap: 4px; }
-  .cardIdentity { min-width: 0; }
-  .cardIdentity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .cardIdentity small { color: var(--color-muted); }
-  .cardBalance { justify-items: end; }
-  .cardBalance strong { font-variant-numeric: tabular-nums; white-space: nowrap; }
-}
-
-@media (max-width: 390px) {
-  .accountCard { grid-template-columns: auto minmax(0, 1fr); }
-  .cardBalance { grid-column: 2; grid-template-columns: 1fr auto; width: 100%; align-items: center; justify-items: start; }
-  .cardBalance .state { justify-self: end; }
 }

@@ -955,11 +955,68 @@ paths:
     get:
       tags: [System]
       summary: List append-only global system audit events
+      description: |
+        Filters, search, sorting, and keyset pagination execute against the full
+        authorized system audit table. The existing object response shape is
+        retained. Date-only bounds use UTC: `occurredFrom` starts at the selected
+        day's 00:00, while `occurredTo` includes the complete selected day by
+        becoming an exclusive bound at the next day's 00:00. RFC 3339 upper
+        timestamps are exclusive. `q` searches actor name, action, resource type,
+        resource identifier, and serialized safe metadata.
       parameters:
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/TableSearch'
+        - $ref: '#/components/parameters/TableCursor'
+        - $ref: '#/components/parameters/SortDirection'
+        - name: actorUserId
+          in: query
+          schema: { type: string }
+        - name: action
+          in: query
+          description: Exact action values combined with OR semantics when repeated.
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 100
+            items: { type: string, maxLength: 200 }
+        - name: resourceType
+          in: query
+          description: Exact resource-type values combined with OR semantics when repeated.
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 100
+            items: { type: string, maxLength: 200 }
+        - name: occurredFrom
+          in: query
+          schema:
+            oneOf:
+              - { type: string, format: date }
+              - { type: string, format: date-time }
+        - name: occurredTo
+          in: query
+          schema:
+            oneOf:
+              - { type: string, format: date }
+              - { type: string, format: date-time }
+        - name: sort
+          in: query
+          schema: { type: string, enum: [occurredAt, actorName, action, resourceType], default: occurredAt }
       responses:
         '200':
           description: Newest global events, including minimal purge receipts
+          headers:
+            X-Next-Cursor:
+              description: Opaque cursor for the next page; omitted on the final page.
+              schema: { type: string }
+            X-Has-More:
+              description: Whether another matching page exists.
+              schema: { type: boolean }
+            X-Page-Limit:
+              description: Effective maximum number of rows in this page.
+              schema: { type: integer, minimum: 1, maximum: 200 }
           content:
             application/json:
               schema:
@@ -970,6 +1027,20 @@ paths:
                   items:
                     type: array
                     items: { $ref: '#/components/schemas/SystemAuditEvent' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /system/audit/filter-options:
+    get:
+      tags: [System]
+      summary: List system-audit filter options
+      description: Returns every distinct action and resource type currently present in the authorized system audit log. Newly recorded values appear automatically.
+      responses:
+        '200':
+          description: Complete data-derived system-audit filter catalog
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditFilterOptions' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
   /groups:
@@ -2069,21 +2140,102 @@ paths:
     get:
       tags: [Bookings]
       summary: List activity bookings visible to the current member
-      description: Members with `VIEW_ALL_BOOKING_ACTIVITY`, including through the `VOID_ANY_BOOKING` implication, see complete group history. Other active members see actor- and target-relevant activity. Each item includes server-resolved actor and target display names so this read does not require `VIEW_MEMBER_DIRECTORY`. This endpoint does not broaden account visibility.
+      description: |
+        Members with `VIEW_ALL_BOOKING_ACTIVITY`, including through the
+        `VOID_ANY_BOOKING` implication, see complete group history. Other active
+        members see actor- and target-relevant activity. Search, filters, sorting,
+        and keyset pagination execute only after this tenant and visibility scope
+        is fixed. The JSON body remains the existing booking array.
+
+        Repeated `categoryId` and `productId` parameters apply OR semantics
+        within their own field and AND semantics across fields.
+
+        `createdFrom` is inclusive and `createdTo` is exclusive for RFC 3339
+        timestamps. A date-only lower bound starts at 00:00 UTC; a date-only
+        upper bound includes the complete selected day and is evaluated as the
+        next day's exclusive 00:00 UTC bound. `q` searches actor, target, product,
+        category, reason, total minor units, and posting status.
       parameters:
         - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/TableSearch'
+        - $ref: '#/components/parameters/TableCursor'
+        - $ref: '#/components/parameters/SortDirection'
         - name: periodId
           in: query
           schema: { type: string }
+        - name: actorMembershipId
+          in: query
+          schema: { type: string }
+        - name: targetMembershipId
+          in: query
+          schema: { type: string }
+        - name: categoryId
+          in: query
+          description: One or more category identifiers. Repeat the parameter for multiple values.
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 200
+            items: { type: string }
+        - name: productId
+          in: query
+          description: One or more product identifiers. Repeat the parameter for multiple values.
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 200
+            items: { type: string }
+        - name: status
+          in: query
+          schema: { type: string, enum: [POSTED, VOIDED] }
+        - name: createdFrom
+          in: query
+          schema:
+            oneOf:
+              - { type: string, format: date }
+              - { type: string, format: date-time }
+        - name: createdTo
+          in: query
+          schema:
+            oneOf:
+              - { type: string, format: date }
+              - { type: string, format: date-time }
+        - name: amountMin
+          in: query
+          description: Inclusive lower booking total in minor units.
+          schema: { type: integer, format: int64, minimum: 0 }
+        - name: amountMax
+          in: query
+          description: Inclusive upper booking total in minor units.
+          schema: { type: integer, format: int64, minimum: 0 }
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [createdAt, amount, targetName, actorName, productName, categoryName, status]
+            default: createdAt
         - $ref: '#/components/parameters/Limit'
       responses:
         '200':
           description: Visible booking snapshots
+          headers:
+            X-Next-Cursor:
+              description: Opaque cursor for the next page; omitted on the final page.
+              schema: { type: string }
+            X-Has-More:
+              description: Whether another matching page exists.
+              schema: { type: boolean }
+            X-Page-Limit:
+              description: Effective maximum number of rows in this page.
+              schema: { type: integer, minimum: 1, maximum: 200 }
           content:
             application/json:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/Booking' }
+        '422': { $ref: '#/components/responses/Problem' }
     post:
       tags: [Bookings]
       summary: Create an immutable booking and balanced ledger entries
@@ -2170,6 +2322,72 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Account' }
+  /groups/{groupId}/accounts/me/movements:
+    get:
+      tags: [Finance]
+      summary: Query the current member's complete receivable movement history
+      description: |
+        This additive endpoint removes the account response's 50-row presentation
+        limit without changing that existing response. Search, typed filters,
+        sorting, and keyset pagination are evaluated inside the authenticated
+        member's group and membership scope. `createdFrom` is inclusive and
+        `createdTo` is exclusive for RFC 3339 timestamps. Date-only bounds select
+        UTC calendar days; a date-only upper bound advances to the next day's
+        00:00 UTC. `q` searches description, signed minor units, and movement type.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/TableSearch'
+        - $ref: '#/components/parameters/TableCursor'
+        - $ref: '#/components/parameters/SortDirection'
+        - name: periodId
+          in: query
+          schema: { type: string }
+        - name: type
+          in: query
+          schema: { type: string, enum: [BOOKING, PAYMENT, REVERSAL, ADJUSTMENT] }
+        - name: createdFrom
+          in: query
+          schema:
+            oneOf:
+              - { type: string, format: date }
+              - { type: string, format: date-time }
+        - name: createdTo
+          in: query
+          schema:
+            oneOf:
+              - { type: string, format: date }
+              - { type: string, format: date-time }
+        - name: amountMin
+          in: query
+          description: Inclusive lower signed movement amount in minor units.
+          schema: { type: integer, format: int64 }
+        - name: amountMax
+          in: query
+          description: Inclusive upper signed movement amount in minor units.
+          schema: { type: integer, format: int64 }
+        - name: sort
+          in: query
+          schema: { type: string, enum: [createdAt, amount, description, type], default: createdAt }
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Complete personal movement page
+          headers:
+            X-Next-Cursor:
+              description: Opaque cursor for the next page; omitted on the final page.
+              schema: { type: string }
+            X-Has-More:
+              description: Whether another matching page exists.
+              schema: { type: boolean }
+            X-Page-Limit:
+              description: Effective maximum number of rows in this page.
+              schema: { type: integer, minimum: 1, maximum: 200 }
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/LedgerEntry' }
+        '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/accounts/{membershipId}:
     get:
       tags: [Finance]
@@ -2188,18 +2406,73 @@ paths:
     get:
       tags: [Finance]
       summary: List incoming payments
+      description: |
+        Search, typed filters, sorting, and keyset pagination execute over the
+        complete finance-authorized group history. The JSON body remains the
+        existing payment array. `receivedFrom` is inclusive and `receivedTo` is
+        exclusive for RFC 3339 timestamps. Date-only bounds select UTC calendar
+        days; a date-only upper bound advances to the next day's 00:00 UTC. `q`
+        searches member name, method identifier and label, reference, note,
+        amount minor units, and posting status.
       parameters:
         - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/TableSearch'
+        - $ref: '#/components/parameters/TableCursor'
+        - $ref: '#/components/parameters/SortDirection'
+        - name: membershipId
+          in: query
+          schema: { type: string }
+        - name: method
+          in: query
+          description: Exact stable payment-method identifier.
+          schema: { type: string, maxLength: 120 }
+        - name: status
+          in: query
+          schema: { type: string, enum: [POSTED, REVERSED] }
+        - name: receivedFrom
+          in: query
+          schema:
+            oneOf:
+              - { type: string, format: date }
+              - { type: string, format: date-time }
+        - name: receivedTo
+          in: query
+          schema:
+            oneOf:
+              - { type: string, format: date }
+              - { type: string, format: date-time }
+        - name: amountMin
+          in: query
+          description: Inclusive lower payment amount in minor units.
+          schema: { type: integer, format: int64, minimum: 0 }
+        - name: amountMax
+          in: query
+          description: Inclusive upper payment amount in minor units.
+          schema: { type: integer, format: int64, minimum: 0 }
+        - name: sort
+          in: query
+          schema: { type: string, enum: [receivedAt, amount, memberName, method, status], default: receivedAt }
         - $ref: '#/components/parameters/Limit'
       responses:
         '200':
           description: Payments
+          headers:
+            X-Next-Cursor:
+              description: Opaque cursor for the next page; omitted on the final page.
+              schema: { type: string }
+            X-Has-More:
+              description: Whether another matching page exists.
+              schema: { type: boolean }
+            X-Page-Limit:
+              description: Effective maximum number of rows in this page.
+              schema: { type: integer, minimum: 1, maximum: 200 }
           content:
             application/json:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/Payment' }
         '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
     post:
       tags: [Finance]
       summary: Record and FIFO-allocate an incoming payment
@@ -2538,17 +2811,92 @@ paths:
     get:
       tags: [Groups]
       summary: List append-only administrative audit events
+      description: |
+        Search, typed filters, sorting, and keyset pagination execute inside the
+        authorized group only. The JSON body remains the existing event array.
+        `occurredFrom` is inclusive and `occurredTo` is exclusive for RFC 3339
+        timestamps. Date-only bounds select UTC calendar days; a date-only upper
+        bound advances to the next day's 00:00 UTC. `q` searches actor name,
+        action, resource type, resource identifier, and serialized safe metadata.
       parameters:
         - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/TableSearch'
+        - $ref: '#/components/parameters/TableCursor'
+        - $ref: '#/components/parameters/SortDirection'
+        - name: actorUserId
+          in: query
+          schema: { type: string }
+        - name: actorMembershipId
+          in: query
+          schema: { type: string }
+        - name: action
+          in: query
+          description: Exact action values combined with OR semantics when repeated.
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 100
+            items: { type: string, maxLength: 200 }
+        - name: resourceType
+          in: query
+          description: Exact resource-type values combined with OR semantics when repeated.
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 100
+            items: { type: string, maxLength: 200 }
+        - name: occurredFrom
+          in: query
+          schema:
+            oneOf:
+              - { type: string, format: date }
+              - { type: string, format: date-time }
+        - name: occurredTo
+          in: query
+          schema:
+            oneOf:
+              - { type: string, format: date }
+              - { type: string, format: date-time }
+        - name: sort
+          in: query
+          schema: { type: string, enum: [occurredAt, actorName, action, resourceType], default: occurredAt }
         - $ref: '#/components/parameters/Limit'
       responses:
         '200':
           description: Audit events
+          headers:
+            X-Next-Cursor:
+              description: Opaque cursor for the next page; omitted on the final page.
+              schema: { type: string }
+            X-Has-More:
+              description: Whether another matching page exists.
+              schema: { type: boolean }
+            X-Page-Limit:
+              description: Effective maximum number of rows in this page.
+              schema: { type: integer, minimum: 1, maximum: 200 }
           content:
             application/json:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/AuditEvent' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/audit/filter-options:
+    get:
+      tags: [Groups]
+      summary: List group-audit filter options
+      description: Returns every distinct action and resource type currently present in the authorized group audit log. Newly recorded values appear automatically.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Complete data-derived group-audit filter catalog
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditFilterOptions' }
+        '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
   /health/live:
     get:
@@ -2653,6 +3001,21 @@ components:
       name: limit
       in: query
       schema: { type: integer, minimum: 1, maximum: 200, default: 100 }
+    TableSearch:
+      name: q
+      in: query
+      description: Case-insensitive global contains search across the table's documented display fields.
+      schema: { type: string, maxLength: 200 }
+    TableCursor:
+      name: cursor
+      in: query
+      description: Opaque continuation token from X-Next-Cursor. It is valid only with the same filters, sort, direction, and authorization scope.
+      schema: { type: string, maxLength: 2048 }
+    SortDirection:
+      name: direction
+      in: query
+      description: Sort direction; descending is the compatibility default.
+      schema: { type: string, enum: [asc, desc], default: desc }
   responses:
     Problem:
       description: RFC 9457 problem details
@@ -3020,6 +3383,25 @@ components:
           additionalProperties: true
           description: Secret-free bounded metadata; purge events retain only group identity, actor, time, and deletion counts.
         occurredAt: { type: string, format: date-time }
+    AuditFilterOptions:
+      type: object
+      additionalProperties: false
+      required: [actions, resourceTypes, actionResourceTypes]
+      properties:
+        actions:
+          type: array
+          description: Distinct persisted action values in stable case-insensitive order.
+          items: { type: string }
+        resourceTypes:
+          type: array
+          description: Distinct persisted resource-type values in stable case-insensitive order.
+          items: { type: string }
+        actionResourceTypes:
+          type: object
+          description: Persisted resource types observed for each action; clients use this relationship to constrain dependent action filters.
+          additionalProperties:
+            type: array
+            items: { type: string }
     PasswordResetRequest:
       type: object
       additionalProperties: false
@@ -4132,13 +4514,17 @@ components:
         netMinor: { $ref: '#/components/schemas/MinorUnits' }
     LedgerEntry:
       type: object
-      required: [id, periodId, amountMinor, description, createdAt]
+      required: [id, periodId, type, amountMinor, description, createdAt]
       properties:
         id: { type: string }
         periodId: { type: string }
         bookingId: { type: string }
         paymentId: { type: string }
         reversalOf: { type: string }
+        type:
+          type: string
+          enum: [BOOKING, PAYMENT, REVERSAL, ADJUSTMENT]
+          description: Server-derived movement class; reversals take precedence over their original booking or payment reference.
         amountMinor: { $ref: '#/components/schemas/MinorUnits' }
         description: { type: string }
         createdAt: { type: string, format: date-time }
@@ -4324,6 +4710,9 @@ components:
         groupId: { type: string }
         actorUserId: { type: string }
         actorMembershipId: { type: string }
+        actorDisplayName:
+          type: string
+          description: Current display name of the actor account; absent for system-generated events.
         action: { type: string }
         resourceType: { type: string }
         resourceId: { type: string }

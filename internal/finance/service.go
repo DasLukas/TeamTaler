@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/notifications"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/storage"
+	"github.com/DasLukas/TeamTaler/internal/tablequery"
 )
 
 // Service implements finance commands and read models over a migrated TeamTaler
@@ -91,6 +93,7 @@ type LedgerEntry struct {
 	BookingID   *string `json:"bookingId,omitempty"`
 	PaymentID   *string `json:"paymentId,omitempty"`
 	ReversalOf  *string `json:"reversalOf,omitempty"`
+	Type        string  `json:"type"`
 	AmountMinor int64   `json:"amountMinor,string"`
 	Description string  `json:"description"`
 	CreatedAt   string  `json:"createdAt"`
@@ -186,7 +189,9 @@ func (s Service) Account(ctx context.Context, membership domain.Membership, targ
 			return Account{}, err
 		}
 	}
-	entries, err := s.DB.QueryContext(ctx, `SELECT id,period_id,booking_id,payment_id,reversal_of,amount_minor,description,created_at
+	entries, err := s.DB.QueryContext(ctx, `SELECT id,period_id,booking_id,payment_id,reversal_of,
+		CASE WHEN reversal_of IS NOT NULL THEN 'REVERSAL' WHEN booking_id IS NOT NULL THEN 'BOOKING' WHEN payment_id IS NOT NULL THEN 'PAYMENT' ELSE 'ADJUSTMENT' END,
+		amount_minor,description,created_at
 		FROM ledger_entries WHERE group_id=? AND membership_id=? AND account='MEMBER_RECEIVABLE'
 		ORDER BY created_at DESC,id DESC LIMIT 50`, membership.GroupID, targetMembershipID)
 	if err != nil {
@@ -196,12 +201,205 @@ func (s Service) Account(ctx context.Context, membership domain.Membership, targ
 	account.RecentEntries = make([]LedgerEntry, 0)
 	for entries.Next() {
 		var entry LedgerEntry
-		if err := entries.Scan(&entry.ID, &entry.PeriodID, &entry.BookingID, &entry.PaymentID, &entry.ReversalOf, &entry.AmountMinor, &entry.Description, &entry.CreatedAt); err != nil {
+		if err := entries.Scan(&entry.ID, &entry.PeriodID, &entry.BookingID, &entry.PaymentID, &entry.ReversalOf, &entry.Type, &entry.AmountMinor, &entry.Description, &entry.CreatedAt); err != nil {
 			return Account{}, err
 		}
 		account.RecentEntries = append(account.RecentEntries, entry)
 	}
 	return account, entries.Err()
+}
+
+// MovementQuery describes a server-side member-receivable movement query.
+// CreatedAt bounds accept ISO 8601 dates or RFC 3339 timestamps. Amount bounds
+// are inclusive signed minor units.
+type MovementQuery struct {
+	Search      string
+	PeriodID    string
+	Type        string
+	CreatedFrom string
+	CreatedTo   string
+	AmountMin   *int64
+	AmountMax   *int64
+	Sort        string
+	Direction   string
+	Cursor      string
+	Limit       int
+}
+
+// MovementPage is one stable keyset-paginated receivable movement slice.
+type MovementPage struct {
+	Items      []LedgerEntry
+	NextCursor string
+}
+
+var movementSorts = map[string]struct{}{
+	"createdAt": {}, "amount": {}, "description": {}, "type": {},
+}
+
+const (
+	movementCreatedExpression = `strftime('%Y-%m-%dT%H:%M:%fZ',entry.created_at)`
+	movementTypeExpression    = `CASE WHEN entry.reversal_of IS NOT NULL THEN 'REVERSAL' WHEN entry.booking_id IS NOT NULL THEN 'BOOKING' WHEN entry.payment_id IS NOT NULL THEN 'PAYMENT' ELSE 'ADJUSTMENT' END`
+)
+
+// movementSortExpression maps a normalized public sort key to a closed SQL
+// expression. The default is intentionally safe so caller input is never
+// reflected into query text even if validation is accidentally bypassed.
+func movementSortExpression(sortKey string) string {
+	switch sortKey {
+	case "amount":
+		return "entry.amount_minor"
+	case "description":
+		return "lower(entry.description)"
+	case "type":
+		return movementTypeExpression
+	default:
+		return movementCreatedExpression
+	}
+}
+
+// QueryMovements returns a tenant- and membership-scoped movement page. The
+// authenticated membership may read itself; FINANCE_MANAGEMENT is required for
+// another target membership.
+func (s Service) QueryMovements(ctx context.Context, membership domain.Membership, targetMembershipID string, input MovementQuery) (MovementPage, error) {
+	targetMembershipID = strings.TrimSpace(targetMembershipID)
+	if targetMembershipID == "" {
+		targetMembershipID = membership.ID
+	}
+	if targetMembershipID != membership.ID {
+		if err := requirePermission(ctx, s.DB, membership, domain.PermissionFinanceManagement); err != nil {
+			return MovementPage{}, err
+		}
+	}
+	var targetExists int
+	if err := s.DB.QueryRowContext(ctx, `SELECT count(*) FROM memberships WHERE group_id=? AND id=?`, membership.GroupID, targetMembershipID).Scan(&targetExists); err != nil {
+		return MovementPage{}, err
+	}
+	if targetExists != 1 {
+		return MovementPage{}, domain.ErrNotFound
+	}
+	var err error
+	input.Search, err = tablequery.NormalizeSearch(input.Search)
+	if err != nil {
+		return MovementPage{}, err
+	}
+	input.Sort, input.Direction, err = tablequery.NormalizeSort(input.Sort, input.Direction, "createdAt", "desc", movementSorts)
+	if err != nil {
+		return MovementPage{}, err
+	}
+	input.CreatedFrom, err = tablequery.NormalizeTimeBound("createdFrom", input.CreatedFrom, false)
+	if err != nil {
+		return MovementPage{}, err
+	}
+	input.CreatedTo, err = tablequery.NormalizeTimeBound("createdTo", input.CreatedTo, true)
+	if err != nil {
+		return MovementPage{}, err
+	}
+	if input.CreatedFrom != "" && input.CreatedTo != "" && input.CreatedFrom >= input.CreatedTo {
+		return MovementPage{}, domain.ValidationError{Field: "createdTo", Message: "must be later than createdFrom"}
+	}
+	if input.AmountMin != nil && input.AmountMax != nil && *input.AmountMin > *input.AmountMax {
+		return MovementPage{}, domain.ValidationError{Field: "amountMax", Message: "must be greater than or equal to amountMin"}
+	}
+	input.PeriodID = strings.TrimSpace(input.PeriodID)
+	input.Type = strings.ToUpper(strings.TrimSpace(input.Type))
+	if input.Type != "" && input.Type != "BOOKING" && input.Type != "PAYMENT" && input.Type != "REVERSAL" && input.Type != "ADJUSTMENT" {
+		return MovementPage{}, domain.ValidationError{Field: "type", Message: "must be BOOKING, PAYMENT, REVERSAL, or ADJUSTMENT"}
+	}
+	if input.Limit < 1 || input.Limit > 200 {
+		input.Limit = 100
+	}
+	fingerprint, err := tablequery.Fingerprint(struct {
+		GroupID, MembershipID, Search, PeriodID, Type, CreatedFrom, CreatedTo, Sort, Direction string
+		AmountMin, AmountMax                                                                   *int64
+	}{membership.GroupID, targetMembershipID, input.Search, input.PeriodID, input.Type, input.CreatedFrom, input.CreatedTo, input.Sort, input.Direction, input.AmountMin, input.AmountMax})
+	if err != nil {
+		return MovementPage{}, err
+	}
+	cursorKey, cursorID, err := tablequery.DecodeCursor(input.Cursor, fingerprint, input.Sort, input.Direction)
+	if err != nil {
+		return MovementPage{}, err
+	}
+	sortExpression := movementSortExpression(input.Sort)
+	orderKeyword, comparison := tablequery.SQLOrderFragments(input.Direction)
+	query := `SELECT entry.id,entry.period_id,entry.booking_id,entry.payment_id,entry.reversal_of,` + movementTypeExpression + `,
+		entry.amount_minor,entry.description,entry.created_at,CAST(` + sortExpression + ` AS TEXT)
+		FROM ledger_entries entry
+		WHERE entry.group_id=? AND entry.membership_id=? AND entry.account='MEMBER_RECEIVABLE'`
+	args := []any{membership.GroupID, targetMembershipID}
+	if input.PeriodID != "" {
+		query += ` AND entry.period_id=?`
+		args = append(args, input.PeriodID)
+	}
+	if input.Type != "" {
+		query += ` AND ` + movementTypeExpression + `=?`
+		args = append(args, input.Type)
+	}
+	if input.CreatedFrom != "" {
+		query += ` AND ` + movementCreatedExpression + `>=?`
+		args = append(args, input.CreatedFrom)
+	}
+	if input.CreatedTo != "" {
+		query += ` AND ` + movementCreatedExpression + `<?`
+		args = append(args, input.CreatedTo)
+	}
+	if input.AmountMin != nil {
+		query += ` AND entry.amount_minor>=?`
+		args = append(args, *input.AmountMin)
+	}
+	if input.AmountMax != nil {
+		query += ` AND entry.amount_minor<=?`
+		args = append(args, *input.AmountMax)
+	}
+	if input.Search != "" {
+		pattern := tablequery.LikePattern(input.Search)
+		query += ` AND (entry.description LIKE ? ESCAPE '\' COLLATE NOCASE
+			OR CAST(entry.amount_minor AS TEXT) LIKE ? ESCAPE '\'
+			OR ` + movementTypeExpression + ` LIKE ? ESCAPE '\' COLLATE NOCASE)`
+		args = append(args, pattern, pattern, pattern)
+	}
+	if cursorID != "" {
+		var boundKey any = cursorKey
+		if input.Sort == "amount" {
+			boundKey, err = strconv.ParseInt(cursorKey, 10, 64)
+			if err != nil {
+				return MovementPage{}, domain.ValidationError{Field: "cursor", Message: "is invalid or does not match the current query"}
+			}
+		}
+		query += ` AND (` + sortExpression + ` ` + comparison + ` ? OR (` + sortExpression + ` = ? AND entry.id ` + comparison + ` ?))`
+		args = append(args, boundKey, boundKey, cursorID)
+	}
+	query += ` ORDER BY ` + sortExpression + ` ` + orderKeyword + `,entry.id ` + orderKeyword + ` LIMIT ?`
+	args = append(args, input.Limit+1)
+	rows, err := s.DB.QueryContext(ctx, query, args...)
+	if err != nil {
+		return MovementPage{}, err
+	}
+	defer rows.Close()
+	items := make([]LedgerEntry, 0)
+	sortKeys := make([]string, 0)
+	for rows.Next() {
+		var item LedgerEntry
+		var sortKey string
+		if err := rows.Scan(&item.ID, &item.PeriodID, &item.BookingID, &item.PaymentID, &item.ReversalOf,
+			&item.Type, &item.AmountMinor, &item.Description, &item.CreatedAt, &sortKey); err != nil {
+			return MovementPage{}, err
+		}
+		items = append(items, item)
+		sortKeys = append(sortKeys, sortKey)
+	}
+	if err := rows.Err(); err != nil {
+		return MovementPage{}, err
+	}
+	page := MovementPage{Items: items}
+	if len(items) > input.Limit {
+		page.Items = items[:input.Limit]
+		last := page.Items[len(page.Items)-1]
+		page.NextCursor, err = tablequery.EncodeCursor(fingerprint, input.Sort, input.Direction, sortKeys[input.Limit-1], last.ID)
+		if err != nil {
+			return MovementPage{}, err
+		}
+	}
+	return page, nil
 }
 
 // categoryStatistics returns category totals for an optional member and period
@@ -537,36 +735,257 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 // membership's group. ctx bounds queries; finance privileges are required. It
 // returns the slice or forbidden and SQL errors.
 func (s Service) ListPayments(ctx context.Context, membership domain.Membership, limit int) ([]domain.Payment, error) {
+	page, err := s.QueryPayments(ctx, membership, PaymentQuery{Limit: limit})
+	return page.Items, err
+}
+
+// PaymentQuery describes a server-side finance payment table query. ReceivedAt
+// bounds accept ISO 8601 dates or RFC 3339 timestamps; ReceivedFrom is inclusive
+// and ReceivedTo is exclusive after date-only upper-bound normalization. Amount
+// bounds are inclusive minor units.
+type PaymentQuery struct {
+	Search       string
+	MembershipID string
+	Method       string
+	Status       string
+	ReceivedFrom string
+	ReceivedTo   string
+	AmountMin    *int64
+	AmountMax    *int64
+	Sort         string
+	Direction    string
+	Cursor       string
+	Limit        int
+}
+
+// PaymentPage is one stable keyset-paginated payment slice. NextCursor is empty
+// when no further matching payment exists.
+type PaymentPage struct {
+	Items      []domain.Payment
+	NextCursor string
+}
+
+var paymentSorts = map[string]struct{}{
+	"receivedAt": {}, "amount": {}, "memberName": {}, "method": {}, "status": {},
+}
+
+const (
+	paymentReceivedExpression = `strftime('%Y-%m-%dT%H:%M:%fZ',p.received_at)`
+	paymentStatusExpression   = `CASE WHEN p.reversed_at IS NULL THEN 'POSTED' ELSE 'REVERSED' END`
+)
+
+// paymentSortExpression maps a normalized public sort key to a closed SQL
+// expression. The default is intentionally safe so caller input is never
+// reflected into query text even if validation is accidentally bypassed.
+func paymentSortExpression(sortKey string) string {
+	switch sortKey {
+	case "amount":
+		return "p.amount_minor"
+	case "memberName":
+		return "lower(u.display_name)"
+	case "method":
+		return "lower(coalesce(p.method_label,p.method))"
+	case "status":
+		return paymentStatusExpression
+	default:
+		return paymentReceivedExpression
+	}
+}
+
+// QueryPayments returns a filtered, sorted, keyset-paginated payment page for
+// one tenant. Finance-management permission is checked before query validation
+// or storage access.
+func (s Service) QueryPayments(ctx context.Context, membership domain.Membership, input PaymentQuery) (PaymentPage, error) {
 	if err := requirePermission(ctx, s.DB, membership, domain.PermissionFinanceManagement); err != nil {
-		return nil, err
+		return PaymentPage{}, err
 	}
-	if limit < 1 || limit > 200 {
-		limit = 100
-	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT p.id,p.group_id,p.membership_id,u.display_name,
-		CASE WHEN m.deleted_at IS NOT NULL THEN 'DELETED' ELSE m.status END,
-		p.amount_minor,g.currency,p.received_at,p.method,coalesce(p.method_label,''),coalesce(p.reference,''),coalesce(p.note,''),p.reversed_at
-		FROM payments p JOIN groups g ON g.id=p.group_id JOIN memberships m ON m.id=p.membership_id JOIN users u ON u.id=m.user_id
-		WHERE p.group_id=? ORDER BY p.received_at DESC LIMIT ?`, membership.GroupID, limit)
+	var err error
+	input.Search, err = tablequery.NormalizeSearch(input.Search)
 	if err != nil {
-		return nil, err
+		return PaymentPage{}, err
+	}
+	input.Sort, input.Direction, err = tablequery.NormalizeSort(input.Sort, input.Direction, "receivedAt", "desc", paymentSorts)
+	if err != nil {
+		return PaymentPage{}, err
+	}
+	input.ReceivedFrom, err = tablequery.NormalizeTimeBound("receivedFrom", input.ReceivedFrom, false)
+	if err != nil {
+		return PaymentPage{}, err
+	}
+	input.ReceivedTo, err = tablequery.NormalizeTimeBound("receivedTo", input.ReceivedTo, true)
+	if err != nil {
+		return PaymentPage{}, err
+	}
+	if input.ReceivedFrom != "" && input.ReceivedTo != "" && input.ReceivedFrom >= input.ReceivedTo {
+		return PaymentPage{}, domain.ValidationError{Field: "receivedTo", Message: "must be later than receivedFrom"}
+	}
+	if input.AmountMin != nil && *input.AmountMin < 0 {
+		return PaymentPage{}, domain.ValidationError{Field: "amountMin", Message: "must be zero or greater"}
+	}
+	if input.AmountMax != nil && *input.AmountMax < 0 {
+		return PaymentPage{}, domain.ValidationError{Field: "amountMax", Message: "must be zero or greater"}
+	}
+	if input.AmountMin != nil && input.AmountMax != nil && *input.AmountMin > *input.AmountMax {
+		return PaymentPage{}, domain.ValidationError{Field: "amountMax", Message: "must be greater than or equal to amountMin"}
+	}
+	input.MembershipID = strings.TrimSpace(input.MembershipID)
+	input.Method = strings.TrimSpace(input.Method)
+	input.Status = strings.ToUpper(strings.TrimSpace(input.Status))
+	if input.Status != "" && input.Status != "POSTED" && input.Status != "REVERSED" {
+		return PaymentPage{}, domain.ValidationError{Field: "status", Message: "must be POSTED or REVERSED"}
+	}
+	if input.Limit < 1 || input.Limit > 200 {
+		input.Limit = 100
+	}
+	fingerprint, err := tablequery.Fingerprint(struct {
+		GroupID, ViewerMembershipID                                                     string
+		Search, MembershipID, Method, Status, ReceivedFrom, ReceivedTo, Sort, Direction string
+		AmountMin, AmountMax                                                            *int64
+	}{membership.GroupID, membership.ID, input.Search, input.MembershipID, input.Method, input.Status, input.ReceivedFrom, input.ReceivedTo, input.Sort, input.Direction, input.AmountMin, input.AmountMax})
+	if err != nil {
+		return PaymentPage{}, err
+	}
+	cursorKey, cursorID, err := tablequery.DecodeCursor(input.Cursor, fingerprint, input.Sort, input.Direction)
+	if err != nil {
+		return PaymentPage{}, err
+	}
+	sortExpression := paymentSortExpression(input.Sort)
+	orderKeyword, comparison := tablequery.SQLOrderFragments(input.Direction)
+	query := `SELECT p.id,p.group_id,p.membership_id,u.display_name,
+		CASE WHEN m.deleted_at IS NOT NULL THEN 'DELETED' ELSE m.status END,
+		p.amount_minor,g.currency,p.received_at,p.method,coalesce(p.method_label,''),coalesce(p.reference,''),coalesce(p.note,''),p.reversed_at,CAST(` + sortExpression + ` AS TEXT)
+		FROM payments p JOIN groups g ON g.id=p.group_id JOIN memberships m ON m.id=p.membership_id JOIN users u ON u.id=m.user_id
+		WHERE p.group_id=?`
+	args := []any{membership.GroupID}
+	if input.MembershipID != "" {
+		query += ` AND p.membership_id=?`
+		args = append(args, input.MembershipID)
+	}
+	if input.Method != "" {
+		query += ` AND p.method=?`
+		args = append(args, input.Method)
+	}
+	if input.Status == "POSTED" {
+		query += ` AND p.reversed_at IS NULL`
+	} else if input.Status == "REVERSED" {
+		query += ` AND p.reversed_at IS NOT NULL`
+	}
+	if input.ReceivedFrom != "" {
+		query += ` AND ` + paymentReceivedExpression + `>=?`
+		args = append(args, input.ReceivedFrom)
+	}
+	if input.ReceivedTo != "" {
+		query += ` AND ` + paymentReceivedExpression + `<?`
+		args = append(args, input.ReceivedTo)
+	}
+	if input.AmountMin != nil {
+		query += ` AND p.amount_minor>=?`
+		args = append(args, *input.AmountMin)
+	}
+	if input.AmountMax != nil {
+		query += ` AND p.amount_minor<=?`
+		args = append(args, *input.AmountMax)
+	}
+	if input.Search != "" {
+		pattern := tablequery.LikePattern(input.Search)
+		query += ` AND (u.display_name LIKE ? ESCAPE '\' COLLATE NOCASE
+			OR p.method LIKE ? ESCAPE '\' COLLATE NOCASE
+			OR coalesce(p.method_label,'') LIKE ? ESCAPE '\' COLLATE NOCASE
+			OR coalesce(p.reference,'') LIKE ? ESCAPE '\' COLLATE NOCASE
+			OR coalesce(p.note,'') LIKE ? ESCAPE '\' COLLATE NOCASE
+			OR CAST(p.amount_minor AS TEXT) LIKE ? ESCAPE '\'
+			OR ` + paymentStatusExpression + ` LIKE ? ESCAPE '\' COLLATE NOCASE)`
+		args = append(args, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
+	}
+	if cursorID != "" {
+		var boundKey any = cursorKey
+		if input.Sort == "amount" {
+			boundKey, err = strconv.ParseInt(cursorKey, 10, 64)
+			if err != nil {
+				return PaymentPage{}, domain.ValidationError{Field: "cursor", Message: "is invalid or does not match the current query"}
+			}
+		}
+		query += ` AND (` + sortExpression + ` ` + comparison + ` ? OR (` + sortExpression + ` = ? AND p.id ` + comparison + ` ?))`
+		args = append(args, boundKey, boundKey, cursorID)
+	}
+	query += ` ORDER BY ` + sortExpression + ` ` + orderKeyword + `,p.id ` + orderKeyword + ` LIMIT ?`
+	args = append(args, input.Limit+1)
+	rows, err := s.DB.QueryContext(ctx, query, args...)
+	if err != nil {
+		return PaymentPage{}, err
 	}
 	defer rows.Close()
 	result := make([]domain.Payment, 0)
+	sortKeys := make([]string, 0)
 	for rows.Next() {
 		var item domain.Payment
-		if err := rows.Scan(&item.ID, &item.GroupID, &item.MembershipID, &item.MemberName, &item.MemberStatus, &item.AmountMinor, &item.Currency, &item.ReceivedAt, &item.Method, &item.MethodLabel, &item.Reference, &item.Note, &item.ReversedAt); err != nil {
-			return nil, err
+		var sortKey string
+		if err := rows.Scan(&item.ID, &item.GroupID, &item.MembershipID, &item.MemberName, &item.MemberStatus, &item.AmountMinor, &item.Currency, &item.ReceivedAt, &item.Method, &item.MethodLabel, &item.Reference, &item.Note, &item.ReversedAt, &sortKey); err != nil {
+			return PaymentPage{}, err
 		}
 		item.Status = "POSTED"
 		if item.ReversedAt != nil {
 			item.Status = "REVERSED"
 		}
-		item.Allocations, err = s.allocations(ctx, item.ID)
+		result = append(result, item)
+		sortKeys = append(sortKeys, sortKey)
+	}
+	if err := rows.Err(); err != nil {
+		return PaymentPage{}, err
+	}
+	page := PaymentPage{Items: result}
+	if len(result) > input.Limit {
+		page.Items = result[:input.Limit]
+		last := page.Items[len(page.Items)-1]
+		page.NextCursor, err = tablequery.EncodeCursor(fingerprint, input.Sort, input.Direction, sortKeys[input.Limit-1], last.ID)
 		if err != nil {
+			return PaymentPage{}, err
+		}
+	}
+	paymentIDs := make([]string, len(page.Items))
+	for index := range page.Items {
+		paymentIDs[index] = page.Items[index].ID
+	}
+	allocations, err := s.allocationsByPayment(ctx, membership.GroupID, paymentIDs)
+	if err != nil {
+		return PaymentPage{}, err
+	}
+	for index := range page.Items {
+		page.Items[index].Allocations = allocations[page.Items[index].ID]
+		if page.Items[index].Allocations == nil {
+			page.Items[index].Allocations = make([]domain.PaymentAllocation, 0)
+		}
+	}
+	return page, nil
+}
+
+// allocationsByPayment loads every allocation for a bounded payment page in a
+// single query, avoiding one database round trip per rendered table row.
+func (s Service) allocationsByPayment(ctx context.Context, groupID string, paymentIDs []string) (map[string][]domain.PaymentAllocation, error) {
+	result := make(map[string][]domain.PaymentAllocation, len(paymentIDs))
+	if len(paymentIDs) == 0 {
+		return result, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(paymentIDs)), ",")
+	args := make([]any, 0, len(paymentIDs)+1)
+	args = append(args, groupID)
+	for _, paymentID := range paymentIDs {
+		args = append(args, paymentID)
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT payment_id,period_id,amount_minor
+		FROM payment_allocations WHERE group_id=? AND payment_id IN (`+placeholders+`)
+		ORDER BY payment_id,period_id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var paymentID string
+		var allocation domain.PaymentAllocation
+		if err := rows.Scan(&paymentID, &allocation.PeriodID, &allocation.AmountMinor); err != nil {
 			return nil, err
 		}
-		result = append(result, item)
+		result[paymentID] = append(result[paymentID], allocation)
 	}
 	return result, rows.Err()
 }

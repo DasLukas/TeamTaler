@@ -4,7 +4,7 @@ import CircleDollarSign from 'lucide-react/dist/esm/icons/circle-dollar-sign';
 import ArrowLeft from 'lucide-react/dist/esm/icons/arrow-left';
 import CircleCheck from 'lucide-react/dist/esm/icons/circle-check';
 import X from 'lucide-react/dist/esm/icons/x';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { formatMoney, isCreditBalance, majorUnitsInputPattern, majorUnitsInputValue, majorUnitsPlaceholder, validatePositiveMajorUnits } from '@/api/money';
@@ -12,7 +12,7 @@ import type { Dashboard, Money, Payment, SelfPaymentCommand } from '@/api/types'
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Button } from '@/components/ui/Button';
 import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
-import { Modal } from '@/components/ui/Modal';
+import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import styles from './SelfPaymentDialog.module.css';
 
@@ -52,6 +52,7 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
   const { activeGroupId, activeGroup, session } = useActiveGroup();
   const queryClient = useQueryClient();
   const compact = useMediaQuery('(max-width: 600px)');
+  const entryFormId = useId();
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<SelfPaymentStep>('entry');
   const [amount, setAmount] = useState('');
@@ -141,9 +142,9 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
       <Button className={className} disabled={!transactionSettingsQuery.data?.paymentMethods.length} fullWidth={fullWidth} leadingIcon={<CircleDollarSign size={18} />} onClick={openDialog}>
         {t('selfPayment.action')}
       </Button>
-      <Modal className={styles.dialog} onClose={closeDialog} open={open} title={t(`selfPayment.${step}Title`)} variant={compact ? 'sheet' : 'dialog'}>
+      <Modal onClose={closeDialog} open={open} title={t(`selfPayment.${step}Title`)} variant={compact ? 'sheet' : 'dialog'}>
         {step === 'entry' ? (
-          <form className={styles.form} onSubmit={(event) => { event.preventDefault(); prepareReview(); }}>
+          <form className={styles.form} id={entryFormId} onSubmit={(event) => { event.preventDefault(); prepareReview(); }}>
             <Field error={amountError || undefined} htmlFor="self-payment-amount" label={t('finance.amountIn', { currency: activeGroup.currency })}>
               <TextInput id="self-payment-amount" inputMode="decimal" onChange={(event) => { setAmount(event.target.value); setAmountError(''); }} pattern={majorUnitsInputPattern(activeGroup.currency)} placeholder={majorUnitsPlaceholder(activeGroup.currency)} required type="text" value={amount} />
             </Field>
@@ -153,7 +154,7 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
               <Field htmlFor="self-payment-method" label={t('finance.paymentType')}><SelectInput id="self-payment-method" onChange={(event) => setMethod(event.target.value)} required value={method}>{transactionSettingsQuery.data?.paymentMethods.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</SelectInput></Field>
             </div>
             {reasonEnabled ? <Field error={referenceError || undefined} htmlFor="self-payment-reference" label={`${t('finance.reason')}${reasonRequired ? ' *' : ''}`}><TextInput id="self-payment-reference" list="self-payment-reason-suggestions" maxLength={120} onChange={(event) => { setReference(event.target.value); setReferenceError(''); }} required={reasonRequired} value={reference} /><datalist id="self-payment-reason-suggestions">{transactionSettingsQuery.data?.paymentReasons.map((item) => <option key={item.id} value={item.label} />)}</datalist></Field> : null}
-            <div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button leadingIcon={<CircleCheck size={17} />} type="submit">{t('selfPayment.review')}</Button></div>
+            <ModalFooter><div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button form={entryFormId} leadingIcon={<CircleCheck size={17} />} type="submit">{t('selfPayment.review')}</Button></div></ModalFooter>
           </form>
         ) : null}
 
@@ -168,7 +169,7 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
               {reasonEnabled ? <div><dt>{t('finance.reason')}</dt><dd>{command.reference || '–'}</dd></div> : null}
             </dl>
             {mutation.isError ? <p className={styles.error} role="alert">{mutation.error.message}</p> : null}
-            <div className={styles.actions}><Button disabled={mutation.isPending} leadingIcon={<ArrowLeft size={17} />} onClick={() => { mutation.reset(); setStep('entry'); }} variant="secondary">{t('common.back')}</Button><Button disabled={mutation.isPending} leadingIcon={<CircleDollarSign size={17} />} onClick={() => mutation.mutate(command)}>{mutation.isPending ? t('selfPayment.pending') : t('selfPayment.confirm', { amount: formatMoney(command.amount) })}</Button></div>
+            <ModalFooter><div className={styles.actions}><Button disabled={mutation.isPending} leadingIcon={<ArrowLeft size={17} />} onClick={() => { mutation.reset(); setStep('entry'); }} variant="secondary">{t('common.back')}</Button><Button disabled={mutation.isPending} leadingIcon={<CircleDollarSign size={17} />} onClick={() => mutation.mutate(command)}>{mutation.isPending ? t('selfPayment.pending') : t('selfPayment.confirm', { amount: formatMoney(command.amount) })}</Button></div></ModalFooter>
           </div>
         ) : null}
 
@@ -178,7 +179,7 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
             <h3>{t('selfPayment.successHeading', { amount: formatMoney(command.amount) })}</h3>
             <p>{t('selfPayment.updatedBalance')}</p>
             <strong className={updatedBalanceIsCredit ? styles.creditBalance : undefined} data-financial-state={updatedBalanceIsCredit ? 'credit' : 'due'}>{formatMoney(updatedBalance)}</strong>
-            <Button fullWidth leadingIcon={<CircleCheck size={17} />} onClick={closeDialog}>{t('common.done')}</Button>
+            <ModalFooter><Button fullWidth leadingIcon={<CircleCheck size={17} />} onClick={closeDialog}>{t('common.done')}</Button></ModalFooter>
           </div>
         ) : null}
       </Modal>

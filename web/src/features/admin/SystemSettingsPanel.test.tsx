@@ -22,7 +22,8 @@ const apiMock = vi.hoisted(() => ({
   resendSystemGroupInvitation: vi.fn(),
   getSystemGroupDeletionImpact: vi.fn(),
   purgeSystemGroup: vi.fn(),
-  getSystemAudit: vi.fn(),
+  getSystemAuditPage: vi.fn(),
+  getSystemAuditFilterOptions: vi.fn(),
 }));
 
 vi.mock('@/api/client', () => ({ api: apiMock }));
@@ -99,6 +100,7 @@ function renderPanel(): void {
 describe('SystemSettingsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.history.replaceState({}, '', '/system');
     apiMock.getSystemSettings.mockResolvedValue(settings);
     apiMock.updateSystemSettings.mockResolvedValue(settings);
     apiMock.resetSystemSettings.mockResolvedValue(settings);
@@ -114,7 +116,12 @@ describe('SystemSettingsPanel', () => {
     apiMock.resendSystemGroupInvitation.mockResolvedValue({ group: { ...provisioningGroup, version: 3 }, acceptUrl: 'https://teamtaler.example/invite#token=replaced', emailDeliveryStatus: 'NOT_REQUESTED', expiresAt: '2026-08-23T12:00:00Z' });
     apiMock.getSystemGroupDeletionImpact.mockResolvedValue({ groupId: 'group-a', groupName: 'Group A', version: 5, openBalance: { minorUnits: '1234', currency: 'EUR' }, ...archivedGroup.impact });
     apiMock.purgeSystemGroup.mockResolvedValue({ groupId: 'group-a', groupName: 'Group A', version: 5, openBalance: { minorUnits: '1234', currency: 'EUR' }, ...archivedGroup.impact });
-    apiMock.getSystemAudit.mockResolvedValue([]);
+    apiMock.getSystemAuditPage.mockResolvedValue({ hasMore: false, items: [], limit: 50 });
+    apiMock.getSystemAuditFilterOptions.mockResolvedValue({
+      actions: ['system.group.archived', 'system.settings.updated'],
+      resourceTypes: ['group', 'system_settings'],
+      actionResourceTypes: { 'system.group.archived': ['group'], 'system.settings.updated': ['system_settings'] },
+    });
   });
 
   it('loads all five instance-administration areas in parallel', async () => {
@@ -136,7 +143,7 @@ describe('SystemSettingsPanel', () => {
   });
 
   it('renders instance activity with the shared audit table columns', async () => {
-    apiMock.getSystemAudit.mockResolvedValue([{
+    apiMock.getSystemAuditPage.mockResolvedValue({ hasMore: false, items: [{
       id: 'audit-1',
       action: 'system.group.archived',
       actorUserId: 'system-user',
@@ -145,7 +152,7 @@ describe('SystemSettingsPanel', () => {
       targetId: 'group-a',
       summary: '{"name":"Group A"}',
       createdAt: '2026-08-16T18:55:00Z',
-    }]);
+    }], limit: 50 });
     renderPanel();
 
     const section = (await screen.findByRole('heading', { name: 'Systemaktivität' })).closest('section');
@@ -157,6 +164,28 @@ describe('SystemSettingsPanel', () => {
     expect(row).toHaveTextContent('system.group.archived');
     expect(row).toHaveTextContent('group · group-a');
     expect(row).toHaveTextContent('{"name":"Group A"}');
+  });
+
+  it('filters system audit with searchable multi-select values discovered from the server', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    const section = (await screen.findByRole('heading', { name: 'Systemaktivität' })).closest('section');
+    if (!section) throw new Error('Missing system activity section.');
+    await user.click(within(section).getByRole('button', { name: 'Filter' }));
+    const filterDialog = screen.getByRole('dialog', { name: 'Ergebnisse filtern' });
+    await user.click(within(filterDialog).getByRole('button', { name: 'Ressourcentyp' }));
+    await user.click(within(screen.getByRole('dialog', { name: 'Ressourcentyp' })).getByRole('checkbox', { name: 'group' }));
+    await user.click(within(filterDialog).getByRole('button', { name: 'Aktion' }));
+    const actionMenu = screen.getByRole('dialog', { name: 'Aktion' });
+    expect(within(actionMenu).queryByRole('checkbox', { name: 'system.settings.updated' })).not.toBeInTheDocument();
+    await user.click(within(actionMenu).getByRole('checkbox', { name: 'system.group.archived' }));
+    await user.click(within(filterDialog).getByRole('button', { name: 'Filter anwenden' }));
+
+    await waitFor(() => expect(apiMock.getSystemAuditPage).toHaveBeenLastCalledWith(expect.objectContaining({
+      action: ['system.group.archived'],
+      resourceType: ['group'],
+    })));
   });
 
   it('patches only changed general settings with the aggregate revision', async () => {

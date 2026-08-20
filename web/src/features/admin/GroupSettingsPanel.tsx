@@ -78,8 +78,8 @@ function GroupNameForm({ groupId, currentName, embedded }: { groupId: string; cu
  * Renders administrator-only group identity and branding controls.
  *
  * Only server-validated, normalized images are rendered. Successful mutations
- * update the shared session cache so every active brand surface changes without
- * a page reload.
+ * update the shared session cache so group-selection and management surfaces
+ * change without a page reload. Product-brand surfaces intentionally remain fixed.
  *
  * @param props - Optional embedding behavior for the combined settings workspace.
  * @returns Group-name settings, a group-logo preview, and update actions.

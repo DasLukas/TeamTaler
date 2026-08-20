@@ -33,7 +33,9 @@ import type {
   AccountSummary,
   AuthenticationCapabilities,
   AuditEntry,
+  AuditFilterOptions,
   Booking,
+  BookingCollectionQuery,
   BookingBatchCommand,
   BookingBulkCommand,
   BookingCommand,
@@ -42,6 +44,7 @@ import type {
   Category,
   CategoryCreateCommand,
   CategoryUpdateCommand,
+  CollectionPage,
   CreatedInvitation,
   Dashboard,
   EmailDeliveryStatus,
@@ -68,12 +71,14 @@ import type {
   NotificationReadResult,
   NotificationSummary,
   Payment,
+  PaymentCollectionQuery,
   PaymentCommand,
   SelfPaymentCommand,
   Period,
   PermissionDefinition,
   PermissionUpdate,
   ProblemDetails,
+  AuditCollectionQuery,
   Product,
   ProductCreateCommand,
   ProductUpdateCommand,
@@ -88,6 +93,7 @@ import type {
   Settlement,
   SystemAccount,
   SystemAuditEntry,
+  SystemAuditCollectionQuery,
   SystemGroup,
   SystemGroupCreateInput,
   SystemGroupInvitationResult,
@@ -198,6 +204,58 @@ const groupRootPath = (groupId: string) => `/groups/${encodeURIComponent(groupId
 const systemGroupPath = (groupId: string, resource = '') => `/system/groups/${encodeURIComponent(groupId)}${resource ? `/${resource}` : ''}`;
 const json = (value: unknown) => JSON.stringify(value);
 const versionHeaders = (version: number): HeadersInit => ({ 'If-Match': `"v${version}"` });
+
+/**
+ * Encodes defined collection-query values without leaking empty filters into cacheable URLs.
+ *
+ * @param query - Typed collection search, filter, sorting, and cursor values.
+ * @returns URL parameters containing only meaningful values.
+ */
+function collectionQueryParameters(query: object): URLSearchParams {
+  const parameters = new URLSearchParams();
+  Object.entries(query).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') return;
+    if (Array.isArray(value)) {
+      value.forEach((item) => {
+        if (item !== undefined && item !== null && item !== '') parameters.append(key, String(item));
+      });
+      return;
+    }
+    parameters.set(key, String(value));
+  });
+  return parameters;
+}
+
+/**
+ * Appends a normalized collection query to an API resource path.
+ *
+ * @param path - API path without the shared base prefix.
+ * @param query - Typed collection query values.
+ * @returns The unchanged path for an empty query or a query-string path otherwise.
+ */
+function collectionPath(path: string, query: object): string {
+  const parameters = collectionQueryParameters(query);
+  return parameters.size > 0 ? `${path}?${parameters.toString()}` : path;
+}
+
+/**
+ * Combines an array response with cursor metadata exposed through response headers.
+ *
+ * @param items - Adapted collection items from the response body.
+ * @param headers - Response headers containing pagination metadata.
+ * @param requestedLimit - Client-requested page size used when the server omits metadata.
+ * @returns A stable page model for React Query infinite collections.
+ */
+function collectionPage<Item>(items: Item[], headers: Headers, requestedLimit?: number): CollectionPage<Item> {
+  const nextCursor = headers.get('X-Next-Cursor') ?? undefined;
+  const parsedLimit = Number(headers.get('X-Page-Limit'));
+  return {
+    items,
+    nextCursor,
+    hasMore: headers.get('X-Has-More') === 'true' || Boolean(nextCursor),
+    limit: Number.isInteger(parsedLimit) && parsedLimit > 0 ? parsedLimit : requestedLimit ?? 100,
+  };
+}
 const systemSettingKeys: Record<ResettableSystemSettingKey, string> = {
   instanceName: 'instance.name',
   defaultCurrency: 'instance.default_currency',
@@ -364,6 +422,11 @@ export const api = {
     body: json(input),
   })),
   getSystemAudit: async (): Promise<SystemAuditEntry[]> => adaptSystemAudit(await request<unknown>('/system/audit')),
+  getSystemAuditFilterOptions: (): Promise<AuditFilterOptions> => request<AuditFilterOptions>('/system/audit/filter-options'),
+  getSystemAuditPage: async (query: SystemAuditCollectionQuery = {}): Promise<CollectionPage<SystemAuditEntry>> => {
+    const response = await requestWithMetadata<unknown>(collectionPath('/system/audit', query));
+    return collectionPage(adaptSystemAudit(response.data), response.headers, query.limit);
+  },
   requestPasswordReset: async (email: string): Promise<void> => request<void>('/auth/password-reset/request', { method: 'POST', body: json({ email }) }),
   confirmPasswordReset: async (token: string, newPassword: string): Promise<void> => {
     await request<void>('/auth/password-reset/confirm', { method: 'POST', body: json({ token, newPassword }) });
@@ -513,6 +576,10 @@ export const api = {
   })),
   permanentlyDeleteMember: async (groupId: string, membershipId: string): Promise<void> => request<void>(groupPath(groupId, `members/${encodeURIComponent(membershipId)}/permanent`), { method: 'DELETE' }),
   getBookings: async (groupId: string): Promise<Booking[]> => (await request<unknown[]>(groupPath(groupId, 'bookings'))).map((booking) => adaptBooking(booking)),
+  getBookingsPage: async (groupId: string, query: BookingCollectionQuery = {}): Promise<CollectionPage<Booking>> => {
+    const response = await requestWithMetadata<unknown[]>(collectionPath(groupPath(groupId, 'bookings'), query));
+    return collectionPage(response.data.map((booking) => adaptBooking(booking)), response.headers, query.limit);
+  },
   createBooking: async (groupId: string, command: BookingCommand): Promise<Booking> => {
     const path = groupPath(groupId, 'bookings');
     const payload = {
@@ -553,6 +620,10 @@ export const api = {
   getLedger: async (groupId: string): Promise<LedgerEntry[]> => adaptLedger(await request<unknown>(groupPath(groupId, 'accounts/me'))),
   getAccountSummaries: async (groupId: string): Promise<AccountSummary[]> => adaptAccountSummaries(await request<unknown>(groupPath(groupId, 'accounts'))),
   getPayments: async (groupId: string): Promise<Payment[]> => (await request<unknown[]>(groupPath(groupId, 'payments'))).map(adaptPayment),
+  getPaymentsPage: async (groupId: string, query: PaymentCollectionQuery = {}): Promise<CollectionPage<Payment>> => {
+    const response = await requestWithMetadata<unknown[]>(collectionPath(groupPath(groupId, 'payments'), query));
+    return collectionPage(response.data.map(adaptPayment), response.headers, query.limit);
+  },
   createPayment: async (groupId: string, command: PaymentCommand): Promise<Payment> => {
     const path = groupPath(groupId, 'payments');
     const payload = { ...command, amountMinor: minorUnitsToSafeNumber(command.amount.minorUnits), amount: undefined, receivedAt: new Date(command.receivedAt).toISOString() };
@@ -595,6 +666,15 @@ export const api = {
     const [entries, members] = await Promise.all([request<unknown[]>(groupPath(groupId, 'audit')), request<unknown>(groupPath(groupId, 'members'))]);
     const adaptedMembers = adaptMemberships(members);
     return entries.map((entry) => adaptAuditEntry(entry, adaptedMembers));
+  },
+  getAuditFilterOptions: (groupId: string): Promise<AuditFilterOptions> => request<AuditFilterOptions>(groupPath(groupId, 'audit/filter-options')),
+  getAuditPage: async (groupId: string, query: AuditCollectionQuery = {}): Promise<CollectionPage<AuditEntry>> => {
+    const [response, members] = await Promise.all([
+      requestWithMetadata<unknown[]>(collectionPath(groupPath(groupId, 'audit'), query)),
+      request<unknown>(groupPath(groupId, 'members')),
+    ]);
+    const adaptedMembers = adaptMemberships(members);
+    return collectionPage(response.data.map((entry) => adaptAuditEntry(entry, adaptedMembers)), response.headers, query.limit);
   },
   getPermissionDefinitions: async (): Promise<PermissionDefinition[]> => {
     const response = await request<unknown>('/permission-definitions');

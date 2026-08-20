@@ -936,13 +936,17 @@ export function adaptNotification(input: unknown): Notification {
  */
 export function adaptAuditEntry(input: unknown, members: Membership[]): AuditEntry {
   const source = asRecord(input);
-  if ('actorName' in source) return source as unknown as AuditEntry;
+  if ('actorName' in source) return {
+    ...(source as unknown as AuditEntry),
+    resourceType: String(source.resourceType ?? String(source.subject ?? '').split(' · ')[0]),
+  };
   const metadata = source.metadata && typeof source.metadata === 'object' ? JSON.stringify(source.metadata) : '';
   return {
     id: String(source.id),
     occurredAt: String(source.occurredAt),
     actorName: memberName(String(source.actorMembershipId ?? ''), members, i18n.t('common.system')),
     action: String(source.action),
+    resourceType: String(source.resourceType ?? ''),
     subject: `${String(source.resourceType ?? '')}${source.resourceId ? ` · ${String(source.resourceId)}` : ''}`,
     details: metadata,
   };

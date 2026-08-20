@@ -58,7 +58,7 @@ export function Sidebar({ collapsed, onCollapsedChange, onNavigate }: SidebarPro
   return (
     <aside className={`${styles.sidebar} ${collapsed ? styles.collapsed : ''}`} data-collapsed={collapsed} id="desktop-sidebar">
       <div className={styles.sidebarHeader}>
-        <Brand className={styles.brand} imageAlt={activeGroup?.logoUrl ? t('brand.groupMarkAlt', { group: activeGroup.name }) : undefined} imageUrl={activeGroup?.logoUrl} name={instanceCapabilities.instanceName} />
+        <Brand className={styles.brand} name={instanceCapabilities.instanceName} />
         <button
           aria-controls="desktop-sidebar"
           aria-expanded={!collapsed}

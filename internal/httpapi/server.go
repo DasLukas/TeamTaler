@@ -162,6 +162,7 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /api/v1/system/groups/{groupID}/invitation/resend", server.handleResendSystemGroupInvitation)
 	mux.HandleFunc("POST /api/v1/system/groups/{groupID}/purge", server.handlePurgeSystemGroup)
 	mux.HandleFunc("GET /api/v1/system/audit", server.handleSystemAudit)
+	mux.HandleFunc("GET /api/v1/system/audit/filter-options", server.handleSystemAuditFilterOptions)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}", server.handleUpdateGroup)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/settings", server.handleGetGroupSettings)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/settings", server.handleUpdateGroupSettings)
@@ -211,6 +212,7 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/bookings/bulk", server.handleCreateBookingBulk)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/bookings/{bookingID}/void", server.handleVoidBooking)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/accounts", server.handleListAccounts)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/accounts/me/movements", server.handleOwnAccountMovements)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/accounts/me", server.handleOwnAccount)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/accounts/{membershipID}", server.handleMemberAccount)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/payments", server.handleListPayments)
@@ -226,6 +228,7 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/notifications/read", server.handleMarkNotificationsRead)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/notifications/{notificationID}", server.handleUpdateNotification)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/audit", server.handleAudit)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/audit/filter-options", server.handleAuditFilterOptions)
 	mux.HandleFunc("/api/", func(response http.ResponseWriter, request *http.Request) {
 		writeProblem(response, request, domain.ErrNotFound)
 	})
