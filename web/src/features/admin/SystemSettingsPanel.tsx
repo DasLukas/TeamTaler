@@ -37,7 +37,7 @@ import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { Toggle } from '@/components/ui/Toggle';
 import { AuditEventTable } from '@/features/shared/AuditEventTable';
-import { createAuditFilterDefinitions, type AuditEventFilterId } from '@/features/shared/auditFilters';
+import { createAuditFilterDefinitions, mergeAuditFilterOptions, type AuditEventFilterId } from '@/features/shared/auditFilters';
 import type { DataTableDateRange } from '@/features/shared/DataTable';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
 import styles from './SystemSettingsPanel.module.css';
@@ -557,10 +557,10 @@ function SystemAuditSection() {
   })) ?? [], [audit.data]);
   const visibleFilterOptions = useMemo(() => {
     const loadedEntries = audit.data?.pages.flatMap((page) => page.items) ?? [];
-    return {
-      actions: filterOptionsQuery.data?.actions.length ? filterOptionsQuery.data.actions : [...new Set(loadedEntries.map((entry) => entry.action))].sort(),
-      resourceTypes: filterOptionsQuery.data?.resourceTypes.length ? filterOptionsQuery.data.resourceTypes : [...new Set(loadedEntries.map((entry) => entry.targetType))].filter(Boolean).sort(),
-    };
+    return mergeAuditFilterOptions(
+      filterOptionsQuery.data,
+      loadedEntries.map((entry) => ({ action: entry.action, resourceType: entry.targetType })),
+    );
   }, [audit.data, filterOptionsQuery.data]);
   const filterDefinitions = useMemo(() => createAuditFilterDefinitions(t, visibleFilterOptions), [t, visibleFilterOptions]);
   return (

@@ -127,10 +127,11 @@ func TestTableQueryHandlersFilterSortAndPaginateWithoutChangingArrayBodies(t *te
 	auditOptionsResponse := performTableGET(t, principal, membership.GroupID,
 		"/api/v1/groups/"+membership.GroupID+"/audit/filter-options", server.handleAuditFilterOptions)
 	var auditOptions struct {
-		Actions       []string `json:"actions"`
-		ResourceTypes []string `json:"resourceTypes"`
+		Actions             []string            `json:"actions"`
+		ResourceTypes       []string            `json:"resourceTypes"`
+		ActionResourceTypes map[string][]string `json:"actionResourceTypes"`
 	}
-	if err := json.Unmarshal(auditOptionsResponse.Body.Bytes(), &auditOptions); err != nil || auditOptionsResponse.Code != http.StatusOK || !containsString(auditOptions.Actions, "booking.created") || !containsString(auditOptions.ResourceTypes, "payment") {
+	if err := json.Unmarshal(auditOptionsResponse.Body.Bytes(), &auditOptions); err != nil || auditOptionsResponse.Code != http.StatusOK || !containsString(auditOptions.Actions, "booking.created") || !containsString(auditOptions.ResourceTypes, "payment") || !containsString(auditOptions.ActionResourceTypes["booking.created"], "booking") {
 		t.Fatalf("audit options status=%d options=%#v err=%v body=%s", auditOptionsResponse.Code, auditOptions, err, auditOptionsResponse.Body.String())
 	}
 }
@@ -178,7 +179,7 @@ func TestSystemAuditHandlerUsesCompatibleObjectBodyAndCursorHeaders(t *testing.T
 	optionsResponse := httptest.NewRecorder()
 	server.handleSystemAuditFilterOptions(optionsResponse, optionsRequest)
 	var options systemadmin.AuditFilterOptions
-	if err := json.Unmarshal(optionsResponse.Body.Bytes(), &options); err != nil || optionsResponse.Code != http.StatusOK || !containsString(options.Actions, "system.query.test") || !containsString(options.ResourceTypes, "test_resource") {
+	if err := json.Unmarshal(optionsResponse.Body.Bytes(), &options); err != nil || optionsResponse.Code != http.StatusOK || !containsString(options.Actions, "system.query.test") || !containsString(options.ResourceTypes, "test_resource") || !containsString(options.ActionResourceTypes["system.query.test"], "test_resource") {
 		t.Fatalf("system audit options status=%d options=%#v err=%v body=%s", optionsResponse.Code, options, err, optionsResponse.Body.String())
 	}
 }

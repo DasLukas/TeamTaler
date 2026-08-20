@@ -41,29 +41,31 @@ describe('AuditPanel filters', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.history.replaceState({}, '', '/admin');
-    apiMock.getAuditFilterOptions.mockResolvedValue({ actions: ['booking.created', 'payment.created'], resourceTypes: ['booking', 'payment'] });
+    apiMock.getAuditFilterOptions.mockResolvedValue({
+      actions: ['booking.created', 'payment.created'],
+      resourceTypes: ['booking', 'payment'],
+      actionResourceTypes: { 'booking.created': ['booking'], 'payment.created': ['payment'] },
+    });
     apiMock.getAuditPage.mockResolvedValue({ hasMore: false, items: [], limit: 50 });
   });
 
-  it('applies searched multi-value action and resource filters', async () => {
+  it('limits actions to the selected resource types', async () => {
     const user = userEvent.setup();
     renderPanel();
     await screen.findByRole('heading', { name: 'Audit-Protokoll' });
     await user.click(screen.getByRole('button', { name: 'Filter' }));
     const filterDialog = screen.getByRole('dialog', { name: 'Ergebnisse filtern' });
 
-    await user.click(within(filterDialog).getByRole('button', { name: 'Aktion' }));
-    const actionMenu = screen.getByRole('dialog', { name: 'Aktion' });
-    await user.type(within(actionMenu).getByRole('searchbox', { name: 'Aktionen durchsuchen' }), 'created');
-    await user.click(within(actionMenu).getByRole('checkbox', { name: 'booking.created' }));
-    await user.click(within(actionMenu).getByRole('checkbox', { name: 'payment.created' }));
-
     await user.click(within(filterDialog).getByRole('button', { name: 'Ressourcentyp' }));
     await user.click(within(screen.getByRole('dialog', { name: 'Ressourcentyp' })).getByRole('checkbox', { name: 'payment' }));
+    await user.click(within(filterDialog).getByRole('button', { name: 'Aktion' }));
+    const actionMenu = screen.getByRole('dialog', { name: 'Aktion' });
+    expect(within(actionMenu).queryByRole('checkbox', { name: 'booking.created' })).not.toBeInTheDocument();
+    await user.click(within(actionMenu).getByRole('checkbox', { name: 'payment.created' }));
     await user.click(within(filterDialog).getByRole('button', { name: 'Filter anwenden' }));
 
     await waitFor(() => expect(apiMock.getAuditPage).toHaveBeenLastCalledWith('group-a', expect.objectContaining({
-      action: ['booking.created', 'payment.created'],
+      action: ['payment.created'],
       resourceType: ['payment'],
     })));
   });

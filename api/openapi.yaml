@@ -3386,7 +3386,7 @@ components:
     AuditFilterOptions:
       type: object
       additionalProperties: false
-      required: [actions, resourceTypes]
+      required: [actions, resourceTypes, actionResourceTypes]
       properties:
         actions:
           type: array
@@ -3396,6 +3396,12 @@ components:
           type: array
           description: Distinct persisted resource-type values in stable case-insensitive order.
           items: { type: string }
+        actionResourceTypes:
+          type: object
+          description: Persisted resource types observed for each action; clients use this relationship to constrain dependent action filters.
+          additionalProperties:
+            type: array
+            items: { type: string }
     PasswordResetRequest:
       type: object
       additionalProperties: false

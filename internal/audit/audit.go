@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/DasLukas/TeamTaler/internal/platform"
@@ -66,39 +67,76 @@ type Page struct {
 }
 
 // FilterOptions contains every action and resource type currently present in
-// one authorized group audit log. Values are distinct and sorted.
+// an authorized audit log, including the persisted action-to-resource
+// relationships. Values are distinct and sorted.
 type FilterOptions struct {
-	Actions       []string `json:"actions"`
-	ResourceTypes []string `json:"resourceTypes"`
+	Actions             []string            `json:"actions"`
+	ResourceTypes       []string            `json:"resourceTypes"`
+	ActionResourceTypes map[string][]string `json:"actionResourceTypes"`
+}
+
+// ScanFilterOptions consumes distinct action/resource-type pairs and builds a
+// stable filter catalog. The caller transfers ownership of rows to this
+// helper. It returns row scanning and iteration errors.
+// Example: options, err := ScanFilterOptions(rows).
+func ScanFilterOptions(rows *sql.Rows) (FilterOptions, error) {
+	defer rows.Close()
+	options := FilterOptions{
+		Actions:             []string{},
+		ResourceTypes:       []string{},
+		ActionResourceTypes: map[string][]string{},
+	}
+	actions := map[string]struct{}{}
+	resourceTypes := map[string]struct{}{}
+	for rows.Next() {
+		var action, resourceType string
+		if err := rows.Scan(&action, &resourceType); err != nil {
+			return FilterOptions{}, fmt.Errorf("scan audit filter relationship: %w", err)
+		}
+		actions[action] = struct{}{}
+		resourceTypes[resourceType] = struct{}{}
+		options.ActionResourceTypes[action] = append(options.ActionResourceTypes[action], resourceType)
+	}
+	if err := rows.Err(); err != nil {
+		return FilterOptions{}, fmt.Errorf("iterate audit filter relationships: %w", err)
+	}
+	for action := range actions {
+		options.Actions = append(options.Actions, action)
+	}
+	for resourceType := range resourceTypes {
+		options.ResourceTypes = append(options.ResourceTypes, resourceType)
+	}
+	sortAuditFilterValues(options.Actions)
+	sortAuditFilterValues(options.ResourceTypes)
+	for action := range options.ActionResourceTypes {
+		sortAuditFilterValues(options.ActionResourceTypes[action])
+	}
+	return options, nil
+}
+
+// sortAuditFilterValues sorts values case-insensitively with a stable tie-breaker.
+func sortAuditFilterValues(values []string) {
+	sort.Slice(values, func(left, right int) bool {
+		leftFolded, rightFolded := strings.ToLower(values[left]), strings.ToLower(values[right])
+		if leftFolded == rightFolded {
+			return values[left] < values[right]
+		}
+		return leftFolded < rightFolded
+	})
 }
 
 // ListFilterOptions returns the complete data-derived filter catalog for one
 // group. Recording a new action or resource type makes it available without a
 // separate registry update.
 func ListFilterOptions(ctx context.Context, db *sql.DB, groupID string) (FilterOptions, error) {
-	rows, err := db.QueryContext(ctx, `SELECT kind,value FROM (
-		SELECT 'action' AS kind,action AS value FROM audit_events WHERE group_id=?
-		UNION
-		SELECT 'resourceType' AS kind,resource_type AS value FROM audit_events WHERE group_id=?
-	) ORDER BY kind,lower(value),value`, groupID, groupID)
+	rows, err := db.QueryContext(ctx, `SELECT DISTINCT action,resource_type
+		FROM audit_events WHERE group_id=?`, groupID)
 	if err != nil {
 		return FilterOptions{}, fmt.Errorf("list audit filter options: %w", err)
 	}
-	defer rows.Close()
-	options := FilterOptions{Actions: []string{}, ResourceTypes: []string{}}
-	for rows.Next() {
-		var kind, value string
-		if err := rows.Scan(&kind, &value); err != nil {
-			return FilterOptions{}, fmt.Errorf("scan audit filter option: %w", err)
-		}
-		if kind == "action" {
-			options.Actions = append(options.Actions, value)
-		} else {
-			options.ResourceTypes = append(options.ResourceTypes, value)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return FilterOptions{}, fmt.Errorf("iterate audit filter options: %w", err)
+	options, err := ScanFilterOptions(rows)
+	if err != nil {
+		return FilterOptions{}, fmt.Errorf("list audit filter options: %w", err)
 	}
 	return options, nil
 }

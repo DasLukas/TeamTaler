@@ -70,6 +70,8 @@ export type SystemAuditCollectionQuery = Omit<AuditCollectionQuery, 'actorMember
 export interface AuditFilterOptions {
   actions: string[];
   resourceTypes: string[];
+  /** Persisted resource types observed for each action. */
+  actionResourceTypes?: Record<string, string[]>;
 }
 
 /** Determines whether a product price is fixed by the catalog or chosen per booking. */

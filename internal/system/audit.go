@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	sharedaudit "github.com/DasLukas/TeamTaler/internal/audit"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/tablequery"
 )
@@ -52,39 +53,20 @@ type AuditPage struct {
 	NextCursor string
 }
 
-// AuditFilterOptions contains every action and resource type currently
-// present in the instance-wide audit log. Values are distinct and sorted.
-type AuditFilterOptions struct {
-	Actions       []string `json:"actions"`
-	ResourceTypes []string `json:"resourceTypes"`
-}
+// AuditFilterOptions aliases the shared data-derived audit filter catalog.
+type AuditFilterOptions = sharedaudit.FilterOptions
 
 // ListAuditFilterOptions returns the complete data-derived system-audit filter
 // catalog. Recording a new value makes it available without a UI registry.
 func (s Service) ListAuditFilterOptions(ctx context.Context) (AuditFilterOptions, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT kind,value FROM (
-		SELECT 'action' AS kind,action AS value FROM system_audit_events
-		UNION
-		SELECT 'resourceType' AS kind,resource_type AS value FROM system_audit_events
-	) ORDER BY kind,lower(value),value`)
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT action,resource_type
+		FROM system_audit_events`)
 	if err != nil {
 		return AuditFilterOptions{}, fmt.Errorf("list system audit filter options: %w", err)
 	}
-	defer rows.Close()
-	options := AuditFilterOptions{Actions: []string{}, ResourceTypes: []string{}}
-	for rows.Next() {
-		var kind, value string
-		if err := rows.Scan(&kind, &value); err != nil {
-			return AuditFilterOptions{}, fmt.Errorf("scan system audit filter option: %w", err)
-		}
-		if kind == "action" {
-			options.Actions = append(options.Actions, value)
-		} else {
-			options.ResourceTypes = append(options.ResourceTypes, value)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return AuditFilterOptions{}, fmt.Errorf("iterate system audit filter options: %w", err)
+	options, err := sharedaudit.ScanFilterOptions(rows)
+	if err != nil {
+		return AuditFilterOptions{}, fmt.Errorf("list system audit filter options: %w", err)
 	}
 	return options, nil
 }

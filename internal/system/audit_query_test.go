@@ -53,7 +53,7 @@ func TestQueryAuditFiltersSortsAndPaginates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list audit filter options: %v", err)
 	}
-	if len(options.Actions) != 3 || options.Actions[0] != "system.group.archived" || len(options.ResourceTypes) != 2 || options.ResourceTypes[0] != "group" {
+	if len(options.Actions) != 3 || options.Actions[0] != "system.group.archived" || len(options.ResourceTypes) != 2 || options.ResourceTypes[0] != "group" || len(options.ActionResourceTypes["system.settings.updated"]) != 1 || options.ActionResourceTypes["system.settings.updated"][0] != "system_settings" {
 		t.Fatalf("audit filter options=%#v", options)
 	}
 }

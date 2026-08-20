@@ -1122,7 +1122,7 @@ describe('server-backed collection API contract', () => {
   });
 
   it('loads data-derived audit filter options for group and system scopes', async () => {
-    const options = { actions: ['payment.created'], resourceTypes: ['payment'] };
+    const options = { actions: ['payment.created'], resourceTypes: ['payment'], actionResourceTypes: { 'payment.created': ['payment'] } };
     const fetchMock = vi.fn((url: string) => {
       void url;
       return Promise.resolve(jsonResponse(options));

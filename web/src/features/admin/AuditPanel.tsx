@@ -5,7 +5,7 @@ import { api } from '@/api/client';
 import type { AuditCollectionQuery, AuditEntry, CollectionPage } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { AuditEventTable } from '@/features/shared/AuditEventTable';
-import { createAuditFilterDefinitions, type AuditEventFilterId } from '@/features/shared/auditFilters';
+import { createAuditFilterDefinitions, mergeAuditFilterOptions, type AuditEventFilterId } from '@/features/shared/auditFilters';
 import type { DataTableDateRange } from '@/features/shared/DataTable';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
 import styles from './AuditPanel.module.css';
@@ -50,10 +50,10 @@ export function AuditPanel() {
     queryKey: ['audit', activeGroupId, 'collection', collectionQuery],
   });
   const entries = useMemo(() => auditQuery.data?.pages.flatMap((page) => page.items).map((entry) => ({ ...entry, actor: entry.actorName })) ?? [], [auditQuery.data]);
-  const visibleFilterOptions = useMemo(() => ({
-    actions: filterOptionsQuery.data?.actions.length ? filterOptionsQuery.data.actions : [...new Set(entries.map((entry) => entry.action))].sort(),
-    resourceTypes: filterOptionsQuery.data?.resourceTypes.length ? filterOptionsQuery.data.resourceTypes : [...new Set(entries.map((entry) => entry.resourceType))].filter(Boolean).sort(),
-  }), [entries, filterOptionsQuery.data]);
+  const visibleFilterOptions = useMemo(() => mergeAuditFilterOptions(
+    filterOptionsQuery.data,
+    entries.map((entry) => ({ action: entry.action, resourceType: entry.resourceType })),
+  ), [entries, filterOptionsQuery.data]);
   const filterDefinitions = useMemo(() => createAuditFilterDefinitions(t, visibleFilterOptions), [t, visibleFilterOptions]);
   return (
     <div className={styles.content}>
