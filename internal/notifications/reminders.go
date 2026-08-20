@@ -182,11 +182,11 @@ func (w *ReminderWorker) processStatementTx(ctx context.Context, tx *sql.Tx, sta
 		return false, nil
 	}
 	createdAt := platform.Timestamp(now.UTC())
-	title := "Settlement due soon"
-	body := "An open settlement is due soon."
+	title := "Abrechnung bald fällig"
+	body := "Eine offene Abrechnung ist bald fällig."
 	if eventType == TypeSettlementOverdue {
-		title = "Settlement overdue"
-		body = "A settlement remains overdue."
+		title = "Abrechnung überfällig"
+		body = "Eine offene Abrechnung ist überfällig."
 	}
 	notification, err := w.notifications.CreateTx(ctx, tx, CreateInput{
 		GroupID: item.groupID, MembershipID: item.membershipID, Type: eventType,

@@ -32,3 +32,13 @@ func TestCatalogProvidesCompleteSafeDeliveryMetadata(t *testing.T) {
 		t.Fatal("catalog returned mutable shared channel metadata")
 	}
 }
+
+func TestCatalogUsesGermanPushCopy(t *testing.T) {
+	definition, ok := Definition(TypeBookingAssigned)
+	if !ok {
+		t.Fatal("booking-assigned notification definition is missing")
+	}
+	if definition.PushTitle != "Neue Buchung" || definition.PushBody != "In deiner Gruppe wurde etwas auf dein Konto gebucht." {
+		t.Fatalf("booking-assigned push copy=%q/%q", definition.PushTitle, definition.PushBody)
+	}
+}

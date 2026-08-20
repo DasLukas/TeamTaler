@@ -70,7 +70,7 @@ func TestNotificationDispatcherSendsLocalizedEventAndMarksJobSent(t *testing.T) 
 	if len(messages) != 1 || messages[0].Title != "Neue Buchung" || !strings.HasPrefix(messages[0].ActionURL, "https://teamtaler.example.test/notifications?notification=") {
 		t.Fatalf("notification messages=%#v", messages)
 	}
-	if messages[0].Body != "Sam Admin hat dir 1 × „Training fine“ über 5,00 EUR zugewiesen." {
+	if messages[0].Body != "Sam Admin hat 1 × „Training fine“ im Wert von 5,00 EUR auf dein Konto gebucht." {
 		t.Fatalf("notification body=%q", messages[0].Body)
 	}
 	var status string

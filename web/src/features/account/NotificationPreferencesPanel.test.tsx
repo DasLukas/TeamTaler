@@ -78,6 +78,7 @@ describe('NotificationPreferencesPanel', () => {
     const disabledEmailToggle = screen.getByRole('switch', { name: i18n.t('notifications.preferences.emailFor', { event: i18n.t('notifications.preferences.events.settlementDueSoon.label') }) });
     expect(pushToggle).toBeDisabled();
     expect(disabledEmailToggle).toBeDisabled();
+    expect(screen.queryByText('Auf dem Sperrbildschirm erscheinen nur Gruppenname und Ereignisart.')).not.toBeInTheDocument();
 
     await user.click(emailToggle);
     await user.click(screen.getByRole('button', { name: i18n.t('common.save') }));
@@ -86,5 +87,12 @@ describe('NotificationPreferencesPanel', () => {
       version: 2,
       events: [{ eventType: 'BOOKING_ASSIGNED', email: false }],
     }));
+  });
+
+  it('shows the concise notice when email delivery is unavailable', async () => {
+    apiMock.getNotificationPreferences.mockResolvedValue({ ...preferences, channels: { ...preferences.channels, email: false } });
+    renderPanel();
+
+    expect(await screen.findByText('E-Mail-Benachrichtigungen sind derzeit nicht verfügbar.')).toBeVisible();
   });
 });

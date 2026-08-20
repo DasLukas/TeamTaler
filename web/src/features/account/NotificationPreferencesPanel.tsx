@@ -145,7 +145,7 @@ function PushDevices({ capabilities, userId }: { capabilities: InstanceCapabilit
   return <section aria-labelledby="push-devices-title" className={styles.card}>
     <header><h2 id="push-devices-title">{t('notifications.devices.title')}</h2><p>{t('notifications.devices.intro')}</p></header>
     <div className={styles.pushOptIn}>
-      <div><strong>{t('notifications.devices.thisBrowser')}</strong><span>{t('notifications.devices.privacy')}</span></div>
+      <div><strong>{t('notifications.devices.thisBrowser')}</strong></div>
       <Button disabled={unavailable || permission === 'denied' || enable.isPending || (devices.data?.length ?? 0) >= 10} leadingIcon={<BellRing size={17} />} onClick={() => enable.mutate()}>{enable.isPending ? t('notifications.devices.enabling') : t('notifications.devices.enable')}</Button>
     </div>
     {!capabilities.webPushAvailable ? <p className={styles.notice}>{t('notifications.devices.systemUnavailable')}</p> : null}

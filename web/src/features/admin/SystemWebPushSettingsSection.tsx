@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import BellRing from 'lucide-react/dist/esm/icons/bell-ring';
+import CircleCheck from 'lucide-react/dist/esm/icons/circle-check';
 import KeyRound from 'lucide-react/dist/esm/icons/key-round';
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
 import Save from 'lucide-react/dist/esm/icons/save';
@@ -77,9 +78,9 @@ export function SystemWebPushSettingsSection({ settings }: { settings: SystemSet
       <div className={styles.fieldBlock}><div className={styles.toggleRow}><div><strong>{t('systemSettings.webPush.enabled')}</strong><span>{t('systemSettings.webPush.enabledHint')}</span></div><Toggle checked={enabled} disabled={pending || !enabled && !canEnable} label={t('systemSettings.webPush.enabled')} onChange={setEnabled} /></div></div>
       <div className={styles.fieldBlock}><Field hint={t('systemSettings.webPush.subjectHint')} htmlFor="system-web-push-subject" label={t('systemSettings.webPush.subject')}><TextInput id="system-web-push-subject" onChange={(event) => setSubject(event.target.value)} placeholder="mailto:admin@example.com" required value={subject} /></Field></div>
       <dl className={styles.compactImpact}>
-        <div><dt>{t('systemSettings.webPush.key')}</dt><dd>{webPush.privateKeyConfigured ? t('systemSettings.webPush.configured') : t('systemSettings.webPush.missing')}</dd></div>
-        <div><dt>{t('systemSettings.webPush.keyId')}</dt><dd>{webPush.keyId ?? '–'}</dd></div>
-        <div><dt>{t('common.status')}</dt><dd>{webPush.active ? t('systemSettings.webPush.active') : webPush.configurationValid ? t('systemSettings.webPush.ready') : t('systemSettings.webPush.incomplete')}</dd></div>
+        <div><dt>{t('systemSettings.webPush.key')}:</dt><dd>{webPush.privateKeyConfigured ? t('systemSettings.webPush.configured') : t('systemSettings.webPush.missing')}</dd></div>
+        <div><dt>{t('systemSettings.webPush.keyId')}:</dt><dd>{webPush.keyId ?? '–'}</dd></div>
+        <div><dt>{t('common.status')}:</dt><dd>{webPush.active ? <CircleCheck aria-label={t('systemSettings.webPush.active')} className={styles.activeStatus} role="img" size={20} /> : webPush.configurationValid ? t('systemSettings.webPush.ready') : t('systemSettings.webPush.incomplete')}</dd></div>
       </dl>
       {save.isError || generate.isError || reset.isError || test.isError ? <p className={styles.error} role="alert">{t('systemSettings.webPush.error')}</p> : null}
       {save.isSuccess || generate.isSuccess || reset.isSuccess || test.isSuccess ? <p className={styles.success} role="status">{test.isSuccess ? t('systemSettings.webPush.testQueued') : t('systemSettings.saved')}</p> : null}

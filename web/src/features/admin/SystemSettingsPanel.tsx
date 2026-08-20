@@ -1,9 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Archive from 'lucide-react/dist/esm/icons/archive';
 import ArchiveRestore from 'lucide-react/dist/esm/icons/archive-restore';
-import CircleAlert from 'lucide-react/dist/esm/icons/circle-alert';
 import CircleCheckBig from 'lucide-react/dist/esm/icons/circle-check-big';
-import CircleHelp from 'lucide-react/dist/esm/icons/circle-help';
 import MailCheck from 'lucide-react/dist/esm/icons/mail-check';
 import Plus from 'lucide-react/dist/esm/icons/plus';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
@@ -70,10 +68,6 @@ function currencyOptionLabel(currency: string): string {
     .formatToParts(0)
     .find((part) => part.type === 'currency')?.value ?? currency;
   return `${currency} - ${symbol}`;
-}
-
-function localizedDate(value: string | null): string {
-  return value ? new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '–';
 }
 
 interface ResetConfirmationDialogProps {
@@ -260,10 +254,6 @@ function SmtpSettingsSection({ settings }: { settings: SystemSettings }) {
   const configurationChanged = form.enabled !== smtp.enabled.value || connectionChanged;
   const validPort = Number.isInteger(form.port) && Number(form.port) >= 1 && Number(form.port) <= 65535;
   const visibleTestStatus = testMutation.isError ? 'FAILED' : connectionChanged ? 'UNTESTED' : smtp.testStatus;
-  const StatusIcon = visibleTestStatus === 'VERIFIED' ? CircleCheckBig : visibleTestStatus === 'FAILED' ? CircleAlert : CircleHelp;
-  const statusHint = visibleTestStatus === 'VERIFIED' && smtp.testedAt
-    ? t('systemSettings.smtp.testedAt', { date: localizedDate(smtp.testedAt) })
-    : visibleTestStatus === 'FAILED' ? t('systemSettings.smtp.failedHint') : t('systemSettings.smtp.notTested');
   const hasOverrides = smtp.passwordSource === 'DATABASE' || [smtp.enabled, smtp.host, smtp.port, smtp.tlsMode, smtp.username, smtp.fromAddress, smtp.fromName]
     .some((setting) => setting.source === 'DATABASE');
   const setValue = <K extends keyof SmtpForm>(key: K, value: SmtpForm[K]) => setForm((current) => ({ ...current, [key]: value }));
@@ -282,16 +272,13 @@ function SmtpSettingsSection({ settings }: { settings: SystemSettings }) {
           <div className={styles.fieldBlock}><Field htmlFor="system-smtp-from-name" label={t('systemSettings.smtp.fromName')}><TextInput id="system-smtp-from-name" onChange={(event) => setValue('fromName', event.target.value)} value={form.fromName} /></Field></div>
         </fieldset>
         {saveMutation.isError || resetMutation.isError ? <p className={styles.error} role="alert">{t('systemSettings.smtp.error')}</p> : null}
-        <div className={styles.smtpFooter}>
-          <div className={styles.smtpStatus} data-status={visibleTestStatus.toLowerCase()} role={visibleTestStatus === 'FAILED' ? 'alert' : 'status'}>
-            <StatusIcon aria-hidden="true" size={22} strokeWidth={2.2} />
-            <span><strong>{t(`systemSettings.smtp.status.${visibleTestStatus.toLowerCase()}`)}</strong><small>{statusHint}</small></span>
-          </div>
-          <div className={styles.actions}>
-            <Button disabled={pending || configurationChanged || !smtp.configurationValid} leadingIcon={<MailCheck size={17} />} onClick={() => testMutation.mutate()} variant="secondary">{testMutation.isPending ? t('systemSettings.smtp.testing') : t('systemSettings.smtp.test')}</Button>
-            <Button disabled={pending || !hasOverrides} leadingIcon={<RotateCcw size={17} />} onClick={() => setResetOpen(true)} variant="secondary">{t('systemSettings.reset')}</Button>
-            <Button disabled={pending || !configurationChanged || !form.host || !form.username || !form.fromAddress || !validPort} leadingIcon={<Save size={17} />} type="submit">{saveMutation.isPending ? t('common.saving') : t('common.save')}</Button>
-          </div>
+        <dl className={styles.compactImpact}>
+          <div><dt>{t('common.status')}:</dt><dd className={styles.smtpStatus} data-status={smtp.active ? 'active' : visibleTestStatus.toLowerCase()} role={!smtp.active && visibleTestStatus === 'FAILED' ? 'alert' : 'status'}>{smtp.active ? <CircleCheckBig aria-label={t('systemSettings.smtp.active')} className={styles.activeStatus} role="img" size={20} /> : t(`systemSettings.smtp.status.${visibleTestStatus.toLowerCase()}`)}</dd></div>
+        </dl>
+        <div className={styles.actions}>
+          <Button disabled={pending || configurationChanged || !smtp.configurationValid} leadingIcon={<MailCheck size={17} />} onClick={() => testMutation.mutate()} variant="secondary">{testMutation.isPending ? t('systemSettings.smtp.testing') : t('systemSettings.smtp.test')}</Button>
+          <Button disabled={pending || !hasOverrides} leadingIcon={<RotateCcw size={17} />} onClick={() => setResetOpen(true)} variant="secondary">{t('systemSettings.reset')}</Button>
+          <Button disabled={pending || !configurationChanged || !form.host || !form.username || !form.fromAddress || !validPort} leadingIcon={<Save size={17} />} type="submit">{saveMutation.isPending ? t('common.saving') : t('common.save')}</Button>
         </div>
       </form>
       <ResetConfirmationDialog errorMessage={resetMutation.isError ? t('systemSettings.smtp.error') : undefined} onClose={() => setResetOpen(false)} onConfirm={() => resetMutation.mutate()} open={resetOpen} pending={resetMutation.isPending} sectionName={t('systemSettings.smtp.title')} />

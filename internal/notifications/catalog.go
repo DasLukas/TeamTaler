@@ -53,32 +53,32 @@ type EventDefinition struct {
 
 var eventCatalog = map[EventType]EventDefinition{
 	TypeBookingAssigned: {
-		Type: TypeBookingAssigned, Category: "BOOKINGS", Label: "Booking assigned",
-		Description: "A booking was assigned to the member account.", Route: "/notifications", PushTitle: "Booking activity", PushBody: "A booking was assigned in your group.", PushTTLSeconds: 21600, PushUrgency: "normal", DefaultEnabled: true,
+		Type: TypeBookingAssigned, Category: "BOOKINGS", Label: "Neue Buchung",
+		Description: "Eine andere Person bucht etwas auf das Mitgliedskonto.", Route: "/notifications", PushTitle: "Neue Buchung", PushBody: "In deiner Gruppe wurde etwas auf dein Konto gebucht.", PushTTLSeconds: 21600, PushUrgency: "normal", DefaultEnabled: true,
 	},
 	TypeBookingReversed: {
-		Type: TypeBookingReversed, Category: "BOOKINGS", Label: "Booking reversed",
-		Description: "A booking on the member account was reversed.", Route: "/notifications", PushTitle: "Booking activity", PushBody: "A booking was reversed in your group.", PushTTLSeconds: 21600, PushUrgency: "normal", DefaultEnabled: true,
+		Type: TypeBookingReversed, Category: "BOOKINGS", Label: "Buchung storniert",
+		Description: "Eine Buchung auf dem Mitgliedskonto wird storniert.", Route: "/notifications", PushTitle: "Buchung storniert", PushBody: "In deiner Gruppe wurde eine Buchung auf deinem Konto storniert.", PushTTLSeconds: 21600, PushUrgency: "normal", DefaultEnabled: true,
 	},
 	TypePaymentRecorded: {
-		Type: TypePaymentRecorded, Category: "PAYMENTS", Label: "Payment recorded",
-		Description: "A payment was recorded for the member account.", Route: "/notifications", PushTitle: "Payment activity", PushBody: "A payment was recorded in your group.", PushTTLSeconds: 21600, PushUrgency: "normal", DefaultEnabled: true,
+		Type: TypePaymentRecorded, Category: "PAYMENTS", Label: "Zahlung eingegangen",
+		Description: "Eine Zahlung wird dem Mitgliedskonto gutgeschrieben.", Route: "/notifications", PushTitle: "Zahlung eingegangen", PushBody: "In deiner Gruppe wurde deinem Konto eine Zahlung gutgeschrieben.", PushTTLSeconds: 21600, PushUrgency: "normal", DefaultEnabled: true,
 	},
 	TypePaymentReversed: {
-		Type: TypePaymentReversed, Category: "PAYMENTS", Label: "Payment reversed",
-		Description: "A payment on the member account was reversed.", Route: "/notifications", PushTitle: "Payment activity", PushBody: "A payment was reversed in your group.", PushTTLSeconds: 21600, PushUrgency: "normal", DefaultEnabled: true,
+		Type: TypePaymentReversed, Category: "PAYMENTS", Label: "Zahlung storniert",
+		Description: "Eine Zahlung auf dem Mitgliedskonto wird storniert.", Route: "/notifications", PushTitle: "Zahlung storniert", PushBody: "In deiner Gruppe wurde eine Zahlung auf deinem Konto storniert.", PushTTLSeconds: 21600, PushUrgency: "normal", DefaultEnabled: true,
 	},
 	TypeSettlementCreated: {
-		Type: TypeSettlementCreated, Category: "SETTLEMENTS", Label: "Settlement created",
-		Description: "A new settlement is available for the member.", Route: "/notifications", PushTitle: "Settlement available", PushBody: "A settlement is available in your group.", PushTTLSeconds: 86400, PushUrgency: "normal", DefaultEnabled: true,
+		Type: TypeSettlementCreated, Category: "SETTLEMENTS", Label: "Neue Abrechnung",
+		Description: "Für das Mitglied wurde eine neue Abrechnung erstellt.", Route: "/notifications", PushTitle: "Neue Abrechnung", PushBody: "In deiner Gruppe ist eine neue Abrechnung für dich verfügbar.", PushTTLSeconds: 86400, PushUrgency: "normal", DefaultEnabled: true,
 	},
 	TypeSettlementDueSoon: {
-		Type: TypeSettlementDueSoon, Category: "SETTLEMENTS", Label: "Settlement due soon",
-		Description: "An unpaid settlement is approaching its due date.", Route: "/notifications", PushTitle: "Settlement reminder", PushBody: "A settlement in your group is due soon.", PushTTLSeconds: 86400, PushUrgency: "normal", Reminder: true,
+		Type: TypeSettlementDueSoon, Category: "SETTLEMENTS", Label: "Abrechnung bald fällig",
+		Description: "Eine offene Abrechnung ist bald fällig.", Route: "/notifications", PushTitle: "Abrechnung bald fällig", PushBody: "Eine offene Abrechnung in deiner Gruppe ist bald fällig.", PushTTLSeconds: 86400, PushUrgency: "normal", Reminder: true,
 	},
 	TypeSettlementOverdue: {
-		Type: TypeSettlementOverdue, Category: "SETTLEMENTS", Label: "Settlement overdue",
-		Description: "A settlement remains unpaid after its due date.", Route: "/notifications", PushTitle: "Settlement reminder", PushBody: "A settlement in your group is overdue.", PushTTLSeconds: 86400, PushUrgency: "high", Reminder: true,
+		Type: TypeSettlementOverdue, Category: "SETTLEMENTS", Label: "Abrechnung überfällig",
+		Description: "Eine offene Abrechnung ist überfällig.", Route: "/notifications", PushTitle: "Abrechnung überfällig", PushBody: "Eine offene Abrechnung in deiner Gruppe ist überfällig.", PushTTLSeconds: 86400, PushUrgency: "high", Reminder: true,
 	},
 }
 

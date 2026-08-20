@@ -291,26 +291,26 @@ func renderNotificationCopy(eventType notifications.EventType, context notificat
 	amount := formatEmailMoney(context.AmountMinor, context.Currency)
 	switch eventType {
 	case notifications.TypeBookingAssigned:
-		return "Neue Buchung", fmt.Sprintf("%s hat dir %d × „%s“ über %s zugewiesen.", actor, context.Quantity, item, amount)
+		return "Neue Buchung", fmt.Sprintf("%s hat %d × „%s“ im Wert von %s auf dein Konto gebucht.", actor, context.Quantity, item, amount)
 	case notifications.TypeBookingReversed:
-		return "Buchung storniert", fmt.Sprintf("%s hat %d × „%s“ über %s auf deinem Konto storniert.", actor, context.Quantity, item, amount)
+		return "Buchung storniert", fmt.Sprintf("%s hat %d × „%s“ im Wert von %s auf deinem Konto storniert.", actor, context.Quantity, item, amount)
 	case notifications.TypePaymentRecorded:
-		return "Zahlung erfasst", fmt.Sprintf("%s hat eine Zahlung über %s für dich erfasst.", actor, amount)
+		return "Zahlung eingegangen", fmt.Sprintf("%s hat dir eine Zahlung von %s gutgeschrieben.", actor, amount)
 	case notifications.TypePaymentReversed:
-		return "Zahlung storniert", fmt.Sprintf("%s hat eine Zahlung über %s auf deinem Konto storniert.", actor, amount)
+		return "Zahlung storniert", fmt.Sprintf("%s hat eine Zahlung von %s auf deinem Konto storniert.", actor, amount)
 	case notifications.TypeSettlementCreated:
 		label := safeInline(context.PeriodLabel)
 		if context.AmountMinor > 0 {
-			return "Neue Abrechnung", fmt.Sprintf("Die Abrechnung „%s“ ist bereit. Offen sind %s, fällig am %s.", label, amount, safeInline(context.DueAt))
+			return "Neue Abrechnung", fmt.Sprintf("Die Abrechnung „%s“ ist bereit. Offener Betrag: %s. Fällig am %s.", label, amount, safeInline(context.DueAt))
 		}
 		if context.AmountMinor < 0 {
-			return "Neue Abrechnung", fmt.Sprintf("Die Abrechnung „%s“ ist bereit und weist ein Guthaben über %s aus.", label, formatEmailMoney(-context.AmountMinor, context.Currency))
+			return "Neue Abrechnung", fmt.Sprintf("Die Abrechnung „%s“ ist bereit. Dein Guthaben beträgt %s.", label, formatEmailMoney(-context.AmountMinor, context.Currency))
 		}
 		return "Neue Abrechnung", fmt.Sprintf("Die Abrechnung „%s“ ist bereit. Es ist keine Zahlung offen.", label)
 	case notifications.TypeSettlementDueSoon:
-		return "Settlement due soon", "An open settlement in your TeamTaler group is due soon."
+		return "Abrechnung bald fällig", "Eine offene Abrechnung in deiner TeamTaler-Gruppe ist bald fällig."
 	case notifications.TypeSettlementOverdue:
-		return "Settlement overdue", "A settlement in your TeamTaler group is overdue."
+		return "Abrechnung überfällig", "Eine offene Abrechnung in deiner TeamTaler-Gruppe ist überfällig."
 	default:
 		return "Neue Benachrichtigung", "In deiner TeamTaler-Gruppe gibt es eine neue Aktivität."
 	}

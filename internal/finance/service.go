@@ -713,7 +713,7 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 		if notifyTarget && membership.ID != input.MembershipID && memberStatus != domain.MembershipStatusDeleted {
 			if _, err := s.Notifications.CreateTx(ctx, tx, notifications.CreateInput{
 				GroupID: membership.GroupID, MembershipID: input.MembershipID,
-				Type: notifications.TypePaymentRecorded, Title: "Payment recorded", Body: "A payment was added to your account.",
+				Type: notifications.TypePaymentRecorded, Title: "Zahlung eingegangen", Body: "Deinem Konto wurde eine Zahlung gutgeschrieben.",
 				ResourceType: "payment", ResourceID: paymentID, CreatedAt: now,
 				Context: notifications.EventContext{ActorName: membership.DisplayName, AmountMinor: input.AmountMinor, Currency: currency},
 			}); err != nil {
@@ -1097,7 +1097,7 @@ func (s Service) ReversePayment(ctx context.Context, actor domain.Principal, mem
 		if membership.ID != targetMembershipID && !targetDeletedAt.Valid {
 			if _, err := s.Notifications.CreateTx(ctx, tx, notifications.CreateInput{
 				GroupID: membership.GroupID, MembershipID: targetMembershipID,
-				Type: notifications.TypePaymentReversed, Title: "Payment reversed", Body: "A payment on your account was reversed.",
+				Type: notifications.TypePaymentReversed, Title: "Zahlung storniert", Body: "Eine Zahlung auf deinem Konto wurde storniert.",
 				ResourceType: "payment", ResourceID: paymentID, CreatedAt: now,
 				Context: notifications.EventContext{ActorName: membership.DisplayName, AmountMinor: amountMinor, Currency: currency},
 			}); err != nil {

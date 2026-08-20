@@ -130,7 +130,7 @@ func TestNotificationDispatcherSendsPrivacySafeCatalogPayload(t *testing.T) {
 	if err := json.Unmarshal(calls[0].payload, &payload); err != nil {
 		t.Fatalf("decode payload: %v", err)
 	}
-	if payload["notificationId"] != "ntf_push" || payload["groupName"] != "Example Group" || payload["eventLabel"] != "A booking was assigned in your group." {
+	if payload["notificationId"] != "ntf_push" || payload["groupName"] != "Example Group" || payload["eventLabel"] != "In deiner Gruppe wurde etwas auf dein Konto gebucht." {
 		t.Fatalf("unexpected push payload: %#v", payload)
 	}
 	if strings.Contains(string(calls[0].payload), "500") || strings.Contains(string(calls[0].payload), "Secret title") {

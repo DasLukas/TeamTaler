@@ -150,9 +150,11 @@ describe('SystemSettingsPanel', () => {
   it('loads all six instance-administration areas in parallel', async () => {
     renderPanel();
 
-    for (const name of ['Allgemein', 'E-Mail (SMTP)', 'Web Push', 'Zugriff und Wartung', 'Gruppenverwaltung', 'Systemaktivität']) {
+    for (const name of ['Allgemein', 'E-Mail', 'Push-Benachrichtigungen', 'Zugriff und Wartung', 'Gruppenverwaltung', 'Systemaktivität']) {
       expect(await screen.findByRole('heading', { name })).toBeVisible();
     }
+    expect(screen.getByText(i18n.t('systemSettings.smtp.intro'))).toBeVisible();
+    expect(screen.getByText(i18n.t('systemSettings.smtp.enabledHint'))).toBeVisible();
     expect(screen.getByText('admin@example.test')).toBeVisible();
     expect(screen.getByText('Group A')).toBeVisible();
     const groupCard = screen.getByText('Group A').closest('article');
@@ -174,6 +176,34 @@ describe('SystemSettingsPanel', () => {
     await user.click(within(dialog).getByRole('button', { name: i18n.t('systemSettings.webPush.generateKey') }));
 
     await waitFor(() => expect(apiMock.generateSystemWebPushKey).toHaveBeenCalledWith(4));
+  });
+
+  it('renders active Web Push details as three accessible status rows', async () => {
+    apiMock.getSystemSettings.mockResolvedValue({
+      ...settings,
+      webPush: {
+        ...settings.webPush,
+        enabled: value(true, 'ENVIRONMENT'),
+        privateKeyConfigured: true,
+        publicKey: 'public-key',
+        keyId: 'key-id',
+        configurationValid: true,
+        active: true,
+        revision: 1,
+      },
+    });
+    renderPanel();
+
+    const section = (await screen.findByRole('heading', { name: i18n.t('systemSettings.webPush.title') })).closest('section');
+    if (!section) throw new Error('Missing Web Push settings section.');
+    const rows = Array.from(section.querySelectorAll('dl > div'));
+
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toHaveTextContent(`${i18n.t('systemSettings.webPush.key')}:`);
+    expect(rows[0]).toHaveTextContent(i18n.t('systemSettings.webPush.configured'));
+    expect(rows[1]).toHaveTextContent(`${i18n.t('systemSettings.webPush.keyId')}:`);
+    expect(rows[2]).toHaveTextContent(`${i18n.t('common.status')}:`);
+    expect(within(rows[2] as HTMLElement).getByRole('img', { name: i18n.t('systemSettings.webPush.active') })).toBeVisible();
   });
 
   it('keeps VAPID key generation disabled without the independent storage key', async () => {
@@ -284,7 +314,7 @@ describe('SystemSettingsPanel', () => {
     apiMock.getSystemSettings.mockResolvedValue(overriddenSettings);
     renderPanel();
 
-    for (const name of ['Allgemein', 'E-Mail (SMTP)', 'Zugriff und Wartung']) {
+    for (const name of ['Allgemein', 'E-Mail', 'Zugriff und Wartung']) {
       const heading = await screen.findByRole('heading', { name });
       const section = heading.closest('section');
       if (!section) throw new Error(`Missing ${name} settings section.`);
@@ -317,12 +347,12 @@ describe('SystemSettingsPanel', () => {
   it('requires confirmation before resetting SMTP overrides', async () => {
     const user = userEvent.setup();
     renderPanel();
-    const heading = await screen.findByRole('heading', { name: 'E-Mail (SMTP)' });
+    const heading = await screen.findByRole('heading', { name: 'E-Mail' });
     const section = heading.closest('section');
     if (!section) throw new Error('Missing SMTP settings section.');
 
     await user.click(within(section).getByRole('button', { name: 'Zurücksetzen' }));
-    const dialog = screen.getByRole('dialog', { name: 'E-Mail (SMTP) zurücksetzen?' });
+    const dialog = screen.getByRole('dialog', { name: 'E-Mail zurücksetzen?' });
     expect(apiMock.resetSystemSmtp).not.toHaveBeenCalled();
     await user.click(within(dialog).getByRole('button', { name: 'Zurücksetzen' }));
 
@@ -482,20 +512,38 @@ describe('SystemSettingsPanel', () => {
   it('enables an exactly tested SMTP revision without resending unchanged connection fields', async () => {
     const user = userEvent.setup();
     renderPanel();
-    const heading = await screen.findByRole('heading', { name: 'E-Mail (SMTP)' });
+    const heading = await screen.findByRole('heading', { name: 'E-Mail' });
     const section = heading.closest('section');
     if (!section) throw new Error('Missing SMTP settings section.');
 
     const verifiedStatus = within(section).getByRole('status');
     expect(verifiedStatus).toHaveAttribute('data-status', 'verified');
-    expect(within(verifiedStatus).getByText('Erfolgreich geprüft')).toBeVisible();
-    expect(verifiedStatus.querySelector('svg')).toBeInTheDocument();
-    expect(verifiedStatus.nextElementSibling).toContainElement(within(section).getByRole('button', { name: 'Testmail senden' }));
+    expect(within(verifiedStatus).getByText('Versand erfolgreich geprüft')).toBeVisible();
+    const statusList = verifiedStatus.closest('dl');
+    expect(statusList).toHaveTextContent('Status:');
+    expect(statusList?.nextElementSibling).toContainElement(within(section).getByRole('button', { name: 'Test-E-Mail senden' }));
 
-    await user.click(within(section).getByRole('switch', { name: 'SMTP-Versand aktiviert' }));
+    await user.click(within(section).getByRole('switch', { name: 'E-Mail senden' }));
     await user.click(within(section).getByRole('button', { name: 'Speichern' }));
 
     await waitFor(() => expect(apiMock.updateSystemSmtp).toHaveBeenCalledWith({ enabled: true }, 4));
+  });
+
+  it('shows the compact active SMTP status above the shared action row', async () => {
+    apiMock.getSystemSettings.mockResolvedValue({
+      ...settings,
+      smtp: { ...settings.smtp, active: true, enabled: value(true) },
+    });
+    renderPanel();
+    const heading = await screen.findByRole('heading', { name: 'E-Mail' });
+    const section = heading.closest('section');
+    if (!section) throw new Error('Missing SMTP settings section.');
+
+    const activeStatus = within(section).getByRole('status');
+    expect(activeStatus).toHaveAttribute('data-status', 'active');
+    expect(within(activeStatus).getByRole('img', { name: 'Aktiv' })).toBeVisible();
+    expect(activeStatus.closest('dl')).toHaveTextContent('Status:');
+    expect(activeStatus.closest('dl')?.nextElementSibling).toContainElement(within(section).getByRole('button', { name: 'Test-E-Mail senden' }));
   });
 
   it('disables SMTP configuration fields while delivery is off and unlocks them with the switch', async () => {
@@ -505,25 +553,24 @@ describe('SystemSettingsPanel', () => {
       smtp: { ...settings.smtp, configurationValid: false, testStatus: 'UNTESTED', testedAt: null, testedRevision: null },
     });
     renderPanel();
-    const heading = await screen.findByRole('heading', { name: 'E-Mail (SMTP)' });
+    const heading = await screen.findByRole('heading', { name: 'E-Mail' });
     const section = heading.closest('section');
     if (!section) throw new Error('Missing SMTP settings section.');
 
     const configurationFields = [
-      within(section).getByLabelText('SMTP-Host'),
+      within(section).getByLabelText('E-Mail-Server'),
       within(section).getByLabelText('Port'),
-      within(section).getByLabelText('Transportverschlüsselung'),
+      within(section).getByLabelText('Verschlüsselung'),
       within(section).getByLabelText('Benutzername'),
       within(section).getByLabelText('Passwort'),
-      within(section).getByLabelText('Absenderadresse'),
+      within(section).getByLabelText('Absender-E-Mail-Adresse'),
       within(section).getByLabelText('Absendername (optional)'),
     ];
-    const enabledSwitch = within(section).getByRole('switch', { name: 'SMTP-Versand aktiviert' });
+    const enabledSwitch = within(section).getByRole('switch', { name: 'E-Mail senden' });
     const untestedStatus = within(section).getByRole('status');
     expect(within(section).getByLabelText('Port')).toHaveValue(587);
     expect(enabledSwitch).toBeEnabled();
-    expect(within(untestedStatus).getByText('Noch nicht getestet')).toBeVisible();
-    expect(within(untestedStatus).getByText('Sende eine Testmail, um den E-Mail-Versand zu prüfen.')).toBeVisible();
+    expect(within(untestedStatus).getByText('Noch nicht geprüft')).toBeVisible();
     for (const field of configurationFields) expect(field).toBeDisabled();
 
     await user.click(enabledSwitch);
@@ -545,7 +592,7 @@ describe('SystemSettingsPanel', () => {
       smtp: { ...settings.smtp, active: true, enabled: value(true) },
     });
     renderPanel();
-    const heading = await screen.findByRole('heading', { name: 'E-Mail (SMTP)' });
+    const heading = await screen.findByRole('heading', { name: 'E-Mail' });
     const section = heading.closest('section');
     if (!section) throw new Error('Missing SMTP settings section.');
 
@@ -566,12 +613,12 @@ describe('SystemSettingsPanel', () => {
   it('saves changed SMTP connection values disabled until their revision is tested', async () => {
     const user = userEvent.setup();
     renderPanel();
-    const heading = await screen.findByRole('heading', { name: 'E-Mail (SMTP)' });
+    const heading = await screen.findByRole('heading', { name: 'E-Mail' });
     const section = heading.closest('section');
     if (!section) throw new Error('Missing SMTP settings section.');
 
-    await user.click(within(section).getByRole('switch', { name: 'SMTP-Versand aktiviert' }));
-    const host = within(section).getByLabelText('SMTP-Host');
+    await user.click(within(section).getByRole('switch', { name: 'E-Mail senden' }));
+    const host = within(section).getByLabelText('E-Mail-Server');
     await user.clear(host);
     await user.type(host, 'smtp.changed.test');
     await user.click(within(section).getByRole('button', { name: 'Speichern' }));
@@ -583,7 +630,7 @@ describe('SystemSettingsPanel', () => {
     const user = userEvent.setup();
     apiMock.getSystemSettings.mockResolvedValue({ ...settings, smtp: { ...settings.smtp, active: true, enabled: value(true) } });
     renderPanel();
-    const heading = await screen.findByRole('heading', { name: 'E-Mail (SMTP)' });
+    const heading = await screen.findByRole('heading', { name: 'E-Mail' });
     const section = heading.closest('section');
     if (!section) throw new Error('Missing SMTP settings section.');
 
@@ -604,18 +651,17 @@ describe('SystemSettingsPanel', () => {
       .mockResolvedValueOnce({ ...settings, smtp: { ...settings.smtp, testStatus: 'FAILED' } });
     apiMock.testSystemSmtp.mockRejectedValue(new Error('SMTP unavailable'));
     renderPanel();
-    const heading = await screen.findByRole('heading', { name: 'E-Mail (SMTP)' });
+    const heading = await screen.findByRole('heading', { name: 'E-Mail' });
     const section = heading.closest('section');
     if (!section) throw new Error('Missing SMTP settings section.');
 
-    await user.click(within(section).getByRole('button', { name: 'Testmail senden' }));
+    await user.click(within(section).getByRole('button', { name: 'Test-E-Mail senden' }));
 
     await waitFor(() => expect(apiMock.getSystemSettings).toHaveBeenCalledTimes(2));
     const failedStatus = await within(section).findByRole('alert');
     expect(failedStatus).toHaveAttribute('data-status', 'failed');
-    expect(within(failedStatus).getByText('Test fehlgeschlagen')).toBeVisible();
-    expect(within(failedStatus).getByText('Die Testmail konnte nicht gesendet werden. Prüfe die SMTP-Daten und versuche es erneut.')).toBeVisible();
-    expect(failedStatus.querySelector('svg')).toBeInTheDocument();
+    expect(within(failedStatus).getByText('Prüfung fehlgeschlagen')).toBeVisible();
+    expect(failedStatus.querySelector('svg')).not.toBeInTheDocument();
   });
 
   it('shows the current impact and requires only the exact group name before purge', async () => {

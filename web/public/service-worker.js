@@ -18,7 +18,7 @@ self.addEventListener('push', (event) => {
   }
   const notificationId = typeof payload.notificationId === 'string' ? payload.notificationId : '';
   const groupName = typeof payload.groupName === 'string' && payload.groupName ? payload.groupName : 'TeamTaler';
-  const eventLabel = typeof payload.eventLabel === 'string' && payload.eventLabel ? payload.eventLabel : 'New notification';
+  const eventLabel = typeof payload.eventLabel === 'string' && payload.eventLabel ? payload.eventLabel : 'Neue Benachrichtigung';
   const route = safeRelativeRoute(payload.route);
   const separator = route.includes('?') ? '&' : '?';
   const url = notificationId ? `${route}${separator}notification=${encodeURIComponent(notificationId)}` : route;
