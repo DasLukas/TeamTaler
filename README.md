@@ -13,7 +13,7 @@ This README is the primary entry point for the person who installs and operates 
 - Searchable, column-filterable, sortable operational tables with shareable filter state, cursor-backed loading, and complete horizontally scrollable mobile columns.
 - Individual invitations, CSV invitation imports, public join links, and temporary guest accounts.
 - Local accounts with profile images, password recovery, verified email changes, and server-side sessions.
-- In-app notifications and optional SMTP delivery.
+- In-app notifications plus independently configurable SMTP and standards-based Web Push delivery.
 - Global system administration for instance settings and the complete group lifecycle.
 - Reversible group archival and strongly protected permanent group deletion.
 - Application-consistent backups containing SQLite data and referenced media.
@@ -29,7 +29,8 @@ A supported production deployment requires:
 - a local persistent filesystem for the `teamtaler-data` volume;
 - an existing HTTPS reverse proxy such as Caddy, Nginx, Traefik, or Nginx Proxy Manager;
 - a DNS name and valid TLS certificate for browser access;
-- optionally, a TLS-capable SMTP relay for automatic email delivery.
+- optionally, a TLS-capable SMTP relay for automatic email delivery;
+- optionally, browser Web Push credentials for installable desktop, Android, and iOS Home Screen web apps.
 
 SQLite on NFS, SMB, or another network filesystem is unsupported. TeamTaler does not terminate TLS, request certificates, provide an external database, or support horizontal application replicas.
 
@@ -75,6 +76,8 @@ openssl rand -base64 32
 ```
 
 Store the result in `.env` as `TEAMTALER_EMAIL_TOKEN_KEY`. Keep this value secret, outside version control, and available during restores. Losing or changing it invalidates encrypted pending email material and a stored SMTP password.
+
+Web Push uses an independent storage key. Generate another random 32-byte value for `TEAMTALER_PUSH_STORAGE_KEY`, then create the VAPID identity with `teamtaler admin system web-push generate`. Back up both values securely; rotating the VAPID identity deliberately requires browsers to register a new subscription.
 
 The standard Compose deployment supplies the correct container paths. Do not change `TEAMTALER_LISTEN`, `TEAMTALER_DATA_DIR`, `TEAMTALER_DATABASE_PATH`, or `TEAMTALER_WEB_DIR` unless the corresponding mounts and deployment procedures are changed deliberately.
 
@@ -153,6 +156,7 @@ TeamTaler separates immutable host configuration from runtime-editable instance 
 | `TEAMTALER_VERSION` | current release | Pinned image tag and application version. |
 | `TEAMTALER_MAX_REQUEST_BYTES` | `6291456` | Request-body ceiling for ordinary API operations. Media routes instead follow the live media setting plus a fixed multipart reserve. |
 | `TEAMTALER_EMAIL_TOKEN_KEY` | unset | Base64-encoded 32-byte key for encrypted email proofs and stored SMTP credentials. |
+| `TEAMTALER_PUSH_STORAGE_KEY` | unset | Independent base64-encoded 32-byte key for VAPID overrides and encrypted browser subscriptions. |
 | `TEAMTALER_SMTP_ALLOW_PRIVATE_NETWORK` | `false` | Allows web-configured SMTP targets on private or local networks. Enable only for a trusted private relay requirement. |
 | `TEAMTALER_SMTP_TEST_RECIPIENT` | empty | Optional immutable mailbox for operator-triggered SMTP test messages. Normal application email is unaffected. |
 
@@ -168,6 +172,9 @@ The standard container also uses fixed runtime paths from `.env.example`. Detail
 | `TEAMTALER_PUBLIC_JOIN_ENABLED` | `true` | Global availability of otherwise valid public join links. |
 | `TEAMTALER_MAINTENANCE_MODE` | `false` | Read-only maintenance policy. Login, reads, logout, health checks, and system administration remain available. |
 | `TEAMTALER_MAINTENANCE_MESSAGE` | empty | Short public maintenance notice. |
+| `TEAMTALER_WEB_PUSH_ENABLED` | `false` | Enables Web Push only when the subject, VAPID private key, and storage key are complete. |
+| `TEAMTALER_WEB_PUSH_SUBJECT` | empty | VAPID contact as `mailto:` or an absolute HTTPS URL. |
+| `TEAMTALER_WEB_PUSH_VAPID_PRIVATE_KEY` | empty | Secret URL-safe VAPID P-256 private key; the public key is derived by the server. |
 
 The media limit is editable without a restart through the System tab or `teamtaler admin system settings set --media-upload-max-bytes ...`. It must be a whole MiB value from 1 MiB through 25 MiB. The server automatically applies that live value plus multipart reserve to avatar, group-logo, and product-image requests; `TEAMTALER_MAX_REQUEST_BYTES` does not cap those routes. Immutable image-decoder protections still limit dimensions, pixel count, and normalized output size. If a reverse proxy is used, configure its body limit for at least 26 MiB so it does not override TeamTaler's runtime setting.
 
@@ -198,6 +205,14 @@ The System tab and local CLI can send a test message through either effective co
 The disposable `make test-server` fixture always keeps the stable `admin@example.test` administrator login. When complete SMTP credentials are loaded from `.env.test-server.local`, the script routes operator-triggered SMTP test messages to `TEAMTALER_SMTP_FROM_ADDRESS` through `TEAMTALER_SMTP_TEST_RECIPIENT`; other application email flows retain their actual fixture recipients. The shared development password printed by the script remains unchanged.
 
 Runtime SMTP targets are restricted to public network addresses by default. The exact host and port supplied by the immutable environment SMTP block remain allowed for an existing private relay. Set `TEAMTALER_SMTP_ALLOW_PRIVATE_NETWORK=true` only when system administrators must configure additional private targets and are trusted with that network access.
+
+### Web Push notifications
+
+TeamTaler implements the browser Push API directly with VAPID; it does not require Firebase or another notification provider. Configure Web Push through `.env`, **Settings → System → Web Push**, or the local operator CLI. A complete environment configuration needs `TEAMTALER_WEB_PUSH_ENABLED=true`, a valid VAPID subject and private key, and the separate `TEAMTALER_PUSH_STORAGE_KEY`. An explicitly enabled but incomplete environment block prevents startup.
+
+Permission is requested only after a signed-in user selects **Enable push notifications**. Each browser installation becomes an account-owned device that can be renamed or revoked. Browser consent is reconciled only for the same account; switching accounts requires a new explicit opt-in and replaces any unknown prior browser subscription. iPhone and iPad users must first install TeamTaler on the Home Screen. Push messages deliberately contain only the group name, generic event copy, a relative route, and an opaque notification identifier; member names, products, amounts, and due dates remain behind authenticated in-app navigation.
+
+System administrators control whether email and push channels are available. Group administrators choose the allowed event types and settlement-reminder schedule. Every member then selects email and push independently for each allowed event; selecting both produces both deliveries, while the in-app inbox remains the canonical history. Existing security, invitation, password-reset, and email-verification messages are transactional and are not optional notification events.
 
 ## System administration
 
@@ -315,6 +330,18 @@ docker compose exec app teamtaler admin system smtp set \
 ```
 
 When exactly one active system administrator exists, `smtp test` may omit `--email`. With multiple assignments, select the audited recipient explicitly.
+
+### Web Push
+
+```sh
+teamtaler admin system web-push show [--json]
+teamtaler admin system web-push generate [--revision VERSION] [--confirm-rotation] [--json]
+teamtaler admin system web-push set [--revision VERSION] [--enabled true|false] [--subject SUBJECT] [--private-key-stdin] [--confirm-rotation] [--json]
+teamtaler admin system web-push test [--email ADMIN_EMAIL] [--subscription-id DEVICE_ID] [--json]
+teamtaler admin system web-push reset [--revision VERSION] [--json]
+```
+
+Private key input is accepted only from standard input or an interactive terminal. Replacing an existing VAPID identity requires `--confirm-rotation`; a rotation advances the public key identifier, and browsers reconcile and replace subscriptions on their next authenticated visit. When exactly one active system administrator exists, `web-push test` may omit `--email`.
 
 ### Group lifecycle
 

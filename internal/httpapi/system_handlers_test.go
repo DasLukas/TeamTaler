@@ -346,6 +346,69 @@ func TestHostDefaultSMTPTestAttemptsDeliveryWithoutPersistingRevisionStatus(t *t
 	}
 }
 
+func TestSystemWebPushKeyRotationRequiresExplicitConfirmation(t *testing.T) {
+	fixture := newSystemHTTPFixture(t, func(configuration *config.Config) {
+		configuration.PushStorageKey = bytes.Repeat([]byte{0x24}, 32)
+	})
+	settingsResponse := fixture.serve(fixture.bootstrap, http.MethodGet, "/api/v1/system/settings", "", "")
+	if settingsResponse.Code != http.StatusOK {
+		t.Fatalf("get settings status=%d body=%s", settingsResponse.Code, settingsResponse.Body.String())
+	}
+
+	generated := fixture.serve(
+		fixture.bootstrap,
+		http.MethodPost,
+		"/api/v1/system/settings/web-push/generate-key",
+		"",
+		settingsResponse.Header().Get("ETag"),
+	)
+	if generated.Code != http.StatusOK {
+		t.Fatalf("initial Web Push key generation status=%d body=%s", generated.Code, generated.Body.String())
+	}
+	var initial systemadmin.Settings
+	if err := json.Unmarshal(generated.Body.Bytes(), &initial); err != nil {
+		t.Fatalf("decode generated Web Push settings: %v", err)
+	}
+	if !initial.WebPush.VAPIDPrivateKey.Configured || initial.WebPush.KeyID == "" || initial.WebPush.PublicKey == "" {
+		t.Fatalf("initial Web Push key metadata is incomplete: %#v", initial.WebPush)
+	}
+	if bytes.Contains(generated.Body.Bytes(), []byte("privateKey")) {
+		t.Fatal("Web Push private key field appeared in settings response")
+	}
+
+	rejected := fixture.serve(
+		fixture.bootstrap,
+		http.MethodPost,
+		"/api/v1/system/settings/web-push/generate-key",
+		`{}`,
+		generated.Header().Get("ETag"),
+	)
+	if rejected.Code != http.StatusConflict {
+		t.Fatalf("unconfirmed Web Push rotation status=%d body=%s, want 409", rejected.Code, rejected.Body.String())
+	}
+
+	rotated := fixture.serve(
+		fixture.bootstrap,
+		http.MethodPost,
+		"/api/v1/system/settings/web-push/generate-key",
+		`{"confirmRotation":true}`,
+		generated.Header().Get("ETag"),
+	)
+	if rotated.Code != http.StatusOK {
+		t.Fatalf("confirmed Web Push rotation status=%d body=%s", rotated.Code, rotated.Body.String())
+	}
+	var current systemadmin.Settings
+	if err := json.Unmarshal(rotated.Body.Bytes(), &current); err != nil {
+		t.Fatalf("decode rotated Web Push settings: %v", err)
+	}
+	if current.WebPush.KeyID == "" || current.WebPush.KeyID == initial.WebPush.KeyID {
+		t.Fatalf("Web Push key ID was not rotated: before=%q after=%q", initial.WebPush.KeyID, current.WebPush.KeyID)
+	}
+	if current.Revision <= initial.Revision || current.WebPush.Revision <= initial.WebPush.Revision {
+		t.Fatalf("Web Push revisions did not advance: before=%#v after=%#v", initial.WebPush, current.WebPush)
+	}
+}
+
 type systemHTTPFixture struct {
 	db            *sql.DB
 	handler       http.Handler

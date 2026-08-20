@@ -7,16 +7,20 @@ import {
   adaptCategories,
   adaptDashboard,
   adaptGroupSettings,
+  adaptGroupNotificationSettings,
   adaptInstanceCapabilities,
   adaptTransactionSettings,
   adaptLedger,
   adaptMembership,
   adaptMemberships,
   adaptNotification,
+  adaptNotificationDestination,
+  adaptNotificationPreferences,
   adaptPermissionDefinition,
   adaptPayment,
   adaptPeriod,
   adaptProduct,
+  adaptPushSubscriptions,
   adaptRole,
   adaptRoleAssignment,
   adaptSession,
@@ -60,6 +64,8 @@ import type {
   LedgerEntry,
   LoginCommand,
   GroupPreference,
+  GroupNotificationSettings,
+  GroupNotificationSettingsUpdate,
   GroupSettings,
   GroupSettingsUpdateInput,
   InstanceCapabilities,
@@ -67,6 +73,9 @@ import type {
   Membership,
   MemberReactivationCommand,
   Notification,
+  NotificationDestination,
+  NotificationPreferences,
+  NotificationPreferencesUpdate,
   NotificationPage,
   NotificationReadResult,
   NotificationSummary,
@@ -80,6 +89,8 @@ import type {
   ProblemDetails,
   AuditCollectionQuery,
   Product,
+  PushSubscriptionDevice,
+  PushSubscriptionRegistration,
   ProductCreateCommand,
   ProductUpdateCommand,
   PublicJoinLink,
@@ -103,6 +114,7 @@ import type {
   SystemSettings,
   SystemSettingsUpdate,
   SystemSmtpSettingsUpdate,
+  SystemWebPushSettingsUpdate,
   User,
 } from './types';
 import i18n from '@/i18n';
@@ -394,6 +406,25 @@ export const api = {
     method: 'POST',
     headers: versionHeaders(revision),
   })),
+  updateSystemWebPush: async (update: SystemWebPushSettingsUpdate, revision: number): Promise<SystemSettings> => adaptSystemSettings(await request<unknown>('/system/settings/web-push', {
+    method: 'PUT',
+    headers: versionHeaders(revision),
+    body: json(update),
+  })),
+  resetSystemWebPush: async (revision: number): Promise<SystemSettings> => adaptSystemSettings(await request<unknown>('/system/settings/web-push', {
+    method: 'DELETE',
+    headers: versionHeaders(revision),
+  })),
+  generateSystemWebPushKey: async (revision: number): Promise<SystemSettings> => adaptSystemSettings(await request<unknown>('/system/settings/web-push/generate-key', {
+    method: 'POST',
+    headers: versionHeaders(revision),
+    body: json({ confirmRotation: true }),
+  })),
+  testSystemWebPush: async (revision: number, subscriptionId?: string): Promise<SystemSettings> => adaptSystemSettings(await request<unknown>('/system/settings/web-push/test', {
+    method: 'POST',
+    headers: versionHeaders(revision),
+    ...(subscriptionId ? { body: json({ subscriptionId }) } : {}),
+  })),
   searchSystemAccounts: async (query = ''): Promise<SystemAccount[]> => {
     const parameters = new URLSearchParams();
     if (query.trim()) parameters.set('q', query.trim());
@@ -450,6 +481,16 @@ export const api = {
     return request<{ avatarUrl: string }>('/me/avatar', { method: 'POST', body: form });
   },
   removeProfileAvatar: async (): Promise<void> => request<void>('/me/avatar', { method: 'DELETE' }),
+  getPushSubscriptions: async (): Promise<PushSubscriptionDevice[]> => adaptPushSubscriptions(await request<unknown>('/me/push-subscriptions')),
+  registerPushSubscription: async (input: PushSubscriptionRegistration): Promise<PushSubscriptionDevice> => adaptPushSubscriptions([await request<unknown>('/me/push-subscriptions', {
+    method: 'POST',
+    body: json(input),
+  })])[0],
+  renamePushSubscription: async (subscriptionId: string, label: string): Promise<PushSubscriptionDevice> => adaptPushSubscriptions([await request<unknown>(`/me/push-subscriptions/${encodeURIComponent(subscriptionId)}`, {
+    method: 'PATCH',
+    body: json({ label }),
+  })])[0],
+  deletePushSubscription: async (subscriptionId: string): Promise<void> => request<void>(`/me/push-subscriptions/${encodeURIComponent(subscriptionId)}`, { method: 'DELETE' }),
   login: async (command: LoginCommand): Promise<Session> => setSessionActor(adaptSession(await request<unknown>('/auth/login', { method: 'POST', body: json(command) }))),
   logout: async (): Promise<void> => {
     try {
@@ -531,6 +572,27 @@ export const api = {
   },
   updateGroupName: async (groupId: string, name: string): Promise<{ name: string }> => request<{ name: string }>(groupRootPath(groupId), { method: 'PATCH', body: json({ name }) }),
   getGroupSettings: async (groupId: string): Promise<GroupSettings> => adaptGroupSettings(await request<unknown>(groupPath(groupId, 'settings'))),
+  getGroupNotificationSettings: async (groupId: string): Promise<GroupNotificationSettings> => adaptGroupNotificationSettings(await request<unknown>(groupPath(groupId, 'notification-settings'))),
+  updateGroupNotificationSettings: async (groupId: string, settings: GroupNotificationSettingsUpdate): Promise<GroupNotificationSettings> => adaptGroupNotificationSettings(await request<unknown>(groupPath(groupId, 'notification-settings'), {
+    method: 'PUT',
+    headers: versionHeaders(settings.version),
+    body: json({
+      timezone: settings.timezone,
+      dueSoonLeadDays: settings.dueSoonLeadDays,
+      overdueRepeatDays: settings.overdueRepeatDays,
+      events: settings.events.map((event) => ({ type: event.eventType, enabled: event.enabled })),
+    }),
+  })),
+  getNotificationPreferences: async (groupId: string): Promise<NotificationPreferences> => adaptNotificationPreferences(await request<unknown>(groupPath(groupId, 'notification-preferences'))),
+  updateNotificationPreferences: async (groupId: string, preferences: NotificationPreferencesUpdate): Promise<NotificationPreferences> => adaptNotificationPreferences(await request<unknown>(groupPath(groupId, 'notification-preferences'), {
+    method: 'PUT',
+    headers: versionHeaders(preferences.version),
+    body: json({ events: preferences.events.map((event) => ({
+      type: event.eventType,
+      ...(event.email !== undefined ? { email: event.email } : {}),
+      ...(event.push !== undefined ? { push: event.push } : {}),
+    })) }),
+  })),
   getTransactionSettings: async (groupId: string): Promise<TransactionSettings> => adaptTransactionSettings(await request<unknown>(groupPath(groupId, 'transaction-settings'))),
   updateGroupSettings: async (groupId: string, settings: GroupSettingsUpdateInput): Promise<GroupSettings> => adaptGroupSettings(await request<unknown>(groupPath(groupId, 'settings'), {
     method: 'PATCH',
@@ -659,6 +721,9 @@ export const api = {
     const response = await requestWithMetadata<unknown[]>(`${groupPath(groupId, 'notifications')}?${query.toString()}`);
     return { items: response.data.map(adaptNotification), nextCursor: response.headers.get('X-Next-Cursor') ?? undefined };
   },
+  getNotificationDestination: async (notificationId: string): Promise<NotificationDestination> => adaptNotificationDestination(
+    await request<unknown>(`/me/notifications/${encodeURIComponent(notificationId)}/destination`),
+  ),
   getNotificationSummary: (groupId: string): Promise<NotificationSummary> => request<NotificationSummary>(groupPath(groupId, 'notifications/summary')),
   markNotificationsRead: (groupId: string, notificationIds: string[]): Promise<NotificationReadResult> => request<NotificationReadResult>(groupPath(groupId, 'notifications/read'), { method: 'PATCH', body: json({ notificationIds }) }),
   markNotificationRead: async (groupId: string, notificationId: string): Promise<Notification> => adaptNotification(await request<unknown>(groupPath(groupId, `notifications/${notificationId}`), { method: 'PATCH', body: json({ read: true }) })),

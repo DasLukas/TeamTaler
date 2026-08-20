@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import Bell from 'lucide-react/dist/esm/icons/bell';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -9,6 +9,7 @@ import { useActiveGroup } from '@/app/useActiveGroup';
 import { Page } from '@/components/layout/Page';
 import { Button } from '@/components/ui/Button';
 import { StatePanel } from '@/components/ui/StatePanel';
+import { notificationIdFromHref } from './notificationDeepLink';
 import { notificationSummaryKey } from './notification-summary';
 import styles from './NotificationsPage.module.css';
 
@@ -22,7 +23,7 @@ const notificationListKey = (groupId: string) => ['notifications', groupId] as c
  */
 export function NotificationsPage() {
   const { t } = useTranslation();
-  const { activeGroupId } = useActiveGroup();
+  const { activeGroupId, session, setActiveGroupId } = useActiveGroup();
   const queryClient = useQueryClient();
   const listRef = useRef<HTMLDivElement>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
@@ -32,6 +33,33 @@ export function NotificationsPage() {
   const mutationBusy = useRef(false);
   const flushRef = useRef<() => void>(() => undefined);
   const [acknowledgementFailed, setAcknowledgementFailed] = useState(false);
+  const focusedNotificationId = notificationIdFromHref(window.location.href);
+
+  const destinationQuery = useQuery({
+    queryKey: ['notification-destination', focusedNotificationId],
+    queryFn: () => api.getNotificationDestination(focusedNotificationId as string),
+    enabled: Boolean(focusedNotificationId),
+    retry: false,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+  });
+  const handledDestinations = useRef(new Set<string>());
+  const destinationGroupId = destinationQuery.data?.groupId;
+  const knownDestination = Boolean(destinationGroupId && session.groups.some((group) => group.id === destinationGroupId));
+  const switchingDestination = Boolean(knownDestination && destinationGroupId !== activeGroupId);
+
+  useEffect(() => {
+    if (!focusedNotificationId || !destinationGroupId) return;
+    const key = `${focusedNotificationId}:${destinationGroupId}`;
+    if (handledDestinations.current.has(key)) return;
+    handledDestinations.current.add(key);
+    if (!session.groups.some((group) => group.id === destinationGroupId)) return;
+    if (destinationGroupId !== activeGroupId) setActiveGroupId(destinationGroupId, { preserveRoute: true });
+    void Promise.all([
+      queryClient.invalidateQueries({ queryKey: notificationListKey(destinationGroupId), exact: true }),
+      queryClient.invalidateQueries({ queryKey: notificationSummaryKey(destinationGroupId), exact: true }),
+    ]);
+  }, [activeGroupId, destinationGroupId, focusedNotificationId, queryClient, session.groups, setActiveGroupId]);
 
   const notificationsQuery = useInfiniteQuery({
     queryKey: notificationListKey(activeGroupId),
@@ -117,6 +145,13 @@ export function NotificationsPage() {
 
   const notifications = useMemo(() => notificationsQuery.data?.pages.flatMap((page) => page.items) ?? [], [notificationsQuery.data]);
   const unreadSignature = notifications.filter((item) => !item.readAt).map((item) => item.id).join('|');
+  useEffect(() => {
+    if (!focusedNotificationId || destinationQuery.isLoading || switchingDestination) return;
+    const card = document.getElementById(`notification-${focusedNotificationId}`);
+    if (!card) return;
+    card.scrollIntoView({ block: 'center' });
+    card.focus({ preventScroll: true });
+  }, [destinationQuery.isLoading, focusedNotificationId, notifications, switchingDestination]);
 
   useEffect(() => {
     const root = listRef.current;
@@ -148,6 +183,9 @@ export function NotificationsPage() {
     };
   }, [retryFailed]);
 
+  if (focusedNotificationId && (destinationQuery.isLoading || switchingDestination)) {
+    return <Page title={t('notifications.title')}><StatePanel kind="loading" /></Page>;
+  }
   if (notificationsQuery.isLoading) return <Page title={t('notifications.title')}><StatePanel kind="loading" /></Page>;
   if (notificationsQuery.isError) return <Page title={t('notifications.title')}><StatePanel kind="error" message={t('notifications.error')} /></Page>;
 
@@ -157,7 +195,7 @@ export function NotificationsPage() {
       {notifications.length === 0 ? <StatePanel kind="empty" message={t('notifications.empty')} /> : (
         <div className={styles.list} ref={listRef}>
           {notifications.map((notification) => (
-            <article className={`${styles.notification} ${notification.readAt ? styles.read : ''}`} data-notification-id={notification.id} data-unread={notification.readAt ? 'false' : 'true'} key={notification.id}>
+            <article className={`${styles.notification} ${notification.readAt ? styles.read : ''}`} data-focused={focusedNotificationId === notification.id || undefined} data-notification-id={notification.id} data-unread={notification.readAt ? 'false' : 'true'} id={`notification-${notification.id}`} key={notification.id} tabIndex={-1}>
               <span className={styles.icon}><Bell aria-hidden="true" size={21} /></span>
               <div><h2>{notification.title}</h2><p>{notification.message}</p><time>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(notification.createdAt))}</time></div>
               <span className={styles.label}>{notification.readAt ? t('notifications.read') : t('notifications.new')}</span>

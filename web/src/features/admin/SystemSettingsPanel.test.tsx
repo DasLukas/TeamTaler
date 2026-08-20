@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SystemSettings } from '@/api/types';
+import i18n from '@/i18n';
 import { SystemSettingsPanel } from './SystemSettingsPanel';
 
 const apiMock = vi.hoisted(() => ({
@@ -13,6 +14,10 @@ const apiMock = vi.hoisted(() => ({
   updateSystemSmtp: vi.fn(),
   resetSystemSmtp: vi.fn(),
   testSystemSmtp: vi.fn(),
+  updateSystemWebPush: vi.fn(),
+  resetSystemWebPush: vi.fn(),
+  generateSystemWebPushKey: vi.fn(),
+  testSystemWebPush: vi.fn(),
   getSystemAdministrators: vi.fn(),
   searchSystemAccounts: vi.fn(),
   getSystemGroups: vi.fn(),
@@ -27,6 +32,7 @@ const apiMock = vi.hoisted(() => ({
 }));
 
 vi.mock('@/api/client', () => ({ api: apiMock }));
+vi.mock('@/app/useSession', () => ({ useSession: () => ({ user: { id: 'system-user' } }) }));
 
 const value = <T,>(settingValue: T, source: 'CODE' | 'ENVIRONMENT' | 'DATABASE' = 'CODE') => ({ value: settingValue, source, overrideVersion: source === 'DATABASE' ? 1 : null, updatedAt: source === 'DATABASE' ? '2026-08-15T10:00:00Z' : null });
 
@@ -57,6 +63,19 @@ const settings: SystemSettings = {
     requiresTest: true,
     configurationValid: true,
     active: false,
+  },
+  webPush: {
+    enabled: value(false),
+    subject: value('mailto:admin@example.test'),
+    privateKeyConfigured: false,
+    privateKeySource: 'CODE',
+    privateKeyUpdatedAt: null,
+    storageKeyConfigured: true,
+    publicKey: null,
+    keyId: null,
+    configurationValid: false,
+    active: false,
+    revision: 0,
   },
   updatedAt: '2026-08-15T10:00:00Z',
   updatedByUserId: 'system-user',
@@ -107,6 +126,10 @@ describe('SystemSettingsPanel', () => {
     apiMock.updateSystemSmtp.mockResolvedValue(settings);
     apiMock.resetSystemSmtp.mockResolvedValue(settings);
     apiMock.testSystemSmtp.mockResolvedValue(settings);
+    apiMock.updateSystemWebPush.mockResolvedValue(settings);
+    apiMock.resetSystemWebPush.mockResolvedValue(settings);
+    apiMock.generateSystemWebPushKey.mockResolvedValue(settings);
+    apiMock.testSystemWebPush.mockResolvedValue(settings);
     apiMock.getSystemAdministrators.mockResolvedValue([{ id: 'system-user', displayName: 'System Admin', email: 'admin@example.test', active: true }]);
     apiMock.searchSystemAccounts.mockResolvedValue([]);
     apiMock.getSystemGroups.mockResolvedValue([archivedGroup]);
@@ -124,10 +147,10 @@ describe('SystemSettingsPanel', () => {
     });
   });
 
-  it('loads all five instance-administration areas in parallel', async () => {
+  it('loads all six instance-administration areas in parallel', async () => {
     renderPanel();
 
-    for (const name of ['Allgemein', 'E-Mail (SMTP)', 'Zugriff und Wartung', 'Gruppenverwaltung', 'Systemaktivität']) {
+    for (const name of ['Allgemein', 'E-Mail (SMTP)', 'Web Push', 'Zugriff und Wartung', 'Gruppenverwaltung', 'Systemaktivität']) {
       expect(await screen.findByRole('heading', { name })).toBeVisible();
     }
     expect(screen.getByText('admin@example.test')).toBeVisible();
@@ -140,6 +163,50 @@ describe('SystemSettingsPanel', () => {
     expect(screen.queryByText('Bestehende Konten werden direkt zugewiesen; neue Adressen erhalten eine Einladung.')).not.toBeInTheDocument();
     expect(screen.queryByText(/Quelle:/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Geändert:/)).not.toBeInTheDocument();
+  });
+
+  it('requires explicit confirmation before generating VAPID key material', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.click(await screen.findByRole('button', { name: i18n.t('systemSettings.webPush.generateKey') }));
+    const dialog = screen.getByRole('dialog', { name: i18n.t('systemSettings.webPush.generateTitle') });
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('systemSettings.webPush.generateKey') }));
+
+    await waitFor(() => expect(apiMock.generateSystemWebPushKey).toHaveBeenCalledWith(4));
+  });
+
+  it('keeps VAPID key generation disabled without the independent storage key', async () => {
+    const unavailableSettings = { ...settings, webPush: { ...settings.webPush, storageKeyConfigured: false } };
+    apiMock.getSystemSettings.mockResolvedValue(unavailableSettings);
+    renderPanel();
+
+    const generateButton = await screen.findByRole('button', { name: i18n.t('systemSettings.webPush.generateKey') });
+    expect(generateButton).toBeDisabled();
+    expect(apiMock.generateSystemWebPushKey).not.toHaveBeenCalled();
+  });
+
+  it('still permits fail-closed disabling when an active Web Push setup becomes incomplete', async () => {
+    const user = userEvent.setup();
+    const incompleteSettings: SystemSettings = {
+      ...settings,
+      webPush: {
+        ...settings.webPush,
+        enabled: value(true, 'DATABASE'),
+        privateKeyConfigured: true,
+        storageKeyConfigured: false,
+        active: false,
+      },
+    };
+    apiMock.getSystemSettings.mockResolvedValue(incompleteSettings);
+    renderPanel();
+
+    const section = (await screen.findByRole('heading', { name: i18n.t('systemSettings.webPush.title') })).closest('section');
+    if (!section) throw new Error('Missing Web Push settings section.');
+    await user.click(within(section).getByRole('switch', { name: i18n.t('systemSettings.webPush.enabled') }));
+    await user.click(within(section).getByRole('button', { name: i18n.t('common.save') }));
+
+    await waitFor(() => expect(apiMock.updateSystemWebPush).toHaveBeenCalledWith({ enabled: false }, 4));
   });
 
   it('renders instance activity with the shared audit table columns', async () => {

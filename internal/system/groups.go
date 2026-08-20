@@ -535,7 +535,7 @@ func (s Service) ArchiveGroup(ctx context.Context, actorUserID, groupID string, 
 		if _, err := tx.ExecContext(ctx, `UPDATE invitation_email_outbox SET status='CANCELLED',token_ciphertext=NULL,next_attempt_at=NULL,lease_token=NULL,lease_until=NULL,last_error_code='group_archived',updated_at=? WHERE group_id=? AND status IN ('PENDING','SENDING','FAILED')`, now, groupID); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE notification_email_outbox SET status='FAILED',next_attempt_at=NULL,lease_token=NULL,lease_until=NULL,last_error_code='group_archived',updated_at=? WHERE group_id=? AND status IN ('PENDING','SENDING')`, now, groupID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE notification_delivery_jobs SET status='FAILED',next_attempt_at=NULL,lease_token=NULL,lease_until=NULL,last_error_code='group_archived',updated_at=? WHERE group_id=? AND status IN ('PENDING','SENDING')`, now, groupID); err != nil {
 			return err
 		}
 		if err := audit.Record(ctx, tx, groupID, actorUserID, "", "group.archived.by_system_administrator", "group", groupID, map[string]any{"previousStatus": status}); err != nil {
@@ -659,13 +659,13 @@ func (s Service) purgeGroup(ctx context.Context, actorUserID, groupID string, in
 		return DeletionImpact{}, err
 	}
 	deleteOrder := []string{
-		"notification_email_outbox", "invitation_email_outbox", "public_join_email_outbox",
+		"notification_reminder_runs", "notification_delivery_jobs", "invitation_email_outbox", "public_join_email_outbox",
 		"notifications", "invitation_role_assignments", "invitations",
 		"public_join_registrations", "public_join_links", "ledger_entries", "period_statements",
 		"payment_allocations", "period_adjustment_allocations", "bookings", "payments",
 		"audit_events", "idempotency_results", "category_permissions", "membership_permissions",
-		"membership_role_assignments", "membership_roles", "group_reason_suggestions",
-		"group_payment_methods", "group_settings", "role_permission_grants", "roles",
+		"membership_notification_channels", "membership_role_assignments", "membership_roles", "group_reason_suggestions",
+		"group_payment_methods", "group_notification_events", "group_notification_settings", "group_settings", "role_permission_grants", "roles",
 		"products", "categories", "periods", "memberships",
 	}
 	for _, table := range deleteOrder {

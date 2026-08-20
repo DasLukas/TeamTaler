@@ -223,6 +223,7 @@
 .impact dt { color: var(--color-muted); font-size: var(--font-size-xs); }
 .compactImpact dd,
 .impact dd { margin: 0; font-weight: 700; }
+.compactImpact dd { overflow-wrap: anywhere; }
 
 .purgeForm {
   display: grid;

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/url"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,6 +28,7 @@ func TestNotificationDispatcherSendsLocalizedEventAndMarksJobSent(t *testing.T) 
 		`INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES('grp_notice','Example Team','EUR','2026-08-04T12:00:00Z','2026-08-04T12:00:00Z')`,
 		`INSERT INTO memberships(id,group_id,user_id,joined_at) VALUES('mem_notice','grp_notice','usr_notice','2026-08-04T12:00:00Z')`,
 		`INSERT INTO group_settings(group_id,members_can_view_all_bookings,notification_emails_enabled,updated_at) VALUES('grp_notice',0,1,'2026-08-04T12:00:00Z')`,
+		`INSERT INTO membership_notification_channels(group_id,membership_id,event_type,channel,enabled_at,updated_at) VALUES('grp_notice','mem_notice','BOOKING_ASSIGNED','EMAIL','2026-08-04T12:00:00Z','2026-08-04T12:00:00Z')`,
 	} {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
 			t.Fatalf("seed database: %v", err)
@@ -50,6 +52,14 @@ func TestNotificationDispatcherSendsLocalizedEventAndMarksJobSent(t *testing.T) 
 		t.Fatalf("create dispatcher: %v", err)
 	}
 	dispatcher.now = func() time.Time { return time.Date(2026, time.August, 4, 12, 1, 0, 0, time.UTC) }
+	claimed, found, err := dispatcher.claimNext(ctx)
+	if err != nil || !found || claimed.leaseToken == "" {
+		t.Fatalf("claim email notification: found=%v job=%#v err=%v", found, claimed, err)
+	}
+	if _, found, err := dispatcher.claimNext(ctx); err != nil || found {
+		t.Fatalf("duplicate email lease claim: found=%v err=%v", found, err)
+	}
+	dispatcher.releaseAfterCancellation(claimed)
 	processed, err := dispatcher.processOne(ctx)
 	if err != nil || !processed {
 		t.Fatalf("process notification: processed=%v err=%v", processed, err)
@@ -57,14 +67,14 @@ func TestNotificationDispatcherSendsLocalizedEventAndMarksJobSent(t *testing.T) 
 	sender.mu.Lock()
 	messages := append([]NotificationMessage(nil), sender.notifications...)
 	sender.mu.Unlock()
-	if len(messages) != 1 || messages[0].Title != "Neue Buchung" || messages[0].ActionURL != "https://teamtaler.example.test/notifications" {
+	if len(messages) != 1 || messages[0].Title != "Neue Buchung" || !strings.HasPrefix(messages[0].ActionURL, "https://teamtaler.example.test/notifications?notification=") {
 		t.Fatalf("notification messages=%#v", messages)
 	}
 	if messages[0].Body != "Sam Admin hat dir 1 × „Training fine“ über 5,00 EUR zugewiesen." {
 		t.Fatalf("notification body=%q", messages[0].Body)
 	}
 	var status string
-	if err := db.QueryRowContext(ctx, `SELECT status FROM notification_email_outbox`).Scan(&status); err != nil || status != "SENT" {
+	if err := db.QueryRowContext(ctx, `SELECT status FROM notification_delivery_jobs WHERE channel='EMAIL'`).Scan(&status); err != nil || status != "SENT" {
 		t.Fatalf("outbox status=%q err=%v", status, err)
 	}
 }
@@ -84,7 +94,7 @@ func TestNotificationDispatcherTerminatesLegacyJobWithoutRecipientEmail(t *testi
 		`INSERT INTO memberships(id,group_id,user_id,joined_at) VALUES('mem_admin','grp_managed','usr_admin','2026-08-04T12:00:00Z')`,
 		`INSERT INTO memberships(id,group_id,user_id,joined_at,temporary_guest_name_key) VALUES('mem_managed','grp_managed','usr_managed','2026-08-04T12:00:00Z','managed guest')`,
 		`INSERT INTO notifications(id,group_id,membership_id,type,title,body,context_json,created_at) VALUES('notice_managed','grp_managed','mem_managed','BOOKING_ASSIGNED','New booking','Booking body','{}','2026-08-04T12:00:00Z')`,
-		`INSERT INTO notification_email_outbox(notification_id,group_id,status,attempt_count,next_attempt_at,created_at,updated_at) VALUES('notice_managed','grp_managed','PENDING',0,'2026-08-04T12:00:00Z','2026-08-04T12:00:00Z','2026-08-04T12:00:00Z')`,
+		`INSERT INTO notification_delivery_jobs(id,notification_id,group_id,channel,target_membership_id,status,attempt_count,next_attempt_at,created_at,updated_at) VALUES('job_managed','notice_managed','grp_managed','EMAIL','mem_managed','PENDING',0,'2026-08-04T12:00:00Z','2026-08-04T12:00:00Z','2026-08-04T12:00:00Z')`,
 	} {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
 			t.Fatalf("seed managed notification: %v", err)
@@ -108,7 +118,7 @@ func TestNotificationDispatcherTerminatesLegacyJobWithoutRecipientEmail(t *testi
 		t.Fatalf("managed notification sends=%d, want 0", messages)
 	}
 	var status, code string
-	if err := db.QueryRowContext(ctx, `SELECT status,last_error_code FROM notification_email_outbox WHERE notification_id='notice_managed'`).Scan(&status, &code); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT status,last_error_code FROM notification_delivery_jobs WHERE notification_id='notice_managed' AND channel='EMAIL'`).Scan(&status, &code); err != nil {
 		t.Fatalf("read managed outbox status: %v", err)
 	}
 	if status != string(OutboxStatusFailed) || code != string(FailureCodeRecipientUnavailable) {

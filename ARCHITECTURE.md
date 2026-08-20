@@ -2,7 +2,7 @@
 
 ## System overview
 
-TeamTaler is a self-hosted group expense and settlement application implemented as a modular monolith. One Go process serves the versioned JSON API and the compiled React single-page application. The same process owns authentication, global system administration, password recovery, verified email changes, group authorization, temporary-guest and regular-account lifecycle, group provisioning/archive/purge, versioned runtime settings, domain transactions, SQLite access, image delivery, dynamic SMTP delivery, health endpoints, and request logging.
+TeamTaler is a self-hosted group expense and settlement application implemented as a modular monolith. One Go process serves the versioned JSON API and the compiled React single-page application. The same process owns authentication, global system administration, password recovery, verified email changes, group authorization, temporary-guest and regular-account lifecycle, group provisioning/archive/purge, versioned runtime settings, domain transactions, SQLite access, image delivery, dynamic SMTP and Web Push delivery, settlement-reminder scheduling, health endpoints, and request logging.
 
 Production uses one TeamTaler application replica, one SQLite database on a local filesystem, and content-addressed product images, group logos, and user profile images below the application data directory. An external reverse proxy terminates TLS. The `teamtaler` binary also provides operator commands that open the same local database or data directory directly.
 
@@ -15,8 +15,9 @@ flowchart LR
     API --> DB[("SQLite database")]
     API --> Images["Content-addressed PNG files"]
     API --> System["Live system settings and global role policy"]
-    Worker["Email outbox workers"] --> DB
+    Worker["Notification delivery workers"] --> DB
     Worker -->|"TLS-secured SMTP"| SMTP["Configured SMTP relay"]
+    Worker -->|"RFC Web Push over HTTPS"| Push["Browser push service"]
     CLI["TeamTaler operator command"] --> DB
     CLI --> Images
 ```
@@ -38,13 +39,14 @@ This topology deliberately avoids a separate application server, database server
 - `internal/authorization` centralizes permission evaluation through `Policy.Can` and transaction-compatible `Require`, unions current role grants, expands implications, and evaluates tenant-bound resource context without cross-request caching.
 - `internal/memberimport` parses bounded UTF-8 comma- or semicolon-delimited invitation documents and preserves row-level validation outcomes.
 - `internal/email` implements the dynamic SMTP sender boundary, mandatory STARTTLS or implicit TLS transport, localized plain-text invitation, public-registration verification, password-reset, email-change, system-test, and notification rendering, and leased transactional-outbox dispatch with bounded retries. Workers read effective settings before every job and pause without consuming attempts while delivery or mutations are administratively disabled.
+- The Web Push package owns VAPID identity handling, purpose-separated encryption of browser subscriptions, endpoint network policy, privacy-minimized payload rendering, and bounded leased delivery. It depends on an injected HTTP transport so DNS resolution and the connected address remain part of one validated operation.
 - `internal/catalog` implements category and product reads and writes, controlled category-icon validation, fixed or user-defined pricing modes, idempotent product creation, optimistic versions, and catalog authorization.
 - `internal/media` validates JPEG/PNG/WebP input, strips metadata through PNG normalization, and owns content-addressed image paths shared by group logos, product images, and user profile images.
 - `internal/bookings` resolves server-authoritative fixed prices or validates actor-supplied unit prices, then implements idempotent single, atomic multi-target, and atomic multi-product cart booking creation, transaction-bound temporary-guest creation, credential-class-specific target authorization, privacy-minimized booking context, immutable product/category/price snapshots, actor-based 30-second reason-free reversal, audited reversal, and tenant-safe full-history activity search, typed filters, deterministic sorting, and keyset pagination.
 - `internal/finance` implements consolidated member accounts, lifecycle-aware active/archived/deleted balance summaries, personal and anonymous group category statistics with setting-dependent all-time or current-period scope, the `VIEW_GROUP_STATISTICS`-gated signed net group receivable, permission-gated group and own-account incoming payments, configured payment-method validation and label snapshots, payment reversal, recent ledger activity, full personal movement history, and finance-management read models. Payment and movement tables support server-side search, typed filters, deterministic sorting, and keyset pagination. Consolidated balances always use the complete ledger. Archived accounts remain settlement targets; deleted accounts are projected only while their current receivable is non-zero.
 - `internal/ledger` rebuilds correction and payment allocations. Negative current-period corrections offset the oldest positive claims before non-reversed payments are allocated oldest first.
 - `internal/periods` lists periods, rejects close commands while settlements are disabled, snapshots member statements, opens the successor period after an enabled close, and returns settlement status enriched with later allocations. The same technical open period remains active while settlements are disabled.
-- `internal/notifications` atomically creates structured member notifications and optional email jobs only for identities with a real address, exposes exact unread summaries and cursor-backed member history, and applies tenant-scoped batch read acknowledgements.
+- `internal/notifications` owns the typed event catalog, group event policy, per-membership channel preferences, atomic in-app creation and channel-neutral delivery jobs, settlement reminders, exact unread summaries, cursor-backed member history, and tenant-scoped batch read acknowledgements.
 - `internal/audit` writes group-scoped audit events and exposes tenant-bound full-history search, typed filters, deterministic sorting, and keyset pagination.
 - `internal/tablequery` owns bounded global-search normalization, ISO 8601 date/RFC 3339 range normalization, escaped SQL contains patterns, normalized-query fingerprints, and opaque keyset cursor encoding shared by table-oriented backend queries.
 - `internal/idempotency` validates keys and stores or replays mutation results.
@@ -121,8 +123,8 @@ The initial schema consists of strict SQLite tables plus the migration ledger:
 | `users` | Global local identities, nullable email/password credentials constrained to be both present or both absent, optional profile-image keys, and nullable fixed-default plus most-recently-used group references. Credentialless rows back temporary guests but still have stable IDs. |
 | `sessions` | Hashed session and CSRF secrets, expiry, and throttled last-seen time. |
 | `system_role_assignments` | CLI-managed global role assignments keyed by stable user ID. V1 permits only `SYSTEM_ADMINISTRATOR`. |
-| `system_settings_state` | Singleton aggregate settings revision plus the persisted/tested SMTP revision and secret-free change metadata. |
-| `system_setting_overrides` | Typed per-key instance overrides, including the encrypted SMTP password envelope; absence means the environment or code default is effective. Secret material is write-only at every external interface. |
+| `system_settings_state` | Singleton aggregate settings revision plus independent SMTP and Web Push revisions and secret-free change metadata. |
+| `system_setting_overrides` | Typed per-key instance overrides, including encrypted SMTP and VAPID secret envelopes; absence means the environment or code default is effective. Secret material is write-only at every external interface. |
 | `system_audit_events` | Append-only global system mutations and minimal completed group-purge receipts. |
 | `system_media_delete_jobs` | Repeatable content-hash garbage-collection work created only after database references are gone. |
 | `system_group_purge_context` | A transaction-local guard row that opens immutable group-delete triggers for exactly one purged tenant and is removed with that group. |
@@ -152,7 +154,10 @@ The initial schema consists of strict SQLite tables plus the migration ledger:
 | `account_security_actions` | One-hour password-reset or email-change proofs with source and optional target address, unique token hash, consumption, invalidation, and supersession state. |
 | `account_security_email_outbox` | AES-GCM-encrypted account-action token envelopes, bounded retry state, worker leases, safe failure codes, and SMTP acceptance time. |
 | `notifications` | Structured member-visible events, resource context, read state, and stable newest-first ordering. |
-| `notification_email_outbox` | Optional notification delivery state, bounded retry schedule, worker leases, safe failure codes, and SMTP acceptance time. |
+| `group_notification_settings` and `group_notification_events` | Versioned group event allowlist, IANA time zone, due-soon lead time, and overdue repeat interval. |
+| `membership_notification_settings` and `membership_notification_channels` | Per-membership optimistic preference version plus per-event enabled email and push rows; unavailable policies remain stored but ineffective. |
+| `web_push_subscriptions` | Account-owned encrypted browser subscription envelopes, endpoint hashes, device labels, active VAPID key identifiers, and revocation metadata. |
+| `notification_delivery_jobs` | Channel-neutral email and push work with deduplication, expiry, bounded retry schedule, worker leases, safe failure codes, and acceptance time. |
 | `audit_events` | Immutable administrative and domain action history. |
 | `idempotency_results` | Request hash and serialized response for protected mutation retries. |
 
@@ -301,14 +306,14 @@ The database-to-SMTP boundary provides at-least-once delivery. A connection fail
 5. Verification atomically consumes the proof, creates the account, creates the membership, assigns the group's current non-administrative default role, creates a session, cancels the outbox secret, and records an audit event. An authenticated archived membership is reactivated under its stable identity after its old roles are replaced by that same current default.
 6. Lifetime edits preserve the token. Rotation replaces it and increments the link version. Rotation and deactivation invalidate pending registrations and cancel their outbox secrets in the same transaction, so an older URL, QR code, or mailbox proof cannot complete afterward.
 
-### Notification creation, acknowledgement, and email delivery
+### Notification creation, acknowledgement, and external delivery
 
-1. Booking, payment, reversal, and period-close services call the shared notification writer inside their existing SQLite transaction. Only events external to the target are emitted, except system-generated period settlements, which are always delivered to the affected membership.
-2. The notification stores a stable event type, safe structured context, optional domain-resource reference, immutable creation time, and nullable read time. If the target has a real email address and both runtime SMTP capability and the `GROUP_ADMINISTRATION`-managed group preference are enabled, the same transaction inserts one `PENDING` notification-email job. A credentialless guest receives no email job and therefore cannot enter futile retry processing.
-3. The application shell loads one exact unread summary and revalidates it after navigation, browser focus, and network reconnection without polling. Desktop navigation displays the count on notifications; mobile navigation displays it on overflow, whose first destination is the notification inbox.
-4. The inbox reads a newest-first cursor page and loads further pages through an intersection sentinel. Every unread card is queued for acknowledgement as soon as any pixel intersects the current viewport. The client sends deduplicated batches of at most 100 identifiers, updates the shared summary optimistically, rolls back failures, and retries on explicit action, focus, or reconnection.
-5. The server scopes cursor resolution, list reads, summary counts, and batch acknowledgements to the authenticated membership. Unknown or inaccessible notification identifiers never reveal another tenant's state.
-6. Notification email workers claim due jobs with leases, reload the target email and group context, render short localized event details plus a public inbox link, and submit them through the same TLS-secured SMTP sender. Acceptance marks a job `SENT`; temporary failure uses bounded backoff for at most five attempts. Email is supplemental and never changes in-app delivery or acknowledgement.
+1. Booking, payment, reversal, period-close, and reminder services call one typed notification writer inside their existing SQLite transaction. The catalog supplies stable event metadata, safe in-app copy, privacy-minimized push copy, route, urgency, TTL, and supported channels.
+2. The transaction rechecks the current group event allowlist and creates the canonical in-app record. It then evaluates email and push independently against the current system channel, group event, and membership preference gates and inserts one deduplicated channel-neutral delivery job for each effective channel.
+3. A scheduler evaluates open settlement balances in the group's IANA time zone. It emits due-soon and overdue events from current outstanding value, skips paid statements, handles daylight-saving transitions, and records deterministic schedule keys so startup catch-up and concurrent ticks cannot duplicate a reminder.
+4. Channel dispatchers claim work through bounded leases. Email resolves the current account mailbox and TLS-only SMTP sender. Push decrypts the current device envelope in memory, validates and pins the public HTTPS endpoint, and submits a catalog-TTL-bounded privacy-minimized payload with the active VAPID identity. `404` and `410` revoke the device; `429` and temporary failures use bounded retry.
+5. The application shell loads one exact unread summary and revalidates it after navigation, browser focus, and network reconnection without polling. The push-only root service worker neither caches nor intercepts fetches; it updates the badge and focuses or opens `/notifications?notification=<id>` when selected. A valid opaque identifier may survive an authentication redirect in one-shot session storage for at most 30 minutes. After authentication, an account-scoped resolver maps it to an active owned group without exposing the group identifier in the external payload or distinguishing inaccessible records; group selection changes without replacing the inbox route.
+6. The inbox reads a newest-first cursor page and sends tenant-scoped, deduplicated acknowledgement batches. External delivery never changes in-app visibility or read state and contains no names, products, amounts, or deadlines in a push payload.
 
 ### Booking
 
@@ -506,6 +511,7 @@ Restore stages extraction below the writable data directory and permits only reg
 - `golang.org/x/crypto` provides Argon2id.
 - `golang.org/x/image` provides WebP decoding.
 - `golang.org/x/term` suppresses terminal echo for the interactive bootstrap password prompt.
+- `github.com/marknefedov/go-webpush/v2` implements the standardized VAPID-authenticated Web Push content encoding behind TeamTaler's validated transport boundary.
 
 There is no external backend framework or router; routes use Go's `net/http` method/path patterns.
 

@@ -17,11 +17,15 @@ import (
 )
 
 type instanceCapabilitiesResponse struct {
-	InstanceName        string `json:"instanceName"`
-	MaintenanceMode     bool   `json:"maintenanceMode"`
-	MaintenanceMessage  string `json:"maintenanceMessage,omitempty"`
-	PublicJoinEnabled   bool   `json:"publicJoinEnabled"`
-	MediaUploadMaxBytes int64  `json:"mediaUploadMaxBytes"`
+	InstanceName                string `json:"instanceName"`
+	MaintenanceMode             bool   `json:"maintenanceMode"`
+	MaintenanceMessage          string `json:"maintenanceMessage,omitempty"`
+	PublicJoinEnabled           bool   `json:"publicJoinEnabled"`
+	MediaUploadMaxBytes         int64  `json:"mediaUploadMaxBytes"`
+	EmailNotificationsAvailable bool   `json:"emailNotificationsAvailable"`
+	WebPushAvailable            bool   `json:"webPushAvailable"`
+	WebPushPublicKey            string `json:"webPushPublicKey,omitempty"`
+	WebPushKeyID                string `json:"webPushKeyId,omitempty"`
 }
 
 type systemGroupInvitationResponse struct {
@@ -51,7 +55,9 @@ func (s *Server) handleInstanceCapabilities(response http.ResponseWriter, reques
 	writeJSON(response, http.StatusOK, instanceCapabilitiesResponse{
 		InstanceName: settings.InstanceName.Value, MaintenanceMode: settings.MaintenanceMode.Value,
 		MaintenanceMessage: settings.MaintenanceMessage.Value, PublicJoinEnabled: settings.PublicJoinEnabled.Value,
-		MediaUploadMaxBytes: settings.MediaUploadMaxBytes.Value,
+		MediaUploadMaxBytes: settings.MediaUploadMaxBytes.Value, EmailNotificationsAvailable: settings.SMTP.Active,
+		WebPushAvailable: settings.WebPush.Active, WebPushPublicKey: settings.WebPush.PublicKey,
+		WebPushKeyID: settings.WebPush.KeyID,
 	})
 }
 

@@ -41,6 +41,7 @@ import { createAuditFilterDefinitions, mergeAuditFilterOptions, type AuditEventF
 import type { DataTableDateRange } from '@/features/shared/DataTable';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
 import styles from './SystemSettingsPanel.module.css';
+import { SystemWebPushSettingsSection } from './SystemWebPushSettingsSection';
 
 const SETTINGS_QUERY_KEY = ['system-settings'] as const;
 const GROUPS_QUERY_KEY = ['system-groups'] as const;
@@ -595,6 +596,7 @@ export function SystemSettingsPanel() {
     <div className={styles.content}>
       <GeneralSettingsSection key={`general-${settings.data.revision}`} settings={settings.data} />
       <SmtpSettingsSection key={`smtp-${settings.data.revision}`} settings={settings.data} />
+      <SystemWebPushSettingsSection key={`web-push-${settings.data.revision}`} settings={settings.data} />
       <AccessSettingsSection key={`access-${settings.data.revision}`} settings={settings.data} />
       <GroupsSettingsSection defaultCurrency={settings.data.defaultCurrency.value} key={`groups-${settings.data.revision}`} />
       <SystemAuditSection />

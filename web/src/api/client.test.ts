@@ -1001,6 +1001,22 @@ describe('system-administration API contract', () => {
     expect(new Headers((fetchMock.mock.calls[1][1] as RequestInit).headers).get('If-Match')).toBe('"v4"');
   });
 
+  it('confirms VAPID rotation and targets the current browser for a test push', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ revision: 8, webPush: { revision: 2, vapidPrivateKey: { configured: true, source: 'DATABASE' } } }))
+      .mockResolvedValueOnce(jsonResponse({ revision: 8, webPush: { revision: 2, active: true } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.generateSystemWebPushKey(7);
+    await api.testSystemWebPush(8, 'device-a');
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/system/settings/web-push/generate-key');
+    expect(new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers).get('If-Match')).toBe('"v7"');
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ confirmRotation: true });
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/system/settings/web-push/test');
+    expect(requestBody(fetchMock.mock.calls[1])).toEqual({ subscriptionId: 'device-a' });
+  });
+
   it('posts the exact group-name confirmation to the purge endpoint', async () => {
     const impact = { groupId: 'group/a', groupName: 'Group A', currency: 'EUR', version: 6, memberCount: 2, openBalanceMinor: '1234', invitationCount: 1, bookingCount: 4, financialRecordCount: 3, auditEventCount: 5, mediaCount: 1 };
     const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(impact));
@@ -1045,6 +1061,53 @@ describe('system-administration API contract', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/system/groups/group%2Fpending/invitation/resend');
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' });
     expect(new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers).get('If-Match')).toBe('"v2"');
+  });
+});
+
+describe('notification preference and push-device API contract', () => {
+  beforeEach(() => vi.restoreAllMocks());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('uses strong versions and omits unavailable unchanged preference channels', async () => {
+    const response = {
+      version: 3,
+      availableChannels: ['PUSH'],
+      events: [{ type: 'BOOKING_ASSIGNED', enabled: true, email: true, push: true, emailAvailable: false, pushAvailable: true, supportedChannels: ['EMAIL', 'PUSH'] }],
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ version: 2, timezone: 'Europe/Berlin', dueSoonLeadDays: 3, overdueRepeatDays: 7, availableChannels: ['EMAIL'], events: [] }))
+      .mockResolvedValueOnce(jsonResponse(response));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.updateGroupNotificationSettings('group/a', { version: 1, timezone: 'Europe/Berlin', dueSoonLeadDays: 3, overdueRepeatDays: 7, events: [{ eventType: 'BOOKING_ASSIGNED', enabled: true }] });
+    await api.updateNotificationPreferences('group/a', { version: 2, events: [{ eventType: 'BOOKING_ASSIGNED', push: true }] });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group%2Fa/notification-settings');
+    expect(new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers).get('If-Match')).toBe('"v1"');
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ timezone: 'Europe/Berlin', dueSoonLeadDays: 3, overdueRepeatDays: 7, events: [{ type: 'BOOKING_ASSIGNED', enabled: true }] });
+    expect(requestBody(fetchMock.mock.calls[1])).toEqual({ events: [{ type: 'BOOKING_ASSIGNED', push: true }] });
+  });
+
+  it('registers browser key material while exposing only redacted device metadata', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ id: 'device-a', deviceLabel: 'Safari on iPhone', keyId: 'key-a', createdAt: '2026-08-20T10:00:00Z', lastUsedAt: '2026-08-20T10:00:00Z', current: true }, 201));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const device = await api.registerPushSubscription({
+      label: 'Safari on iPhone', keyId: 'key-a',
+      subscription: { endpoint: 'https://push.example.test/subscription', expirationTime: null, keys: { auth: 'auth-key', p256dh: 'p256dh-key' } },
+    });
+
+    expect(device).toEqual({ id: 'device-a', label: 'Safari on iPhone', keyId: 'key-a', createdAt: '2026-08-20T10:00:00Z', lastUsedAt: '2026-08-20T10:00:00Z', current: true });
+    expect(requestBody(fetchMock.mock.calls[0])).toMatchObject({ label: 'Safari on iPhone', keyId: 'key-a', subscription: { keys: { auth: 'auth-key', p256dh: 'p256dh-key' } } });
+  });
+
+  it('resolves an encoded opaque notification through the account-scoped endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ groupId: 'group-b' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.getNotificationDestination('ntf/a')).resolves.toEqual({ groupId: 'group-b' });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/me/notifications/ntf%2Fa/destination');
   });
 });
 
