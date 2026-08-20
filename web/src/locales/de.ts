@@ -3,7 +3,6 @@ export const de = {
   brand: {
     name: 'TeamTaler',
     markAlt: 'TeamTaler Bildmarke',
-    groupMarkAlt: 'Logo der Gruppe {{group}}',
   },
   nav: {
     overview: 'Übersicht',
