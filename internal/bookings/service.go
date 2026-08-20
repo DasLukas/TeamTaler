@@ -828,6 +828,33 @@ var activitySorts = map[string]struct{}{
 	"productName": {}, "categoryName": {}, "status": {},
 }
 
+const (
+	activityCreatedExpression = `strftime('%Y-%m-%dT%H:%M:%fZ',b.created_at)`
+	activityStatusExpression  = `CASE WHEN b.voided_at IS NULL THEN 'POSTED' ELSE 'VOIDED' END`
+)
+
+// activitySortExpression maps a normalized public sort key to a closed SQL
+// expression. The default is intentionally safe so caller input is never
+// reflected into query text even if validation is accidentally bypassed.
+func activitySortExpression(sortKey string) string {
+	switch sortKey {
+	case "amount":
+		return "b.total_minor"
+	case "targetName":
+		return "lower(target_user.display_name)"
+	case "actorName":
+		return "lower(actor_user.display_name)"
+	case "productName":
+		return "lower(b.product_name)"
+	case "categoryName":
+		return "lower(b.category_name)"
+	case "status":
+		return activityStatusExpression
+	default:
+		return activityCreatedExpression
+	}
+}
+
 const maxActivityFilterIDs = 200
 
 func normalizeActivityFilterIDs(field string, values []string) ([]string, error) {
@@ -943,14 +970,8 @@ func (s Service) queryActivity(ctx context.Context, membership domain.Membership
 		return ActivityPage{}, err
 	}
 
-	statusExpression := `CASE WHEN b.voided_at IS NULL THEN 'POSTED' ELSE 'VOIDED' END`
-	createdExpression := `strftime('%Y-%m-%dT%H:%M:%fZ',b.created_at)`
-	sortExpressions := map[string]string{
-		"createdAt": createdExpression, "amount": "b.total_minor", "targetName": "lower(target_user.display_name)",
-		"actorName": "lower(actor_user.display_name)", "productName": "lower(b.product_name)",
-		"categoryName": "lower(b.category_name)", "status": statusExpression,
-	}
-	sortExpression := sortExpressions[input.Sort]
+	sortExpression := activitySortExpression(input.Sort)
+	orderKeyword, comparison := tablequery.SQLOrderFragments(input.Direction)
 	query := `SELECT b.id,b.group_id,b.period_id,b.category_id,b.product_id,b.actor_membership_id,actor_user.display_name,actor_user.id,coalesce(actor_user.avatar_key,''),
 		CASE WHEN actor_member.deleted_at IS NOT NULL THEN 'DELETED' ELSE actor_member.status END,
 		b.target_membership_id,target_user.display_name,target_user.id,coalesce(target_user.avatar_key,''),CASE WHEN target_member.deleted_at IS NOT NULL THEN 'DELETED' ELSE target_member.status END,b.quantity,
@@ -996,11 +1017,11 @@ func (s Service) queryActivity(ctx context.Context, membership domain.Membership
 		query += ` AND b.voided_at IS NOT NULL`
 	}
 	if input.CreatedFrom != "" {
-		query += ` AND ` + createdExpression + `>=?`
+		query += ` AND ` + activityCreatedExpression + `>=?`
 		args = append(args, input.CreatedFrom)
 	}
 	if input.CreatedTo != "" {
-		query += ` AND ` + createdExpression + `<?`
+		query += ` AND ` + activityCreatedExpression + `<?`
 		args = append(args, input.CreatedTo)
 	}
 	if input.AmountMin != nil {
@@ -1019,14 +1040,10 @@ func (s Service) queryActivity(ctx context.Context, membership domain.Membership
 			OR b.category_name LIKE ? ESCAPE '\' COLLATE NOCASE
 			OR coalesce(b.reason,'') LIKE ? ESCAPE '\' COLLATE NOCASE
 			OR CAST(b.total_minor AS TEXT) LIKE ? ESCAPE '\'
-			OR ` + statusExpression + ` LIKE ? ESCAPE '\' COLLATE NOCASE)`
+			OR ` + activityStatusExpression + ` LIKE ? ESCAPE '\' COLLATE NOCASE)`
 		args = append(args, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
 	}
 	if cursorID != "" {
-		comparison := ">"
-		if input.Direction == "desc" {
-			comparison = "<"
-		}
 		var boundKey any = cursorKey
 		if input.Sort == "amount" {
 			boundKey, err = strconv.ParseInt(cursorKey, 10, 64)
@@ -1037,7 +1054,7 @@ func (s Service) queryActivity(ctx context.Context, membership domain.Membership
 		query += ` AND (` + sortExpression + ` ` + comparison + ` ? OR (` + sortExpression + ` = ? AND b.id ` + comparison + ` ?))`
 		args = append(args, boundKey, boundKey, cursorID)
 	}
-	query += ` ORDER BY ` + sortExpression + ` ` + strings.ToUpper(input.Direction) + `,b.id ` + strings.ToUpper(input.Direction) + ` LIMIT ?`
+	query += ` ORDER BY ` + sortExpression + ` ` + orderKeyword + `,b.id ` + orderKeyword + ` LIMIT ?`
 	args = append(args, input.Limit+1)
 	rows, err := s.DB.QueryContext(ctx, query, args...)
 	if err != nil {

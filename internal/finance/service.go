@@ -236,6 +236,27 @@ var movementSorts = map[string]struct{}{
 	"createdAt": {}, "amount": {}, "description": {}, "type": {},
 }
 
+const (
+	movementCreatedExpression = `strftime('%Y-%m-%dT%H:%M:%fZ',entry.created_at)`
+	movementTypeExpression    = `CASE WHEN entry.reversal_of IS NOT NULL THEN 'REVERSAL' WHEN entry.booking_id IS NOT NULL THEN 'BOOKING' WHEN entry.payment_id IS NOT NULL THEN 'PAYMENT' ELSE 'ADJUSTMENT' END`
+)
+
+// movementSortExpression maps a normalized public sort key to a closed SQL
+// expression. The default is intentionally safe so caller input is never
+// reflected into query text even if validation is accidentally bypassed.
+func movementSortExpression(sortKey string) string {
+	switch sortKey {
+	case "amount":
+		return "entry.amount_minor"
+	case "description":
+		return "lower(entry.description)"
+	case "type":
+		return movementTypeExpression
+	default:
+		return movementCreatedExpression
+	}
+}
+
 // QueryMovements returns a tenant- and membership-scoped movement page. The
 // authenticated membership may read itself; FINANCE_MANAGEMENT is required for
 // another target membership.
@@ -298,14 +319,9 @@ func (s Service) QueryMovements(ctx context.Context, membership domain.Membershi
 	if err != nil {
 		return MovementPage{}, err
 	}
-	typeExpression := `CASE WHEN entry.reversal_of IS NOT NULL THEN 'REVERSAL' WHEN entry.booking_id IS NOT NULL THEN 'BOOKING' WHEN entry.payment_id IS NOT NULL THEN 'PAYMENT' ELSE 'ADJUSTMENT' END`
-	createdExpression := `strftime('%Y-%m-%dT%H:%M:%fZ',entry.created_at)`
-	sortExpressions := map[string]string{
-		"createdAt": createdExpression, "amount": "entry.amount_minor",
-		"description": "lower(entry.description)", "type": typeExpression,
-	}
-	sortExpression := sortExpressions[input.Sort]
-	query := `SELECT entry.id,entry.period_id,entry.booking_id,entry.payment_id,entry.reversal_of,` + typeExpression + `,
+	sortExpression := movementSortExpression(input.Sort)
+	orderKeyword, comparison := tablequery.SQLOrderFragments(input.Direction)
+	query := `SELECT entry.id,entry.period_id,entry.booking_id,entry.payment_id,entry.reversal_of,` + movementTypeExpression + `,
 		entry.amount_minor,entry.description,entry.created_at,CAST(` + sortExpression + ` AS TEXT)
 		FROM ledger_entries entry
 		WHERE entry.group_id=? AND entry.membership_id=? AND entry.account='MEMBER_RECEIVABLE'`
@@ -315,15 +331,15 @@ func (s Service) QueryMovements(ctx context.Context, membership domain.Membershi
 		args = append(args, input.PeriodID)
 	}
 	if input.Type != "" {
-		query += ` AND ` + typeExpression + `=?`
+		query += ` AND ` + movementTypeExpression + `=?`
 		args = append(args, input.Type)
 	}
 	if input.CreatedFrom != "" {
-		query += ` AND ` + createdExpression + `>=?`
+		query += ` AND ` + movementCreatedExpression + `>=?`
 		args = append(args, input.CreatedFrom)
 	}
 	if input.CreatedTo != "" {
-		query += ` AND ` + createdExpression + `<?`
+		query += ` AND ` + movementCreatedExpression + `<?`
 		args = append(args, input.CreatedTo)
 	}
 	if input.AmountMin != nil {
@@ -338,14 +354,10 @@ func (s Service) QueryMovements(ctx context.Context, membership domain.Membershi
 		pattern := tablequery.LikePattern(input.Search)
 		query += ` AND (entry.description LIKE ? ESCAPE '\' COLLATE NOCASE
 			OR CAST(entry.amount_minor AS TEXT) LIKE ? ESCAPE '\'
-			OR ` + typeExpression + ` LIKE ? ESCAPE '\' COLLATE NOCASE)`
+			OR ` + movementTypeExpression + ` LIKE ? ESCAPE '\' COLLATE NOCASE)`
 		args = append(args, pattern, pattern, pattern)
 	}
 	if cursorID != "" {
-		comparison := ">"
-		if input.Direction == "desc" {
-			comparison = "<"
-		}
 		var boundKey any = cursorKey
 		if input.Sort == "amount" {
 			boundKey, err = strconv.ParseInt(cursorKey, 10, 64)
@@ -356,7 +368,7 @@ func (s Service) QueryMovements(ctx context.Context, membership domain.Membershi
 		query += ` AND (` + sortExpression + ` ` + comparison + ` ? OR (` + sortExpression + ` = ? AND entry.id ` + comparison + ` ?))`
 		args = append(args, boundKey, boundKey, cursorID)
 	}
-	query += ` ORDER BY ` + sortExpression + ` ` + strings.ToUpper(input.Direction) + `,entry.id ` + strings.ToUpper(input.Direction) + ` LIMIT ?`
+	query += ` ORDER BY ` + sortExpression + ` ` + orderKeyword + `,entry.id ` + orderKeyword + ` LIMIT ?`
 	args = append(args, input.Limit+1)
 	rows, err := s.DB.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -757,6 +769,29 @@ var paymentSorts = map[string]struct{}{
 	"receivedAt": {}, "amount": {}, "memberName": {}, "method": {}, "status": {},
 }
 
+const (
+	paymentReceivedExpression = `strftime('%Y-%m-%dT%H:%M:%fZ',p.received_at)`
+	paymentStatusExpression   = `CASE WHEN p.reversed_at IS NULL THEN 'POSTED' ELSE 'REVERSED' END`
+)
+
+// paymentSortExpression maps a normalized public sort key to a closed SQL
+// expression. The default is intentionally safe so caller input is never
+// reflected into query text even if validation is accidentally bypassed.
+func paymentSortExpression(sortKey string) string {
+	switch sortKey {
+	case "amount":
+		return "p.amount_minor"
+	case "memberName":
+		return "lower(u.display_name)"
+	case "method":
+		return "lower(coalesce(p.method_label,p.method))"
+	case "status":
+		return paymentStatusExpression
+	default:
+		return paymentReceivedExpression
+	}
+}
+
 // QueryPayments returns a filtered, sorted, keyset-paginated payment page for
 // one tenant. Finance-management permission is checked before query validation
 // or storage access.
@@ -814,13 +849,8 @@ func (s Service) QueryPayments(ctx context.Context, membership domain.Membership
 	if err != nil {
 		return PaymentPage{}, err
 	}
-	statusExpression := `CASE WHEN p.reversed_at IS NULL THEN 'POSTED' ELSE 'REVERSED' END`
-	receivedExpression := `strftime('%Y-%m-%dT%H:%M:%fZ',p.received_at)`
-	sortExpressions := map[string]string{
-		"receivedAt": receivedExpression, "amount": "p.amount_minor", "memberName": "lower(u.display_name)",
-		"method": "lower(coalesce(p.method_label,p.method))", "status": statusExpression,
-	}
-	sortExpression := sortExpressions[input.Sort]
+	sortExpression := paymentSortExpression(input.Sort)
+	orderKeyword, comparison := tablequery.SQLOrderFragments(input.Direction)
 	query := `SELECT p.id,p.group_id,p.membership_id,u.display_name,
 		CASE WHEN m.deleted_at IS NOT NULL THEN 'DELETED' ELSE m.status END,
 		p.amount_minor,g.currency,p.received_at,p.method,coalesce(p.method_label,''),coalesce(p.reference,''),coalesce(p.note,''),p.reversed_at,CAST(` + sortExpression + ` AS TEXT)
@@ -841,11 +871,11 @@ func (s Service) QueryPayments(ctx context.Context, membership domain.Membership
 		query += ` AND p.reversed_at IS NOT NULL`
 	}
 	if input.ReceivedFrom != "" {
-		query += ` AND ` + receivedExpression + `>=?`
+		query += ` AND ` + paymentReceivedExpression + `>=?`
 		args = append(args, input.ReceivedFrom)
 	}
 	if input.ReceivedTo != "" {
-		query += ` AND ` + receivedExpression + `<?`
+		query += ` AND ` + paymentReceivedExpression + `<?`
 		args = append(args, input.ReceivedTo)
 	}
 	if input.AmountMin != nil {
@@ -864,14 +894,10 @@ func (s Service) QueryPayments(ctx context.Context, membership domain.Membership
 			OR coalesce(p.reference,'') LIKE ? ESCAPE '\' COLLATE NOCASE
 			OR coalesce(p.note,'') LIKE ? ESCAPE '\' COLLATE NOCASE
 			OR CAST(p.amount_minor AS TEXT) LIKE ? ESCAPE '\'
-			OR ` + statusExpression + ` LIKE ? ESCAPE '\' COLLATE NOCASE)`
+			OR ` + paymentStatusExpression + ` LIKE ? ESCAPE '\' COLLATE NOCASE)`
 		args = append(args, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
 	}
 	if cursorID != "" {
-		comparison := ">"
-		if input.Direction == "desc" {
-			comparison = "<"
-		}
 		var boundKey any = cursorKey
 		if input.Sort == "amount" {
 			boundKey, err = strconv.ParseInt(cursorKey, 10, 64)
@@ -882,7 +908,7 @@ func (s Service) QueryPayments(ctx context.Context, membership domain.Membership
 		query += ` AND (` + sortExpression + ` ` + comparison + ` ? OR (` + sortExpression + ` = ? AND p.id ` + comparison + ` ?))`
 		args = append(args, boundKey, boundKey, cursorID)
 	}
-	query += ` ORDER BY ` + sortExpression + ` ` + strings.ToUpper(input.Direction) + `,p.id ` + strings.ToUpper(input.Direction) + ` LIMIT ?`
+	query += ` ORDER BY ` + sortExpression + ` ` + orderKeyword + `,p.id ` + orderKeyword + ` LIMIT ?`
 	args = append(args, input.Limit+1)
 	rows, err := s.DB.QueryContext(ctx, query, args...)
 	if err != nil {

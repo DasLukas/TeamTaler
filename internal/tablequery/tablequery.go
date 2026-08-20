@@ -38,6 +38,26 @@ var auditSorts = map[string]struct{}{
 	"occurredAt": {}, "actorName": {}, "action": {}, "resourceType": {},
 }
 
+// AuditOccurredSQLExpression is the normalized timestamp expression shared by
+// group and system audit queries. Both queries use the event table alias.
+const AuditOccurredSQLExpression = `strftime('%Y-%m-%dT%H:%M:%fZ',event.occurred_at)`
+
+// AuditSortExpression maps a normalized public audit sort key to a closed SQL
+// expression. Unknown values fail safely to occurredAt so caller input is
+// never reflected into query text even if validation is accidentally bypassed.
+func AuditSortExpression(sortKey string) string {
+	switch sortKey {
+	case "actorName":
+		return "lower(coalesce(actor.display_name,''))"
+	case "action":
+		return "lower(event.action)"
+	case "resourceType":
+		return "lower(event.resource_type)"
+	default:
+		return AuditOccurredSQLExpression
+	}
+}
+
 // NormalizeAudit validates the common audit query, applies stable defaults,
 // and returns a fingerprint bound to scope. Scope must identify the authorized
 // tenant or the global system table without including secrets.
@@ -176,6 +196,17 @@ func NormalizeSort(sort, direction, defaultSort, defaultDirection string, allowe
 		return "", "", domain.ValidationError{Field: "direction", Message: "must be asc or desc"}
 	}
 	return sort, direction, nil
+}
+
+// SQLOrderFragments maps a normalized direction to closed, trusted SQL
+// fragments. It never reflects caller input into the query text; unexpected
+// values fail closed to ascending order and are rejected earlier by
+// NormalizeSort in request-facing query paths.
+func SQLOrderFragments(direction string) (keyword, comparison string) {
+	if direction == "desc" {
+		return "DESC", "<"
+	}
+	return "ASC", ">"
 }
 
 // NormalizeTimeBound validates an optional RFC 3339 timestamp or ISO 8601 date

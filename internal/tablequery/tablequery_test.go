@@ -52,3 +52,55 @@ func TestLikePatternEscapesWildcards(t *testing.T) {
 		t.Fatalf("escaped pattern = %q", got)
 	}
 }
+
+func TestSQLOrderFragmentsNeverReflectInput(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		direction  string
+		keyword    string
+		comparison string
+	}{
+		{direction: "asc", keyword: "ASC", comparison: ">"},
+		{direction: "desc", keyword: "DESC", comparison: "<"},
+		{direction: "desc; DROP TABLE users;--", keyword: "ASC", comparison: ">"},
+	}
+	for _, test := range tests {
+		keyword, comparison := SQLOrderFragments(test.direction)
+		if keyword != test.keyword || comparison != test.comparison {
+			t.Fatalf("SQLOrderFragments(%q) = (%q,%q), want (%q,%q)", test.direction, keyword, comparison, test.keyword, test.comparison)
+		}
+	}
+}
+
+func TestAuditSortExpressionNeverReflectsInput(t *testing.T) {
+	t.Parallel()
+	if got := AuditSortExpression("actorName"); got != "lower(coalesce(actor.display_name,''))" {
+		t.Fatalf("actorName expression = %q", got)
+	}
+	if got := AuditSortExpression("occurredAt DESC; DROP TABLE audit_events;--"); got != AuditOccurredSQLExpression {
+		t.Fatalf("unexpected audit sort expression = %q", got)
+	}
+}
+
+func TestNormalizeSortRejectsSQLFragments(t *testing.T) {
+	t.Parallel()
+	allowed := map[string]struct{}{"createdAt": {}, "amount": {}}
+	tests := []struct {
+		name      string
+		sort      string
+		direction string
+	}{
+		{name: "sort expression", sort: "amount DESC; DROP TABLE bookings;--", direction: "asc"},
+		{name: "direction expression", sort: "amount", direction: "desc; DROP TABLE bookings;--"},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			_, _, err := NormalizeSort(test.sort, test.direction, "createdAt", "desc", allowed)
+			if !errors.Is(err, domain.ErrValidation) {
+				t.Fatalf("NormalizeSort(%q,%q) error = %v, want validation", test.sort, test.direction, err)
+			}
+		})
+	}
+}

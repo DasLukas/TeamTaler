@@ -94,6 +94,24 @@ func TestTableQueryHandlersFilterSortAndPaginateWithoutChangingArrayBodies(t *te
 	if mismatchedCursor.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("mismatched cursor status=%d body=%s", mismatchedCursor.Code, mismatchedCursor.Body.String())
 	}
+	maliciousSort := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/bookings?sort="+url.QueryEscape("amount DESC; DROP TABLE bookings;--")+"&direction=asc",
+		server.handleListBookings)
+	if maliciousSort.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("malicious sort status=%d body=%s", maliciousSort.Code, maliciousSort.Body.String())
+	}
+	maliciousDirection := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/bookings?sort=amount&direction="+url.QueryEscape("desc; DROP TABLE bookings;--"),
+		server.handleListBookings)
+	if maliciousDirection.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("malicious direction status=%d body=%s", maliciousDirection.Code, maliciousDirection.Body.String())
+	}
+	postInjectionActivity := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/bookings?sort=amount&direction=asc&limit=10",
+		server.handleListBookings)
+	if postInjectionActivity.Code != http.StatusOK {
+		t.Fatalf("post-injection activity status=%d body=%s", postInjectionActivity.Code, postInjectionActivity.Body.String())
+	}
 
 	paymentResponse := performTableGET(t, principal, membership.GroupID,
 		"/api/v1/groups/"+membership.GroupID+"/payments?q=payment&status=POSTED&sort=amount&direction=desc&limit=2",

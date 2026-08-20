@@ -153,12 +153,8 @@ func Query(ctx context.Context, db *sql.DB, groupID string, input tablequery.Aud
 	if err != nil {
 		return Page{}, err
 	}
-	occurredExpression := `strftime('%Y-%m-%dT%H:%M:%fZ',event.occurred_at)`
-	sortExpressions := map[string]string{
-		"occurredAt": occurredExpression, "actorName": "lower(coalesce(actor.display_name,''))",
-		"action": "lower(event.action)", "resourceType": "lower(event.resource_type)",
-	}
-	sortExpression := sortExpressions[input.Sort]
+	sortExpression := tablequery.AuditSortExpression(input.Sort)
+	orderKeyword, comparison := tablequery.SQLOrderFragments(input.Direction)
 	query := `SELECT event.id,event.group_id,event.actor_user_id,event.actor_membership_id,
 		coalesce(actor.display_name,''),event.action,event.resource_type,event.resource_id,
 		event.metadata_json,event.occurred_at,CAST(` + sortExpression + ` AS TEXT)
@@ -177,11 +173,11 @@ func Query(ctx context.Context, db *sql.DB, groupID string, input tablequery.Aud
 	query, args = tablequery.AppendExactStringSet(query, args, "event.action", input.Actions)
 	query, args = tablequery.AppendExactStringSet(query, args, "event.resource_type", input.ResourceTypes)
 	if input.OccurredFrom != "" {
-		query += ` AND ` + occurredExpression + `>=?`
+		query += ` AND ` + tablequery.AuditOccurredSQLExpression + `>=?`
 		args = append(args, input.OccurredFrom)
 	}
 	if input.OccurredTo != "" {
-		query += ` AND ` + occurredExpression + `<?`
+		query += ` AND ` + tablequery.AuditOccurredSQLExpression + `<?`
 		args = append(args, input.OccurredTo)
 	}
 	if input.Search != "" {
@@ -194,14 +190,10 @@ func Query(ctx context.Context, db *sql.DB, groupID string, input tablequery.Aud
 		args = append(args, pattern, pattern, pattern, pattern, pattern)
 	}
 	if cursorID != "" {
-		comparison := ">"
-		if input.Direction == "desc" {
-			comparison = "<"
-		}
 		query += ` AND (` + sortExpression + ` ` + comparison + ` ? OR (` + sortExpression + ` = ? AND event.id ` + comparison + ` ?))`
 		args = append(args, cursorKey, cursorKey, cursorID)
 	}
-	query += ` ORDER BY ` + sortExpression + ` ` + strings.ToUpper(input.Direction) + `,event.id ` + strings.ToUpper(input.Direction) + ` LIMIT ?`
+	query += ` ORDER BY ` + sortExpression + ` ` + orderKeyword + `,event.id ` + orderKeyword + ` LIMIT ?`
 	args = append(args, input.Limit+1)
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
