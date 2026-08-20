@@ -18,6 +18,9 @@ func TestCatalogProvidesCompleteSafeDeliveryMetadata(t *testing.T) {
 		if definition.PushTTLSeconds < 1 || (definition.PushUrgency != "normal" && definition.PushUrgency != "high") {
 			t.Fatalf("catalog definition %s has invalid delivery metadata: %#v", definition.Type, definition)
 		}
+		if !definition.DefaultEnabled {
+			t.Fatalf("catalog definition %s is not enabled by default", definition.Type)
+		}
 		if len(definition.SupportedChannels) != 2 || definition.SupportedChannels[0] != ChannelEmail || definition.SupportedChannels[1] != ChannelPush {
 			t.Fatalf("catalog definition %s channels=%v", definition.Type, definition.SupportedChannels)
 		}

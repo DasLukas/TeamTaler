@@ -24,8 +24,6 @@ func TestReminderWorkerUsesLocalScheduleCatchUpAndDedupeAcrossDST(t *testing.T) 
 		`INSERT INTO group_settings(group_id,members_can_view_all_bookings,notification_emails_enabled,updated_at) VALUES('group-reminder',0,0,'2026-10-01T08:00:00Z')`,
 		`INSERT INTO periods(id,group_id,label,status,starts_at,closed_at,due_at,created_at) VALUES('period-reminder','group-reminder','October','CLOSED','2026-10-01T08:00:00Z','2026-10-02T08:00:00Z','2026-10-25','2026-10-01T08:00:00Z')`,
 		`INSERT INTO period_statements(id,group_id,period_id,membership_id,display_name,email,charges_minor,payments_allocated_minor,adjustments_applied_minor,adjustments_provided_minor,amount_due_minor,status,created_at) VALUES('statement-reminder','group-reminder','period-reminder','member-reminder','Member','member@example.test',1000,0,0,0,1000,'OPEN','2026-10-02T08:00:00Z')`,
-		`INSERT INTO group_notification_events(group_id,event_type,enabled_at) VALUES('group-reminder','SETTLEMENT_DUE_SOON','2026-10-01T08:00:00Z')`,
-		`INSERT INTO group_notification_events(group_id,event_type,enabled_at) VALUES('group-reminder','SETTLEMENT_OVERDUE','2026-10-01T08:00:00Z')`,
 	} {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
 			t.Fatalf("seed reminder fixture: %v", err)
@@ -84,7 +82,6 @@ func TestReminderWorkerSkipsCurrentlyPaidStatement(t *testing.T) {
 		`INSERT INTO period_statements(id,group_id,period_id,membership_id,display_name,email,charges_minor,payments_allocated_minor,adjustments_applied_minor,adjustments_provided_minor,amount_due_minor,status,created_at) VALUES('statement-paid','group-paid','period-paid','member-paid','Paid','paid@example.test',1000,0,0,0,1000,'OPEN','2026-10-02T08:00:00Z')`,
 		`INSERT INTO payments(id,group_id,membership_id,amount_minor,received_at,method,created_by,created_at) VALUES('payment-paid','group-paid','member-paid',1000,'2026-10-20','BANK_TRANSFER','member-paid','2026-10-20T08:00:00Z')`,
 		`INSERT INTO payment_allocations(group_id,payment_id,period_id,amount_minor) VALUES('group-paid','payment-paid','period-paid',1000)`,
-		`INSERT INTO group_notification_events(group_id,event_type,enabled_at) VALUES('group-paid','SETTLEMENT_OVERDUE','2026-10-01T08:00:00Z')`,
 	} {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
 			t.Fatalf("seed paid reminder fixture: %v", err)

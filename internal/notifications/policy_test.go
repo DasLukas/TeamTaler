@@ -23,7 +23,6 @@ func TestCreateTxAppliesGroupMemberAndIndependentSystemChannelGates(t *testing.T
 		arguments []any
 	}{
 		{`INSERT INTO membership_notification_channels(group_id,membership_id,event_type,channel,enabled_at,updated_at) VALUES('group-policy','member-policy','BOOKING_ASSIGNED','EMAIL',?,?)`, []any{now, now}},
-		{`INSERT INTO membership_notification_channels(group_id,membership_id,event_type,channel,enabled_at,updated_at) VALUES('group-policy','member-policy','BOOKING_ASSIGNED','PUSH',?,?)`, []any{now, now}},
 		{`INSERT INTO web_push_subscriptions(id,user_id,endpoint_hash,encrypted_subscription,vapid_key_id,device_label,created_at,updated_at,last_used_at) VALUES('push-one','user-policy','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','sealed','current-key-id-1234','Browser',?,?,?)`, []any{now, now, now}},
 	} {
 		if _, err := db.ExecContext(ctx, seed.statement, seed.arguments...); err != nil {
@@ -96,13 +95,13 @@ func TestNotificationPolicyVersioningAndPreferenceRetention(t *testing.T) {
 		updates = append(updates, GroupEventUpdate{Type: event.Type, Enabled: true})
 	}
 	settings, err = service.UpdateGroupSettings(ctx, actor, membership, GroupSettingsUpdate{
-		Timezone: "Europe/Berlin", DueSoonLeadDays: 3, OverdueRepeatDays: 7, Events: updates,
+		Timezone: "Europe/Berlin", DueSoonLeadDays: 4, OverdueRepeatDays: 7, Events: updates,
 	}, settings.Version)
 	if err != nil || settings.Version != 2 {
 		t.Fatalf("updated group settings=%#v err=%v", settings, err)
 	}
 	if _, err := service.UpdateGroupSettings(ctx, actor, membership, GroupSettingsUpdate{
-		Timezone: "Europe/Berlin", DueSoonLeadDays: 3, OverdueRepeatDays: 7, Events: updates,
+		Timezone: "Europe/Berlin", DueSoonLeadDays: 4, OverdueRepeatDays: 7, Events: updates,
 	}, 1); !errors.Is(err, domain.ErrPrecondition) {
 		t.Fatalf("stale group policy error=%v, want precondition", err)
 	}
@@ -110,18 +109,33 @@ func TestNotificationPolicyVersioningAndPreferenceRetention(t *testing.T) {
 	if err != nil || preferences.Version != 1 || len(preferences.AvailableChannels) != 2 {
 		t.Fatalf("initial preferences=%#v err=%v", preferences, err)
 	}
-	email, push := true, true
+	email, push := false, true
 	preferences, err = service.UpdatePreferences(ctx, membership, PreferencesUpdate{Events: []PreferenceUpdate{{Type: TypeSettlementOverdue, Email: &email, Push: &push}}}, preferences.Version)
 	if err != nil || preferences.Version != 2 {
 		t.Fatalf("updated preferences=%#v err=%v", preferences, err)
 	}
+	service.PushDeliveryAvailable = false
+	preferences, err = service.GetPreferences(ctx, membership)
+	if err != nil {
+		t.Fatalf("read preferences while Push is unavailable: %v", err)
+	}
+	var unavailableOverdue EventPreference
+	for _, event := range preferences.Events {
+		if event.Type == TypeSettlementOverdue {
+			unavailableOverdue = event
+		}
+	}
+	if !unavailableOverdue.Push || unavailableOverdue.PushAvailable {
+		t.Fatalf("preferences changed while Push was unavailable: %#v", unavailableOverdue)
+	}
+	service.PushDeliveryAvailable = true
 	for index := range updates {
 		if updates[index].Type == TypeSettlementOverdue {
 			updates[index].Enabled = false
 		}
 	}
 	settings, err = service.UpdateGroupSettings(ctx, actor, membership, GroupSettingsUpdate{
-		Timezone: "Europe/Berlin", DueSoonLeadDays: 3, OverdueRepeatDays: 7, Events: updates,
+		Timezone: "Europe/Berlin", DueSoonLeadDays: 4, OverdueRepeatDays: 7, Events: updates,
 	}, settings.Version)
 	if err != nil {
 		t.Fatalf("disable overdue event: %v", err)
@@ -136,7 +150,7 @@ func TestNotificationPolicyVersioningAndPreferenceRetention(t *testing.T) {
 			overdue = event
 		}
 	}
-	if overdue.Enabled || !overdue.Email || !overdue.Push {
+	if overdue.Enabled || overdue.Email || !overdue.Push {
 		t.Fatalf("retained disabled event preferences=%#v", overdue)
 	}
 	disable := false

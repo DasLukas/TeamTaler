@@ -74,11 +74,11 @@ var eventCatalog = map[EventType]EventDefinition{
 	},
 	TypeSettlementDueSoon: {
 		Type: TypeSettlementDueSoon, Category: "SETTLEMENTS", Label: "Abrechnung bald fällig",
-		Description: "Eine offene Abrechnung ist bald fällig.", Route: "/notifications", PushTitle: "Abrechnung bald fällig", PushBody: "Eine offene Abrechnung in deiner Gruppe ist bald fällig.", PushTTLSeconds: 86400, PushUrgency: "normal", Reminder: true,
+		Description: "Eine offene Abrechnung ist bald fällig.", Route: "/notifications", PushTitle: "Abrechnung bald fällig", PushBody: "Eine offene Abrechnung in deiner Gruppe ist bald fällig.", PushTTLSeconds: 86400, PushUrgency: "normal", Reminder: true, DefaultEnabled: true,
 	},
 	TypeSettlementOverdue: {
 		Type: TypeSettlementOverdue, Category: "SETTLEMENTS", Label: "Abrechnung überfällig",
-		Description: "Eine offene Abrechnung ist überfällig.", Route: "/notifications", PushTitle: "Abrechnung überfällig", PushBody: "Eine offene Abrechnung in deiner Gruppe ist überfällig.", PushTTLSeconds: 86400, PushUrgency: "high", Reminder: true,
+		Description: "Eine offene Abrechnung ist überfällig.", Route: "/notifications", PushTitle: "Abrechnung überfällig", PushBody: "Eine offene Abrechnung in deiner Gruppe ist überfällig.", PushTTLSeconds: 86400, PushUrgency: "high", Reminder: true, DefaultEnabled: true,
 	},
 }
 

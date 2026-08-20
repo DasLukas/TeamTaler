@@ -28,7 +28,7 @@ func TestNotificationSettingsHandlersEnforceETagsAndExposeCanonicalContract(t *t
 		updates = append(updates, notifications.GroupEventUpdate{Type: event.Type, Enabled: true})
 	}
 	body, err := json.Marshal(notifications.GroupSettingsUpdate{
-		Timezone: "Europe/Berlin", DueSoonLeadDays: 3, OverdueRepeatDays: 7, Events: updates,
+		Timezone: "Europe/Berlin", DueSoonLeadDays: 4, OverdueRepeatDays: 7, Events: updates,
 	})
 	if err != nil {
 		t.Fatalf("encode notification settings update: %v", err)
