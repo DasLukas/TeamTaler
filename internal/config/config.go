@@ -24,6 +24,12 @@ const (
 	MediaUploadUnitBytes int64 = 1 << 20
 	// DefaultMediaUploadBytes preserves TeamTaler's original five MiB upload limit.
 	DefaultMediaUploadBytes int64 = 5 << 20
+	// MinimumAttachmentUploadBytes is the smallest configurable receipt upload.
+	MinimumAttachmentUploadBytes int64 = 1 << 20
+	// MaximumAttachmentUploadBytes is the compiled receipt-upload safety ceiling.
+	MaximumAttachmentUploadBytes int64 = 50 << 20
+	// DefaultAttachmentUploadBytes is the default immutable receipt limit.
+	DefaultAttachmentUploadBytes int64 = 15 << 20
 	// MultipartRequestReserve leaves room for multipart headers and boundaries.
 	MultipartRequestReserve int64 = 1 << 20
 	// DefaultSMTPPort is the standard submission port offered for new STARTTLS configurations.
@@ -97,6 +103,8 @@ type InstanceDefaults struct {
 	DefaultCurrency string
 	// MediaUploadMaxBytes limits raw image input before decoding.
 	MediaUploadMaxBytes int64
+	// AttachmentUploadMaxBytes limits payment receipt input before normalization.
+	AttachmentUploadMaxBytes int64
 	// PublicJoinEnabled is the installation-wide public-registration kill switch.
 	PublicJoinEnabled bool
 	// MaintenanceMode blocks non-system mutations while preserving reads and login.
@@ -234,6 +242,10 @@ func loadInstanceDefaults() (InstanceDefaults, error) {
 	if err != nil || mediaUploadMaxBytes < MinimumMediaUploadBytes || mediaUploadMaxBytes > MaximumMediaUploadBytes || mediaUploadMaxBytes%MediaUploadUnitBytes != 0 {
 		return InstanceDefaults{}, fmt.Errorf("TEAMTALER_MEDIA_UPLOAD_MAX_BYTES must be a whole MiB value between %d and %d", MinimumMediaUploadBytes, MaximumMediaUploadBytes)
 	}
+	attachmentUploadMaxBytes, err := strconv.ParseInt(env("TEAMTALER_ATTACHMENT_UPLOAD_MAX_BYTES", strconv.FormatInt(DefaultAttachmentUploadBytes, 10)), 10, 64)
+	if err != nil || attachmentUploadMaxBytes < MinimumAttachmentUploadBytes || attachmentUploadMaxBytes > MaximumAttachmentUploadBytes || attachmentUploadMaxBytes%MediaUploadUnitBytes != 0 {
+		return InstanceDefaults{}, fmt.Errorf("TEAMTALER_ATTACHMENT_UPLOAD_MAX_BYTES must be a whole MiB value between %d and %d", MinimumAttachmentUploadBytes, MaximumAttachmentUploadBytes)
+	}
 	publicJoinEnabled, err := parseBoolEnvironment("TEAMTALER_PUBLIC_JOIN_ENABLED", true)
 	if err != nil {
 		return InstanceDefaults{}, err
@@ -247,12 +259,13 @@ func loadInstanceDefaults() (InstanceDefaults, error) {
 		return InstanceDefaults{}, fmt.Errorf("TEAMTALER_MAINTENANCE_MESSAGE must contain at most 240 characters without control characters")
 	}
 	return InstanceDefaults{
-		InstanceName:        instanceName,
-		DefaultCurrency:     defaultCurrency,
-		MediaUploadMaxBytes: mediaUploadMaxBytes,
-		PublicJoinEnabled:   publicJoinEnabled,
-		MaintenanceMode:     maintenanceMode,
-		MaintenanceMessage:  maintenanceMessage,
+		InstanceName:             instanceName,
+		DefaultCurrency:          defaultCurrency,
+		MediaUploadMaxBytes:      mediaUploadMaxBytes,
+		AttachmentUploadMaxBytes: attachmentUploadMaxBytes,
+		PublicJoinEnabled:        publicJoinEnabled,
+		MaintenanceMode:          maintenanceMode,
+		MaintenanceMessage:       maintenanceMessage,
 	}, nil
 }
 

@@ -61,10 +61,10 @@ describe('BehaviorSettingsPanel', () => {
     ownPaymentReasonRequired: true,
     otherPaymentReasonRequired: false,
     paymentMethods: [
-      { id: 'BANK_TRANSFER', label: 'Banküberweisung' },
-      { id: 'CASH', label: 'Bar' },
-      { id: 'PAYPAL', label: 'PayPal' },
-      { id: 'OTHER', label: 'Sonstige' },
+      { id: 'BANK_TRANSFER', label: 'Banküberweisung', attachmentMode: 'OFF' },
+      { id: 'CASH', label: 'Bar', attachmentMode: 'OFF' },
+      { id: 'PAYPAL', label: 'PayPal', attachmentMode: 'OFF' },
+      { id: 'OTHER', label: 'Sonstige', attachmentMode: 'OFF' },
     ],
     bookingReasons: [],
     paymentReasons: [],
@@ -261,11 +261,32 @@ describe('BehaviorSettingsPanel', () => {
 
     await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', {
       paymentMethods: [
-        { id: 'BANK_TRANSFER', label: 'Banküberweisung' },
-        { id: 'PAYPAL', label: 'PayPal' },
-        { id: 'CASH', label: 'Kasse' },
-        expect.objectContaining({ label: 'Karte' }),
+        { id: 'BANK_TRANSFER', label: 'Banküberweisung', attachmentMode: 'OFF' },
+        { id: 'PAYPAL', label: 'PayPal', attachmentMode: 'OFF' },
+        { id: 'CASH', label: 'Kasse', attachmentMode: 'OFF' },
+        expect.objectContaining({ label: 'Karte', attachmentMode: 'OFF' }),
       ],
+    }));
+  });
+
+  it('persists the receipt policy per payment method', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    const receiptPolicy = await screen.findByRole('combobox', { name: `${i18n.t('behaviorSettings.attachmentModeLabel')}: Bar` });
+    expect(screen.getByText(i18n.t('behaviorSettings.attachmentModeDescription'))).toBeVisible();
+    await user.click(receiptPolicy);
+    const modeOptions = [
+      screen.getByRole('option', { name: i18n.t('behaviorSettings.attachmentModeOff') }),
+      screen.getByRole('option', { name: i18n.t('behaviorSettings.attachmentModeOptional') }),
+      screen.getByRole('option', { name: i18n.t('behaviorSettings.attachmentModeRequired') }),
+    ];
+    modeOptions.forEach((option) => expect(option.querySelector('svg')).toBeInTheDocument());
+    await user.click(modeOptions[2]);
+    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
+
+    await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', {
+      paymentMethods: expect.arrayContaining([{ id: 'CASH', label: 'Bar', attachmentMode: 'REQUIRED' }]),
     }));
   });
 });

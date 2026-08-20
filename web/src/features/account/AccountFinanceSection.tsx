@@ -11,6 +11,7 @@ import { useActiveGroup } from '@/app/useActiveGroup';
 import { Button } from '@/components/ui/Button';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { SelfPaymentDialog } from '@/features/finance/SelfPaymentDialog';
+import { PaymentAttachmentAction } from '@/features/finance/PaymentAttachmentAction';
 import { DataTable, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange } from '@/features/shared/DataTable';
 import tableStyles from '@/features/shared/Table.module.css';
 import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
@@ -168,7 +169,8 @@ export function AccountFinanceSection() {
     { accessorKey: 'description', enableSorting: true, header: t('common.description'), id: 'description', meta: { label: t('common.description') } },
     { accessorFn: (entry) => entry.amount.minorUnits, cell: ({ row }) => formatMoney(row.original.amount), enableSorting: true, header: t('common.amount'), id: 'amount', meta: { align: 'end', label: t('common.amount') } },
     { accessorFn: (entry) => entry.balance.minorUnits, cell: ({ row }) => <strong>{formatMoney(row.original.balance)}</strong>, enableSorting: true, header: t('account.balance'), id: 'balance', meta: { align: 'end', label: t('account.balance') } },
-  ], [t]);
+    { cell: ({ row }) => row.original.attachment ? <PaymentAttachmentAction attachment={row.original.attachment} groupId={activeGroupId} paymentId={row.original.referenceId} /> : null, enableSorting: false, header: () => <span className="sr-only">{t('paymentAttachment.action', { defaultValue: 'Receipt' })}</span>, id: 'attachment', meta: { label: t('paymentAttachment.action', { defaultValue: 'Receipt' }) } },
+  ], [activeGroupId, t]);
 
   if (ledgerQuery.isLoading || dashboardQuery.isLoading || settlementsQuery.isLoading || transactionSettingsQuery.isLoading) return <StatePanel kind="loading" />;
   if (ledgerQuery.isError || dashboardQuery.isError || settlementsQuery.isError || transactionSettingsQuery.isError || !ledgerQuery.data || !dashboardQuery.data || !settlementsQuery.data || !transactionSettingsQuery.data) return <StatePanel kind="error" message={t('account.error')} />;

@@ -18,7 +18,7 @@ func TestTransactionSettingsControlBookingsPaymentsAndHistoricalLabels(t *testin
 	foreignBookingReasonMode := domain.ReasonModeOptional
 	ownPaymentReasonMode := domain.ReasonModeOff
 	otherPaymentReasonMode := domain.ReasonModeRequired
-	paymentMethods := []domain.ConfigurableItem{{ID: "CARD", Label: "Card terminal"}}
+	paymentMethods := []domain.PaymentMethod{{ID: "CARD", Label: "Card terminal"}}
 	bookingReasons := []domain.ConfigurableItem{{ID: "TEAM", Label: "Team event"}}
 	paymentReasons := []domain.ConfigurableItem{{ID: "MONTHLY", Label: "Monthly settlement"}}
 	if _, err := f.groups.UpdateSettings(f.ctx, f.admin, f.membership, groups.SettingsUpdate{
@@ -72,7 +72,7 @@ func TestTransactionSettingsControlBookingsPaymentsAndHistoricalLabels(t *testin
 		t.Fatalf("create managed payment with reason: %v", err)
 	}
 
-	renamedMethods := []domain.ConfigurableItem{{ID: "CARD", Label: "Debit card"}}
+	renamedMethods := []domain.PaymentMethod{{ID: "CARD", Label: "Debit card"}}
 	if _, err := f.groups.UpdateSettings(f.ctx, f.admin, f.membership, groups.SettingsUpdate{PaymentMethods: &renamedMethods}); err != nil {
 		t.Fatalf("rename payment method: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestTransactionSettingsControlBookingsPaymentsAndHistoricalLabels(t *testin
 			t.Fatalf("historical method label=%q, want Card terminal", payment.MethodLabel)
 		}
 	}
-	legacyMethods := []domain.ConfigurableItem{{ID: "CASH", Label: "Cash"}}
+	legacyMethods := []domain.PaymentMethod{{ID: "CASH", Label: "Cash"}}
 	if _, err := f.groups.UpdateSettings(f.ctx, f.admin, f.membership, groups.SettingsUpdate{PaymentMethods: &legacyMethods}); err != nil {
 		t.Fatalf("replace payment method: %v", err)
 	}

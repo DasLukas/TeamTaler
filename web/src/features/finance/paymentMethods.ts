@@ -1,16 +1,22 @@
-import type { ConfigurableItem, Payment } from '@/api/types';
+import type { Payment, PaymentMethod } from '@/api/types';
 import i18n from '@/i18n';
 
-/** Supported payment methods and their localized display keys. */
+/** Built-in payment-method defaults and their localized display keys. */
 export const PAYMENT_METHOD_OPTIONS = [
-  { value: 'BANK_TRANSFER', labelKey: 'finance.transfer' },
-  { value: 'CASH', labelKey: 'finance.cash' },
-  { value: 'PAYPAL', labelKey: 'finance.paypal' },
-  { value: 'OTHER', labelKey: 'finance.other' },
-] as const satisfies ReadonlyArray<{ value: Payment['method']; labelKey: string }>;
+  { value: 'BANK_TRANSFER', labelKey: 'finance.transfer', attachmentMode: 'OFF' },
+  { value: 'SHOPPING', labelKey: 'finance.shopping', attachmentMode: 'REQUIRED' },
+  { value: 'CASH', labelKey: 'finance.cash', attachmentMode: 'OFF' },
+  { value: 'PAYPAL', labelKey: 'finance.paypal', attachmentMode: 'OFF' },
+  { value: 'OTHER', labelKey: 'finance.other', attachmentMode: 'OPTIONAL' },
+] as const satisfies ReadonlyArray<{
+  value: Payment['method'];
+  labelKey: string;
+  attachmentMode: PaymentMethod['attachmentMode'];
+}>;
 
 const DEFAULT_PAYMENT_METHOD_LABELS: Readonly<Record<string, string>> = {
   BANK_TRANSFER: 'Bank transfer',
+  SHOPPING: 'Shopping',
   CASH: 'Cash',
   PAYPAL: 'PayPal',
   OTHER: 'Other',
@@ -54,11 +60,12 @@ export function historicalPaymentMethodLabel(id: string, label?: string): string
 /**
  * Builds the localized, editable payment-method defaults used by new groups.
  *
- * @returns A new ordered collection containing the four built-in methods.
+ * @returns A new ordered collection containing the five built-in methods.
  */
-export function defaultPaymentMethods(): ConfigurableItem[] {
+export function defaultPaymentMethods(): PaymentMethod[] {
   return PAYMENT_METHOD_OPTIONS.map((option) => ({
     id: option.value,
     label: i18n.t(option.labelKey),
+    attachmentMode: option.attachmentMode,
   }));
 }

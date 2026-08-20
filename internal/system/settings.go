@@ -525,6 +525,12 @@ func (s Service) patchMutations(patch SettingsPatch) ([]settingMutation, bool, b
 		}
 		mutations = append(mutations, integerMutation(SettingMediaUploadMaxBytes, *patch.MediaUploadMaxBytes))
 	}
+	if patch.AttachmentUploadMaxBytes != nil {
+		if *patch.AttachmentUploadMaxBytes < MinimumAttachmentUploadBytes || *patch.AttachmentUploadMaxBytes > MaximumAttachmentUploadBytes || *patch.AttachmentUploadMaxBytes%MediaUploadUnitBytes != 0 {
+			return nil, false, false, domain.ValidationError{Field: "attachmentUploadMaxBytes", Message: fmt.Sprintf("must be a whole MiB value between %d and %d bytes", MinimumAttachmentUploadBytes, MaximumAttachmentUploadBytes)}
+		}
+		mutations = append(mutations, integerMutation(SettingAttachmentUploadMaxBytes, *patch.AttachmentUploadMaxBytes))
+	}
 	if patch.PublicJoinEnabled != nil {
 		mutations = append(mutations, booleanMutation(SettingPublicJoinEnabled, *patch.PublicJoinEnabled))
 	}
@@ -656,15 +662,17 @@ func (s Service) loadSettings(ctx context.Context, queryer settingsQueryer) (loa
 		return loadedSettings{}, err
 	}
 	settings := Settings{
-		Revision:                  state.revision,
-		InstanceName:              stringSetting(s.defaults, overrides, SettingInstanceName, s.defaults.InstanceName),
-		DefaultCurrency:           stringSetting(s.defaults, overrides, SettingDefaultCurrency, s.defaults.DefaultCurrency),
-		MediaUploadMaxBytes:       int64Setting(s.defaults, overrides, SettingMediaUploadMaxBytes, s.defaults.MediaUploadMaxBytes),
-		MediaUploadHardLimitBytes: MaximumMediaUploadBytes,
-		PublicJoinEnabled:         boolSetting(s.defaults, overrides, SettingPublicJoinEnabled, s.defaults.PublicJoinEnabled),
-		MaintenanceMode:           boolSetting(s.defaults, overrides, SettingMaintenanceEnabled, s.defaults.MaintenanceMode),
-		MaintenanceMessage:        stringSetting(s.defaults, overrides, SettingMaintenanceMessage, s.defaults.MaintenanceMessage),
-		UpdatedAt:                 state.updatedAt,
+		Revision:                       state.revision,
+		InstanceName:                   stringSetting(s.defaults, overrides, SettingInstanceName, s.defaults.InstanceName),
+		DefaultCurrency:                stringSetting(s.defaults, overrides, SettingDefaultCurrency, s.defaults.DefaultCurrency),
+		MediaUploadMaxBytes:            int64Setting(s.defaults, overrides, SettingMediaUploadMaxBytes, s.defaults.MediaUploadMaxBytes),
+		MediaUploadHardLimitBytes:      MaximumMediaUploadBytes,
+		AttachmentUploadMaxBytes:       int64Setting(s.defaults, overrides, SettingAttachmentUploadMaxBytes, s.defaults.AttachmentUploadMaxBytes),
+		AttachmentUploadHardLimitBytes: MaximumAttachmentUploadBytes,
+		PublicJoinEnabled:              boolSetting(s.defaults, overrides, SettingPublicJoinEnabled, s.defaults.PublicJoinEnabled),
+		MaintenanceMode:                boolSetting(s.defaults, overrides, SettingMaintenanceEnabled, s.defaults.MaintenanceMode),
+		MaintenanceMessage:             stringSetting(s.defaults, overrides, SettingMaintenanceMessage, s.defaults.MaintenanceMessage),
+		UpdatedAt:                      state.updatedAt,
 	}
 	if state.updatedByUserID.Valid {
 		value := state.updatedByUserID.String
@@ -828,7 +836,7 @@ func readOverrides(ctx context.Context, queryer settingsQueryer) (map[SettingKey
 func validateStoredOverride(override storedOverride) error {
 	expectedType := settingTypeString
 	switch override.key {
-	case SettingMediaUploadMaxBytes, SettingSMTPPort:
+	case SettingMediaUploadMaxBytes, SettingAttachmentUploadMaxBytes, SettingSMTPPort:
 		expectedType = settingTypeInteger
 	case SettingPublicJoinEnabled, SettingMaintenanceEnabled, SettingSMTPEnabled, SettingWebPushEnabled:
 		expectedType = settingTypeBoolean

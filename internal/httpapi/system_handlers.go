@@ -22,6 +22,7 @@ type instanceCapabilitiesResponse struct {
 	MaintenanceMessage          string `json:"maintenanceMessage,omitempty"`
 	PublicJoinEnabled           bool   `json:"publicJoinEnabled"`
 	MediaUploadMaxBytes         int64  `json:"mediaUploadMaxBytes"`
+	AttachmentUploadMaxBytes    int64  `json:"attachmentUploadMaxBytes"`
 	EmailNotificationsAvailable bool   `json:"emailNotificationsAvailable"`
 	WebPushAvailable            bool   `json:"webPushAvailable"`
 	WebPushPublicKey            string `json:"webPushPublicKey,omitempty"`
@@ -55,8 +56,9 @@ func (s *Server) handleInstanceCapabilities(response http.ResponseWriter, reques
 	writeJSON(response, http.StatusOK, instanceCapabilitiesResponse{
 		InstanceName: settings.InstanceName.Value, MaintenanceMode: settings.MaintenanceMode.Value,
 		MaintenanceMessage: settings.MaintenanceMessage.Value, PublicJoinEnabled: settings.PublicJoinEnabled.Value,
-		MediaUploadMaxBytes: settings.MediaUploadMaxBytes.Value, EmailNotificationsAvailable: settings.SMTP.Active,
-		WebPushAvailable: settings.WebPush.Active, WebPushPublicKey: settings.WebPush.PublicKey,
+		MediaUploadMaxBytes: settings.MediaUploadMaxBytes.Value, AttachmentUploadMaxBytes: settings.AttachmentUploadMaxBytes.Value,
+		EmailNotificationsAvailable: settings.SMTP.Active,
+		WebPushAvailable:            settings.WebPush.Active, WebPushPublicKey: settings.WebPush.PublicKey,
 		WebPushKeyID: settings.WebPush.KeyID,
 	})
 }
@@ -98,12 +100,13 @@ func (s *Server) handleUpdateSystemSettings(response http.ResponseWriter, reques
 		return
 	}
 	var input struct {
-		InstanceName        *string `json:"instanceName,omitempty"`
-		DefaultCurrency     *string `json:"defaultCurrency,omitempty"`
-		MediaUploadMaxBytes *int64  `json:"mediaUploadMaxBytes,omitempty"`
-		PublicJoinEnabled   *bool   `json:"publicJoinEnabled,omitempty"`
-		MaintenanceMode     *bool   `json:"maintenanceMode,omitempty"`
-		MaintenanceMessage  *string `json:"maintenanceMessage,omitempty"`
+		InstanceName             *string `json:"instanceName,omitempty"`
+		DefaultCurrency          *string `json:"defaultCurrency,omitempty"`
+		MediaUploadMaxBytes      *int64  `json:"mediaUploadMaxBytes,omitempty"`
+		AttachmentUploadMaxBytes *int64  `json:"attachmentUploadMaxBytes,omitempty"`
+		PublicJoinEnabled        *bool   `json:"publicJoinEnabled,omitempty"`
+		MaintenanceMode          *bool   `json:"maintenanceMode,omitempty"`
+		MaintenanceMessage       *string `json:"maintenanceMessage,omitempty"`
 	}
 	if err := decodeJSON(response, request, &input); err != nil {
 		writeProblem(response, request, err)
@@ -112,9 +115,10 @@ func (s *Server) handleUpdateSystemSettings(response http.ResponseWriter, reques
 	patch := systemadmin.SettingsPatch{
 		InstanceName: input.InstanceName, DefaultCurrency: input.DefaultCurrency,
 		MediaUploadMaxBytes: input.MediaUploadMaxBytes, PublicJoinEnabled: input.PublicJoinEnabled,
-		MaintenanceMode: input.MaintenanceMode, MaintenanceMessage: input.MaintenanceMessage,
+		AttachmentUploadMaxBytes: input.AttachmentUploadMaxBytes,
+		MaintenanceMode:          input.MaintenanceMode, MaintenanceMessage: input.MaintenanceMessage,
 	}
-	if patch.InstanceName == nil && patch.DefaultCurrency == nil && patch.MediaUploadMaxBytes == nil &&
+	if patch.InstanceName == nil && patch.DefaultCurrency == nil && patch.MediaUploadMaxBytes == nil && patch.AttachmentUploadMaxBytes == nil &&
 		patch.PublicJoinEnabled == nil && patch.MaintenanceMode == nil && patch.MaintenanceMessage == nil {
 		writeProblem(response, request, domain.ValidationError{Message: "at least one system setting is required"})
 		return

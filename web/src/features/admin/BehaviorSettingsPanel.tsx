@@ -11,6 +11,7 @@ import { Field, SelectInput } from '@/components/ui/FormField';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { Toggle } from '@/components/ui/Toggle';
 import { ConfigurableListEditor } from './ConfigurableListEditor';
+import { PaymentMethodEditor } from './PaymentMethodEditor';
 import { GroupSettingsPanel } from './GroupSettingsPanel';
 import { roleDisplayName } from './roleDisplayName';
 import styles from './BehaviorSettingsPanel.module.css';
@@ -204,7 +205,7 @@ function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canMan
           </div>
         </section>
         <section className={styles.card}>
-          <ConfigurableListEditor addLabel={t('behaviorSettings.addPaymentMethod')} emptyLabel={t('behaviorSettings.paymentMethodRequired')} items={paymentMethods} label={t('behaviorSettings.paymentMethods')} minimumItems={1} onChange={(items) => { setPaymentMethods(items); mutation.reset(); }} />
+          <PaymentMethodEditor addLabel={t('behaviorSettings.addPaymentMethod')} emptyLabel={t('behaviorSettings.paymentMethodRequired')} items={paymentMethods} label={t('behaviorSettings.paymentMethods')} onChange={(items) => { setPaymentMethods(items); mutation.reset(); }} />
         </section>
         <section className={styles.card}>
           <ConfigurableListEditor addLabel={t('behaviorSettings.addBookingReason')} emptyLabel={t('behaviorSettings.noReasonSuggestions')} items={bookingReasons} label={t('behaviorSettings.bookingReasons')} onChange={(items) => { setBookingReasons(items); mutation.reset(); }} />

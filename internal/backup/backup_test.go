@@ -2,10 +2,12 @@ package backup
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,8 +17,11 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/auth"
 	"github.com/DasLukas/TeamTaler/internal/authorization"
 	"github.com/DasLukas/TeamTaler/internal/catalog"
+	"github.com/DasLukas/TeamTaler/internal/config"
 	"github.com/DasLukas/TeamTaler/internal/domain"
+	"github.com/DasLukas/TeamTaler/internal/finance"
 	"github.com/DasLukas/TeamTaler/internal/groups"
+	"github.com/DasLukas/TeamTaler/internal/paymentattachments"
 	"github.com/DasLukas/TeamTaler/internal/storage"
 )
 
@@ -46,13 +51,31 @@ func TestCreateAndRestore(t *testing.T) {
 		t.Fatalf("list backup group: groups=%d err=%v", len(groupItems), err)
 	}
 	membership := groupItems[0].Membership
-	roleIDs := append(append([]string(nil), membership.RoleIDs...), authorization.TemplateRoleID(membership.GroupID, domain.RoleTemplateCatalog))
+	roleIDs := append(append([]string(nil), membership.RoleIDs...),
+		authorization.TemplateRoleID(membership.GroupID, domain.RoleTemplateCatalog),
+		authorization.TemplateRoleID(membership.GroupID, domain.RoleTemplateFinance))
 	if _, err := groupService.ReplaceMemberRoles(ctx, session.Principal, membership, membership.ID, roleIDs, membership.RoleAssignmentsVersion); err != nil {
 		t.Fatalf("assign backup catalog role: %v", err)
 	}
 	membership, err = groupService.MembershipForUser(ctx, membership.GroupID, membership.UserID)
 	if err != nil {
 		t.Fatalf("reload backup membership: %v", err)
+	}
+	paymentMethods := []domain.PaymentMethod{{ID: "CASH", Label: "Cash", AttachmentMode: domain.AttachmentModeOptional}}
+	if _, err := groupService.UpdateSettings(ctx, session.Principal, membership, groups.SettingsUpdate{PaymentMethods: &paymentMethods}); err != nil {
+		t.Fatalf("configure payment attachment backup fixture: %v", err)
+	}
+	paymentService := finance.Service{DB: db, Attachments: paymentattachments.Store{DataDirectory: sourceDirectory}}
+	attachmentBody := backupTestPDF()
+	payment, err := paymentService.CreatePaymentWithAttachment(ctx, session.Principal, membership, "backup-payment-receipt", finance.CreatePaymentInput{
+		MembershipID: membership.ID, AmountMinor: 250, Method: "CASH",
+	}, &finance.PaymentAttachmentUpload{FileName: "receipt.pdf", Reader: bytes.NewReader(attachmentBody), MaxBytes: config.DefaultAttachmentUploadBytes})
+	if err != nil || payment.Attachment == nil {
+		t.Fatalf("create payment attachment backup fixture: payment=%#v err=%v", payment, err)
+	}
+	var attachmentKey string
+	if err := db.QueryRowContext(ctx, `SELECT storage_key FROM payment_attachments WHERE payment_id=?`, payment.ID).Scan(&attachmentKey); err != nil {
+		t.Fatalf("read payment attachment key: %v", err)
 	}
 	categoryService := catalog.Service{DB: db}
 	category, err := categoryService.CreateCategory(ctx, session.Principal, membership, catalog.CreateCategoryInput{Name: "Drinks", Icon: domain.CategoryIconDrink})
@@ -118,6 +141,9 @@ func TestCreateAndRestore(t *testing.T) {
 	if body, err := os.ReadFile(filepath.Join(restoreDirectory, "images", imageKey)); err != nil || string(body) != "fixture" {
 		t.Fatalf("restored image=%q err=%v", body, err)
 	}
+	if body, err := os.ReadFile(filepath.Join(restoreDirectory, "attachments", attachmentKey)); err != nil || !bytes.Equal(body, attachmentBody) {
+		t.Fatalf("restored attachment=%q err=%v", body, err)
+	}
 	if body, err := os.ReadFile(filepath.Join(restoreDirectory, "images", logoKey)); err != nil || string(body) != "logo-fixture" {
 		t.Fatalf("restored logo=%q err=%v", body, err)
 	}
@@ -148,6 +174,9 @@ func TestValidateArchiveEntryName(t *testing.T) {
 		manifestEntryName,
 		imagesEntryPrefix + contentAddress + ".png",
 		imagesEntryPrefix + strings.Repeat("0", 64) + ".png",
+		attachmentsEntryPrefix + contentAddress + ".jpg",
+		attachmentsEntryPrefix + contentAddress + ".png",
+		attachmentsEntryPrefix + contentAddress + ".pdf",
 	}
 	for _, name := range validNames {
 		t.Run("valid_"+strings.ReplaceAll(name, "/", "_"), func(t *testing.T) {
@@ -178,6 +207,11 @@ func TestValidateArchiveEntryName(t *testing.T) {
 			}
 		})
 	}
+}
+
+func backupTestPDF() []byte {
+	prefix := "%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n"
+	return []byte(fmt.Sprintf("%sxref\n0 2\n0000000000 65535 f \n0000000009 00000 n \ntrailer\n<< /Size 2 /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", prefix, len(prefix)))
 }
 
 func TestArchiveDestinationPathAcceptsCanonicalEntries(t *testing.T) {

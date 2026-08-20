@@ -107,6 +107,16 @@ const DEMO_ROUTE_POLICIES: readonly DemoRoutePolicy[] = [
 const clone = <T,>(value: T): T => structuredClone(value);
 const identifier = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
 
+async function blobText(blob: Blob): Promise<string> {
+  if (typeof blob.text === 'function') return blob.text();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener('load', () => resolve(String(reader.result ?? '')));
+    reader.addEventListener('error', () => reject(reader.error));
+    reader.readAsText(blob);
+  });
+}
+
 /**
  * Resolves the strong catalog version precondition used by demo deletions.
  *
@@ -225,6 +235,7 @@ export class DemoTransport {
   private ledger = clone(demoLedger);
   private accountSummaries: AccountSummary[] = clone(demoAccountSummaries);
   private payments = clone(demoPayments);
+  private paymentAttachments = new Map<string, File>();
   private periods = clone(demoPeriods);
   private settlements = clone(demoSettlements);
   private notifications = clone(demoNotifications);
@@ -246,10 +257,11 @@ export class DemoTransport {
     ownPaymentReasonRequired: true,
     otherPaymentReasonRequired: false,
     paymentMethods: [
-      { id: 'BANK_TRANSFER', label: 'Bank transfer' },
-      { id: 'CASH', label: 'Cash' },
-      { id: 'PAYPAL', label: 'PayPal' },
-      { id: 'OTHER', label: 'Other' },
+      { id: 'BANK_TRANSFER', label: 'Bank transfer', attachmentMode: 'OFF' },
+      { id: 'SHOPPING', label: 'Shopping', attachmentMode: 'REQUIRED' },
+      { id: 'CASH', label: 'Cash', attachmentMode: 'OFF' },
+      { id: 'PAYPAL', label: 'PayPal', attachmentMode: 'OFF' },
+      { id: 'OTHER', label: 'Other', attachmentMode: 'OPTIONAL' },
     ],
     bookingReasons: [],
     paymentReasons: [],
@@ -269,11 +281,23 @@ export class DemoTransport {
     await new Promise((resolve) => window.setTimeout(resolve, 90));
     const method = init.method ?? 'GET';
     const contentType = new Headers(init.headers).get('Content-Type')?.toLowerCase() ?? '';
-    const body = typeof init.body === 'string'
+    let body = typeof init.body === 'string'
       ? contentType.startsWith('text/csv') ? init.body : JSON.parse(init.body) as unknown
       : undefined;
+    let attachment: File | undefined;
+    if (init.body instanceof FormData) {
+      const commandPart = init.body.get('command');
+      if (commandPart instanceof Blob) body = JSON.parse(await blobText(commandPart)) as unknown;
+      else if (typeof commandPart === 'string') body = JSON.parse(commandPart) as unknown;
+      const attachmentPart = init.body.get('attachment');
+      if (attachmentPart instanceof File) attachment = attachmentPart;
+    }
     const cleanPath = path.split('?')[0];
 
+    if (cleanPath === '/instance/capabilities' && method === 'GET') return {
+      instanceName: 'TeamTaler Demo', maintenanceMode: false, maintenanceMessage: '', publicJoinEnabled: true,
+      mediaUploadMaxBytes: 5 * 1024 * 1024, attachmentUploadMaxBytes: 15 * 1024 * 1024,
+    } as T;
     if (cleanPath === '/auth/capabilities' && method === 'GET') return { passwordResetAvailable: false, emailChangeAvailable: false } as T;
     if (cleanPath === '/me/profile' && method === 'PATCH') {
       const displayName = String((body as { displayName?: unknown }).displayName ?? '').trim();
@@ -484,8 +508,17 @@ export class DemoTransport {
     if (resource === 'accounts/me') return clone(this.ledger) as T;
     if (resource === 'accounts' && method === 'GET') return clone(this.accountSummaries.filter((account) => account.status !== 'DELETED' || BigInt(account.balance.minorUnits) !== 0n)) as T;
     if (resource === 'payments' && method === 'GET') return clone(this.payments) as T;
-    if (resource === 'payments' && method === 'POST') return this.createPayment(body as PaymentCommand) as T;
-    if (resource === 'payments/self' && method === 'POST') return this.createOwnPayment(groupId, body as SelfPaymentCommand & { amountMinor?: number }) as T;
+    if (resource === 'payments' && method === 'POST') return this.createPayment(body as PaymentCommand, this.groupSettings.otherPaymentReasonMode, attachment) as T;
+    if (resource === 'payments/self' && method === 'POST') return this.createOwnPayment(groupId, body as SelfPaymentCommand & { amountMinor?: number }, attachment) as T;
+    const paymentAttachmentMatch = resource.match(/^payments\/([^/]+)\/attachment$/);
+    if (paymentAttachmentMatch && method === 'GET') {
+      const payment = this.payments.find((entry) => entry.id === paymentAttachmentMatch[1]);
+      const currentMember = this.currentMembership(groupId);
+      const canRead = payment && currentMember && (payment.membershipId === currentMember.id || can(currentMember.effectiveGrants, 'FINANCE_MANAGEMENT'));
+      const file = canRead ? this.paymentAttachments.get(payment.id) : undefined;
+      if (!file) throw new Error('Payment receipt not found.');
+      return file.slice(0, file.size, file.type) as T;
+    }
     if (resource === 'periods' && method === 'GET') return clone(this.periods) as T;
     if (resource === 'settlements' && method === 'GET') return clone(this.settlements) as T;
     if (resource === 'notifications' && method === 'GET') return clone(this.notifications) as T;
@@ -1533,10 +1566,14 @@ export class DemoTransport {
     category.products.splice(productIndex, 1);
   }
 
-  private createPayment(command: PaymentCommand & { amountMinor?: number }, reasonMode: ReasonMode = this.groupSettings.otherPaymentReasonMode): Payment {
+  private createPayment(command: PaymentCommand & { amountMinor?: number }, reasonMode: ReasonMode = this.groupSettings.otherPaymentReasonMode, attachment?: File): Payment {
     const member = this.members.find((entry) => entry.id === command.membershipId);
     if (!member) throw new Error(i18n.t('errors.memberNotFound'));
     if (reasonMode === 'REQUIRED' && !command.reference?.trim()) throw new Error(i18n.t('selfPayment.referenceRequired'));
+    const paymentMethod = this.groupSettings.paymentMethods.find((entry) => entry.id === command.method);
+    if (!paymentMethod) throw new Error(i18n.t('errors.requestFailed'));
+    if (paymentMethod.attachmentMode === 'OFF' && attachment) throw new Error('This payment method does not accept receipts.');
+    if (paymentMethod.attachmentMode === 'REQUIRED' && !attachment) throw new Error('A receipt is required for this payment method.');
     const effectiveReference = reasonMode === 'OFF' ? undefined : command.reference?.trim() || undefined;
     const payment: Payment = {
       id: identifier('payment'),
@@ -1546,8 +1583,14 @@ export class DemoTransport {
       ...command,
       reference: effectiveReference,
       amount: command.amount ?? { minorUnits: String(command.amountMinor ?? 0), currency: 'EUR' },
-      methodLabel: this.groupSettings.paymentMethods.find((entry) => entry.id === command.method)?.label ?? command.method,
+      methodLabel: paymentMethod.label,
+      ...(attachment ? { attachment: { fileName: attachment.name, mediaType: attachment.type, sizeBytes: attachment.size, url: '' } } : {}),
     };
+    if (attachment && payment.attachment) {
+      const groupId = this.session.activeGroupId ?? this.session.groups[0]?.id ?? '';
+      payment.attachment.url = `/api/v1/groups/${encodeURIComponent(groupId)}/payments/${encodeURIComponent(payment.id)}/attachment`;
+      this.paymentAttachments.set(payment.id, attachment);
+    }
     this.payments.unshift(payment);
     const paymentMinor = BigInt(payment.amount.minorUnits);
     this.adjustAccountBalance(member.id, -paymentMinor);
@@ -1562,6 +1605,7 @@ export class DemoTransport {
         amount: { minorUnits: (-paymentMinor).toString(), currency: payment.amount.currency },
         balance: clone(this.dashboard.openBalance),
         referenceId: payment.id,
+        ...(payment.attachment ? { attachment: clone(payment.attachment) } : {}),
       });
       let remaining = paymentMinor;
       for (const settlement of this.settlements.filter((entry) => entry.membershipId === member.id && (entry.status === 'OPEN' || entry.status === 'PARTIAL'))) {
@@ -1577,7 +1621,7 @@ export class DemoTransport {
     return clone(payment);
   }
 
-  private createOwnPayment(groupId: string, command: SelfPaymentCommand & { amountMinor?: number }): Payment {
+  private createOwnPayment(groupId: string, command: SelfPaymentCommand & { amountMinor?: number }, attachment?: File): Payment {
     const membershipId = this.session.groups.find((group) => group.id === groupId)?.membership?.id;
     const member = this.members.find((entry) => entry.id === membershipId && entry.active);
     if (!member) throw new Error(i18n.t('errors.memberNotFound'));
@@ -1586,7 +1630,7 @@ export class DemoTransport {
     if (amountMinor <= 0n) throw new Error(i18n.t('errors.amountFormat'));
     if (amountMinor > 100_000_000_000n) throw new Error(i18n.t('errors.amountRange'));
     if (!command.receivedAt || Number.isNaN(Date.parse(command.receivedAt))) throw new Error(i18n.t('errors.requestFailed'));
-    if (!['BANK_TRANSFER', 'CASH', 'PAYPAL', 'OTHER'].includes(command.method)) throw new Error(i18n.t('errors.requestFailed'));
+    if (!this.groupSettings.paymentMethods.some((entry) => entry.id === command.method)) throw new Error(i18n.t('errors.requestFailed'));
     if (this.groupSettings.ownPaymentReasonMode === 'REQUIRED' && !command.reference?.trim()) throw new Error(i18n.t('selfPayment.referenceRequired'));
     return this.createPayment({
       membershipId: member.id,
@@ -1594,7 +1638,7 @@ export class DemoTransport {
       receivedAt: command.receivedAt,
       method: command.method,
       reference: command.reference?.trim(),
-    }, this.groupSettings.ownPaymentReasonMode);
+    }, this.groupSettings.ownPaymentReasonMode, attachment);
   }
 
   private reversePayment(id: string): void {

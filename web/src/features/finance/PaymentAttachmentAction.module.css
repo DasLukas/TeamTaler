@@ -1,0 +1,4 @@
+.action { display: inline-grid; gap: var(--space-1); }
+.action small { max-width: 16rem; color: var(--color-red-600); }
+.preview { display: grid; min-height: 18rem; place-items: center; padding: var(--space-4); }
+.preview img { display: block; max-width: 100%; max-height: 75vh; object-fit: contain; }

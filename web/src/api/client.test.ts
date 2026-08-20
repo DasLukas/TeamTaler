@@ -61,6 +61,15 @@ function requestBody(call: unknown[]): Record<string, unknown> {
   return JSON.parse(String((call[1] as RequestInit | undefined)?.body)) as Record<string, unknown>;
 }
 
+function blobText(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener('load', () => resolve(String(reader.result ?? '')));
+    reader.addEventListener('error', () => reject(reader.error));
+    reader.readAsText(blob);
+  });
+}
+
 describe('high-risk API idempotency', () => {
   beforeEach(() => {
     sessionStorage.clear();
@@ -470,6 +479,45 @@ describe('high-risk API idempotency', () => {
     expect(requestBody(call)).not.toHaveProperty('membershipId');
   });
 
+  it('uploads a payment receipt as multipart and fingerprints its content for retries', async () => {
+    const payment = {
+      id: 'payment-receipt', membershipId: 'member-user-a', memberName: 'user-a', amountMinor: 2450, currency: 'EUR',
+      receivedAt: '2026-08-06T00:00:00Z', method: 'OTHER', status: 'POSTED',
+      attachment: { fileName: 'receipt.pdf', mediaType: 'application/pdf', sizeBytes: 7, url: '/api/v1/groups/group-a/payments/payment-receipt/attachment' },
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(session('user-a')))
+      .mockRejectedValueOnce(new TypeError('network lost'))
+      .mockResolvedValueOnce(jsonResponse(payment, 201));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.getSession();
+    const command = { amount: { minorUnits: '2450', currency: 'EUR' }, receivedAt: '2026-08-06', method: 'OTHER' };
+    await expect(api.createOwnPayment('group-a', command, new File(['receipt'], 'receipt.pdf', { type: 'application/pdf' }))).rejects.toThrow('network lost');
+    await api.createOwnPayment('group-a', command, new File(['receipt'], 'renamed.pdf', { type: 'application/pdf' }));
+
+    const firstRequest = fetchMock.mock.calls[1];
+    const retryRequest = fetchMock.mock.calls[2];
+    expect(idempotencyKey(firstRequest)).toBe(idempotencyKey(retryRequest));
+    const body = (retryRequest[1] as RequestInit).body;
+    expect(body).toBeInstanceOf(FormData);
+    const form = body as FormData;
+    expect(form.get('attachment')).toBeInstanceOf(File);
+    expect((form.get('attachment') as File).name).toBe('renamed.pdf');
+    expect(JSON.parse(await blobText(form.get('command') as Blob))).toEqual({ amountMinor: 2450, receivedAt: '2026-08-06T00:00:00.000Z', method: 'OTHER' });
+  });
+
+  it('downloads a protected payment receipt as a blob', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response('image', { headers: { 'Content-Type': 'image/jpeg' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const downloaded = await api.getPaymentAttachment('group-a', 'payment-a');
+    expect(downloaded.size).toBe(5);
+    expect(downloaded.type).toBe('image/jpeg');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group-a/payments/payment-a/attachment');
+    expect(new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers).get('Accept')).toContain('application/pdf');
+  });
+
   it('sends raw CSV with its explicit media type and reuses the key after a network failure', async () => {
     const csv = 'email,display_name\nnew@example.test,New Member\n';
     const file = new File([csv], 'members.csv', { type: 'text/csv' });
@@ -658,10 +706,11 @@ describe('high-risk API idempotency', () => {
       notificationEmailDeliveryAvailable: true,
       defaultRoleId: 'role-member',
       paymentMethods: [
-        { id: 'BANK_TRANSFER', label: 'Überweisung' },
-        { id: 'CASH', label: 'Bar' },
-        { id: 'PAYPAL', label: 'PayPal' },
-        { id: 'OTHER', label: 'Sonstige' },
+        { id: 'BANK_TRANSFER', label: 'Überweisung', attachmentMode: 'OFF' },
+        { id: 'SHOPPING', label: 'Einkauf', attachmentMode: 'REQUIRED' },
+        { id: 'CASH', label: 'Bar', attachmentMode: 'OFF' },
+        { id: 'PAYPAL', label: 'PayPal', attachmentMode: 'OFF' },
+        { id: 'OTHER', label: 'Sonstige', attachmentMode: 'OPTIONAL' },
       ],
     });
     await expect(api.updateGroupSettings('group-a', { notificationEmailsEnabled: true })).resolves.toMatchObject({

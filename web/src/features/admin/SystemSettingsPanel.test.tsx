@@ -42,6 +42,8 @@ const settings: SystemSettings = {
   defaultCurrency: value('EUR'),
   mediaUploadMaxBytes: value(5 * 1024 * 1024),
   mediaUploadHardLimitBytes: 25 * 1024 * 1024,
+  attachmentUploadMaxBytes: value(15 * 1024 * 1024),
+  attachmentUploadHardLimitBytes: 50 * 1024 * 1024,
   publicJoinEnabled: value(true),
   maintenanceMode: value(false),
   maintenanceMessage: value(''),
@@ -375,6 +377,10 @@ describe('SystemSettingsPanel', () => {
     expect(mediaLimit).toHaveAttribute('max', '25');
     expect(mediaLimit).toHaveAttribute('step', '1');
     expect(within(section).getByText('Einstellbar in ganzen MiB von 1 bis 25.')).toBeVisible();
+    const attachmentLimit = within(section).getByLabelText('Maximale Beleg-Uploadgröße in MiB');
+    expect(attachmentLimit).toHaveAttribute('min', '1');
+    expect(attachmentLimit).toHaveAttribute('max', '50');
+    expect(attachmentLimit).toHaveAttribute('step', '1');
 
     await user.selectOptions(currency, 'USD');
     await user.click(within(section).getByRole('button', { name: 'Speichern' }));

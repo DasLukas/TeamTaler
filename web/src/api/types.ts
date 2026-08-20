@@ -232,6 +232,9 @@ export type SystemRole = 'SYSTEM_ADMINISTRATOR';
 /** Browser fallback used only while public instance capabilities are unavailable. */
 export const DEFAULT_MEDIA_UPLOAD_MAX_BYTES = 5 * 1024 * 1024;
 
+/** Browser fallback for immutable payment attachments. */
+export const DEFAULT_ATTACHMENT_UPLOAD_MAX_BYTES = 15 * 1024 * 1024;
+
 /** Public, non-sensitive instance behavior required before authenticated features render. */
 export interface InstanceCapabilities {
   instanceName: string;
@@ -239,6 +242,7 @@ export interface InstanceCapabilities {
   maintenanceMessage: string;
   publicJoinEnabled: boolean;
   mediaUploadMaxBytes: number;
+  attachmentUploadMaxBytes: number;
   /** Whether SMTP-backed optional notifications can currently be delivered. */
   emailNotificationsAvailable: boolean;
   /** Whether this deployment exposes a complete, active Web Push configuration. */
@@ -276,6 +280,14 @@ export interface ConfigurableItem {
   label: string;
 }
 
+/** Controls whether one payment method accepts or requires a receipt. */
+export type AttachmentMode = 'OFF' | 'OPTIONAL' | 'REQUIRED';
+
+/** One stable, ordered payment method and its receipt policy. */
+export interface PaymentMethod extends ConfigurableItem {
+  attachmentMode: AttachmentMode;
+}
+
 /** Visibility and validation policy for one transaction-reason context. */
 export type ReasonMode = 'OFF' | 'OPTIONAL' | 'REQUIRED';
 
@@ -289,7 +301,7 @@ export interface TransactionSettings {
   foreignBookingReasonRequired: boolean;
   ownPaymentReasonRequired: boolean;
   otherPaymentReasonRequired: boolean;
-  paymentMethods: ConfigurableItem[];
+  paymentMethods: PaymentMethod[];
   bookingReasons: ConfigurableItem[];
   paymentReasons: ConfigurableItem[];
 }
@@ -307,7 +319,7 @@ export interface GroupSettings {
   foreignBookingReasonRequired: boolean;
   ownPaymentReasonRequired: boolean;
   otherPaymentReasonRequired: boolean;
-  paymentMethods: ConfigurableItem[];
+  paymentMethods: PaymentMethod[];
   bookingReasons: ConfigurableItem[];
   paymentReasons: ConfigurableItem[];
 }
@@ -326,7 +338,7 @@ export interface GroupSettingsUpdateInput {
   foreignBookingReasonRequired?: boolean;
   ownPaymentReasonRequired?: boolean;
   otherPaymentReasonRequired?: boolean;
-  paymentMethods?: ConfigurableItem[];
+  paymentMethods?: PaymentMethod[];
   bookingReasons?: ConfigurableItem[];
   paymentReasons?: ConfigurableItem[];
 }
@@ -432,12 +444,14 @@ export interface SystemSettings {
   instanceName: SystemSetting<string>;
   defaultCurrency: SystemSetting<string>;
   mediaUploadMaxBytes: SystemSetting<number>;
+  attachmentUploadMaxBytes: SystemSetting<number>;
   publicJoinEnabled: SystemSetting<boolean>;
   maintenanceMode: SystemSetting<boolean>;
   maintenanceMessage: SystemSetting<string>;
   smtp: SystemSmtpSettings;
   webPush: SystemWebPushSettings;
   mediaUploadHardLimitBytes: number;
+  attachmentUploadHardLimitBytes: number;
   updatedAt: string;
   updatedByUserId: string | null;
 }
@@ -447,6 +461,7 @@ export type ResettableSystemSettingKey =
   | 'instanceName'
   | 'defaultCurrency'
   | 'mediaUploadMaxBytes'
+  | 'attachmentUploadMaxBytes'
   | 'publicJoinEnabled'
   | 'maintenanceMode'
   | 'maintenanceMessage';
@@ -456,6 +471,7 @@ export interface SystemSettingsUpdate {
   instanceName?: string;
   defaultCurrency?: string;
   mediaUploadMaxBytes?: number;
+  attachmentUploadMaxBytes?: number;
   publicJoinEnabled?: boolean;
   maintenanceMode?: boolean;
   maintenanceMessage?: string;
@@ -769,6 +785,7 @@ export interface LedgerEntry {
   amount: Money;
   balance: Money;
   referenceId: string;
+  attachment?: PaymentAttachmentSummary;
 }
 
 /** Consolidated group account balance for one operational or non-zero deleted membership. */
@@ -795,6 +812,15 @@ export interface Payment {
   reference?: string;
   note?: string;
   status: 'POSTED' | 'REVERSED';
+  attachment?: PaymentAttachmentSummary;
+}
+
+/** Safe payment-receipt metadata exposed without its internal storage key. */
+export interface PaymentAttachmentSummary {
+  fileName: string;
+  mediaType: string;
+  sizeBytes: number;
+  url: string;
 }
 
 /** Complete command for restoring one archived group membership. */

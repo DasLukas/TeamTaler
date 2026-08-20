@@ -9,7 +9,7 @@ This README is the primary entry point for the person who installs and operates 
 - Multiple isolated groups in one installation.
 - Group-owned roles and granular permissions for administration, bookings, finance, catalogue management, and reporting.
 - Fixed-price and user-defined-price products with category, file or camera image capture, archive, and ordering support.
-- Account balances, incoming payments, immutable corrections, optional accounting periods, and settlement history.
+- Account balances, incoming payments with optional or required image/PDF receipts, immutable corrections, optional accounting periods, and settlement history.
 - Searchable, column-filterable, sortable operational tables with shareable filter state, cursor-backed loading, and complete horizontally scrollable mobile columns.
 - Individual invitations, CSV invitation imports, public join links, and temporary guest accounts.
 - Local accounts with profile images, password recovery, verified email changes, and server-side sessions.
@@ -20,7 +20,7 @@ This README is the primary entry point for the person who installs and operates 
 
 ## Deployment model
 
-TeamTaler runs as one application container. The container serves both the web interface and API and stores its SQLite database and managed images in one persistent Docker volume.
+TeamTaler runs as one application container. The container serves both the web interface and API and stores its SQLite database, managed images, and payment receipts in one persistent Docker volume.
 
 A supported production deployment requires:
 
@@ -109,7 +109,7 @@ Adjust the port in the readiness URL when `TEAMTALER_HOST_PORT` is not `8080`.
 
 Forward the public HTTPS origin to `http://127.0.0.1:8080` when the proxy runs on the Docker host. A proxy in Docker should share a dedicated external network with TeamTaler and use `http://app:8080` as its upstream.
 
-The proxy must preserve the request method, path, query, body, cookies, `Origin`, and `X-CSRF-Token`. Its body-size limit must be at least 26 MiB to preserve the full runtime-configurable media range, and at least as large as `TEAMTALER_MAX_REQUEST_BYTES` when that ordinary API ceiling is configured above 26 MiB.
+The proxy must preserve the request method, path, query, body, cookies, `Origin`, and `X-CSRF-Token`. Its body-size limit must be at least 51 MiB to preserve the full runtime-configurable receipt range, and at least as large as `TEAMTALER_MAX_REQUEST_BYTES` when that ordinary API ceiling is configured above 51 MiB.
 
 Ready-to-adapt Caddy, Nginx, Traefik, and shared-Docker-network examples are documented in [deploy/README.md](deploy/README.md).
 
@@ -136,7 +136,7 @@ Bootstrap refuses to run after an account already exists. It never accepts a pas
 
 ### 6. Open the instance
 
-Open `TEAMTALER_PUBLIC_URL` in a browser and sign in with the bootstrap account. The first settings tab is **System**, where the instance identity, default currency, media limit, SMTP, public joining, maintenance mode, groups, and global system audit are managed.
+Open `TEAMTALER_PUBLIC_URL` in a browser and sign in with the bootstrap account. The first settings tab is **System**, where the instance identity, default currency, media and receipt limits, SMTP, public joining, maintenance mode, groups, and global system audit are managed.
 
 ## Configuration
 
@@ -154,7 +154,7 @@ TeamTaler separates immutable host configuration from runtime-editable instance 
 | `TEAMTALER_HOST_PORT` | `8080` | Host-loopback port published by Docker Compose. |
 | `TEAMTALER_IMAGE` | `ghcr.io/daslukas/teamtaler` | Container image repository used by Compose. |
 | `TEAMTALER_VERSION` | current release | Pinned image tag and application version. |
-| `TEAMTALER_MAX_REQUEST_BYTES` | `6291456` | Request-body ceiling for ordinary API operations. Media routes instead follow the live media setting plus a fixed multipart reserve. |
+| `TEAMTALER_MAX_REQUEST_BYTES` | `6291456` | Request-body ceiling for ordinary API operations. Media and payment-receipt routes instead follow their live upload setting plus a fixed multipart reserve. |
 | `TEAMTALER_EMAIL_TOKEN_KEY` | unset | Base64-encoded 32-byte key for encrypted email proofs and stored SMTP credentials. |
 | `TEAMTALER_PUSH_STORAGE_KEY` | unset | Independent base64-encoded 32-byte key for VAPID overrides and encrypted browser subscriptions. |
 | `TEAMTALER_SMTP_ALLOW_PRIVATE_NETWORK` | `false` | Allows web-configured SMTP targets on private or local networks. Enable only for a trusted private relay requirement. |
@@ -169,6 +169,7 @@ The standard container also uses fixed runtime paths from `.env.example`. Detail
 | `TEAMTALER_INSTANCE_NAME` | `TeamTaler` | Public instance name. |
 | `TEAMTALER_DEFAULT_CURRENCY` | `EUR` | Currency suggested for newly created groups. Existing groups are unchanged. |
 | `TEAMTALER_MEDIA_UPLOAD_MAX_BYTES` | `5242880` | Shared raw upload limit for product images, group logos, and avatars. |
+| `TEAMTALER_ATTACHMENT_UPLOAD_MAX_BYTES` | `15728640` | Raw upload limit for one payment receipt. |
 | `TEAMTALER_PUBLIC_JOIN_ENABLED` | `true` | Global availability of otherwise valid public join links. |
 | `TEAMTALER_MAINTENANCE_MODE` | `false` | Read-only maintenance policy. Login, reads, logout, health checks, and system administration remain available. |
 | `TEAMTALER_MAINTENANCE_MESSAGE` | empty | Short public maintenance notice. |
@@ -176,7 +177,9 @@ The standard container also uses fixed runtime paths from `.env.example`. Detail
 | `TEAMTALER_WEB_PUSH_SUBJECT` | empty | VAPID contact as `mailto:` or an absolute HTTPS URL. |
 | `TEAMTALER_WEB_PUSH_VAPID_PRIVATE_KEY` | empty | Secret URL-safe VAPID P-256 private key; the public key is derived by the server. |
 
-The media limit is editable without a restart through the System tab or `teamtaler admin system settings set --media-upload-max-bytes ...`. It must be a whole MiB value from 1 MiB through 25 MiB. The server automatically applies that live value plus multipart reserve to avatar, group-logo, and product-image requests; `TEAMTALER_MAX_REQUEST_BYTES` does not cap those routes. Immutable image-decoder protections still limit dimensions, pixel count, and normalized output size. If a reverse proxy is used, configure its body limit for at least 26 MiB so it does not override TeamTaler's runtime setting.
+The media and receipt limits are editable without a restart through the System tab or `teamtaler admin system settings set`. Media must be a whole MiB value from 1 through 25 MiB; receipts must be a whole MiB value from 1 through 50 MiB. The server applies each live value plus a 1-MiB multipart reserve to the matching routes, independently of `TEAMTALER_MAX_REQUEST_BYTES`. Receipt images are decoded, dimension-checked, metadata-stripped, and normalized; bounded PDFs are validated and stored as opaque documents. Configure a reverse proxy for at least 51 MiB so it does not override the maximum receipt setting.
+
+Group administrators configure receipt handling independently for every payment method as disabled, optional, or required. New groups start with Bank transfer without a receipt, Shopping with a required receipt, Cash and PayPal without receipts, and Other with an optional receipt. Members may select a JPEG, PNG, WebP, or PDF from the device, use a photo-library source, or create a locally processed multi-page PDF through the camera-only document scanner. Imported files remain separate from camera scan sessions. A payment keeps exactly one immutable receipt, including after reversal. The affected member and current holders of `FINANCE_MANAGEMENT` may retrieve it; storage identifiers are never exposed through the API.
 
 ### SMTP and email delivery
 
@@ -264,6 +267,7 @@ teamtaler admin system settings set \
   [--instance-name NAME] \
   [--default-currency EUR] \
   [--media-upload-max-bytes BYTES] \
+  [--attachment-upload-max-bytes BYTES] \
   [--public-join-enabled true|false] \
   [--maintenance-mode true|false] \
   [--maintenance-message MESSAGE] \
@@ -278,6 +282,7 @@ Reset keys are:
 - `instance.name`
 - `instance.default_currency`
 - `media.upload_max_bytes`
+- `attachment.upload_max_bytes`
 - `access.public_join_enabled`
 - `maintenance.enabled`
 - `maintenance.message`
@@ -388,9 +393,9 @@ Create an online application-consistent backup from the Compose deployment:
 ./scripts/backup.sh
 ```
 
-The resulting archive contains a consistent SQLite snapshot, referenced images, a format manifest, and SHA-256 checksums. Copy completed archives away from the Docker host and encrypt them with an external backup system. TeamTaler does not schedule backups or enforce retention.
+The resulting archive contains a consistent SQLite snapshot, referenced images and payment receipts, a format manifest, and SHA-256 checksums. Copy completed archives away from the Docker host and encrypt them with an external backup system. TeamTaler does not schedule backups or enforce retention.
 
-Restore only while the application is stopped. A restore validates archive paths, sizes, checksums, images, SQLite integrity, foreign keys, and migration compatibility before replacing data. The exact procedure, including the one-off Compose command and recovery directory, is documented in [deploy/README.md](deploy/README.md#restore).
+Restore only while the application is stopped. A restore validates archive paths, sizes, checksums, image and receipt content addresses, SQLite integrity, foreign keys, exact reference inventories, and migration compatibility before replacing data. The exact procedure, including the one-off Compose command and recovery directory, is documented in [deploy/README.md](deploy/README.md#restore).
 
 Before every upgrade:
 
@@ -405,7 +410,7 @@ Before every upgrade:
    docker compose up -d app
    ```
 
-6. Verify readiness, login, representative balances, images, and audit history.
+6. Verify readiness, login, representative balances, images, payment receipts, and audit history.
 
 Migrations are forward-only. Rollback requires the previous image together with a compatible pre-upgrade backup. Do not run an older binary against a database already migrated by a newer release. Automatic unreviewed container updates are not recommended for financial data.
 
@@ -440,7 +445,7 @@ Confirm the direct peer address seen by TeamTaler. Configure only that proxy add
 
 ### Uploads fail with HTTP 413
 
-Check the effective media limit in the System tab. If a reverse proxy is used, its body limit must allow at least 26 MiB for the maximum 25 MiB media setting plus multipart overhead. `TEAMTALER_MAX_REQUEST_BYTES` applies only to ordinary non-media API requests.
+Check the effective media or receipt limit in the System tab. If a reverse proxy is used, its body limit must allow at least 51 MiB for the maximum 50 MiB receipt setting plus multipart overhead. `TEAMTALER_MAX_REQUEST_BYTES` applies only to ordinary non-upload API requests.
 
 ### The System tab is missing after an upgrade
 

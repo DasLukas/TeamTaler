@@ -10,11 +10,13 @@ import { api } from '@/api/client';
 import { formatMoney, isCreditBalance, majorUnitsInputPattern, majorUnitsInputValue, majorUnitsPlaceholder, validatePositiveMajorUnits } from '@/api/money';
 import type { Dashboard, Money, Payment, SelfPaymentCommand } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
+import { useInstanceCapabilities } from '@/app/useSession';
 import { Button } from '@/components/ui/Button';
 import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import styles from './SelfPaymentDialog.module.css';
+import { PaymentAttachmentField } from './PaymentAttachmentField';
 
 type SelfPaymentStep = 'entry' | 'review' | 'success';
 
@@ -51,6 +53,7 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
   const { t } = useTranslation();
   const { activeGroupId, activeGroup, session } = useActiveGroup();
   const queryClient = useQueryClient();
+  const { attachmentUploadMaxBytes } = useInstanceCapabilities();
   const compact = useMediaQuery('(max-width: 600px)');
   const entryFormId = useId();
   const [open, setOpen] = useState(false);
@@ -62,12 +65,15 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
   const [method, setMethod] = useState<Payment['method']>('');
   const [reference, setReference] = useState('');
   const [referenceError, setReferenceError] = useState('');
+  const [attachment, setAttachment] = useState<File | null>(null);
   const [command, setCommand] = useState<SelfPaymentCommand | null>(null);
   const [updatedBalance, setUpdatedBalance] = useState<Money | null>(null);
   const reasonMode = transactionSettingsQuery.data?.ownPaymentReasonMode
     ?? (transactionSettingsQuery.data?.ownPaymentReasonRequired === false ? 'OPTIONAL' : 'REQUIRED');
   const reasonEnabled = reasonMode !== 'OFF';
   const reasonRequired = reasonMode === 'REQUIRED';
+  const selectedPaymentMethod = transactionSettingsQuery.data?.paymentMethods.find((item) => item.id === method);
+  const attachmentMode = selectedPaymentMethod?.attachmentMode ?? 'OFF';
 
   const reset = () => {
     setStep('entry');
@@ -77,12 +83,15 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
     setMethod(transactionSettingsQuery.data?.paymentMethods[0]?.id ?? '');
     setReference('');
     setReferenceError('');
+    setAttachment(null);
     setCommand(null);
     setUpdatedBalance(null);
   };
 
   const mutation = useMutation({
-    mutationFn: (input: SelfPaymentCommand) => api.createOwnPayment(activeGroupId, input),
+    mutationFn: ({ input, file }: { input: SelfPaymentCommand; file: File | null }) => file
+      ? api.createOwnPayment(activeGroupId, input, file)
+      : api.createOwnPayment(activeGroupId, input),
     onSuccess: async (payment) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['dashboard', activeGroupId] }),
@@ -123,6 +132,7 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
       setReferenceError(t('selfPayment.referenceRequired'));
       return;
     }
+    if (attachmentMode === 'REQUIRED' && !attachment) return;
     setAmountError('');
     setReferenceError('');
     setCommand({
@@ -151,10 +161,11 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
             {BigInt(openBalance.minorUnits) > 0n ? <Button fullWidth leadingIcon={<CircleDollarSign size={17} />} onClick={() => { setAmount(majorUnitsInputValue(openBalance)); setAmountError(''); }} variant="secondary">{t('selfPayment.useOpenBalance', { amount: formatMoney(openBalance) })}</Button> : null}
             <div className={styles.formRow}>
               <Field htmlFor="self-payment-date" label={t('finance.receivedDate')}><TextInput id="self-payment-date" onChange={(event) => setReceivedAt(event.target.value)} required type="date" value={receivedAt} /></Field>
-              <Field htmlFor="self-payment-method" label={t('finance.paymentType')}><SelectInput id="self-payment-method" onChange={(event) => setMethod(event.target.value)} required value={method}>{transactionSettingsQuery.data?.paymentMethods.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</SelectInput></Field>
+              <Field htmlFor="self-payment-method" label={t('finance.paymentType')}><SelectInput id="self-payment-method" onChange={(event) => { const nextMethod = event.target.value; setMethod(nextMethod); if (transactionSettingsQuery.data?.paymentMethods.find((item) => item.id === nextMethod)?.attachmentMode === 'OFF') setAttachment(null); }} required value={method}>{transactionSettingsQuery.data?.paymentMethods.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</SelectInput></Field>
             </div>
             {reasonEnabled ? <Field error={referenceError || undefined} htmlFor="self-payment-reference" label={`${t('finance.reason')}${reasonRequired ? ' *' : ''}`}><TextInput id="self-payment-reference" list="self-payment-reason-suggestions" maxLength={120} onChange={(event) => { setReference(event.target.value); setReferenceError(''); }} required={reasonRequired} value={reference} /><datalist id="self-payment-reason-suggestions">{transactionSettingsQuery.data?.paymentReasons.map((item) => <option key={item.id} value={item.label} />)}</datalist></Field> : null}
-            <ModalFooter><div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button form={entryFormId} leadingIcon={<CircleCheck size={17} />} type="submit">{t('selfPayment.review')}</Button></div></ModalFooter>
+            <PaymentAttachmentField attachmentMode={attachmentMode} file={attachment} maxBytes={attachmentUploadMaxBytes} onChange={setAttachment} />
+            <ModalFooter><div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={attachmentMode === 'REQUIRED' && !attachment} form={entryFormId} leadingIcon={<CircleCheck size={17} />} type="submit">{t('selfPayment.review')}</Button></div></ModalFooter>
           </form>
         ) : null}
 
@@ -167,9 +178,10 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
               <div><dt>{t('common.date')}</dt><dd>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(`${receivedAt}T12:00:00`))}</dd></div>
               <div><dt>{t('finance.paymentType')}</dt><dd>{paymentMethod}</dd></div>
               {reasonEnabled ? <div><dt>{t('finance.reason')}</dt><dd>{command.reference || '–'}</dd></div> : null}
+              {attachment ? <div><dt>{t('paymentAttachment.label', { defaultValue: 'Receipt' })}</dt><dd>{attachment.name}</dd></div> : null}
             </dl>
             {mutation.isError ? <p className={styles.error} role="alert">{mutation.error.message}</p> : null}
-            <ModalFooter><div className={styles.actions}><Button disabled={mutation.isPending} leadingIcon={<ArrowLeft size={17} />} onClick={() => { mutation.reset(); setStep('entry'); }} variant="secondary">{t('common.back')}</Button><Button disabled={mutation.isPending} leadingIcon={<CircleDollarSign size={17} />} onClick={() => mutation.mutate(command)}>{mutation.isPending ? t('selfPayment.pending') : t('selfPayment.confirm', { amount: formatMoney(command.amount) })}</Button></div></ModalFooter>
+            <ModalFooter><div className={styles.actions}><Button disabled={mutation.isPending} leadingIcon={<ArrowLeft size={17} />} onClick={() => { mutation.reset(); setStep('entry'); }} variant="secondary">{t('common.back')}</Button><Button disabled={mutation.isPending} leadingIcon={<CircleDollarSign size={17} />} onClick={() => mutation.mutate({ input: command, file: attachment })}>{mutation.isPending ? t('selfPayment.pending') : t('selfPayment.confirm', { amount: formatMoney(command.amount) })}</Button></div></ModalFooter>
           </div>
         ) : null}
 

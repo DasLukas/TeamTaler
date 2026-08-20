@@ -1,6 +1,6 @@
 # Deployment and operations
 
-TeamTaler runs as one application container behind an existing HTTPS reverse proxy. The container serves the API and compiled frontend and stores its SQLite database, normalized product images and group logos, and backup/restore staging data in one persistent volume.
+TeamTaler runs as one application container behind an existing HTTPS reverse proxy. The container serves the API and compiled frontend and stores its SQLite database, normalized managed images, payment receipts, and backup/restore staging data in one persistent volume.
 
 ## Supported topology
 
@@ -45,7 +45,7 @@ The proxy must:
 
 - forward the original method, path, query, request body, cookies, `Origin`, and `X-CSRF-Token` header;
 - append the client address to `X-Forwarded-For` when per-client throttling through a trusted proxy is required;
-- allow request bodies of at least 26 MiB so the live media-upload setting can use its full 25 MiB range plus multipart reserve;
+- allow request bodies of at least 51 MiB so the live receipt-upload setting can use its full 50 MiB range plus multipart reserve;
 - use timeouts longer than the application's 30-second request read/write limits.
 
 Preserving `Host` and setting `X-Forwarded-Proto` are recommended conventional proxy behavior and are shown in the templates. The current server uses the configured public URL—not forwarded scheme/host values—as its canonical origin and secure-cookie signal. It consumes `X-Forwarded-For` only when the direct connection originates from a configured trusted CIDR.
@@ -107,12 +107,13 @@ The host remains authoritative for the public URL, listener, trusted proxy CIDRs
 TEAMTALER_INSTANCE_NAME=TeamTaler
 TEAMTALER_DEFAULT_CURRENCY=EUR
 TEAMTALER_MEDIA_UPLOAD_MAX_BYTES=5242880
+TEAMTALER_ATTACHMENT_UPLOAD_MAX_BYTES=15728640
 TEAMTALER_PUBLIC_JOIN_ENABLED=true
 TEAMTALER_MAINTENANCE_MODE=false
 TEAMTALER_MAINTENANCE_MESSAGE=
 ```
 
-A system administrator may persist versioned overrides from the System settings tab or the local `teamtaler admin system` CLI. Persisted values take precedence and become effective without restarting; reset removes the override and reveals the current environment or code default. Media endpoints derive their request ceiling from the live media setting and are not capped by `TEAMTALER_MAX_REQUEST_BYTES`; that variable remains the ordinary API request ceiling. Configure an optional reverse proxy to accept at least 26 MiB so the full runtime range of whole MiB values from 1 MiB through 25 MiB remains usable. Image decoder and normalized-output protections remain fixed.
+A system administrator may persist versioned overrides from the System settings tab or the local `teamtaler admin system` CLI. Persisted values take precedence and become effective without restarting; reset removes the override and reveals the current environment or code default. Media and receipt endpoints derive their request ceiling from their respective live setting and are not capped by `TEAMTALER_MAX_REQUEST_BYTES`; that variable remains the ordinary API request ceiling. Configure an optional reverse proxy to accept at least 51 MiB so the full 50-MiB receipt range plus multipart reserve remains usable. Image decoder and normalized-output protections remain fixed.
 
 Persisted SMTP credentials require `TEAMTALER_EMAIL_TOKEN_KEY`. The application derives a separate encryption key for the SMTP password and never returns it from the API or CLI. Every changed persisted SMTP revision starts disabled, must successfully send a test message to the current system administrator, and may be enabled only while that exact revision remains tested. Existing complete environment SMTP defaults remain available without this migration-time test. Email workers re-read effective settings before each job and pause without consuming attempts while SMTP is disabled or maintenance mode is active.
 
@@ -148,7 +149,7 @@ copies that completed file to:
 ./backups/teamtaler-YYYYMMDDTHHMMSSZ.tar.gz
 ```
 
-The application first creates a SQLite `VACUUM INTO` snapshot, then includes every image referenced by the snapshot and a manifest containing SHA-256 checksums. Archive creation uses temporary files and publishes the completed archive with mode `0600`. After a successful host copy, the helper removes the source archive from the named volume. If the copy fails, it deliberately leaves the source path in the volume and reports that path for recovery.
+The application first creates a SQLite `VACUUM INTO` snapshot, then includes every managed image and payment receipt referenced by the snapshot together with a manifest containing SHA-256 checksums. Archive creation uses temporary files and publishes the completed archive with mode `0600`. After a successful host copy, the helper removes the source archive from the named volume. If the copy fails, it deliberately leaves the source path in the volume and reports that path for recovery.
 
 Copy backups to storage outside the Docker host and encrypt them. TeamTaler does not schedule backups, enforce retention, upload off-site copies, or encrypt archives. A sample policy is seven daily, four weekly, and twelve monthly archives, but the required schedule and retention must follow the deployment's recovery objectives.
 
@@ -188,11 +189,11 @@ The restore implementation installs the archive's internal `teamtaler.db` snapsh
    docker compose up -d app
    ```
 
-6. Verify readiness, login, representative member balances, a closed statement, image loading, notifications, and audit history.
+6. Verify readiness, login, representative member balances, a closed statement, managed-image and payment-receipt loading, notifications, and audit history.
 
-Restore accepts only regular files at the database, manifest, and image paths and limits expanded content to 2 GiB. Before replacing data it validates manifest structure and timestamps, file checksums, image content addresses, SQLite integrity, foreign keys, supported migration versions, and exact correspondence between database image references and archived images.
+Restore accepts only regular files at the canonical database, manifest, managed-image, and receipt paths and limits expanded content to 2 GiB. Before replacing data it validates manifest structure and timestamps, file checksums, content addresses, SQLite integrity, foreign keys, supported migration versions, and exact correspondence between database references and archived files.
 
-With `--force`, the configured database file, its WAL/SHM files, and the `images` directory move to a timestamped `.restore-backup-*` directory under the data volume. Keep that recovery directory until post-restore verification succeeds, then remove it deliberately to reclaim space.
+With `--force`, the configured database file, its WAL/SHM files, and the `images` and `attachments` directories move to a timestamped `.restore-backup-*` directory under the data volume. Keep that recovery directory until post-restore verification succeeds, then remove it deliberately to reclaim space.
 
 Never unpack an untrusted archive directly into the volume. Never run restore while the application is serving traffic.
 

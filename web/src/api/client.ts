@@ -185,6 +185,23 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await requestWithMetadata<T>(path, init)).data;
 }
 
+async function requestBlob(path: string): Promise<Blob> {
+  const headers = new Headers({ Accept: 'image/jpeg, image/png, image/webp, application/pdf' });
+  const csrf = csrfToken();
+  if (csrf) headers.set('X-CSRF-Token', csrf);
+  try {
+    const response = await fetch(`${API_BASE}${path}`, { credentials: 'include', headers });
+    if (!response.ok) {
+      if (DEMO_ENABLED && (response.status === 404 || response.status >= 500)) return requestDevelopmentDemo<Blob>(path, {});
+      throw new ApiError(await parseProblem(response));
+    }
+    return response.blob();
+  } catch (error) {
+    if (DEMO_ENABLED && !(error instanceof ApiError)) return requestDevelopmentDemo<Blob>(path, {});
+    throw error;
+  }
+}
+
 async function requestWithMetadata<T>(path: string, init: RequestInit = {}): Promise<{ data: T; headers: Headers }> {
   const headers = new Headers(init.headers);
   headers.set('Accept', 'application/json');
@@ -215,6 +232,18 @@ const groupPath = (groupId: string, resource: string) => `/groups/${encodeURICom
 const groupRootPath = (groupId: string) => `/groups/${encodeURIComponent(groupId)}`;
 const systemGroupPath = (groupId: string, resource = '') => `/system/groups/${encodeURIComponent(groupId)}${resource ? `/${resource}` : ''}`;
 const json = (value: unknown) => JSON.stringify(value);
+
+async function fileSha256(file: File): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function paymentMultipart(payload: unknown, attachment: File): FormData {
+  const form = new FormData();
+  form.append('command', new Blob([json(payload)], { type: 'application/json' }), 'command.json');
+  form.append('attachment', attachment, attachment.name);
+  return form;
+}
 const versionHeaders = (version: number): HeadersInit => ({ 'If-Match': `"v${version}"` });
 
 /**
@@ -272,6 +301,7 @@ const systemSettingKeys: Record<ResettableSystemSettingKey, string> = {
   instanceName: 'instance.name',
   defaultCurrency: 'instance.default_currency',
   mediaUploadMaxBytes: 'media.upload_max_bytes',
+  attachmentUploadMaxBytes: 'attachment.upload_max_bytes',
   publicJoinEnabled: 'access.public_join_enabled',
   maintenanceMode: 'maintenance.enabled',
   maintenanceMessage: 'maintenance.message',
@@ -686,16 +716,19 @@ export const api = {
     const response = await requestWithMetadata<unknown[]>(collectionPath(groupPath(groupId, 'payments'), query));
     return collectionPage(response.data.map(adaptPayment), response.headers, query.limit);
   },
-  createPayment: async (groupId: string, command: PaymentCommand): Promise<Payment> => {
+  createPayment: async (groupId: string, command: PaymentCommand, attachment?: File): Promise<Payment> => {
     const path = groupPath(groupId, 'payments');
     const payload = { ...command, amountMinor: minorUnitsToSafeNumber(command.amount.minorUnits), amount: undefined, receivedAt: new Date(command.receivedAt).toISOString() };
-    return adaptPayment(await idempotentRequest<unknown>(groupId, 'payment.create', path, payload, { method: 'POST', body: json(payload) }));
+    const fingerprint = attachment ? { command: payload, attachmentSha256: await fileSha256(attachment) } : payload;
+    return adaptPayment(await idempotentRequest<unknown>(groupId, 'payment.create', path, fingerprint, { method: 'POST', body: attachment ? paymentMultipart(payload, attachment) : json(payload) }));
   },
-  createOwnPayment: async (groupId: string, command: SelfPaymentCommand): Promise<Payment> => {
+  createOwnPayment: async (groupId: string, command: SelfPaymentCommand, attachment?: File): Promise<Payment> => {
     const path = groupPath(groupId, 'payments/self');
     const payload = { ...command, amountMinor: minorUnitsToSafeNumber(command.amount.minorUnits), amount: undefined, receivedAt: new Date(command.receivedAt).toISOString() };
-    return adaptPayment(await idempotentRequest<unknown>(groupId, 'payment.self.create', path, payload, { method: 'POST', body: json(payload) }));
+    const fingerprint = attachment ? { command: payload, attachmentSha256: await fileSha256(attachment) } : payload;
+    return adaptPayment(await idempotentRequest<unknown>(groupId, 'payment.self.create', path, fingerprint, { method: 'POST', body: attachment ? paymentMultipart(payload, attachment) : json(payload) }));
   },
+  getPaymentAttachment: (groupId: string, paymentId: string): Promise<Blob> => requestBlob(groupPath(groupId, `payments/${paymentId}/attachment`)),
   reversePayment: (groupId: string, paymentId: string, reason: string): Promise<void> => {
     const path = groupPath(groupId, `payments/${paymentId}/reverse`);
     const payload = { reason };

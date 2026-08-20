@@ -12,6 +12,7 @@ export interface SelectMenuOption<Value extends string = string> {
 
 /** Properties accepted by the anchored single-value selection menu. */
 export interface SelectMenuProps<Value extends string = string> {
+  ariaDescribedBy?: string;
   ariaLabel?: string;
   className?: string;
   id: string;
@@ -33,7 +34,7 @@ export interface SelectMenuProps<Value extends string = string> {
  * and optional disabled state.
  * @returns A keyboard-operable combobox trigger and anchored listbox.
  */
-export function SelectMenu<Value extends string>({ ariaLabel, className = '', id, menuMinWidth = 0, value, options, onChange, disabled = false, renderOption, renderValue, title }: SelectMenuProps<Value>) {
+export function SelectMenu<Value extends string>({ ariaDescribedBy, ariaLabel, className = '', id, menuMinWidth = 0, value, options, onChange, disabled = false, renderOption, renderValue, title }: SelectMenuProps<Value>) {
   const listboxId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLUListElement>(null);
@@ -146,6 +147,7 @@ export function SelectMenu<Value extends string>({ ariaLabel, className = '', id
       <button
         aria-activedescendant={open ? `${listboxId}-${activeIndex}` : undefined}
         aria-controls={open ? listboxId : undefined}
+        aria-describedby={ariaDescribedBy}
         aria-expanded={open}
         aria-haspopup="listbox"
         aria-label={ariaLabel}
@@ -160,7 +162,7 @@ export function SelectMenu<Value extends string>({ ariaLabel, className = '', id
         type="button"
       >
         <span className={styles.value}>{selectedOption ? (renderValue?.(selectedOption) ?? selectedOption.label) : ''}</span>
-        <ChevronDown aria-hidden="true" size={18} />
+        <ChevronDown aria-hidden="true" className={styles.chevron} size={18} />
       </button>
       {open && portalTarget ? createPortal(
         <ul aria-label={ariaLabel} className={styles.menu} id={listboxId} ref={panelRef} role="listbox" style={panelStyle}>
