@@ -46,7 +46,7 @@ describe('dynamic role controls', () => {
     expect(screen.getByRole('checkbox', { name: /Mitglied/i })).not.toBeChecked();
     expect(screen.getByRole('checkbox', { name: /Mitglied/i })).toBeEnabled();
     expect(screen.getByRole('checkbox', { name: /Administrative custom role/i })).toBeDisabled();
-    expect(screen.getByRole('checkbox', { name: /Group administrator/i })).toBeDisabled();
+    expect(screen.getByRole('checkbox', { name: /Gruppenadministrator/i })).toBeDisabled();
     await user.click(screen.getByRole('checkbox', { name: /Finance/i }));
 
     expect(onChange).toHaveBeenCalledWith(['role-finance']);
@@ -56,7 +56,7 @@ describe('dynamic role controls', () => {
     const onChange = vi.fn();
     render(<RoleMultiSelect canManageGroup label="Roles" onChange={onChange} roleIds={['role-member']} roles={roles} />);
 
-    const reservedAdministrator = screen.getByRole('checkbox', { name: /Group administrator/i });
+    const reservedAdministrator = screen.getByRole('checkbox', { name: /Gruppenadministrator/i });
     expect(reservedAdministrator).toBeDisabled();
     expect(screen.getByRole('checkbox', { name: /Finance/i })).toBeDisabled();
     expect(screen.getByRole('checkbox', { name: /Administrative custom role/i })).toBeDisabled();
@@ -68,7 +68,7 @@ describe('dynamic role controls', () => {
     const onChange = vi.fn();
     render(<RoleMultiSelect canAssignRoles canManageGroup label="Roles" onChange={onChange} roleIds={['role-member']} roles={roles} />);
 
-    const reservedAdministrator = screen.getByRole('checkbox', { name: /Group administrator/i });
+    const reservedAdministrator = screen.getByRole('checkbox', { name: /Gruppenadministrator/i });
     expect(reservedAdministrator).toBeEnabled();
     await user.click(reservedAdministrator);
 
@@ -87,7 +87,7 @@ describe('dynamic role controls', () => {
       />,
     );
 
-    expect(screen.getByRole('checkbox', { name: /Group administrator/i })).toBeDisabled();
+    expect(screen.getByRole('checkbox', { name: /Gruppenadministrator/i })).toBeDisabled();
     expect(screen.queryByText('Letzter Administrator')).not.toBeInTheDocument();
   });
 });

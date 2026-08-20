@@ -4,15 +4,17 @@ import i18n from '@/i18n';
 const CANONICAL_ADMINISTRATOR_DESCRIPTIONS: readonly string[] = ['Required administrator role with full group access.', 'Standardrolle für Administratorrolle mit vollständigem Zugriff auf die Gruppe'];
 
 /**
- * Returns the persisted role name verbatim for every UI surface.
+ * Returns the localized name of a reserved role or the persisted custom name.
  *
- * Role names are group-owned content. Translating canonical-looking values
- * would make the editor disagree with role pickers and assignment summaries.
+ * Reserved identities are selected exclusively through their stable preset
+ * key. Administrator-authored role names remain group-owned content and are
+ * never translated heuristically.
  *
  * @param role - Group-owned role returned by the API.
- * @returns The exact name stored for the role.
+ * @returns The consistent localized or custom display name.
  */
 export function roleDisplayName(role: Role): string {
+  if (role.presetKey === 'GROUP_ADMINISTRATOR') return i18n.t('roleManagement.presetNames.GROUP_ADMINISTRATOR');
   return role.name;
 }
 

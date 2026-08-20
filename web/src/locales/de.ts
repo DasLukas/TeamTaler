@@ -1051,6 +1051,9 @@ export const de = {
   },
   roleManagement: {
     title: 'Gruppenrollen',
+    presetNames: {
+      GROUP_ADMINISTRATOR: 'Gruppenadministrator',
+    },
     presetDescriptions: {
       GROUP_ADMINISTRATOR: 'Standardrolle für Administratorrolle mit vollständigem Zugriff auf die Gruppe',
     },
