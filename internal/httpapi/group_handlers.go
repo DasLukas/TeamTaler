@@ -131,7 +131,7 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		ForeignBookingReasonRequired *bool                      `json:"foreignBookingReasonRequired"`
 		OwnPaymentReasonRequired     *bool                      `json:"ownPaymentReasonRequired"`
 		OtherPaymentReasonRequired   *bool                      `json:"otherPaymentReasonRequired"`
-		PaymentMethods               *[]domain.ConfigurableItem `json:"paymentMethods"`
+		PaymentMethods               *[]domain.PaymentMethod    `json:"paymentMethods"`
 		BookingReasons               *[]domain.ConfigurableItem `json:"bookingReasons"`
 		PaymentReasons               *[]domain.ConfigurableItem `json:"paymentReasons"`
 	}

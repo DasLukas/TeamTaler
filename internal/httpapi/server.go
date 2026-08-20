@@ -30,6 +30,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/finance"
 	"github.com/DasLukas/TeamTaler/internal/groups"
 	"github.com/DasLukas/TeamTaler/internal/notifications"
+	"github.com/DasLukas/TeamTaler/internal/paymentattachments"
 	"github.com/DasLukas/TeamTaler/internal/periods"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	systemadmin "github.com/DasLukas/TeamTaler/internal/system"
@@ -141,7 +142,7 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 		groups:            groupService,
 		catalog:           catalog.Service{DB: db},
 		bookings:          bookings.Service{DB: db, Groups: groupService, Notifications: notificationService},
-		finance:           finance.Service{DB: db, Notifications: notificationService},
+		finance:           finance.Service{DB: db, Notifications: notificationService, Attachments: paymentattachments.Store{DataDirectory: cfg.DataDirectory}},
 		periods:           periods.Service{DB: db, Notifications: notificationService},
 		notifications:     notificationService,
 		systemAdmin:       systemService,
@@ -268,6 +269,7 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/payments", server.handleListPayments)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/payments", server.handleCreatePayment)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/payments/self", server.handleCreateOwnPayment)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/payments/{paymentID}/attachment", server.handlePaymentAttachment)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/payments/{paymentID}/reverse", server.handleReversePayment)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/periods", server.handleListPeriods)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/periods/{periodID}/close", server.handleClosePeriod)
@@ -419,7 +421,13 @@ func (s *Server) originCheck(next http.Handler) http.Handler {
 func (s *Server) limitBody(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		limit := s.config.MaxRequestBytes
-		if isMediaUploadRequest(request) {
+		if isPaymentAttachmentRequest(request) {
+			if settings, loaded := effectiveSystemSettings(request); loaded {
+				limit = settings.AttachmentUploadMaxBytes.Value + systemadmin.MultipartRequestReserveBytes
+			} else {
+				limit = config.DefaultAttachmentUploadBytes + config.MultipartRequestReserve
+			}
+		} else if isMediaUploadRequest(request) {
 			if settings, loaded := effectiveSystemSettings(request); loaded {
 				limit = settings.MediaUploadMaxBytes.Value + systemadmin.MultipartRequestReserveBytes
 			} else {
@@ -429,6 +437,17 @@ func (s *Server) limitBody(next http.Handler) http.Handler {
 		request.Body = http.MaxBytesReader(response, request.Body, limit)
 		next.ServeHTTP(response, request)
 	})
+}
+
+func isPaymentAttachmentRequest(request *http.Request) bool {
+	if request.Method != http.MethodPost {
+		return false
+	}
+	segments := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
+	if len(segments) == 5 {
+		return segments[0] == "api" && segments[1] == "v1" && segments[2] == "groups" && segments[4] == "payments"
+	}
+	return len(segments) == 6 && segments[0] == "api" && segments[1] == "v1" && segments[2] == "groups" && segments[4] == "payments" && segments[5] == "self"
 }
 
 // isMediaUploadRequest identifies the three multipart routes whose request
@@ -465,11 +484,11 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 			response.Header().Set("Cache-Control", "no-store")
 			response.Header().Add("Vary", "Cookie")
 		}
-		response.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")
+		response.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")
 		response.Header().Set("Referrer-Policy", "no-referrer")
 		response.Header().Set("X-Content-Type-Options", "nosniff")
 		response.Header().Set("X-Frame-Options", "DENY")
-		response.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
+		response.Header().Set("Permissions-Policy", "camera=(self), microphone=(), geolocation=(), payment=()")
 		if s.config.SecureCookies {
 			response.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}

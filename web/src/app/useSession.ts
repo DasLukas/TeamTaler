@@ -1,5 +1,5 @@
 import { useContext } from 'react';
-import { DEFAULT_MEDIA_UPLOAD_MAX_BYTES, type InstanceCapabilities, type Session } from '@/api/types';
+import { DEFAULT_ATTACHMENT_UPLOAD_MAX_BYTES, DEFAULT_MEDIA_UPLOAD_MAX_BYTES, type InstanceCapabilities, type Session } from '@/api/types';
 import { SessionContext } from './session-context';
 
 /** Safe browser defaults used only when a standalone component lacks the app provider. */
@@ -9,6 +9,7 @@ export const DEFAULT_INSTANCE_CAPABILITIES: InstanceCapabilities = {
   maintenanceMessage: '',
   publicJoinEnabled: true,
   mediaUploadMaxBytes: DEFAULT_MEDIA_UPLOAD_MAX_BYTES,
+  attachmentUploadMaxBytes: DEFAULT_ATTACHMENT_UPLOAD_MAX_BYTES,
   emailNotificationsAvailable: false,
   webPushAvailable: false,
   webPushPublicKey: null,

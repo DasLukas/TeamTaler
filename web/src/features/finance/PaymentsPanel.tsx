@@ -9,6 +9,7 @@ import { api } from '@/api/client';
 import { currencyExponent, formatMoney, majorUnitsInputPattern, majorUnitsPlaceholder, parseMajorUnits } from '@/api/money';
 import type { CollectionPage, Payment, PaymentCollectionQuery } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
+import { useInstanceCapabilities } from '@/app/useSession';
 import { Button } from '@/components/ui/Button';
 import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
@@ -18,6 +19,8 @@ import tableStyles from '@/features/shared/Table.module.css';
 import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
 import styles from './PaymentsPanel.module.css';
+import { PaymentAttachmentAction } from './PaymentAttachmentAction';
+import { PaymentAttachmentField } from './PaymentAttachmentField';
 
 const paymentPageSize = 50;
 type PaymentFilterId = 'membershipId' | 'method' | 'status' | 'receivedAt' | 'amount';
@@ -31,6 +34,7 @@ export function PaymentsPanel() {
   const { t } = useTranslation();
   const { activeGroupId, activeGroup } = useActiveGroup();
   const queryClient = useQueryClient();
+  const { attachmentUploadMaxBytes } = useInstanceCapabilities();
   const paymentFormId = useId();
   const reversalFormId = useId();
   const accountsQuery = useQuery({ queryKey: ['account-summaries', activeGroupId], queryFn: () => api.getAccountSummaries(activeGroupId) });
@@ -42,6 +46,7 @@ export function PaymentsPanel() {
   const [receivedAt, setReceivedAt] = useState(new Date().toISOString().slice(0, 10));
   const [method, setMethod] = useState<Payment['method']>('');
   const [reference, setReference] = useState('');
+  const [attachment, setAttachment] = useState<File | null>(null);
   const [paymentToReverse, setPaymentToReverse] = useState<Payment | null>(null);
   const [reversalReason, setReversalReason] = useState('');
   const filterDefinitions = useMemo<readonly DataTableFilterDefinition<PaymentFilterId>[]>(() => [
@@ -120,9 +125,17 @@ export function PaymentsPanel() {
     ?? (transactionSettingsQuery.data?.otherPaymentReasonRequired ? 'REQUIRED' : 'OPTIONAL');
   const reasonEnabled = reasonMode !== 'OFF';
   const reasonRequired = reasonMode === 'REQUIRED';
+  const selectedPaymentMethod = transactionSettingsQuery.data?.paymentMethods.find((item) => item.id === method);
+  const attachmentMode = selectedPaymentMethod?.attachmentMode ?? 'OFF';
   const openRecordDialog = () => {
     setMethod(transactionSettingsQuery.data?.paymentMethods[0]?.id ?? '');
+    setAttachment(null);
     setDialogOpen(true);
+  };
+  const closeRecordDialog = () => {
+    setDialogOpen(false);
+    setAttachment(null);
+    paymentMutation.reset();
   };
   const invalidateFinancialReads = async () => Promise.all([
     queryClient.invalidateQueries({ queryKey: ['payments', activeGroupId] }),
@@ -132,11 +145,15 @@ export function PaymentsPanel() {
     queryClient.invalidateQueries({ queryKey: ['dashboard', activeGroupId] }),
   ]);
   const paymentMutation = useMutation({
-    mutationFn: () => api.createPayment(activeGroupId, { membershipId: selectedMembershipId, amount: { minorUnits: parseMajorUnits(amount, activeGroup.currency), currency: activeGroup.currency }, receivedAt, method, reference: reasonEnabled ? reference.trim() || undefined : undefined }),
+    mutationFn: () => {
+      const command = { membershipId: selectedMembershipId, amount: { minorUnits: parseMajorUnits(amount, activeGroup.currency), currency: activeGroup.currency }, receivedAt, method, reference: reasonEnabled ? reference.trim() || undefined : undefined };
+      return attachment ? api.createPayment(activeGroupId, command, attachment) : api.createPayment(activeGroupId, command);
+    },
     onSuccess: async () => {
       setDialogOpen(false);
       setAmount('');
       setReference('');
+      setAttachment(null);
       await invalidateFinancialReads();
     },
   });
@@ -185,13 +202,16 @@ export function PaymentsPanel() {
       meta: { label: t('common.status') },
     },
     {
-      cell: ({ row }) => row.original.status === 'POSTED' ? <Button leadingIcon={<RotateCcw size={16} />} onClick={() => setPaymentToReverse(row.original)} size="small" variant="ghost">{t('finance.reverse')}</Button> : null,
+      cell: ({ row }) => <div className={styles.rowActions}>
+        {row.original.attachment ? <PaymentAttachmentAction attachment={row.original.attachment} groupId={activeGroupId} paymentId={row.original.id} /> : null}
+        {row.original.status === 'POSTED' ? <Button leadingIcon={<RotateCcw size={16} />} onClick={() => setPaymentToReverse(row.original)} size="small" variant="ghost">{t('finance.reverse')}</Button> : null}
+      </div>,
       enableSorting: false,
       header: () => <span className="sr-only">{t('common.action')}</span>,
       id: 'action',
       meta: { label: t('common.action') },
     },
-  ], [t]);
+  ], [activeGroupId, t]);
 
   if (accountsQuery.isLoading || transactionSettingsQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
   if (!accountsQuery.data || !transactionSettingsQuery.data) return <div className={styles.state}><StatePanel kind="error" message={t('finance.error')} /></div>;
@@ -216,7 +236,7 @@ export function PaymentsPanel() {
         onLoadMore={() => void paymentsQuery.fetchNextPage()}
         {...tableState}
       />
-      <Modal onClose={() => setDialogOpen(false)} open={dialogOpen} title={t('finance.record')}>
+      <Modal onClose={closeRecordDialog} open={dialogOpen} title={t('finance.record')}>
         <form className={styles.form} id={paymentFormId} onSubmit={(event) => { event.preventDefault(); paymentMutation.mutate(); }}>
           <Field htmlFor="payment-member" label={t('common.member')}>
             <SelectInput id="payment-member" onChange={(event) => setMembershipId(event.target.value)} value={membershipId || defaultAccount?.membershipId}>
@@ -227,10 +247,11 @@ export function PaymentsPanel() {
             </SelectInput>
           </Field>
           <div className={styles.formRow}><Field htmlFor="payment-amount" label={`${t('finance.amountIn', { currency: activeGroup.currency })} *`}><TextInput id="payment-amount" inputMode="decimal" onChange={(event) => setAmount(event.target.value)} pattern={majorUnitsInputPattern(activeGroup.currency)} placeholder={majorUnitsPlaceholder(activeGroup.currency)} required type="text" value={amount} /></Field><Field htmlFor="payment-date" label={t('finance.receivedDate')}><TextInput id="payment-date" onChange={(event) => setReceivedAt(event.target.value)} required type="date" value={receivedAt} /></Field></div>
-          <Field htmlFor="payment-method" label={t('finance.paymentType')}><SelectInput id="payment-method" onChange={(event) => setMethod(event.target.value)} required value={method}>{transactionSettingsQuery.data.paymentMethods.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</SelectInput></Field>
+          <Field htmlFor="payment-method" label={t('finance.paymentType')}><SelectInput id="payment-method" onChange={(event) => { const nextMethod = event.target.value; setMethod(nextMethod); if (transactionSettingsQuery.data.paymentMethods.find((item) => item.id === nextMethod)?.attachmentMode === 'OFF') setAttachment(null); }} required value={method}>{transactionSettingsQuery.data.paymentMethods.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</SelectInput></Field>
           {reasonEnabled ? <Field htmlFor="payment-reference" label={`${t('finance.reason')}${reasonRequired ? ' *' : ''}`}><TextInput id="payment-reference" list="payment-reason-suggestions" maxLength={120} onChange={(event) => setReference(event.target.value)} required={reasonRequired} value={reference} /><datalist id="payment-reason-suggestions">{transactionSettingsQuery.data.paymentReasons.map((item) => <option key={item.id} value={item.label} />)}</datalist></Field> : null}
+          <PaymentAttachmentField attachmentMode={attachmentMode} file={attachment} maxBytes={attachmentUploadMaxBytes} onChange={setAttachment} />
           {paymentMutation.isError ? <p className={styles.error} role="alert">{paymentMutation.error.message}</p> : null}
-          <ModalFooter><div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={() => setDialogOpen(false)} variant="secondary">{t('common.cancel')}</Button><Button disabled={!amount || !method || (reasonRequired && !reference.trim()) || paymentMutation.isPending} form={paymentFormId} leadingIcon={<CircleDollarSign size={17} />} type="submit">{t('finance.bookPayment')}</Button></div></ModalFooter>
+          <ModalFooter><div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeRecordDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!amount || !method || (reasonRequired && !reference.trim()) || (attachmentMode === 'REQUIRED' && !attachment) || paymentMutation.isPending} form={paymentFormId} leadingIcon={<CircleDollarSign size={17} />} type="submit">{t('finance.bookPayment')}</Button></div></ModalFooter>
         </form>
       </Modal>
       <Modal onClose={() => setPaymentToReverse(null)} open={Boolean(paymentToReverse)} title={t('finance.reverseTitle')}>

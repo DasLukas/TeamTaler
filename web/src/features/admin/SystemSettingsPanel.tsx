@@ -130,33 +130,40 @@ function GeneralSettingsSection({ settings }: { settings: SystemSettings }) {
   const [instanceName, setInstanceName] = useState(settings.instanceName.value);
   const [defaultCurrency, setDefaultCurrency] = useState(settings.defaultCurrency.value);
   const [mediaLimitMiB, setMediaLimitMiB] = useState(settings.mediaUploadMaxBytes.value / MEBIBYTE);
+  const [attachmentLimitMiB, setAttachmentLimitMiB] = useState(settings.attachmentUploadMaxBytes.value / MEBIBYTE);
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const mediaUploadMaxBytes = mediaLimitMiB * MEBIBYTE;
+    const attachmentUploadMaxBytes = attachmentLimitMiB * MEBIBYTE;
     mutation.mutate({
       revision: settings.revision,
       update: {
         ...(instanceName.trim() !== settings.instanceName.value ? { instanceName: instanceName.trim() } : {}),
         ...(defaultCurrency !== settings.defaultCurrency.value ? { defaultCurrency } : {}),
         ...(mediaUploadMaxBytes !== settings.mediaUploadMaxBytes.value ? { mediaUploadMaxBytes } : {}),
+        ...(attachmentUploadMaxBytes !== settings.attachmentUploadMaxBytes.value ? { attachmentUploadMaxBytes } : {}),
       },
     });
   };
   const changed = instanceName.trim() !== settings.instanceName.value
     || defaultCurrency !== settings.defaultCurrency.value
-    || mediaLimitMiB * MEBIBYTE !== settings.mediaUploadMaxBytes.value;
+    || mediaLimitMiB * MEBIBYTE !== settings.mediaUploadMaxBytes.value
+    || attachmentLimitMiB * MEBIBYTE !== settings.attachmentUploadMaxBytes.value;
   const pending = mutation.isPending || resetMutation.isPending;
   const maximumMediaLimitMiB = 25;
+  const maximumAttachmentLimitMiB = Math.max(1, Math.floor(settings.attachmentUploadHardLimitBytes / MEBIBYTE));
   const resetKeys: ResettableSystemSettingKey[] = [
     ...(settings.instanceName.source === 'DATABASE' ? ['instanceName' as const] : []),
     ...(settings.defaultCurrency.source === 'DATABASE' ? ['defaultCurrency' as const] : []),
     ...(settings.mediaUploadMaxBytes.source === 'DATABASE' ? ['mediaUploadMaxBytes' as const] : []),
+    ...(settings.attachmentUploadMaxBytes.source === 'DATABASE' ? ['attachmentUploadMaxBytes' as const] : []),
   ];
   const reset = () => resetMutation.mutate({ keys: resetKeys, revision: settings.revision }, {
     onSuccess: (persisted) => {
       setInstanceName(persisted.instanceName.value);
       setDefaultCurrency(persisted.defaultCurrency.value);
       setMediaLimitMiB(persisted.mediaUploadMaxBytes.value / MEBIBYTE);
+      setAttachmentLimitMiB(persisted.attachmentUploadMaxBytes.value / MEBIBYTE);
       setResetOpen(false);
     },
   });
@@ -166,6 +173,11 @@ function GeneralSettingsSection({ settings }: { settings: SystemSettings }) {
       <form className={styles.form} onSubmit={submit}>
         <div className={styles.fieldBlock}>
           <Field htmlFor="system-instance-name" label={t('systemSettings.general.instanceName')}><TextInput id="system-instance-name" maxLength={120} onChange={(event) => setInstanceName(event.target.value)} required value={instanceName} /></Field>
+        </div>
+        <div className={styles.fieldBlock}>
+          <Field hint={t('systemSettings.general.attachmentLimitHint', { defaultValue: 'Maximum size of one payment receipt.' })} htmlFor="system-attachment-limit" label={t('systemSettings.general.attachmentLimit', { defaultValue: 'Receipt upload limit (MiB)' })}>
+            <TextInput id="system-attachment-limit" max={maximumAttachmentLimitMiB} min={1} onChange={(event) => setAttachmentLimitMiB(event.target.valueAsNumber)} required step={1} type="number" value={attachmentLimitMiB} />
+          </Field>
         </div>
         <div className={styles.fieldBlock}>
           <Field htmlFor="system-default-currency" label={t('systemSettings.general.defaultCurrency')}>
@@ -184,7 +196,7 @@ function GeneralSettingsSection({ settings }: { settings: SystemSettings }) {
         {mutation.isSuccess || resetMutation.isSuccess ? <p className={styles.success} role="status">{t('systemSettings.saved')}</p> : null}
         <div className={styles.actions}>
           <Button disabled={pending || resetKeys.length === 0} leadingIcon={<RotateCcw size={17} />} onClick={() => setResetOpen(true)} variant="secondary">{t('systemSettings.reset')}</Button>
-          <Button disabled={!changed || pending || !instanceName.trim() || !/^[A-Z]{3}$/.test(defaultCurrency) || !Number.isInteger(mediaLimitMiB) || mediaLimitMiB < 1 || mediaLimitMiB > maximumMediaLimitMiB} leadingIcon={<Save size={17} />} type="submit">{pending ? t('common.saving') : t('common.save')}</Button>
+          <Button disabled={!changed || pending || !instanceName.trim() || !/^[A-Z]{3}$/.test(defaultCurrency) || !Number.isInteger(mediaLimitMiB) || mediaLimitMiB < 1 || mediaLimitMiB > maximumMediaLimitMiB || !Number.isInteger(attachmentLimitMiB) || attachmentLimitMiB < 1 || attachmentLimitMiB > maximumAttachmentLimitMiB} leadingIcon={<Save size={17} />} type="submit">{pending ? t('common.saving') : t('common.save')}</Button>
         </div>
       </form>
       <ResetConfirmationDialog errorMessage={resetMutation.isError ? t('systemSettings.saveError') : undefined} onClose={() => setResetOpen(false)} onConfirm={reset} open={resetOpen} pending={resetMutation.isPending} sectionName={t('systemSettings.general.title')} />

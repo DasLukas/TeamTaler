@@ -14,7 +14,11 @@ export default defineConfig({
   use: {
     baseURL: 'http://127.0.0.1:5173',
     headless: true,
-    launchOptions: localChrome ? { executablePath: localChrome } : undefined,
+    launchOptions: {
+      args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
+      ...(localChrome ? { executablePath: localChrome } : {}),
+    },
+    permissions: ['camera'],
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
   },

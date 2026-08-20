@@ -109,16 +109,18 @@ func TestSettingsUseTypedOverridesOptimisticConcurrencyAndReset(t *testing.T) {
 	name := "Runtime TeamTaler"
 	currency := "usd"
 	uploadLimit := int64(24 << 20)
+	attachmentLimit := int64(40 << 20)
 	publicJoin := false
 	maintenance := true
 	message := "Short maintenance"
 	updated, err := service.UpdateSettings(ctx, "admin", initial.Revision, SettingsPatch{
-		InstanceName:        &name,
-		DefaultCurrency:     &currency,
-		MediaUploadMaxBytes: &uploadLimit,
-		PublicJoinEnabled:   &publicJoin,
-		MaintenanceMode:     &maintenance,
-		MaintenanceMessage:  &message,
+		InstanceName:             &name,
+		DefaultCurrency:          &currency,
+		MediaUploadMaxBytes:      &uploadLimit,
+		AttachmentUploadMaxBytes: &attachmentLimit,
+		PublicJoinEnabled:        &publicJoin,
+		MaintenanceMode:          &maintenance,
+		MaintenanceMessage:       &message,
 	})
 	if err != nil {
 		t.Fatalf("update settings: %v", err)
@@ -126,11 +128,14 @@ func TestSettingsUseTypedOverridesOptimisticConcurrencyAndReset(t *testing.T) {
 	if updated.Revision != 2 || updated.InstanceName.Value != name || updated.InstanceName.Source != SettingSourceDatabase || updated.InstanceName.OverrideVersion != 1 {
 		t.Fatalf("unexpected updated instance setting: %#v", updated.InstanceName)
 	}
-	if updated.DefaultCurrency.Value != "USD" || updated.MediaUploadMaxBytes.Value != uploadLimit || updated.PublicJoinEnabled.Value || !updated.MaintenanceMode.Value {
+	if updated.DefaultCurrency.Value != "USD" || updated.MediaUploadMaxBytes.Value != uploadLimit || updated.AttachmentUploadMaxBytes.Value != attachmentLimit || updated.PublicJoinEnabled.Value || !updated.MaintenanceMode.Value {
 		t.Fatalf("unexpected typed settings snapshot: %#v", updated)
 	}
 	if updated.MediaUploadHardLimitBytes != MaximumMediaUploadBytes {
 		t.Fatalf("media hard limit=%d, want %d", updated.MediaUploadHardLimitBytes, MaximumMediaUploadBytes)
+	}
+	if updated.AttachmentUploadHardLimitBytes != MaximumAttachmentUploadBytes {
+		t.Fatalf("attachment hard limit=%d, want %d", updated.AttachmentUploadHardLimitBytes, MaximumAttachmentUploadBytes)
 	}
 	if _, err := service.UpdateSettings(ctx, "admin", initial.Revision, SettingsPatch{InstanceName: &name}); !errors.Is(err, domain.ErrPrecondition) {
 		t.Fatalf("stale update error=%v, want precondition", err)

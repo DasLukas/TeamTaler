@@ -436,10 +436,11 @@ describe('DemoTransport group settings', () => {
       ownPaymentReasonMode: 'REQUIRED',
       otherPaymentReasonMode: 'OPTIONAL',
       paymentMethods: [
-        { id: 'BANK_TRANSFER', label: 'Bank transfer' },
-        { id: 'CASH', label: 'Cash' },
-        { id: 'PAYPAL', label: 'PayPal' },
-        { id: 'OTHER', label: 'Other' },
+        { id: 'BANK_TRANSFER', label: 'Bank transfer', attachmentMode: 'OFF' },
+        { id: 'SHOPPING', label: 'Shopping', attachmentMode: 'REQUIRED' },
+        { id: 'CASH', label: 'Cash', attachmentMode: 'OFF' },
+        { id: 'PAYPAL', label: 'PayPal', attachmentMode: 'OFF' },
+        { id: 'OTHER', label: 'Other', attachmentMode: 'OPTIONAL' },
       ],
     });
     await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings', {
@@ -613,6 +614,26 @@ describe('DemoTransport finance accounts', () => {
     expect(BigInt(after.groupOutstanding?.minorUnits ?? '0')).toBe(BigInt(before.groupOutstanding?.minorUnits ?? '0') - 3000n);
     expect(after.openBalance.minorUnits).toBe('-660');
     expect(ledger[0]).toMatchObject({ kind: 'PAYMENT', referenceId: payment.id, balance: { minorUnits: '-660', currency: 'EUR' } });
+  });
+
+  it('supports custom required-receipt methods and protected demo downloads', async () => {
+    const transport = new DemoTransport();
+    await transport.request('/groups/group-sv-adler/settings', jsonRequest('PATCH', {
+      paymentMethods: [{ id: 'SHOPPING', label: 'Shopping', attachmentMode: 'REQUIRED' }],
+    }));
+    const command = { amountMinor: 1250, receivedAt: '2026-08-20', method: 'SHOPPING', reference: 'Supplies' };
+    await expect(transport.request('/groups/group-sv-adler/payments/self', jsonRequest('POST', command))).rejects.toThrow('required');
+
+    const receipt = new File(['receipt'], 'receipt.pdf', { type: 'application/pdf' });
+    const form = new FormData();
+    form.append('command', new Blob([JSON.stringify(command)], { type: 'application/json' }), 'command.json');
+    form.append('attachment', receipt, receipt.name);
+    const payment = await transport.request<Payment>('/groups/group-sv-adler/payments/self', { method: 'POST', body: form });
+
+    expect(payment).toMatchObject({ method: 'SHOPPING', attachment: { fileName: 'receipt.pdf', mediaType: 'application/pdf', sizeBytes: 7 } });
+    await expect(transport.request<Blob>(`/groups/group-sv-adler/payments/${payment.id}/attachment`)).resolves.toMatchObject({ size: 7, type: 'application/pdf' });
+    const ledger = await transport.request<LedgerEntry[]>('/groups/group-sv-adler/accounts/me');
+    expect(ledger[0]).toMatchObject({ referenceId: payment.id, attachment: { fileName: 'receipt.pdf' } });
   });
 });
 

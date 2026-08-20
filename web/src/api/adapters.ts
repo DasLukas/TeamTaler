@@ -24,6 +24,8 @@ import type {
   PermissionDefinition,
   PermissionGrant,
   Payment,
+  PaymentAttachmentSummary,
+  PaymentMethod,
   Period,
   Product,
   PushSubscriptionDevice,
@@ -47,7 +49,7 @@ import type {
   TransactionSettings,
   User,
 } from './types';
-import { DEFAULT_MEDIA_UPLOAD_MAX_BYTES, isCategoryIcon, isPermissionKey } from './types';
+import { DEFAULT_ATTACHMENT_UPLOAD_MAX_BYTES, DEFAULT_MEDIA_UPLOAD_MAX_BYTES, isCategoryIcon, isPermissionKey } from './types';
 import { formatMoney } from './money';
 import i18n from '@/i18n';
 import { defaultPaymentMethods, historicalPaymentMethodLabel, localizedPaymentMethodLabel } from '@/features/finance/paymentMethods';
@@ -103,6 +105,17 @@ const booleanSetting = (input: unknown, fallback = false) => setting(input, fall
 const numberSetting = (input: unknown, fallback = 0) => setting(input, fallback, (value) => Number(value));
 const DEFAULT_SMTP_PORT = 587;
 
+function paymentAttachmentSummary(input: unknown): PaymentAttachmentSummary | undefined {
+  if (!input || typeof input !== 'object') return undefined;
+  const source = asRecord(input);
+  const fileName = typeof source.fileName === 'string' ? source.fileName : '';
+  const mediaType = typeof source.mediaType === 'string' ? source.mediaType : '';
+  const sizeBytes = Number(source.sizeBytes);
+  const url = typeof source.url === 'string' ? source.url : '';
+  if (!fileName || !mediaType || !Number.isFinite(sizeBytes) || sizeBytes < 0 || !url) return undefined;
+  return { fileName, mediaType, sizeBytes, url };
+}
+
 /**
  * Adapts the public instance-capabilities document with safe deployment defaults.
  *
@@ -120,6 +133,9 @@ export function adaptInstanceCapabilities(input: unknown): InstanceCapabilities 
     mediaUploadMaxBytes: Number.isFinite(Number(source.mediaUploadMaxBytes)) && Number(source.mediaUploadMaxBytes) > 0
       ? Number(source.mediaUploadMaxBytes)
       : DEFAULT_MEDIA_UPLOAD_MAX_BYTES,
+    attachmentUploadMaxBytes: Number.isFinite(Number(source.attachmentUploadMaxBytes)) && Number(source.attachmentUploadMaxBytes) > 0
+      ? Number(source.attachmentUploadMaxBytes)
+      : DEFAULT_ATTACHMENT_UPLOAD_MAX_BYTES,
     emailNotificationsAvailable: source.emailNotificationsAvailable === true || source.emailAvailable === true,
     webPushAvailable: source.webPushAvailable === true || webPush.available === true,
     webPushPublicKey: typeof source.webPushPublicKey === 'string' && source.webPushPublicKey
@@ -195,12 +211,14 @@ export function adaptSystemSettings(input: unknown): SystemSettings {
     instanceName: stringSetting(source.instanceName, 'TeamTaler'),
     defaultCurrency: stringSetting(source.defaultCurrency, 'EUR'),
     mediaUploadMaxBytes: numberSetting(source.mediaUploadMaxBytes, DEFAULT_MEDIA_UPLOAD_MAX_BYTES),
+    attachmentUploadMaxBytes: numberSetting(source.attachmentUploadMaxBytes, DEFAULT_ATTACHMENT_UPLOAD_MAX_BYTES),
     publicJoinEnabled: booleanSetting(source.publicJoinEnabled, true),
     maintenanceMode: booleanSetting(source.maintenanceMode),
     maintenanceMessage: stringSetting(source.maintenanceMessage),
     smtp,
     webPush,
     mediaUploadHardLimitBytes: Number(source.mediaUploadHardLimitBytes ?? envelope.mediaUploadHardLimitBytes ?? 0),
+    attachmentUploadHardLimitBytes: Number(source.attachmentUploadHardLimitBytes ?? envelope.attachmentUploadHardLimitBytes ?? 50 * 1024 * 1024),
     updatedAt: typeof source.updatedAt === 'string' ? source.updatedAt : '',
     updatedByUserId: typeof source.updatedByUserId === 'string' ? source.updatedByUserId : null,
   };
@@ -454,7 +472,7 @@ const reasonMode = (value: unknown, legacyRequired: unknown, fallback: ReasonMod
  */
 export function adaptGroupSettings(input: unknown): GroupSettings {
   const source = asRecord(input);
-  const paymentMethods = adaptConfigurableItems(source.paymentMethods, true);
+  const paymentMethods = adaptPaymentMethods(source.paymentMethods);
   const ownBookingReasonMode = reasonMode(source.ownBookingReasonMode, undefined, 'OFF');
   const foreignBookingReasonMode = reasonMode(source.foreignBookingReasonMode, source.foreignBookingReasonRequired, 'REQUIRED');
   const ownPaymentReasonMode = reasonMode(source.ownPaymentReasonMode, source.ownPaymentReasonRequired, 'REQUIRED');
@@ -488,10 +506,21 @@ export function adaptConfigurableItems(input: unknown, localizePaymentMethods = 
   });
 }
 
+/** Adapts payment methods while defaulting legacy receipt policies to disabled. */
+export function adaptPaymentMethods(input: unknown): PaymentMethod[] {
+  if (!Array.isArray(input)) return [];
+  return input.flatMap((entry) => {
+    const source = asRecord(entry);
+    if (typeof source.id !== 'string' || typeof source.label !== 'string' || !source.id || !source.label) return [];
+    const attachmentMode = source.attachmentMode === 'OPTIONAL' || source.attachmentMode === 'REQUIRED' ? source.attachmentMode : 'OFF';
+    return [{ id: source.id, label: localizedPaymentMethodLabel(source.id, source.label), attachmentMode }];
+  });
+}
+
 /** Adapts non-sensitive feature state and transaction settings for operational surfaces. */
 export function adaptTransactionSettings(input: unknown): TransactionSettings {
   const source = asRecord(input);
-  const paymentMethods = adaptConfigurableItems(source.paymentMethods, true);
+  const paymentMethods = adaptPaymentMethods(source.paymentMethods);
   const ownBookingReasonMode = reasonMode(source.ownBookingReasonMode, undefined, 'OFF');
   const foreignBookingReasonMode = reasonMode(source.foreignBookingReasonMode, source.foreignBookingReasonRequired, 'REQUIRED');
   const ownPaymentReasonMode = reasonMode(source.ownPaymentReasonMode, source.ownPaymentReasonRequired, 'REQUIRED');
@@ -968,12 +997,19 @@ export function adaptPeriod(input: unknown): Period {
  * @returns Newest-first ledger entries with reconstructed running balances.
  */
 export function adaptLedger(input: unknown): LedgerEntry[] {
-  if (Array.isArray(input)) return input as LedgerEntry[];
+  if (Array.isArray(input)) return input.map((entry) => {
+    const source = asRecord(entry);
+    const attachment = paymentAttachmentSummary(source.attachment);
+    const canonical = { ...source };
+    delete canonical.attachment;
+    return { ...canonical as unknown as LedgerEntry, ...(attachment ? { attachment } : {}) };
+  });
   const source = asRecord(input);
   let runningBalance = BigInt(String(source.balanceMinor ?? 0));
   const currency = String(source.currency || 'EUR');
   return (source.recentEntries as unknown[] ?? []).map((entry) => {
     const wire = asRecord(entry);
+    const attachment = paymentAttachmentSummary(wire.attachment);
     const amountMinor = BigInt(String(wire.amountMinor ?? 0));
     const balance = runningBalance;
     runningBalance -= amountMinor;
@@ -985,6 +1021,7 @@ export function adaptLedger(input: unknown): LedgerEntry[] {
       amount: money(amountMinor.toString(), currency),
       balance: money(balance.toString(), currency),
       referenceId: String(wire.bookingId ?? wire.paymentId ?? wire.id),
+      ...(attachment ? { attachment } : {}),
     };
   });
 }
@@ -1020,13 +1057,14 @@ export function adaptAccountSummaries(input: unknown): AccountSummary[] {
  */
 export function adaptPayment(input: unknown): Payment {
   const source = asRecord(input);
-  if ('amount' in source) return source as unknown as Payment;
+  const sourceAmount = source.amount && typeof source.amount === 'object' ? asRecord(source.amount) : undefined;
+  const attachment = paymentAttachmentSummary(source.attachment);
   return {
     id: String(source.id),
     membershipId: String(source.membershipId),
     memberName: String(source.memberName ?? i18n.t('common.member')),
     membershipStatus: source.membershipStatus === 'ARCHIVED' || source.membershipStatus === 'DELETED' ? source.membershipStatus : 'ACTIVE',
-    amount: money(source.amountMinor, source.currency),
+    amount: sourceAmount ? money(sourceAmount.minorUnits, sourceAmount.currency) : money(source.amountMinor, source.currency),
     receivedAt: String(source.receivedAt),
     method: source.method as Payment['method'],
     methodLabel: historicalPaymentMethodLabel(
@@ -1036,6 +1074,7 @@ export function adaptPayment(input: unknown): Payment {
     reference: typeof source.reference === 'string' && source.reference ? source.reference : undefined,
     note: typeof source.note === 'string' && source.note ? source.note : undefined,
     status: source.status === 'REVERSED' || source.reversedAt ? 'REVERSED' : 'POSTED',
+    ...(attachment ? { attachment } : {}),
   };
 }
 

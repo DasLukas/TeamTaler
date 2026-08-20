@@ -24,7 +24,7 @@ func TestLimitBodyUsesLiveMediaLimitForUploadRoutes(t *testing.T) {
 		}
 		response.WriteHeader(http.StatusNoContent)
 	}))
-	settings := systemadmin.Settings{MediaUploadMaxBytes: systemadmin.Setting[int64]{Value: 2 << 20}}
+	settings := systemadmin.Settings{MediaUploadMaxBytes: systemadmin.Setting[int64]{Value: 2 << 20}, AttachmentUploadMaxBytes: systemadmin.Setting[int64]{Value: 2 << 20}}
 	tests := []struct {
 		name       string
 		method     string
@@ -34,6 +34,8 @@ func TestLimitBodyUsesLiveMediaLimitForUploadRoutes(t *testing.T) {
 		{name: "avatar", method: http.MethodPost, path: "/api/v1/me/avatar", wantStatus: http.StatusNoContent},
 		{name: "group logo", method: http.MethodPost, path: "/api/v1/groups/grp_1/logo", wantStatus: http.StatusNoContent},
 		{name: "product image", method: http.MethodPost, path: "/api/v1/groups/grp_1/products/prd_1/image", wantStatus: http.StatusNoContent},
+		{name: "managed payment attachment", method: http.MethodPost, path: "/api/v1/groups/grp_1/payments", wantStatus: http.StatusNoContent},
+		{name: "self payment attachment", method: http.MethodPost, path: "/api/v1/groups/grp_1/payments/self", wantStatus: http.StatusNoContent},
 		{name: "ordinary API request", method: http.MethodPost, path: "/api/v1/groups", wantStatus: http.StatusRequestEntityTooLarge},
 		{name: "non-upload method", method: http.MethodPut, path: "/api/v1/groups/grp_1/logo", wantStatus: http.StatusRequestEntityTooLarge},
 	}
@@ -136,6 +138,12 @@ func TestSecurityHeadersAllowBlobURLsOnlyForImagePreviews(t *testing.T) {
 	}
 	if strings.Contains(policy, "script-src 'self' blob:") {
 		t.Fatalf("Content-Security-Policy unexpectedly permits blob scripts: %q", policy)
+	}
+	if !strings.Contains(policy, "script-src 'self' 'wasm-unsafe-eval'") || strings.Contains(policy, "'unsafe-eval'") {
+		t.Fatalf("Content-Security-Policy does not narrowly permit scanner WASM: %q", policy)
+	}
+	if permissions := response.Header().Get("Permissions-Policy"); !strings.Contains(permissions, "camera=(self)") || !strings.Contains(permissions, "microphone=()") {
+		t.Fatalf("Permissions-Policy does not restrict scanner camera access: %q", permissions)
 	}
 }
 

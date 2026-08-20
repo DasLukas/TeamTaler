@@ -25,12 +25,13 @@ import (
 )
 
 const (
-	maxRestoreBytes     int64 = 2 << 30
-	databaseEntryName         = "teamtaler.db"
-	manifestEntryName         = "manifest.json"
-	imagesEntryPrefix         = "images/"
-	groupLogoMigration        = "0004_group_logos.sql"
-	userAvatarMigration       = "0010_user_avatars.sql"
+	maxRestoreBytes        int64 = 2 << 30
+	databaseEntryName            = "teamtaler.db"
+	manifestEntryName            = "manifest.json"
+	imagesEntryPrefix            = "images/"
+	attachmentsEntryPrefix       = "attachments/"
+	groupLogoMigration           = "0004_group_logos.sql"
+	userAvatarMigration          = "0010_user_avatars.sql"
 )
 
 // Manifest records the archive format, creation timestamp, and SHA-256 checksum
@@ -79,6 +80,17 @@ func Create(ctx context.Context, db *sql.DB, dataDirectory, outputPath string) e
 			return errors.New("database contains an unsafe image key")
 		}
 	}
+	attachmentKeys, err := referencedAttachmentKeys(ctx, snapshotDB)
+	if err != nil {
+		snapshotDB.Close()
+		return fmt.Errorf("read referenced attachment inventory: %w", err)
+	}
+	for _, key := range attachmentKeys {
+		if err := validateArchiveEntryName(attachmentsEntryPrefix + key); err != nil {
+			snapshotDB.Close()
+			return errors.New("database contains an unsafe attachment key")
+		}
+	}
 	if err := snapshotDB.Close(); err != nil {
 		return err
 	}
@@ -89,6 +101,13 @@ func Create(ctx context.Context, db *sql.DB, dataDirectory, outputPath string) e
 		}
 		archiveName := imagesEntryPrefix + key
 		files[archiveName] = imagePath
+	}
+	for _, key := range attachmentKeys {
+		attachmentPath := filepath.Join(dataDirectory, "attachments", key)
+		if _, err := os.Stat(attachmentPath); err != nil {
+			return fmt.Errorf("referenced attachment %s is unavailable: %w", key, err)
+		}
+		files[attachmentsEntryPrefix+key] = attachmentPath
 	}
 	manifest := Manifest{FormatVersion: 1, CreatedAt: platform.Timestamp(platform.Now()), Files: map[string]string{}}
 	for name, path := range files {
@@ -193,6 +212,7 @@ func Restore(archivePath, dataDirectory, databasePath string, force bool) (strin
 		{databasePath + "-wal", databaseName + "-wal"},
 		{databasePath + "-shm", databaseName + "-shm"},
 		{filepath.Join(dataDirectory, "images"), "images"},
+		{filepath.Join(dataDirectory, "attachments"), "attachments"},
 	}
 	for _, item := range existing {
 		if _, err := os.Stat(item.path); err == nil {
@@ -218,6 +238,11 @@ func Restore(archivePath, dataDirectory, databasePath string, force bool) (strin
 	}
 	if _, err := os.Stat(filepath.Join(working, "images")); err == nil {
 		if err := os.Rename(filepath.Join(working, "images"), filepath.Join(dataDirectory, "images")); err != nil {
+			return recovery, err
+		}
+	}
+	if _, err := os.Stat(filepath.Join(working, "attachments")); err == nil {
+		if err := os.Rename(filepath.Join(working, "attachments"), filepath.Join(dataDirectory, "attachments")); err != nil {
 			return recovery, err
 		}
 	}
@@ -327,6 +352,15 @@ func extractValidated(archivePath, destination string) error {
 				return fmt.Errorf("image %s has an invalid content address", name)
 			}
 		}
+		if strings.HasPrefix(name, attachmentsEntryPrefix) {
+			base := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(filepath.Base(name), ".jpg"), ".png"), ".pdf")
+			if len(base) != 64 || actual != base {
+				return fmt.Errorf("attachment %s does not match its content address", name)
+			}
+			if _, err := hex.DecodeString(base); err != nil {
+				return fmt.Errorf("attachment %s has an invalid content address", name)
+			}
+		}
 	}
 	return validateRestoredDatabase(destination, manifest)
 }
@@ -344,14 +378,21 @@ func validateArchiveEntryName(name string) error {
 	if name == databaseEntryName || name == manifestEntryName {
 		return nil
 	}
-	if !strings.HasPrefix(name, imagesEntryPrefix) {
+	prefix := imagesEntryPrefix
+	if strings.HasPrefix(name, attachmentsEntryPrefix) {
+		prefix = attachmentsEntryPrefix
+	} else if !strings.HasPrefix(name, imagesEntryPrefix) {
 		return errors.New("archive entry name is not allowed")
 	}
-	filename := strings.TrimPrefix(name, imagesEntryPrefix)
-	if len(filename) != 68 || !strings.HasSuffix(filename, ".png") {
-		return errors.New("archive image name is invalid")
+	filename := strings.TrimPrefix(name, prefix)
+	validExtension := strings.HasSuffix(filename, ".png")
+	if prefix == attachmentsEntryPrefix {
+		validExtension = validExtension || strings.HasSuffix(filename, ".jpg") || strings.HasSuffix(filename, ".pdf")
 	}
-	contentAddress := strings.TrimSuffix(filename, ".png")
+	if len(filename) != 68 || !validExtension {
+		return errors.New("archive content-addressed file name is invalid")
+	}
+	contentAddress := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(filename, ".jpg"), ".png"), ".pdf")
 	for _, character := range contentAddress {
 		if !((character >= '0' && character <= '9') || (character >= 'a' && character <= 'f')) {
 			return errors.New("archive image name is not a lowercase hexadecimal content address")
@@ -460,7 +501,49 @@ func validateRestoredDatabase(destination string, manifest Manifest) error {
 			}
 		}
 	}
+	attachmentKeys, err := referencedAttachmentKeys(context.Background(), db)
+	if err != nil {
+		return err
+	}
+	for _, key := range attachmentKeys {
+		name := attachmentsEntryPrefix + key
+		if _, ok := manifest.Files[name]; !ok {
+			return fmt.Errorf("referenced attachment %s is missing from backup manifest", key)
+		}
+		referenced[name] = struct{}{}
+	}
+	for name := range manifest.Files {
+		if strings.HasPrefix(name, attachmentsEntryPrefix) {
+			if _, ok := referenced[name]; !ok {
+				return fmt.Errorf("backup contains unreferenced attachment %s", name)
+			}
+		}
+	}
 	return nil
+}
+
+func referencedAttachmentKeys(ctx context.Context, db *sql.DB) ([]string, error) {
+	var tableExists int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='table' AND name='payment_attachments'`).Scan(&tableExists); err != nil {
+		return nil, err
+	}
+	if tableExists == 0 {
+		return []string{}, nil
+	}
+	rows, err := db.QueryContext(ctx, `SELECT DISTINCT storage_key FROM payment_attachments ORDER BY storage_key`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	keys := make([]string, 0)
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, rows.Err()
 }
 
 // referencedImageKeys returns every distinct content-addressed image referenced

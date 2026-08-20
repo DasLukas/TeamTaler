@@ -34,8 +34,10 @@ export interface ModalProps {
   children: ReactNode;
   footer?: ReactNode;
   size?: 'standard' | 'wide' | 'workspace';
-  variant?: 'dialog' | 'sheet';
+  variant?: 'dialog' | 'sheet' | 'fullscreen';
+  headerMode?: 'visible' | 'accessible-only';
   className?: string;
+  bodyClassName?: string;
 }
 
 /** Properties accepted by content-owned persistent modal actions. */
@@ -55,12 +57,13 @@ export function ModalFooter({ children }: ModalFooterProps) {
 }
 
 /**
- * Renders an accessible modal that can use a compact-screen sheet style.
+ * Renders an accessible modal that can use a compact-screen sheet or
+ * viewport-filling workspace style.
  *
  * @param props - Visibility, heading, close callback, scrollable content, optional persistent footer, size, and style mode.
  * @returns A native dialog with fixed chrome and an independently scrolling content region.
  */
-export function Modal({ open, title, onClose, children, footer, size = 'standard', variant = 'dialog', className = '' }: ModalProps) {
+export function Modal({ open, title, onClose, children, footer, size = 'standard', variant = 'dialog', headerMode = 'visible', className = '', bodyClassName = '' }: ModalProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [footerElement, setFooterElement] = useState<HTMLElement | null>(null);
   const openingElementRef = useRef<HTMLElement | null>(null);
@@ -237,7 +240,7 @@ export function Modal({ open, title, onClose, children, footer, size = 'standard
   return (
     <dialog
       aria-labelledby={titleId}
-      className={`${styles.dialog} ${styles[variant]} ${styles[size]} ${className}`}
+      className={`${styles.dialog} ${styles[variant]} ${styles[size]} ${headerMode === 'accessible-only' ? styles.headerless : ''} ${className}`}
       onCancel={(event) => {
         event.preventDefault();
         onClose();
@@ -246,6 +249,7 @@ export function Modal({ open, title, onClose, children, footer, size = 'standard
     >
       {open ? (
         <>
+          {headerMode === 'accessible-only' ? <h2 className={styles.accessibleTitle} id={titleId}>{title}</h2> : (
           <div className={styles.chrome}>
             {variant === 'sheet' ? (
               <button
@@ -275,8 +279,9 @@ export function Modal({ open, title, onClose, children, footer, size = 'standard
               <IconButton label={t('dialog.close')} onClick={onClose}><X size={28} strokeWidth={1.8} /></IconButton>
             </header>
           </div>
+          )}
           <ModalFooterContext.Provider value={footerElement}>
-            <div className={styles.body}>{children}</div>
+            <div className={`${styles.body} ${bodyClassName}`}>{children}</div>
             <footer className={styles.footer} ref={setFooterNode}>{footer}</footer>
           </ModalFooterContext.Provider>
         </>

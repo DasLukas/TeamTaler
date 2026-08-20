@@ -268,12 +268,13 @@ func TestLoadReadsMutableInstanceDefaults(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	want := InstanceDefaults{
-		InstanceName:        "Example TeamTaler",
-		DefaultCurrency:     "USD",
-		MediaUploadMaxBytes: 10 << 20,
-		PublicJoinEnabled:   false,
-		MaintenanceMode:     true,
-		MaintenanceMessage:  "Scheduled maintenance",
+		InstanceName:             "Example TeamTaler",
+		DefaultCurrency:          "USD",
+		MediaUploadMaxBytes:      10 << 20,
+		AttachmentUploadMaxBytes: DefaultAttachmentUploadBytes,
+		PublicJoinEnabled:        false,
+		MaintenanceMode:          true,
+		MaintenanceMessage:       "Scheduled maintenance",
 	}
 	if loaded.InstanceDefaults != want {
 		t.Fatalf("instance defaults = %#v, want %#v", loaded.InstanceDefaults, want)

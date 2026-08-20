@@ -12,7 +12,7 @@ vi.mock('@/api/client', () => ({ api: apiMock }));
 
 const capabilities: InstanceCapabilities = {
   instanceName: 'TeamTaler', maintenanceMode: false, maintenanceMessage: '', publicJoinEnabled: true,
-  mediaUploadMaxBytes: 1024, emailNotificationsAvailable: true,
+  mediaUploadMaxBytes: 1024, attachmentUploadMaxBytes: 15 * 1024 * 1024, emailNotificationsAvailable: true,
   webPushAvailable: true, webPushPublicKey: 'BEl6pM0N4l2Z33e6pOPDT7T2YfB3_f-GY1whQ5lIFCdEEhOXyIjN7lJYYG7NFE7KqAJ2sNQxQh6YjJ3lJv9wPlM', webPushKeyId: 'key-revision-a',
 };
 

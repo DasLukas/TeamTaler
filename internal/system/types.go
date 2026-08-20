@@ -24,6 +24,8 @@ const (
 	SettingDefaultCurrency SettingKey = "instance.default_currency"
 	// SettingMediaUploadMaxBytes controls the maximum accepted source-media size.
 	SettingMediaUploadMaxBytes SettingKey = "media.upload_max_bytes"
+	// SettingAttachmentUploadMaxBytes controls the maximum payment receipt size.
+	SettingAttachmentUploadMaxBytes SettingKey = "attachment.upload_max_bytes"
 	// SettingPublicJoinEnabled gates every group public-join link globally.
 	SettingPublicJoinEnabled SettingKey = "access.public_join_enabled"
 	// SettingMaintenanceEnabled controls instance-wide maintenance mode.
@@ -64,6 +66,7 @@ var allSettingKeys = []SettingKey{
 	SettingInstanceName,
 	SettingDefaultCurrency,
 	SettingMediaUploadMaxBytes,
+	SettingAttachmentUploadMaxBytes,
 	SettingPublicJoinEnabled,
 	SettingMaintenanceEnabled,
 	SettingMaintenanceMessage,
@@ -203,33 +206,36 @@ type WebPushSettings struct {
 // embedded configurations; media endpoints derive their request limit from the
 // live MediaUploadMaxBytes setting.
 type Defaults struct {
-	InstanceName        string
-	DefaultCurrency     string
-	MediaUploadMaxBytes int64
-	PublicJoinEnabled   bool
-	MaintenanceMode     bool
-	MaintenanceMessage  string
-	SMTP                SMTPConfiguration
-	WebPush             WebPushConfiguration
-	MaxRequestBytes     int64
-	Sources             map[SettingKey]SettingSource
+	InstanceName             string
+	DefaultCurrency          string
+	MediaUploadMaxBytes      int64
+	AttachmentUploadMaxBytes int64
+	PublicJoinEnabled        bool
+	MaintenanceMode          bool
+	MaintenanceMessage       string
+	SMTP                     SMTPConfiguration
+	WebPush                  WebPushConfiguration
+	MaxRequestBytes          int64
+	Sources                  map[SettingKey]SettingSource
 }
 
 // Settings is one transactionally consistent effective runtime snapshot.
 // Revision is the optimistic concurrency token required by mutation methods.
 type Settings struct {
-	Revision                  int64           `json:"revision"`
-	InstanceName              Setting[string] `json:"instanceName"`
-	DefaultCurrency           Setting[string] `json:"defaultCurrency"`
-	MediaUploadMaxBytes       Setting[int64]  `json:"mediaUploadMaxBytes"`
-	MediaUploadHardLimitBytes int64           `json:"mediaUploadHardLimitBytes"`
-	PublicJoinEnabled         Setting[bool]   `json:"publicJoinEnabled"`
-	MaintenanceMode           Setting[bool]   `json:"maintenanceMode"`
-	MaintenanceMessage        Setting[string] `json:"maintenanceMessage"`
-	SMTP                      SMTPSettings    `json:"smtp"`
-	WebPush                   WebPushSettings `json:"webPush"`
-	UpdatedAt                 string          `json:"updatedAt"`
-	UpdatedByUserID           *string         `json:"updatedByUserId,omitempty"`
+	Revision                       int64           `json:"revision"`
+	InstanceName                   Setting[string] `json:"instanceName"`
+	DefaultCurrency                Setting[string] `json:"defaultCurrency"`
+	MediaUploadMaxBytes            Setting[int64]  `json:"mediaUploadMaxBytes"`
+	MediaUploadHardLimitBytes      int64           `json:"mediaUploadHardLimitBytes"`
+	AttachmentUploadMaxBytes       Setting[int64]  `json:"attachmentUploadMaxBytes"`
+	AttachmentUploadHardLimitBytes int64           `json:"attachmentUploadHardLimitBytes"`
+	PublicJoinEnabled              Setting[bool]   `json:"publicJoinEnabled"`
+	MaintenanceMode                Setting[bool]   `json:"maintenanceMode"`
+	MaintenanceMessage             Setting[string] `json:"maintenanceMessage"`
+	SMTP                           SMTPSettings    `json:"smtp"`
+	WebPush                        WebPushSettings `json:"webPush"`
+	UpdatedAt                      string          `json:"updatedAt"`
+	UpdatedByUserID                *string         `json:"updatedByUserId,omitempty"`
 }
 
 // SMTPPatch contains optional SMTP overrides. Password is write-only: an empty
@@ -256,14 +262,15 @@ type WebPushPatch struct {
 // SettingsPatch contains optional instance-setting overrides. Nil fields are
 // unchanged; explicit zero values are validated and persisted.
 type SettingsPatch struct {
-	InstanceName        *string       `json:"instanceName,omitempty"`
-	DefaultCurrency     *string       `json:"defaultCurrency,omitempty"`
-	MediaUploadMaxBytes *int64        `json:"mediaUploadMaxBytes,omitempty"`
-	PublicJoinEnabled   *bool         `json:"publicJoinEnabled,omitempty"`
-	MaintenanceMode     *bool         `json:"maintenanceMode,omitempty"`
-	MaintenanceMessage  *string       `json:"maintenanceMessage,omitempty"`
-	SMTP                *SMTPPatch    `json:"smtp,omitempty"`
-	WebPush             *WebPushPatch `json:"webPush,omitempty"`
+	InstanceName             *string       `json:"instanceName,omitempty"`
+	DefaultCurrency          *string       `json:"defaultCurrency,omitempty"`
+	MediaUploadMaxBytes      *int64        `json:"mediaUploadMaxBytes,omitempty"`
+	AttachmentUploadMaxBytes *int64        `json:"attachmentUploadMaxBytes,omitempty"`
+	PublicJoinEnabled        *bool         `json:"publicJoinEnabled,omitempty"`
+	MaintenanceMode          *bool         `json:"maintenanceMode,omitempty"`
+	MaintenanceMessage       *string       `json:"maintenanceMessage,omitempty"`
+	SMTP                     *SMTPPatch    `json:"smtp,omitempty"`
+	WebPush                  *WebPushPatch `json:"webPush,omitempty"`
 }
 
 // RoleAssignment describes one durable instance-role assignment and its

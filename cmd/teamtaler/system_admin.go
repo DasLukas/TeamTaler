@@ -202,10 +202,11 @@ func systemSettingsCommand(ctx context.Context, runtime *localSystemRuntime, arg
 		if *jsonOutput {
 			return writeCommandJSON(settings)
 		}
-		fmt.Printf("Revision: %d\nInstance name: %s (%s)\nDefault currency: %s (%s)\nMedia upload bytes: %d (%s; allowed maximum %d)\nPublic join: %t\nMaintenance: %t\n",
+		fmt.Printf("Revision: %d\nInstance name: %s (%s)\nDefault currency: %s (%s)\nMedia upload bytes: %d (%s; allowed maximum %d)\nAttachment upload bytes: %d (%s; allowed maximum %d)\nPublic join: %t\nMaintenance: %t\n",
 			settings.Revision, settings.InstanceName.Value, settings.InstanceName.Source,
 			settings.DefaultCurrency.Value, settings.DefaultCurrency.Source,
 			settings.MediaUploadMaxBytes.Value, settings.MediaUploadMaxBytes.Source, settings.MediaUploadHardLimitBytes,
+			settings.AttachmentUploadMaxBytes.Value, settings.AttachmentUploadMaxBytes.Source, settings.AttachmentUploadHardLimitBytes,
 			settings.PublicJoinEnabled.Value, settings.MaintenanceMode.Value)
 		return nil
 	case "set":
@@ -214,6 +215,7 @@ func systemSettingsCommand(ctx context.Context, runtime *localSystemRuntime, arg
 		instanceName := flags.String("instance-name", "", "instance display name")
 		currency := flags.String("default-currency", "", "default three-letter currency")
 		mediaBytes := flags.Int64("media-upload-max-bytes", 0, "whole-MiB raw media limit in bytes (1048576 through 26214400)")
+		attachmentBytes := flags.Int64("attachment-upload-max-bytes", 0, "whole-MiB receipt limit in bytes (1048576 through 52428800)")
 		publicJoin := flags.String("public-join-enabled", "", "true or false")
 		maintenance := flags.String("maintenance-mode", "", "true or false")
 		maintenanceMessage := flags.String("maintenance-message", "", "short maintenance notice")
@@ -232,6 +234,9 @@ func systemSettingsCommand(ctx context.Context, runtime *localSystemRuntime, arg
 		if visited["media-upload-max-bytes"] {
 			patch.MediaUploadMaxBytes = mediaBytes
 		}
+		if visited["attachment-upload-max-bytes"] {
+			patch.AttachmentUploadMaxBytes = attachmentBytes
+		}
 		if visited["public-join-enabled"] {
 			value, err := strconv.ParseBool(*publicJoin)
 			if err != nil {
@@ -249,7 +254,7 @@ func systemSettingsCommand(ctx context.Context, runtime *localSystemRuntime, arg
 		if visited["maintenance-message"] {
 			patch.MaintenanceMessage = maintenanceMessage
 		}
-		if patch.InstanceName == nil && patch.DefaultCurrency == nil && patch.MediaUploadMaxBytes == nil &&
+		if patch.InstanceName == nil && patch.DefaultCurrency == nil && patch.MediaUploadMaxBytes == nil && patch.AttachmentUploadMaxBytes == nil &&
 			patch.PublicJoinEnabled == nil && patch.MaintenanceMode == nil && patch.MaintenanceMessage == nil {
 			return errors.New("at least one system setting flag is required")
 		}

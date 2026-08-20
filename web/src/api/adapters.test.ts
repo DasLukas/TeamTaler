@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import i18n from '@/i18n';
-import { adaptAccountSummaries, adaptBooking, adaptCategories, adaptDashboard, adaptGroupNotificationSettings, adaptGroupSettings, adaptInstanceCapabilities, adaptLedger, adaptMembership, adaptNotification, adaptNotificationDestination, adaptNotificationPreferences, adaptPermissionDefinition, adaptPermissionGrants, adaptProduct, adaptPushSubscriptions, adaptRole, adaptSession, adaptSettlement, adaptSystemAudit, adaptSystemGroupDeletionImpact, adaptSystemGroups, adaptSystemSettings, adaptTransactionSettings } from './adapters';
+import { adaptAccountSummaries, adaptBooking, adaptCategories, adaptDashboard, adaptGroupNotificationSettings, adaptGroupSettings, adaptInstanceCapabilities, adaptLedger, adaptMembership, adaptNotification, adaptNotificationDestination, adaptNotificationPreferences, adaptPayment, adaptPermissionDefinition, adaptPermissionGrants, adaptProduct, adaptPushSubscriptions, adaptRole, adaptSession, adaptSettlement, adaptSystemAudit, adaptSystemGroupDeletionImpact, adaptSystemGroups, adaptSystemSettings, adaptTransactionSettings } from './adapters';
 
 describe('API adapters', () => {
   it('keeps group-less system-administrator sessions valid', () => {
@@ -14,8 +14,8 @@ describe('API adapters', () => {
   });
 
   it('adapts public capabilities and exact system settings without exposing SMTP secrets', () => {
-    expect(adaptInstanceCapabilities({ instanceName: 'Club Cloud', maintenanceMode: true, publicJoinEnabled: false, mediaUploadMaxBytes: 786432, emailNotificationsAvailable: true, webPushAvailable: true, webPushPublicKey: 'public-key', webPushKeyId: 'key-a' })).toEqual({
-      instanceName: 'Club Cloud', maintenanceMode: true, maintenanceMessage: '', publicJoinEnabled: false, mediaUploadMaxBytes: 786432,
+    expect(adaptInstanceCapabilities({ instanceName: 'Club Cloud', maintenanceMode: true, publicJoinEnabled: false, mediaUploadMaxBytes: 786432, attachmentUploadMaxBytes: 15728640, emailNotificationsAvailable: true, webPushAvailable: true, webPushPublicKey: 'public-key', webPushKeyId: 'key-a' })).toEqual({
+      instanceName: 'Club Cloud', maintenanceMode: true, maintenanceMessage: '', publicJoinEnabled: false, mediaUploadMaxBytes: 786432, attachmentUploadMaxBytes: 15728640,
       emailNotificationsAvailable: true, webPushAvailable: true, webPushPublicKey: 'public-key', webPushKeyId: 'key-a',
     });
     const settings = adaptSystemSettings({
@@ -115,6 +115,20 @@ describe('API adapters', () => {
       ownPaymentReasonRequired: false,
       otherPaymentReasonRequired: true,
     });
+  });
+
+  it('defaults legacy payment attachment policies and exposes only safe receipt metadata', () => {
+    expect(adaptTransactionSettings({ paymentMethods: [
+      { id: 'CASH', label: 'Cash' },
+      { id: 'SHOPPING', label: 'Shopping', attachmentMode: 'REQUIRED' },
+    ] }).paymentMethods).toEqual([
+      { id: 'CASH', label: 'Bar', attachmentMode: 'OFF' },
+      { id: 'SHOPPING', label: 'Einkauf', attachmentMode: 'REQUIRED' },
+    ]);
+    expect(adaptPayment({
+      id: 'payment-a', membershipId: 'member-a', memberName: 'Alex', amountMinor: 1234, currency: 'EUR', receivedAt: '2026-08-20', method: 'SHOPPING', status: 'POSTED',
+      attachment: { fileName: 'receipt.pdf', mediaType: 'application/pdf', sizeBytes: 1024, url: '/api/v1/groups/group-a/payments/payment-a/attachment', storageKey: 'secret' },
+    }).attachment).toEqual({ fileName: 'receipt.pdf', mediaType: 'application/pdf', sizeBytes: 1024, url: '/api/v1/groups/group-a/payments/payment-a/attachment' });
   });
 
   it('accepts stable group grants and rejects unknown keys or disabled scopes', () => {

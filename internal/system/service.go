@@ -14,6 +14,10 @@ const (
 	MaximumMediaUploadBytes int64 = config.MaximumMediaUploadBytes
 	// MediaUploadUnitBytes is the required increment for source upload limits.
 	MediaUploadUnitBytes int64 = config.MediaUploadUnitBytes
+	// MinimumAttachmentUploadBytes is the smallest configurable receipt limit.
+	MinimumAttachmentUploadBytes int64 = config.MinimumAttachmentUploadBytes
+	// MaximumAttachmentUploadBytes is the application-level receipt ceiling.
+	MaximumAttachmentUploadBytes int64 = config.MaximumAttachmentUploadBytes
 	// MultipartRequestReserveBytes leaves space for multipart framing and HTTP
 	// fields when the HTTP layer derives a request limit from the live media limit.
 	MultipartRequestReserveBytes int64 = config.MultipartRequestReserve
@@ -30,6 +34,9 @@ func NewService(db *sql.DB, defaults Defaults, passwordCipher PasswordCipher, op
 		return Service{}, fmt.Errorf("system database is required")
 	}
 	defaults.Sources = cloneSources(defaults.Sources)
+	if defaults.AttachmentUploadMaxBytes == 0 {
+		defaults.AttachmentUploadMaxBytes = config.DefaultAttachmentUploadBytes
+	}
 	if err := validateDefaults(defaults); err != nil {
 		return Service{}, err
 	}
@@ -60,6 +67,9 @@ func validateDefaults(defaults Defaults) error {
 	}
 	if err := validateMediaUploadLimit(defaults.MediaUploadMaxBytes, MaximumMediaUploadBytes); err != nil {
 		return fmt.Errorf("invalid default media upload limit: %w", err)
+	}
+	if err := validateMediaUploadLimit(defaults.AttachmentUploadMaxBytes, MaximumAttachmentUploadBytes); err != nil {
+		return fmt.Errorf("invalid default attachment upload limit: %w", err)
 	}
 	if err := validateMaintenanceMessage(defaults.MaintenanceMessage); err != nil {
 		return fmt.Errorf("invalid default maintenance message: %w", err)

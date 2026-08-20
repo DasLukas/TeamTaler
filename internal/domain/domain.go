@@ -293,6 +293,35 @@ func (mode ReasonMode) Enabled() bool { return mode != ReasonModeOff }
 // Required reports whether a transaction command must include a reason.
 func (mode ReasonMode) Required() bool { return mode == ReasonModeRequired }
 
+// AttachmentMode controls whether a configured payment method accepts or
+// requires one immutable receipt attachment.
+type AttachmentMode string
+
+const (
+	// AttachmentModeOff rejects attachments for the payment method.
+	AttachmentModeOff AttachmentMode = "OFF"
+	// AttachmentModeOptional accepts a payment with or without an attachment.
+	AttachmentModeOptional AttachmentMode = "OPTIONAL"
+	// AttachmentModeRequired requires an attachment before posting a payment.
+	AttachmentModeRequired AttachmentMode = "REQUIRED"
+)
+
+// Valid reports whether mode is one of the three persisted attachment modes.
+func (mode AttachmentMode) Valid() bool {
+	switch mode {
+	case AttachmentModeOff, AttachmentModeOptional, AttachmentModeRequired:
+		return true
+	default:
+		return false
+	}
+}
+
+// Enabled reports whether the payment method accepts a receipt attachment.
+func (mode AttachmentMode) Enabled() bool { return mode != AttachmentModeOff }
+
+// Required reports whether the payment method requires a receipt attachment.
+func (mode AttachmentMode) Required() bool { return mode == AttachmentModeRequired }
+
 // GroupSettings contains administrator-managed behavior shared by every member
 // of one group.
 type GroupSettings struct {
@@ -306,7 +335,7 @@ type GroupSettings struct {
 	ForeignBookingReasonRequired bool               `json:"foreignBookingReasonRequired"`
 	OwnPaymentReasonRequired     bool               `json:"ownPaymentReasonRequired"`
 	OtherPaymentReasonRequired   bool               `json:"otherPaymentReasonRequired"`
-	PaymentMethods               []ConfigurableItem `json:"paymentMethods"`
+	PaymentMethods               []PaymentMethod    `json:"paymentMethods"`
 	BookingReasons               []ConfigurableItem `json:"bookingReasons"`
 	PaymentReasons               []ConfigurableItem `json:"paymentReasons"`
 }
@@ -316,6 +345,14 @@ type GroupSettings struct {
 type ConfigurableItem struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
+}
+
+// PaymentMethod is one administrator-managed payment option. AttachmentMode
+// determines whether callers may or must include a receipt when posting it.
+type PaymentMethod struct {
+	ID             string         `json:"id"`
+	Label          string         `json:"label"`
+	AttachmentMode AttachmentMode `json:"attachmentMode"`
 }
 
 // TransactionSettings contains the non-sensitive operational behavior that
@@ -329,7 +366,7 @@ type TransactionSettings struct {
 	ForeignBookingReasonRequired bool               `json:"foreignBookingReasonRequired"`
 	OwnPaymentReasonRequired     bool               `json:"ownPaymentReasonRequired"`
 	OtherPaymentReasonRequired   bool               `json:"otherPaymentReasonRequired"`
-	PaymentMethods               []ConfigurableItem `json:"paymentMethods"`
+	PaymentMethods               []PaymentMethod    `json:"paymentMethods"`
 	BookingReasons               []ConfigurableItem `json:"bookingReasons"`
 	PaymentReasons               []ConfigurableItem `json:"paymentReasons"`
 }
@@ -447,21 +484,31 @@ type Booking struct {
 
 // Payment records received money and its period allocations.
 type Payment struct {
-	ID           string              `json:"id"`
-	GroupID      string              `json:"groupId"`
-	MembershipID string              `json:"membershipId"`
-	MemberName   string              `json:"memberName"`
-	MemberStatus string              `json:"membershipStatus"`
-	AmountMinor  int64               `json:"amountMinor,string"`
-	Currency     string              `json:"currency"`
-	ReceivedAt   string              `json:"receivedAt"`
-	Method       string              `json:"method"`
-	MethodLabel  string              `json:"methodLabel"`
-	Reference    string              `json:"reference,omitempty"`
-	Note         string              `json:"note,omitempty"`
-	ReversedAt   *string             `json:"reversedAt,omitempty"`
-	Status       string              `json:"status"`
-	Allocations  []PaymentAllocation `json:"allocations"`
+	ID           string                    `json:"id"`
+	GroupID      string                    `json:"groupId"`
+	MembershipID string                    `json:"membershipId"`
+	MemberName   string                    `json:"memberName"`
+	MemberStatus string                    `json:"membershipStatus"`
+	AmountMinor  int64                     `json:"amountMinor,string"`
+	Currency     string                    `json:"currency"`
+	ReceivedAt   string                    `json:"receivedAt"`
+	Method       string                    `json:"method"`
+	MethodLabel  string                    `json:"methodLabel"`
+	Reference    string                    `json:"reference,omitempty"`
+	Note         string                    `json:"note,omitempty"`
+	ReversedAt   *string                   `json:"reversedAt,omitempty"`
+	Status       string                    `json:"status"`
+	Allocations  []PaymentAllocation       `json:"allocations"`
+	Attachment   *PaymentAttachmentSummary `json:"attachment,omitempty"`
+}
+
+// PaymentAttachmentSummary exposes safe immutable receipt metadata. URL is a
+// protected same-origin endpoint and never reveals the storage key.
+type PaymentAttachmentSummary struct {
+	FileName  string `json:"fileName"`
+	MediaType string `json:"mediaType"`
+	SizeBytes int64  `json:"sizeBytes"`
+	URL       string `json:"url"`
 }
 
 // PaymentAllocation maps part of a payment to a period using FIFO rules.

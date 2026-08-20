@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/ledger"
 	"github.com/DasLukas/TeamTaler/internal/media"
 	"github.com/DasLukas/TeamTaler/internal/notifications"
+	"github.com/DasLukas/TeamTaler/internal/paymentattachments"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/storage"
 	"github.com/DasLukas/TeamTaler/internal/tablequery"
@@ -32,6 +34,9 @@ type Service struct {
 	DB *sql.DB
 	// Notifications atomically records member-visible payment events.
 	Notifications notifications.Service
+	// Attachments owns immutable receipt files. It is required only when an
+	// attachment is supplied or downloaded.
+	Attachments paymentattachments.Store
 }
 
 func requirePermission(ctx context.Context, queryer authorization.Queryer, membership domain.Membership, permission domain.PermissionKey) error {
@@ -88,15 +93,16 @@ type AccountSummary struct {
 // LedgerEntry is one immutable movement on a member receivable account. Positive
 // amounts increase debt and negative amounts reduce debt or create credit.
 type LedgerEntry struct {
-	ID          string  `json:"id"`
-	PeriodID    string  `json:"periodId"`
-	BookingID   *string `json:"bookingId,omitempty"`
-	PaymentID   *string `json:"paymentId,omitempty"`
-	ReversalOf  *string `json:"reversalOf,omitempty"`
-	Type        string  `json:"type"`
-	AmountMinor int64   `json:"amountMinor,string"`
-	Description string  `json:"description"`
-	CreatedAt   string  `json:"createdAt"`
+	ID          string                           `json:"id"`
+	PeriodID    string                           `json:"periodId"`
+	BookingID   *string                          `json:"bookingId,omitempty"`
+	PaymentID   *string                          `json:"paymentId,omitempty"`
+	ReversalOf  *string                          `json:"reversalOf,omitempty"`
+	Type        string                           `json:"type"`
+	AmountMinor int64                            `json:"amountMinor,string"`
+	Description string                           `json:"description"`
+	CreatedAt   string                           `json:"createdAt"`
+	Attachment  *domain.PaymentAttachmentSummary `json:"attachment,omitempty"`
 }
 
 // Dashboard is the group-scoped landing-page read model combining account,
@@ -189,11 +195,13 @@ func (s Service) Account(ctx context.Context, membership domain.Membership, targ
 			return Account{}, err
 		}
 	}
-	entries, err := s.DB.QueryContext(ctx, `SELECT id,period_id,booking_id,payment_id,reversal_of,
-		CASE WHEN reversal_of IS NOT NULL THEN 'REVERSAL' WHEN booking_id IS NOT NULL THEN 'BOOKING' WHEN payment_id IS NOT NULL THEN 'PAYMENT' ELSE 'ADJUSTMENT' END,
-		amount_minor,description,created_at
-		FROM ledger_entries WHERE group_id=? AND membership_id=? AND account='MEMBER_RECEIVABLE'
-		ORDER BY created_at DESC,id DESC LIMIT 50`, membership.GroupID, targetMembershipID)
+	entries, err := s.DB.QueryContext(ctx, `SELECT entry.id,entry.period_id,entry.booking_id,entry.payment_id,entry.reversal_of,
+		CASE WHEN entry.reversal_of IS NOT NULL THEN 'REVERSAL' WHEN entry.booking_id IS NOT NULL THEN 'BOOKING' WHEN entry.payment_id IS NOT NULL THEN 'PAYMENT' ELSE 'ADJUSTMENT' END,
+		entry.amount_minor,entry.description,entry.created_at,attachment.original_filename,attachment.media_type,attachment.size_bytes
+		FROM ledger_entries entry LEFT JOIN payment_attachments attachment
+			ON attachment.group_id=entry.group_id AND attachment.payment_id=entry.payment_id
+		WHERE entry.group_id=? AND entry.membership_id=? AND entry.account='MEMBER_RECEIVABLE'
+		ORDER BY entry.created_at DESC,entry.id DESC LIMIT 50`, membership.GroupID, targetMembershipID)
 	if err != nil {
 		return Account{}, err
 	}
@@ -201,9 +209,12 @@ func (s Service) Account(ctx context.Context, membership domain.Membership, targ
 	account.RecentEntries = make([]LedgerEntry, 0)
 	for entries.Next() {
 		var entry LedgerEntry
-		if err := entries.Scan(&entry.ID, &entry.PeriodID, &entry.BookingID, &entry.PaymentID, &entry.ReversalOf, &entry.Type, &entry.AmountMinor, &entry.Description, &entry.CreatedAt); err != nil {
+		var fileName, mediaType sql.NullString
+		var sizeBytes sql.NullInt64
+		if err := entries.Scan(&entry.ID, &entry.PeriodID, &entry.BookingID, &entry.PaymentID, &entry.ReversalOf, &entry.Type, &entry.AmountMinor, &entry.Description, &entry.CreatedAt, &fileName, &mediaType, &sizeBytes); err != nil {
 			return Account{}, err
 		}
+		entry.Attachment = attachmentSummaryFromNull(membership.GroupID, entry.PaymentID, fileName, mediaType, sizeBytes)
 		account.RecentEntries = append(account.RecentEntries, entry)
 	}
 	return account, entries.Err()
@@ -322,8 +333,9 @@ func (s Service) QueryMovements(ctx context.Context, membership domain.Membershi
 	sortExpression := movementSortExpression(input.Sort)
 	orderKeyword, comparison := tablequery.SQLOrderFragments(input.Direction)
 	query := `SELECT entry.id,entry.period_id,entry.booking_id,entry.payment_id,entry.reversal_of,` + movementTypeExpression + `,
-		entry.amount_minor,entry.description,entry.created_at,CAST(` + sortExpression + ` AS TEXT)
-		FROM ledger_entries entry
+		entry.amount_minor,entry.description,entry.created_at,attachment.original_filename,attachment.media_type,attachment.size_bytes,CAST(` + sortExpression + ` AS TEXT)
+		FROM ledger_entries entry LEFT JOIN payment_attachments attachment
+			ON attachment.group_id=entry.group_id AND attachment.payment_id=entry.payment_id
 		WHERE entry.group_id=? AND entry.membership_id=? AND entry.account='MEMBER_RECEIVABLE'`
 	args := []any{membership.GroupID, targetMembershipID}
 	if input.PeriodID != "" {
@@ -380,10 +392,13 @@ func (s Service) QueryMovements(ctx context.Context, membership domain.Membershi
 	for rows.Next() {
 		var item LedgerEntry
 		var sortKey string
+		var fileName, mediaType sql.NullString
+		var sizeBytes sql.NullInt64
 		if err := rows.Scan(&item.ID, &item.PeriodID, &item.BookingID, &item.PaymentID, &item.ReversalOf,
-			&item.Type, &item.AmountMinor, &item.Description, &item.CreatedAt, &sortKey); err != nil {
+			&item.Type, &item.AmountMinor, &item.Description, &item.CreatedAt, &fileName, &mediaType, &sizeBytes, &sortKey); err != nil {
 			return MovementPage{}, err
 		}
+		item.Attachment = attachmentSummaryFromNull(membership.GroupID, item.PaymentID, fileName, mediaType, sizeBytes)
 		items = append(items, item)
 		sortKeys = append(sortKeys, sortKey)
 	}
@@ -523,6 +538,14 @@ type CreateOwnPaymentInput struct {
 	Reference   string `json:"reference,omitempty"`
 }
 
+// PaymentAttachmentUpload is one untrusted receipt stream supplied with a
+// payment command. MaxBytes is the effective live instance limit.
+type PaymentAttachmentUpload struct {
+	FileName string
+	Reader   io.Reader
+	MaxBytes int64
+}
+
 const (
 	paymentSourceFinanceWorkspace = "FINANCE_WORKSPACE"
 	paymentSourceSelfService      = "SELF_SERVICE"
@@ -534,10 +557,17 @@ const (
 // It returns the created or replayed Payment, or validation, forbidden,
 // not-found, idempotency, audit, and database errors.
 func (s Service) CreatePayment(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey string, input CreatePaymentInput) (domain.Payment, error) {
+	return s.CreatePaymentWithAttachment(ctx, actor, membership, idempotencyKey, input, nil)
+}
+
+// CreatePaymentWithAttachment records a finance-managed payment with an
+// optional immutable receipt. The selected payment method is revalidated in
+// the same transaction that creates the payment and receipt reference.
+func (s Service) CreatePaymentWithAttachment(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey string, input CreatePaymentInput, attachment *PaymentAttachmentUpload) (domain.Payment, error) {
 	if err := requirePermission(ctx, s.DB, membership, domain.PermissionFinanceManagement); err != nil {
 		return domain.Payment{}, err
 	}
-	return s.createPayment(ctx, actor, membership, idempotencyKey, input, true, paymentSourceFinanceWorkspace)
+	return s.createPayment(ctx, actor, membership, idempotencyKey, input, attachment, true, paymentSourceFinanceWorkspace)
 }
 
 // CreateOwnPayment records a payment for the authenticated membership only.
@@ -546,6 +576,12 @@ func (s Service) CreatePayment(ctx context.Context, actor domain.Principal, memb
 // immediately posted, audited, and FIFO-allocated without creating a redundant
 // notification for the actor.
 func (s Service) CreateOwnPayment(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey string, input CreateOwnPaymentInput) (domain.Payment, error) {
+	return s.CreateOwnPaymentWithAttachment(ctx, actor, membership, idempotencyKey, input, nil)
+}
+
+// CreateOwnPaymentWithAttachment records a self-service payment with an
+// optional immutable receipt while deriving the target from the caller.
+func (s Service) CreateOwnPaymentWithAttachment(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey string, input CreateOwnPaymentInput, attachment *PaymentAttachmentUpload) (domain.Payment, error) {
 	if err := requirePermission(ctx, s.DB, membership, domain.PermissionRecordOwnPayment); err != nil {
 		return domain.Payment{}, err
 	}
@@ -560,10 +596,10 @@ func (s Service) CreateOwnPayment(ctx context.Context, actor domain.Principal, m
 		ReceivedAt:   input.ReceivedAt,
 		Method:       input.Method,
 		Reference:    input.Reference,
-	}, false, paymentSourceSelfService)
+	}, attachment, false, paymentSourceSelfService)
 }
 
-func (s Service) createPayment(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey string, input CreatePaymentInput, notifyTarget bool, source string) (domain.Payment, error) {
+func (s Service) createPayment(ctx context.Context, actor domain.Principal, membership domain.Membership, idempotencyKey string, input CreatePaymentInput, attachment *PaymentAttachmentUpload, notifyTarget bool, source string) (domain.Payment, error) {
 	if len(idempotencyKey) < 8 || len(idempotencyKey) > 200 {
 		return domain.Payment{}, domain.ValidationError{Field: "Idempotency-Key", Message: "must contain 8 to 200 characters"}
 	}
@@ -595,7 +631,29 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 		}
 		receivedAt = parsed.UTC()
 	}
-	encodedRequest, _ := json.Marshal(input)
+	var storedAttachment *paymentattachments.Stored
+	attachmentCreated := false
+	var releaseAttachment func()
+	if attachment != nil {
+		if attachment.Reader == nil {
+			return domain.Payment{}, domain.ValidationError{Field: "attachment", Message: "is required"}
+		}
+		stored, created, release, err := s.Attachments.Save(attachment.Reader, attachment.FileName, attachment.MaxBytes)
+		if err != nil {
+			return domain.Payment{}, err
+		}
+		storedAttachment, attachmentCreated, releaseAttachment = &stored, created, release
+		defer releaseAttachment()
+	}
+	encodedRequest, _ := json.Marshal(struct {
+		Input          CreatePaymentInput `json:"input"`
+		AttachmentHash string             `json:"attachmentHash,omitempty"`
+	}{Input: input, AttachmentHash: func() string {
+		if storedAttachment != nil {
+			return storedAttachment.SHA256
+		}
+		return ""
+	}()})
 	digest := sha256.Sum256(encodedRequest)
 	requestHash := hex.EncodeToString(digest[:])
 	var payment domain.Payment
@@ -622,10 +680,20 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		if err := tx.QueryRowContext(ctx, `SELECT label FROM group_payment_methods WHERE group_id=? AND id=?`, membership.GroupID, input.Method).Scan(&payment.MethodLabel); errors.Is(err, sql.ErrNoRows) {
+		var attachmentMode domain.AttachmentMode
+		if err := tx.QueryRowContext(ctx, `SELECT label,attachment_mode FROM group_payment_methods WHERE group_id=? AND id=?`, membership.GroupID, input.Method).Scan(&payment.MethodLabel, &attachmentMode); errors.Is(err, sql.ErrNoRows) {
 			return domain.ValidationError{Field: "method", Message: "is not configured for this group"}
 		} else if err != nil {
 			return err
+		}
+		if !attachmentMode.Valid() {
+			return fmt.Errorf("payment method %s has unsupported attachment mode %q", input.Method, attachmentMode)
+		}
+		if storedAttachment != nil && !attachmentMode.Enabled() {
+			return domain.ValidationError{Field: "attachment", Message: "is not accepted for the selected payment method"}
+		}
+		if storedAttachment == nil && attachmentMode.Required() {
+			return domain.ValidationError{Field: "attachment", Message: "is required for the selected payment method"}
 		}
 		var ownReasonMode, otherReasonMode domain.ReasonMode
 		if err := tx.QueryRowContext(ctx, `SELECT own_payment_reason_mode,other_payment_reason_mode FROM group_settings WHERE group_id=?`, membership.GroupID).Scan(&ownReasonMode, &otherReasonMode); err != nil {
@@ -695,6 +763,14 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 		if err := ledger.RebuildPaymentAllocations(ctx, tx, membership.GroupID, input.MembershipID); err != nil {
 			return err
 		}
+		if storedAttachment != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO payment_attachments(payment_id,group_id,storage_key,original_filename,media_type,size_bytes,sha256,created_by_membership_id,created_at)
+				VALUES(?,?,?,?,?,?,?,?,?)`, paymentID, membership.GroupID, storedAttachment.StorageKey, storedAttachment.FileName, storedAttachment.MediaType,
+				storedAttachment.SizeBytes, storedAttachment.SHA256, membership.ID, now); err != nil {
+				return err
+			}
+			payment.Attachment = attachmentSummary(membership.GroupID, paymentID, *storedAttachment)
+		}
 		allocationRows, err := tx.QueryContext(ctx, `SELECT period_id,amount_minor FROM payment_allocations WHERE payment_id=? ORDER BY rowid`, paymentID)
 		if err != nil {
 			return err
@@ -728,7 +804,72 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 			membership.GroupID, actor.UserID, storedIdempotencyKey, requestHash, string(encodedResponse), now)
 		return err
 	})
+	if err != nil && attachmentCreated && storedAttachment != nil {
+		var references int64
+		if queryErr := s.DB.QueryRowContext(context.Background(), `SELECT count(*) FROM payment_attachments WHERE storage_key=?`, storedAttachment.StorageKey).Scan(&references); queryErr == nil && references == 0 {
+			_ = s.Attachments.Remove(storedAttachment.StorageKey)
+		}
+	}
 	return payment, err
+}
+
+func attachmentSummary(groupID, paymentID string, stored paymentattachments.Stored) *domain.PaymentAttachmentSummary {
+	return &domain.PaymentAttachmentSummary{FileName: stored.FileName, MediaType: stored.MediaType, SizeBytes: stored.SizeBytes, URL: paymentAttachmentURL(groupID, paymentID)}
+}
+
+func paymentAttachmentURL(groupID, paymentID string) string {
+	return "/api/v1/groups/" + groupID + "/payments/" + paymentID + "/attachment"
+}
+
+func attachmentSummaryFromNull(groupID string, paymentID *string, fileName, mediaType sql.NullString, sizeBytes sql.NullInt64) *domain.PaymentAttachmentSummary {
+	if paymentID == nil || !fileName.Valid || !mediaType.Valid || !sizeBytes.Valid {
+		return nil
+	}
+	return &domain.PaymentAttachmentSummary{FileName: fileName.String, MediaType: mediaType.String, SizeBytes: sizeBytes.Int64, URL: paymentAttachmentURL(groupID, *paymentID)}
+}
+
+// PaymentAttachment identifies an authorized immutable receipt download.
+// Path is an internal trusted local path and must never be serialized.
+type PaymentAttachment struct {
+	FileName  string
+	MediaType string
+	SizeBytes int64
+	Path      string
+}
+
+// GetPaymentAttachment returns a receipt only to the target member or a
+// current finance manager. Every absence and authorization failure is reported
+// as not found to avoid disclosing cross-member or cross-group records.
+func (s Service) GetPaymentAttachment(ctx context.Context, membership domain.Membership, paymentID string) (PaymentAttachment, error) {
+	paymentID = strings.TrimSpace(paymentID)
+	if paymentID == "" {
+		return PaymentAttachment{}, domain.ErrNotFound
+	}
+	var targetMembershipID, storageKey string
+	var item PaymentAttachment
+	err := s.DB.QueryRowContext(ctx, `SELECT p.membership_id,a.storage_key,a.original_filename,a.media_type,a.size_bytes
+		FROM payments p JOIN payment_attachments a ON a.group_id=p.group_id AND a.payment_id=p.id
+		WHERE p.group_id=? AND p.id=?`, membership.GroupID, paymentID).
+		Scan(&targetMembershipID, &storageKey, &item.FileName, &item.MediaType, &item.SizeBytes)
+	if errors.Is(err, sql.ErrNoRows) {
+		return PaymentAttachment{}, domain.ErrNotFound
+	}
+	if err != nil {
+		return PaymentAttachment{}, err
+	}
+	if targetMembershipID != membership.ID {
+		if err := requirePermission(ctx, s.DB, membership, domain.PermissionFinanceManagement); err != nil {
+			if errors.Is(err, domain.ErrForbidden) {
+				return PaymentAttachment{}, domain.ErrNotFound
+			}
+			return PaymentAttachment{}, err
+		}
+	}
+	item.Path, err = s.Attachments.Resolve(storageKey)
+	if err != nil {
+		return PaymentAttachment{}, fmt.Errorf("resolve payment attachment: %w", err)
+	}
+	return item, nil
 }
 
 // ListPayments returns at most limit newest-first payments and allocations for
@@ -853,8 +994,10 @@ func (s Service) QueryPayments(ctx context.Context, membership domain.Membership
 	orderKeyword, comparison := tablequery.SQLOrderFragments(input.Direction)
 	query := `SELECT p.id,p.group_id,p.membership_id,u.display_name,
 		CASE WHEN m.deleted_at IS NOT NULL THEN 'DELETED' ELSE m.status END,
-		p.amount_minor,g.currency,p.received_at,p.method,coalesce(p.method_label,''),coalesce(p.reference,''),coalesce(p.note,''),p.reversed_at,CAST(` + sortExpression + ` AS TEXT)
+		p.amount_minor,g.currency,p.received_at,p.method,coalesce(p.method_label,''),coalesce(p.reference,''),coalesce(p.note,''),p.reversed_at,
+		attachment.original_filename,attachment.media_type,attachment.size_bytes,CAST(` + sortExpression + ` AS TEXT)
 		FROM payments p JOIN groups g ON g.id=p.group_id JOIN memberships m ON m.id=p.membership_id JOIN users u ON u.id=m.user_id
+		LEFT JOIN payment_attachments attachment ON attachment.group_id=p.group_id AND attachment.payment_id=p.id
 		WHERE p.group_id=?`
 	args := []any{membership.GroupID}
 	if input.MembershipID != "" {
@@ -920,9 +1063,12 @@ func (s Service) QueryPayments(ctx context.Context, membership domain.Membership
 	for rows.Next() {
 		var item domain.Payment
 		var sortKey string
-		if err := rows.Scan(&item.ID, &item.GroupID, &item.MembershipID, &item.MemberName, &item.MemberStatus, &item.AmountMinor, &item.Currency, &item.ReceivedAt, &item.Method, &item.MethodLabel, &item.Reference, &item.Note, &item.ReversedAt, &sortKey); err != nil {
+		var fileName, mediaType sql.NullString
+		var sizeBytes sql.NullInt64
+		if err := rows.Scan(&item.ID, &item.GroupID, &item.MembershipID, &item.MemberName, &item.MemberStatus, &item.AmountMinor, &item.Currency, &item.ReceivedAt, &item.Method, &item.MethodLabel, &item.Reference, &item.Note, &item.ReversedAt, &fileName, &mediaType, &sizeBytes, &sortKey); err != nil {
 			return PaymentPage{}, err
 		}
+		item.Attachment = attachmentSummaryFromNull(item.GroupID, &item.ID, fileName, mediaType, sizeBytes)
 		item.Status = "POSTED"
 		if item.ReversedAt != nil {
 			item.Status = "REVERSED"
