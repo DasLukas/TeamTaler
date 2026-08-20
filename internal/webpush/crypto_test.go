@@ -52,6 +52,19 @@ func TestSecretsUseAuthenticatedPurposeSeparatedEnvelopes(t *testing.T) {
 	}
 }
 
+func TestSealEnvelopeBoundsAllocationInputs(t *testing.T) {
+	secrets, err := NewSecrets(bytes.Repeat([]byte{0x42}, 32))
+	if err != nil {
+		t.Fatalf("NewSecrets: %v", err)
+	}
+	if _, err := sealEnvelope(secrets.subscriptionAEAD, bytes.Repeat([]byte{0x24}, maxEnvelopePlaintextBytes), subscriptionEnvelopeAAD); err != nil {
+		t.Fatalf("seal maximum supported plaintext: %v", err)
+	}
+	if _, err := sealEnvelope(secrets.subscriptionAEAD, bytes.Repeat([]byte{0x24}, maxEnvelopePlaintextBytes+1), subscriptionEnvelopeAAD); err == nil {
+		t.Fatal("oversized Web Push encryption plaintext was accepted")
+	}
+}
+
 func TestValidateEndpointRejectsPrivateAndReservedResolution(t *testing.T) {
 	ctx := context.Background()
 	resolver := staticResolver{

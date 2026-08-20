@@ -23,6 +23,8 @@ const (
 	vapidKeyDerivationContext        = "teamtaler-web-push-vapid-secret-v1"
 	subscriptionKeyDerivationContext = "teamtaler-web-push-subscription-v1"
 	envelopeVersion                  = byte(1)
+	maxEnvelopePlaintextBytes        = 4 << 10
+	maxEnvelopeAEADMetadataBytes     = 64
 )
 
 var (
@@ -124,11 +126,15 @@ func sealEnvelope(aead cipher.AEAD, plaintext, aad []byte) (string, error) {
 	if aead == nil {
 		return "", fmt.Errorf("Web Push encryption is unavailable")
 	}
-	nonce := make([]byte, aead.NonceSize())
+	nonceSize, overhead := aead.NonceSize(), aead.Overhead()
+	if len(plaintext) > maxEnvelopePlaintextBytes || nonceSize < 1 || nonceSize > maxEnvelopeAEADMetadataBytes || overhead < 1 || overhead > maxEnvelopeAEADMetadataBytes {
+		return "", fmt.Errorf("Web Push encryption input is invalid")
+	}
+	nonce := make([]byte, nonceSize)
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return "", fmt.Errorf("generate Web Push envelope nonce: %w", err)
 	}
-	envelope := make([]byte, 1, 1+len(nonce)+len(plaintext)+aead.Overhead())
+	envelope := make([]byte, 1, 1+nonceSize+len(plaintext)+overhead)
 	envelope[0] = envelopeVersion
 	envelope = append(envelope, nonce...)
 	envelope = aead.Seal(envelope, nonce, plaintext, aad)
