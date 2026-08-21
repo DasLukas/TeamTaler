@@ -4,15 +4,25 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-21
+
 ### Added
 
 - Standards-based Web Push with VAPID, encrypted per-device subscriptions, privacy-minimized payloads, and a push-only service worker.
 - Versioned system, group, and per-membership notification controls for independent email and push delivery across booking, payment, settlement, due-soon, and overdue events.
 - Time-zone-aware settlement reminder scheduling and a channel-neutral leased notification delivery outbox.
+- Configurable payment-receipt policies with immutable image or PDF attachments for member and finance-managed payments.
+- A camera-based multi-page document scanner with automatic edge detection, manual corner correction, local image processing, and bounded PDF generation.
+
+### Changed
+
+- Operational data tables now provide server-backed search, column filters, deterministic sorting, cursor pagination, URL-persisted state, and responsive mobile layouts.
+- Administration and finance workflows use shared accessible menus, modals, confirmation controls, and table primitives for consistent desktop and mobile behavior.
 
 ### Security
 
 - Web Push secrets and browser subscription material are encrypted with purpose-separated keys, never returned by administrative APIs, and protected by HTTPS-only endpoint validation plus private-network and DNS-rebinding defenses.
+- Receipt uploads enforce independent size limits, content validation, normalized image storage, authorization-bound retrieval, and backup-integrity checks.
 
 ## [0.9.0] - 2026-08-17
 
@@ -272,7 +282,8 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Explicit acting and charged membership display for every booking, including searchable third-party-assignment cues.
 - Canonical backup-entry allowlisting, target-width Argon2 parameter parsing, and directory-confined SPA asset serving with traversal regression coverage.
 
-[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/DasLukas/TeamTaler/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/DasLukas/TeamTaler/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/DasLukas/TeamTaler/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/DasLukas/TeamTaler/compare/v0.6.0...v0.7.0
