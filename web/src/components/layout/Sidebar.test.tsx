@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PermissionKey } from '@/api/types';
+import { NotificationSummaryContext } from '@/features/notifications/NotificationSummaryContext';
 import { Sidebar } from './Sidebar';
 
 const mocks = vi.hoisted(() => ({ useActiveGroup: vi.fn() }));
@@ -90,5 +91,15 @@ describe('Sidebar role navigation', () => {
     expect(screen.getByTitle('Navigationsleiste ausklappen')).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByRole('combobox', { name: 'Gruppe auswählen' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Buchen' })).toHaveAttribute('title', 'Buchen');
+  });
+
+  it('anchors the unread badge to the notification bell', () => {
+    usePermissions([]);
+
+    render(<NotificationSummaryContext.Provider value={3}><Sidebar collapsed={false} onCollapsedChange={vi.fn()} /></NotificationSummaryContext.Provider>);
+
+    const badge = screen.getByLabelText('3 ungelesene Benachrichtigungen');
+    expect(badge.parentElement?.querySelector('svg')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Benachrichtigungen' })).toContainElement(badge);
   });
 });

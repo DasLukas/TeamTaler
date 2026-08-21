@@ -3,6 +3,7 @@ module github.com/DasLukas/TeamTaler
 go 1.26.0
 
 require (
+	github.com/marknefedov/go-webpush/v2 v2.0.0
 	golang.org/x/crypto v0.54.0
 	golang.org/x/image v0.44.0
 	golang.org/x/term v0.45.0
@@ -11,6 +12,7 @@ require (
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect

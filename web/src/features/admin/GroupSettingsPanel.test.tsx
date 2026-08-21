@@ -68,6 +68,14 @@ describe('GroupSettingsPanel', () => {
     expect(await screen.findByText(i18n.t('groupSettings.nameSaved'))).toHaveAttribute('role', 'status');
   });
 
+  it('shows a compact first-letter fallback when the group has no custom logo', () => {
+    renderSettings();
+
+    const preview = screen.getByRole('img', { name: 'Group A' });
+    expect(preview).toHaveTextContent('G');
+    expect(preview.querySelector('img')).not.toBeInTheDocument();
+  });
+
   it('previews, positions, and saves a normalized group logo crop', async () => {
     const user = userEvent.setup();
     const logo = new File(['logo'], 'club.png', { type: 'image/png' });
@@ -96,6 +104,7 @@ describe('GroupSettingsPanel', () => {
     apiMock.removeGroupLogo.mockResolvedValue(undefined);
     const session: Session = { ...baseSession, groups: [{ ...baseSession.groups[0], logoUrl: '/custom-logo.png' }] };
     const queryClient = renderSettings(session);
+    expect(screen.getByRole('img', { name: 'Group A' }).querySelector('img')).toHaveAttribute('src', '/custom-logo.png');
 
     await user.click(screen.getByRole('button', { name: i18n.t('groupSettings.restoreDefault') }));
 

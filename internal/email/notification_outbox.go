@@ -82,6 +82,7 @@ func (d *NotificationDispatcher) Run(ctx context.Context) error {
 }
 
 type claimedNotification struct {
+	jobID          string
 	notificationID string
 	leaseToken     string
 	attemptCount   int
@@ -91,7 +92,7 @@ type notificationDelivery struct {
 	toAddress string
 	toName    string
 	groupName string
-	eventType string
+	eventType notifications.EventType
 	context   notifications.EventContext
 }
 
@@ -128,7 +129,7 @@ func (d *NotificationDispatcher) processOne(ctx context.Context) (bool, error) {
 		d.releaseAfterCancellation(job)
 		return true, nil
 	}
-	delivery, err := d.loadDelivery(ctx, job.notificationID)
+	delivery, err := d.loadDelivery(ctx, job.jobID)
 	if err != nil {
 		if ctx.Err() != nil {
 			d.releaseAfterCancellation(job)
@@ -144,9 +145,13 @@ func (d *NotificationDispatcher) processOne(ctx context.Context) (bool, error) {
 		})
 	}
 	title, body := renderNotificationCopy(delivery.eventType, delivery.context)
+	actionRoute := "/notifications"
+	if definition, found := notifications.Definition(delivery.eventType); found {
+		actionRoute = definition.Route
+	}
 	message := NotificationMessage{
 		ToAddress: delivery.toAddress, ToName: delivery.toName, GroupName: delivery.groupName,
-		Title: title, Body: body, ActionURL: d.publicURL + "/notifications",
+		Title: title, Body: body, ActionURL: d.publicURL + actionRoute + "?notification=" + url.QueryEscape(job.notificationID),
 	}
 	err = d.sender.SendNotification(ctx, message)
 	if err == nil {
@@ -176,10 +181,16 @@ func (d *NotificationDispatcher) claimNext(ctx context.Context) (claimedNotifica
 	var job claimedNotification
 	found := false
 	err = storage.WithTx(ctx, d.db, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `UPDATE notification_email_outbox SET status='PENDING',lease_token=NULL,lease_until=NULL,next_attempt_at=?,updated_at=? WHERE status='SENDING' AND lease_until<=?`, nowText, nowText, nowText); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE notification_delivery_jobs SET status='PENDING',lease_token=NULL,lease_until=NULL,next_attempt_at=?,updated_at=? WHERE channel='EMAIL' AND status='SENDING' AND lease_until<=?`, nowText, nowText, nowText); err != nil {
 			return err
 		}
-		err := tx.QueryRowContext(ctx, `SELECT notification_id,attempt_count FROM notification_email_outbox WHERE status='PENDING' AND next_attempt_at<=? ORDER BY next_attempt_at,created_at LIMIT 1`, nowText).Scan(&job.notificationID, &job.attemptCount)
+		if _, err := tx.ExecContext(ctx, `UPDATE notification_delivery_jobs SET status='FAILED',next_attempt_at=NULL,last_error_code='delivery_failed',updated_at=?
+			WHERE channel='EMAIL' AND status='PENDING' AND attempt_count>=?`, nowText, maximumDeliveryAttempts); err != nil {
+			return err
+		}
+		err := tx.QueryRowContext(ctx, `SELECT id,notification_id,attempt_count FROM notification_delivery_jobs
+			WHERE channel='EMAIL' AND status='PENDING' AND next_attempt_at<=? AND attempt_count<?
+			ORDER BY next_attempt_at,created_at,id LIMIT 1`, nowText, maximumDeliveryAttempts).Scan(&job.jobID, &job.notificationID, &job.attemptCount)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -187,7 +198,7 @@ func (d *NotificationDispatcher) claimNext(ctx context.Context) (claimedNotifica
 			return err
 		}
 		job.attemptCount++
-		result, err := tx.ExecContext(ctx, `UPDATE notification_email_outbox SET status='SENDING',attempt_count=?,next_attempt_at=NULL,lease_token=?,lease_until=?,updated_at=? WHERE notification_id=? AND status='PENDING'`, job.attemptCount, leaseToken, leaseUntil, nowText, job.notificationID)
+		result, err := tx.ExecContext(ctx, `UPDATE notification_delivery_jobs SET status='SENDING',attempt_count=?,next_attempt_at=NULL,lease_token=?,lease_until=?,updated_at=? WHERE id=? AND channel='EMAIL' AND status='PENDING'`, job.attemptCount, leaseToken, leaseUntil, nowText, job.jobID)
 		if err != nil {
 			return err
 		}
@@ -199,15 +210,17 @@ func (d *NotificationDispatcher) claimNext(ctx context.Context) (claimedNotifica
 	return job, found, err
 }
 
-func (d *NotificationDispatcher) loadDelivery(ctx context.Context, notificationID string) (notificationDelivery, error) {
+func (d *NotificationDispatcher) loadDelivery(ctx context.Context, jobID string) (notificationDelivery, error) {
 	var delivery notificationDelivery
 	var contextJSON string
 	err := d.db.QueryRowContext(ctx, `SELECT u.email,u.display_name,g.name,n.type,n.context_json
-		FROM notifications n
-		JOIN memberships m ON m.id=n.membership_id AND m.group_id=n.group_id
+		FROM notification_delivery_jobs job
+		JOIN notifications n ON n.id=job.notification_id AND n.group_id=job.group_id
+		JOIN memberships m ON m.id=job.target_membership_id AND m.group_id=job.group_id AND m.id=n.membership_id
 		JOIN users u ON u.id=m.user_id
 		JOIN groups g ON g.id=n.group_id
-		WHERE n.id=? AND u.email IS NOT NULL`, notificationID).Scan(&delivery.toAddress, &delivery.toName, &delivery.groupName, &delivery.eventType, &contextJSON)
+		WHERE job.id=? AND job.channel='EMAIL' AND u.email IS NOT NULL AND u.active=1
+		  AND m.status='ACTIVE' AND m.deleted_at IS NULL`, jobID).Scan(&delivery.toAddress, &delivery.toName, &delivery.groupName, &delivery.eventType, &contextJSON)
 	if err != nil {
 		return notificationDelivery{}, err
 	}
@@ -219,7 +232,7 @@ func (d *NotificationDispatcher) loadDelivery(ctx context.Context, notificationI
 
 func (d *NotificationDispatcher) markSent(ctx context.Context, job claimedNotification) error {
 	now := platform.Timestamp(d.now().UTC())
-	result, err := d.db.ExecContext(ctx, `UPDATE notification_email_outbox SET status='SENT',sent_at=?,lease_token=NULL,lease_until=NULL,last_error_code=NULL,updated_at=? WHERE notification_id=? AND status='SENDING' AND lease_token=?`, now, now, job.notificationID, job.leaseToken)
+	result, err := d.db.ExecContext(ctx, `UPDATE notification_delivery_jobs SET status='SENT',delivered_at=?,lease_token=NULL,lease_until=NULL,last_error_code=NULL,updated_at=? WHERE id=? AND channel='EMAIL' AND status='SENDING' AND lease_token=?`, now, now, job.jobID, job.leaseToken)
 	if err != nil {
 		return err
 	}
@@ -232,9 +245,9 @@ func (d *NotificationDispatcher) markSent(ctx context.Context, job claimedNotifi
 
 func (d *NotificationDispatcher) markUndeliverable(ctx context.Context, job claimedNotification) error {
 	now := platform.Timestamp(d.now().UTC())
-	result, err := d.db.ExecContext(ctx, `UPDATE notification_email_outbox
+	result, err := d.db.ExecContext(ctx, `UPDATE notification_delivery_jobs
 		SET status='FAILED',next_attempt_at=NULL,lease_token=NULL,lease_until=NULL,last_error_code=?,updated_at=?
-		WHERE notification_id=? AND status='SENDING' AND lease_token=?`, FailureCodeRecipientUnavailable, now, job.notificationID, job.leaseToken)
+		WHERE id=? AND channel='EMAIL' AND status='SENDING' AND lease_token=?`, FailureCodeRecipientUnavailable, now, job.jobID, job.leaseToken)
 	if err != nil {
 		return err
 	}
@@ -253,7 +266,7 @@ func (d *NotificationDispatcher) recordFailure(ctx context.Context, job claimedN
 		status = string(OutboxStatusPending)
 		nextAttempt = platform.Timestamp(now.Add(retryDelay(job.attemptCount)))
 	}
-	result, err := d.db.ExecContext(ctx, `UPDATE notification_email_outbox SET status=?,next_attempt_at=?,lease_token=NULL,lease_until=NULL,last_error_code=?,updated_at=? WHERE notification_id=? AND status='SENDING' AND lease_token=?`, status, nextAttempt, code, platform.Timestamp(now), job.notificationID, job.leaseToken)
+	result, err := d.db.ExecContext(ctx, `UPDATE notification_delivery_jobs SET status=?,next_attempt_at=?,lease_token=NULL,lease_until=NULL,last_error_code=?,updated_at=? WHERE id=? AND channel='EMAIL' AND status='SENDING' AND lease_token=?`, status, nextAttempt, code, platform.Timestamp(now), job.jobID, job.leaseToken)
 	if err != nil {
 		return err
 	}
@@ -267,33 +280,37 @@ func (d *NotificationDispatcher) recordFailure(ctx context.Context, job claimedN
 func (d *NotificationDispatcher) releaseAfterCancellation(job claimedNotification) {
 	_ = withCompletionContext(func(ctx context.Context) error {
 		now := platform.Timestamp(d.now().UTC())
-		_, err := d.db.ExecContext(ctx, `UPDATE notification_email_outbox SET status='PENDING',attempt_count=max(attempt_count-1,0),next_attempt_at=?,lease_token=NULL,lease_until=NULL,updated_at=? WHERE notification_id=? AND status='SENDING' AND lease_token=?`, now, now, job.notificationID, job.leaseToken)
+		_, err := d.db.ExecContext(ctx, `UPDATE notification_delivery_jobs SET status='PENDING',attempt_count=max(attempt_count-1,0),next_attempt_at=?,lease_token=NULL,lease_until=NULL,updated_at=? WHERE id=? AND channel='EMAIL' AND status='SENDING' AND lease_token=?`, now, now, job.jobID, job.leaseToken)
 		return err
 	})
 }
 
-func renderNotificationCopy(eventType string, context notifications.EventContext) (string, string) {
+func renderNotificationCopy(eventType notifications.EventType, context notifications.EventContext) (string, string) {
 	actor := safeInline(context.ActorName)
 	item := safeInline(context.ItemName)
 	amount := formatEmailMoney(context.AmountMinor, context.Currency)
 	switch eventType {
 	case notifications.TypeBookingAssigned:
-		return "Neue Buchung", fmt.Sprintf("%s hat dir %d × „%s“ über %s zugewiesen.", actor, context.Quantity, item, amount)
+		return "Neue Buchung", fmt.Sprintf("%s hat %d × „%s“ im Wert von %s auf dein Konto gebucht.", actor, context.Quantity, item, amount)
 	case notifications.TypeBookingReversed:
-		return "Buchung storniert", fmt.Sprintf("%s hat %d × „%s“ über %s auf deinem Konto storniert.", actor, context.Quantity, item, amount)
+		return "Buchung storniert", fmt.Sprintf("%s hat %d × „%s“ im Wert von %s auf deinem Konto storniert.", actor, context.Quantity, item, amount)
 	case notifications.TypePaymentRecorded:
-		return "Zahlung erfasst", fmt.Sprintf("%s hat eine Zahlung über %s für dich erfasst.", actor, amount)
+		return "Zahlung eingegangen", fmt.Sprintf("%s hat dir eine Zahlung von %s gutgeschrieben.", actor, amount)
 	case notifications.TypePaymentReversed:
-		return "Zahlung storniert", fmt.Sprintf("%s hat eine Zahlung über %s auf deinem Konto storniert.", actor, amount)
+		return "Zahlung storniert", fmt.Sprintf("%s hat eine Zahlung von %s auf deinem Konto storniert.", actor, amount)
 	case notifications.TypeSettlementCreated:
 		label := safeInline(context.PeriodLabel)
 		if context.AmountMinor > 0 {
-			return "Neue Abrechnung", fmt.Sprintf("Die Abrechnung „%s“ ist bereit. Offen sind %s, fällig am %s.", label, amount, safeInline(context.DueAt))
+			return "Neue Abrechnung", fmt.Sprintf("Die Abrechnung „%s“ ist bereit. Offener Betrag: %s. Fällig am %s.", label, amount, safeInline(context.DueAt))
 		}
 		if context.AmountMinor < 0 {
-			return "Neue Abrechnung", fmt.Sprintf("Die Abrechnung „%s“ ist bereit und weist ein Guthaben über %s aus.", label, formatEmailMoney(-context.AmountMinor, context.Currency))
+			return "Neue Abrechnung", fmt.Sprintf("Die Abrechnung „%s“ ist bereit. Dein Guthaben beträgt %s.", label, formatEmailMoney(-context.AmountMinor, context.Currency))
 		}
 		return "Neue Abrechnung", fmt.Sprintf("Die Abrechnung „%s“ ist bereit. Es ist keine Zahlung offen.", label)
+	case notifications.TypeSettlementDueSoon:
+		return "Abrechnung bald fällig", "Eine offene Abrechnung in deiner TeamTaler-Gruppe ist bald fällig."
+	case notifications.TypeSettlementOverdue:
+		return "Abrechnung überfällig", "Eine offene Abrechnung in deiner TeamTaler-Gruppe ist überfällig."
 	default:
 		return "Neue Benachrichtigung", "In deiner TeamTaler-Gruppe gibt es eine neue Aktivität."
 	}

@@ -5,6 +5,7 @@ import LogOut from 'lucide-react/dist/esm/icons/log-out';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
+import { detachWebPushBeforeLogout } from '@/features/push/webPush';
 
 interface LogoutButtonProps {
   className?: string;
@@ -26,6 +27,7 @@ export function LogoutButton({ className = '', showChevron = false }: LogoutButt
   const logout = async () => {
     setPending(true);
     try {
+      await detachWebPushBeforeLogout();
       await api.logout();
     } finally {
       queryClient.clear();

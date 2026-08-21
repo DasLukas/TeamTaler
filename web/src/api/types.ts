@@ -4,6 +4,76 @@ export interface Money {
   currency: string;
 }
 
+/** Sort direction accepted by every server-backed collection endpoint. */
+export type CollectionSortDirection = 'asc' | 'desc';
+
+/** Shared search, sorting, and cursor options for an immutable collection. */
+export interface CollectionQuery<SortKey extends string> {
+  q?: string;
+  limit?: number;
+  cursor?: string;
+  sort?: SortKey;
+  direction?: CollectionSortDirection;
+}
+
+/** One cursor-based collection page while preserving the API's array response body. */
+export interface CollectionPage<Item> {
+  items: Item[];
+  nextCursor?: string;
+  hasMore: boolean;
+  limit: number;
+}
+
+/** Server-backed activity search, filter, and sort options. */
+export interface BookingCollectionQuery extends CollectionQuery<'createdAt' | 'amount' | 'targetName' | 'actorName' | 'productName' | 'categoryName' | 'status'> {
+  periodId?: string;
+  actorMembershipId?: string;
+  targetMembershipId?: string;
+  /** One or more repeated categoryId query values combined with OR semantics. */
+  categoryId?: string | readonly string[];
+  /** One or more repeated productId query values combined with OR semantics. */
+  productId?: string | readonly string[];
+  status?: 'POSTED' | 'VOIDED';
+  createdFrom?: string;
+  createdTo?: string;
+  amountMin?: string;
+  amountMax?: string;
+}
+
+/** Server-backed incoming-payment search, filter, and sort options. */
+export interface PaymentCollectionQuery extends CollectionQuery<'receivedAt' | 'amount' | 'memberName' | 'method' | 'status'> {
+  membershipId?: string;
+  method?: string;
+  status?: 'POSTED' | 'REVERSED';
+  receivedFrom?: string;
+  receivedTo?: string;
+  amountMin?: string;
+  amountMax?: string;
+}
+
+/** Server-backed group-audit search, filter, and sort options. */
+export interface AuditCollectionQuery extends CollectionQuery<'occurredAt' | 'actorName' | 'action' | 'resourceType'> {
+  actorUserId?: string;
+  actorMembershipId?: string;
+  /** One or more repeated action query values combined with OR semantics. */
+  action?: string | readonly string[];
+  /** One or more repeated resourceType query values combined with OR semantics. */
+  resourceType?: string | readonly string[];
+  occurredFrom?: string;
+  occurredTo?: string;
+}
+
+/** Server-backed system-audit search, filter, and sort options. */
+export type SystemAuditCollectionQuery = Omit<AuditCollectionQuery, 'actorMembershipId'>;
+
+/** Complete data-derived option catalog for one authorized audit scope. */
+export interface AuditFilterOptions {
+  actions: string[];
+  resourceTypes: string[];
+  /** Persisted resource types observed for each action. */
+  actionResourceTypes?: Record<string, string[]>;
+}
+
 /** Determines whether a product price is fixed by the catalog or chosen per booking. */
 export type ProductPricingMode = 'FIXED' | 'USER_DEFINED';
 
@@ -162,6 +232,9 @@ export type SystemRole = 'SYSTEM_ADMINISTRATOR';
 /** Browser fallback used only while public instance capabilities are unavailable. */
 export const DEFAULT_MEDIA_UPLOAD_MAX_BYTES = 5 * 1024 * 1024;
 
+/** Browser fallback for immutable payment attachments. */
+export const DEFAULT_ATTACHMENT_UPLOAD_MAX_BYTES = 15 * 1024 * 1024;
+
 /** Public, non-sensitive instance behavior required before authenticated features render. */
 export interface InstanceCapabilities {
   instanceName: string;
@@ -169,6 +242,15 @@ export interface InstanceCapabilities {
   maintenanceMessage: string;
   publicJoinEnabled: boolean;
   mediaUploadMaxBytes: number;
+  attachmentUploadMaxBytes: number;
+  /** Whether SMTP-backed optional notifications can currently be delivered. */
+  emailNotificationsAvailable: boolean;
+  /** Whether this deployment exposes a complete, active Web Push configuration. */
+  webPushAvailable: boolean;
+  /** URL-safe VAPID public key used only by the browser subscription API. */
+  webPushPublicKey: string | null;
+  /** Opaque VAPID revision used to reconcile subscriptions after key rotation. */
+  webPushKeyId: string | null;
 }
 
 /** Confirmation returned after an email-change request has been accepted. */
@@ -198,6 +280,14 @@ export interface ConfigurableItem {
   label: string;
 }
 
+/** Controls whether one payment method accepts or requires a receipt. */
+export type AttachmentMode = 'OFF' | 'OPTIONAL' | 'REQUIRED';
+
+/** One stable, ordered payment method and its receipt policy. */
+export interface PaymentMethod extends ConfigurableItem {
+  attachmentMode: AttachmentMode;
+}
+
 /** Visibility and validation policy for one transaction-reason context. */
 export type ReasonMode = 'OFF' | 'OPTIONAL' | 'REQUIRED';
 
@@ -211,7 +301,7 @@ export interface TransactionSettings {
   foreignBookingReasonRequired: boolean;
   ownPaymentReasonRequired: boolean;
   otherPaymentReasonRequired: boolean;
-  paymentMethods: ConfigurableItem[];
+  paymentMethods: PaymentMethod[];
   bookingReasons: ConfigurableItem[];
   paymentReasons: ConfigurableItem[];
 }
@@ -229,7 +319,7 @@ export interface GroupSettings {
   foreignBookingReasonRequired: boolean;
   ownPaymentReasonRequired: boolean;
   otherPaymentReasonRequired: boolean;
-  paymentMethods: ConfigurableItem[];
+  paymentMethods: PaymentMethod[];
   bookingReasons: ConfigurableItem[];
   paymentReasons: ConfigurableItem[];
 }
@@ -248,7 +338,7 @@ export interface GroupSettingsUpdateInput {
   foreignBookingReasonRequired?: boolean;
   ownPaymentReasonRequired?: boolean;
   otherPaymentReasonRequired?: boolean;
-  paymentMethods?: ConfigurableItem[];
+  paymentMethods?: PaymentMethod[];
   bookingReasons?: ConfigurableItem[];
   paymentReasons?: ConfigurableItem[];
 }
@@ -333,17 +423,35 @@ export interface SystemSmtpSettings {
   active: boolean;
 }
 
+/** Redacted, effective Web Push configuration exposed to system administrators. */
+export interface SystemWebPushSettings {
+  enabled: SystemSetting<boolean>;
+  subject: SystemSetting<string>;
+  privateKeyConfigured: boolean;
+  privateKeySource: SystemSettingSource;
+  privateKeyUpdatedAt: string | null;
+  storageKeyConfigured: boolean;
+  publicKey: string | null;
+  keyId: string | null;
+  configurationValid: boolean;
+  active: boolean;
+  revision: number;
+}
+
 /** Complete effective, versioned instance settings document. */
 export interface SystemSettings {
   revision: number;
   instanceName: SystemSetting<string>;
   defaultCurrency: SystemSetting<string>;
   mediaUploadMaxBytes: SystemSetting<number>;
+  attachmentUploadMaxBytes: SystemSetting<number>;
   publicJoinEnabled: SystemSetting<boolean>;
   maintenanceMode: SystemSetting<boolean>;
   maintenanceMessage: SystemSetting<string>;
   smtp: SystemSmtpSettings;
+  webPush: SystemWebPushSettings;
   mediaUploadHardLimitBytes: number;
+  attachmentUploadHardLimitBytes: number;
   updatedAt: string;
   updatedByUserId: string | null;
 }
@@ -353,6 +461,7 @@ export type ResettableSystemSettingKey =
   | 'instanceName'
   | 'defaultCurrency'
   | 'mediaUploadMaxBytes'
+  | 'attachmentUploadMaxBytes'
   | 'publicJoinEnabled'
   | 'maintenanceMode'
   | 'maintenanceMessage';
@@ -362,6 +471,7 @@ export interface SystemSettingsUpdate {
   instanceName?: string;
   defaultCurrency?: string;
   mediaUploadMaxBytes?: number;
+  attachmentUploadMaxBytes?: number;
   publicJoinEnabled?: boolean;
   maintenanceMode?: boolean;
   maintenanceMessage?: string;
@@ -377,6 +487,12 @@ export interface SystemSmtpSettingsUpdate {
   fromAddress?: string;
   fromName?: string;
   password?: string;
+}
+
+/** Partial Web Push update; private material is generated and never accepted by this client. */
+export interface SystemWebPushSettingsUpdate {
+  enabled?: boolean;
+  subject?: string;
 }
 
 /** Non-sensitive account projection available to system administrators. */
@@ -669,6 +785,7 @@ export interface LedgerEntry {
   amount: Money;
   balance: Money;
   referenceId: string;
+  attachment?: PaymentAttachmentSummary;
 }
 
 /** Consolidated group account balance for one operational or non-zero deleted membership. */
@@ -695,6 +812,15 @@ export interface Payment {
   reference?: string;
   note?: string;
   status: 'POSTED' | 'REVERSED';
+  attachment?: PaymentAttachmentSummary;
+}
+
+/** Safe payment-receipt metadata exposed without its internal storage key. */
+export interface PaymentAttachmentSummary {
+  fileName: string;
+  mediaType: string;
+  sizeBytes: number;
+  url: string;
 }
 
 /** Complete command for restoring one archived group membership. */
@@ -747,7 +873,109 @@ export interface Settlement {
 }
 
 /** Stable event types emitted by the financial notification system. */
-export type NotificationEventType = 'BOOKING_ASSIGNED' | 'BOOKING_REVERSED' | 'PAYMENT_RECORDED' | 'PAYMENT_REVERSED' | 'SETTLEMENT_CREATED' | 'SYSTEM';
+export type NotificationEventType =
+  | 'BOOKING_ASSIGNED'
+  | 'BOOKING_REVERSED'
+  | 'PAYMENT_RECORDED'
+  | 'PAYMENT_REVERSED'
+  | 'SETTLEMENT_CREATED'
+  | 'SETTLEMENT_DUE_SOON'
+  | 'SETTLEMENT_OVERDUE'
+  | 'SYSTEM';
+
+/** Optional external delivery channels controlled by system, group, and member policy. */
+export type NotificationChannel = 'EMAIL' | 'PUSH';
+
+/** User-facing metadata for one event from the server-owned notification catalog. */
+export interface NotificationEventDefinition {
+  eventType: Exclude<NotificationEventType, 'SYSTEM'>;
+  category: string;
+  name: string;
+  description: string;
+  supportedChannels: NotificationChannel[];
+}
+
+/** Runtime availability of optional external delivery channels. */
+export interface NotificationChannelAvailability {
+  email: boolean;
+  push: boolean;
+}
+
+/** One administrator-controlled event policy within a group. */
+export interface GroupNotificationEventSetting extends NotificationEventDefinition {
+  enabled: boolean;
+}
+
+/** Versioned group policy that determines which events members may configure. */
+export interface GroupNotificationSettings {
+  version: number;
+  timezone: string;
+  dueSoonLeadDays: number;
+  overdueRepeatDays: number;
+  channels: NotificationChannelAvailability;
+  events: GroupNotificationEventSetting[];
+}
+
+/** Editable group notification-policy fields. */
+export interface GroupNotificationSettingsUpdate {
+  version: number;
+  timezone: string;
+  dueSoonLeadDays: number;
+  overdueRepeatDays: number;
+  events: Array<{ eventType: Exclude<NotificationEventType, 'SYSTEM'>; enabled: boolean }>;
+}
+
+/** One member's effective preferences for a group event. */
+export interface NotificationPreference extends GroupNotificationEventSetting {
+  email: boolean;
+  push: boolean;
+  emailAvailable: boolean;
+  pushAvailable: boolean;
+}
+
+/** Versioned preference matrix for the current membership. */
+export interface NotificationPreferences {
+  version: number;
+  channels: NotificationChannelAvailability;
+  events: NotificationPreference[];
+}
+
+/** Editable external-channel choices for the current membership. */
+export interface NotificationPreferencesUpdate {
+  version: number;
+  events: Array<{
+    eventType: Exclude<NotificationEventType, 'SYSTEM'>;
+    email?: boolean;
+    push?: boolean;
+  }>;
+}
+
+/** Public metadata for one account-owned browser subscription. */
+export interface PushSubscriptionDevice {
+  id: string;
+  label: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  keyId: string;
+  current: boolean;
+}
+
+/** Browser Push API material accepted only during subscription reconciliation. */
+export interface BrowserPushSubscriptionInput {
+  endpoint: string;
+  expirationTime: number | null;
+  keys: {
+    auth: string;
+    p256dh: string;
+  };
+}
+
+/** Registration command that combines safe device metadata with browser key material. */
+export interface PushSubscriptionRegistration {
+  label: string;
+  keyId: string;
+  subscription: BrowserPushSubscriptionInput;
+}
 
 /** Safe structured details used to localize one notification. */
 export interface NotificationContext {
@@ -778,6 +1006,11 @@ export interface NotificationPage {
   nextCursor?: string;
 }
 
+/** Active group resolved from an account-owned opaque notification identifier. */
+export interface NotificationDestination {
+  groupId: string;
+}
+
 /** Exact unread count returned by the lightweight navigation endpoint. */
 export interface NotificationSummary {
   unreadCount: number;
@@ -794,6 +1027,7 @@ export interface AuditEntry {
   occurredAt: string;
   actorName: string;
   action: string;
+  resourceType: string;
   subject: string;
   details: string;
 }

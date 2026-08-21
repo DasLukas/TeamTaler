@@ -17,6 +17,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/finance"
 	"github.com/DasLukas/TeamTaler/internal/groups"
 	"github.com/DasLukas/TeamTaler/internal/media"
+	"github.com/DasLukas/TeamTaler/internal/paymentattachments"
 	"github.com/DasLukas/TeamTaler/internal/periods"
 	"github.com/DasLukas/TeamTaler/internal/storage"
 )
@@ -24,24 +25,26 @@ import (
 const testPassword = "a-correct-horse-battery-staple"
 
 type fixture struct {
-	t          *testing.T
-	ctx        context.Context
-	db         *sql.DB
-	auth       auth.Service
-	groups     groups.Service
-	catalog    catalog.Service
-	bookings   bookings.Service
-	finance    finance.Service
-	periods    periods.Service
-	admin      domain.Principal
-	group      domain.Group
-	membership domain.Membership
+	t             *testing.T
+	ctx           context.Context
+	db            *sql.DB
+	auth          auth.Service
+	groups        groups.Service
+	catalog       catalog.Service
+	bookings      bookings.Service
+	finance       finance.Service
+	periods       periods.Service
+	admin         domain.Principal
+	group         domain.Group
+	membership    domain.Membership
+	dataDirectory string
 }
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	ctx := context.Background()
-	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), "teamtaler.db"))
+	dataDirectory := t.TempDir()
+	db, err := storage.Open(ctx, filepath.Join(dataDirectory, "teamtaler.db"))
 	if err != nil {
 		t.Fatalf("open test database: %v", err)
 	}
@@ -63,8 +66,9 @@ func newFixture(t *testing.T) *fixture {
 	result := &fixture{
 		t: t, ctx: ctx, db: db, auth: authService, groups: groupService,
 		catalog: catalog.Service{DB: db}, bookings: bookings.Service{DB: db, Groups: groupService},
-		finance: finance.Service{DB: db}, periods: periods.Service{DB: db},
+		finance: finance.Service{DB: db, Attachments: paymentattachments.Store{DataDirectory: dataDirectory}}, periods: periods.Service{DB: db},
 		admin: session.Principal, group: groupItems[0], membership: groupItems[0].Membership,
+		dataDirectory: dataDirectory,
 	}
 	result.membership = result.assignPermissionRole(result.membership, "Integration fixture capabilities",
 		domain.PermissionFinanceManagement,

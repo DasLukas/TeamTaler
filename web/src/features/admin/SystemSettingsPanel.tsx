@@ -1,9 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Archive from 'lucide-react/dist/esm/icons/archive';
 import ArchiveRestore from 'lucide-react/dist/esm/icons/archive-restore';
-import CircleAlert from 'lucide-react/dist/esm/icons/circle-alert';
 import CircleCheckBig from 'lucide-react/dist/esm/icons/circle-check-big';
-import CircleHelp from 'lucide-react/dist/esm/icons/circle-help';
 import MailCheck from 'lucide-react/dist/esm/icons/mail-check';
 import Plus from 'lucide-react/dist/esm/icons/plus';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
@@ -12,12 +10,15 @@ import Save from 'lucide-react/dist/esm/icons/save';
 import ShieldAlert from 'lucide-react/dist/esm/icons/shield-alert';
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
 import X from 'lucide-react/dist/esm/icons/x';
-import { useDeferredValue, useState, type FormEvent } from 'react';
+import { useDeferredValue, useId, useMemo, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { formatMoney } from '@/api/money';
 import type {
+  CollectionPage,
   ResettableSystemSettingKey,
+  SystemAuditCollectionQuery,
+  SystemAuditEntry,
   SystemGroup,
   SystemGroupInvitationResult,
   SystemSettings,
@@ -28,17 +29,22 @@ import { Button } from '@/components/ui/Button';
 import { ConfirmationDialog } from '@/components/ui/ConfirmationDialog';
 import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { GroupMark } from '@/components/ui/GroupMark';
-import { InvitationReady } from '@/components/ui/InvitationReady';
+import { InvitationReady, InvitationReadyFooter } from '@/components/ui/InvitationReady';
 import { ItemAction } from '@/components/ui/ItemAction';
-import { Modal } from '@/components/ui/Modal';
+import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { Toggle } from '@/components/ui/Toggle';
 import { AuditEventTable } from '@/features/shared/AuditEventTable';
+import { createAuditFilterDefinitions, mergeAuditFilterOptions, type AuditEventFilterId } from '@/features/shared/auditFilters';
+import type { DataTableDateRange } from '@/features/shared/DataTable';
+import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
 import styles from './SystemSettingsPanel.module.css';
+import { SystemWebPushSettingsSection } from './SystemWebPushSettingsSection';
 
 const SETTINGS_QUERY_KEY = ['system-settings'] as const;
 const GROUPS_QUERY_KEY = ['system-groups'] as const;
 const AUDIT_QUERY_KEY = ['system-audit'] as const;
+const SYSTEM_AUDIT_PAGE_SIZE = 50;
 const MEBIBYTE = 1024 * 1024;
 const SMTP_PASSWORD_MASK = '••••••••••••';
 const COMMON_CURRENCIES = ['EUR', 'CHF', 'USD', 'GBP', 'PLN', 'CZK', 'DKK', 'NOK', 'SEK'] as const;
@@ -62,10 +68,6 @@ function currencyOptionLabel(currency: string): string {
     .formatToParts(0)
     .find((part) => part.type === 'currency')?.value ?? currency;
   return `${currency} - ${symbol}`;
-}
-
-function localizedDate(value: string | null): string {
-  return value ? new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '–';
 }
 
 interface ResetConfirmationDialogProps {
@@ -128,33 +130,40 @@ function GeneralSettingsSection({ settings }: { settings: SystemSettings }) {
   const [instanceName, setInstanceName] = useState(settings.instanceName.value);
   const [defaultCurrency, setDefaultCurrency] = useState(settings.defaultCurrency.value);
   const [mediaLimitMiB, setMediaLimitMiB] = useState(settings.mediaUploadMaxBytes.value / MEBIBYTE);
+  const [attachmentLimitMiB, setAttachmentLimitMiB] = useState(settings.attachmentUploadMaxBytes.value / MEBIBYTE);
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const mediaUploadMaxBytes = mediaLimitMiB * MEBIBYTE;
+    const attachmentUploadMaxBytes = attachmentLimitMiB * MEBIBYTE;
     mutation.mutate({
       revision: settings.revision,
       update: {
         ...(instanceName.trim() !== settings.instanceName.value ? { instanceName: instanceName.trim() } : {}),
         ...(defaultCurrency !== settings.defaultCurrency.value ? { defaultCurrency } : {}),
         ...(mediaUploadMaxBytes !== settings.mediaUploadMaxBytes.value ? { mediaUploadMaxBytes } : {}),
+        ...(attachmentUploadMaxBytes !== settings.attachmentUploadMaxBytes.value ? { attachmentUploadMaxBytes } : {}),
       },
     });
   };
   const changed = instanceName.trim() !== settings.instanceName.value
     || defaultCurrency !== settings.defaultCurrency.value
-    || mediaLimitMiB * MEBIBYTE !== settings.mediaUploadMaxBytes.value;
+    || mediaLimitMiB * MEBIBYTE !== settings.mediaUploadMaxBytes.value
+    || attachmentLimitMiB * MEBIBYTE !== settings.attachmentUploadMaxBytes.value;
   const pending = mutation.isPending || resetMutation.isPending;
   const maximumMediaLimitMiB = 25;
+  const maximumAttachmentLimitMiB = Math.max(1, Math.floor(settings.attachmentUploadHardLimitBytes / MEBIBYTE));
   const resetKeys: ResettableSystemSettingKey[] = [
     ...(settings.instanceName.source === 'DATABASE' ? ['instanceName' as const] : []),
     ...(settings.defaultCurrency.source === 'DATABASE' ? ['defaultCurrency' as const] : []),
     ...(settings.mediaUploadMaxBytes.source === 'DATABASE' ? ['mediaUploadMaxBytes' as const] : []),
+    ...(settings.attachmentUploadMaxBytes.source === 'DATABASE' ? ['attachmentUploadMaxBytes' as const] : []),
   ];
   const reset = () => resetMutation.mutate({ keys: resetKeys, revision: settings.revision }, {
     onSuccess: (persisted) => {
       setInstanceName(persisted.instanceName.value);
       setDefaultCurrency(persisted.defaultCurrency.value);
       setMediaLimitMiB(persisted.mediaUploadMaxBytes.value / MEBIBYTE);
+      setAttachmentLimitMiB(persisted.attachmentUploadMaxBytes.value / MEBIBYTE);
       setResetOpen(false);
     },
   });
@@ -164,6 +173,11 @@ function GeneralSettingsSection({ settings }: { settings: SystemSettings }) {
       <form className={styles.form} onSubmit={submit}>
         <div className={styles.fieldBlock}>
           <Field htmlFor="system-instance-name" label={t('systemSettings.general.instanceName')}><TextInput id="system-instance-name" maxLength={120} onChange={(event) => setInstanceName(event.target.value)} required value={instanceName} /></Field>
+        </div>
+        <div className={styles.fieldBlock}>
+          <Field hint={t('systemSettings.general.attachmentLimitHint', { defaultValue: 'Maximum size of one payment receipt.' })} htmlFor="system-attachment-limit" label={t('systemSettings.general.attachmentLimit', { defaultValue: 'Receipt upload limit (MiB)' })}>
+            <TextInput id="system-attachment-limit" max={maximumAttachmentLimitMiB} min={1} onChange={(event) => setAttachmentLimitMiB(event.target.valueAsNumber)} required step={1} type="number" value={attachmentLimitMiB} />
+          </Field>
         </div>
         <div className={styles.fieldBlock}>
           <Field htmlFor="system-default-currency" label={t('systemSettings.general.defaultCurrency')}>
@@ -182,7 +196,7 @@ function GeneralSettingsSection({ settings }: { settings: SystemSettings }) {
         {mutation.isSuccess || resetMutation.isSuccess ? <p className={styles.success} role="status">{t('systemSettings.saved')}</p> : null}
         <div className={styles.actions}>
           <Button disabled={pending || resetKeys.length === 0} leadingIcon={<RotateCcw size={17} />} onClick={() => setResetOpen(true)} variant="secondary">{t('systemSettings.reset')}</Button>
-          <Button disabled={!changed || pending || !instanceName.trim() || !/^[A-Z]{3}$/.test(defaultCurrency) || !Number.isInteger(mediaLimitMiB) || mediaLimitMiB < 1 || mediaLimitMiB > maximumMediaLimitMiB} leadingIcon={<Save size={17} />} type="submit">{pending ? t('common.saving') : t('common.save')}</Button>
+          <Button disabled={!changed || pending || !instanceName.trim() || !/^[A-Z]{3}$/.test(defaultCurrency) || !Number.isInteger(mediaLimitMiB) || mediaLimitMiB < 1 || mediaLimitMiB > maximumMediaLimitMiB || !Number.isInteger(attachmentLimitMiB) || attachmentLimitMiB < 1 || attachmentLimitMiB > maximumAttachmentLimitMiB} leadingIcon={<Save size={17} />} type="submit">{pending ? t('common.saving') : t('common.save')}</Button>
         </div>
       </form>
       <ResetConfirmationDialog errorMessage={resetMutation.isError ? t('systemSettings.saveError') : undefined} onClose={() => setResetOpen(false)} onConfirm={reset} open={resetOpen} pending={resetMutation.isPending} sectionName={t('systemSettings.general.title')} />
@@ -252,10 +266,6 @@ function SmtpSettingsSection({ settings }: { settings: SystemSettings }) {
   const configurationChanged = form.enabled !== smtp.enabled.value || connectionChanged;
   const validPort = Number.isInteger(form.port) && Number(form.port) >= 1 && Number(form.port) <= 65535;
   const visibleTestStatus = testMutation.isError ? 'FAILED' : connectionChanged ? 'UNTESTED' : smtp.testStatus;
-  const StatusIcon = visibleTestStatus === 'VERIFIED' ? CircleCheckBig : visibleTestStatus === 'FAILED' ? CircleAlert : CircleHelp;
-  const statusHint = visibleTestStatus === 'VERIFIED' && smtp.testedAt
-    ? t('systemSettings.smtp.testedAt', { date: localizedDate(smtp.testedAt) })
-    : visibleTestStatus === 'FAILED' ? t('systemSettings.smtp.failedHint') : t('systemSettings.smtp.notTested');
   const hasOverrides = smtp.passwordSource === 'DATABASE' || [smtp.enabled, smtp.host, smtp.port, smtp.tlsMode, smtp.username, smtp.fromAddress, smtp.fromName]
     .some((setting) => setting.source === 'DATABASE');
   const setValue = <K extends keyof SmtpForm>(key: K, value: SmtpForm[K]) => setForm((current) => ({ ...current, [key]: value }));
@@ -274,16 +284,13 @@ function SmtpSettingsSection({ settings }: { settings: SystemSettings }) {
           <div className={styles.fieldBlock}><Field htmlFor="system-smtp-from-name" label={t('systemSettings.smtp.fromName')}><TextInput id="system-smtp-from-name" onChange={(event) => setValue('fromName', event.target.value)} value={form.fromName} /></Field></div>
         </fieldset>
         {saveMutation.isError || resetMutation.isError ? <p className={styles.error} role="alert">{t('systemSettings.smtp.error')}</p> : null}
-        <div className={styles.smtpFooter}>
-          <div className={styles.smtpStatus} data-status={visibleTestStatus.toLowerCase()} role={visibleTestStatus === 'FAILED' ? 'alert' : 'status'}>
-            <StatusIcon aria-hidden="true" size={22} strokeWidth={2.2} />
-            <span><strong>{t(`systemSettings.smtp.status.${visibleTestStatus.toLowerCase()}`)}</strong><small>{statusHint}</small></span>
-          </div>
-          <div className={styles.actions}>
-            <Button disabled={pending || configurationChanged || !smtp.configurationValid} leadingIcon={<MailCheck size={17} />} onClick={() => testMutation.mutate()} variant="secondary">{testMutation.isPending ? t('systemSettings.smtp.testing') : t('systemSettings.smtp.test')}</Button>
-            <Button disabled={pending || !hasOverrides} leadingIcon={<RotateCcw size={17} />} onClick={() => setResetOpen(true)} variant="secondary">{t('systemSettings.reset')}</Button>
-            <Button disabled={pending || !configurationChanged || !form.host || !form.username || !form.fromAddress || !validPort} leadingIcon={<Save size={17} />} type="submit">{saveMutation.isPending ? t('common.saving') : t('common.save')}</Button>
-          </div>
+        <dl className={styles.compactImpact}>
+          <div><dt>{t('common.status')}:</dt><dd className={styles.smtpStatus} data-status={smtp.active ? 'active' : visibleTestStatus.toLowerCase()} role={!smtp.active && visibleTestStatus === 'FAILED' ? 'alert' : 'status'}>{smtp.active ? <CircleCheckBig aria-label={t('systemSettings.smtp.active')} className={styles.activeStatus} role="img" size={20} /> : t(`systemSettings.smtp.status.${visibleTestStatus.toLowerCase()}`)}</dd></div>
+        </dl>
+        <div className={styles.actions}>
+          <Button disabled={pending || configurationChanged || !smtp.configurationValid} leadingIcon={<MailCheck size={17} />} onClick={() => testMutation.mutate()} variant="secondary">{testMutation.isPending ? t('systemSettings.smtp.testing') : t('systemSettings.smtp.test')}</Button>
+          <Button disabled={pending || !hasOverrides} leadingIcon={<RotateCcw size={17} />} onClick={() => setResetOpen(true)} variant="secondary">{t('systemSettings.reset')}</Button>
+          <Button disabled={pending || !configurationChanged || !form.host || !form.username || !form.fromAddress || !validPort} leadingIcon={<Save size={17} />} type="submit">{saveMutation.isPending ? t('common.saving') : t('common.save')}</Button>
         </div>
       </form>
       <ResetConfirmationDialog errorMessage={resetMutation.isError ? t('systemSettings.smtp.error') : undefined} onClose={() => setResetOpen(false)} onConfirm={() => resetMutation.mutate()} open={resetOpen} pending={resetMutation.isPending} sectionName={t('systemSettings.smtp.title')} />
@@ -347,6 +354,7 @@ interface PurgeDialogProps {
 /** Exact-name confirmation and impact review for permanent group deletion. */
 function PurgeDialog({ group, onClose, onPurged }: PurgeDialogProps) {
   const { t } = useTranslation();
+  const formId = useId();
   const impact = useQuery({
     queryKey: ['system-group-deletion-impact', group?.id],
     queryFn: () => api.getSystemGroupDeletionImpact(group?.id ?? ''),
@@ -368,8 +376,8 @@ function PurgeDialog({ group, onClose, onPurged }: PurgeDialogProps) {
   const currentGroupName = impact.data?.groupName ?? group?.name;
   const valid = Boolean(group) && groupName === currentGroupName;
   return (
-    <Modal className={styles.purgeDialog} onClose={() => { if (!mutation.isPending) close(); }} open={group !== null} title={t('systemSettings.groups.purgeTitle', { name: currentGroupName ?? '' })} variant="sheet">
-      {group ? <form className={styles.purgeForm} onSubmit={(event) => { event.preventDefault(); mutation.mutate(); }}>
+    <Modal onClose={() => { if (!mutation.isPending) close(); }} open={group !== null} size="wide" title={t('systemSettings.groups.purgeTitle', { name: currentGroupName ?? '' })} variant="sheet">
+      {group ? <form className={styles.purgeForm} id={formId} onSubmit={(event) => { event.preventDefault(); mutation.mutate(); }}>
         <div className={styles.dangerNotice}><span className={styles.dangerIcon}><ShieldAlert aria-hidden="true" size={26} /></span><div><strong>{t('systemSettings.groups.purgeWarning')}</strong><p>{t('systemSettings.groups.purgeDescription')}</p></div></div>
         {impact.isError ? <p className={styles.error} role="alert">{t('systemSettings.groups.impactError')}</p> : null}
         <section aria-labelledby="system-purge-impact-title" className={styles.impactPanel}>
@@ -384,7 +392,7 @@ function PurgeDialog({ group, onClose, onPurged }: PurgeDialogProps) {
           <Field htmlFor="system-purge-name" label={t('systemSettings.groups.confirmName')}><TextInput autoComplete="off" id="system-purge-name" onChange={(event) => setGroupName(event.target.value)} required value={groupName} /></Field>
         </div>
         {mutation.isError ? <p className={styles.error} role="alert">{t('systemSettings.groups.purgeError')}</p> : null}
-        <div className={`${styles.actions} ${styles.purgeActions}`}><Button disabled={mutation.isPending} leadingIcon={<X size={17} />} onClick={close} variant="secondary">{t('common.cancel')}</Button><Button disabled={!valid || mutation.isPending || impact.isLoading || impact.isError} leadingIcon={<Trash2 size={17} />} type="submit" variant="danger">{mutation.isPending ? t('systemSettings.groups.purging') : t('systemSettings.groups.purge')}</Button></div>
+        <ModalFooter><div className={`${styles.actions} ${styles.purgeActions}`}><Button disabled={mutation.isPending} leadingIcon={<X size={17} />} onClick={close} variant="secondary">{t('common.cancel')}</Button><Button disabled={!valid || mutation.isPending || impact.isLoading || impact.isError} form={formId} leadingIcon={<Trash2 size={17} />} type="submit" variant="danger">{mutation.isPending ? t('systemSettings.groups.purging') : t('systemSettings.groups.purge')}</Button></div></ModalFooter>
       </form> : null}
     </Modal>
   );
@@ -396,7 +404,7 @@ function SystemGroupInvitationDialog({ invitation, onClose }: { invitation: Syst
   if (!invitation?.acceptUrl || !invitation.expiresAt) return null;
   const emailQueued = invitation.emailDeliveryStatus === 'PENDING';
   return (
-    <Modal className={styles.invitationDialog} onClose={onClose} open title={t('systemSettings.groups.invitationReadyTitle', { group: invitation.group.name })}>
+    <Modal footer={<InvitationReadyFooter onDone={onClose} />} onClose={onClose} open size="workspace" title={t('systemSettings.groups.invitationReadyTitle', { group: invitation.group.name })}>
       <InvitationReady
         acceptUrl={invitation.acceptUrl}
         deliveryStatus={{
@@ -406,7 +414,6 @@ function SystemGroupInvitationDialog({ invitation, onClose }: { invitation: Syst
         expiresAt={invitation.expiresAt}
         fallbackHint={emailQueued ? t('members.fallbackHint') : undefined}
         linkLabel={t('members.invitationLink')}
-        onDone={onClose}
       />
     </Modal>
   );
@@ -511,18 +518,65 @@ function GroupsSettingsSection({ defaultCurrency }: { defaultCurrency: string })
 /** Immutable global activity feed including retained purge receipts. */
 function SystemAuditSection() {
   const { t } = useTranslation();
-  const audit = useQuery({ queryKey: AUDIT_QUERY_KEY, queryFn: api.getSystemAudit });
+  const filterOptionsQuery = useQuery({ queryFn: api.getSystemAuditFilterOptions, queryKey: [...AUDIT_QUERY_KEY, 'filter-options'] });
+  const queryFilterDefinitions = useMemo(() => createAuditFilterDefinitions(t, filterOptionsQuery.data), [filterOptionsQuery.data, t]);
+  const tableState = useDataTableUrlState<AuditEventFilterId>({
+    filterDefinitions: queryFilterDefinitions,
+    initialSorting: [{ id: 'occurredAt', desc: true }],
+    namespace: 'system-audit',
+    sortableColumnIds: ['occurredAt', 'actorName', 'action', 'resourceType'],
+  });
+  const deferredSearch = useDeferredValue(tableState.searchValue.trim());
+  const collectionQuery = useMemo<SystemAuditCollectionQuery>(() => {
+    const dateRange = tableState.filters.occurredAt as DataTableDateRange | undefined;
+    const sorting = tableState.sorting[0];
+    return {
+      action: tableState.filters.action as string[] | undefined,
+      direction: sorting?.desc === false ? 'asc' : 'desc',
+      limit: SYSTEM_AUDIT_PAGE_SIZE,
+      occurredFrom: dateRange?.from,
+      occurredTo: dateRange?.to,
+      q: deferredSearch || undefined,
+      resourceType: tableState.filters.resourceType as string[] | undefined,
+      sort: (sorting?.id ?? 'occurredAt') as SystemAuditCollectionQuery['sort'],
+    };
+  }, [deferredSearch, tableState.filters, tableState.sorting]);
+  const audit = useInfiniteQuery({
+    getNextPageParam: (lastPage: CollectionPage<SystemAuditEntry>) => lastPage.nextCursor,
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }): Promise<CollectionPage<SystemAuditEntry>> => api.getSystemAuditPage({ ...collectionQuery, cursor: pageParam }),
+    queryKey: [...AUDIT_QUERY_KEY, 'collection', collectionQuery],
+  });
+  const entries = useMemo(() => audit.data?.pages.flatMap((page) => page.items).map((entry) => ({
+    action: entry.action,
+    actor: entry.actorDisplayName,
+    details: entry.summary,
+    id: entry.id,
+    occurredAt: entry.createdAt,
+    subject: [entry.targetType, entry.targetId].filter(Boolean).join(' · ') || '–',
+  })) ?? [], [audit.data]);
+  const visibleFilterOptions = useMemo(() => {
+    const loadedEntries = audit.data?.pages.flatMap((page) => page.items) ?? [];
+    return mergeAuditFilterOptions(
+      filterOptionsQuery.data,
+      loadedEntries.map((entry) => ({ action: entry.action, resourceType: entry.targetType })),
+    );
+  }, [audit.data, filterOptionsQuery.data]);
+  const filterDefinitions = useMemo(() => createAuditFilterDefinitions(t, visibleFilterOptions), [t, visibleFilterOptions]);
   return (
     <section aria-labelledby="system-audit-title" className={styles.section}>
       <header><h3 id="system-audit-title">{t('systemSettings.audit.title')}</h3><p>{t('systemSettings.audit.intro')}</p></header>
-      {audit.isLoading ? <StatePanel kind="loading" /> : audit.isError ? <StatePanel kind="error" message={t('systemSettings.audit.error')} /> : audit.data?.length === 0 ? <StatePanel kind="empty" message={t('systemSettings.audit.empty')} /> : <AuditEventTable entries={audit.data?.map((entry) => ({
-        action: entry.action,
-        actor: entry.actorDisplayName,
-        details: entry.summary,
-        id: entry.id,
-        occurredAt: entry.createdAt,
-        subject: [entry.targetType, entry.targetId].filter(Boolean).join(' · ') || '–',
-      })) ?? []} />}
+      <AuditEventTable
+        emptyMessage={audit.isError ? t('systemSettings.audit.error') : t('systemSettings.audit.empty')}
+        entries={entries}
+        filterDefinitions={filterDefinitions}
+        hasMore={audit.hasNextPage}
+        isLoading={audit.isLoading}
+        isLoadingMore={audit.isFetchingNextPage}
+        onLoadMore={() => void audit.fetchNextPage()}
+        tableState={tableState}
+        title={t('systemSettings.audit.title')}
+      />
     </section>
   );
 }
@@ -541,6 +595,7 @@ export function SystemSettingsPanel() {
     <div className={styles.content}>
       <GeneralSettingsSection key={`general-${settings.data.revision}`} settings={settings.data} />
       <SmtpSettingsSection key={`smtp-${settings.data.revision}`} settings={settings.data} />
+      <SystemWebPushSettingsSection key={`web-push-${settings.data.revision}`} settings={settings.data} />
       <AccessSettingsSection key={`access-${settings.data.revision}`} settings={settings.data} />
       <GroupsSettingsSection defaultCurrency={settings.data.defaultCurrency.value} key={`groups-${settings.data.revision}`} />
       <SystemAuditSection />

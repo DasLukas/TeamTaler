@@ -62,6 +62,48 @@ func TestTransactionSettingsMigrationPreservesPaymentsAndSeedsEditableDefaults(t
 	if seededCount != len(want) {
 		t.Fatalf("seeded method count=%d, want %d", seededCount, len(want))
 	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES('group-two','Two Group','EUR',?,?)`, now, now); err != nil {
+		t.Fatalf("insert post-migration group: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO group_settings(group_id,updated_at) VALUES('group-two',?)`, now); err != nil {
+		t.Fatalf("insert post-migration group settings: %v", err)
+	}
+	newRows, err := db.QueryContext(ctx, `SELECT id,label,attachment_mode FROM group_payment_methods WHERE group_id='group-two' ORDER BY sort_order`)
+	if err != nil {
+		t.Fatalf("list post-migration payment methods: %v", err)
+	}
+	wantNew := []struct {
+		id, label, attachmentMode string
+	}{
+		{id: "BANK_TRANSFER", label: "Bank transfer", attachmentMode: "OFF"},
+		{id: "SHOPPING", label: "Shopping", attachmentMode: "REQUIRED"},
+		{id: "CASH", label: "Cash", attachmentMode: "OFF"},
+		{id: "PAYPAL", label: "PayPal", attachmentMode: "OFF"},
+		{id: "OTHER", label: "Other", attachmentMode: "OPTIONAL"},
+	}
+	newIndex := 0
+	for newRows.Next() {
+		if newIndex >= len(wantNew) {
+			newRows.Close()
+			t.Fatal("too many post-migration payment methods")
+		}
+		var id, label, attachmentMode string
+		if err := newRows.Scan(&id, &label, &attachmentMode); err != nil {
+			newRows.Close()
+			t.Fatalf("scan post-migration payment method: %v", err)
+		}
+		if got := (struct{ id, label, attachmentMode string }{id, label, attachmentMode}); got != wantNew[newIndex] {
+			newRows.Close()
+			t.Fatalf("post-migration payment method %d=%#v, want %#v", newIndex, got, wantNew[newIndex])
+		}
+		newIndex++
+	}
+	if err := newRows.Close(); err != nil {
+		t.Fatalf("close post-migration payment methods: %v", err)
+	}
+	if newIndex != len(wantNew) {
+		t.Fatalf("post-migration payment method count=%d, want %d", newIndex, len(wantNew))
+	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO group_payment_methods(group_id,id,label,sort_order,created_at) VALUES('group-one','DUPLICATE','cash',4,?)`, now); err == nil {
 		t.Fatal("case-insensitive duplicate method label unexpectedly passed")
 	}

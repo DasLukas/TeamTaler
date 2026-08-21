@@ -17,11 +17,16 @@ import (
 )
 
 type instanceCapabilitiesResponse struct {
-	InstanceName        string `json:"instanceName"`
-	MaintenanceMode     bool   `json:"maintenanceMode"`
-	MaintenanceMessage  string `json:"maintenanceMessage,omitempty"`
-	PublicJoinEnabled   bool   `json:"publicJoinEnabled"`
-	MediaUploadMaxBytes int64  `json:"mediaUploadMaxBytes"`
+	InstanceName                string `json:"instanceName"`
+	MaintenanceMode             bool   `json:"maintenanceMode"`
+	MaintenanceMessage          string `json:"maintenanceMessage,omitempty"`
+	PublicJoinEnabled           bool   `json:"publicJoinEnabled"`
+	MediaUploadMaxBytes         int64  `json:"mediaUploadMaxBytes"`
+	AttachmentUploadMaxBytes    int64  `json:"attachmentUploadMaxBytes"`
+	EmailNotificationsAvailable bool   `json:"emailNotificationsAvailable"`
+	WebPushAvailable            bool   `json:"webPushAvailable"`
+	WebPushPublicKey            string `json:"webPushPublicKey,omitempty"`
+	WebPushKeyID                string `json:"webPushKeyId,omitempty"`
 }
 
 type systemGroupInvitationResponse struct {
@@ -51,7 +56,10 @@ func (s *Server) handleInstanceCapabilities(response http.ResponseWriter, reques
 	writeJSON(response, http.StatusOK, instanceCapabilitiesResponse{
 		InstanceName: settings.InstanceName.Value, MaintenanceMode: settings.MaintenanceMode.Value,
 		MaintenanceMessage: settings.MaintenanceMessage.Value, PublicJoinEnabled: settings.PublicJoinEnabled.Value,
-		MediaUploadMaxBytes: settings.MediaUploadMaxBytes.Value,
+		MediaUploadMaxBytes: settings.MediaUploadMaxBytes.Value, AttachmentUploadMaxBytes: settings.AttachmentUploadMaxBytes.Value,
+		EmailNotificationsAvailable: settings.SMTP.Active,
+		WebPushAvailable:            settings.WebPush.Active, WebPushPublicKey: settings.WebPush.PublicKey,
+		WebPushKeyID: settings.WebPush.KeyID,
 	})
 }
 
@@ -92,12 +100,13 @@ func (s *Server) handleUpdateSystemSettings(response http.ResponseWriter, reques
 		return
 	}
 	var input struct {
-		InstanceName        *string `json:"instanceName,omitempty"`
-		DefaultCurrency     *string `json:"defaultCurrency,omitempty"`
-		MediaUploadMaxBytes *int64  `json:"mediaUploadMaxBytes,omitempty"`
-		PublicJoinEnabled   *bool   `json:"publicJoinEnabled,omitempty"`
-		MaintenanceMode     *bool   `json:"maintenanceMode,omitempty"`
-		MaintenanceMessage  *string `json:"maintenanceMessage,omitempty"`
+		InstanceName             *string `json:"instanceName,omitempty"`
+		DefaultCurrency          *string `json:"defaultCurrency,omitempty"`
+		MediaUploadMaxBytes      *int64  `json:"mediaUploadMaxBytes,omitempty"`
+		AttachmentUploadMaxBytes *int64  `json:"attachmentUploadMaxBytes,omitempty"`
+		PublicJoinEnabled        *bool   `json:"publicJoinEnabled,omitempty"`
+		MaintenanceMode          *bool   `json:"maintenanceMode,omitempty"`
+		MaintenanceMessage       *string `json:"maintenanceMessage,omitempty"`
 	}
 	if err := decodeJSON(response, request, &input); err != nil {
 		writeProblem(response, request, err)
@@ -106,9 +115,10 @@ func (s *Server) handleUpdateSystemSettings(response http.ResponseWriter, reques
 	patch := systemadmin.SettingsPatch{
 		InstanceName: input.InstanceName, DefaultCurrency: input.DefaultCurrency,
 		MediaUploadMaxBytes: input.MediaUploadMaxBytes, PublicJoinEnabled: input.PublicJoinEnabled,
-		MaintenanceMode: input.MaintenanceMode, MaintenanceMessage: input.MaintenanceMessage,
+		AttachmentUploadMaxBytes: input.AttachmentUploadMaxBytes,
+		MaintenanceMode:          input.MaintenanceMode, MaintenanceMessage: input.MaintenanceMessage,
 	}
-	if patch.InstanceName == nil && patch.DefaultCurrency == nil && patch.MediaUploadMaxBytes == nil &&
+	if patch.InstanceName == nil && patch.DefaultCurrency == nil && patch.MediaUploadMaxBytes == nil && patch.AttachmentUploadMaxBytes == nil &&
 		patch.PublicJoinEnabled == nil && patch.MaintenanceMode == nil && patch.MaintenanceMessage == nil {
 		writeProblem(response, request, domain.ValidationError{Message: "at least one system setting is required"})
 		return
@@ -469,12 +479,27 @@ func (s *Server) handleSystemAudit(response http.ResponseWriter, request *http.R
 		writeProblem(response, request, err)
 		return
 	}
-	items, err := s.systemAdmin.ListAudit(request.Context(), queryLimit(request))
+	query := auditTableQuery(request)
+	page, err := s.systemAdmin.QueryAudit(request.Context(), query)
 	if err != nil {
 		writeProblem(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"items": items})
+	writeTablePageHeaders(response, page.NextCursor, query.Limit)
+	writeJSON(response, http.StatusOK, map[string]any{"items": page.Items})
+}
+
+func (s *Server) handleSystemAuditFilterOptions(response http.ResponseWriter, request *http.Request) {
+	if _, err := s.systemAdministrator(request); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	options, err := s.systemAdmin.ListAuditFilterOptions(request.Context())
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, options)
 }
 
 func parseSMTPRevision(request *http.Request) int64 {

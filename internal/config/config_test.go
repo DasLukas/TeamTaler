@@ -21,6 +21,13 @@ var smtpEnvironmentVariables = []string{
 	"TEAMTALER_EMAIL_TOKEN_KEY",
 }
 
+var webPushEnvironmentVariables = []string{
+	"TEAMTALER_WEB_PUSH_ENABLED",
+	"TEAMTALER_WEB_PUSH_SUBJECT",
+	"TEAMTALER_WEB_PUSH_VAPID_PRIVATE_KEY",
+	"TEAMTALER_PUSH_STORAGE_KEY",
+}
+
 func TestLoadRejectsPublicURLSubpathsAndCredentials(t *testing.T) {
 	clearSMTPEnvironment(t)
 	invalid := []string{
@@ -261,12 +268,13 @@ func TestLoadReadsMutableInstanceDefaults(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	want := InstanceDefaults{
-		InstanceName:        "Example TeamTaler",
-		DefaultCurrency:     "USD",
-		MediaUploadMaxBytes: 10 << 20,
-		PublicJoinEnabled:   false,
-		MaintenanceMode:     true,
-		MaintenanceMessage:  "Scheduled maintenance",
+		InstanceName:             "Example TeamTaler",
+		DefaultCurrency:          "USD",
+		MediaUploadMaxBytes:      10 << 20,
+		AttachmentUploadMaxBytes: DefaultAttachmentUploadBytes,
+		PublicJoinEnabled:        false,
+		MaintenanceMode:          true,
+		MaintenanceMessage:       "Scheduled maintenance",
 	}
 	if loaded.InstanceDefaults != want {
 		t.Fatalf("instance defaults = %#v, want %#v", loaded.InstanceDefaults, want)
@@ -311,6 +319,59 @@ func TestLoadAllowsMediaDefaultAboveGeneralRequestLimit(t *testing.T) {
 	}
 }
 
+func TestLoadAcceptsCompleteWebPushConfiguration(t *testing.T) {
+	clearSMTPEnvironment(t)
+	clearWebPushEnvironment(t)
+	privateKey := make([]byte, 32)
+	privateKey[31] = 1
+	storageKey := bytes.Repeat([]byte{0x7a}, 32)
+	t.Setenv("TEAMTALER_WEB_PUSH_ENABLED", "true")
+	t.Setenv("TEAMTALER_WEB_PUSH_SUBJECT", "mailto:operator@example.test")
+	t.Setenv("TEAMTALER_WEB_PUSH_VAPID_PRIVATE_KEY", base64.RawURLEncoding.EncodeToString(privateKey))
+	t.Setenv("TEAMTALER_PUSH_STORAGE_KEY", base64.StdEncoding.EncodeToString(storageKey))
+
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !loaded.WebPush.Enabled || loaded.WebPush.Subject != "mailto:operator@example.test" {
+		t.Fatalf("unexpected Web Push configuration: %#v", loaded.WebPush)
+	}
+	if !bytes.Equal(loaded.PushStorageKey, storageKey) {
+		t.Fatal("Web Push storage key was not decoded")
+	}
+}
+
+func TestLoadRejectsIncompleteOrUnsafeWebPushConfiguration(t *testing.T) {
+	tests := []struct {
+		name     string
+		subject  string
+		private  string
+		storage  string
+		contains string
+	}{
+		{name: "missing subject", private: validTestVAPIDPrivateKey(), storage: validTestPushStorageKey(), contains: "TEAMTALER_WEB_PUSH_SUBJECT"},
+		{name: "missing private key", subject: "https://teamtaler.example.test", storage: validTestPushStorageKey(), contains: "TEAMTALER_WEB_PUSH_VAPID_PRIVATE_KEY"},
+		{name: "missing storage key", subject: "https://teamtaler.example.test", private: validTestVAPIDPrivateKey(), contains: "TEAMTALER_PUSH_STORAGE_KEY"},
+		{name: "unsafe subject", subject: "http://127.0.0.1", private: validTestVAPIDPrivateKey(), storage: validTestPushStorageKey(), contains: "TEAMTALER_WEB_PUSH_SUBJECT"},
+		{name: "short private key", subject: "https://teamtaler.example.test", private: base64.RawURLEncoding.EncodeToString(make([]byte, 16)), storage: validTestPushStorageKey(), contains: "TEAMTALER_WEB_PUSH_VAPID_PRIVATE_KEY"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			clearSMTPEnvironment(t)
+			clearWebPushEnvironment(t)
+			t.Setenv("TEAMTALER_WEB_PUSH_ENABLED", "true")
+			t.Setenv("TEAMTALER_WEB_PUSH_SUBJECT", test.subject)
+			t.Setenv("TEAMTALER_WEB_PUSH_VAPID_PRIVATE_KEY", test.private)
+			t.Setenv("TEAMTALER_PUSH_STORAGE_KEY", test.storage)
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), test.contains) {
+				t.Fatalf("error=%v, want %s", err, test.contains)
+			}
+		})
+	}
+}
+
 func clearSMTPEnvironment(t *testing.T) {
 	t.Helper()
 	for _, name := range smtpEnvironmentVariables {
@@ -326,4 +387,21 @@ func setCompleteSMTPEnvironment(t *testing.T) {
 	t.Setenv("TEAMTALER_SMTP_PASSWORD", "smtp-secret")
 	t.Setenv("TEAMTALER_SMTP_FROM_ADDRESS", "teamtaler@example.test")
 	t.Setenv("TEAMTALER_EMAIL_TOKEN_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x5a}, 32)))
+}
+
+func clearWebPushEnvironment(t *testing.T) {
+	t.Helper()
+	for _, name := range webPushEnvironmentVariables {
+		t.Setenv(name, "")
+	}
+}
+
+func validTestVAPIDPrivateKey() string {
+	privateKey := make([]byte, 32)
+	privateKey[31] = 1
+	return base64.RawURLEncoding.EncodeToString(privateKey)
+}
+
+func validTestPushStorageKey() string {
+	return base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x7a}, 32))
 }

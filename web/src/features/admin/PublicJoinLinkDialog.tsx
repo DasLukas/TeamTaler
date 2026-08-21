@@ -13,7 +13,7 @@ import { api } from '@/api/client';
 import type { PublicJoinLink } from '@/api/types';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
-import { Modal } from '@/components/ui/Modal';
+import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { SelectMenu, type SelectMenuOption } from '@/components/ui/SelectMenu';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
@@ -137,7 +137,7 @@ export function PublicJoinLinkDialog({ groupId, onClose }: PublicJoinLinkDialogP
   };
 
   return (
-    <Modal className={styles.modal} onClose={onClose} open title={t('publicJoin.adminTitle')} variant={compact ? 'sheet' : 'dialog'}>
+    <Modal onClose={onClose} open size="wide" title={t('publicJoin.adminTitle')} variant={compact ? 'sheet' : 'dialog'}>
       <div className={styles.content}>
         {linkQuery.isLoading ? <StatePanel kind="loading" /> : null}
         {linkQuery.isError ? <StatePanel kind="error" message={linkQuery.error.message} /> : null}
@@ -167,11 +167,11 @@ export function PublicJoinLinkDialog({ groupId, onClose }: PublicJoinLinkDialogP
             </Field>
 			{selectedLifetime === 'custom' ? <Field error={invalidCustomExpiry ? t('publicJoin.customInvalid') : undefined} htmlFor="public-join-custom-expiry" label={t('publicJoin.customExpiry')}><TextInput id="public-join-custom-expiry" max={maxCustomExpiry} min={minCustomExpiry} onChange={(event) => { setCustomExpiry(event.target.value); setCustomExpiryTouched(true); }} type="datetime-local" value={selectedCustomExpiry} /></Field> : null}
 			{selectedLifetime === 'unlimited' ? <p className={styles.securityWarning}><ShieldAlert aria-hidden="true" size={19} />{t('publicJoin.unlimitedWarning')}</p> : null}
-            <div className={styles.actions}>
+            <ModalFooter><div className={styles.actions}>
               {active ? <Button disabled={pending} leadingIcon={<Ban size={17} />} onClick={() => setConfirmation('disable')} variant="danger">{t('publicJoin.disable')}</Button> : null}
               {active ? <Button disabled={pending} leadingIcon={<RefreshCw size={17} />} onClick={() => setConfirmation('rotate')} variant="secondary">{t('publicJoin.rotate')}</Button> : null}
               <Button disabled={pending || invalidCustomExpiry} leadingIcon={<Link2 size={17} />} onClick={applyLifetime}>{active ? t('publicJoin.saveLifetime') : link.expired ? t('publicJoin.reactivate') : t('publicJoin.create')}</Button>
-            </div>
+            </div></ModalFooter>
           </section>
         ) : null}
 
@@ -179,7 +179,7 @@ export function PublicJoinLinkDialog({ groupId, onClose }: PublicJoinLinkDialogP
           <section className={styles.confirmation} role="alert">
             <h3>{confirmation === 'rotate' ? t('publicJoin.rotateConfirmTitle') : t('publicJoin.disableConfirmTitle')}</h3>
             <p>{confirmation === 'rotate' ? t('publicJoin.rotateConfirmDescription') : t('publicJoin.disableConfirmDescription')}</p>
-            <div className={styles.actions}><Button disabled={pending} leadingIcon={<X size={17} />} onClick={() => setConfirmation(null)} variant="secondary">{t('common.cancel')}</Button><Button disabled={pending} leadingIcon={confirmation === 'disable' ? <Ban size={17} /> : <RefreshCw size={17} />} onClick={() => confirmation === 'rotate' ? rotateMutation.mutate() : disable()} variant={confirmation === 'disable' ? 'danger' : 'primary'}>{t('common.confirm')}</Button></div>
+            <ModalFooter><div className={styles.actions}><Button disabled={pending} leadingIcon={<X size={17} />} onClick={() => setConfirmation(null)} variant="secondary">{t('common.cancel')}</Button><Button disabled={pending} leadingIcon={confirmation === 'disable' ? <Ban size={17} /> : <RefreshCw size={17} />} onClick={() => confirmation === 'rotate' ? rotateMutation.mutate() : disable()} variant={confirmation === 'disable' ? 'danger' : 'primary'}>{t('common.confirm')}</Button></div></ModalFooter>
           </section>
         ) : null}
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"path/filepath"
 	"strconv"
@@ -108,16 +109,18 @@ func TestSettingsUseTypedOverridesOptimisticConcurrencyAndReset(t *testing.T) {
 	name := "Runtime TeamTaler"
 	currency := "usd"
 	uploadLimit := int64(24 << 20)
+	attachmentLimit := int64(40 << 20)
 	publicJoin := false
 	maintenance := true
 	message := "Short maintenance"
 	updated, err := service.UpdateSettings(ctx, "admin", initial.Revision, SettingsPatch{
-		InstanceName:        &name,
-		DefaultCurrency:     &currency,
-		MediaUploadMaxBytes: &uploadLimit,
-		PublicJoinEnabled:   &publicJoin,
-		MaintenanceMode:     &maintenance,
-		MaintenanceMessage:  &message,
+		InstanceName:             &name,
+		DefaultCurrency:          &currency,
+		MediaUploadMaxBytes:      &uploadLimit,
+		AttachmentUploadMaxBytes: &attachmentLimit,
+		PublicJoinEnabled:        &publicJoin,
+		MaintenanceMode:          &maintenance,
+		MaintenanceMessage:       &message,
 	})
 	if err != nil {
 		t.Fatalf("update settings: %v", err)
@@ -125,11 +128,14 @@ func TestSettingsUseTypedOverridesOptimisticConcurrencyAndReset(t *testing.T) {
 	if updated.Revision != 2 || updated.InstanceName.Value != name || updated.InstanceName.Source != SettingSourceDatabase || updated.InstanceName.OverrideVersion != 1 {
 		t.Fatalf("unexpected updated instance setting: %#v", updated.InstanceName)
 	}
-	if updated.DefaultCurrency.Value != "USD" || updated.MediaUploadMaxBytes.Value != uploadLimit || updated.PublicJoinEnabled.Value || !updated.MaintenanceMode.Value {
+	if updated.DefaultCurrency.Value != "USD" || updated.MediaUploadMaxBytes.Value != uploadLimit || updated.AttachmentUploadMaxBytes.Value != attachmentLimit || updated.PublicJoinEnabled.Value || !updated.MaintenanceMode.Value {
 		t.Fatalf("unexpected typed settings snapshot: %#v", updated)
 	}
 	if updated.MediaUploadHardLimitBytes != MaximumMediaUploadBytes {
 		t.Fatalf("media hard limit=%d, want %d", updated.MediaUploadHardLimitBytes, MaximumMediaUploadBytes)
+	}
+	if updated.AttachmentUploadHardLimitBytes != MaximumAttachmentUploadBytes {
+		t.Fatalf("attachment hard limit=%d, want %d", updated.AttachmentUploadHardLimitBytes, MaximumAttachmentUploadBytes)
 	}
 	if _, err := service.UpdateSettings(ctx, "admin", initial.Revision, SettingsPatch{InstanceName: &name}); !errors.Is(err, domain.ErrPrecondition) {
 		t.Fatalf("stale update error=%v, want precondition", err)
@@ -293,6 +299,38 @@ func TestSMTPPasswordCipherUsesPurposeDerivedAuthenticatedEncryption(t *testing.
 	}
 	if _, err := NewSMTPPasswordCipher([]byte("short")); err == nil {
 		t.Fatal("short SMTP password key unexpectedly accepted")
+	}
+}
+
+func TestWebPushFailsClosedWithoutIndependentStorageEncryption(t *testing.T) {
+	ctx := context.Background()
+	db, baseService := openSystemService(t)
+	defer db.Close()
+	insertSystemTestUser(t, db, "admin", "admin@example.test", true)
+	privateScalar := make([]byte, 32)
+	privateScalar[len(privateScalar)-1] = 1
+	defaults := baseService.defaults
+	defaults.WebPush = WebPushConfiguration{
+		Subject:         "mailto:admin@example.test",
+		VAPIDPrivateKey: base64.RawURLEncoding.EncodeToString(privateScalar),
+	}
+	service, err := NewService(db, defaults, nil)
+	if err != nil {
+		t.Fatalf("create system service without Web Push storage encryption: %v", err)
+	}
+	if _, err := service.GrantAdministrator(ctx, "admin", ""); err != nil {
+		t.Fatalf("grant administrator: %v", err)
+	}
+	settings, err := service.GetSettings(ctx)
+	if err != nil {
+		t.Fatalf("get Web Push settings: %v", err)
+	}
+	if settings.WebPush.StorageKeyConfigured || settings.WebPush.ConfigurationValid || settings.WebPush.Active {
+		t.Fatalf("Web Push remained usable without storage encryption: %#v", settings.WebPush)
+	}
+	enabled := true
+	if _, err := service.UpdateSettings(ctx, "admin", settings.Revision, SettingsPatch{WebPush: &WebPushPatch{Enabled: &enabled}}); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("enable Web Push without storage encryption error=%v, want validation", err)
 	}
 }
 

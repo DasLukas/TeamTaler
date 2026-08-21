@@ -5,23 +5,24 @@ import { useTranslation } from 'react-i18next';
 export interface BrandProps {
   compact?: boolean;
   className?: string;
-  imageUrl?: string;
-  imageAlt?: string;
   name?: string;
 }
 
 /**
  * Renders the TeamTaler wordmark and circular team emblem.
  *
- * @param props - Compact mode, class name, and optional group-logo override.
+ * The emblem is intentionally fixed so group imagery remains confined to
+ * group-selection surfaces and can never replace the product identity.
+ *
+ * @param props - Compact mode, class name, and optional instance name.
  * @returns A localized, accessible brand mark.
  */
-export function Brand({ compact = false, className = '', imageUrl, imageAlt, name }: BrandProps) {
+export function Brand({ compact = false, className = '', name }: BrandProps) {
   const { t } = useTranslation();
   const displayName = name?.trim() || t('brand.name');
   return (
     <span aria-label={displayName} className={`${styles.brand} ${className}`}>
-      <img alt={imageAlt ?? t('brand.markAlt')} className={styles.emblem} src={imageUrl || '/brand/teamtaler-mark.png'} />
+      <img alt={t('brand.markAlt')} className={styles.emblem} src="/brand/teamtaler-emblem-transparent.webp" />
       {compact ? null : <strong>{displayName}</strong>}
     </span>
   );

@@ -13,20 +13,25 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/DasLukas/TeamTaler/internal/config"
 	"github.com/DasLukas/TeamTaler/internal/email"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/storage"
 	systemadmin "github.com/DasLukas/TeamTaler/internal/system"
+	webpushservice "github.com/DasLukas/TeamTaler/internal/webpush"
+	push "github.com/marknefedov/go-webpush/v2"
 	"golang.org/x/term"
 )
 
 type localSystemRuntime struct {
-	configuration config.Config
-	database      *sql.DB
-	service       systemadmin.Service
-	tokenBox      *platform.SecretBox
+	configuration     config.Config
+	database          *sql.DB
+	service           systemadmin.Service
+	tokenBox          *platform.SecretBox
+	pushSubscriptions *webpushservice.SubscriptionService
+	pushSender        *webpushservice.Sender
 }
 
 type localGroupInvitationResult struct {
@@ -68,12 +73,30 @@ func openLocalSystemRuntime(ctx context.Context) (*localSystemRuntime, error) {
 			return nil, err
 		}
 	}
-	service, err := systemadmin.NewService(database, systemadmin.DefaultsFromConfig(configuration), passwordCipher)
+	var systemOptions []systemadmin.ServiceOption
+	var pushSubscriptions *webpushservice.SubscriptionService
+	var pushSender *webpushservice.Sender
+	if len(configuration.PushStorageKey) == 32 {
+		pushSecrets, pushErr := webpushservice.NewSecrets(configuration.PushStorageKey)
+		if pushErr != nil {
+			database.Close()
+			return nil, pushErr
+		}
+		systemOptions = append(systemOptions, systemadmin.WithWebPushSecretCipher(pushSecrets))
+		pushSubscriptions, pushErr = webpushservice.NewSubscriptionService(database, pushSecrets, nil)
+		if pushErr != nil {
+			database.Close()
+			return nil, pushErr
+		}
+		pushSender = webpushservice.NewSender(nil)
+	}
+	service, err := systemadmin.NewService(database, systemadmin.DefaultsFromConfig(configuration), passwordCipher, systemOptions...)
 	if err != nil {
 		database.Close()
 		return nil, err
 	}
-	return &localSystemRuntime{configuration: configuration, database: database, service: service, tokenBox: tokenBox}, nil
+	return &localSystemRuntime{configuration: configuration, database: database, service: service, tokenBox: tokenBox,
+		pushSubscriptions: pushSubscriptions, pushSender: pushSender}, nil
 }
 
 func (runtime *localSystemRuntime) close() { _ = runtime.database.Close() }
@@ -139,7 +162,7 @@ func systemAdministratorCommand(arguments []string) error {
 
 func systemCommand(arguments []string) error {
 	if len(arguments) < 2 {
-		return errors.New("usage: teamtaler admin system <settings|smtp|groups> <command>")
+		return errors.New("usage: teamtaler admin system <settings|smtp|web-push|groups> <command>")
 	}
 	ctx := context.Background()
 	runtime, err := openLocalSystemRuntime(ctx)
@@ -152,6 +175,8 @@ func systemCommand(arguments []string) error {
 		return systemSettingsCommand(ctx, runtime, arguments[1:])
 	case "smtp":
 		return systemSMTPCommand(ctx, runtime, arguments[1:])
+	case "web-push":
+		return systemWebPushCommand(ctx, runtime, arguments[1:])
 	case "groups":
 		return systemGroupsCommand(ctx, runtime, arguments[1:])
 	default:
@@ -177,10 +202,11 @@ func systemSettingsCommand(ctx context.Context, runtime *localSystemRuntime, arg
 		if *jsonOutput {
 			return writeCommandJSON(settings)
 		}
-		fmt.Printf("Revision: %d\nInstance name: %s (%s)\nDefault currency: %s (%s)\nMedia upload bytes: %d (%s; allowed maximum %d)\nPublic join: %t\nMaintenance: %t\n",
+		fmt.Printf("Revision: %d\nInstance name: %s (%s)\nDefault currency: %s (%s)\nMedia upload bytes: %d (%s; allowed maximum %d)\nAttachment upload bytes: %d (%s; allowed maximum %d)\nPublic join: %t\nMaintenance: %t\n",
 			settings.Revision, settings.InstanceName.Value, settings.InstanceName.Source,
 			settings.DefaultCurrency.Value, settings.DefaultCurrency.Source,
 			settings.MediaUploadMaxBytes.Value, settings.MediaUploadMaxBytes.Source, settings.MediaUploadHardLimitBytes,
+			settings.AttachmentUploadMaxBytes.Value, settings.AttachmentUploadMaxBytes.Source, settings.AttachmentUploadHardLimitBytes,
 			settings.PublicJoinEnabled.Value, settings.MaintenanceMode.Value)
 		return nil
 	case "set":
@@ -189,6 +215,7 @@ func systemSettingsCommand(ctx context.Context, runtime *localSystemRuntime, arg
 		instanceName := flags.String("instance-name", "", "instance display name")
 		currency := flags.String("default-currency", "", "default three-letter currency")
 		mediaBytes := flags.Int64("media-upload-max-bytes", 0, "whole-MiB raw media limit in bytes (1048576 through 26214400)")
+		attachmentBytes := flags.Int64("attachment-upload-max-bytes", 0, "whole-MiB receipt limit in bytes (1048576 through 52428800)")
 		publicJoin := flags.String("public-join-enabled", "", "true or false")
 		maintenance := flags.String("maintenance-mode", "", "true or false")
 		maintenanceMessage := flags.String("maintenance-message", "", "short maintenance notice")
@@ -207,6 +234,9 @@ func systemSettingsCommand(ctx context.Context, runtime *localSystemRuntime, arg
 		if visited["media-upload-max-bytes"] {
 			patch.MediaUploadMaxBytes = mediaBytes
 		}
+		if visited["attachment-upload-max-bytes"] {
+			patch.AttachmentUploadMaxBytes = attachmentBytes
+		}
 		if visited["public-join-enabled"] {
 			value, err := strconv.ParseBool(*publicJoin)
 			if err != nil {
@@ -224,7 +254,7 @@ func systemSettingsCommand(ctx context.Context, runtime *localSystemRuntime, arg
 		if visited["maintenance-message"] {
 			patch.MaintenanceMessage = maintenanceMessage
 		}
-		if patch.InstanceName == nil && patch.DefaultCurrency == nil && patch.MediaUploadMaxBytes == nil &&
+		if patch.InstanceName == nil && patch.DefaultCurrency == nil && patch.MediaUploadMaxBytes == nil && patch.AttachmentUploadMaxBytes == nil &&
 			patch.PublicJoinEnabled == nil && patch.MaintenanceMode == nil && patch.MaintenanceMessage == nil {
 			return errors.New("at least one system setting flag is required")
 		}
@@ -434,6 +464,205 @@ func systemSMTPCommand(ctx context.Context, runtime *localSystemRuntime, argumen
 		return nil
 	default:
 		return fmt.Errorf("unknown system smtp command %q", arguments[0])
+	}
+}
+
+// systemWebPushCommand manages redacted VAPID configuration and trusted test
+// deliveries. Private keys are accepted only from stdin and are never printed.
+func systemWebPushCommand(ctx context.Context, runtime *localSystemRuntime, arguments []string) error {
+	if len(arguments) == 0 {
+		return errors.New("usage: teamtaler admin system web-push <show|set|generate|test|reset>")
+	}
+	switch arguments[0] {
+	case "show":
+		flags := flag.NewFlagSet("admin system web-push show", flag.ContinueOnError)
+		jsonOutput := flags.Bool("json", false, "write machine-readable JSON")
+		if err := flags.Parse(arguments[1:]); err != nil {
+			return err
+		}
+		settings, err := runtime.service.GetSettings(ctx)
+		if err != nil {
+			return err
+		}
+		if *jsonOutput {
+			return writeCommandJSON(settings.WebPush)
+		}
+		fmt.Printf("Web Push revision: %d\nEnabled: %t\nActive: %t\nSubject: %s\nPrivate key configured: %t\nStorage key configured: %t\nPublic key: %s\nKey ID: %s\n",
+			settings.WebPush.Revision, settings.WebPush.Enabled.Value, settings.WebPush.Active,
+			settings.WebPush.Subject.Value, settings.WebPush.VAPIDPrivateKey.Configured,
+			settings.WebPush.StorageKeyConfigured, settings.WebPush.PublicKey, settings.WebPush.KeyID)
+		return nil
+	case "set":
+		flags := flag.NewFlagSet("admin system web-push set", flag.ContinueOnError)
+		revision := flags.Int64("revision", 0, "expected settings revision (defaults to current)")
+		enabled := flags.String("enabled", "", "true or false")
+		subject := flags.String("subject", "", "HTTPS or mailto VAPID subject")
+		privateKeyStdin := flags.Bool("private-key-stdin", false, "read the VAPID private key from stdin or TTY")
+		confirmRotation := flags.Bool("confirm-rotation", false, "confirm replacing an existing VAPID key")
+		jsonOutput := flags.Bool("json", false, "write machine-readable JSON")
+		if err := flags.Parse(arguments[1:]); err != nil {
+			return err
+		}
+		visited := visitedFlags(flags)
+		patch := systemadmin.WebPushPatch{}
+		checkedRevision := int64(0)
+		if visited["enabled"] {
+			value, err := strconv.ParseBool(*enabled)
+			if err != nil {
+				return fmt.Errorf("enabled must be true or false")
+			}
+			patch.Enabled = &value
+		}
+		if visited["subject"] {
+			patch.Subject = subject
+		}
+		if *privateKeyStdin {
+			current, currentErr := runtime.service.GetSettings(ctx)
+			if currentErr != nil {
+				return currentErr
+			}
+			if current.WebPush.VAPIDPrivateKey.Configured && !*confirmRotation {
+				return errors.New("--confirm-rotation is required to replace the existing VAPID key")
+			}
+			checkedRevision = current.Revision
+			privateKey, err := readAdminSecret(os.Stdin, os.Stderr, "VAPID private key: ")
+			if err != nil {
+				return err
+			}
+			patch.VAPIDPrivateKey = &privateKey
+		}
+		if patch.Enabled == nil && patch.Subject == nil && patch.VAPIDPrivateKey == nil {
+			return errors.New("at least one Web Push setting flag is required")
+		}
+		expected := *revision
+		if expected <= 0 && checkedRevision > 0 {
+			expected = checkedRevision
+		} else if expected <= 0 {
+			var revisionErr error
+			expected, revisionErr = effectiveCLIRevision(ctx, runtime.service, expected)
+			if revisionErr != nil {
+				return revisionErr
+			}
+		}
+		settings, err := runtime.service.UpdateSettingsLocally(ctx, expected, systemadmin.SettingsPatch{WebPush: &patch})
+		if err != nil {
+			return err
+		}
+		if *jsonOutput {
+			return writeCommandJSON(settings.WebPush)
+		}
+		fmt.Printf("Web Push settings updated at system revision %d; active=%t.\n", settings.Revision, settings.WebPush.Active)
+		return nil
+	case "generate":
+		flags := flag.NewFlagSet("admin system web-push generate", flag.ContinueOnError)
+		revision := flags.Int64("revision", 0, "expected settings revision (defaults to current)")
+		confirmRotation := flags.Bool("confirm-rotation", false, "confirm replacing an existing VAPID key")
+		jsonOutput := flags.Bool("json", false, "write machine-readable JSON")
+		if err := flags.Parse(arguments[1:]); err != nil {
+			return err
+		}
+		current, err := runtime.service.GetSettings(ctx)
+		if err != nil {
+			return err
+		}
+		if current.WebPush.VAPIDPrivateKey.Configured && !*confirmRotation {
+			return errors.New("--confirm-rotation is required to replace the existing VAPID key")
+		}
+		privateKey, _, _, err := webpushservice.GenerateVAPIDKey()
+		if err != nil {
+			return err
+		}
+		expected := *revision
+		if expected <= 0 {
+			expected = current.Revision
+		}
+		settings, err := runtime.service.UpdateSettingsLocally(ctx, expected, systemadmin.SettingsPatch{
+			WebPush: &systemadmin.WebPushPatch{VAPIDPrivateKey: &privateKey},
+		})
+		if err != nil {
+			return err
+		}
+		if *jsonOutput {
+			return writeCommandJSON(settings.WebPush)
+		}
+		fmt.Printf("VAPID key generated at Web Push revision %d. Public key: %s\nKey ID: %s\n",
+			settings.WebPush.Revision, settings.WebPush.PublicKey, settings.WebPush.KeyID)
+		return nil
+	case "test":
+		flags := flag.NewFlagSet("admin system web-push test", flag.ContinueOnError)
+		emailAddress := flags.String("email", "", "active system-administrator account owning the browser subscription")
+		subscriptionID := flags.String("subscription-id", "", "specific owned device ID (defaults to most recently used)")
+		jsonOutput := flags.Bool("json", false, "write machine-readable JSON")
+		if err := flags.Parse(arguments[1:]); err != nil {
+			return err
+		}
+		if runtime.pushSubscriptions == nil || runtime.pushSender == nil {
+			return errors.New("Web Push storage is unavailable; configure TEAMTALER_PUSH_STORAGE_KEY")
+		}
+		administrator, err := localSystemActor(ctx, runtime.service, *emailAddress)
+		if err != nil {
+			return err
+		}
+		settings, configuration, err := runtime.service.ResolveWebPush(ctx)
+		if err != nil {
+			return err
+		}
+		if !configuration.Enabled {
+			return errors.New("Web Push configuration is not active")
+		}
+		subscriptions, err := runtime.pushSubscriptions.ListActiveForUser(ctx, administrator.UserID, configuration.KeyID)
+		if err != nil {
+			return err
+		}
+		var selected *webpushservice.StoredSubscription
+		for index := range subscriptions {
+			if *subscriptionID == "" || subscriptions[index].ID == *subscriptionID {
+				selected = &subscriptions[index]
+				break
+			}
+		}
+		if selected == nil {
+			return errors.New("no matching active Web Push subscription exists for that administrator")
+		}
+		payload, _ := json.Marshal(map[string]string{
+			"groupName": settings.InstanceName.Value, "eventLabel": "Web Push test notification", "route": "/account",
+		})
+		if err := runtime.pushSender.Send(ctx, payload, selected.Subscription, configuration.Subject,
+			configuration.VAPIDPrivateKey, 5*time.Minute, push.UrgencyNormal); err != nil {
+			return err
+		}
+		if err := runtime.pushSubscriptions.MarkUsed(ctx, selected.ID); err != nil {
+			return err
+		}
+		if *jsonOutput {
+			return writeCommandJSON(map[string]any{"delivered": true, "subscriptionId": selected.ID})
+		}
+		fmt.Printf("Web Push test delivered to subscription %s.\n", selected.ID)
+		return nil
+	case "reset":
+		flags := flag.NewFlagSet("admin system web-push reset", flag.ContinueOnError)
+		revision := flags.Int64("revision", 0, "expected settings revision (defaults to current)")
+		jsonOutput := flags.Bool("json", false, "write machine-readable JSON")
+		if err := flags.Parse(arguments[1:]); err != nil {
+			return err
+		}
+		expected, err := effectiveCLIRevision(ctx, runtime.service, *revision)
+		if err != nil {
+			return err
+		}
+		settings, err := runtime.service.ResetSettingsLocally(ctx, expected, []systemadmin.SettingKey{
+			systemadmin.SettingWebPushEnabled, systemadmin.SettingWebPushSubject, systemadmin.SettingWebPushVAPIDPrivateKey,
+		})
+		if err != nil {
+			return err
+		}
+		if *jsonOutput {
+			return writeCommandJSON(settings.WebPush)
+		}
+		fmt.Printf("Web Push settings reset at system revision %d.\n", settings.Revision)
+		return nil
+	default:
+		return fmt.Errorf("unknown system web-push command %q", arguments[0])
 	}
 }
 

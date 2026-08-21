@@ -24,6 +24,12 @@ const (
 	MediaUploadUnitBytes int64 = 1 << 20
 	// DefaultMediaUploadBytes preserves TeamTaler's original five MiB upload limit.
 	DefaultMediaUploadBytes int64 = 5 << 20
+	// MinimumAttachmentUploadBytes is the smallest configurable receipt upload.
+	MinimumAttachmentUploadBytes int64 = 1 << 20
+	// MaximumAttachmentUploadBytes is the compiled receipt-upload safety ceiling.
+	MaximumAttachmentUploadBytes int64 = 50 << 20
+	// DefaultAttachmentUploadBytes is the default immutable receipt limit.
+	DefaultAttachmentUploadBytes int64 = 15 << 20
 	// MultipartRequestReserve leaves room for multipart headers and boundaries.
 	MultipartRequestReserve int64 = 1 << 20
 	// DefaultSMTPPort is the standard submission port offered for new STARTTLS configurations.
@@ -75,6 +81,18 @@ type SMTPConfig struct {
 	AllowedPrivatePort int
 }
 
+// WebPushConfig contains validated host defaults for standards-based Web Push.
+// VAPIDPrivateKey is a raw base64url-encoded P-256 scalar and is never exposed
+// through public APIs or logs. Subject is either an HTTPS origin or a mailto URL.
+type WebPushConfig struct {
+	// Enabled reports whether Web Push delivery is enabled by the host.
+	Enabled bool
+	// Subject identifies the VAPID operator to push services.
+	Subject string
+	// VAPIDPrivateKey contains the write-only signing key supplied by the host.
+	VAPIDPrivateKey string
+}
+
 // InstanceDefaults contains mutable instance-setting defaults supplied by the
 // process environment. Persisted settings may override these values without a
 // restart, while clearing an override restores the corresponding value here.
@@ -85,6 +103,8 @@ type InstanceDefaults struct {
 	DefaultCurrency string
 	// MediaUploadMaxBytes limits raw image input before decoding.
 	MediaUploadMaxBytes int64
+	// AttachmentUploadMaxBytes limits payment receipt input before normalization.
+	AttachmentUploadMaxBytes int64
 	// PublicJoinEnabled is the installation-wide public-registration kill switch.
 	PublicJoinEnabled bool
 	// MaintenanceMode blocks non-system mutations while preserving reads and login.
@@ -115,6 +135,11 @@ type Config struct {
 	SMTPTestRecipient string
 	// EmailTokenKey is an optional decoded 32-byte AES key and is required when SMTP is enabled.
 	EmailTokenKey []byte
+	// WebPush contains validated Web Push host defaults.
+	WebPush WebPushConfig
+	// PushStorageKey is optional decoded 32-byte key material used exclusively
+	// for Web Push configuration and subscription envelopes.
+	PushStorageKey []byte
 }
 
 // Load reads TEAMTALER_* environment variables and applies secure local defaults.
@@ -173,6 +198,17 @@ func Load() (Config, error) {
 	if smtpConfig.Enabled && len(emailTokenKey) == 0 {
 		return Config{}, fmt.Errorf("TEAMTALER_EMAIL_TOKEN_KEY is required when SMTP delivery is configured")
 	}
+	webPushConfig, err := loadWebPushConfig()
+	if err != nil {
+		return Config{}, err
+	}
+	pushStorageKey, err := loadStandardBase64Key("TEAMTALER_PUSH_STORAGE_KEY")
+	if err != nil {
+		return Config{}, err
+	}
+	if webPushConfig.Enabled && len(pushStorageKey) == 0 {
+		return Config{}, fmt.Errorf("TEAMTALER_PUSH_STORAGE_KEY is required when Web Push delivery is enabled")
+	}
 
 	return Config{
 		ListenAddress:     env("TEAMTALER_LISTEN", "127.0.0.1:8080"),
@@ -188,6 +224,8 @@ func Load() (Config, error) {
 		SMTP:              smtpConfig,
 		SMTPTestRecipient: smtpTestRecipient,
 		EmailTokenKey:     emailTokenKey,
+		WebPush:           webPushConfig,
+		PushStorageKey:    pushStorageKey,
 	}, nil
 }
 
@@ -204,6 +242,10 @@ func loadInstanceDefaults() (InstanceDefaults, error) {
 	if err != nil || mediaUploadMaxBytes < MinimumMediaUploadBytes || mediaUploadMaxBytes > MaximumMediaUploadBytes || mediaUploadMaxBytes%MediaUploadUnitBytes != 0 {
 		return InstanceDefaults{}, fmt.Errorf("TEAMTALER_MEDIA_UPLOAD_MAX_BYTES must be a whole MiB value between %d and %d", MinimumMediaUploadBytes, MaximumMediaUploadBytes)
 	}
+	attachmentUploadMaxBytes, err := strconv.ParseInt(env("TEAMTALER_ATTACHMENT_UPLOAD_MAX_BYTES", strconv.FormatInt(DefaultAttachmentUploadBytes, 10)), 10, 64)
+	if err != nil || attachmentUploadMaxBytes < MinimumAttachmentUploadBytes || attachmentUploadMaxBytes > MaximumAttachmentUploadBytes || attachmentUploadMaxBytes%MediaUploadUnitBytes != 0 {
+		return InstanceDefaults{}, fmt.Errorf("TEAMTALER_ATTACHMENT_UPLOAD_MAX_BYTES must be a whole MiB value between %d and %d", MinimumAttachmentUploadBytes, MaximumAttachmentUploadBytes)
+	}
 	publicJoinEnabled, err := parseBoolEnvironment("TEAMTALER_PUBLIC_JOIN_ENABLED", true)
 	if err != nil {
 		return InstanceDefaults{}, err
@@ -217,12 +259,13 @@ func loadInstanceDefaults() (InstanceDefaults, error) {
 		return InstanceDefaults{}, fmt.Errorf("TEAMTALER_MAINTENANCE_MESSAGE must contain at most 240 characters without control characters")
 	}
 	return InstanceDefaults{
-		InstanceName:        instanceName,
-		DefaultCurrency:     defaultCurrency,
-		MediaUploadMaxBytes: mediaUploadMaxBytes,
-		PublicJoinEnabled:   publicJoinEnabled,
-		MaintenanceMode:     maintenanceMode,
-		MaintenanceMessage:  maintenanceMessage,
+		InstanceName:             instanceName,
+		DefaultCurrency:          defaultCurrency,
+		MediaUploadMaxBytes:      mediaUploadMaxBytes,
+		AttachmentUploadMaxBytes: attachmentUploadMaxBytes,
+		PublicJoinEnabled:        publicJoinEnabled,
+		MaintenanceMode:          maintenanceMode,
+		MaintenanceMessage:       maintenanceMessage,
 	}, nil
 }
 
@@ -253,15 +296,49 @@ func isCurrencyCode(value string) bool {
 }
 
 func loadEmailTokenKey() ([]byte, error) {
-	encoded := strings.TrimSpace(os.Getenv("TEAMTALER_EMAIL_TOKEN_KEY"))
+	return loadStandardBase64Key("TEAMTALER_EMAIL_TOKEN_KEY")
+}
+
+func loadStandardBase64Key(name string) ([]byte, error) {
+	encoded := strings.TrimSpace(os.Getenv(name))
 	if encoded == "" {
 		return nil, nil
 	}
 	key, err := base64.StdEncoding.Strict().DecodeString(encoded)
 	if err != nil || len(key) != 32 {
-		return nil, fmt.Errorf("TEAMTALER_EMAIL_TOKEN_KEY must be standard base64 encoding exactly 32 bytes")
+		return nil, fmt.Errorf("%s must be standard base64 encoding exactly 32 bytes", name)
 	}
 	return key, nil
+}
+
+func loadWebPushConfig() (WebPushConfig, error) {
+	enabled, err := parseBoolEnvironment("TEAMTALER_WEB_PUSH_ENABLED", false)
+	if err != nil {
+		return WebPushConfig{}, err
+	}
+	subject := strings.TrimSpace(os.Getenv("TEAMTALER_WEB_PUSH_SUBJECT"))
+	privateKey := strings.TrimSpace(os.Getenv("TEAMTALER_WEB_PUSH_VAPID_PRIVATE_KEY"))
+	if enabled && subject == "" {
+		return WebPushConfig{}, fmt.Errorf("TEAMTALER_WEB_PUSH_SUBJECT is required when Web Push delivery is enabled")
+	}
+	if enabled && privateKey == "" {
+		return WebPushConfig{}, fmt.Errorf("TEAMTALER_WEB_PUSH_VAPID_PRIVATE_KEY is required when Web Push delivery is enabled")
+	}
+	if subject != "" {
+		parsed, parseErr := url.ParseRequestURI(subject)
+		validHTTPS := parseErr == nil && parsed.Scheme == "https" && parsed.Host != "" && parsed.User == nil && parsed.Fragment == ""
+		validMailto := parseErr == nil && parsed.Scheme == "mailto" && parsed.Opaque != "" && isMailbox(parsed.Opaque)
+		if !validHTTPS && !validMailto {
+			return WebPushConfig{}, fmt.Errorf("TEAMTALER_WEB_PUSH_SUBJECT must be an HTTPS URL or a mailto URL with one ASCII mailbox")
+		}
+	}
+	if privateKey != "" {
+		decoded, decodeErr := base64.RawURLEncoding.Strict().DecodeString(privateKey)
+		if decodeErr != nil || len(decoded) != 32 {
+			return WebPushConfig{}, fmt.Errorf("TEAMTALER_WEB_PUSH_VAPID_PRIVATE_KEY must be unpadded base64url encoding exactly 32 bytes")
+		}
+	}
+	return WebPushConfig{Enabled: enabled, Subject: subject, VAPIDPrivateKey: privateKey}, nil
 }
 
 func loadSMTPConfig() (SMTPConfig, error) {

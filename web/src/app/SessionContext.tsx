@@ -1,5 +1,6 @@
-import { useMemo, type ReactNode } from 'react';
+import { useEffect, useMemo, type ReactNode } from 'react';
 import type { InstanceCapabilities, Session } from '@/api/types';
+import { reconcileWebPush } from '@/features/push/webPush';
 import { SessionContext } from './session-context';
 
 /** Properties accepted by the global authenticated-session provider. */
@@ -17,5 +18,10 @@ export interface SessionProviderProps {
  */
 export function SessionProvider({ children, instanceCapabilities, session }: SessionProviderProps) {
   const value = useMemo(() => ({ session, instanceCapabilities }), [instanceCapabilities, session]);
+
+  useEffect(() => {
+    void reconcileWebPush(instanceCapabilities, session.user.id).catch(() => undefined);
+  }, [instanceCapabilities, session.user.id]);
+
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

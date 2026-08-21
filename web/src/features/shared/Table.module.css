@@ -67,7 +67,6 @@
 @media (max-width: 767px) {
   .toolbar { align-items: stretch; flex-direction: column; }
   .search { width: 100%; }
-  .tableWrap { margin-inline: calc(var(--space-5) * -1); border-inline: 0; border-radius: 0; }
   .table th,
   .table td { padding-inline: var(--space-5); }
 }

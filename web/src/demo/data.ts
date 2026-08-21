@@ -354,6 +354,6 @@ export const demoNotifications: Notification[] = [
 
 /** Demo append-only audit records. */
 export const demoAudit: AuditEntry[] = [
-  { id: 'audit-1', occurredAt: '2026-08-04T18:32:00+02:00', actorName: 'Mara Becker', action: 'Buchung erstellt', subject: 'Jonas Krüger', details: 'Zu spät zum Training · 5,00 €' },
-  { id: 'audit-2', occurredAt: '2026-08-01T09:00:00+02:00', actorName: 'Mara Becker', action: 'Zahlung erfasst', subject: 'Lukas Waschul', details: '20,00 € · Überweisung' },
+  { id: 'audit-1', occurredAt: '2026-08-04T18:32:00+02:00', actorName: 'Mara Becker', action: 'Buchung erstellt', resourceType: 'booking', subject: 'Jonas Krüger', details: 'Zu spät zum Training · 5,00 €' },
+  { id: 'audit-2', occurredAt: '2026-08-01T09:00:00+02:00', actorName: 'Mara Becker', action: 'Zahlung erfasst', resourceType: 'payment', subject: 'Lukas Waschul', details: '20,00 € · Überweisung' },
 ];

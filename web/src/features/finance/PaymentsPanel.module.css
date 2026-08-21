@@ -9,6 +9,7 @@
 .form { display: grid; gap: var(--space-5); padding: var(--space-4) var(--space-6) var(--space-6); }
 .formRow { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
 .actions { display: flex; justify-content: flex-end; gap: var(--space-3); }
+.rowActions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-1); }
 .error { color: var(--color-red-600); }
 .explanation { margin: 0; color: var(--color-muted); line-height: 1.55; }
 .state { padding-top: var(--space-8); }

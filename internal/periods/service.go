@@ -257,15 +257,15 @@ func (s Service) snapshotStatements(ctx context.Context, tx *sql.Tx, groupID, pe
 			id, groupID, periodID, item.membershipID, item.displayName, item.email, item.charges, item.paid, item.applied, item.provided, due, status, now); err != nil {
 			return 0, err
 		}
-		body := "Your statement is ready. No payment is currently due."
+		body := "Deine Abrechnung ist bereit. Es ist keine Zahlung offen."
 		if due > 0 {
-			body = fmt.Sprintf("Your statement is ready. Amount due: %d minor units (%s), due %s.", due, currency, dueAt)
+			body = "Deine Abrechnung ist bereit. Es ist noch eine Zahlung offen."
 		} else if due < 0 {
-			body = fmt.Sprintf("Your statement is ready and shows a credit of %d minor units (%s).", -due, currency)
+			body = "Deine Abrechnung ist bereit. Sie enthält ein Guthaben."
 		}
 		if _, err := s.Notifications.CreateTx(ctx, tx, notifications.CreateInput{
 			GroupID: groupID, MembershipID: item.membershipID,
-			Type: notifications.TypeSettlementCreated, Title: "Settlement ready", Body: body,
+			Type: notifications.TypeSettlementCreated, Title: "Neue Abrechnung", Body: body,
 			ResourceType: "statement", ResourceID: id, CreatedAt: now,
 			Context: notifications.EventContext{AmountMinor: due, Currency: currency, PeriodLabel: periodLabel, DueAt: dueAt},
 		}); err != nil {

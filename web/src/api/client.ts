@@ -7,16 +7,20 @@ import {
   adaptCategories,
   adaptDashboard,
   adaptGroupSettings,
+  adaptGroupNotificationSettings,
   adaptInstanceCapabilities,
   adaptTransactionSettings,
   adaptLedger,
   adaptMembership,
   adaptMemberships,
   adaptNotification,
+  adaptNotificationDestination,
+  adaptNotificationPreferences,
   adaptPermissionDefinition,
   adaptPayment,
   adaptPeriod,
   adaptProduct,
+  adaptPushSubscriptions,
   adaptRole,
   adaptRoleAssignment,
   adaptSession,
@@ -33,7 +37,9 @@ import type {
   AccountSummary,
   AuthenticationCapabilities,
   AuditEntry,
+  AuditFilterOptions,
   Booking,
+  BookingCollectionQuery,
   BookingBatchCommand,
   BookingBulkCommand,
   BookingCommand,
@@ -42,6 +48,7 @@ import type {
   Category,
   CategoryCreateCommand,
   CategoryUpdateCommand,
+  CollectionPage,
   CreatedInvitation,
   Dashboard,
   EmailDeliveryStatus,
@@ -57,6 +64,8 @@ import type {
   LedgerEntry,
   LoginCommand,
   GroupPreference,
+  GroupNotificationSettings,
+  GroupNotificationSettingsUpdate,
   GroupSettings,
   GroupSettingsUpdateInput,
   InstanceCapabilities,
@@ -64,17 +73,24 @@ import type {
   Membership,
   MemberReactivationCommand,
   Notification,
+  NotificationDestination,
+  NotificationPreferences,
+  NotificationPreferencesUpdate,
   NotificationPage,
   NotificationReadResult,
   NotificationSummary,
   Payment,
+  PaymentCollectionQuery,
   PaymentCommand,
   SelfPaymentCommand,
   Period,
   PermissionDefinition,
   PermissionUpdate,
   ProblemDetails,
+  AuditCollectionQuery,
   Product,
+  PushSubscriptionDevice,
+  PushSubscriptionRegistration,
   ProductCreateCommand,
   ProductUpdateCommand,
   PublicJoinLink,
@@ -88,6 +104,7 @@ import type {
   Settlement,
   SystemAccount,
   SystemAuditEntry,
+  SystemAuditCollectionQuery,
   SystemGroup,
   SystemGroupCreateInput,
   SystemGroupInvitationResult,
@@ -97,6 +114,7 @@ import type {
   SystemSettings,
   SystemSettingsUpdate,
   SystemSmtpSettingsUpdate,
+  SystemWebPushSettingsUpdate,
   User,
 } from './types';
 import i18n from '@/i18n';
@@ -167,6 +185,23 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await requestWithMetadata<T>(path, init)).data;
 }
 
+async function requestBlob(path: string): Promise<Blob> {
+  const headers = new Headers({ Accept: 'image/jpeg, image/png, image/webp, application/pdf' });
+  const csrf = csrfToken();
+  if (csrf) headers.set('X-CSRF-Token', csrf);
+  try {
+    const response = await fetch(`${API_BASE}${path}`, { credentials: 'include', headers });
+    if (!response.ok) {
+      if (DEMO_ENABLED && (response.status === 404 || response.status >= 500)) return requestDevelopmentDemo<Blob>(path, {});
+      throw new ApiError(await parseProblem(response));
+    }
+    return response.blob();
+  } catch (error) {
+    if (DEMO_ENABLED && !(error instanceof ApiError)) return requestDevelopmentDemo<Blob>(path, {});
+    throw error;
+  }
+}
+
 async function requestWithMetadata<T>(path: string, init: RequestInit = {}): Promise<{ data: T; headers: Headers }> {
   const headers = new Headers(init.headers);
   headers.set('Accept', 'application/json');
@@ -197,11 +232,76 @@ const groupPath = (groupId: string, resource: string) => `/groups/${encodeURICom
 const groupRootPath = (groupId: string) => `/groups/${encodeURIComponent(groupId)}`;
 const systemGroupPath = (groupId: string, resource = '') => `/system/groups/${encodeURIComponent(groupId)}${resource ? `/${resource}` : ''}`;
 const json = (value: unknown) => JSON.stringify(value);
+
+async function fileSha256(file: File): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function paymentMultipart(payload: unknown, attachment: File): FormData {
+  const form = new FormData();
+  form.append('command', new Blob([json(payload)], { type: 'application/json' }), 'command.json');
+  form.append('attachment', attachment, attachment.name);
+  return form;
+}
 const versionHeaders = (version: number): HeadersInit => ({ 'If-Match': `"v${version}"` });
+
+/**
+ * Encodes defined collection-query values without leaking empty filters into cacheable URLs.
+ *
+ * @param query - Typed collection search, filter, sorting, and cursor values.
+ * @returns URL parameters containing only meaningful values.
+ */
+function collectionQueryParameters(query: object): URLSearchParams {
+  const parameters = new URLSearchParams();
+  Object.entries(query).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') return;
+    if (Array.isArray(value)) {
+      value.forEach((item) => {
+        if (item !== undefined && item !== null && item !== '') parameters.append(key, String(item));
+      });
+      return;
+    }
+    parameters.set(key, String(value));
+  });
+  return parameters;
+}
+
+/**
+ * Appends a normalized collection query to an API resource path.
+ *
+ * @param path - API path without the shared base prefix.
+ * @param query - Typed collection query values.
+ * @returns The unchanged path for an empty query or a query-string path otherwise.
+ */
+function collectionPath(path: string, query: object): string {
+  const parameters = collectionQueryParameters(query);
+  return parameters.size > 0 ? `${path}?${parameters.toString()}` : path;
+}
+
+/**
+ * Combines an array response with cursor metadata exposed through response headers.
+ *
+ * @param items - Adapted collection items from the response body.
+ * @param headers - Response headers containing pagination metadata.
+ * @param requestedLimit - Client-requested page size used when the server omits metadata.
+ * @returns A stable page model for React Query infinite collections.
+ */
+function collectionPage<Item>(items: Item[], headers: Headers, requestedLimit?: number): CollectionPage<Item> {
+  const nextCursor = headers.get('X-Next-Cursor') ?? undefined;
+  const parsedLimit = Number(headers.get('X-Page-Limit'));
+  return {
+    items,
+    nextCursor,
+    hasMore: headers.get('X-Has-More') === 'true' || Boolean(nextCursor),
+    limit: Number.isInteger(parsedLimit) && parsedLimit > 0 ? parsedLimit : requestedLimit ?? 100,
+  };
+}
 const systemSettingKeys: Record<ResettableSystemSettingKey, string> = {
   instanceName: 'instance.name',
   defaultCurrency: 'instance.default_currency',
   mediaUploadMaxBytes: 'media.upload_max_bytes',
+  attachmentUploadMaxBytes: 'attachment.upload_max_bytes',
   publicJoinEnabled: 'access.public_join_enabled',
   maintenanceMode: 'maintenance.enabled',
   maintenanceMessage: 'maintenance.message',
@@ -336,6 +436,25 @@ export const api = {
     method: 'POST',
     headers: versionHeaders(revision),
   })),
+  updateSystemWebPush: async (update: SystemWebPushSettingsUpdate, revision: number): Promise<SystemSettings> => adaptSystemSettings(await request<unknown>('/system/settings/web-push', {
+    method: 'PUT',
+    headers: versionHeaders(revision),
+    body: json(update),
+  })),
+  resetSystemWebPush: async (revision: number): Promise<SystemSettings> => adaptSystemSettings(await request<unknown>('/system/settings/web-push', {
+    method: 'DELETE',
+    headers: versionHeaders(revision),
+  })),
+  generateSystemWebPushKey: async (revision: number): Promise<SystemSettings> => adaptSystemSettings(await request<unknown>('/system/settings/web-push/generate-key', {
+    method: 'POST',
+    headers: versionHeaders(revision),
+    body: json({ confirmRotation: true }),
+  })),
+  testSystemWebPush: async (revision: number, subscriptionId?: string): Promise<SystemSettings> => adaptSystemSettings(await request<unknown>('/system/settings/web-push/test', {
+    method: 'POST',
+    headers: versionHeaders(revision),
+    ...(subscriptionId ? { body: json({ subscriptionId }) } : {}),
+  })),
   searchSystemAccounts: async (query = ''): Promise<SystemAccount[]> => {
     const parameters = new URLSearchParams();
     if (query.trim()) parameters.set('q', query.trim());
@@ -364,6 +483,11 @@ export const api = {
     body: json(input),
   })),
   getSystemAudit: async (): Promise<SystemAuditEntry[]> => adaptSystemAudit(await request<unknown>('/system/audit')),
+  getSystemAuditFilterOptions: (): Promise<AuditFilterOptions> => request<AuditFilterOptions>('/system/audit/filter-options'),
+  getSystemAuditPage: async (query: SystemAuditCollectionQuery = {}): Promise<CollectionPage<SystemAuditEntry>> => {
+    const response = await requestWithMetadata<unknown>(collectionPath('/system/audit', query));
+    return collectionPage(adaptSystemAudit(response.data), response.headers, query.limit);
+  },
   requestPasswordReset: async (email: string): Promise<void> => request<void>('/auth/password-reset/request', { method: 'POST', body: json({ email }) }),
   confirmPasswordReset: async (token: string, newPassword: string): Promise<void> => {
     await request<void>('/auth/password-reset/confirm', { method: 'POST', body: json({ token, newPassword }) });
@@ -387,6 +511,16 @@ export const api = {
     return request<{ avatarUrl: string }>('/me/avatar', { method: 'POST', body: form });
   },
   removeProfileAvatar: async (): Promise<void> => request<void>('/me/avatar', { method: 'DELETE' }),
+  getPushSubscriptions: async (): Promise<PushSubscriptionDevice[]> => adaptPushSubscriptions(await request<unknown>('/me/push-subscriptions')),
+  registerPushSubscription: async (input: PushSubscriptionRegistration): Promise<PushSubscriptionDevice> => adaptPushSubscriptions([await request<unknown>('/me/push-subscriptions', {
+    method: 'POST',
+    body: json(input),
+  })])[0],
+  renamePushSubscription: async (subscriptionId: string, label: string): Promise<PushSubscriptionDevice> => adaptPushSubscriptions([await request<unknown>(`/me/push-subscriptions/${encodeURIComponent(subscriptionId)}`, {
+    method: 'PATCH',
+    body: json({ label }),
+  })])[0],
+  deletePushSubscription: async (subscriptionId: string): Promise<void> => request<void>(`/me/push-subscriptions/${encodeURIComponent(subscriptionId)}`, { method: 'DELETE' }),
   login: async (command: LoginCommand): Promise<Session> => setSessionActor(adaptSession(await request<unknown>('/auth/login', { method: 'POST', body: json(command) }))),
   logout: async (): Promise<void> => {
     try {
@@ -468,6 +602,27 @@ export const api = {
   },
   updateGroupName: async (groupId: string, name: string): Promise<{ name: string }> => request<{ name: string }>(groupRootPath(groupId), { method: 'PATCH', body: json({ name }) }),
   getGroupSettings: async (groupId: string): Promise<GroupSettings> => adaptGroupSettings(await request<unknown>(groupPath(groupId, 'settings'))),
+  getGroupNotificationSettings: async (groupId: string): Promise<GroupNotificationSettings> => adaptGroupNotificationSettings(await request<unknown>(groupPath(groupId, 'notification-settings'))),
+  updateGroupNotificationSettings: async (groupId: string, settings: GroupNotificationSettingsUpdate): Promise<GroupNotificationSettings> => adaptGroupNotificationSettings(await request<unknown>(groupPath(groupId, 'notification-settings'), {
+    method: 'PUT',
+    headers: versionHeaders(settings.version),
+    body: json({
+      timezone: settings.timezone,
+      dueSoonLeadDays: settings.dueSoonLeadDays,
+      overdueRepeatDays: settings.overdueRepeatDays,
+      events: settings.events.map((event) => ({ type: event.eventType, enabled: event.enabled })),
+    }),
+  })),
+  getNotificationPreferences: async (groupId: string): Promise<NotificationPreferences> => adaptNotificationPreferences(await request<unknown>(groupPath(groupId, 'notification-preferences'))),
+  updateNotificationPreferences: async (groupId: string, preferences: NotificationPreferencesUpdate): Promise<NotificationPreferences> => adaptNotificationPreferences(await request<unknown>(groupPath(groupId, 'notification-preferences'), {
+    method: 'PUT',
+    headers: versionHeaders(preferences.version),
+    body: json({ events: preferences.events.map((event) => ({
+      type: event.eventType,
+      ...(event.email !== undefined ? { email: event.email } : {}),
+      ...(event.push !== undefined ? { push: event.push } : {}),
+    })) }),
+  })),
   getTransactionSettings: async (groupId: string): Promise<TransactionSettings> => adaptTransactionSettings(await request<unknown>(groupPath(groupId, 'transaction-settings'))),
   updateGroupSettings: async (groupId: string, settings: GroupSettingsUpdateInput): Promise<GroupSettings> => adaptGroupSettings(await request<unknown>(groupPath(groupId, 'settings'), {
     method: 'PATCH',
@@ -513,6 +668,10 @@ export const api = {
   })),
   permanentlyDeleteMember: async (groupId: string, membershipId: string): Promise<void> => request<void>(groupPath(groupId, `members/${encodeURIComponent(membershipId)}/permanent`), { method: 'DELETE' }),
   getBookings: async (groupId: string): Promise<Booking[]> => (await request<unknown[]>(groupPath(groupId, 'bookings'))).map((booking) => adaptBooking(booking)),
+  getBookingsPage: async (groupId: string, query: BookingCollectionQuery = {}): Promise<CollectionPage<Booking>> => {
+    const response = await requestWithMetadata<unknown[]>(collectionPath(groupPath(groupId, 'bookings'), query));
+    return collectionPage(response.data.map((booking) => adaptBooking(booking)), response.headers, query.limit);
+  },
   createBooking: async (groupId: string, command: BookingCommand): Promise<Booking> => {
     const path = groupPath(groupId, 'bookings');
     const payload = {
@@ -553,16 +712,23 @@ export const api = {
   getLedger: async (groupId: string): Promise<LedgerEntry[]> => adaptLedger(await request<unknown>(groupPath(groupId, 'accounts/me'))),
   getAccountSummaries: async (groupId: string): Promise<AccountSummary[]> => adaptAccountSummaries(await request<unknown>(groupPath(groupId, 'accounts'))),
   getPayments: async (groupId: string): Promise<Payment[]> => (await request<unknown[]>(groupPath(groupId, 'payments'))).map(adaptPayment),
-  createPayment: async (groupId: string, command: PaymentCommand): Promise<Payment> => {
+  getPaymentsPage: async (groupId: string, query: PaymentCollectionQuery = {}): Promise<CollectionPage<Payment>> => {
+    const response = await requestWithMetadata<unknown[]>(collectionPath(groupPath(groupId, 'payments'), query));
+    return collectionPage(response.data.map(adaptPayment), response.headers, query.limit);
+  },
+  createPayment: async (groupId: string, command: PaymentCommand, attachment?: File): Promise<Payment> => {
     const path = groupPath(groupId, 'payments');
     const payload = { ...command, amountMinor: minorUnitsToSafeNumber(command.amount.minorUnits), amount: undefined, receivedAt: new Date(command.receivedAt).toISOString() };
-    return adaptPayment(await idempotentRequest<unknown>(groupId, 'payment.create', path, payload, { method: 'POST', body: json(payload) }));
+    const fingerprint = attachment ? { command: payload, attachmentSha256: await fileSha256(attachment) } : payload;
+    return adaptPayment(await idempotentRequest<unknown>(groupId, 'payment.create', path, fingerprint, { method: 'POST', body: attachment ? paymentMultipart(payload, attachment) : json(payload) }));
   },
-  createOwnPayment: async (groupId: string, command: SelfPaymentCommand): Promise<Payment> => {
+  createOwnPayment: async (groupId: string, command: SelfPaymentCommand, attachment?: File): Promise<Payment> => {
     const path = groupPath(groupId, 'payments/self');
     const payload = { ...command, amountMinor: minorUnitsToSafeNumber(command.amount.minorUnits), amount: undefined, receivedAt: new Date(command.receivedAt).toISOString() };
-    return adaptPayment(await idempotentRequest<unknown>(groupId, 'payment.self.create', path, payload, { method: 'POST', body: json(payload) }));
+    const fingerprint = attachment ? { command: payload, attachmentSha256: await fileSha256(attachment) } : payload;
+    return adaptPayment(await idempotentRequest<unknown>(groupId, 'payment.self.create', path, fingerprint, { method: 'POST', body: attachment ? paymentMultipart(payload, attachment) : json(payload) }));
   },
+  getPaymentAttachment: (groupId: string, paymentId: string): Promise<Blob> => requestBlob(groupPath(groupId, `payments/${paymentId}/attachment`)),
   reversePayment: (groupId: string, paymentId: string, reason: string): Promise<void> => {
     const path = groupPath(groupId, `payments/${paymentId}/reverse`);
     const payload = { reason };
@@ -588,6 +754,9 @@ export const api = {
     const response = await requestWithMetadata<unknown[]>(`${groupPath(groupId, 'notifications')}?${query.toString()}`);
     return { items: response.data.map(adaptNotification), nextCursor: response.headers.get('X-Next-Cursor') ?? undefined };
   },
+  getNotificationDestination: async (notificationId: string): Promise<NotificationDestination> => adaptNotificationDestination(
+    await request<unknown>(`/me/notifications/${encodeURIComponent(notificationId)}/destination`),
+  ),
   getNotificationSummary: (groupId: string): Promise<NotificationSummary> => request<NotificationSummary>(groupPath(groupId, 'notifications/summary')),
   markNotificationsRead: (groupId: string, notificationIds: string[]): Promise<NotificationReadResult> => request<NotificationReadResult>(groupPath(groupId, 'notifications/read'), { method: 'PATCH', body: json({ notificationIds }) }),
   markNotificationRead: async (groupId: string, notificationId: string): Promise<Notification> => adaptNotification(await request<unknown>(groupPath(groupId, `notifications/${notificationId}`), { method: 'PATCH', body: json({ read: true }) })),
@@ -595,6 +764,15 @@ export const api = {
     const [entries, members] = await Promise.all([request<unknown[]>(groupPath(groupId, 'audit')), request<unknown>(groupPath(groupId, 'members'))]);
     const adaptedMembers = adaptMemberships(members);
     return entries.map((entry) => adaptAuditEntry(entry, adaptedMembers));
+  },
+  getAuditFilterOptions: (groupId: string): Promise<AuditFilterOptions> => request<AuditFilterOptions>(groupPath(groupId, 'audit/filter-options')),
+  getAuditPage: async (groupId: string, query: AuditCollectionQuery = {}): Promise<CollectionPage<AuditEntry>> => {
+    const [response, members] = await Promise.all([
+      requestWithMetadata<unknown[]>(collectionPath(groupPath(groupId, 'audit'), query)),
+      request<unknown>(groupPath(groupId, 'members')),
+    ]);
+    const adaptedMembers = adaptMemberships(members);
+    return collectionPage(response.data.map((entry) => adaptAuditEntry(entry, adaptedMembers)), response.headers, query.limit);
   },
   getPermissionDefinitions: async (): Promise<PermissionDefinition[]> => {
     const response = await request<unknown>('/permission-definitions');

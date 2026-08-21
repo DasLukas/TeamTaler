@@ -5,10 +5,10 @@ import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { InvitationImportResult, InvitationMetadata, InvitationUpdateInput, Membership, Role, Session } from '@/api/types';
 import { ActiveGroupContext } from '@/app/active-group-context';
+import modalStyles from '@/components/ui/Modal.module.css';
 import i18n from '@/i18n';
 import { MembersPanel } from './MembersPanel';
 
-const mediaQueryMock = vi.hoisted(() => ({ compact: false }));
 const apiMock = vi.hoisted(() => ({
   getMembers: vi.fn(),
   getCategories: vi.fn(),
@@ -33,8 +33,6 @@ const apiMock = vi.hoisted(() => ({
   updatePublicJoinLink: vi.fn(),
   rotatePublicJoinLink: vi.fn(),
 }));
-
-vi.mock('@/hooks/useMediaQuery', () => ({ useMediaQuery: () => mediaQueryMock.compact }));
 
 vi.mock('@/api/client', () => ({
   api: apiMock,
@@ -135,7 +133,6 @@ function renderMembers(activeSession: Session = session): QueryClient {
 describe('MembersPanel invitations', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mediaQueryMock.compact = false;
     apiMock.getMembers.mockResolvedValue(members);
     apiMock.getRoles.mockResolvedValue(roles);
     apiMock.getGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
@@ -191,13 +188,36 @@ describe('MembersPanel invitations', () => {
     expect(screen.queryByText(i18n.t('members.csvImport.deliveryStatus.notRequested'))).not.toBeInTheDocument();
   });
 
-  it('omits the neutral email-delivery badge from compact invitation cards', async () => {
-    mediaQueryMock.compact = true;
-    apiMock.getInvitations.mockResolvedValue([{ ...invitationMetadata[0], emailDeliveryStatus: 'NOT_REQUESTED' }]);
+  it('keeps every member collection semantic and gives member tables accessible sorting and shared overflow state', async () => {
+    apiMock.getMembers.mockResolvedValue([members[0], {
+      ...members[0],
+      id: 'member-archived',
+      userId: 'user-archived',
+      displayName: 'Archived Member',
+      email: 'archived@example.test',
+      status: 'ARCHIVED',
+      active: false,
+    }]);
     renderMembers();
 
-    expect(await screen.findByText('new@example.test')).toBeVisible();
-    expect(screen.queryByText(i18n.t('members.csvImport.deliveryStatus.notRequested'))).not.toBeInTheDocument();
+    const collections = [
+      { name: i18n.t('members.openInvitations'), columns: 6, sortableColumns: 0 },
+      { name: i18n.t('members.activeMembers'), columns: 4, sortableColumns: 3 },
+      { name: i18n.t('members.archivedMembers'), columns: 3, sortableColumns: 2 },
+    ];
+    await screen.findByText('new@example.test');
+
+    for (const collection of collections) {
+      const region = screen.getByRole('region', { name: collection.name });
+      const table = within(region).getByRole('table');
+      const headers = within(table).getAllByRole('columnheader');
+      expect(headers).toHaveLength(collection.columns);
+      headers.forEach((header) => expect(header).toHaveAttribute('scope', 'col'));
+      expect(within(table).getAllByRole('cell')).toHaveLength(collection.columns);
+      expect(within(table).queryAllByRole('button', { name: /sortieren/ })).toHaveLength(collection.sortableColumns);
+      if (collection.sortableColumns > 0) expect(region.parentElement).toHaveAttribute('data-scroll-position', 'none');
+      else expect(region).toHaveAttribute('tabindex', '0');
+    }
   });
 
   it('keeps relevant email-delivery badges visible', async () => {
@@ -262,6 +282,7 @@ describe('MembersPanel invitations', () => {
     renderMembers();
 
     await user.click(await screen.findByRole('button', { name: i18n.t('members.invite') }));
+    expect(screen.getByRole('dialog', { name: i18n.t('members.invite') })).toHaveClass(modalStyles.sheet);
     await user.type(screen.getByLabelText(i18n.t('auth.email')), 'manual@example.test');
     await user.click(screen.getByRole('button', { name: i18n.t('members.createInvitation') }));
 

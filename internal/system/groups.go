@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/authorization"
 	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/media"
+	"github.com/DasLukas/TeamTaler/internal/paymentattachments"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/storage"
 )
@@ -221,6 +223,7 @@ const managedGroupQuery = `SELECT g.id,g.name,g.currency,g.status,g.version,g.ar
 	(SELECT count(*) FROM bookings b WHERE b.group_id=g.id),
 	(SELECT count(*) FROM ledger_entries l WHERE l.group_id=g.id) +
 	(SELECT count(*) FROM payments p WHERE p.group_id=g.id) +
+	(SELECT count(*) FROM payment_attachments attachment WHERE attachment.group_id=g.id) +
 	(SELECT count(*) FROM payment_allocations a WHERE a.group_id=g.id) +
 	(SELECT count(*) FROM period_adjustment_allocations a WHERE a.group_id=g.id) +
 	(SELECT count(*) FROM period_statements statement WHERE statement.group_id=g.id),
@@ -228,6 +231,7 @@ const managedGroupQuery = `SELECT g.id,g.name,g.currency,g.status,g.version,g.ar
 	(SELECT count(DISTINCT image_key) FROM (
 		SELECT logo_key AS image_key FROM groups WHERE id=g.id AND logo_key IS NOT NULL
 		UNION ALL SELECT image_key FROM products WHERE group_id=g.id AND image_key IS NOT NULL
+		UNION ALL SELECT storage_key FROM payment_attachments WHERE group_id=g.id
 	)),
 	(SELECT coalesce(sum(l.amount_minor),0) FROM ledger_entries l
 		WHERE l.group_id=g.id AND l.account='MEMBER_RECEIVABLE')
@@ -535,7 +539,7 @@ func (s Service) ArchiveGroup(ctx context.Context, actorUserID, groupID string, 
 		if _, err := tx.ExecContext(ctx, `UPDATE invitation_email_outbox SET status='CANCELLED',token_ciphertext=NULL,next_attempt_at=NULL,lease_token=NULL,lease_until=NULL,last_error_code='group_archived',updated_at=? WHERE group_id=? AND status IN ('PENDING','SENDING','FAILED')`, now, groupID); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE notification_email_outbox SET status='FAILED',next_attempt_at=NULL,lease_token=NULL,lease_until=NULL,last_error_code='group_archived',updated_at=? WHERE group_id=? AND status IN ('PENDING','SENDING')`, now, groupID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE notification_delivery_jobs SET status='FAILED',next_attempt_at=NULL,lease_token=NULL,lease_until=NULL,last_error_code='group_archived',updated_at=? WHERE group_id=? AND status IN ('PENDING','SENDING')`, now, groupID); err != nil {
 			return err
 		}
 		if err := audit.Record(ctx, tx, groupID, actorUserID, "", "group.archived.by_system_administrator", "group", groupID, map[string]any{"previousStatus": status}); err != nil {
@@ -658,14 +662,19 @@ func (s Service) purgeGroup(ctx context.Context, actorUserID, groupID string, in
 		ON CONFLICT(image_key) DO UPDATE SET status='PENDING',next_attempt_at=excluded.next_attempt_at,updated_at=excluded.updated_at`, now, now, now, groupID, groupID); err != nil {
 		return DeletionImpact{}, err
 	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO system_attachment_delete_jobs(storage_key,next_attempt_at,created_at,updated_at)
+		SELECT DISTINCT storage_key,?,?,? FROM payment_attachments WHERE group_id=?
+		ON CONFLICT(storage_key) DO UPDATE SET status='PENDING',next_attempt_at=excluded.next_attempt_at,updated_at=excluded.updated_at`, now, now, now, groupID); err != nil {
+		return DeletionImpact{}, err
+	}
 	deleteOrder := []string{
-		"notification_email_outbox", "invitation_email_outbox", "public_join_email_outbox",
+		"notification_reminder_runs", "notification_delivery_jobs", "invitation_email_outbox", "public_join_email_outbox",
 		"notifications", "invitation_role_assignments", "invitations",
 		"public_join_registrations", "public_join_links", "ledger_entries", "period_statements",
-		"payment_allocations", "period_adjustment_allocations", "bookings", "payments",
+		"payment_allocations", "period_adjustment_allocations", "bookings", "payment_attachments", "payments",
 		"audit_events", "idempotency_results", "category_permissions", "membership_permissions",
-		"membership_role_assignments", "membership_roles", "group_reason_suggestions",
-		"group_payment_methods", "group_settings", "role_permission_grants", "roles",
+		"membership_notification_channels", "membership_role_assignments", "membership_roles", "group_reason_suggestions",
+		"group_payment_methods", "group_notification_events", "group_notification_settings", "group_settings", "role_permission_grants", "roles",
 		"products", "categories", "periods", "memberships",
 	}
 	for _, table := range deleteOrder {
@@ -810,7 +819,111 @@ func (s Service) RunMediaGarbageCollection(ctx context.Context, dataDirectory st
 		}
 		completed++
 	}
-	return completed, nil
+	attachmentCompleted, err := s.RunAttachmentGarbageCollection(ctx, dataDirectory, limit-completed)
+	return completed + attachmentCompleted, err
+}
+
+// RunAttachmentGarbageCollection removes receipt files only after their last
+// database reference disappears. Durable failures remain pending for retry.
+func (s Service) RunAttachmentGarbageCollection(ctx context.Context, dataDirectory string, limit int) (int, error) {
+	if limit < 1 {
+		return 0, nil
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT storage_key FROM system_attachment_delete_jobs
+		WHERE status='PENDING' AND next_attempt_at<=? ORDER BY next_attempt_at,storage_key LIMIT ?`, platform.Timestamp(platform.Now()), limit)
+	if err != nil {
+		return 0, err
+	}
+	keys := make([]string, 0)
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		keys = append(keys, key)
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	store := paymentattachments.Store{DataDirectory: dataDirectory}
+	completed := 0
+	for _, key := range keys {
+		release := paymentattachments.LockStore()
+		var references int64
+		if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM payment_attachments WHERE storage_key=?`, key).Scan(&references); err != nil {
+			release()
+			return completed, err
+		}
+		if references > 0 {
+			release()
+			now := platform.Now()
+			if _, err := s.db.ExecContext(ctx, `UPDATE system_attachment_delete_jobs SET next_attempt_at=?,last_error_code='still_referenced',updated_at=? WHERE storage_key=?`, platform.Timestamp(now.Add(referencedMediaRetryDelay)), platform.Timestamp(now), key); err != nil {
+				return completed, err
+			}
+			continue
+		}
+		err := store.Remove(key)
+		release()
+		if err != nil {
+			now := platform.Now()
+			if _, updateErr := s.db.ExecContext(ctx, `UPDATE system_attachment_delete_jobs SET attempt_count=attempt_count+1,next_attempt_at=?,last_error_code='io_error',updated_at=? WHERE storage_key=?`, platform.Timestamp(now.Add(5*time.Minute)), platform.Timestamp(now), key); updateErr != nil {
+				return completed, errors.Join(err, updateErr)
+			}
+			continue
+		}
+		if _, err := s.db.ExecContext(ctx, `UPDATE system_attachment_delete_jobs SET status='DONE',last_error_code=NULL,updated_at=? WHERE storage_key=?`, platform.Timestamp(platform.Now()), key); err != nil {
+			return completed, err
+		}
+		completed++
+	}
+	if completed >= limit {
+		return completed, nil
+	}
+	orphans, err := s.sweepUnreferencedAttachments(ctx, dataDirectory, limit-completed)
+	return completed + orphans, err
+}
+
+func (s Service) sweepUnreferencedAttachments(ctx context.Context, dataDirectory string, limit int) (int, error) {
+	directory := filepath.Join(dataDirectory, "attachments")
+	entries, err := os.ReadDir(directory)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	store := paymentattachments.Store{DataDirectory: dataDirectory}
+	removed := 0
+	for _, entry := range entries {
+		if removed >= limit {
+			break
+		}
+		if entry.IsDir() {
+			continue
+		}
+		key := entry.Name()
+		if _, err := store.Resolve(key); err != nil {
+			continue
+		}
+		release := paymentattachments.LockStore()
+		var references int64
+		err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM payment_attachments WHERE storage_key=?`, key).Scan(&references)
+		if err == nil && references == 0 {
+			err = store.Remove(key)
+		}
+		release()
+		if err != nil {
+			return removed, err
+		}
+		if references == 0 {
+			removed++
+		}
+	}
+	return removed, nil
 }
 
 func (s Service) managedGroupByID(ctx context.Context, groupID string) (ManagedGroup, error) {

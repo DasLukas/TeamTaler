@@ -25,8 +25,8 @@ vi.mock('@tanstack/react-router', () => ({ useNavigate: () => navigateMock }));
 const session: Session = {
   user: { id: 'user-a', displayName: 'Alex Member', email: 'alex@example.test' },
   groups: [
-    { id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', roles: ['MEMBER'], groupPermissions: [] } },
-    { id: 'group-b', name: 'Group B', currency: 'EUR', membership: { id: 'member-b', roles: ['MEMBER'], groupPermissions: [] } },
+    { id: 'group-a', name: 'Group A', currency: 'EUR', logoUrl: '/group-a.png', membership: { id: 'member-a', roles: ['MEMBER'], groupPermissions: [] } },
+    { id: 'group-b', name: 'Group B', currency: 'EUR', logoUrl: '/group-b.png', membership: { id: 'member-b', roles: ['MEMBER'], groupPermissions: [] } },
   ],
   activeGroupId: 'group-a',
   defaultGroupId: null,
@@ -95,12 +95,16 @@ describe('AccountDetailsPanel', () => {
     const queryClient = renderPanel();
 
     const selection = screen.getByLabelText(i18n.t('account.details.defaultGroup'));
-    expect(selection).toHaveValue('__LAST_USED_GROUP__');
-    expect(within(selection).getByRole('option', { name: i18n.t('account.details.lastUsedGroup') })).toBeVisible();
-    expect(within(selection).getByRole('option', { name: 'Group A' })).toBeVisible();
-    expect(within(selection).getByRole('option', { name: 'Group B' })).toBeVisible();
+    expect(selection).toHaveTextContent(i18n.t('account.details.lastUsedGroup'));
+    await user.click(selection);
+    const listbox = screen.getByRole('listbox', { name: i18n.t('account.details.defaultGroup') });
+    expect(within(listbox).getByRole('option', { name: i18n.t('account.details.lastUsedGroup') })).toBeVisible();
+    expect(within(listbox).getByRole('option', { name: 'Group A' }).querySelector('img')).toHaveAttribute('src', '/group-a.png');
+    const groupBOption = within(listbox).getByRole('option', { name: 'Group B' });
+    expect(groupBOption.querySelector('img')).toHaveAttribute('src', '/group-b.png');
 
-    await user.selectOptions(selection, 'group-b');
+    await user.click(groupBOption);
+    expect(selection).toHaveTextContent('Group B');
     await user.click(within(rowFor(i18n.t('account.details.defaultGroup'))).getByRole('button', { name: i18n.t('common.save') }));
 
     await waitFor(() => expect(apiMock.updateDefaultGroup).toHaveBeenCalledWith('group-b'));
@@ -119,8 +123,9 @@ describe('AccountDetailsPanel', () => {
     const queryClient = renderPanel({ ...session, defaultGroupId: 'group-a' });
 
     const selection = screen.getByLabelText(i18n.t('account.details.defaultGroup'));
-    expect(selection).toHaveValue('group-a');
-    await user.selectOptions(selection, '__LAST_USED_GROUP__');
+    expect(selection).toHaveTextContent('Group A');
+    await user.click(selection);
+    await user.click(screen.getByRole('option', { name: i18n.t('account.details.lastUsedGroup') }));
     await user.click(within(rowFor(i18n.t('account.details.defaultGroup'))).getByRole('button', { name: i18n.t('common.save') }));
 
     await waitFor(() => expect(apiMock.updateDefaultGroup).toHaveBeenCalledWith(null));

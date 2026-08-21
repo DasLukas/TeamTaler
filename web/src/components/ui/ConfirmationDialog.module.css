@@ -1,7 +1,7 @@
 .content {
   display: grid;
   gap: var(--space-5);
-  padding: var(--space-4) var(--space-6) var(--space-6);
+  padding: var(--space-4) var(--space-6);
 }
 
 .message,
@@ -19,7 +19,7 @@
 }
 
 @media (max-width: 520px) {
-  .content { padding: var(--space-3) var(--space-5) var(--space-5); }
+  .content { padding: var(--space-3) var(--space-5); }
 
   .actions {
     align-items: stretch;

@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 
+	sharedaudit "github.com/DasLukas/TeamTaler/internal/audit"
 	"github.com/DasLukas/TeamTaler/internal/platform"
+	"github.com/DasLukas/TeamTaler/internal/tablequery"
 )
 
 // RecordAudit serializes metadata and appends an immutable instance-wide event
@@ -39,34 +41,115 @@ func RecordAudit(ctx context.Context, tx *sql.Tx, actorUserID, action, resourceT
 // by {"decodeError": true}; query and scan failures are returned.
 // Example: events, err := service.ListAudit(ctx, 50).
 func (s Service) ListAudit(ctx context.Context, limit int) ([]AuditEvent, error) {
-	if limit < 1 || limit > 200 {
-		limit = 100
+	page, err := s.QueryAudit(ctx, tablequery.AuditQuery{Limit: limit})
+	return page.Items, err
+}
+
+// AuditPage is one stable keyset-paginated global audit slice. NextCursor is
+// empty when no further matching event exists.
+type AuditPage struct {
+	Items      []AuditEvent
+	NextCursor string
+}
+
+// AuditFilterOptions aliases the shared data-derived audit filter catalog.
+type AuditFilterOptions = sharedaudit.FilterOptions
+
+// ListAuditFilterOptions returns the complete data-derived system-audit filter
+// catalog. Recording a new value makes it available without a UI registry.
+func (s Service) ListAuditFilterOptions(ctx context.Context) (AuditFilterOptions, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT action,resource_type
+		FROM system_audit_events`)
+	if err != nil {
+		return AuditFilterOptions{}, fmt.Errorf("list system audit filter options: %w", err)
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT event.id,event.actor_user_id,
+	options, err := sharedaudit.ScanFilterOptions(rows)
+	if err != nil {
+		return AuditFilterOptions{}, fmt.Errorf("list system audit filter options: %w", err)
+	}
+	return options, nil
+}
+
+// QueryAudit returns one filtered and sorted global system-audit page. Callers
+// must enforce system-administrator authorization before invoking this query.
+func (s Service) QueryAudit(ctx context.Context, input tablequery.AuditQuery) (AuditPage, error) {
+	input, fingerprint, err := tablequery.NormalizeAudit(input, "system", false)
+	if err != nil {
+		return AuditPage{}, err
+	}
+	cursorKey, cursorID, err := tablequery.DecodeCursor(input.Cursor, fingerprint, input.Sort, input.Direction)
+	if err != nil {
+		return AuditPage{}, err
+	}
+	sortExpression := tablequery.AuditSortExpression(input.Sort)
+	orderKeyword, comparison := tablequery.SQLOrderFragments(input.Direction)
+	query := `SELECT event.id,event.actor_user_id,
 		coalesce(actor.display_name,''),event.action,event.resource_type,
-		event.resource_id,event.metadata_json,event.occurred_at
+		event.resource_id,event.metadata_json,event.occurred_at,CAST(` + sortExpression + ` AS TEXT)
 		FROM system_audit_events event
 		LEFT JOIN users actor ON actor.id=event.actor_user_id
-		ORDER BY event.occurred_at DESC,event.id DESC LIMIT ?`, limit)
+		WHERE 1=1`
+	args := make([]any, 0)
+	if input.ActorUserID != "" {
+		query += ` AND event.actor_user_id=?`
+		args = append(args, input.ActorUserID)
+	}
+	query, args = tablequery.AppendExactStringSet(query, args, "event.action", input.Actions)
+	query, args = tablequery.AppendExactStringSet(query, args, "event.resource_type", input.ResourceTypes)
+	if input.OccurredFrom != "" {
+		query += ` AND ` + tablequery.AuditOccurredSQLExpression + `>=?`
+		args = append(args, input.OccurredFrom)
+	}
+	if input.OccurredTo != "" {
+		query += ` AND ` + tablequery.AuditOccurredSQLExpression + `<?`
+		args = append(args, input.OccurredTo)
+	}
+	if input.Search != "" {
+		pattern := tablequery.LikePattern(input.Search)
+		query += ` AND (coalesce(actor.display_name,'') LIKE ? ESCAPE '\' COLLATE NOCASE
+			OR event.action LIKE ? ESCAPE '\' COLLATE NOCASE
+			OR event.resource_type LIKE ? ESCAPE '\' COLLATE NOCASE
+			OR coalesce(event.resource_id,'') LIKE ? ESCAPE '\' COLLATE NOCASE
+			OR event.metadata_json LIKE ? ESCAPE '\' COLLATE NOCASE)`
+		args = append(args, pattern, pattern, pattern, pattern, pattern)
+	}
+	if cursorID != "" {
+		query += ` AND (` + sortExpression + ` ` + comparison + ` ? OR (` + sortExpression + ` = ? AND event.id ` + comparison + ` ?))`
+		args = append(args, cursorKey, cursorKey, cursorID)
+	}
+	query += ` ORDER BY ` + sortExpression + ` ` + orderKeyword + `,event.id ` + orderKeyword + ` LIMIT ?`
+	args = append(args, input.Limit+1)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list system audit events: %w", err)
+		return AuditPage{}, fmt.Errorf("list system audit events: %w", err)
 	}
 	defer rows.Close()
 	events := make([]AuditEvent, 0)
+	sortKeys := make([]string, 0)
 	for rows.Next() {
 		var event AuditEvent
-		var metadata string
+		var metadata, sortKey string
 		if err := rows.Scan(&event.ID, &event.ActorUserID, &event.ActorDisplayName, &event.Action, &event.ResourceType,
-			&event.ResourceID, &metadata, &event.OccurredAt); err != nil {
-			return nil, fmt.Errorf("scan system audit event: %w", err)
+			&event.ResourceID, &metadata, &event.OccurredAt, &sortKey); err != nil {
+			return AuditPage{}, fmt.Errorf("scan system audit event: %w", err)
 		}
 		if err := json.Unmarshal([]byte(metadata), &event.Metadata); err != nil {
 			event.Metadata = map[string]any{"decodeError": true}
 		}
 		events = append(events, event)
+		sortKeys = append(sortKeys, sortKey)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate system audit events: %w", err)
+		return AuditPage{}, fmt.Errorf("iterate system audit events: %w", err)
 	}
-	return events, nil
+	page := AuditPage{Items: events}
+	if len(events) > input.Limit {
+		page.Items = events[:input.Limit]
+		last := page.Items[len(page.Items)-1]
+		page.NextCursor, err = tablequery.EncodeCursor(fingerprint, input.Sort, input.Direction, sortKeys[input.Limit-1], last.ID)
+		if err != nil {
+			return AuditPage{}, err
+		}
+	}
+	return page, nil
 }

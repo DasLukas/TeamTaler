@@ -39,17 +39,23 @@ func TestGroupSettingsDefaultAuthorizationPersistenceAndAudit(t *testing.T) {
 	if err != nil || settings.NotificationEmailsEnabled || settings.SettlementsEnabled || settings.DefaultRoleID == nil || *settings.DefaultRoleID != guestRoleID {
 		t.Fatalf("default settings=%#v err=%v", settings, err)
 	}
-	if !settings.ForeignBookingReasonRequired || !settings.OwnPaymentReasonRequired || settings.OtherPaymentReasonRequired || len(settings.PaymentMethods) != 4 {
+	if !settings.ForeignBookingReasonRequired || !settings.OwnPaymentReasonRequired || settings.OtherPaymentReasonRequired || len(settings.PaymentMethods) != 5 {
 		t.Fatalf("default transaction settings=%#v", settings)
 	}
 	if settings.OwnBookingReasonMode != domain.ReasonModeOff || settings.ForeignBookingReasonMode != domain.ReasonModeRequired ||
 		settings.OwnPaymentReasonMode != domain.ReasonModeRequired || settings.OtherPaymentReasonMode != domain.ReasonModeOptional {
 		t.Fatalf("default reason modes=%#v", settings)
 	}
-	wantDefaultMethods := []string{"BANK_TRANSFER", "CASH", "PAYPAL", "OTHER"}
+	wantDefaultMethods := []domain.PaymentMethod{
+		{ID: "BANK_TRANSFER", Label: "Bank transfer", AttachmentMode: domain.AttachmentModeOff},
+		{ID: "SHOPPING", Label: "Shopping", AttachmentMode: domain.AttachmentModeRequired},
+		{ID: "CASH", Label: "Cash", AttachmentMode: domain.AttachmentModeOff},
+		{ID: "PAYPAL", Label: "PayPal", AttachmentMode: domain.AttachmentModeOff},
+		{ID: "OTHER", Label: "Other", AttachmentMode: domain.AttachmentModeOptional},
+	}
 	for index, method := range settings.PaymentMethods {
-		if method.ID != wantDefaultMethods[index] {
-			t.Fatalf("default payment method %d=%#v, want id %s", index, method, wantDefaultMethods[index])
+		if method != wantDefaultMethods[index] {
+			t.Fatalf("default payment method %d=%#v, want %#v", index, method, wantDefaultMethods[index])
 		}
 	}
 
@@ -140,7 +146,7 @@ func TestTransactionSettingsAreOrderedEditableAndRequireOnePaymentMethod(t *test
 	ownPaymentReasonRequired := false
 	otherPaymentReasonRequired := true
 	ownBookingReasonMode := domain.ReasonModeOptional
-	paymentMethods := []domain.ConfigurableItem{{ID: "CARD", Label: "Card"}, {ID: "CASH", Label: "Cash desk"}}
+	paymentMethods := []domain.PaymentMethod{{ID: "CARD", Label: "Card"}, {ID: "CASH", Label: "Cash desk"}}
 	bookingReasons := []domain.ConfigurableItem{{ID: "TEAM", Label: "Team event"}, {ID: "TRAVEL", Label: "Travel"}}
 	paymentReasons := []domain.ConfigurableItem{{ID: "MONTHLY", Label: "Monthly settlement"}}
 	updated, err := service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{
@@ -169,11 +175,11 @@ func TestTransactionSettingsAreOrderedEditableAndRequireOnePaymentMethod(t *test
 	if err != nil || operational.SettlementsEnabled || len(operational.BookingReasons) != 2 || operational.BookingReasons[0].ID != "TEAM" || operational.PaymentReasons[0].ID != "MONTHLY" {
 		t.Fatalf("operational transaction settings=%#v err=%v", operational, err)
 	}
-	empty := []domain.ConfigurableItem{}
+	empty := []domain.PaymentMethod{}
 	if _, err := service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{PaymentMethods: &empty}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("empty payment methods error=%v, want validation", err)
 	}
-	duplicates := []domain.ConfigurableItem{{ID: "ONE", Label: "Card"}, {ID: "TWO", Label: "card"}}
+	duplicates := []domain.PaymentMethod{{ID: "ONE", Label: "Card"}, {ID: "TWO", Label: "card"}}
 	if _, err := service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{PaymentMethods: &duplicates}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("duplicate payment methods error=%v, want validation", err)
 	}

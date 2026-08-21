@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from '@/app/App';
+import { registerWebPushServiceWorker, supportsWebPush } from '@/features/push/webPush';
 import '@/i18n';
 import '@/styles/global.css';
 
@@ -12,3 +13,5 @@ createRoot(rootElement).render(
     <App />
   </StrictMode>,
 );
+
+if (supportsWebPush()) void registerWebPushServiceWorker().catch(() => undefined);

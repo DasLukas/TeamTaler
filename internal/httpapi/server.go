@@ -30,9 +30,11 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/finance"
 	"github.com/DasLukas/TeamTaler/internal/groups"
 	"github.com/DasLukas/TeamTaler/internal/notifications"
+	"github.com/DasLukas/TeamTaler/internal/paymentattachments"
 	"github.com/DasLukas/TeamTaler/internal/periods"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	systemadmin "github.com/DasLukas/TeamTaler/internal/system"
+	webpushservice "github.com/DasLukas/TeamTaler/internal/webpush"
 )
 
 const (
@@ -49,20 +51,22 @@ const systemSettingsKey contextKey = "system-settings"
 // Use New to construct it; fields intentionally remain private so middleware and
 // authorization cannot be bypassed by external packages.
 type Server struct {
-	config           config.Config
-	db               *sql.DB
-	auth             auth.Service
-	groups           groups.Service
-	catalog          catalog.Service
-	bookings         bookings.Service
-	finance          finance.Service
-	periods          periods.Service
-	notifications    notifications.Service
-	systemAdmin      systemadmin.Service
-	systemConfigured bool
-	loginLimiter     *loginLimiter
-	passwordSlots    chan struct{}
-	logger           *slog.Logger
+	config            config.Config
+	db                *sql.DB
+	auth              auth.Service
+	groups            groups.Service
+	catalog           catalog.Service
+	bookings          bookings.Service
+	finance           finance.Service
+	periods           periods.Service
+	notifications     notifications.Service
+	systemAdmin       systemadmin.Service
+	pushSubscriptions *webpushservice.SubscriptionService
+	pushSender        *webpushservice.Sender
+	systemConfigured  bool
+	loginLimiter      *loginLimiter
+	passwordSlots     chan struct{}
+	logger            *slog.Logger
 }
 
 // New builds a hardened same-origin handler from cfg, db, and an optional logger.
@@ -92,28 +96,62 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 		}
 		smtpPasswordCipher = cipher
 	}
-	systemService, err := systemadmin.NewService(db, systemadmin.DefaultsFromConfig(cfg), smtpPasswordCipher)
+	var pushSecrets *webpushservice.Secrets
+	var systemOptions []systemadmin.ServiceOption
+	if len(cfg.PushStorageKey) == 32 {
+		secrets, err := webpushservice.NewSecrets(cfg.PushStorageKey)
+		if err != nil {
+			panic(fmt.Sprintf("configure Web Push secret encryption: %v", err))
+		}
+		pushSecrets = secrets
+		systemOptions = append(systemOptions, systemadmin.WithWebPushSecretCipher(secrets))
+	}
+	systemService, err := systemadmin.NewService(db, systemadmin.DefaultsFromConfig(cfg), smtpPasswordCipher, systemOptions...)
 	if err != nil {
 		panic(fmt.Sprintf("configure system administration: %v", err))
 	}
 	emailInfrastructureAvailable := len(cfg.EmailTokenKey) == 32
 	groupService := groups.Service{DB: db, TokenSealer: tokenSealer, TokenOpener: tokenOpener, EmailDeliveryAvailable: emailInfrastructureAvailable}
-	notificationService := notifications.Service{DB: db, EmailDeliveryAvailable: emailInfrastructureAvailable}
+	notificationService := notifications.Service{
+		DB: db, EmailDeliveryAvailable: emailInfrastructureAvailable, PushDeliveryAvailable: pushSecrets != nil,
+	}
+	notificationService.ResolveChannelAvailability = func(ctx context.Context, tx *sql.Tx) (notifications.ChannelAvailability, error) {
+		availability, err := systemService.ResolveNotificationChannelsTx(ctx, tx)
+		if err != nil {
+			return notifications.ChannelAvailability{}, err
+		}
+		return notifications.ChannelAvailability{
+			EmailAvailable: emailInfrastructureAvailable && availability.EmailActive,
+			PushAvailable:  pushSecrets != nil && availability.WebPushActive,
+			PushKeyID:      availability.WebPushKeyID,
+		}, nil
+	}
+	var pushSubscriptions *webpushservice.SubscriptionService
+	var pushSender *webpushservice.Sender
+	if pushSecrets != nil {
+		pushSubscriptions, err = webpushservice.NewSubscriptionService(db, pushSecrets, nil)
+		if err != nil {
+			panic(fmt.Sprintf("configure Web Push subscriptions: %v", err))
+		}
+		pushSender = webpushservice.NewSender(nil)
+	}
 	server := &Server{
-		config:           cfg,
-		db:               db,
-		auth:             auth.Service{DB: db, SessionLifetime: cfg.SessionLifetime, TokenSealer: tokenSealer, EmailDeliveryAvailable: emailInfrastructureAvailable},
-		groups:           groupService,
-		catalog:          catalog.Service{DB: db},
-		bookings:         bookings.Service{DB: db, Groups: groupService, Notifications: notificationService},
-		finance:          finance.Service{DB: db, Notifications: notificationService},
-		periods:          periods.Service{DB: db, Notifications: notificationService},
-		notifications:    notificationService,
-		systemAdmin:      systemService,
-		systemConfigured: true,
-		loginLimiter:     newLoginLimiter(),
-		passwordSlots:    make(chan struct{}, 2),
-		logger:           logger,
+		config:            cfg,
+		db:                db,
+		auth:              auth.Service{DB: db, SessionLifetime: cfg.SessionLifetime, TokenSealer: tokenSealer, EmailDeliveryAvailable: emailInfrastructureAvailable},
+		groups:            groupService,
+		catalog:           catalog.Service{DB: db},
+		bookings:          bookings.Service{DB: db, Groups: groupService, Notifications: notificationService},
+		finance:           finance.Service{DB: db, Notifications: notificationService, Attachments: paymentattachments.Store{DataDirectory: cfg.DataDirectory}},
+		periods:           periods.Service{DB: db, Notifications: notificationService},
+		notifications:     notificationService,
+		systemAdmin:       systemService,
+		pushSubscriptions: pushSubscriptions,
+		pushSender:        pushSender,
+		systemConfigured:  true,
+		loginLimiter:      newLoginLimiter(),
+		passwordSlots:     make(chan struct{}, 2),
+		logger:            logger,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", server.handleLive)
@@ -130,11 +168,16 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("PATCH /api/v1/me/profile", server.handleUpdateProfile)
 	mux.HandleFunc("PUT /api/v1/me/group-preference", server.handleUpdateDefaultGroup)
 	mux.HandleFunc("PUT /api/v1/me/group-preference/last-used", server.handleRecordLastUsedGroup)
+	mux.HandleFunc("GET /api/v1/me/notifications/{notificationID}/destination", server.handleResolveNotificationDestination)
 	mux.HandleFunc("PUT /api/v1/me/password", server.handleChangePassword)
 	mux.HandleFunc("POST /api/v1/me/email-change", server.handleStartEmailChange)
 	mux.HandleFunc("GET /api/v1/permission-definitions", server.handlePermissionDefinitions)
 	mux.HandleFunc("POST /api/v1/me/avatar", server.handleProfileAvatar)
 	mux.HandleFunc("DELETE /api/v1/me/avatar", server.handleRemoveProfileAvatar)
+	mux.HandleFunc("GET /api/v1/me/push-subscriptions", server.handleListPushSubscriptions)
+	mux.HandleFunc("POST /api/v1/me/push-subscriptions", server.handleRegisterPushSubscription)
+	mux.HandleFunc("PATCH /api/v1/me/push-subscriptions/{subscriptionID}", server.handleRenamePushSubscription)
+	mux.HandleFunc("DELETE /api/v1/me/push-subscriptions/{subscriptionID}", server.handleDeletePushSubscription)
 	mux.HandleFunc("GET /api/v1/users/{userID}/avatar/{imageKey}", server.handleUserAvatar)
 	mux.HandleFunc("POST /api/v1/invitations/preview", server.handlePreviewInvitation)
 	mux.HandleFunc("POST /api/v1/invitations/accept", server.handleAcceptInvitation)
@@ -151,6 +194,10 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("PUT /api/v1/system/settings/smtp", server.handleUpdateSystemSMTP)
 	mux.HandleFunc("DELETE /api/v1/system/settings/smtp", server.handleResetSystemSMTP)
 	mux.HandleFunc("POST /api/v1/system/settings/smtp/test", server.handleTestSystemSMTP)
+	mux.HandleFunc("PUT /api/v1/system/settings/web-push", server.handleUpdateSystemWebPush)
+	mux.HandleFunc("DELETE /api/v1/system/settings/web-push", server.handleResetSystemWebPush)
+	mux.HandleFunc("POST /api/v1/system/settings/web-push/generate-key", server.handleGenerateSystemWebPushKey)
+	mux.HandleFunc("POST /api/v1/system/settings/web-push/test", server.handleTestSystemWebPush)
 	mux.HandleFunc("GET /api/v1/system/administrators", server.handleListSystemAdministrators)
 	mux.HandleFunc("GET /api/v1/system/accounts", server.handleSearchSystemAccounts)
 	mux.HandleFunc("GET /api/v1/system/groups", server.handleListSystemGroups)
@@ -162,9 +209,14 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /api/v1/system/groups/{groupID}/invitation/resend", server.handleResendSystemGroupInvitation)
 	mux.HandleFunc("POST /api/v1/system/groups/{groupID}/purge", server.handlePurgeSystemGroup)
 	mux.HandleFunc("GET /api/v1/system/audit", server.handleSystemAudit)
+	mux.HandleFunc("GET /api/v1/system/audit/filter-options", server.handleSystemAuditFilterOptions)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}", server.handleUpdateGroup)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/settings", server.handleGetGroupSettings)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/settings", server.handleUpdateGroupSettings)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/notification-settings", server.handleGetGroupNotificationSettings)
+	mux.HandleFunc("PUT /api/v1/groups/{groupID}/notification-settings", server.handleUpdateGroupNotificationSettings)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/notification-preferences", server.handleGetNotificationPreferences)
+	mux.HandleFunc("PUT /api/v1/groups/{groupID}/notification-preferences", server.handleUpdateNotificationPreferences)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/transaction-settings", server.handleGetTransactionSettings)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/logo", server.handleGroupLogo)
 	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/logo", server.handleRemoveGroupLogo)
@@ -211,11 +263,13 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/bookings/bulk", server.handleCreateBookingBulk)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/bookings/{bookingID}/void", server.handleVoidBooking)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/accounts", server.handleListAccounts)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/accounts/me/movements", server.handleOwnAccountMovements)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/accounts/me", server.handleOwnAccount)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/accounts/{membershipID}", server.handleMemberAccount)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/payments", server.handleListPayments)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/payments", server.handleCreatePayment)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/payments/self", server.handleCreateOwnPayment)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/payments/{paymentID}/attachment", server.handlePaymentAttachment)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/payments/{paymentID}/reverse", server.handleReversePayment)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/periods", server.handleListPeriods)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/periods/{periodID}/close", server.handleClosePeriod)
@@ -226,6 +280,7 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/notifications/read", server.handleMarkNotificationsRead)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/notifications/{notificationID}", server.handleUpdateNotification)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/audit", server.handleAudit)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/audit/filter-options", server.handleAuditFilterOptions)
 	mux.HandleFunc("/api/", func(response http.ResponseWriter, request *http.Request) {
 		writeProblem(response, request, domain.ErrNotFound)
 	})
@@ -366,7 +421,13 @@ func (s *Server) originCheck(next http.Handler) http.Handler {
 func (s *Server) limitBody(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		limit := s.config.MaxRequestBytes
-		if isMediaUploadRequest(request) {
+		if isPaymentAttachmentRequest(request) {
+			if settings, loaded := effectiveSystemSettings(request); loaded {
+				limit = settings.AttachmentUploadMaxBytes.Value + systemadmin.MultipartRequestReserveBytes
+			} else {
+				limit = config.DefaultAttachmentUploadBytes + config.MultipartRequestReserve
+			}
+		} else if isMediaUploadRequest(request) {
 			if settings, loaded := effectiveSystemSettings(request); loaded {
 				limit = settings.MediaUploadMaxBytes.Value + systemadmin.MultipartRequestReserveBytes
 			} else {
@@ -376,6 +437,17 @@ func (s *Server) limitBody(next http.Handler) http.Handler {
 		request.Body = http.MaxBytesReader(response, request.Body, limit)
 		next.ServeHTTP(response, request)
 	})
+}
+
+func isPaymentAttachmentRequest(request *http.Request) bool {
+	if request.Method != http.MethodPost {
+		return false
+	}
+	segments := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
+	if len(segments) == 5 {
+		return segments[0] == "api" && segments[1] == "v1" && segments[2] == "groups" && segments[4] == "payments"
+	}
+	return len(segments) == 6 && segments[0] == "api" && segments[1] == "v1" && segments[2] == "groups" && segments[4] == "payments" && segments[5] == "self"
 }
 
 // isMediaUploadRequest identifies the three multipart routes whose request
@@ -412,11 +484,11 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 			response.Header().Set("Cache-Control", "no-store")
 			response.Header().Add("Vary", "Cookie")
 		}
-		response.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")
+		response.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")
 		response.Header().Set("Referrer-Policy", "no-referrer")
 		response.Header().Set("X-Content-Type-Options", "nosniff")
 		response.Header().Set("X-Frame-Options", "DENY")
-		response.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
+		response.Header().Set("Permissions-Policy", "camera=(self), microphone=(), geolocation=(), payment=()")
 		if s.config.SecureCookies {
 			response.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}
@@ -587,7 +659,8 @@ func (filesystem spaFileSystem) Open(name string) (http.File, error) {
 // spaHandler serves build assets from directory through net/http's constrained
 // file-server abstraction and returns index.html for extensionless React routes.
 // Only GET and HEAD are accepted. Hashed /assets files receive immutable caching,
-// other concrete files revalidate hourly, and the SPA shell is never cached.
+// other concrete files revalidate hourly, and the SPA shell and root-scoped
+// service worker are never cached.
 func spaHandler(directory string) http.Handler {
 	files := http.FileServer(spaFileSystem{root: http.Dir(directory)})
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
@@ -596,7 +669,10 @@ func spaHandler(directory string) http.Handler {
 			return
 		}
 		response.Header().Set("Cache-Control", "no-cache")
-		if strings.HasPrefix(request.URL.Path, "/assets/") && path.Ext(request.URL.Path) != "" {
+		if request.URL.Path == "/service-worker.js" {
+			response.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+			response.Header().Set("Service-Worker-Allowed", "/")
+		} else if strings.HasPrefix(request.URL.Path, "/assets/") && path.Ext(request.URL.Path) != "" {
 			response.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		} else if path.Ext(request.URL.Path) != "" && path.Base(request.URL.Path) != "index.html" {
 			response.Header().Set("Cache-Control", "public, max-age=3600, must-revalidate")

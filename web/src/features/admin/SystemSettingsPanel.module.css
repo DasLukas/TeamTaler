@@ -96,37 +96,14 @@
 .error { color: var(--color-red-600); }
 .success { color: var(--color-green-600); }
 
-.smtpFooter {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-5);
-}
-
 .smtpStatus {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-muted);
+  gap: var(--space-2);
 }
 
-.smtpStatus > span {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 2px;
-}
-.smtpStatus small { color: var(--color-muted); }
-.smtpStatus svg { flex: 0 0 auto; color: var(--color-muted); }
-.smtpStatus[data-status='verified'] { background: var(--color-green-100); }
-.smtpStatus[data-status='verified'] svg,
-.smtpStatus[data-status='verified'] strong { color: var(--color-green-600); }
-.smtpStatus[data-status='failed'] { background: var(--color-red-100); }
-.smtpStatus[data-status='failed'] svg,
-.smtpStatus[data-status='failed'] strong { color: var(--color-red-600); }
+.smtpStatus[data-status='failed'] { color: var(--color-red-600); }
 
 .subsection {
   display: grid;
@@ -206,8 +183,8 @@
 }
 
 .compactImpact {
-  grid-template-columns: repeat(3, auto);
-  justify-self: center;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .groupActions { justify-self: end; }
@@ -219,20 +196,27 @@
   min-width: 0;
   gap: 2px;
 }
+.compactImpact div {
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--space-2);
+}
 .compactImpact dt,
 .impact dt { color: var(--color-muted); font-size: var(--font-size-xs); }
 .compactImpact dd,
 .impact dd { margin: 0; font-weight: 700; }
+.compactImpact dd { overflow-wrap: anywhere; }
 
-.purgeDialog { width: min(94vw, 720px); }
+.activeStatus {
+  display: block;
+  color: var(--color-green-600);
+}
 
 .purgeForm {
   display: grid;
   gap: var(--space-5);
   padding: var(--space-2) var(--space-6) var(--space-6);
 }
-
-.invitationDialog { width: min(96vw, 980px); }
 
 .dangerNotice {
   display: flex;
@@ -314,10 +298,8 @@
 }
 
 @media (max-width: 1050px) {
-  .purgeDialog { width: 100%; }
   .createGroup { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .groupCard { grid-template-columns: 1fr; }
-  .compactImpact { justify-self: start; }
   .groupActions { justify-self: end; justify-content: flex-end; }
 }
 
@@ -328,11 +310,8 @@
   .actions { align-items: stretch; flex-direction: column-reverse; }
   .actions button { width: 100%; }
   .toggleRow,
-  .smtpStatus,
   .adminList li { align-items: flex-start; }
   .adminList li { flex-direction: column; gap: var(--space-1); }
-  .smtpFooter { align-items: stretch; flex-direction: column; }
-  .compactImpact { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .groupActions {
     width: 100%;
     padding-top: var(--space-2);
@@ -349,16 +328,4 @@
   .confirmationPanel { padding: var(--space-4); }
 
   .impact { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-
-@media (max-width: 360px) {
-  .compactImpact {
-    width: 100%;
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .compactImpact div {
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-  }
 }

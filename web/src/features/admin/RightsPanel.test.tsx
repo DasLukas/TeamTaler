@@ -148,9 +148,9 @@ describe('RightsPanel role definitions', () => {
     mocks.getRoles.mockResolvedValue([{ ...baseRole, id: 'role-admin', presetKey: 'GROUP_ADMINISTRATOR', name: 'Group administrator', nameLocked: true }]);
     renderPanel();
 
-    expect(await screen.findByLabelText('Rollenname')).toHaveValue('Group administrator');
+    expect(await screen.findByLabelText('Rollenname')).toHaveValue('Gruppenadministrator');
     expect(screen.getByLabelText('Rollenname')).toBeDisabled();
-    expect(screen.getByRole('heading', { name: 'Group administrator' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Gruppenadministrator' })).toBeVisible();
     expect(screen.queryByText('Der Name dieser Sicherheitsrolle ist unveränderlich.')).not.toBeInTheDocument();
     expect(screen.queryByText('Vordefiniert')).not.toBeInTheDocument();
   });

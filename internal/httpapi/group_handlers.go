@@ -131,7 +131,7 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		ForeignBookingReasonRequired *bool                      `json:"foreignBookingReasonRequired"`
 		OwnPaymentReasonRequired     *bool                      `json:"ownPaymentReasonRequired"`
 		OtherPaymentReasonRequired   *bool                      `json:"otherPaymentReasonRequired"`
-		PaymentMethods               *[]domain.ConfigurableItem `json:"paymentMethods"`
+		PaymentMethods               *[]domain.PaymentMethod    `json:"paymentMethods"`
 		BookingReasons               *[]domain.ConfigurableItem `json:"bookingReasons"`
 		PaymentReasons               *[]domain.ConfigurableItem `json:"paymentReasons"`
 	}
@@ -515,10 +515,30 @@ func (s *Server) handleAudit(response http.ResponseWriter, request *http.Request
 		writeProblem(response, request, err)
 		return
 	}
-	items, err := audit.List(request.Context(), s.db, membership.GroupID, queryLimit(request))
+	query := auditTableQuery(request)
+	page, err := audit.Query(request.Context(), s.db, membership.GroupID, query)
 	if err != nil {
 		writeProblem(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusOK, items)
+	writeTablePageHeaders(response, page.NextCursor, query.Limit)
+	writeJSON(response, http.StatusOK, page.Items)
+}
+
+func (s *Server) handleAuditFilterOptions(response http.ResponseWriter, request *http.Request) {
+	_, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	if err := authorization.Require(request.Context(), s.db, membership.GroupID, membership.ID, domain.PermissionGroupAdministration, authorization.GroupResource(membership.GroupID)); err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	options, err := audit.ListFilterOptions(request.Context(), s.db, membership.GroupID)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, options)
 }

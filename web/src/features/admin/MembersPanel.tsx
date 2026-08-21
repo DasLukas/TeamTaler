@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { SortingState } from '@tanstack/react-table';
 import type { TFunction } from 'i18next';
 import CircleCheck from 'lucide-react/dist/esm/icons/circle-check';
 import Copy from 'lucide-react/dist/esm/icons/copy';
@@ -13,7 +14,7 @@ import UserMinus from 'lucide-react/dist/esm/icons/user-minus';
 import UserRoundPlus from 'lucide-react/dist/esm/icons/user-round-plus';
 import QrCode from 'lucide-react/dist/esm/icons/qr-code';
 import X from 'lucide-react/dist/esm/icons/x';
-import { useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
+import { useId, useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, ApiError } from '@/api/client';
 import type {
@@ -31,13 +32,15 @@ import { can } from '@/app/permissions';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
+import { ConfirmationDialog } from '@/components/ui/ConfirmationDialog';
 import { Field, TextInput } from '@/components/ui/FormField';
-import { InvitationReady } from '@/components/ui/InvitationReady';
+import { InvitationReady, InvitationReadyFooter } from '@/components/ui/InvitationReady';
 import { ItemAction } from '@/components/ui/ItemAction';
-import { Modal } from '@/components/ui/Modal';
+import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { StatePanel } from '@/components/ui/StatePanel';
+import { DataTable, type DataTableColumnDef } from '@/features/shared/DataTable';
 import tableStyles from '@/features/shared/Table.module.css';
-import { useMediaQuery } from '@/hooks/useMediaQuery';
+import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
 import { RoleAssignmentPicker } from './RoleAssignmentPicker';
 import { RoleMultiSelect } from './RoleMultiSelect';
 import { PublicJoinLinkDialog } from './PublicJoinLinkDialog';
@@ -58,9 +61,104 @@ interface DeliverySummary {
   failed: number;
 }
 
+interface MemberCollectionTableProps {
+  ariaLabel: string;
+  emptyContent: ReactNode;
+  members: Membership[];
+  minTableWidth: string;
+  renderActions?: (member: Membership) => ReactNode;
+  renderRoles?: (member: Membership) => ReactNode;
+  roleNamesById?: ReadonlyMap<string, string>;
+}
+
 const MAX_CSV_BYTES = 256 * 1024;
 const DELIVERY_POLL_INTERVAL_MS = 1_200;
 const ACTIVE_DELIVERY_STATUSES = new Set<EmailDeliveryStatus>(['PENDING', 'SENDING']);
+const MEMBER_COLLATOR = new Intl.Collator('de-DE', { numeric: true, sensitivity: 'base' });
+const ignoreMemberSearch = () => undefined;
+
+/**
+ * Compares resolved table values with German, case-insensitive, numeric-aware collation.
+ *
+ * @param rowA - First TanStack row exposing resolved cell values.
+ * @param rowB - Second TanStack row exposing resolved cell values.
+ * @param columnId - Column whose accessor values should be compared.
+ * @returns A negative, zero, or positive locale comparison result.
+ */
+const sortMemberText = (rowA: { getValue: (columnId: string) => unknown }, rowB: { getValue: (columnId: string) => unknown }, columnId: string) => MEMBER_COLLATOR.compare(String(rowA.getValue(columnId) ?? ''), String(rowB.getValue(columnId) ?? ''));
+
+/**
+ * Renders one complete member collection with accessible local sorting and shared horizontal overflow feedback.
+ *
+ * @param props - Members, optional role/action cells, accessible copy, and the desktop table width.
+ * @returns A compact TanStack table without search, filters, or duplicate result feedback.
+ */
+function MemberCollectionTable({ ariaLabel, emptyContent, members, minTableWidth, renderActions, renderRoles, roleNamesById }: MemberCollectionTableProps) {
+  const { t } = useTranslation();
+  const labels = useDataTableLabels();
+  const [sorting, setSorting] = useState<SortingState>([]);
+  const columns = useMemo<DataTableColumnDef<Membership>[]>(() => {
+    const definitions: DataTableColumnDef<Membership>[] = [
+      {
+        accessorKey: 'displayName',
+        cell: ({ row }) => <span className={styles.member}><Avatar decorative name={row.original.displayName} src={row.original.avatarUrl} /> <span className={styles.memberName}><strong>{row.original.displayName}</strong>{isTemporaryGuest(row.original) ? <span className={styles.guestBadge}>{t('members.temporaryGuestBadge')}</span> : null}</span></span>,
+        enableSorting: true,
+        header: t('common.member'),
+        id: 'displayName',
+        meta: { label: t('common.member') },
+        sortFn: sortMemberText,
+      },
+      {
+        accessorFn: (member) => member.email ?? '',
+        cell: ({ row }) => row.original.email,
+        enableSorting: true,
+        header: t('members.email'),
+        id: 'email',
+        meta: { label: t('members.email') },
+        sortFn: sortMemberText,
+      },
+    ];
+    if (renderRoles) definitions.push({
+      accessorFn: (member) => (member.roleIds ?? []).map((roleId) => roleNamesById?.get(roleId) ?? '').filter(Boolean).sort(MEMBER_COLLATOR.compare).join(', '),
+      cell: ({ row }) => {
+        const content = renderRoles(row.original);
+        return content ? <div className={styles.roleCell}>{content}</div> : null;
+      },
+      enableSorting: true,
+      header: t('members.roles'),
+      id: 'roles',
+      meta: { label: t('members.roles') },
+      sortFn: sortMemberText,
+    });
+    if (renderActions) definitions.push({
+      cell: ({ row }) => <div className={styles.tableActions}>{renderActions(row.original)}</div>,
+      enableSorting: false,
+      header: () => <span className="sr-only">{t('common.action')}</span>,
+      id: 'actions',
+      meta: { align: 'end', label: t('common.action') },
+    });
+    return definitions;
+  }, [renderActions, renderRoles, roleNamesById, t]);
+
+  return (
+    <DataTable
+      ariaLabel={ariaLabel}
+      columns={columns}
+      data={members}
+      emptyContent={emptyContent}
+      getRowId={(member) => member.id}
+      labels={labels}
+      manualSorting={false}
+      minTableWidth={minTableWidth}
+      onSearchChange={ignoreMemberSearch}
+      onSortingChange={setSorting}
+      searchValue=""
+      showControls={false}
+      showResultBar={false}
+      sorting={sorting}
+    />
+  );
+}
 
 /**
  * Determines whether a membership still represents a temporary guest.
@@ -214,6 +312,7 @@ function renderInvitationDeliveryBadge(status: EmailDeliveryStatus, t: TFunction
 function MemberImportDialog({ activeGroupId, defaultRole, onClose }: MemberImportDialogProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  const formId = useId();
   const [selectedFile, setSelectedFile] = useState<File>();
   const [fileError, setFileError] = useState('');
   const importMutation = useMutation({
@@ -299,7 +398,7 @@ function MemberImportDialog({ activeGroupId, defaultRole, onClose }: MemberImpor
   };
 
   return (
-    <Modal className={styles.importDialog} onClose={onClose} open title={t('members.csvImport.title')}>
+    <Modal onClose={onClose} open size="workspace" title={t('members.csvImport.title')} variant="sheet">
       {result ? (
         <div className={styles.importResults}>
           <section aria-live="polite" className={styles.importSummary} role="status">
@@ -350,10 +449,10 @@ function MemberImportDialog({ activeGroupId, defaultRole, onClose }: MemberImpor
               })}</tbody>
             </table>
           </div>
-          <div className={styles.actions}><Button leadingIcon={<FileUp size={17} />} onClick={startAnotherImport} variant="secondary">{t('members.csvImport.importAnother')}</Button><Button leadingIcon={<CircleCheck size={17} />} onClick={onClose}>{t('common.done')}</Button></div>
+          <ModalFooter><div className={styles.actions}><Button leadingIcon={<FileUp size={17} />} onClick={startAnotherImport} variant="secondary">{t('members.csvImport.importAnother')}</Button><Button leadingIcon={<CircleCheck size={17} />} onClick={onClose}>{t('common.done')}</Button></div></ModalFooter>
         </div>
       ) : (
-        <form className={styles.importForm} onSubmit={submitImport}>
+        <form className={styles.importForm} id={formId} onSubmit={submitImport}>
           <div className={styles.importIntro}>
             <p>{t('members.csvImport.intro')}</p>
             <p>{t('members.csvImport.membershipNotice')}</p>
@@ -368,7 +467,7 @@ function MemberImportDialog({ activeGroupId, defaultRole, onClose }: MemberImpor
           </Field>
           {selectedFile ? <p className={styles.selectedFile} role="status">{t('members.csvImport.selectedFile', { name: selectedFile.name })}</p> : null}
           {importMutation.isError ? <p className={styles.error} role="alert">{t('members.csvImport.requestError', { message: importMutation.error.message })}</p> : null}
-          <div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={onClose} variant="secondary">{t('common.cancel')}</Button><Button disabled={!selectedFile || importMutation.isPending} leadingIcon={<FileUp size={17} />} type="submit">{importMutation.isPending ? t('members.csvImport.pending') : t('members.csvImport.submit')}</Button></div>
+          <ModalFooter><div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={onClose} variant="secondary">{t('common.cancel')}</Button><Button disabled={!selectedFile || importMutation.isPending} form={formId} leadingIcon={<FileUp size={17} />} type="submit">{importMutation.isPending ? t('members.csvImport.pending') : t('members.csvImport.submit')}</Button></div></ModalFooter>
         </form>
       )}
     </Modal>
@@ -387,9 +486,13 @@ export function MembersPanel() {
   const { t } = useTranslation();
   const { activeGroupId, activeGroup, session } = useActiveGroup();
   const queryClient = useQueryClient();
+  const inviteFormId = useId();
+  const editInvitationFormId = useId();
+  const renameGuestFormId = useId();
+  const claimGuestFormId = useId();
+  const reactivateFormId = useId();
   const membersQueryKey = ['members', activeGroupId] as const;
   const invitationQueryKey = ['invitations', activeGroupId] as const;
-  const compact = useMediaQuery('(max-width: 767px)');
   const membersQuery = useQuery({ queryKey: membersQueryKey, queryFn: () => api.getMembers(activeGroupId) });
   const canManageMembers = can(activeGroup.membership?.effectiveGrants, 'MEMBER_MANAGEMENT');
   const canManageProtectedRoles = can(activeGroup.membership?.effectiveGrants, 'GROUP_ADMINISTRATION');
@@ -615,6 +718,7 @@ export function MembersPanel() {
     setDialog('reactivate');
   };
   const roles = rolesQuery.data ?? [];
+  const roleNamesById = new Map(roles.map((role) => [role.id, roleDisplayName(role)]));
   const defaultRole = roles.find((role) => role.id === settingsQuery.data?.defaultRoleId);
   const guestClaimRoleConfigured = Boolean(settingsQuery.data?.defaultRoleId);
   const reservedAdminRole = roles.find((role) => role.presetKey === 'GROUP_ADMINISTRATOR');
@@ -653,23 +757,9 @@ export function MembersPanel() {
       <section className={styles.section}>
         <div className={styles.sectionHeading}><h3>{t('members.openInvitations')}</h3><span>{openInvitations.length}</span></div>
         {openInvitations.length === 0 ? <p className={styles.emptySection}>{t('members.noOpenInvitations')}</p> : (
-          compact ? <div className={styles.mobileCards}>{openInvitations.map((item) => {
-            const expired = Date.parse(item.expiresAt) <= invitationsQuery.dataUpdatedAt;
-            const resendBlocked = ACTIVE_DELIVERY_STATUSES.has(item.emailDeliveryStatus);
-            const claimInvitation = Boolean(item.targetMembershipId);
-            return <article className={styles.mobileCard} key={item.id}>
-              <header className={styles.mobileCardHeader}><div><strong>{item.displayName || item.email}</strong><small>{item.email}</small></div>{renderInvitationDeliveryBadge(item.emailDeliveryStatus, t)}</header>
-              <p className={expired ? styles.expired : styles.mobileMetadata}>{expired ? t('members.expired') : t('members.validUntilDate', { date: new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(item.expiresAt)) })}</p>
-              {claimInvitation ? <p className={styles.temporaryGuestRole}>{t('members.claimInvitationRoleLocked')}</p> : <RoleAssignmentPicker canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} onApply={(roleIds) => applyInvitationRoles(item, roleIds)} roleIds={item.roleIds ?? []} roles={roles} subjectName={item.displayName || item.email} />}
-              {canManageMembers ? <div className={styles.mobileActions}>
-                {!claimInvitation ? <ItemAction aria-label={t('members.editInvitationFor', { email: item.email })} leadingIcon={<Pencil size={16} />} onClick={() => openEdit(item)}>{t('common.edit')}</ItemAction> : null}
-                <ItemAction aria-label={t('members.resendFor', { email: item.email })} disabled={resendBlocked} leadingIcon={<RotateCcw size={16} />} onClick={() => { setSelectedInvitation(item); setResendResult(null); setDialog('resend'); }}>{t('members.resend')}</ItemAction>
-                <ItemAction aria-label={t('members.deleteInvitationFor', { email: item.email })} leadingIcon={<Trash2 size={16} />} onClick={() => { setSelectedInvitation(item); setDialog('revoke'); }}>{t('common.delete')}</ItemAction>
-              </div> : null}
-            </article>;
-          })}</div> : <div className={tableStyles.tableWrap}>
+          <div aria-label={t('members.openInvitations')} className={`${tableStyles.tableWrap} ${styles.tableScrollRegion}`} role="region" tabIndex={0}>
             <table className={tableStyles.table}>
-              <thead><tr><th>{t('common.name')}</th><th>{t('members.email')}</th><th>{t('members.roles')}</th><th>{t('members.delivery')}</th><th>{t('members.validUntil')}</th>{canManageMembers ? <th><span className="sr-only">{t('common.action')}</span></th> : null}</tr></thead>
+              <thead><tr><th scope="col">{t('common.name')}</th><th scope="col">{t('members.email')}</th><th scope="col">{t('members.roles')}</th><th scope="col">{t('members.delivery')}</th><th scope="col">{t('members.validUntil')}</th>{canManageMembers ? <th scope="col"><span className="sr-only">{t('common.action')}</span></th> : null}</tr></thead>
               <tbody>{openInvitations.map((item) => {
                 const expired = Date.parse(item.expiresAt) <= invitationsQuery.dataUpdatedAt;
                 const resendBlocked = ACTIVE_DELIVERY_STATUSES.has(item.emailDeliveryStatus);
@@ -696,61 +786,42 @@ export function MembersPanel() {
 
       <section className={styles.section}>
         <div className={styles.sectionHeading}><h3>{t('members.activeMembers')}</h3><span>{activeMembers.length}</span></div>
-        {compact ? <div className={styles.mobileCards}>{activeMembers.map((member) => {
-          const temporaryGuest = isTemporaryGuest(member);
-          const claimPending = claimInvitationMembershipIds.has(member.id);
-          return <article className={styles.mobileCard} key={member.id}>
-            <header className={styles.mobileCardHeader}><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /><span><span className={styles.memberName}><strong>{member.displayName}</strong>{temporaryGuest ? <span className={styles.guestBadge}>{t('members.temporaryGuestBadge')}</span> : null}</span>{member.email ? <small>{member.email}</small> : null}</span></span></header>
-            {!temporaryGuest ? <RoleAssignmentPicker canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} lockedRoleIds={lockedAdministratorRoleIds(member.roleIds ?? [])} onApply={(roleIds) => applyMemberRoles(member, roleIds)} roleIds={member.roleIds ?? []} roles={roles} subjectName={member.displayName} /> : null}
-            {canManageMembers ? <div className={styles.mobileActions}>
+        <MemberCollectionTable
+          ariaLabel={t('members.activeMembers')}
+          emptyContent={t('members.noActiveMembers')}
+          members={activeMembers}
+          minTableWidth={canManageMembers ? '920px' : '680px'}
+          renderActions={canManageMembers ? (member) => {
+            const temporaryGuest = isTemporaryGuest(member);
+            const claimPending = claimInvitationMembershipIds.has(member.id);
+            return <>
               {temporaryGuest ? <ItemAction aria-label={t('members.renameGuestFor', { name: member.displayName })} leadingIcon={<Pencil size={16} />} onClick={() => openGuestRename(member)}>{t('members.renameGuest')}</ItemAction> : null}
               {temporaryGuest ? renderGuestClaimAction(member, claimPending) : null}
               <ItemAction aria-label={t('members.archiveFor', { name: member.displayName })} leadingIcon={<UserMinus size={16} />} onClick={() => { setSelectedMember(member); setDialog('archive'); }}>{t('members.archive')}</ItemAction>
-            </div> : null}
-          </article>;
-        })}</div> : <div className={tableStyles.tableWrap}>
-          <table className={tableStyles.table}>
-            <thead><tr><th>{t('common.member')}</th><th>{t('members.email')}</th><th>{t('members.roles')}</th>{canManageMembers ? <th><span className="sr-only">{t('common.action')}</span></th> : null}</tr></thead>
-            <tbody>{activeMembers.map((member) => {
-              const temporaryGuest = isTemporaryGuest(member);
-              const claimPending = claimInvitationMembershipIds.has(member.id);
-              return <tr key={member.id}>
-                <td><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /> <span className={styles.memberName}><strong>{member.displayName}</strong>{temporaryGuest ? <span className={styles.guestBadge}>{t('members.temporaryGuestBadge')}</span> : null}</span></span></td>
-                <td>{member.email}</td>
-                <td className={styles.roleCell}>{!temporaryGuest ? <RoleAssignmentPicker canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} lockedRoleIds={lockedAdministratorRoleIds(member.roleIds ?? [])} onApply={(roleIds) => applyMemberRoles(member, roleIds)} roleIds={member.roleIds ?? []} roles={roles} subjectName={member.displayName} /> : null}</td>
-                {canManageMembers ? <td><div className={styles.tableActions}>
-                  {temporaryGuest ? <ItemAction aria-label={t('members.renameGuestFor', { name: member.displayName })} leadingIcon={<Pencil size={16} />} onClick={() => openGuestRename(member)}>{t('members.renameGuest')}</ItemAction> : null}
-                  {temporaryGuest ? renderGuestClaimAction(member, claimPending) : null}
-                  <ItemAction aria-label={t('members.archiveFor', { name: member.displayName })} leadingIcon={<UserMinus size={16} />} onClick={() => { setSelectedMember(member); setDialog('archive'); }}>{t('members.archive')}</ItemAction>
-                </div></td> : null}
-              </tr>;
-            })}</tbody>
-          </table>
-        </div>}
+            </>;
+          } : undefined}
+          renderRoles={(member) => !isTemporaryGuest(member) ? <RoleAssignmentPicker canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} lockedRoleIds={lockedAdministratorRoleIds(member.roleIds ?? [])} onApply={(roleIds) => applyMemberRoles(member, roleIds)} roleIds={member.roleIds ?? []} roles={roles} subjectName={member.displayName} /> : null}
+          roleNamesById={roleNamesById}
+        />
       </section>
 
       {canManageMembers ? <section className={styles.section}>
         <div className={styles.sectionHeading}><h3>{t('members.archivedMembers')}</h3><span>{formerMembers.length}</span></div>
-        {formerMembers.length === 0 ? <p className={styles.emptySection}>{t('members.noArchivedMembers')}</p> : compact ? <div className={styles.mobileCards}>{formerMembers.map((member) => (
-          <article className={styles.mobileCard} key={member.id}>
-            <header className={styles.mobileCardHeader}><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /><span><span className={styles.memberName}><strong>{member.displayName}</strong>{isTemporaryGuest(member) ? <span className={styles.guestBadge}>{t('members.temporaryGuestBadge')}</span> : null}</span>{member.email ? <small>{member.email}</small> : null}</span></span></header>
-            <div className={styles.mobileActions}>
+        {formerMembers.length === 0 ? <p className={styles.emptySection}>{t('members.noArchivedMembers')}</p> : (
+          <MemberCollectionTable
+            ariaLabel={t('members.archivedMembers')}
+            emptyContent={t('members.noArchivedMembers')}
+            members={formerMembers}
+            minTableWidth="680px"
+            renderActions={(member) => <>
               <ItemAction aria-label={t('members.reactivateFor', { name: member.displayName })} leadingIcon={<RotateCcw size={16} />} onClick={() => openReactivation(member)}>{t('members.reactivate')}</ItemAction>
               <ItemAction aria-label={t('members.permanentDeleteFor', { name: member.displayName })} leadingIcon={<Trash2 size={16} />} onClick={() => { setSelectedMember(member); setDialog('permanent-delete'); }}>{t('common.delete')}</ItemAction>
-            </div>
-          </article>
-        ))}</div> : (
-          <div className={tableStyles.tableWrap}><table className={tableStyles.table}>
-            <thead><tr><th>{t('common.member')}</th><th>{t('members.email')}</th><th><span className="sr-only">{t('common.action')}</span></th></tr></thead>
-            <tbody>{formerMembers.map((member) => <tr key={member.id}><td><span className={styles.member}><Avatar decorative name={member.displayName} src={member.avatarUrl} /> <span className={styles.memberName}><strong>{member.displayName}</strong>{isTemporaryGuest(member) ? <span className={styles.guestBadge}>{t('members.temporaryGuestBadge')}</span> : null}</span></span></td><td>{member.email}</td><td><div className={styles.tableActions}>
-              <ItemAction aria-label={t('members.reactivateFor', { name: member.displayName })} leadingIcon={<RotateCcw size={16} />} onClick={() => openReactivation(member)}>{t('members.reactivate')}</ItemAction>
-              <ItemAction aria-label={t('members.permanentDeleteFor', { name: member.displayName })} leadingIcon={<Trash2 size={16} />} onClick={() => { setSelectedMember(member); setDialog('permanent-delete'); }}>{t('common.delete')}</ItemAction>
-            </div></td></tr>)}</tbody>
-          </table></div>
+            </>}
+          />
         )}
       </section> : null}
 
-      <Modal className={styles.permissionDialog} onClose={closeDialog} open={dialog === 'invite'} title={t('members.invite')}>
+      <Modal footer={createdInvitation && invitationDeliveryStatus ? <InvitationReadyFooter onDone={closeDialog} /> : undefined} onClose={closeDialog} open={dialog === 'invite'} size="workspace" title={t('members.invite')} variant="sheet">
         {createdInvitation ? (
           invitationDeliveryStatus ? <InvitationReady
             acceptUrl={createdInvitation.acceptUrl}
@@ -763,10 +834,9 @@ export function MembersPanel() {
             expiresAt={createdInvitation.expiresAt}
             fallbackHint={invitationDeliveryStatus === 'PENDING' || invitationDeliveryStatus === 'SENDING' || invitationDeliveryStatus === 'SENT' ? t('members.fallbackHint') : undefined}
             linkLabel={t('members.invitationLink')}
-            onDone={closeDialog}
           /> : null
         ) : (
-          <form className={styles.form} onSubmit={(event) => { event.preventDefault(); createMutation.mutate(); }}>
+          <form className={styles.form} id={inviteFormId} onSubmit={(event) => { event.preventDefault(); createMutation.mutate(); }}>
             <div className={styles.formGrid}>
               <Field hint={t('members.emailHint')} htmlFor="invitation-email" label={t('auth.email')}><TextInput id="invitation-email" onChange={(event) => setDraft((current) => ({ ...current, email: event.target.value }))} required type="email" value={draft.email} /></Field>
               <Field hint={t('members.displayNameHint')} htmlFor="invitation-display-name" label={t('auth.displayName')}><TextInput id="invitation-display-name" maxLength={120} onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))} value={draft.displayName} /></Field>
@@ -774,26 +844,24 @@ export function MembersPanel() {
             <RoleMultiSelect canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} label={t('roleManagement.invitationRoles')} onChange={(roleIds) => setDraft((current) => ({ ...current, roleIds }))} roleIds={draft.roleIds ?? []} roles={roles} />
             <p className={styles.expiry}>{t('members.expiry')}</p>
             {createMutation.isError ? <p className={styles.error} role="alert">{createMutation.error.message}</p> : null}
-            <div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!draft.email.trim() || (draft.roleIds?.length ?? 0) === 0 || createMutation.isPending} leadingIcon={<MailPlus size={17} />} type="submit">{t('members.createInvitation')}</Button></div>
+            <ModalFooter><div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!draft.email.trim() || (draft.roleIds?.length ?? 0) === 0 || createMutation.isPending} form={inviteFormId} leadingIcon={<MailPlus size={17} />} type="submit">{t('members.createInvitation')}</Button></div></ModalFooter>
           </form>
         )}
       </Modal>
 
-      <Modal className={styles.permissionDialog} onClose={closeDialog} open={dialog === 'edit'} title={t('members.editInvitation')}>
-        <form className={styles.form} onSubmit={(event) => { event.preventDefault(); updateMutation.mutate(); }}>
+      <Modal onClose={closeDialog} open={dialog === 'edit'} size="workspace" title={t('members.editInvitation')} variant="sheet">
+        <form className={styles.form} id={editInvitationFormId} onSubmit={(event) => { event.preventDefault(); updateMutation.mutate(); }}>
           <Field hint={t('members.emailImmutable')} htmlFor="edit-invitation-email" label={t('auth.email')}><TextInput disabled id="edit-invitation-email" value={draft.email} /></Field>
           <Field hint={t('members.displayNameHint')} htmlFor="edit-invitation-display-name" label={t('auth.displayName')}><TextInput id="edit-invitation-display-name" maxLength={120} onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))} value={draft.displayName} /></Field>
           <RoleMultiSelect canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} label={t('roleManagement.invitationRoles')} onChange={(roleIds) => setDraft((current) => ({ ...current, roleIds }))} roleIds={draft.roleIds ?? []} roles={roles} />
           {updateMutation.isError ? <p className={styles.error} role="alert">{updateMutation.error.message}</p> : null}
-          <div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={(draft.roleIds?.length ?? 0) === 0 || updateMutation.isPending} leadingIcon={<Save size={17} />} type="submit">{t('common.save')}</Button></div>
+          <ModalFooter><div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={(draft.roleIds?.length ?? 0) === 0 || updateMutation.isPending} form={editInvitationFormId} leadingIcon={<Save size={17} />} type="submit">{t('common.save')}</Button></div></ModalFooter>
         </form>
       </Modal>
 
-      <Modal onClose={closeDialog} open={dialog === 'revoke'} title={t('members.deleteInvitationTitle')}>
-        <div className={styles.confirmDialog}><p>{t('members.deleteInvitationExplanation', { email: selectedInvitation?.email ?? '' })}</p>{revokeMutation.isError ? <p className={styles.error} role="alert">{revokeMutation.error.message}</p> : null}<div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={revokeMutation.isPending} leadingIcon={<Trash2 size={17} />} onClick={() => revokeMutation.mutate()} variant="danger">{t('common.delete')}</Button></div></div>
-      </Modal>
+      <ConfirmationDialog confirmIcon={<Trash2 size={17} />} confirmLabel={t('common.delete')} errorMessage={revokeMutation.isError ? revokeMutation.error.message : undefined} message={t('members.deleteInvitationExplanation', { email: selectedInvitation?.email ?? '' })} onClose={closeDialog} onConfirm={() => revokeMutation.mutate()} open={dialog === 'revoke'} pending={revokeMutation.isPending} title={t('members.deleteInvitationTitle')} tone="danger" />
 
-      <Modal onClose={closeDialog} open={dialog === 'resend'} title={t('members.resendTitle')}>
+      <Modal footer={resendResult?.acceptUrl ? <InvitationReadyFooter onDone={closeDialog} /> : undefined} onClose={closeDialog} open={dialog === 'resend'} title={t('members.resendTitle')} variant="sheet">
         {resendResult?.acceptUrl ? <InvitationReady
           acceptUrl={resendResult.acceptUrl}
           deliveryStatus={{
@@ -804,34 +872,33 @@ export function MembersPanel() {
           expiresAt={resendResult.expiresAt}
           fallbackHint={t('members.oldLinksInvalid')}
           linkLabel={t('members.invitationLink')}
-          onDone={closeDialog}
         /> : <div className={styles.confirmDialog}>
           <p>{t(settingsQuery.data.notificationEmailDeliveryAvailable ? 'members.resendExplanationEmail' : 'members.resendExplanationManual', { email: selectedInvitation?.email ?? '' })}</p>
           {resendMutation.isError ? <p className={styles.error} role="alert">{resendMutation.error.message}</p> : null}
-          <div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={resendMutation.isPending} leadingIcon={<RotateCcw size={17} />} onClick={() => resendMutation.mutate()}>{t('members.resend')}</Button></div>
+          <ModalFooter><div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={resendMutation.isPending} leadingIcon={<RotateCcw size={17} />} onClick={() => resendMutation.mutate()}>{t('members.resend')}</Button></div></ModalFooter>
         </div>}
       </Modal>
 
-      <Modal onClose={closeDialog} open={dialog === 'rename-guest'} title={t('members.renameGuestTitle')}>
-        <form className={styles.form} onSubmit={(event) => { event.preventDefault(); renameGuestMutation.mutate(); }}>
+      <Modal onClose={closeDialog} open={dialog === 'rename-guest'} title={t('members.renameGuestTitle')} variant="sheet">
+        <form className={styles.form} id={renameGuestFormId} onSubmit={(event) => { event.preventDefault(); renameGuestMutation.mutate(); }}>
           <p className={styles.expiry}>{t('members.renameGuestDescription')}</p>
           <Field hint={t('members.renameGuestHint')} htmlFor="temporary-guest-display-name" label={t('auth.displayName')}>
             <TextInput autoComplete="off" id="temporary-guest-display-name" maxLength={120} onChange={(event) => { setGuestDisplayName(event.target.value); renameGuestMutation.reset(); }} required value={guestDisplayName} />
           </Field>
           {renameGuestMutation.isError ? <p className={styles.error} role="alert">{renameGuestMutation.error.message}</p> : null}
-          <div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!guestDisplayName.trim() || guestDisplayName.trim() === selectedMember?.displayName || renameGuestMutation.isPending} leadingIcon={<Save size={17} />} type="submit">{renameGuestMutation.isPending ? t('members.renameGuestPending') : t('common.save')}</Button></div>
+          <ModalFooter><div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!guestDisplayName.trim() || guestDisplayName.trim() === selectedMember?.displayName || renameGuestMutation.isPending} form={renameGuestFormId} leadingIcon={<Save size={17} />} type="submit">{renameGuestMutation.isPending ? t('members.renameGuestPending') : t('common.save')}</Button></div></ModalFooter>
         </form>
       </Modal>
 
-      <Modal onClose={closeDialog} open={dialog === 'claim-guest'} title={t('members.claimGuestTitle')}>
+      <Modal onClose={closeDialog} open={dialog === 'claim-guest'} title={t('members.claimGuestTitle')} variant="sheet">
         {guestClaimInvitation ? <div className={styles.invitationReady}>
           <MailPlus aria-hidden="true" size={38} />
           <h3>{t('members.claimGuestReadyTitle')}</h3>
           <p>{t('members.claimGuestReadyDescription', { name: selectedMember?.displayName ?? '', email: guestClaimInvitation.email })}</p>
           <p>{t('members.invitationExpiry', { date: new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(guestClaimInvitation.expiresAt)) })}</p>
           {guestClaimInvitation.acceptUrl ? <div className={styles.fallbackLink}><p>{t('members.fallbackHint')}</p><div className={styles.copyRow}><TextInput aria-label={t('members.invitationLink')} readOnly value={guestClaimInvitation.acceptUrl} /><Button leadingIcon={<Copy size={17} />} onClick={() => void navigator.clipboard.writeText(guestClaimInvitation.acceptUrl)} variant="secondary">{t('common.copy')}</Button></div></div> : null}
-          <Button fullWidth leadingIcon={<CircleCheck size={17} />} onClick={closeDialog}>{t('common.done')}</Button>
-        </div> : <form className={styles.form} onSubmit={(event) => { event.preventDefault(); claimGuestMutation.mutate(); }}>
+          <ModalFooter><Button fullWidth leadingIcon={<CircleCheck size={17} />} onClick={closeDialog}>{t('common.done')}</Button></ModalFooter>
+        </div> : <form className={styles.form} id={claimGuestFormId} onSubmit={(event) => { event.preventDefault(); claimGuestMutation.mutate(); }}>
           <p className={styles.expiry}>{t('members.claimGuestDescription', { name: selectedMember?.displayName ?? '' })}</p>
           <Field hint={t('members.claimGuestEmailHint')} htmlFor="temporary-guest-claim-email" label={t('auth.email')}>
             <TextInput autoComplete="email" id="temporary-guest-claim-email" onChange={(event) => { setGuestClaimEmail(event.target.value); claimGuestMutation.reset(); }} required type="email" value={guestClaimEmail} />
@@ -839,32 +906,24 @@ export function MembersPanel() {
           <RoleMultiSelect canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} label={t('roleManagement.memberRoles')} onChange={(roleIds) => { setGuestClaimRoleIds(roleIds); claimGuestMutation.reset(); }} roleIds={guestClaimRoleIds} roles={roles} />
           <p className={styles.claimNotice}>{t('members.claimGuestHistoryNotice')}</p>
           {claimGuestMutation.isError ? <p className={styles.error} role="alert">{claimGuestMutation.error.message}</p> : null}
-          <div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!guestClaimEmail.trim() || guestClaimRoleIds.length === 0 || claimGuestMutation.isPending} leadingIcon={<UserRoundPlus size={17} />} type="submit">{claimGuestMutation.isPending ? t('members.claimGuestPending') : t('members.claimGuestCreate')}</Button></div>
+          <ModalFooter><div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!guestClaimEmail.trim() || guestClaimRoleIds.length === 0 || claimGuestMutation.isPending} form={claimGuestFormId} leadingIcon={<UserRoundPlus size={17} />} type="submit">{claimGuestMutation.isPending ? t('members.claimGuestPending') : t('members.claimGuestCreate')}</Button></div></ModalFooter>
         </form>}
       </Modal>
 
-      <Modal onClose={closeDialog} open={dialog === 'archive'} title={t('members.archiveTitle')}>
-        <div className={styles.confirmDialog}><p>{selectedMember?.userId === session.user.id ? t('members.archiveSelfExplanation') : t('members.archiveExplanation', { name: selectedMember?.displayName ?? '' })}</p>{archiveMutation.isError ? <p className={styles.error} role="alert">{archiveMutation.error.message}</p> : null}<div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={archiveMutation.isPending} leadingIcon={<UserMinus size={17} />} onClick={() => archiveMutation.mutate()} variant="danger">{t('members.archive')}</Button></div></div>
-      </Modal>
+      <ConfirmationDialog confirmIcon={<UserMinus size={17} />} confirmLabel={t('members.archive')} errorMessage={archiveMutation.isError ? archiveMutation.error.message : undefined} message={selectedMember?.userId === session.user.id ? t('members.archiveSelfExplanation') : t('members.archiveExplanation', { name: selectedMember?.displayName ?? '' })} onClose={closeDialog} onConfirm={() => archiveMutation.mutate()} open={dialog === 'archive'} pending={archiveMutation.isPending} title={t('members.archiveTitle')} tone="danger" />
 
-      <Modal onClose={closeDialog} open={dialog === 'reactivate'} title={t('members.reactivateTitle')}>
-        <form className={styles.form} onSubmit={(event) => { event.preventDefault(); reactivateMutation.mutate(); }}>
+      <Modal onClose={closeDialog} open={dialog === 'reactivate'} title={t('members.reactivateTitle')} variant="sheet">
+        <form className={styles.form} id={reactivateFormId} onSubmit={(event) => { event.preventDefault(); reactivateMutation.mutate(); }}>
           <p className={styles.expiry}>{t('members.reactivateExplanation', { name: selectedMember?.displayName ?? '' })}</p>
           {selectedMember && isTemporaryGuest(selectedMember) ? <Field htmlFor="reactivation-display-name" label={t('auth.displayName')}>
             <TextInput id="reactivation-display-name" maxLength={120} onChange={(event) => { setReactivationDisplayName(event.target.value); reactivateMutation.reset(); }} required value={reactivationDisplayName} />
           </Field> : <RoleMultiSelect canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} label={t('roleManagement.memberRoles')} onChange={(roleIds) => { setReactivationRoleIds(roleIds); reactivateMutation.reset(); }} roleIds={reactivationRoleIds} roles={roles} />}
           {reactivateMutation.isError ? <p className={styles.error} role="alert">{reactivateMutation.error.message}</p> : null}
-          <div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={reactivateMutation.isPending || (selectedMember && isTemporaryGuest(selectedMember) ? !reactivationDisplayName.trim() : reactivationRoleIds.length === 0)} leadingIcon={<RotateCcw size={17} />} type="submit">{t('members.reactivate')}</Button></div>
+          <ModalFooter><div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={reactivateMutation.isPending || (selectedMember && isTemporaryGuest(selectedMember) ? !reactivationDisplayName.trim() : reactivationRoleIds.length === 0)} form={reactivateFormId} leadingIcon={<RotateCcw size={17} />} type="submit">{t('members.reactivate')}</Button></div></ModalFooter>
         </form>
       </Modal>
 
-      <Modal onClose={closeDialog} open={dialog === 'permanent-delete'} title={t('members.permanentDeleteTitle')}>
-        <div className={styles.confirmDialog}>
-          <p>{t('members.permanentDeleteExplanation', { name: selectedMember?.displayName ?? '' })}</p>
-          {permanentDeleteMutation.isError ? <p className={styles.error} role="alert">{permanentDeleteMutation.error instanceof ApiError && permanentDeleteMutation.error.problem.status === 409 ? t('members.permanentDeleteBalanceConflict') : permanentDeleteMutation.error.message}</p> : null}
-          <div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={permanentDeleteMutation.isPending} leadingIcon={<Trash2 size={17} />} onClick={() => permanentDeleteMutation.mutate()} variant="danger">{t('common.delete')}</Button></div>
-        </div>
-      </Modal>
+      <ConfirmationDialog confirmIcon={<Trash2 size={17} />} confirmLabel={t('common.delete')} errorMessage={permanentDeleteMutation.isError ? permanentDeleteMutation.error instanceof ApiError && permanentDeleteMutation.error.problem.status === 409 ? t('members.permanentDeleteBalanceConflict') : permanentDeleteMutation.error.message : undefined} message={t('members.permanentDeleteExplanation', { name: selectedMember?.displayName ?? '' })} onClose={closeDialog} onConfirm={() => permanentDeleteMutation.mutate()} open={dialog === 'permanent-delete'} pending={permanentDeleteMutation.isPending} title={t('members.permanentDeleteTitle')} tone="danger" />
 
       {dialog === 'import' ? <MemberImportDialog activeGroupId={activeGroupId} defaultRole={defaultRole} onClose={closeDialog} /> : null}
       {publicJoinOpen ? <PublicJoinLinkDialog groupId={activeGroupId} onClose={() => setPublicJoinOpen(false)} /> : null}

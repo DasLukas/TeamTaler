@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/api/client';
+import { preservePendingNotificationFromHref } from '@/features/notifications/notificationDeepLink';
 import i18n from '@/i18n';
 import { InvitationPage } from './InvitationPage';
 import { LoginPage } from './LoginPage';
@@ -53,6 +54,8 @@ function renderPage(page: ReactNode): QueryClient {
 describe('authentication form policies', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.sessionStorage.clear();
+    window.history.replaceState({}, '', '/login');
     mocks.login.mockResolvedValue(session);
     mocks.previewInvitation.mockResolvedValue({ displayName: '', accountState: 'NEW' });
     mocks.acceptInvitation.mockResolvedValue(session);
@@ -91,6 +94,19 @@ describe('authentication form policies', () => {
     await user.click(screen.getByRole('button', { name: i18n.t('auth.loginAction') }));
 
     await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith({ to: '/admin' }));
+  });
+
+  it('resumes a one-shot notification deep link after successful login', async () => {
+    const user = userEvent.setup();
+    preservePendingNotificationFromHref('/notifications?notification=ntf_target');
+    renderPage(<LoginPage />);
+
+    await user.type(screen.getByLabelText(i18n.t('auth.email')), 'alex@example.test');
+    await user.type(screen.getByLabelText(i18n.t('auth.password')), 'account-password');
+    await user.click(screen.getByRole('button', { name: i18n.t('auth.loginAction') }));
+
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith({ to: '/notifications?notification=ntf_target', replace: true }));
+    expect(window.sessionStorage.getItem('teamtaler:pending-notification:v1')).toBeNull();
   });
 
   it('shows a safe localized message for invalid credentials', async () => {

@@ -9,6 +9,7 @@ import { useActiveGroup } from '@/app/useActiveGroup';
 import { DEFAULT_INSTANCE_CAPABILITIES, isSystemAdministrator } from '@/app/useSession';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { NotificationSummaryProvider } from '@/features/notifications/NotificationSummaryProvider';
+import { preservePendingNotificationFromHref } from '@/features/notifications/notificationDeepLink';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { BottomNavigation } from './BottomNavigation';
 import { MobileHeader } from './MobileHeader';
@@ -29,6 +30,20 @@ function readSidebarCollapsedPreference(): boolean {
   } catch {
     return false;
   }
+}
+
+/** Persists a safe push deep link before replacing an expired session with login. */
+function SessionExpiredRedirect({ href }: { href: string }) {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    let active = true;
+    preservePendingNotificationFromHref(href);
+    queueMicrotask(() => {
+      if (active) setReady(true);
+    });
+    return () => { active = false; };
+  }, [href]);
+  return ready ? <Navigate replace to="/login" /> : <main className={styles.center}><StatePanel kind="loading" /></main>;
 }
 
 /** Remounts route-local state whenever the user changes the active group. */
@@ -84,7 +99,9 @@ export function AppShell() {
   };
 
   if (sessionQuery.isLoading) return <main className={styles.center}><StatePanel kind="loading" /></main>;
-  if (sessionQuery.error instanceof ApiError && sessionQuery.error.problem.status === 401) return <Navigate to="/login" />;
+  if (sessionQuery.error instanceof ApiError && sessionQuery.error.problem.status === 401) {
+    return <SessionExpiredRedirect href={window.location.href} />;
+  }
   if (sessionQuery.isError || !sessionQuery.data) {
     return (
       <main className={styles.center}>

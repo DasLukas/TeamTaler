@@ -59,14 +59,20 @@ export function ConfirmationDialog({
   const close = () => { if (!pending) onClose(); };
 
   return (
-    <Modal onClose={close} open={open} title={title}>
-      <div className={styles.content}>
-        <div className={styles.message}>{message}</div>
-        {errorMessage ? <p className={styles.error} role="alert">{errorMessage}</p> : null}
+    <Modal
+      footer={(
         <div className={styles.actions}>
           <Button disabled={pending} leadingIcon={<X size={17} />} onClick={close} variant="secondary">{cancelLabel ?? t('common.cancel')}</Button>
           <Button disabled={pending} leadingIcon={confirmIcon} onClick={onConfirm} variant={tone === 'danger' ? 'danger' : 'primary'}>{confirmLabel}</Button>
         </div>
+      )}
+      onClose={close}
+      open={open}
+      title={title}
+    >
+      <div className={styles.content}>
+        <div className={styles.message}>{message}</div>
+        {errorMessage ? <p className={styles.error} role="alert">{errorMessage}</p> : null}
       </div>
     </Modal>
   );

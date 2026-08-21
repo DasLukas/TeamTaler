@@ -8,6 +8,7 @@ import type { LoginCommand } from '@/api/types';
 import { preferredAuthenticatedPath } from '@/app/groupCapabilities';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
+import { consumePendingNotificationPath } from '@/features/notifications/notificationDeepLink';
 import { AuthLayout } from './AuthLayout';
 import styles from './AuthForms.module.css';
 import { authenticationCapabilitiesQueryKey } from './authenticationCapabilities';
@@ -29,7 +30,10 @@ export function LoginPage() {
     mutationFn: api.login,
     onSuccess: async (session) => {
       queryClient.setQueryData(['session'], session);
-      await navigate({ to: preferredAuthenticatedPath(session) });
+      const pendingNotification = consumePendingNotificationPath();
+      await navigate(pendingNotification
+        ? { to: pendingNotification, replace: true }
+        : { to: preferredAuthenticatedPath(session) });
     },
   });
 

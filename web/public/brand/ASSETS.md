@@ -1,6 +1,9 @@
-# TeamTaler brand asset
+# TeamTaler brand assets
 
-`teamtaler-mark.png` is the canonical TeamTaler double-coin mark supplied by the product owner on 2026-08-05. All in-app fallback branding and installable-web-app icons are derived from this source so the product identity stays consistent across browser, iOS, and Android surfaces.
+The product identity uses two deliberately separate asset classes:
+
+- `teamtaler-emblem-transparent.webp` is the optimized transparent emblem used by the shared `Brand` component in application chrome and authentication layouts. The component does not accept image overrides. Group logos belong exclusively to group selectors and group-management surfaces, so changing the active group can never replace the TeamTaler identity.
+- `teamtaler-mark.png` is the background-backed source mark supplied by the product owner on 2026-08-05. Browser and installable-web-app icons remain derived from this source because their launch surfaces require a stable background composition.
 
 The adjacent TeamTaler wordmark must remain code-native text for accessibility and responsive rendering.
 
@@ -11,4 +14,4 @@ The browser and installable-web-app assets derived from the source mark are:
 - `/icons/icon-192.png` and `/icons/icon-512.png` for standard web-app installs.
 - `/icons/icon-maskable-512.png` for adaptive Android launchers; the source composition keeps the coin and initials inside the maskable safe zone.
 
-`site.webmanifest` declares the installable application identity and references these generated assets. Regenerate all derived files from `teamtaler-mark.png` whenever the source mark changes.
+`site.webmanifest` declares the installable application identity and references only the background-backed generated assets. Regenerate these derived files from `teamtaler-mark.png` whenever the install identity changes; never derive them implicitly from the transparent in-app emblem.

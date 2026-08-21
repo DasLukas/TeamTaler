@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import i18n from '@/i18n';
-import { adaptAccountSummaries, adaptBooking, adaptCategories, adaptDashboard, adaptGroupSettings, adaptInstanceCapabilities, adaptLedger, adaptMembership, adaptNotification, adaptPermissionDefinition, adaptPermissionGrants, adaptProduct, adaptRole, adaptSession, adaptSettlement, adaptSystemAudit, adaptSystemGroupDeletionImpact, adaptSystemGroups, adaptSystemSettings, adaptTransactionSettings } from './adapters';
+import { adaptAccountSummaries, adaptBooking, adaptCategories, adaptDashboard, adaptGroupNotificationSettings, adaptGroupSettings, adaptInstanceCapabilities, adaptLedger, adaptMembership, adaptNotification, adaptNotificationDestination, adaptNotificationPreferences, adaptPayment, adaptPermissionDefinition, adaptPermissionGrants, adaptProduct, adaptPushSubscriptions, adaptRole, adaptSession, adaptSettlement, adaptSystemAudit, adaptSystemGroupDeletionImpact, adaptSystemGroups, adaptSystemSettings, adaptTransactionSettings } from './adapters';
 
 describe('API adapters', () => {
   it('keeps group-less system-administrator sessions valid', () => {
@@ -14,8 +14,9 @@ describe('API adapters', () => {
   });
 
   it('adapts public capabilities and exact system settings without exposing SMTP secrets', () => {
-    expect(adaptInstanceCapabilities({ instanceName: 'Club Cloud', maintenanceMode: true, publicJoinEnabled: false, mediaUploadMaxBytes: 786432 })).toEqual({
-      instanceName: 'Club Cloud', maintenanceMode: true, maintenanceMessage: '', publicJoinEnabled: false, mediaUploadMaxBytes: 786432,
+    expect(adaptInstanceCapabilities({ instanceName: 'Club Cloud', maintenanceMode: true, publicJoinEnabled: false, mediaUploadMaxBytes: 786432, attachmentUploadMaxBytes: 15728640, emailNotificationsAvailable: true, webPushAvailable: true, webPushPublicKey: 'public-key', webPushKeyId: 'key-a' })).toEqual({
+      instanceName: 'Club Cloud', maintenanceMode: true, maintenanceMessage: '', publicJoinEnabled: false, mediaUploadMaxBytes: 786432, attachmentUploadMaxBytes: 15728640,
+      emailNotificationsAvailable: true, webPushAvailable: true, webPushPublicKey: 'public-key', webPushKeyId: 'key-a',
     });
     const settings = adaptSystemSettings({
       revision: 9,
@@ -33,13 +34,49 @@ describe('API adapters', () => {
         fromAddress: { value: 'mail@example.test', source: 'DATABASE' }, fromName: { value: 'Club Cloud', source: 'DATABASE' },
         revision: 4, testedRevision: 4, testedAt: '2026-08-15T11:00:00Z', requiresTest: true, configurationValid: true, active: false,
       },
+      webPush: {
+        enabled: { value: true, source: 'DATABASE' },
+        subject: { value: 'mailto:admin@example.test', source: 'DATABASE' },
+        vapidPrivateKey: { configured: true, source: 'DATABASE', updatedAt: '2026-08-15T10:30:00Z' },
+        publicKey: 'public-key', keyId: 'key-a', revision: 2, storageKeyConfigured: true, configurationValid: true, active: true,
+      },
       updatedAt: '2026-08-15T11:00:00Z',
     });
     expect(settings).toMatchObject({ revision: 9, mediaUploadHardLimitBytes: 1048576, smtp: { passwordConfigured: true, passwordSource: 'DATABASE', tlsMode: { value: 'starttls' }, testStatus: 'VERIFIED', revision: 4 } });
+    expect(settings.webPush).toMatchObject({ enabled: { value: true }, privateKeyConfigured: true, privateKeySource: 'DATABASE', publicKey: 'public-key', keyId: 'key-a', active: true });
     expect(settings.smtp).not.toHaveProperty('password');
 
 	const unconfiguredSMTP = adaptSystemSettings({ smtp: { port: { value: 0, source: 'CODE' } } }).smtp;
 	expect(unconfiguredSMTP.port).toMatchObject({ value: 587, source: 'CODE' });
+  });
+
+  it('normalizes notification policy, preference, and redacted device contracts', () => {
+    const event = {
+      type: 'SETTLEMENT_DUE_SOON', category: 'SETTLEMENTS', label: 'Settlement due soon', description: 'A settlement is due soon.',
+      supportedChannels: ['EMAIL', 'PUSH'], enabled: true,
+    };
+    expect(adaptGroupNotificationSettings({
+      version: 4, timezone: 'Europe/Berlin', dueSoonLeadDays: 3, overdueRepeatDays: 7,
+      availableChannels: ['EMAIL'], events: [event],
+    })).toMatchObject({
+      version: 4, channels: { email: true, push: false },
+      events: [{ eventType: 'SETTLEMENT_DUE_SOON', name: 'Settlement due soon', enabled: true }],
+    });
+    expect(adaptNotificationPreferences({
+      version: 2, availableChannels: ['PUSH'], events: [{ ...event, email: true, push: false, emailAvailable: false, pushAvailable: true }],
+    })).toMatchObject({
+      version: 2, channels: { email: false, push: true },
+      events: [{ eventType: 'SETTLEMENT_DUE_SOON', email: true, push: false, emailAvailable: false, pushAvailable: true }],
+    });
+    expect(adaptPushSubscriptions({ items: [{ id: 'device-a', deviceLabel: 'Safari on iPhone', keyId: 'key-a', createdAt: '2026-08-20T10:00:00Z', lastUsedAt: '2026-08-20T11:00:00Z', current: true, endpoint: 'must-not-leak' }] })).toEqual([{
+      id: 'device-a', label: 'Safari on iPhone', keyId: 'key-a', createdAt: '2026-08-20T10:00:00Z', lastUsedAt: '2026-08-20T11:00:00Z', current: true,
+    }]);
+  });
+
+  it('accepts direct and enveloped notification destinations but rejects missing ownership data', () => {
+    expect(adaptNotificationDestination({ groupId: ' group-b ' })).toEqual({ groupId: 'group-b' });
+    expect(adaptNotificationDestination({ destination: { groupId: 'group-c' } })).toEqual({ groupId: 'group-c' });
+    expect(() => adaptNotificationDestination({ destination: {} })).toThrow('missing groupId');
   });
 
   it('adapts item envelopes, flat managed-group counts, deletion impact, and system audit', () => {
@@ -78,6 +115,20 @@ describe('API adapters', () => {
       ownPaymentReasonRequired: false,
       otherPaymentReasonRequired: true,
     });
+  });
+
+  it('defaults legacy payment attachment policies and exposes only safe receipt metadata', () => {
+    expect(adaptTransactionSettings({ paymentMethods: [
+      { id: 'CASH', label: 'Cash' },
+      { id: 'SHOPPING', label: 'Shopping', attachmentMode: 'REQUIRED' },
+    ] }).paymentMethods).toEqual([
+      { id: 'CASH', label: 'Bar', attachmentMode: 'OFF' },
+      { id: 'SHOPPING', label: 'Einkauf', attachmentMode: 'REQUIRED' },
+    ]);
+    expect(adaptPayment({
+      id: 'payment-a', membershipId: 'member-a', memberName: 'Alex', amountMinor: 1234, currency: 'EUR', receivedAt: '2026-08-20', method: 'SHOPPING', status: 'POSTED',
+      attachment: { fileName: 'receipt.pdf', mediaType: 'application/pdf', sizeBytes: 1024, url: '/api/v1/groups/group-a/payments/payment-a/attachment', storageKey: 'secret' },
+    }).attachment).toEqual({ fileName: 'receipt.pdf', mediaType: 'application/pdf', sizeBytes: 1024, url: '/api/v1/groups/group-a/payments/payment-a/attachment' });
   });
 
   it('accepts stable group grants and rejects unknown keys or disabled scopes', () => {

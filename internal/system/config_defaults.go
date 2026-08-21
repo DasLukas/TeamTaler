@@ -28,20 +28,25 @@ func DefaultsFromConfig(configuration config.Config) Defaults {
 		instanceDefaults.InstanceName = "TeamTaler"
 		instanceDefaults.DefaultCurrency = "EUR"
 		instanceDefaults.MediaUploadMaxBytes = config.DefaultMediaUploadBytes
+		instanceDefaults.AttachmentUploadMaxBytes = config.DefaultAttachmentUploadBytes
 		instanceDefaults.PublicJoinEnabled = true
+	}
+	if instanceDefaults.AttachmentUploadMaxBytes == 0 {
+		instanceDefaults.AttachmentUploadMaxBytes = config.DefaultAttachmentUploadBytes
 	}
 	maxRequestBytes := configuration.MaxRequestBytes
 	if legacyLiteral && maxRequestBytes < MultipartRequestReserveBytes+MinimumMediaUploadBytes {
 		maxRequestBytes = 0
 	}
 	defaults := Defaults{
-		InstanceName:        instanceDefaults.InstanceName,
-		DefaultCurrency:     instanceDefaults.DefaultCurrency,
-		MediaUploadMaxBytes: instanceDefaults.MediaUploadMaxBytes,
-		PublicJoinEnabled:   instanceDefaults.PublicJoinEnabled,
-		MaintenanceMode:     instanceDefaults.MaintenanceMode,
-		MaintenanceMessage:  instanceDefaults.MaintenanceMessage,
-		MaxRequestBytes:     maxRequestBytes,
+		InstanceName:             instanceDefaults.InstanceName,
+		DefaultCurrency:          instanceDefaults.DefaultCurrency,
+		MediaUploadMaxBytes:      instanceDefaults.MediaUploadMaxBytes,
+		AttachmentUploadMaxBytes: instanceDefaults.AttachmentUploadMaxBytes,
+		PublicJoinEnabled:        instanceDefaults.PublicJoinEnabled,
+		MaintenanceMode:          instanceDefaults.MaintenanceMode,
+		MaintenanceMessage:       instanceDefaults.MaintenanceMessage,
+		MaxRequestBytes:          maxRequestBytes,
 		SMTP: SMTPConfiguration{
 			Enabled:             smtpDefaults.Enabled,
 			Host:                smtpDefaults.Host,
@@ -55,22 +60,29 @@ func DefaultsFromConfig(configuration config.Config) Defaults {
 			AllowedPrivateHost:  smtpDefaults.AllowedPrivateHost,
 			AllowedPrivatePort:  smtpDefaults.AllowedPrivatePort,
 		},
+		WebPush: WebPushConfiguration{
+			Enabled: configuration.WebPush.Enabled, Subject: configuration.WebPush.Subject,
+			VAPIDPrivateKey: configuration.WebPush.VAPIDPrivateKey,
+		},
 		Sources: make(map[SettingKey]SettingSource),
 	}
 	environmentSources := map[SettingKey]string{
-		SettingInstanceName:        "TEAMTALER_INSTANCE_NAME",
-		SettingDefaultCurrency:     "TEAMTALER_DEFAULT_CURRENCY",
-		SettingMediaUploadMaxBytes: "TEAMTALER_MEDIA_UPLOAD_MAX_BYTES",
-		SettingPublicJoinEnabled:   "TEAMTALER_PUBLIC_JOIN_ENABLED",
-		SettingMaintenanceEnabled:  "TEAMTALER_MAINTENANCE_MODE",
-		SettingMaintenanceMessage:  "TEAMTALER_MAINTENANCE_MESSAGE",
-		SettingSMTPHost:            "TEAMTALER_SMTP_HOST",
-		SettingSMTPPort:            "TEAMTALER_SMTP_PORT",
-		SettingSMTPTLSMode:         "TEAMTALER_SMTP_TLS_MODE",
-		SettingSMTPUsername:        "TEAMTALER_SMTP_USERNAME",
-		SettingSMTPPassword:        "TEAMTALER_SMTP_PASSWORD",
-		SettingSMTPFromAddress:     "TEAMTALER_SMTP_FROM_ADDRESS",
-		SettingSMTPFromName:        "TEAMTALER_SMTP_FROM_NAME",
+		SettingInstanceName:             "TEAMTALER_INSTANCE_NAME",
+		SettingDefaultCurrency:          "TEAMTALER_DEFAULT_CURRENCY",
+		SettingMediaUploadMaxBytes:      "TEAMTALER_MEDIA_UPLOAD_MAX_BYTES",
+		SettingAttachmentUploadMaxBytes: "TEAMTALER_ATTACHMENT_UPLOAD_MAX_BYTES",
+		SettingPublicJoinEnabled:        "TEAMTALER_PUBLIC_JOIN_ENABLED",
+		SettingMaintenanceEnabled:       "TEAMTALER_MAINTENANCE_MODE",
+		SettingMaintenanceMessage:       "TEAMTALER_MAINTENANCE_MESSAGE",
+		SettingSMTPHost:                 "TEAMTALER_SMTP_HOST",
+		SettingSMTPPort:                 "TEAMTALER_SMTP_PORT",
+		SettingSMTPTLSMode:              "TEAMTALER_SMTP_TLS_MODE",
+		SettingSMTPUsername:             "TEAMTALER_SMTP_USERNAME",
+		SettingSMTPPassword:             "TEAMTALER_SMTP_PASSWORD",
+		SettingSMTPFromAddress:          "TEAMTALER_SMTP_FROM_ADDRESS",
+		SettingSMTPFromName:             "TEAMTALER_SMTP_FROM_NAME",
+		SettingWebPushSubject:           "TEAMTALER_WEB_PUSH_SUBJECT",
+		SettingWebPushVAPIDPrivateKey:   "TEAMTALER_WEB_PUSH_VAPID_PRIVATE_KEY",
 	}
 	for key, variable := range environmentSources {
 		if value, exists := os.LookupEnv(variable); exists && strings.TrimSpace(value) != "" {
@@ -79,6 +91,9 @@ func DefaultsFromConfig(configuration config.Config) Defaults {
 	}
 	if configuration.SMTP.Enabled {
 		defaults.Sources[SettingSMTPEnabled] = SettingSourceEnvironment
+	}
+	if _, exists := os.LookupEnv("TEAMTALER_WEB_PUSH_ENABLED"); exists {
+		defaults.Sources[SettingWebPushEnabled] = SettingSourceEnvironment
 	}
 	return defaults
 }

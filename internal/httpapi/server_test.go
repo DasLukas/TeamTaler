@@ -24,7 +24,7 @@ func TestLimitBodyUsesLiveMediaLimitForUploadRoutes(t *testing.T) {
 		}
 		response.WriteHeader(http.StatusNoContent)
 	}))
-	settings := systemadmin.Settings{MediaUploadMaxBytes: systemadmin.Setting[int64]{Value: 2 << 20}}
+	settings := systemadmin.Settings{MediaUploadMaxBytes: systemadmin.Setting[int64]{Value: 2 << 20}, AttachmentUploadMaxBytes: systemadmin.Setting[int64]{Value: 2 << 20}}
 	tests := []struct {
 		name       string
 		method     string
@@ -34,6 +34,8 @@ func TestLimitBodyUsesLiveMediaLimitForUploadRoutes(t *testing.T) {
 		{name: "avatar", method: http.MethodPost, path: "/api/v1/me/avatar", wantStatus: http.StatusNoContent},
 		{name: "group logo", method: http.MethodPost, path: "/api/v1/groups/grp_1/logo", wantStatus: http.StatusNoContent},
 		{name: "product image", method: http.MethodPost, path: "/api/v1/groups/grp_1/products/prd_1/image", wantStatus: http.StatusNoContent},
+		{name: "managed payment attachment", method: http.MethodPost, path: "/api/v1/groups/grp_1/payments", wantStatus: http.StatusNoContent},
+		{name: "self payment attachment", method: http.MethodPost, path: "/api/v1/groups/grp_1/payments/self", wantStatus: http.StatusNoContent},
 		{name: "ordinary API request", method: http.MethodPost, path: "/api/v1/groups", wantStatus: http.StatusRequestEntityTooLarge},
 		{name: "non-upload method", method: http.MethodPut, path: "/api/v1/groups/grp_1/logo", wantStatus: http.StatusRequestEntityTooLarge},
 	}
@@ -55,6 +57,7 @@ func TestSPAHandlerServesFilesAndClientRoutes(t *testing.T) {
 	writeStaticFixture(t, root, "index.html", "spa-shell")
 	writeStaticFixture(t, root, "assets/app-deadbeef.js", "console.log('ok')")
 	writeStaticFixture(t, root, "robots.txt", "User-agent: *")
+	writeStaticFixture(t, root, "service-worker.js", "self.addEventListener('push', () => {})")
 
 	handler := spaHandler(root)
 	tests := []struct {
@@ -69,6 +72,7 @@ func TestSPAHandlerServesFilesAndClientRoutes(t *testing.T) {
 		{name: "client route fallback", requestPath: "/activities", method: http.MethodGet, wantStatus: http.StatusOK, wantBody: "spa-shell", wantCache: "no-cache"},
 		{name: "hashed asset", requestPath: "/assets/app-deadbeef.js", method: http.MethodGet, wantStatus: http.StatusOK, wantBody: "console.log('ok')", wantCache: "public, max-age=31536000, immutable"},
 		{name: "concrete public file", requestPath: "/robots.txt", method: http.MethodGet, wantStatus: http.StatusOK, wantBody: "User-agent: *", wantCache: "public, max-age=3600, must-revalidate"},
+		{name: "service worker", requestPath: "/service-worker.js", method: http.MethodGet, wantStatus: http.StatusOK, wantBody: "self.addEventListener('push', () => {})", wantCache: "no-cache, no-store, must-revalidate"},
 		{name: "missing asset", requestPath: "/assets/missing.js", method: http.MethodGet, wantStatus: http.StatusNotFound},
 		{name: "missing concrete file", requestPath: "/missing.txt", method: http.MethodGet, wantStatus: http.StatusNotFound},
 		{name: "unsupported method", requestPath: "/", method: http.MethodPost, wantStatus: http.StatusNotFound},
@@ -87,6 +91,9 @@ func TestSPAHandlerServesFilesAndClientRoutes(t *testing.T) {
 			}
 			if test.wantCache != "" && response.Header().Get("Cache-Control") != test.wantCache {
 				t.Fatalf("Cache-Control = %q, want %q", response.Header().Get("Cache-Control"), test.wantCache)
+			}
+			if test.requestPath == "/service-worker.js" && response.Header().Get("Service-Worker-Allowed") != "/" {
+				t.Fatalf("Service-Worker-Allowed = %q, want root scope", response.Header().Get("Service-Worker-Allowed"))
 			}
 		})
 	}
@@ -131,6 +138,12 @@ func TestSecurityHeadersAllowBlobURLsOnlyForImagePreviews(t *testing.T) {
 	}
 	if strings.Contains(policy, "script-src 'self' blob:") {
 		t.Fatalf("Content-Security-Policy unexpectedly permits blob scripts: %q", policy)
+	}
+	if !strings.Contains(policy, "script-src 'self' 'wasm-unsafe-eval'") || strings.Contains(policy, "'unsafe-eval'") {
+		t.Fatalf("Content-Security-Policy does not narrowly permit scanner WASM: %q", policy)
+	}
+	if permissions := response.Header().Get("Permissions-Policy"); !strings.Contains(permissions, "camera=(self)") || !strings.Contains(permissions, "microphone=()") {
+		t.Fatalf("Permissions-Policy does not restrict scanner camera access: %q", permissions)
 	}
 }
 

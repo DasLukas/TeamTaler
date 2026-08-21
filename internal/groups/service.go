@@ -197,7 +197,7 @@ type SettingsUpdate struct {
 	ForeignBookingReasonRequired *bool
 	OwnPaymentReasonRequired     *bool
 	OtherPaymentReasonRequired   *bool
-	PaymentMethods               *[]domain.ConfigurableItem
+	PaymentMethods               *[]domain.PaymentMethod
 	BookingReasons               *[]domain.ConfigurableItem
 	PaymentReasons               *[]domain.ConfigurableItem
 }
@@ -284,7 +284,7 @@ func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, mem
 		next.OtherPaymentReasonRequired = next.OtherPaymentReasonMode.Required()
 		var err error
 		if update.PaymentMethods != nil {
-			next.PaymentMethods, err = normalizeConfigurableItems(*update.PaymentMethods, "paymentMethods", 1, 20)
+			next.PaymentMethods, err = normalizePaymentMethods(*update.PaymentMethods)
 			if err != nil {
 				return err
 			}
@@ -315,7 +315,7 @@ func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, mem
 			return err
 		}
 		if update.PaymentMethods != nil {
-			if err := replaceConfiguredItems(ctx, tx, membership.GroupID, "PAYMENT_METHOD", next.PaymentMethods, now); err != nil {
+			if err := replacePaymentMethods(ctx, tx, membership.GroupID, next.PaymentMethods, now); err != nil {
 				return err
 			}
 		}
@@ -404,7 +404,7 @@ func querySettings(ctx context.Context, queryer settingsQueryer, groupID string,
 		settings.DefaultRoleID = &defaultRoleID.String
 	}
 	var err error
-	if settings.PaymentMethods, err = queryConfiguredItems(ctx, queryer, groupID, "PAYMENT_METHOD"); err != nil {
+	if settings.PaymentMethods, err = queryPaymentMethods(ctx, queryer, groupID); err != nil {
 		return err
 	}
 	if settings.BookingReasons, err = queryConfiguredItems(ctx, queryer, groupID, "BOOKING"); err != nil {
@@ -452,10 +452,6 @@ func transactionSettingsFromGroup(settings domain.GroupSettings) domain.Transact
 func queryConfiguredItems(ctx context.Context, queryer settingsQueryer, groupID, kind string) ([]domain.ConfigurableItem, error) {
 	query := `SELECT id,label FROM group_reason_suggestions WHERE group_id=? AND kind=? ORDER BY sort_order,id`
 	args := []any{groupID, kind}
-	if kind == "PAYMENT_METHOD" {
-		query = `SELECT id,label FROM group_payment_methods WHERE group_id=? ORDER BY sort_order,id`
-		args = []any{groupID}
-	}
 	rows, err := queryer.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -470,6 +466,61 @@ func queryConfiguredItems(ctx context.Context, queryer settingsQueryer, groupID,
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+func queryPaymentMethods(ctx context.Context, queryer settingsQueryer, groupID string) ([]domain.PaymentMethod, error) {
+	rows, err := queryer.QueryContext(ctx, `SELECT id,label,attachment_mode FROM group_payment_methods WHERE group_id=? ORDER BY sort_order,id`, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.PaymentMethod, 0)
+	for rows.Next() {
+		var item domain.PaymentMethod
+		if err := rows.Scan(&item.ID, &item.Label, &item.AttachmentMode); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func normalizePaymentMethods(items []domain.PaymentMethod) ([]domain.PaymentMethod, error) {
+	if len(items) < 1 || len(items) > 20 {
+		return nil, domain.ValidationError{Field: "paymentMethods", Message: "must contain between 1 and 20 items"}
+	}
+	normalized := make([]domain.PaymentMethod, 0, len(items))
+	ids, labels := map[string]struct{}{}, map[string]struct{}{}
+	for _, item := range items {
+		item.ID, item.Label = strings.TrimSpace(item.ID), strings.TrimSpace(item.Label)
+		if item.ID == "" {
+			item.ID, _ = platform.NewID("opt")
+		}
+		if len(item.ID) > 120 || containsControlCharacter(item.ID) {
+			return nil, domain.ValidationError{Field: "paymentMethods", Message: "contains an invalid identifier"}
+		}
+		if utf8.RuneCountInString(item.Label) < 1 || utf8.RuneCountInString(item.Label) > 120 || containsControlCharacter(item.Label) {
+			return nil, domain.ValidationError{Field: "paymentMethods", Message: "contains a label outside 1 to 120 characters"}
+		}
+		labelKey := strings.ToLower(item.Label)
+		if _, exists := ids[item.ID]; exists {
+			return nil, domain.ValidationError{Field: "paymentMethods", Message: "contains duplicate identifiers"}
+		}
+		if _, exists := labels[labelKey]; exists {
+			return nil, domain.ValidationError{Field: "paymentMethods", Message: "contains duplicate labels ignoring letter case"}
+		}
+		ids[item.ID], labels[labelKey] = struct{}{}, struct{}{}
+		normalized = append(normalized, item)
+	}
+	for index := range normalized {
+		if normalized[index].AttachmentMode == "" {
+			normalized[index].AttachmentMode = domain.AttachmentModeOff
+		}
+		if !normalized[index].AttachmentMode.Valid() {
+			return nil, domain.ValidationError{Field: "paymentMethods", Message: "contains an attachmentMode other than OFF, OPTIONAL, or REQUIRED"}
+		}
+	}
+	return normalized, nil
 }
 
 func normalizeConfigurableItems(items []domain.ConfigurableItem, field string, minimum, maximum int) ([]domain.ConfigurableItem, error) {
@@ -508,22 +559,23 @@ type settingsExecutor interface {
 }
 
 func replaceConfiguredItems(ctx context.Context, queryer settingsExecutor, groupID, kind string, items []domain.ConfigurableItem, now string) error {
-	if kind == "PAYMENT_METHOD" {
-		if _, err := queryer.ExecContext(ctx, `DELETE FROM group_payment_methods WHERE group_id=?`, groupID); err != nil {
-			return err
-		}
-		for index, item := range items {
-			if _, err := queryer.ExecContext(ctx, `INSERT INTO group_payment_methods(group_id,id,label,sort_order,created_at) VALUES(?,?,?,?,?)`, groupID, item.ID, item.Label, index, now); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
 	if _, err := queryer.ExecContext(ctx, `DELETE FROM group_reason_suggestions WHERE group_id=? AND kind=?`, groupID, kind); err != nil {
 		return err
 	}
 	for index, item := range items {
 		if _, err := queryer.ExecContext(ctx, `INSERT INTO group_reason_suggestions(group_id,id,kind,label,sort_order,created_at) VALUES(?,?,?,?,?,?)`, groupID, item.ID, kind, item.Label, index, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func replacePaymentMethods(ctx context.Context, queryer settingsExecutor, groupID string, items []domain.PaymentMethod, now string) error {
+	if _, err := queryer.ExecContext(ctx, `DELETE FROM group_payment_methods WHERE group_id=?`, groupID); err != nil {
+		return err
+	}
+	for index, item := range items {
+		if _, err := queryer.ExecContext(ctx, `INSERT INTO group_payment_methods(group_id,id,label,attachment_mode,sort_order,created_at) VALUES(?,?,?,?,?,?)`, groupID, item.ID, item.Label, item.AttachmentMode, index, now); err != nil {
 			return err
 		}
 	}

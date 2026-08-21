@@ -174,4 +174,65 @@ describe('SelfPaymentDialog', () => {
     expect(screen.queryByLabelText(i18n.t('finance.reason'))).not.toBeInTheDocument();
     expect(screen.queryByLabelText(`${i18n.t('finance.reason')} *`)).not.toBeInTheDocument();
   });
+
+  it('requires and preserves a configured receipt through review and submission', async () => {
+    const user = userEvent.setup();
+    apiMock.getTransactionSettings.mockResolvedValue({
+      ownPaymentReasonMode: 'OFF',
+      ownPaymentReasonRequired: false,
+      paymentMethods: [{ id: 'SHOPPING', label: 'Einkauf', attachmentMode: 'REQUIRED' }],
+      bookingReasons: [],
+      paymentReasons: [],
+    });
+    apiMock.createOwnPayment.mockResolvedValue({
+      id: 'payment-receipt', membershipId: 'member-a', memberName: 'Alex Member', membershipStatus: 'ACTIVE',
+      amount: { minorUnits: '1250', currency: 'EUR' }, receivedAt: '2026-08-06', method: 'SHOPPING', methodLabel: 'Einkauf', status: 'POSTED',
+    });
+    renderDialog();
+
+    await waitFor(() => expect(screen.getByRole('button', { name: i18n.t('selfPayment.action') })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.action') }));
+    await user.type(screen.getByLabelText(i18n.t('finance.amountIn', { currency: 'EUR' })), '12,50');
+    expect(screen.getByRole('button', { name: i18n.t('selfPayment.review') })).toBeDisabled();
+
+    const receipt = new File(['receipt'], 'receipt.pdf', { type: 'application/pdf' });
+    const fileInput = document.querySelector<HTMLInputElement>('input[accept*="application/pdf"]');
+    expect(fileInput).not.toBeNull();
+    await user.upload(fileInput as HTMLInputElement, receipt);
+    expect(screen.getByText('receipt.pdf')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.review') }));
+    expect(screen.getByRole('dialog', { name: i18n.t('selfPayment.reviewTitle') })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.confirm', { amount: '12,50 €' }) }));
+
+    await waitFor(() => expect(apiMock.createOwnPayment).toHaveBeenCalledWith('group-a', expect.objectContaining({ method: 'SHOPPING' }), receipt));
+  });
+
+  it('keeps the payment dialog and its values open when a portaled scan is cancelled', async () => {
+    const user = userEvent.setup();
+    apiMock.getTransactionSettings.mockResolvedValue({
+      ownPaymentReasonMode: 'OFF',
+      ownPaymentReasonRequired: false,
+      paymentMethods: [{ id: 'SHOPPING', label: 'Einkauf', attachmentMode: 'REQUIRED' }],
+      bookingReasons: [],
+      paymentReasons: [],
+    });
+    renderDialog();
+
+    await waitFor(() => expect(screen.getByRole('button', { name: i18n.t('selfPayment.action') })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.action') }));
+    const paymentDialog = screen.getByRole('dialog', { name: i18n.t('selfPayment.entryTitle') });
+    const amount = within(paymentDialog).getByLabelText(i18n.t('finance.amountIn', { currency: 'EUR' }));
+    await user.type(amount, '12,50');
+    const scanTrigger = within(paymentDialog).getByRole('button', { name: i18n.t('paymentAttachment.scan') });
+
+    await user.click(scanTrigger);
+    const scanner = await screen.findByRole('dialog', { name: i18n.t('documentScanner.title') });
+    expect(paymentDialog.contains(scanner)).toBe(false);
+    await user.click(within(scanner).getByRole('button', { name: i18n.t('common.cancel') }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: i18n.t('documentScanner.title') })).not.toBeInTheDocument());
+    expect(paymentDialog).toBeVisible();
+    expect(amount).toHaveValue('12,50');
+    expect(scanTrigger).toHaveFocus();
+  });
 });

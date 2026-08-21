@@ -22,7 +22,7 @@
 .trigger:focus-visible { border-color: var(--color-teal-700); outline: 3px solid color-mix(in srgb, var(--color-teal-600) 24%, transparent); outline-offset: 1px; }
 .trigger:disabled { color: var(--color-muted); background: var(--color-surface-muted); cursor: not-allowed; }
 .trigger svg { flex: 0 0 auto; color: var(--color-muted); transition: transform var(--motion-fast); }
-.trigger[aria-expanded='true'] svg { transform: rotate(180deg); }
+.trigger[aria-expanded='true'] .chevron { transform: rotate(180deg); }
 
 .value {
   min-width: 0;

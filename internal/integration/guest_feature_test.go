@@ -333,7 +333,7 @@ func TestTemporaryGuestPaymentReversalPeriodCloseAndArchivePreserveHistory(t *te
 	if err := f.db.QueryRowContext(f.ctx, `SELECT count(*) FROM notifications WHERE membership_id=?`, guestMembershipID).Scan(&notificationCount); err != nil {
 		t.Fatalf("count temporary guest notifications: %v", err)
 	}
-	if err := f.db.QueryRowContext(f.ctx, `SELECT count(*) FROM notification_email_outbox WHERE group_id=? AND notification_id IN (SELECT id FROM notifications WHERE membership_id=?)`, f.membership.GroupID, guestMembershipID).Scan(&outboxCount); err != nil {
+	if err := f.db.QueryRowContext(f.ctx, `SELECT count(*) FROM notification_delivery_jobs WHERE group_id=? AND channel='EMAIL' AND notification_id IN (SELECT id FROM notifications WHERE membership_id=?)`, f.membership.GroupID, guestMembershipID).Scan(&outboxCount); err != nil {
 		t.Fatalf("count temporary guest email jobs: %v", err)
 	}
 	if notificationCount == 0 || outboxCount != 0 {
