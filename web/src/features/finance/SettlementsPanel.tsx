@@ -14,6 +14,7 @@ import { Field, TextInput } from '@/components/ui/FormField';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { DataTable, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange } from '@/features/shared/DataTable';
+import { formatGermanDate } from '@/features/shared/dateFormat';
 import tableStyles from '@/features/shared/Table.module.css';
 import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
@@ -132,7 +133,7 @@ export function SettlementsPanel({ settlements, settlementsEnabled }: Settlement
   const columns = useMemo<DataTableColumnDef<Settlement>[]>(() => [
     { accessorKey: 'periodLabel', cell: ({ row }) => <strong>{row.original.periodLabel}</strong>, enableSorting: true, header: t('periods.period'), id: 'periodLabel', meta: { label: t('periods.period') } },
     { accessorKey: 'memberName', enableSorting: true, header: t('common.member'), id: 'memberName', meta: { label: t('common.member') } },
-    { accessorKey: 'dueAt', cell: ({ row }) => <time dateTime={row.original.dueAt}>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(row.original.dueAt))}</time>, enableSorting: true, header: t('periods.due'), id: 'dueAt', meta: { label: t('periods.due') } },
+    { accessorKey: 'dueAt', cell: ({ row }) => <time dateTime={row.original.dueAt}>{formatGermanDate(row.original.dueAt)}</time>, enableSorting: true, header: t('periods.due'), id: 'dueAt', meta: { label: t('periods.due') } },
     { accessorFn: (settlement) => settlement.amount.minorUnits, cell: ({ row }) => formatMoney(row.original.amount), enableSorting: true, header: t('periods.claim'), id: 'amount', meta: { align: 'end', label: t('periods.claim') } },
     { accessorFn: (settlement) => settlement.paidAmount.minorUnits, cell: ({ row }) => formatMoney(row.original.paidAmount), enableSorting: true, header: t('periods.paid'), id: 'paidAmount', meta: { align: 'end', label: t('periods.paid') } },
     {
@@ -152,7 +153,7 @@ export function SettlementsPanel({ settlements, settlementsEnabled }: Settlement
   return (
     <div className={styles.content}>
       <header className={styles.header}><div><h2>{t(settlementsEnabled ? 'periods.title' : 'periods.historyTitle')}</h2><p>{t(settlementsEnabled ? 'periods.intro' : 'periods.historyIntro')}</p></div>{openPeriod ? <Button leadingIcon={<LockKeyhole size={18} />} onClick={() => beginClose(openPeriod)}>{t('periods.close')}</Button> : null}</header>
-      {openPeriod ? <section className={styles.openPeriod}><span><CalendarCheck size={27} /></span><div><small>{t('periods.current')}</small><strong>{openPeriod.label}</strong><p>{t('periods.openedSince', { date: new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(openPeriod.startsAt)) })}</p></div></section> : null}
+      {openPeriod ? <section className={styles.openPeriod}><span><CalendarCheck size={27} /></span><div><small>{t('periods.current')}</small><strong>{openPeriod.label}</strong><p>{t('periods.openedSince', { date: formatGermanDate(openPeriod.startsAt) })}</p></div></section> : null}
       <h3>{t('periods.closedSettlements')}</h3>
       <DataTable
         ariaLabel={t('periods.closedSettlements')}

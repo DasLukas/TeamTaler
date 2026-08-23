@@ -15,6 +15,7 @@ import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { DataTable, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange } from '@/features/shared/DataTable';
+import { formatGermanDate } from '@/features/shared/dateFormat';
 import tableStyles from '@/features/shared/Table.module.css';
 import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
@@ -169,7 +170,7 @@ export function PaymentsPanel() {
   const columns = useMemo<DataTableColumnDef<Payment>[]>(() => [
     {
       accessorKey: 'receivedAt',
-      cell: ({ row }) => <time dateTime={row.original.receivedAt}>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(row.original.receivedAt))}</time>,
+      cell: ({ row }) => <time dateTime={row.original.receivedAt}>{formatGermanDate(row.original.receivedAt)}</time>,
       enableSorting: true,
       header: t('common.date'),
       id: 'receivedAt',

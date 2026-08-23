@@ -383,6 +383,18 @@ describe('API adapters', () => {
     expect(notification.message).toBe(i18n.t('notifications.fallback.paymentMessage'));
   });
 
+  it('formats settlement due dates in German notification copy', () => {
+    const notification = adaptNotification({
+      id: 'notification-settlement',
+      type: 'SETTLEMENT_CREATED',
+      createdAt: '2026-08-21T16:48:00Z',
+      context: { periodLabel: 'August', amountMinor: '3200', currency: 'EUR', dueAt: '2026-09-07' },
+    });
+
+    expect(notification.message).toContain('Fällig am 07.09.2026.');
+    expect(notification.message).not.toContain('2026-09-07');
+  });
+
   it('includes cross-period corrections in settlement obligations and payments', () => {
     const settlement = adaptSettlement({
       id: 'statement-1',

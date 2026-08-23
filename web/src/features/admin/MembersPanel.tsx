@@ -39,6 +39,7 @@ import { ItemAction } from '@/components/ui/ItemAction';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { DataTable, type DataTableColumnDef } from '@/features/shared/DataTable';
+import { formatGermanDate } from '@/features/shared/dateFormat';
 import tableStyles from '@/features/shared/Table.module.css';
 import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
 import { RoleAssignmentPicker } from './RoleAssignmentPicker';
@@ -770,7 +771,7 @@ export function MembersPanel() {
                     <td>{canManageMembers && !claimInvitation ? <button className={styles.rowLink} onClick={() => openEdit(item)} type="button"><strong>{item.email}</strong></button> : <strong>{item.email}</strong>}</td>
                     <td className={styles.roleCell}>{claimInvitation ? <span className={styles.temporaryGuestRole}>{t('members.claimInvitationRoleLocked')}</span> : <RoleAssignmentPicker canAssignRoles={canManageMembers} canManageGroup={canManageProtectedRoles} onApply={(roleIds) => applyInvitationRoles(item, roleIds)} roleIds={item.roleIds ?? []} roles={roles} subjectName={item.displayName || item.email} />}</td>
                     <td>{renderInvitationDeliveryBadge(item.emailDeliveryStatus, t)}</td>
-                    <td><span className={expired ? styles.expired : ''}>{expired ? t('members.expired') : new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(item.expiresAt))}</span></td>
+                    <td><span className={expired ? styles.expired : ''}>{expired ? t('members.expired') : formatGermanDate(item.expiresAt)}</span></td>
                     {canManageMembers ? <td><div className={styles.tableActions}>
                       {!claimInvitation ? <ItemAction aria-label={t('members.editInvitationFor', { email: item.email })} leadingIcon={<Pencil size={16} />} onClick={() => openEdit(item)}>{t('common.edit')}</ItemAction> : null}
                       <ItemAction aria-label={t('members.resendFor', { email: item.email })} disabled={resendBlocked} leadingIcon={<RotateCcw size={16} />} onClick={() => { setSelectedInvitation(item); setResendResult(null); setDialog('resend'); }}>{t('members.resend')}</ItemAction>
@@ -895,7 +896,7 @@ export function MembersPanel() {
           <MailPlus aria-hidden="true" size={38} />
           <h3>{t('members.claimGuestReadyTitle')}</h3>
           <p>{t('members.claimGuestReadyDescription', { name: selectedMember?.displayName ?? '', email: guestClaimInvitation.email })}</p>
-          <p>{t('members.invitationExpiry', { date: new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(guestClaimInvitation.expiresAt)) })}</p>
+          <p>{t('members.invitationExpiry', { date: formatGermanDate(guestClaimInvitation.expiresAt) })}</p>
           {guestClaimInvitation.acceptUrl ? <div className={styles.fallbackLink}><p>{t('members.fallbackHint')}</p><div className={styles.copyRow}><TextInput aria-label={t('members.invitationLink')} readOnly value={guestClaimInvitation.acceptUrl} /><Button leadingIcon={<Copy size={17} />} onClick={() => void navigator.clipboard.writeText(guestClaimInvitation.acceptUrl)} variant="secondary">{t('common.copy')}</Button></div></div> : null}
           <ModalFooter><Button fullWidth leadingIcon={<CircleCheck size={17} />} onClick={closeDialog}>{t('common.done')}</Button></ModalFooter>
         </div> : <form className={styles.form} id={claimGuestFormId} onSubmit={(event) => { event.preventDefault(); claimGuestMutation.mutate(); }}>

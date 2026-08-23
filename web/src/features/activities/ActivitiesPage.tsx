@@ -17,12 +17,12 @@ import { Field, TextInput } from '@/components/ui/FormField';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { CategoryIcon } from '@/features/shared/CategoryIcon';
 import { DataTable, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange } from '@/features/shared/DataTable';
+import { formatGermanDateTime } from '@/features/shared/dateFormat';
 import tableStyles from '@/features/shared/Table.module.css';
 import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
 import styles from './ActivitiesPage.module.css';
 
-const activityDateTimeFormatter = new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' });
 const activityPageSize = 50;
 type ActivityFilterId = 'productId' | 'categoryId' | 'status' | 'createdAt' | 'amount';
 
@@ -236,7 +236,7 @@ export function ActivitiesPage() {
     { accessorKey: 'categoryName', enableSorting: true, header: t('common.category'), id: 'categoryName', meta: { label: t('common.category') } },
     {
       accessorKey: 'bookedAt',
-      cell: ({ row }) => <time dateTime={row.original.bookedAt}>{activityDateTimeFormatter.format(new Date(row.original.bookedAt))}</time>,
+      cell: ({ row }) => <time dateTime={row.original.bookedAt}>{formatGermanDateTime(row.original.bookedAt)}</time>,
       enableSorting: true,
       header: t('activities.time'),
       id: 'createdAt',

@@ -53,6 +53,7 @@ import { DEFAULT_ATTACHMENT_UPLOAD_MAX_BYTES, DEFAULT_MEDIA_UPLOAD_MAX_BYTES, is
 import { formatMoney } from './money';
 import i18n from '@/i18n';
 import { defaultPaymentMethods, historicalPaymentMethodLabel, localizedPaymentMethodLabel } from '@/features/finance/paymentMethods';
+import { formatGermanDate } from '@/features/shared/dateFormat';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -1151,7 +1152,7 @@ export function adaptNotification(input: unknown): Notification {
     const rawAmount = BigInt(context.amountMinor);
     const settlementAmount = formatMoney({ minorUnits: (rawAmount < 0n ? -rawAmount : rawAmount).toString(), currency: context.currency });
     const message = rawAmount > 0n
-      ? i18n.t('notifications.events.settlementDueMessage', { period: context.periodLabel, amount: settlementAmount, dueAt: context.dueAt ?? '–' })
+      ? i18n.t('notifications.events.settlementDueMessage', { period: context.periodLabel, amount: settlementAmount, dueAt: context.dueAt ? formatGermanDate(context.dueAt) : '–' })
       : rawAmount < 0n
         ? i18n.t('notifications.events.settlementCreditMessage', { period: context.periodLabel, amount: settlementAmount })
         : i18n.t('notifications.events.settlementPaidMessage', { period: context.periodLabel });

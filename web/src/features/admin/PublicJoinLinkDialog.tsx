@@ -16,6 +16,7 @@ import { Field, TextInput } from '@/components/ui/FormField';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { SelectMenu, type SelectMenuOption } from '@/components/ui/SelectMenu';
 import { StatePanel } from '@/components/ui/StatePanel';
+import { formatGermanDateTime } from '@/features/shared/dateFormat';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import styles from './PublicJoinLinkDialog.module.css';
 
@@ -151,7 +152,7 @@ export function PublicJoinLinkDialog({ groupId, onClose }: PublicJoinLinkDialogP
         {active && link?.acceptUrl ? (
           <>
             <section className={styles.sharePanel}>
-              <div className={styles.statusRow}><span className={styles.activeBadge}><Check size={16} />{t('publicJoin.active')}</span><span>{link.expiresAt ? t('publicJoin.validUntil', { date: new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(link.expiresAt)) }) : t('publicJoin.unlimited')}</span></div>
+              <div className={styles.statusRow}><span className={styles.activeBadge}><Check size={16} />{t('publicJoin.active')}</span><span>{link.expiresAt ? t('publicJoin.validUntil', { date: formatGermanDateTime(link.expiresAt) }) : t('publicJoin.unlimited')}</span></div>
               <div className={styles.qrFrame}>{qrDataURL ? <img alt={t('publicJoin.qrAlt')} height={240} src={qrDataURL} width={240} /> : <span>{t('publicJoin.qrLoading')}</span>}</div>
               <div className={styles.linkRow}><TextInput aria-label={t('publicJoin.linkLabel')} readOnly value={link.acceptUrl} /><Button leadingIcon={copied ? <Check size={17} /> : <Copy size={17} />} onClick={() => void copyLink()} variant="secondary">{copied ? t('common.copied') : t('common.copy')}</Button></div>
               <Button disabled={!qrDataURL} leadingIcon={<Download size={17} />} onClick={() => downloadDataURL(qrDataURL, 'teamtaler-join-qr.png')} size="small" variant="ghost">{t('publicJoin.downloadQr')}</Button>

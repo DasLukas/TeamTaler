@@ -477,7 +477,7 @@ func (s *SMTP) renderInvitation(message InvitationMessage) (string, []byte, erro
 		"Accept the invitation:",
 		acceptURL,
 		"",
-		"This invitation expires at " + message.ExpiresAt.UTC().Format(time.RFC1123) + ".",
+		"This invitation expires at " + formatGermanDateTime(message.ExpiresAt) + ".",
 		"",
 		"If you did not expect this invitation, you can ignore this email.",
 	}, "\r\n") + "\r\n"
@@ -541,7 +541,7 @@ func (s *SMTP) renderJoinVerification(message JoinVerificationMessage) (string, 
 		"Confirm email address:",
 		verifyURL,
 		"",
-		"This link expires at " + message.ExpiresAt.UTC().Format(time.RFC1123) + ".",
+		"This link expires at " + formatGermanDateTime(message.ExpiresAt) + ".",
 		"",
 		"If you did not request this registration, you can ignore this email.",
 	}, "\r\n") + "\r\n"
@@ -657,7 +657,7 @@ func (s *SMTP) renderAccountSecurity(message AccountSecurityMessage, subject, in
 		instruction,
 		actionURL,
 		"",
-		"This link expires at " + message.ExpiresAt.UTC().Format(time.RFC1123) + ".",
+		"This link expires at " + formatGermanDateTime(message.ExpiresAt) + ".",
 		"",
 		ignored,
 	}, "\r\n") + "\r\n"

@@ -301,7 +301,7 @@ func renderNotificationCopy(eventType notifications.EventType, context notificat
 	case notifications.TypeSettlementCreated:
 		label := safeInline(context.PeriodLabel)
 		if context.AmountMinor > 0 {
-			return "Neue Abrechnung", fmt.Sprintf("Die Abrechnung „%s“ ist bereit. Offener Betrag: %s. Fällig am %s.", label, amount, safeInline(context.DueAt))
+			return "Neue Abrechnung", fmt.Sprintf("Die Abrechnung „%s“ ist bereit. Offener Betrag: %s. Fällig am %s.", label, amount, formatGermanCalendarDate(context.DueAt))
 		}
 		if context.AmountMinor < 0 {
 			return "Neue Abrechnung", fmt.Sprintf("Die Abrechnung „%s“ ist bereit. Dein Guthaben beträgt %s.", label, formatEmailMoney(-context.AmountMinor, context.Currency))

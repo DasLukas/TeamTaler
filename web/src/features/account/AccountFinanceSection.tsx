@@ -13,6 +13,7 @@ import { StatePanel } from '@/components/ui/StatePanel';
 import { SelfPaymentDialog } from '@/features/finance/SelfPaymentDialog';
 import { PaymentAttachmentAction } from '@/features/finance/PaymentAttachmentAction';
 import { DataTable, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange } from '@/features/shared/DataTable';
+import { formatGermanDate } from '@/features/shared/dateFormat';
 import tableStyles from '@/features/shared/Table.module.css';
 import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
@@ -156,7 +157,7 @@ export function AccountFinanceSection() {
   }, [currency, deferredLedgerSearch, ledgerQuery.data, ledgerTableState.filters, ledgerTableState.sorting]);
   const settlementColumns = useMemo<DataTableColumnDef<Settlement>[]>(() => [
     { accessorKey: 'periodLabel', cell: ({ row }) => <strong>{row.original.periodLabel}</strong>, enableSorting: true, header: t('account.period'), id: 'periodLabel', meta: { label: t('account.period') } },
-    { accessorKey: 'dueAt', cell: ({ row }) => row.original.dueAt ? <time dateTime={row.original.dueAt}>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(row.original.dueAt))}</time> : '–', enableSorting: true, header: t('account.due'), id: 'dueAt', meta: { label: t('account.due') } },
+    { accessorKey: 'dueAt', cell: ({ row }) => row.original.dueAt ? <time dateTime={row.original.dueAt}>{formatGermanDate(row.original.dueAt)}</time> : '–', enableSorting: true, header: t('account.due'), id: 'dueAt', meta: { label: t('account.due') } },
     { accessorFn: (settlement) => settlement.amount.minorUnits, cell: ({ row }) => formatMoney(row.original.amount), enableSorting: true, header: t('account.claim'), id: 'amount', meta: { align: 'end', label: t('account.claim') } },
     { accessorFn: (settlement) => settlement.paidAmount.minorUnits, cell: ({ row }) => formatMoney(row.original.paidAmount), enableSorting: true, header: t('account.paid'), id: 'paidAmount', meta: { align: 'end', label: t('account.paid') } },
     { accessorFn: (settlement) => settlement.openAmount?.minorUnits, cell: ({ row }) => <strong>{formatMoney(row.original.openAmount ?? { minorUnits: (BigInt(row.original.amount.minorUnits) - BigInt(row.original.paidAmount.minorUnits)).toString(), currency: row.original.amount.currency })}</strong>, enableSorting: true, header: t('account.open'), id: 'openAmount', meta: { align: 'end', label: t('account.open') } },
@@ -164,7 +165,7 @@ export function AccountFinanceSection() {
     { cell: () => <Button leadingIcon={<Printer size={16} />} onClick={() => window.print()} size="small" variant="ghost">{t('account.printPdf')}</Button>, enableSorting: false, header: () => <span className="sr-only">{t('common.action')}</span>, id: 'action', meta: { label: t('common.action') } },
   ], [t]);
   const ledgerColumns = useMemo<DataTableColumnDef<LedgerEntry>[]>(() => [
-    { accessorKey: 'occurredAt', cell: ({ row }) => <time dateTime={row.original.occurredAt}>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(row.original.occurredAt))}</time>, enableSorting: true, header: t('common.date'), id: 'occurredAt', meta: { label: t('common.date') } },
+    { accessorKey: 'occurredAt', cell: ({ row }) => <time dateTime={row.original.occurredAt}>{formatGermanDate(row.original.occurredAt)}</time>, enableSorting: true, header: t('common.date'), id: 'occurredAt', meta: { label: t('common.date') } },
     { accessorKey: 'kind', cell: ({ row }) => row.original.kind === 'BOOKING' ? t('account.kind.booking') : row.original.kind === 'PAYMENT' ? t('account.kind.payment') : row.original.kind === 'REVERSAL' ? t('account.kind.reversal') : t('account.kind.credit'), enableSorting: true, header: t('account.transaction'), id: 'kind', meta: { label: t('account.transaction') } },
     { accessorKey: 'description', enableSorting: true, header: t('common.description'), id: 'description', meta: { label: t('common.description') } },
     { accessorFn: (entry) => entry.amount.minorUnits, cell: ({ row }) => formatMoney(row.original.amount), enableSorting: true, header: t('common.amount'), id: 'amount', meta: { align: 'end', label: t('common.amount') } },
