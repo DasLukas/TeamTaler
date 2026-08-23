@@ -65,6 +65,8 @@
   overscroll-behavior-y: contain;
 }
 
+.body > * { min-width: 0; }
+
 .footer {
   position: relative;
   z-index: 1;
