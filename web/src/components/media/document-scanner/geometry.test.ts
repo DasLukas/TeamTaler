@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyPerspectiveTransform,
+  containedAspectSize,
   createPerspectiveTransform,
   DEFAULT_DOCUMENT_CORNERS,
   estimateWarpSize,
@@ -43,5 +44,11 @@ describe('document scanner geometry', () => {
 
   it('bounds the processed image while retaining its proportions', () => {
     expect(estimateWarpSize(DEFAULT_DOCUMENT_CORNERS, 4000, 2000, 2000)).toEqual({ width: 2000, height: 1000 });
+  });
+
+  it('contains camera media inside portrait and landscape surfaces', () => {
+    expect(containedAspectSize(300, 600, 16 / 9)).toEqual({ height: 168.75, width: 300 });
+    expect(containedAspectSize(800, 400, 3 / 4)).toEqual({ height: 400, width: 300 });
+    expect(containedAspectSize(0, 400, 1)).toBeUndefined();
   });
 });

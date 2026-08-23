@@ -4,10 +4,11 @@ import Palette from 'lucide-react/dist/esm/icons/palette';
 import RotateCw from 'lucide-react/dist/esm/icons/rotate-cw';
 import ScanLine from 'lucide-react/dist/esm/icons/scan-line';
 import Undo2 from 'lucide-react/dist/esm/icons/undo-2';
-import { useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconButton } from '@/components/ui/IconButton';
-import { constrainPoint, DEFAULT_DOCUMENT_CORNERS, isValidDocumentCorners } from './geometry';
+import { constrainPoint, containedAspectSize, DEFAULT_DOCUMENT_CORNERS, isValidDocumentCorners } from './geometry';
+import { renderDocumentFilterPreview } from './imageProcessing';
 import type { DocumentCorners, DocumentFilter, NormalizedPoint, PageRotation, ScannerPage } from './types';
 import styles from './DocumentScannerWorkspace.module.css';
 
@@ -22,6 +23,50 @@ interface FrameSize {
 }
 
 const CORNER_NAMES = ['top left', 'top right', 'bottom right', 'bottom left'] as const;
+
+interface FilterPreviewState {
+  status: 'idle' | 'processing' | 'error';
+  url: string;
+}
+
+interface ProcessedFilterPreview extends FilterPreviewState {
+  file: File;
+  filter: DocumentFilter;
+}
+
+function useFilterPreview(page: ScannerPage): FilterPreviewState {
+  const ownedUrlRef = useRef<string | undefined>(undefined);
+  const [processedPreview, setProcessedPreview] = useState<ProcessedFilterPreview>();
+  const { file, filter, previewUrl, sourceHeight, sourceWidth } = page;
+
+  useEffect(() => {
+    let disposed = false;
+    if (ownedUrlRef.current) {
+      URL.revokeObjectURL(ownedUrlRef.current);
+      ownedUrlRef.current = undefined;
+    }
+    if (filter === 'original') return () => { disposed = true; };
+    void renderDocumentFilterPreview({ file, filter, sourceHeight, sourceWidth }).then((blob) => {
+      if (disposed) return;
+      const url = URL.createObjectURL(blob);
+      ownedUrlRef.current = url;
+      setProcessedPreview({ file, filter, status: 'idle', url });
+    }, () => {
+      if (!disposed) setProcessedPreview({ file, filter, status: 'error', url: previewUrl });
+    });
+    return () => {
+      disposed = true;
+      if (ownedUrlRef.current) {
+        URL.revokeObjectURL(ownedUrlRef.current);
+        ownedUrlRef.current = undefined;
+      }
+    };
+  }, [file, filter, previewUrl, sourceHeight, sourceWidth]);
+
+  if (filter === 'original') return { status: 'idle', url: previewUrl };
+  if (processedPreview?.file === file && processedPreview.filter === filter) return processedPreview;
+  return { status: 'processing', url: previewUrl };
+}
 
 function nextRotation(rotation: PageRotation): PageRotation {
   return ((rotation + 90) % 360) as PageRotation;
@@ -40,12 +85,6 @@ function sourcePoint(point: NormalizedPoint, rotation: PageRotation): Normalized
   return rotatePoint(point, ((360 - rotation) % 360) as PageRotation);
 }
 
-function containedFrameSize(width: number, height: number, aspect: number): FrameSize | undefined {
-  if (width <= 0 || height <= 0 || !Number.isFinite(aspect) || aspect <= 0) return undefined;
-  if (width / height > aspect) return { height, width: height * aspect };
-  return { height: width / aspect, width };
-}
-
 /**
  * Renders an accessible four-corner crop editor for one scanner page.
  *
@@ -57,6 +96,7 @@ export function DocumentCornerEditor({ page, onChange }: DocumentCornerEditorPro
   const hintId = useId();
   const stageRef = useRef<HTMLDivElement>(null);
   const [frameSize, setFrameSize] = useState<FrameSize>();
+  const filterPreview = useFilterPreview(page);
   const displayCorners = page.corners.map((point) => rotatePoint(point, page.rotation)) as unknown as DocumentCorners;
   const quarterTurn = page.rotation === 90 || page.rotation === 270;
   const sourceAspect = page.sourceWidth / page.sourceHeight;
@@ -72,7 +112,7 @@ export function DocumentCornerEditor({ page, onChange }: DocumentCornerEditorPro
     if (!stage) return undefined;
     const synchronize = () => {
       const bounds = stage.getBoundingClientRect();
-      const next = containedFrameSize(bounds.width, bounds.height, previewAspect);
+      const next = containedAspectSize(bounds.width, bounds.height, previewAspect);
       setFrameSize((current) => {
         if (!next || (current && Math.abs(current.height - next.height) < 0.5 && Math.abs(current.width - next.width) < 0.5)) return current;
         return next;
@@ -121,13 +161,14 @@ export function DocumentCornerEditor({ page, onChange }: DocumentCornerEditorPro
   };
 
   return (
-    <section aria-label={t('documentScanner.pageEditor', { defaultValue: 'Page editor' })} className={styles.editorPanel}>
+    <section aria-busy={filterPreview.status === 'processing'} aria-label={t('documentScanner.pageEditor', { defaultValue: 'Page editor' })} className={styles.editorPanel}>
       <div className={styles.cornerStage} ref={stageRef}>
         <div className={styles.cornerFrame} style={{ aspectRatio: previewAspect, height: frameSize?.height, width: frameSize?.width }}>
           <img
             alt={t('documentScanner.pagePreview', { defaultValue: 'Selected scan page' })}
+            data-filter={page.filter}
             data-rotation={page.rotation}
-            src={page.previewUrl}
+            src={filterPreview.url}
             style={imageStyle}
           />
           <svg aria-hidden="true" className={styles.cornerOverlay} preserveAspectRatio="none" viewBox="0 0 100 100">
@@ -151,6 +192,8 @@ export function DocumentCornerEditor({ page, onChange }: DocumentCornerEditorPro
               type="button"
             />
           ))}
+          {filterPreview.status === 'processing' ? <span className={styles.filterPreviewStatus} role="status">{t('documentScanner.filterPreviewProcessing', { defaultValue: 'Applying enhancement…' })}</span> : null}
+          {filterPreview.status === 'error' ? <span className={styles.filterPreviewError} role="alert">{t('documentScanner.filterPreviewFailed', { defaultValue: 'The enhancement preview could not be created.' })}</span> : null}
         </div>
       </div>
       <p className={styles.accessibleEditorInstructions} id={hintId}>

@@ -4,6 +4,16 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+### Changed
+
+- Document scanning now warms OpenCV before publishing contours, normalizes difficult lighting, scores document-like quadrilaterals instead of selecting the largest outline, smooths accepted corners over time, and aligns the overlay with the contained camera frame.
+- Scanner color and grayscale modes now use deterministic pixel processing shared by the live editor preview and PDF renderer, while Original remains an unmodified tonal path.
+
+### Fixed
+
+- Low-confidence or frame-sized detections are no longer displayed or reused for manual capture, preventing unstable table and camera-edge crops.
+- Color, grayscale, and original selections now produce visibly distinct editor previews and persist into final PDF generation.
+
 ## [1.0.0] - 2026-08-21
 
 ### Added

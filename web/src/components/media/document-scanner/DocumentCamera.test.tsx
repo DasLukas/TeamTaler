@@ -2,8 +2,9 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '@/i18n';
-import { createDetectionBitmap } from './cameraUtils';
+import { captureDocumentFrame, createDetectionBitmap } from './cameraUtils';
 import { DocumentCamera } from './DocumentCamera';
+import { DEFAULT_DOCUMENT_CORNERS } from './geometry';
 import type { DetectionResult } from './types';
 
 vi.mock('./cameraUtils', () => ({
@@ -42,6 +43,7 @@ describe('DocumentCamera', () => {
     });
     vi.mocked(createDetectionBitmap).mockReset();
     vi.mocked(createDetectionBitmap).mockResolvedValue(undefined);
+    vi.mocked(captureDocumentFrame).mockReset();
   });
 
   afterEach(() => {
@@ -68,6 +70,7 @@ describe('DocumentCamera', () => {
       confidence: 0.8,
       corners: [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.1 }, { x: 0.9, y: 0.9 }, { x: 0.1, y: 0.9 }],
       requestId: 1,
+      status: 'ready',
     } })));
     expect(container.querySelector('polygon')).not.toBeNull();
 
@@ -125,5 +128,79 @@ describe('DocumentCamera', () => {
     await waitFor(() => expect(workers).toHaveLength(2));
     expect(screen.getByRole('button', { name: i18n.t('documentScanner.capturePage') })).toBeEnabled();
     expect(screen.getByRole('button', { name: i18n.t('documentScanner.capturePage') })).toHaveTextContent('');
+  });
+
+  it('hides weak contours and excludes them from manual capture', async () => {
+    const user = userEvent.setup();
+    const owned = mediaStream();
+    const capturedFile = new File(['jpeg'], 'page.jpg', { type: 'image/jpeg' });
+    const onCapture = vi.fn();
+    vi.mocked(captureDocumentFrame).mockResolvedValue(capturedFile);
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        enumerateDevices: vi.fn().mockResolvedValue([{ kind: 'videoinput' }]),
+        getUserMedia: vi.fn().mockResolvedValue(owned.stream),
+      },
+    });
+    const { container } = render(<DocumentCamera active onCapture={onCapture} />);
+    const video = screen.getByLabelText(i18n.t('documentScanner.cameraPreview'));
+    await waitFor(() => expect(video).toHaveProperty('srcObject', owned.stream));
+    fireEvent.loadedMetadata(video);
+    await waitFor(() => expect(workers).toHaveLength(1));
+
+    act(() => workers[0].onmessage?.(new MessageEvent<DetectionResult>('message', { data: {
+      confidence: 0.4,
+      corners: [{ x: 0.01, y: 0.01 }, { x: 0.99, y: 0.01 }, { x: 0.99, y: 0.99 }, { x: 0.01, y: 0.99 }],
+      requestId: 1,
+      status: 'ready',
+    } })));
+    expect(container.querySelector('polygon')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: i18n.t('documentScanner.capturePage') }));
+    expect(onCapture).toHaveBeenCalledWith(capturedFile, DEFAULT_DOCUMENT_CORNERS);
+
+    act(() => workers[0].onmessage?.(new MessageEvent<DetectionResult>('message', { data: {
+      confidence: 0.9,
+      corners: [{ x: 0.15, y: 0.12 }, { x: 0.85, y: 0.13 }, { x: 0.86, y: 0.88 }, { x: 0.14, y: 0.87 }],
+      requestId: 2,
+      status: 'ready',
+    } })));
+    expect(container.querySelector('polygon')).not.toBeNull();
+  });
+
+  it('contains the overlay in the rendered video frame instead of letterboxed space', async () => {
+    const owned = mediaStream();
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        enumerateDevices: vi.fn().mockResolvedValue([{ kind: 'videoinput' }]),
+        getUserMedia: vi.fn().mockResolvedValue(owned.stream),
+      },
+    });
+    render(<DocumentCamera active onCapture={vi.fn()} />);
+    const video = screen.getByLabelText(i18n.t('documentScanner.cameraPreview'));
+    await waitFor(() => expect(video).toHaveProperty('srcObject', owned.stream));
+    Object.defineProperties(video, {
+      videoHeight: { configurable: true, value: 1080 },
+      videoWidth: { configurable: true, value: 1920 },
+    });
+    const preview = video.parentElement?.parentElement as HTMLDivElement;
+    vi.spyOn(preview, 'getBoundingClientRect').mockReturnValue({
+      bottom: 600,
+      height: 600,
+      left: 0,
+      right: 300,
+      top: 0,
+      width: 300,
+      x: 0,
+      y: 0,
+      toJSON: () => undefined,
+    });
+
+    fireEvent.loadedMetadata(video);
+    window.dispatchEvent(new Event('resize'));
+
+    await waitFor(() => expect(video.parentElement).toHaveStyle({ height: '168.75px', width: '300px' }));
   });
 });

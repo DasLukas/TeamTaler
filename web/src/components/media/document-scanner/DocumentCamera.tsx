@@ -1,9 +1,19 @@
 import Camera from 'lucide-react/dist/esm/icons/camera';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconButton } from '@/components/ui/IconButton';
 import { captureDocumentFrame, createDetectionBitmap, stopDocumentCamera, supportsDocumentCamera } from './cameraUtils';
+import {
+  DOCUMENT_CAPTURE_CONFIDENCE,
+  DOCUMENT_DETECTION_MAX_AGE_MS,
+  DOCUMENT_DISPLAY_CONFIDENCE,
+  DOCUMENT_REARM_DISTANCE,
+  DOCUMENT_STABLE_DISTANCE,
+  maximumCornerDistance,
+  smoothDocumentCorners,
+} from './documentDetection';
+import { containedAspectSize, DEFAULT_DOCUMENT_CORNERS } from './geometry';
 import type { DetectionRequest, DetectionResult, DocumentCorners } from './types';
 import styles from './DocumentScannerWorkspace.module.css';
 
@@ -12,25 +22,38 @@ interface DocumentCameraProps {
   onCapture: (file: File, corners: DocumentCorners) => void;
 }
 
-function cornersAreStable(first: DocumentCorners, second: DocumentCorners): boolean {
-  return first.every((point, index) => Math.hypot(point.x - second[index].x, point.y - second[index].y) < 0.035);
+interface AcceptedDetection {
+  confidence: number;
+  corners: DocumentCorners;
+  detectedAt: number;
 }
+
+interface FrameSize {
+  height: number;
+  width: number;
+}
+
+const AUTO_CAPTURE_STABLE_FRAMES = 4;
+const DETECTION_MISSES_BEFORE_CLEAR = 3;
 
 /**
  * Renders the scanner-owned camera preview and background document detection.
  *
- * @param props - Activity state plus capture and native-fallback callbacks.
+ * @param props - Activity state plus capture callback.
  * @returns A camera surface whose stream and worker are scoped to its active lifetime.
  */
 export function DocumentCamera({ active, onCapture }: DocumentCameraProps) {
   const { t } = useTranslation();
+  const previewRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const activeStreamRef = useRef<MediaStream | undefined>(undefined);
   const workerRef = useRef<Worker | undefined>(undefined);
   const detectionPendingRef = useRef(false);
   const requestIdRef = useRef(0);
   const stableDetectionRef = useRef<{ count: number; corners: DocumentCorners } | undefined>(undefined);
-  const detectedCornersRef = useRef<DocumentCorners | undefined>(undefined);
+  const acceptedDetectionRef = useRef<AcceptedDetection | undefined>(undefined);
+  const displayedCornersRef = useRef<DocumentCorners | undefined>(undefined);
+  const missedDetectionsRef = useRef(0);
   const lastCapturedCornersRef = useRef<DocumentCorners | undefined>(undefined);
   const automaticCaptureArmedRef = useRef(true);
   const autoCaptureRef = useRef(true);
@@ -38,15 +61,19 @@ export function DocumentCamera({ active, onCapture }: DocumentCameraProps) {
   const captureInProgressRef = useRef(false);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [status, setStatus] = useState<'starting' | 'ready' | 'error'>(supportsDocumentCamera() ? 'starting' : 'error');
+  const [detectionStatus, setDetectionStatus] = useState<'loading' | 'ready' | 'unavailable'>(typeof Worker === 'undefined' ? 'unavailable' : 'loading');
   const [canSwitchCamera, setCanSwitchCamera] = useState(false);
   const [detectedCorners, setDetectedCorners] = useState<DocumentCorners>();
   const [autoCapture, setAutoCapture] = useState(true);
-  const [detectionAvailable, setDetectionAvailable] = useState(typeof Worker !== 'undefined');
+  const [videoAspect, setVideoAspect] = useState<number>();
+  const [cameraFrameSize, setCameraFrameSize] = useState<FrameSize>();
 
   const clearDetectionRefs = useCallback(() => {
     detectionPendingRef.current = false;
     stableDetectionRef.current = undefined;
-    detectedCornersRef.current = undefined;
+    acceptedDetectionRef.current = undefined;
+    displayedCornersRef.current = undefined;
+    missedDetectionsRef.current = 0;
     lastCapturedCornersRef.current = undefined;
     automaticCaptureArmedRef.current = true;
   }, []);
@@ -62,7 +89,10 @@ export function DocumentCamera({ active, onCapture }: DocumentCameraProps) {
     captureInProgressRef.current = true;
     try {
       const file = await captureDocumentFrame(video);
-      const corners = detectedCornersRef.current ?? [{ x: 0.04, y: 0.04 }, { x: 0.96, y: 0.04 }, { x: 0.96, y: 0.96 }, { x: 0.04, y: 0.96 }];
+      const detection = acceptedDetectionRef.current;
+      const corners = detection && performance.now() - detection.detectedAt <= DOCUMENT_DETECTION_MAX_AGE_MS
+        ? detection.corners
+        : DEFAULT_DOCUMENT_CORNERS;
       onCapture(file, corners);
       lastCapturedCornersRef.current = corners;
       automaticCaptureArmedRef.current = false;
@@ -74,6 +104,30 @@ export function DocumentCamera({ active, onCapture }: DocumentCameraProps) {
     }
   }, [onCapture]);
 
+  useLayoutEffect(() => {
+    const preview = previewRef.current;
+    if (!preview || !videoAspect) {
+      setCameraFrameSize(undefined);
+      return undefined;
+    }
+    const synchronize = () => {
+      const bounds = preview.getBoundingClientRect();
+      const next = containedAspectSize(bounds.width, bounds.height, videoAspect);
+      setCameraFrameSize((current) => {
+        if (!next || (current && Math.abs(current.height - next.height) < 0.5 && Math.abs(current.width - next.width) < 0.5)) return current;
+        return next;
+      });
+    };
+    synchronize();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', synchronize);
+      return () => window.removeEventListener('resize', synchronize);
+    }
+    const observer = new ResizeObserver(synchronize);
+    observer.observe(preview);
+    return () => observer.disconnect();
+  }, [videoAspect]);
+
   useEffect(() => {
     if (!active || !supportsDocumentCamera()) return undefined;
     let current = true;
@@ -83,8 +137,9 @@ export function DocumentCamera({ active, onCapture }: DocumentCameraProps) {
     const startingTimer = window.setTimeout(() => {
       if (!current) return;
       resetDetectionState();
-      setDetectionAvailable(typeof Worker !== 'undefined');
+      setDetectionStatus(typeof Worker === 'undefined' ? 'unavailable' : 'loading');
       setStatus('starting');
+      setVideoAspect(undefined);
     }, 0);
     void navigator.mediaDevices.getUserMedia({
       audio: false,
@@ -97,7 +152,7 @@ export function DocumentCamera({ active, onCapture }: DocumentCameraProps) {
       }
       window.clearTimeout(startingTimer);
       resetDetectionState();
-      setDetectionAvailable(typeof Worker !== 'undefined');
+      setDetectionStatus(typeof Worker === 'undefined' ? 'unavailable' : 'loading');
       setStatus('starting');
       attachedVideo = videoRef.current;
       activeStreamRef.current = nextStream;
@@ -133,7 +188,7 @@ export function DocumentCamera({ active, onCapture }: DocumentCameraProps) {
     } catch {
       const fallbackTimer = window.setTimeout(() => {
         resetDetectionState();
-        setDetectionAvailable(false);
+        setDetectionStatus('unavailable');
       }, 0);
       return () => window.clearTimeout(fallbackTimer);
     }
@@ -150,35 +205,57 @@ export function DocumentCamera({ active, onCapture }: DocumentCameraProps) {
       if (workerRef.current === worker) workerRef.current = undefined;
       detectionPendingRef.current = false;
       stableDetectionRef.current = undefined;
-      detectedCornersRef.current = undefined;
+      acceptedDetectionRef.current = undefined;
+      displayedCornersRef.current = undefined;
       if (showFallback) {
         resetDetectionState();
-        setDetectionAvailable(false);
+        setDetectionStatus('unavailable');
       }
     };
     worker.onmessage = (event: MessageEvent<DetectionResult>) => {
       if (disposed) return;
       detectionPendingRef.current = false;
       const result = event.data;
-      detectedCornersRef.current = result.corners;
-      setDetectedCorners(result.corners);
-      if (result.confidence < 0.45) {
+      if (result.status === 'unavailable') {
+        stopDetection(true);
+        return;
+      }
+      setDetectionStatus('ready');
+      if (!result.corners || result.confidence < DOCUMENT_DISPLAY_CONFIDENCE) {
+        missedDetectionsRef.current += 1;
+        stableDetectionRef.current = undefined;
+        if (missedDetectionsRef.current >= DETECTION_MISSES_BEFORE_CLEAR) {
+          acceptedDetectionRef.current = undefined;
+          displayedCornersRef.current = undefined;
+          setDetectedCorners(undefined);
+          automaticCaptureArmedRef.current = true;
+          lastCapturedCornersRef.current = undefined;
+        }
+        return;
+      }
+
+      missedDetectionsRef.current = 0;
+      const previousDisplayed = displayedCornersRef.current;
+      const smoothed = previousDisplayed ? smoothDocumentCorners(previousDisplayed, result.corners) : result.corners;
+      displayedCornersRef.current = smoothed;
+      acceptedDetectionRef.current = { confidence: result.confidence, corners: smoothed, detectedAt: performance.now() };
+      setDetectedCorners(smoothed);
+
+      const lastCaptured = lastCapturedCornersRef.current;
+      if (lastCaptured && maximumCornerDistance(lastCaptured, smoothed) > DOCUMENT_REARM_DISTANCE) {
         automaticCaptureArmedRef.current = true;
         lastCapturedCornersRef.current = undefined;
       }
-      if (!autoCaptureRef.current || result.confidence < 0.72) {
+      if (!autoCaptureRef.current || result.confidence < DOCUMENT_CAPTURE_CONFIDENCE) {
         stableDetectionRef.current = undefined;
         return;
       }
-      const lastCaptured = lastCapturedCornersRef.current;
-      if (lastCaptured && !cornersAreStable(lastCaptured, result.corners)) {
-        automaticCaptureArmedRef.current = true;
-        lastCapturedCornersRef.current = undefined;
-      }
-      const previous = stableDetectionRef.current;
-      const count = previous && cornersAreStable(previous.corners, result.corners) ? previous.count + 1 : 1;
-      stableDetectionRef.current = { corners: result.corners, count };
-      if (count >= 3 && automaticCaptureArmedRef.current && performance.now() - lastAutomaticCaptureRef.current > 2200) {
+      const previousStable = stableDetectionRef.current;
+      const count = previousStable && maximumCornerDistance(previousStable.corners, smoothed) < DOCUMENT_STABLE_DISTANCE
+        ? previousStable.count + 1
+        : 1;
+      stableDetectionRef.current = { corners: smoothed, count };
+      if (count >= AUTO_CAPTURE_STABLE_FRAMES && automaticCaptureArmedRef.current && performance.now() - lastAutomaticCaptureRef.current > 2_200) {
         stableDetectionRef.current = undefined;
         void capture(true);
       }
@@ -206,7 +283,7 @@ export function DocumentCamera({ active, onCapture }: DocumentCameraProps) {
           detectionPendingRef.current = false;
         }
       }, () => { detectionPendingRef.current = false; });
-    }, 450);
+    }, 360);
     return () => {
       stopDetection(false);
     };
@@ -218,31 +295,39 @@ export function DocumentCamera({ active, onCapture }: DocumentCameraProps) {
     if (videoRef.current) videoRef.current.srcObject = null;
     stopDocumentCamera(previousStream);
     setStatus('starting');
-    setDetectionAvailable(typeof Worker !== 'undefined');
+    setDetectionStatus(typeof Worker === 'undefined' ? 'unavailable' : 'loading');
+    setVideoAspect(undefined);
     resetDetectionState();
     setFacingMode((current) => current === 'environment' ? 'user' : 'environment');
   };
 
+  const synchronizeVideoAspect = (video: HTMLVideoElement) => {
+    if (video.videoWidth > 0 && video.videoHeight > 0) setVideoAspect(video.videoWidth / video.videoHeight);
+  };
   const cameraReady = active && status === 'ready';
 
   return (
     <section aria-label={t('documentScanner.cameraTitle', { defaultValue: 'Document camera' })} className={styles.cameraPanel}>
-      <div className={styles.cameraPreview}>
-        <video
-          aria-label={t('documentScanner.cameraPreview', { defaultValue: 'Live document preview' })}
-          autoPlay
-          muted
-          onLoadedMetadata={(event) => {
-            if (active && event.currentTarget.srcObject === activeStreamRef.current) setStatus('ready');
-          }}
-          playsInline
-          ref={videoRef}
-        />
-        {detectedCorners && cameraReady ? (
-          <svg aria-hidden="true" className={styles.detectionOverlay} preserveAspectRatio="none" viewBox="0 0 100 100">
-            <polygon points={detectedCorners.map((point) => `${point.x * 100},${point.y * 100}`).join(' ')} />
-          </svg>
-        ) : null}
+      <div className={styles.cameraPreview} ref={previewRef}>
+        <div className={styles.cameraMedia} style={{ height: cameraFrameSize?.height, width: cameraFrameSize?.width }}>
+          <video
+            aria-label={t('documentScanner.cameraPreview', { defaultValue: 'Live document preview' })}
+            autoPlay
+            muted
+            onLoadedMetadata={(event) => {
+              synchronizeVideoAspect(event.currentTarget);
+              if (active && event.currentTarget.srcObject === activeStreamRef.current) setStatus('ready');
+            }}
+            onResize={(event) => synchronizeVideoAspect(event.currentTarget)}
+            playsInline
+            ref={videoRef}
+          />
+          {detectedCorners && cameraReady ? (
+            <svg aria-hidden="true" className={styles.detectionOverlay} preserveAspectRatio="none" viewBox="0 0 100 100">
+              <polygon points={detectedCorners.map((point) => `${point.x * 100},${point.y * 100}`).join(' ')} />
+            </svg>
+          ) : null}
+        </div>
         {status === 'starting' ? <p role="status">{t('documentScanner.cameraStarting', { defaultValue: 'Starting camera…' })}</p> : null}
         {status === 'error' ? (
           <div className={styles.cameraError} role="alert">
@@ -251,10 +336,15 @@ export function DocumentCamera({ active, onCapture }: DocumentCameraProps) {
         ) : null}
         <div className={styles.cameraControls}>
           <label className={styles.autoCaptureToggle}>
-            <input checked={autoCapture} disabled={!detectionAvailable} onChange={(event) => { autoCaptureRef.current = event.target.checked; setAutoCapture(event.target.checked); }} type="checkbox" />
+            <input checked={autoCapture} disabled={detectionStatus === 'unavailable'} onChange={(event) => { autoCaptureRef.current = event.target.checked; setAutoCapture(event.target.checked); }} type="checkbox" />
             <span>{t('documentScanner.autoCapture', { defaultValue: 'Auto' })}</span>
           </label>
-          {!detectionAvailable && cameraReady ? (
+          {detectionStatus === 'loading' && cameraReady ? (
+            <p className={styles.detectionWarning} role="status">
+              {t('documentScanner.detectionPreparing', { defaultValue: 'Preparing automatic document detection…' })}
+            </p>
+          ) : null}
+          {detectionStatus === 'unavailable' && cameraReady ? (
             <p className={styles.detectionWarning} role="status">
               {t('documentScanner.detectionUnavailable', { defaultValue: 'Automatic document detection is unavailable. Capture the page manually.' })}
             </p>
