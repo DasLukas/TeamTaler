@@ -109,7 +109,10 @@
   .fullscreen .footer {
     padding: var(--space-3) var(--space-5) var(--space-5);
   }
+}
 
+/* Sheets are only used where the sidebar is replaced by mobile navigation. */
+@media (max-width: 767px) {
   .dialog.sheet {
     position: fixed;
     inset: auto 0 var(--modal-visual-viewport-bottom, 0px);
