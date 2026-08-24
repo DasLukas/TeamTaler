@@ -268,6 +268,8 @@ describe('BookingPage multi-product workspace', () => {
     expect(screen.queryByRole('button', { name: /Warenkorb öffnen/ })).not.toBeInTheDocument();
     const priceInput = screen.getByLabelText(i18n.t('booking.unitPriceForProduct', { name: 'Ausrüstung vergessen', currency: 'EUR' }));
     expect(priceInput).toBeVisible();
+    expect(priceInput).toHaveAttribute('inputmode', 'decimal');
+    expect(priceInput).toHaveAttribute('type', 'text');
     await waitFor(() => expect(priceInput).toHaveFocus());
   });
 
@@ -282,6 +284,8 @@ describe('BookingPage multi-product workspace', () => {
 
     const priceInput = screen.getByLabelText(i18n.t('booking.unitPriceForProduct', { name: 'Ausrüstung vergessen', currency: 'EUR' }));
     expect(priceInput).toBeVisible();
+    expect(priceInput).toHaveAttribute('inputmode', 'decimal');
+    expect(priceInput).toHaveAttribute('type', 'text');
     await waitFor(() => expect(priceInput).toHaveFocus());
   });
 

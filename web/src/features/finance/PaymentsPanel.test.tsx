@@ -77,7 +77,10 @@ describe('PaymentsPanel', () => {
 
     await user.click((await screen.findAllByRole('button', { name: i18n.t('finance.record') }))[0]);
 
-    expect(screen.getByLabelText(`${i18n.t('finance.amountIn', { currency: 'EUR' })} *`)).toBeRequired();
+    const amountInput = screen.getByLabelText(`${i18n.t('finance.amountIn', { currency: 'EUR' })} *`);
+    expect(amountInput).toBeRequired();
+    expect(amountInput).toHaveAttribute('inputmode', 'decimal');
+    expect(amountInput).toHaveAttribute('type', 'text');
     expect(screen.getByLabelText(i18n.t('finance.reason'))).not.toBeRequired();
     expect(screen.queryByLabelText(`${i18n.t('finance.reason')} *`)).not.toBeInTheDocument();
     expect(screen.getByLabelText(i18n.t('finance.paymentType'))).toHaveValue('CASH');

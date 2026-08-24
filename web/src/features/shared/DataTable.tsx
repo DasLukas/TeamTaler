@@ -417,6 +417,7 @@ function FilterEditor<FilterId extends string>({ definition, filters, onChange, 
       <Field htmlFor={`${controlId}-minimum`} label={definition.minimumLabel}>
         <TextInput
           id={`${controlId}-minimum`}
+          inputMode="decimal"
           onChange={(event) => {
             const minimum = event.target.valueAsNumber;
             onChange({ ...range, min: event.target.value === '' || !Number.isFinite(minimum) ? undefined : minimum });
@@ -429,6 +430,7 @@ function FilterEditor<FilterId extends string>({ definition, filters, onChange, 
       <Field htmlFor={`${controlId}-maximum`} label={definition.maximumLabel}>
         <TextInput
           id={`${controlId}-maximum`}
+          inputMode="decimal"
           onChange={(event) => {
             const maximum = event.target.valueAsNumber;
             onChange({ ...range, max: event.target.value === '' || !Number.isFinite(maximum) ? undefined : maximum });

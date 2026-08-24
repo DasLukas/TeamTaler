@@ -4,7 +4,7 @@ import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
-import { formatMoney, isCreditBalance } from '@/api/money';
+import { formatMoney } from '@/api/money';
 import { canRecordOwnPayment } from '@/app/groupCapabilities';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Avatar } from '@/components/ui/Avatar';
@@ -57,7 +57,8 @@ export function DashboardPage() {
   const recentBookings = dashboard.recentBookings;
   const greeting = t(`dashboard.${getDashboardGreetingKey(localHour)}`);
   const canRecordPayment = canRecordOwnPayment(activeGroup.membership?.effectiveGrants);
-  const hasCreditBalance = isCreditBalance(dashboard.openBalance);
+  const openBalanceAmount = BigInt(dashboard.openBalance.minorUnits);
+  const openBalanceState = openBalanceAmount > 0n ? 'due' : openBalanceAmount < 0n ? 'credit' : 'balanced';
   // The API omits this field unless VIEW_GROUP_STATISTICS is effective. Using
   // the response as the single authorization projection avoids hiding a newly
   // granted balance while locally cached membership grants are still stale.
@@ -71,7 +72,7 @@ export function DashboardPage() {
         <section className={styles.personalBalanceSection}>
           <h2>{t('booking.openBalance')}</h2>
           <div className={`${styles.balanceCard} ${settlementsEnabled ? '' : styles.continuousBalanceCard}`}>
-            <div><strong className={hasCreditBalance ? styles.creditBalance : undefined} data-financial-state={hasCreditBalance ? 'credit' : 'due'}>{formatMoney(dashboard.openBalance)}</strong>{canRecordPayment ? <SelfPaymentDialog className={styles.selfPaymentAction} openBalance={dashboard.openBalance} /> : null}</div>
+            <div><strong className={openBalanceState === 'due' ? undefined : styles.nonDueBalance} data-financial-state={openBalanceState}>{formatMoney(dashboard.openBalance)}</strong>{canRecordPayment ? <SelfPaymentDialog className={styles.selfPaymentAction} openBalance={dashboard.openBalance} /> : null}</div>
             <div className={styles.period}>{settlementsEnabled ? <strong>{t('dashboard.settlement', { label: dashboard.currentPeriod.label.split(' ')[0] })}</strong> : null}<p>{t(canRecordPayment ? 'dashboard.paymentNoteSelf' : 'dashboard.paymentNote')}</p></div>
           </div>
         </section>

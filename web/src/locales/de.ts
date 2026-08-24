@@ -945,6 +945,7 @@ export const de = {
     noAccounts: 'Es sind noch keine Mitgliedskonten vorhanden.',
     membershipStatus: 'Mitgliedschaft',
     balance: 'Saldo',
+    balanceState: 'Saldostand',
     active: 'Aktiv',
     archived: 'Ehemalig',
     states: {
