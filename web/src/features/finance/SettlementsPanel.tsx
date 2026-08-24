@@ -13,6 +13,7 @@ import { api } from '@/api/client';
 import { currencyExponent, formatMoney } from '@/api/money';
 import type { Period, Settlement } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
+import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
@@ -48,6 +49,8 @@ export function SettlementsPanel({ settlements, settlementsEnabled }: Settlement
   const closePeriodFormId = useId();
   const labels = useDataTableLabels();
   const periodsQuery = useQuery({ queryKey: ['periods', activeGroupId], queryFn: () => api.getPeriods(activeGroupId), enabled: settlementsEnabled });
+  const accountsQuery = useQuery({ queryKey: ['account-summaries', activeGroupId], queryFn: () => api.getAccountSummaries(activeGroupId) });
+  const accountAvatarUrls = useMemo(() => new Map((accountsQuery.data ?? []).map((account) => [account.membershipId, account.avatarUrl])), [accountsQuery.data]);
   const [periodToClose, setPeriodToClose] = useState<Period | null>(null);
   const [label, setLabel] = useState('');
   const [dueAt, setDueAt] = useState('');
@@ -64,7 +67,11 @@ export function SettlementsPanel({ settlements, settlementsEnabled }: Settlement
       id: 'membershipId',
       kind: 'select',
       label: t('common.member'),
-      options: [...new Map(settlements.map((settlement) => [settlement.membershipId, { label: settlement.memberName, value: settlement.membershipId }])).values()],
+      options: [...new Map(settlements.map((settlement) => [settlement.membershipId, {
+        label: settlement.memberName,
+        value: settlement.membershipId,
+        visual: <Avatar decorative name={settlement.memberName} size="small" src={accountAvatarUrls.get(settlement.membershipId)} />,
+      }])).values()],
     },
     { fromLabel: t('dataTable.from'), id: 'dueAt', kind: 'date-range', label: t('periods.due'), toLabel: t('dataTable.to') },
     { id: 'amount', kind: 'number-range', label: t('periods.claim'), maximumLabel: t('dataTable.maximum'), minimumLabel: t('dataTable.minimum'), step: 0.01 },
@@ -82,7 +89,7 @@ export function SettlementsPanel({ settlements, settlementsEnabled }: Settlement
         { label: t('common.credit'), value: 'CREDIT', visual: <WalletCards size={19} /> },
       ],
     },
-  ], [settlements, t]);
+  ], [accountAvatarUrls, settlements, t]);
   const tableState = useDataTableUrlState<SettlementFilterId>({
     filterDefinitions,
     initialSorting: [{ id: 'dueAt', desc: true }],

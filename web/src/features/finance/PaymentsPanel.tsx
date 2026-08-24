@@ -7,12 +7,14 @@ import { useDeferredValue, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { currencyExponent, formatMoney, majorUnitsInputPattern, majorUnitsPlaceholder, parseMajorUnits } from '@/api/money';
-import type { CollectionPage, Payment, PaymentCollectionQuery } from '@/api/types';
+import type { AccountSummary, CollectionPage, Payment, PaymentCollectionQuery } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { useInstanceCapabilities } from '@/app/useSession';
+import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
+import { SelectMenu, type SelectMenuOption } from '@/components/ui/SelectMenu';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { DataTable, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange } from '@/features/shared/DataTable';
 import { formatGermanDate } from '@/features/shared/dateFormat';
@@ -26,6 +28,22 @@ import { PaymentAttachmentField } from './PaymentAttachmentField';
 
 const paymentPageSize = 50;
 type PaymentFilterId = 'membershipId' | 'method' | 'status' | 'receivedAt' | 'amount';
+
+/**
+ * Converts one account summary into an avatar-backed member choice.
+ *
+ * @param account - Finance-safe member identity and avatar projection.
+ * @param group - Optional visible group heading for the member menu.
+ * @returns A reusable custom-select option.
+ */
+function accountSelectOption(account: AccountSummary, group?: string): SelectMenuOption {
+  return {
+    group,
+    label: account.displayName,
+    value: account.membershipId,
+    visual: <Avatar decorative name={account.displayName} size="small" src={account.avatarUrl} />,
+  };
+}
 
 /**
  * Renders the finance workspace for auditable incoming payments.
@@ -58,7 +76,7 @@ export function PaymentsPanel() {
       id: 'membershipId',
       kind: 'select',
       label: t('common.member'),
-      options: (accountsQuery.data ?? []).map((account) => ({ label: account.displayName, value: account.membershipId })),
+      options: (accountsQuery.data ?? []).map((account) => accountSelectOption(account)),
     },
     {
       allLabel: t('dataTable.allValues'),
@@ -124,6 +142,12 @@ export function PaymentsPanel() {
   const deletedAccounts = accountsQuery.data?.filter((account) => account.status === 'DELETED' && BigInt(account.balance.minorUnits) > 0n) ?? [];
   const defaultAccount = regularAccounts[0] ?? temporaryGuestAccounts[0] ?? archivedAccounts[0] ?? deletedAccounts[0];
   const selectedMembershipId = membershipId || defaultAccount?.membershipId || '';
+  const paymentMemberOptions: readonly SelectMenuOption[] = [
+    ...regularAccounts.map((account) => accountSelectOption(account, t('booking.regularMembers'))),
+    ...temporaryGuestAccounts.map((account) => accountSelectOption(account, t('booking.guests'))),
+    ...archivedAccounts.map((account) => accountSelectOption(account, t('financeWorkspace.archivedMembers'))),
+    ...deletedAccounts.map((account) => accountSelectOption(account, t('financeWorkspace.deletedAccounts'))),
+  ];
   const reasonMode = transactionSettingsQuery.data?.otherPaymentReasonMode
     ?? (transactionSettingsQuery.data?.otherPaymentReasonRequired ? 'REQUIRED' : 'OPTIONAL');
   const reasonEnabled = reasonMode !== 'OFF';
@@ -242,12 +266,7 @@ export function PaymentsPanel() {
       <Modal onClose={closeRecordDialog} open={dialogOpen} title={t('finance.record')} variant={compact ? 'sheet' : 'dialog'}>
         <form className={styles.form} id={paymentFormId} onSubmit={(event) => { event.preventDefault(); paymentMutation.mutate(); }}>
           <Field htmlFor="payment-member" label={t('common.member')}>
-            <SelectInput id="payment-member" onChange={(event) => setMembershipId(event.target.value)} value={membershipId || defaultAccount?.membershipId}>
-              {regularAccounts.length > 0 ? <optgroup label={t('booking.regularMembers')}>{regularAccounts.map((account) => <option key={account.membershipId} value={account.membershipId}>{account.displayName}</option>)}</optgroup> : null}
-              {temporaryGuestAccounts.length > 0 ? <optgroup label={t('booking.guests')}>{temporaryGuestAccounts.map((account) => <option key={account.membershipId} value={account.membershipId}>{account.displayName}</option>)}</optgroup> : null}
-              {archivedAccounts.length > 0 ? <optgroup label={t('financeWorkspace.archivedMembers')}>{archivedAccounts.map((account) => <option key={account.membershipId} value={account.membershipId}>{account.displayName}</option>)}</optgroup> : null}
-              {deletedAccounts.length > 0 ? <optgroup label={t('financeWorkspace.deletedAccounts')}>{deletedAccounts.map((account) => <option key={account.membershipId} value={account.membershipId}>{account.displayName}</option>)}</optgroup> : null}
-            </SelectInput>
+            <SelectMenu ariaLabel={t('common.member')} id="payment-member" onChange={setMembershipId} options={paymentMemberOptions} value={selectedMembershipId} />
           </Field>
           <div className={styles.formRow}><Field htmlFor="payment-amount" label={`${t('finance.amountIn', { currency: activeGroup.currency })} *`}><TextInput id="payment-amount" inputMode="decimal" onChange={(event) => setAmount(event.target.value)} pattern={majorUnitsInputPattern(activeGroup.currency)} placeholder={majorUnitsPlaceholder(activeGroup.currency)} required type="text" value={amount} /></Field><Field htmlFor="payment-date" label={t('finance.receivedDate')}><TextInput id="payment-date" onChange={(event) => setReceivedAt(event.target.value)} required type="date" value={receivedAt} /></Field></div>
           <Field htmlFor="payment-method" label={t('finance.paymentType')}><SelectInput id="payment-method" onChange={(event) => { const nextMethod = event.target.value; setMethod(nextMethod); if (transactionSettingsQuery.data.paymentMethods.find((item) => item.id === nextMethod)?.attachmentMode === 'OFF') setAttachment(null); }} required value={method}>{transactionSettingsQuery.data.paymentMethods.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</SelectInput></Field>

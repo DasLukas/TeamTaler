@@ -2,13 +2,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Settlement } from '@/api/types';
+import type { AccountSummary, Settlement } from '@/api/types';
 import modalStyles from '@/components/ui/Modal.module.css';
 import i18n from '@/i18n';
 import { SettlementsPanel } from './SettlementsPanel';
 
 const mocks = vi.hoisted(() => ({
   closePeriod: vi.fn(),
+  getAccountSummaries: vi.fn(),
   getPeriods: vi.fn(),
 }));
 const mediaQueryMock = vi.hoisted(() => vi.fn());
@@ -31,6 +32,16 @@ const history: Settlement[] = [{
   status: 'PAID',
 }];
 
+const account: AccountSummary = {
+  membershipId: 'member-a',
+  displayName: 'Alex Example',
+  avatarUrl: '/avatars/alex-example.png',
+  isTemporaryGuest: false,
+  status: 'ACTIVE',
+  currency: 'EUR',
+  balance: { minorUnits: '0', currency: 'EUR' },
+};
+
 function renderPanel(settlementsEnabled: boolean, settlements: Settlement[] = history) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(<QueryClientProvider client={queryClient}><SettlementsPanel settlements={settlements} settlementsEnabled={settlementsEnabled} /></QueryClientProvider>);
@@ -40,6 +51,7 @@ describe('SettlementsPanel feature modes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mediaQueryMock.mockReturnValue(false);
+    mocks.getAccountSummaries.mockResolvedValue([account]);
     mocks.getPeriods.mockResolvedValue([{ id: 'period-open', label: 'August 2026', status: 'OPEN', startsAt: '2026-08-01T00:00:00Z' }]);
   });
 
@@ -80,6 +92,11 @@ describe('SettlementsPanel feature modes', () => {
 
     await user.click(screen.getByRole('button', { name: i18n.t('dataTable.filterButton') }));
     const filterDialog = screen.getByRole('dialog', { name: i18n.t('dataTable.filterHeading') });
+    const memberTrigger = within(filterDialog).getByRole('combobox', { name: i18n.t('common.member') });
+    await user.click(memberTrigger);
+    const memberListbox = screen.getByRole('listbox', { name: i18n.t('common.member') });
+    expect(within(memberListbox).getByRole('option', { name: 'Alex Example' }).querySelector('img')).toHaveAttribute('src', '/avatars/alex-example.png');
+    await user.keyboard('{Escape}');
     const balanceStateTrigger = within(filterDialog).getByRole('button', { name: i18n.t('financeWorkspace.balanceState') });
     await user.click(balanceStateTrigger);
 

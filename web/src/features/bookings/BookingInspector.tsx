@@ -9,9 +9,11 @@ import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { formatMoney, majorUnitsInputPattern, majorUnitsPlaceholder, multiplyMoney, validatePositiveMajorUnits } from '@/api/money';
 import type { BookingTarget, ConfigurableItem, Period, Product, ReasonMode } from '@/api/types';
+import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
-import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
+import { Field, TextInput } from '@/components/ui/FormField';
 import { IconButton } from '@/components/ui/IconButton';
+import { SelectMenu } from '@/components/ui/SelectMenu';
 import { MemberMultiSelect } from './MemberMultiSelect';
 import styles from './BookingInspector.module.css';
 
@@ -192,9 +194,17 @@ export function BookingInspector({
             targets={targets}
           />
         ) : (
-          <SelectInput disabled id="booking-member" value={targetMembershipIds[0] ?? ''}>
-            {targets.map((target) => <option key={target.membershipId} value={target.membershipId}>{target.displayName}</option>)}
-          </SelectInput>
+          <SelectMenu
+            disabled
+            id="booking-member"
+            onChange={() => undefined}
+            options={targets.map((target) => ({
+              label: target.displayName,
+              value: target.membershipId,
+              visual: <Avatar decorative name={target.displayName} size="small" src={target.avatarUrl} />,
+            }))}
+            value={targetMembershipIds[0] ?? ''}
+          />
         )}
       </Field>
 

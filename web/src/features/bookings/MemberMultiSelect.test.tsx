@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BookingTarget } from '@/api/types';
@@ -10,7 +10,7 @@ const mediaQuery = vi.hoisted(() => ({ compact: false, query: '' }));
 vi.mock('@/hooks/useMediaQuery', () => ({ useMediaQuery: (query: string) => { mediaQuery.query = query; return mediaQuery.compact; } }));
 
 const targets: BookingTarget[] = [
-  { membershipId: 'member-regular', displayName: 'Regular Member', isTemporaryGuest: false },
+  { membershipId: 'member-regular', displayName: 'Regular Member', avatarUrl: '/avatars/regular-member.png', isTemporaryGuest: false },
   { membershipId: 'member-guest', displayName: 'Existing Guest', isTemporaryGuest: true },
 ];
 
@@ -41,8 +41,12 @@ describe('MemberMultiSelect', () => {
     expect(trigger).toHaveTextContent('2');
     expect(trigger).not.toHaveTextContent('Regular Member');
     await user.click(trigger);
-    expect(screen.getByRole('dialog', { name: label })).toHaveTextContent('Regular Member');
-    expect(screen.getByRole('dialog', { name: label })).toHaveTextContent('Pending Guest');
+    const dialog = screen.getByRole('dialog', { name: label });
+    expect(dialog).toHaveTextContent('Regular Member');
+    expect(dialog).toHaveTextContent('Pending Guest');
+    expect(dialog.querySelector('img[src="/avatars/regular-member.png"]')).toBeVisible();
+    expect(within(dialog).getByText('EG', { selector: 'span' })).toBeVisible();
+    expect(within(dialog).getByText('PG', { selector: 'span' })).toBeVisible();
   });
 
   it('exposes named member groups and enforces the shared 100-target limit', async () => {

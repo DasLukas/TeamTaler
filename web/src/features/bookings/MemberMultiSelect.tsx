@@ -5,6 +5,7 @@ import UsersRound from 'lucide-react/dist/esm/icons/users-round';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { BookingTarget } from '@/api/types';
+import { Avatar } from '@/components/ui/Avatar';
 import { TextInput } from '@/components/ui/FormField';
 import { IconButton } from '@/components/ui/IconButton';
 import { Modal } from '@/components/ui/Modal';
@@ -143,6 +144,7 @@ export function MemberMultiSelect({
   const renderTarget = (target: BookingTarget) => (
     <label className={styles.option} key={target.membershipId}>
       <input checked={selected.has(target.membershipId)} disabled={!selected.has(target.membershipId) && totalTargetCount >= MAX_BATCH_TARGETS} onChange={(event) => update(target.membershipId, event.target.checked)} type="checkbox" />
+      <Avatar decorative name={target.displayName} size="small" src={target.avatarUrl} />
       <span><strong>{target.displayName}</strong></span>
       {selected.has(target.membershipId) ? <Check aria-hidden="true" size={18} /> : null}
     </label>
@@ -160,6 +162,7 @@ export function MemberMultiSelect({
         {pendingGuestNames.map((name, index) => (
           <label className={styles.option} key={`${name}-${index}`}>
             <input checked onChange={() => { setSelectionError(''); onRemoveGuest(index); }} type="checkbox" />
+            <Avatar decorative name={name} size="small" />
             <span><strong>{name}</strong><small>{t('booking.newGuest')}</small></span>
             <Check aria-hidden="true" size={18} />
           </label>
