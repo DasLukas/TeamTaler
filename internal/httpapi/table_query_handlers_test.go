@@ -96,6 +96,28 @@ func TestTableQueryHandlersFilterSortAndPaginateWithoutChangingArrayBodies(t *te
 	if err := json.Unmarshal(adjustmentResponse.Body.Bytes(), &adjustments); err != nil || adjustmentResponse.Code != http.StatusOK || len(adjustments) != 1 || adjustments[0].Kind != activities.KindAdjustment {
 		t.Fatalf("adjustments status=%d items=%#v err=%v body=%s", adjustmentResponse.Code, adjustments, err, adjustmentResponse.Body.String())
 	}
+	unifiedOptionsResponse := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/activities/filter-options", server.handleActivityFilterOptions)
+	var unifiedOptions activities.FilterOptions
+	if err := json.Unmarshal(unifiedOptionsResponse.Body.Bytes(), &unifiedOptions); err != nil || unifiedOptionsResponse.Code != http.StatusOK ||
+		len(unifiedOptions.Kinds) != 3 || len(unifiedOptions.Members) != 1 || len(unifiedOptions.Categories) != 1 || len(unifiedOptions.Products) != 3 {
+		t.Fatalf("unified options status=%d options=%#v err=%v body=%s", unifiedOptionsResponse.Code, unifiedOptions, err, unifiedOptionsResponse.Body.String())
+	}
+	mismatchedUnifiedCursor := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/activities?sort=amount&direction=asc&limit=4&kind=PAYMENT&cursor="+unifiedCursor, server.handleActivities)
+	if mismatchedUnifiedCursor.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("mismatched unified cursor status=%d body=%s", mismatchedUnifiedCursor.Code, mismatchedUnifiedCursor.Body.String())
+	}
+	maliciousUnifiedSort := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/activities?sort="+url.QueryEscape("amount DESC; DROP TABLE payments;--"), server.handleActivities)
+	if maliciousUnifiedSort.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("malicious unified sort status=%d body=%s", maliciousUnifiedSort.Code, maliciousUnifiedSort.Body.String())
+	}
+	invalidUnifiedAmount := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/activities?amountMin=not-a-number", server.handleActivities)
+	if invalidUnifiedAmount.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid unified amount status=%d body=%s", invalidUnifiedAmount.Code, invalidUnifiedAmount.Body.String())
+	}
 
 	multiActivityResponse := performTableGET(t, principal, membership.GroupID,
 		"/api/v1/groups/"+membership.GroupID+"/bookings?categoryId="+url.QueryEscape(category.ID)+"&categoryId=missing-category&productId="+url.QueryEscape(products[0].ID)+"&productId="+url.QueryEscape(products[2].ID)+"&sort=amount&direction=asc&limit=10",

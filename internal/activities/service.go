@@ -299,7 +299,7 @@ func visibleActivityCTE(membership domain.Membership, access permissions) (strin
 			actor_member.id,actor_user.display_name,
 			CASE WHEN actor_member.deleted_at IS NOT NULL THEN 'DELETED' ELSE actor_member.status END,
 			actor_user.id,coalesce(actor_user.avatar_key,''),
-			coalesce(nullif(p.method_label,''),p.method),coalesce(nullif(p.reference,''),nullif(p.note,''),''),p.method,NULL,'',NULL,NULL,
+			coalesce(nullif(p.method_label,''),''),coalesce(nullif(p.reference,''),nullif(p.note,''),''),p.method,NULL,'',NULL,NULL,
 			-p.amount_minor,g.currency,p.created_at,
 			CASE WHEN p.reversed_at IS NULL THEN 'POSTED' ELSE 'REVERSED' END,
 			attachment.original_filename,attachment.media_type,attachment.size_bytes
@@ -468,11 +468,12 @@ func (s Service) QueryEntries(ctx context.Context, membership domain.Membership,
 			OR activity.actor_name LIKE ? ESCAPE '\' COLLATE NOCASE
 			OR activity.detail_name LIKE ? ESCAPE '\' COLLATE NOCASE
 			OR activity.detail_note LIKE ? ESCAPE '\' COLLATE NOCASE
+			OR activity.payment_method LIKE ? ESCAPE '\' COLLATE NOCASE
 			OR activity.category_name LIKE ? ESCAPE '\' COLLATE NOCASE
 			OR CAST(activity.amount_minor AS TEXT) LIKE ? ESCAPE '\'
 			OR activity.kind LIKE ? ESCAPE '\' COLLATE NOCASE
 			OR activity.status LIKE ? ESCAPE '\' COLLATE NOCASE)`
-		args = append(args, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
+		args = append(args, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
 	}
 	if cursorID != "" {
 		var boundKey any = cursorKey

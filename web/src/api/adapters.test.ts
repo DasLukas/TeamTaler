@@ -16,6 +16,12 @@ describe('API adapters', () => {
       actorMembershipStatus: 'ARCHIVED', detailName: 'Bar', paymentMethod: 'CASH', canReverse: true, reversalReasonRequired: true,
       attachment: { fileName: 'receipt.pdf' },
     });
+    expect(adaptActivity({
+      id: 'payment:legacy', sourceId: 'legacy', kind: 'PAYMENT',
+      targetMembershipId: 'member-a', targetDisplayName: 'Alex', targetMembershipStatus: 'ACTIVE',
+      detailName: '', paymentMethod: 'CASH', amountMinor: '-500', currency: 'EUR',
+      occurredAt: '2026-08-20T10:00:00Z', status: 'POSTED', canReverse: false, reversalReasonRequired: false,
+    })).toMatchObject({ detailName: 'Bar', paymentMethod: 'CASH' });
   });
 
   it('keeps group-less system-administrator sessions valid', () => {
