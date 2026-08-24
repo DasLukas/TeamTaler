@@ -198,10 +198,14 @@
 .rows .name,
 .rows .price { margin: 0; font-size: var(--font-size-lg); }
 .rows .price {
+  inline-size: min-content;
   justify-self: end;
   color: var(--color-ink);
+  font-size: var(--font-size-md);
   font-weight: 600;
+  line-height: 1.2;
   text-align: right;
+  white-space: normal;
 }
 
 .rows .check {
@@ -282,10 +286,14 @@
   .product .name,
   .product .price { margin: 0; font-size: var(--font-size-lg); }
   .product .price {
+    inline-size: min-content;
     justify-self: end;
     color: var(--color-ink);
+    font-size: var(--font-size-md);
     font-weight: 600;
+    line-height: 1.2;
     text-align: right;
+    white-space: normal;
   }
 
   .product .check {

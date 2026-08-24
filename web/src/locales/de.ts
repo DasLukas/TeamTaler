@@ -274,7 +274,7 @@ export const de = {
     guestNameControlCharacters: 'Der Anzeigename darf keine Steuerzeichen enthalten.',
     guestNameDuplicate: 'Dieser Gast wurde für die Buchung bereits hinzugefügt.',
     tooManyTargets: 'Pro Buchung sind höchstens 100 Ziele möglich.',
-    enterPrice: 'Preis eingeben',
+    enterPrice: 'Preis wählen',
     unitPrice: 'Stückpreis in {{currency}}',
     quantity: 'Anzahl',
     decreaseQuantity: 'Anzahl verringern',
