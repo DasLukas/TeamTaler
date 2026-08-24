@@ -1,8 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import i18n from '@/i18n';
-import { adaptAccountSummaries, adaptBooking, adaptCategories, adaptDashboard, adaptGroupNotificationSettings, adaptGroupSettings, adaptInstanceCapabilities, adaptLedger, adaptMembership, adaptNotification, adaptNotificationDestination, adaptNotificationPreferences, adaptPayment, adaptPermissionDefinition, adaptPermissionGrants, adaptProduct, adaptPushSubscriptions, adaptRole, adaptSession, adaptSettlement, adaptSystemAudit, adaptSystemGroupDeletionImpact, adaptSystemGroups, adaptSystemSettings, adaptTransactionSettings } from './adapters';
+import { adaptAccountSummaries, adaptActivity, adaptBooking, adaptCategories, adaptDashboard, adaptGroupNotificationSettings, adaptGroupSettings, adaptInstanceCapabilities, adaptLedger, adaptMembership, adaptNotification, adaptNotificationDestination, adaptNotificationPreferences, adaptPayment, adaptPermissionDefinition, adaptPermissionGrants, adaptProduct, adaptPushSubscriptions, adaptRole, adaptSession, adaptSettlement, adaptSystemAudit, adaptSystemGroupDeletionImpact, adaptSystemGroups, adaptSystemSettings, adaptTransactionSettings } from './adapters';
 
 describe('API adapters', () => {
+  it('adapts signed unified activities and source action metadata', () => {
+    expect(adaptActivity({
+      id: 'payment:pay-a', sourceId: 'pay-a', kind: 'PAYMENT',
+      targetMembershipId: 'member-a', targetDisplayName: 'Alex', targetMembershipStatus: 'ACTIVE',
+      actorMembershipId: 'member-manager', actorDisplayName: 'Manager', actorMembershipStatus: 'ARCHIVED',
+      detailName: 'Bank transfer', detailNote: 'August', amountMinor: '-1250', currency: 'EUR',
+      occurredAt: '2026-08-20T10:00:00Z', status: 'POSTED', canReverse: true,
+      reversalReasonRequired: true, attachment: { fileName: 'receipt.pdf', mediaType: 'application/pdf', sizeBytes: 42, url: '/receipt' },
+    })).toMatchObject({
+      id: 'payment:pay-a', sourceId: 'pay-a', kind: 'PAYMENT', amount: { minorUnits: '-1250', currency: 'EUR' },
+      actorMembershipStatus: 'ARCHIVED', canReverse: true, reversalReasonRequired: true,
+      attachment: { fileName: 'receipt.pdf' },
+    });
+  });
+
   it('keeps group-less system-administrator sessions valid', () => {
     expect(adaptSession({
       user: { id: 'system-user', displayName: 'System Admin', email: 'admin@example.test' },

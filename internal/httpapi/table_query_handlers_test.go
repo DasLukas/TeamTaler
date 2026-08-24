@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DasLukas/TeamTaler/internal/activities"
 	"github.com/DasLukas/TeamTaler/internal/bookings"
 	"github.com/DasLukas/TeamTaler/internal/catalog"
 	"github.com/DasLukas/TeamTaler/internal/domain"
@@ -23,6 +24,7 @@ func TestTableQueryHandlersFilterSortAndPaginateWithoutChangingArrayBodies(t *te
 	membership = assignTestTemplateRoles(t, ctx, server.groups, principal, membership,
 		domain.RoleTemplateMember, domain.RoleTemplateCatalog, domain.RoleTemplateFinance)
 	server.catalog = catalog.Service{DB: server.db}
+	server.activities = activities.Service{DB: server.db}
 	server.bookings = bookings.Service{DB: server.db, Groups: server.groups}
 	server.finance = finance.Service{DB: server.db}
 
@@ -60,6 +62,39 @@ func TestTableQueryHandlersFilterSortAndPaginateWithoutChangingArrayBodies(t *te
 		}); err != nil {
 			t.Fatalf("create payment %d: %v", index, err)
 		}
+	}
+	if _, err := server.db.ExecContext(ctx, `INSERT INTO ledger_entries(id,group_id,period_id,membership_id,account,amount_minor,description,created_at)
+		VALUES('table-adjustment',?,?,?,?,50,'Manual adjustment','2026-08-18T13:00:00Z')`, membership.GroupID, periodID, membership.ID, "MEMBER_RECEIVABLE"); err != nil {
+		t.Fatalf("create adjustment: %v", err)
+	}
+
+	unifiedResponse := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/activities?sort=amount&direction=asc&limit=4", server.handleActivities)
+	if unifiedResponse.Code != http.StatusOK || unifiedResponse.Header().Get("X-Has-More") != "true" || unifiedResponse.Header().Get("X-Next-Cursor") == "" {
+		t.Fatalf("unified response status=%d headers=%v body=%s", unifiedResponse.Code, unifiedResponse.Header(), unifiedResponse.Body.String())
+	}
+	var firstUnified []activities.Entry
+	if err := json.Unmarshal(unifiedResponse.Body.Bytes(), &firstUnified); err != nil || len(firstUnified) != 4 {
+		t.Fatalf("unified first page=%#v err=%v body=%s", firstUnified, err, unifiedResponse.Body.String())
+	}
+	wantFirstAmounts := []int64{-300, -200, -100, 50}
+	for index, want := range wantFirstAmounts {
+		if firstUnified[index].AmountMinor != want {
+			t.Fatalf("unified first amounts=%#v, index %d want %d", firstUnified, index, want)
+		}
+	}
+	unifiedCursor := url.QueryEscape(unifiedResponse.Header().Get("X-Next-Cursor"))
+	nextUnifiedResponse := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/activities?sort=amount&direction=asc&limit=4&cursor="+unifiedCursor, server.handleActivities)
+	var nextUnified []activities.Entry
+	if err := json.Unmarshal(nextUnifiedResponse.Body.Bytes(), &nextUnified); err != nil || nextUnifiedResponse.Code != http.StatusOK || len(nextUnified) != 3 || nextUnified[0].AmountMinor != 100 || nextUnified[2].AmountMinor != 300 {
+		t.Fatalf("unified next page status=%d items=%#v err=%v body=%s", nextUnifiedResponse.Code, nextUnified, err, nextUnifiedResponse.Body.String())
+	}
+	adjustmentResponse := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/activities?kind=ADJUSTMENT&amountMin=50&amountMax=50", server.handleActivities)
+	var adjustments []activities.Entry
+	if err := json.Unmarshal(adjustmentResponse.Body.Bytes(), &adjustments); err != nil || adjustmentResponse.Code != http.StatusOK || len(adjustments) != 1 || adjustments[0].Kind != activities.KindAdjustment {
+		t.Fatalf("adjustments status=%d items=%#v err=%v body=%s", adjustmentResponse.Code, adjustments, err, adjustmentResponse.Body.String())
 	}
 
 	multiActivityResponse := performTableGET(t, principal, membership.GroupID,
@@ -123,7 +158,7 @@ func TestTableQueryHandlersFilterSortAndPaginateWithoutChangingArrayBodies(t *te
 		"/api/v1/groups/"+membership.GroupID+"/payments?q=payment&status=POSTED&sort=amount&direction=desc&limit=2",
 		server.handleListPayments)
 	var paymentItems []domain.Payment
-	if err := json.Unmarshal(paymentResponse.Body.Bytes(), &paymentItems); err != nil || paymentResponse.Code != http.StatusOK || len(paymentItems) != 2 || paymentItems[0].AmountMinor != 300 || paymentItems[1].AmountMinor != 200 {
+	if err := json.Unmarshal(paymentResponse.Body.Bytes(), &paymentItems); err != nil || paymentResponse.Code != http.StatusOK || len(paymentItems) != 2 || paymentItems[0].AmountMinor != 300 || paymentItems[1].AmountMinor != 200 || paymentItems[0].ActorMembershipID != membership.ID || paymentItems[0].ActorDisplayName != membership.DisplayName {
 		t.Fatalf("payments status=%d items=%#v err=%v body=%s", paymentResponse.Code, paymentItems, err, paymentResponse.Body.String())
 	}
 

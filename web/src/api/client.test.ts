@@ -1203,6 +1203,41 @@ describe('server-backed collection API contract', () => {
     expect(page).toMatchObject({ items: [booking], nextCursor: 'opaque-next-page', hasMore: true, limit: 25 });
   });
 
+  it('serializes unified activity filters with signed amounts and repeated values', async () => {
+    const response = new Response(JSON.stringify([{
+      id: 'payment:payment-a', sourceId: 'payment-a', kind: 'PAYMENT',
+      targetMembershipId: 'member-a', targetDisplayName: 'Alex', targetMembershipStatus: 'ACTIVE',
+      detailName: 'Bank transfer', amountMinor: '-1250', currency: 'EUR', occurredAt: '2026-08-20T10:00:00Z',
+      status: 'POSTED', canReverse: false, reversalReasonRequired: false,
+    }]), {
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Next-Cursor': 'activity-cursor',
+        'X-Has-More': 'true',
+        'X-Page-Limit': '50',
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValueOnce(response);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const page = await api.getActivitiesPage('group/a', {
+      q: 'Alex', kind: ['PAYMENT', 'ADJUSTMENT'], targetMembershipId: 'member-a',
+      categoryId: ['category-a', 'category-b'], productId: ['product-a', 'product-b'],
+      status: 'POSTED', occurredFrom: '2026-08-01', occurredTo: '2026-08-31',
+      amountMin: '-5000', amountMax: '2500', sort: 'amount', direction: 'asc', limit: 50,
+    });
+
+    const requestUrl = new URL(String(fetchMock.mock.calls[0][0]), 'https://teamtaler.example');
+    expect(requestUrl.pathname).toBe('/api/v1/groups/group%2Fa/activities');
+    expect(requestUrl.searchParams.getAll('kind')).toEqual(['PAYMENT', 'ADJUSTMENT']);
+    expect(requestUrl.searchParams.getAll('categoryId')).toEqual(['category-a', 'category-b']);
+    expect(requestUrl.searchParams.getAll('productId')).toEqual(['product-a', 'product-b']);
+    expect(Object.fromEntries(requestUrl.searchParams)).toMatchObject({
+      q: 'Alex', targetMembershipId: 'member-a', status: 'POSTED', amountMin: '-5000', amountMax: '2500', sort: 'amount', direction: 'asc', limit: '50',
+    });
+    expect(page).toMatchObject({ items: [{ kind: 'PAYMENT', amount: { minorUnits: '-1250', currency: 'EUR' } }], nextCursor: 'activity-cursor', hasMore: true, limit: 50 });
+  });
+
   it('loads group-audit pages and member identities in parallel', async () => {
     const auditEntry = {
       id: 'audit-a',
@@ -1249,12 +1284,23 @@ describe('server-backed collection API contract', () => {
     ]);
   });
 
-  it('loads privacy-minimized activity member filter options', async () => {
-    const options = { members: [{ membershipId: 'member-a', displayName: 'Alex', avatarUrl: '/avatars/alex.png' }] };
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(options));
+  it('loads privacy-minimized booking and feed-derived activity filter options', async () => {
+    const bookingOptions = { members: [{ membershipId: 'member-a', displayName: 'Alex', avatarUrl: '/avatars/alex.png' }] };
+    const activityOptions = {
+      ...bookingOptions,
+      categories: [{ categoryId: 'category-a', name: 'Penalties', icon: 'penalty' }],
+      products: [{ productId: 'product-a', categoryId: 'category-a', name: 'Late arrival' }],
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(bookingOptions))
+      .mockResolvedValueOnce(jsonResponse(activityOptions));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(api.getBookingFilterOptions('group/a')).resolves.toEqual(options);
-    expect(fetchMock).toHaveBeenCalledWith('/api/v1/groups/group%2Fa/bookings/filter-options', expect.anything());
+    await expect(api.getBookingFilterOptions('group/a')).resolves.toEqual(bookingOptions);
+    await expect(api.getActivityFilterOptions('group/a')).resolves.toEqual(activityOptions);
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      '/api/v1/groups/group%2Fa/bookings/filter-options',
+      '/api/v1/groups/group%2Fa/activities/filter-options',
+    ]);
   });
 });

@@ -10,6 +10,8 @@ This README is the primary entry point for the person who installs and operates 
 - Group-owned roles and granular permissions for administration, bookings, finance, catalogue management, and reporting.
 - Fixed-price and user-defined-price products with category, file or camera image capture, archive, and ordering support.
 - Account balances, incoming payments with optional or required image/PDF receipts, immutable corrections, optional accounting periods, and settlement history.
+- One server-paginated chronological activity history for authorized bookings, incoming payments, and account corrections, including member identity, signed amounts, receipts, status badges, and transaction-type filtering.
+- A focused personal account view for balance, payments, settlement history, printing, and CSV export without duplicating the unified activity table.
 - Searchable, column-filterable, sortable operational tables with shareable filter state, cursor-backed loading, and complete horizontally scrollable mobile columns.
 - Individual invitations, CSV invitation imports, public join links, and temporary guest accounts.
 - Local accounts with profile images, password recovery, verified email changes, and server-side sessions.

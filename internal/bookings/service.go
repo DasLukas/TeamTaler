@@ -1137,7 +1137,7 @@ func (s Service) queryActivity(ctx context.Context, membership domain.Membership
 		}
 		item.ActorAvatarURL = media.UserAvatarURL(actorUserID, actorAvatarKey)
 		item.TargetAvatarURL = media.UserAvatarURL(targetUserID, targetAvatarKey)
-		applyVoidMetadata(&item, membership, canVoidOwn, canVoidAny, platform.Now())
+		ApplyVoidMetadata(&item, membership, canVoidOwn, canVoidAny, platform.Now())
 		items = append(items, item)
 		sortKeys = append(sortKeys, sortKey)
 	}
@@ -1292,7 +1292,21 @@ func (s Service) Void(ctx context.Context, actor domain.Principal, membership do
 	return booking, err
 }
 
-func applyVoidMetadata(booking *domain.Booking, membership domain.Membership, canVoidOwn, canVoidAny bool, now time.Time) {
+// ApplyVoidMetadata projects the current membership's booking-reversal action
+// state without performing additional storage reads.
+//
+// Parameters:
+//   - booking: Booking projection to update in place.
+//   - membership: Membership viewing the booking.
+//   - canVoidOwn: Whether involved bookings may be reversed.
+//   - canVoidAny: Whether uninvolved group bookings may be reversed.
+//   - now: Stable request time used for the reason-free reversal window.
+//
+// Returns:
+//   - None. CanVoid, VoidReasonRequired, and VoidWithoutReasonUntil are updated.
+//
+// Example: ApplyVoidMetadata(&booking, membership, true, false, platform.Now()).
+func ApplyVoidMetadata(booking *domain.Booking, membership domain.Membership, canVoidOwn, canVoidAny bool, now time.Time) {
 	booking.CanVoid = false
 	booking.VoidReasonRequired = false
 	booking.VoidWithoutReasonUntil = nil
@@ -1327,7 +1341,7 @@ func applyCurrentVoidMetadata(ctx context.Context, queryer authorization.Queryer
 	if err != nil {
 		return err
 	}
-	applyVoidMetadata(booking, membership, canVoidOwn, canVoidAny, now)
+	ApplyVoidMetadata(booking, membership, canVoidOwn, canVoidAny, now)
 	return nil
 }
 

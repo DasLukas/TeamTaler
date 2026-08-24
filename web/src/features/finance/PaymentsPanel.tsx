@@ -166,6 +166,7 @@ export function PaymentsPanel() {
     paymentMutation.reset();
   };
   const invalidateFinancialReads = async () => Promise.all([
+    queryClient.invalidateQueries({ queryKey: ['activities', activeGroupId] }),
     queryClient.invalidateQueries({ queryKey: ['payments', activeGroupId] }),
     queryClient.invalidateQueries({ queryKey: ['account-summaries', activeGroupId] }),
     queryClient.invalidateQueries({ queryKey: ['ledger', activeGroupId] }),

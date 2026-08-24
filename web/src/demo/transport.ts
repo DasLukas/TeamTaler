@@ -1,5 +1,7 @@
 import type {
   AccountSummary,
+  ActivityEntry,
+  ActivityFilterOptions,
   AuditFilterOptions,
   Booking,
   BookingBatchCommand,
@@ -294,7 +296,8 @@ export class DemoTransport {
       const attachmentPart = init.body.get('attachment');
       if (attachmentPart instanceof File) attachment = attachmentPart;
     }
-    const cleanPath = path.split('?')[0];
+    const requestUrl = new URL(path, window.location.origin);
+    const cleanPath = requestUrl.pathname;
 
     if (cleanPath === '/instance/capabilities' && method === 'GET') return {
       instanceName: 'TeamTaler Demo', maintenanceMode: false, maintenanceMessage: '', publicJoinEnabled: true,
@@ -503,6 +506,42 @@ export class DemoTransport {
     }
     if (resource === 'members' && method === 'GET') return clone(this.members.filter((member) => member.status !== 'DELETED')) as T;
     if (resource === 'categories' && method === 'GET') return clone(this.categories) as T;
+    if (resource === 'activities/filter-options' && method === 'GET') {
+      const activities = this.listActivities(groupId, new URLSearchParams());
+      const members = new Map<string, ActivityFilterOptions['members'][number]>();
+      const categories = new Map<string, ActivityFilterOptions['categories'][number]>();
+      const products = new Map<string, ActivityFilterOptions['products'][number]>();
+      for (const activity of activities) {
+        members.set(activity.targetMembershipId, {
+          membershipId: activity.targetMembershipId,
+          displayName: activity.targetDisplayName,
+          avatarUrl: activity.targetAvatarUrl,
+        });
+        if (!activity.categoryId || !activity.categoryName) continue;
+        const category = this.categories.find((entry) => entry.id === activity.categoryId);
+        categories.set(activity.categoryId, {
+          categoryId: activity.categoryId,
+          name: category?.name ?? activity.categoryName,
+          icon: category?.icon ?? 'other',
+        });
+        if (!activity.productId) continue;
+        const product = category?.products.find((entry) => entry.id === activity.productId);
+        products.set(activity.productId, {
+          productId: activity.productId,
+          categoryId: activity.categoryId,
+          name: product?.name ?? activity.detailName,
+          imageUrl: product?.imageUrl,
+        });
+      }
+      const collator = new Intl.Collator('de-DE', { numeric: true, sensitivity: 'base' });
+      const options: ActivityFilterOptions = {
+        members: [...members.values()].sort((left, right) => collator.compare(left.displayName, right.displayName)),
+        categories: [...categories.values()].sort((left, right) => collator.compare(left.name, right.name)),
+        products: [...products.values()].sort((left, right) => collator.compare(left.name, right.name)),
+      };
+      return clone(options) as T;
+    }
+    if (resource === 'activities' && method === 'GET') return this.listActivities(groupId, requestUrl.searchParams) as T;
     if (resource === 'bookings/filter-options' && method === 'GET') {
       const members = [...new Map(this.listBookings(groupId).map((booking) => [booking.memberId, {
         membershipId: booking.memberId,
@@ -1121,6 +1160,131 @@ export class DemoTransport {
       .map((booking) => this.bookingWithPermissions(booking, actor)));
   }
 
+  /**
+   * Builds the permission-aware unified demo activity collection.
+   *
+   * @param groupId - Active demo group identifier.
+   * @param parameters - Collection filters and sorting from the request URL.
+   * @returns Fully filtered demo activities; demo mode intentionally returns the complete set.
+   */
+  private listActivities(groupId: string, parameters: URLSearchParams): ActivityEntry[] {
+    const actor = this.currentMembership(groupId);
+    if (!actor) return [];
+    const canManageFinance = can(actor.effectiveGrants, 'FINANCE_MANAGEMENT');
+    const bookingActivities: ActivityEntry[] = this.listBookings(groupId).map((booking) => ({
+      id: `booking:${booking.id}`,
+      sourceId: booking.id,
+      kind: 'BOOKING',
+      targetMembershipId: booking.memberId,
+      targetDisplayName: booking.memberName,
+      targetMembershipStatus: booking.memberStatus,
+      targetAvatarUrl: booking.memberAvatarUrl,
+      actorMembershipId: booking.bookedByMemberId,
+      actorDisplayName: booking.bookedByName,
+      actorMembershipStatus: booking.bookedByStatus,
+      actorAvatarUrl: booking.bookedByAvatarUrl,
+      detailName: booking.productName,
+      detailNote: booking.reason,
+      categoryId: booking.categoryId,
+      categoryName: booking.categoryName,
+      productId: booking.productId,
+      quantity: booking.quantity,
+      amount: booking.total,
+      occurredAt: booking.bookedAt,
+      status: booking.status,
+      canReverse: booking.canVoid === true,
+      reversalReasonRequired: booking.voidReasonRequired === true,
+      reversalWithoutReasonUntil: booking.voidWithoutReasonUntil,
+    }));
+    const paymentActivities: ActivityEntry[] = this.payments
+      .filter((payment) => canManageFinance || payment.membershipId === actor.id)
+      .map((payment) => ({
+        id: `payment:${payment.id}`,
+        sourceId: payment.id,
+        kind: 'PAYMENT',
+        targetMembershipId: payment.membershipId,
+        targetDisplayName: payment.memberName,
+        targetMembershipStatus: payment.membershipStatus,
+        targetAvatarUrl: payment.memberAvatarUrl,
+        actorMembershipId: payment.actorMembershipId,
+        actorDisplayName: payment.actorName,
+        actorMembershipStatus: payment.actorStatus,
+        actorAvatarUrl: payment.actorAvatarUrl,
+        detailName: payment.methodLabel,
+        detailNote: payment.reference ?? payment.note,
+        amount: { ...payment.amount, minorUnits: (-BigInt(payment.amount.minorUnits)).toString() },
+        occurredAt: payment.receivedAt,
+        status: payment.status,
+        attachment: payment.attachment,
+        canReverse: canManageFinance && payment.status === 'POSTED',
+        reversalReasonRequired: canManageFinance && payment.status === 'POSTED',
+      }));
+    const adjustmentActivities: ActivityEntry[] = this.ledger
+      .filter((entry) => entry.kind === 'CREDIT')
+      .map((entry) => ({
+        id: `adjustment:${entry.id}`,
+        sourceId: entry.id,
+        kind: 'ADJUSTMENT',
+        targetMembershipId: actor.id,
+        targetDisplayName: actor.displayName,
+        targetMembershipStatus: actor.status,
+        targetAvatarUrl: actor.avatarUrl,
+        detailName: entry.description,
+        amount: entry.amount,
+        occurredAt: entry.occurredAt,
+        status: 'POSTED',
+        canReverse: false,
+        reversalReasonRequired: false,
+      }));
+    const selectedKinds = new Set(parameters.getAll('kind'));
+    const selectedCategories = new Set(parameters.getAll('categoryId'));
+    const selectedProducts = new Set(parameters.getAll('productId'));
+    const targetMembershipId = parameters.get('targetMembershipId');
+    const status = parameters.get('status');
+    const occurredFrom = parameters.get('occurredFrom');
+    const occurredTo = parameters.get('occurredTo');
+    const amountMin = parameters.get('amountMin');
+    const amountMax = parameters.get('amountMax');
+    const search = parameters.get('q')?.trim().toLocaleLowerCase('de-DE') ?? '';
+    const filtered = [...bookingActivities, ...paymentActivities, ...adjustmentActivities].filter((activity) => {
+      const searchable = [activity.targetDisplayName, activity.actorDisplayName, activity.detailName, activity.detailNote, activity.categoryName, activity.kind, activity.status]
+        .filter(Boolean).join(' ').toLocaleLowerCase('de-DE');
+      const amount = BigInt(activity.amount.minorUnits);
+      return (selectedKinds.size === 0 || selectedKinds.has(activity.kind))
+        && (!targetMembershipId || activity.targetMembershipId === targetMembershipId)
+        && (selectedCategories.size === 0 || Boolean(activity.categoryId && selectedCategories.has(activity.categoryId)))
+        && (selectedProducts.size === 0 || Boolean(activity.productId && selectedProducts.has(activity.productId)))
+        && (!status || activity.status === status)
+        && (!occurredFrom || activity.occurredAt >= occurredFrom)
+        && (!occurredTo || activity.occurredAt < occurredTo)
+        && (amountMin === null || amount >= BigInt(amountMin))
+        && (amountMax === null || amount <= BigInt(amountMax))
+        && (!search || searchable.includes(search));
+    });
+    const sort = parameters.get('sort') ?? 'occurredAt';
+    const descending = parameters.get('direction') !== 'asc';
+    const collator = new Intl.Collator('de-DE', { numeric: true, sensitivity: 'base' });
+    return clone(filtered.sort((left, right) => {
+      const leftValue = sort === 'kind' ? left.kind
+        : sort === 'targetName' ? left.targetDisplayName
+          : sort === 'actorName' ? left.actorDisplayName ?? ''
+            : sort === 'detailName' ? left.detailName
+              : sort === 'categoryName' ? left.categoryName ?? ''
+                : sort === 'status' ? left.status : left.occurredAt;
+      const rightValue = sort === 'kind' ? right.kind
+        : sort === 'targetName' ? right.targetDisplayName
+          : sort === 'actorName' ? right.actorDisplayName ?? ''
+            : sort === 'detailName' ? right.detailName
+              : sort === 'categoryName' ? right.categoryName ?? ''
+                : sort === 'status' ? right.status : right.occurredAt;
+      let comparison = sort === 'amount'
+        ? BigInt(left.amount.minorUnits) < BigInt(right.amount.minorUnits) ? -1 : BigInt(left.amount.minorUnits) > BigInt(right.amount.minorUnits) ? 1 : 0
+        : collator.compare(leftValue, rightValue);
+      if (comparison === 0) comparison = collator.compare(left.id, right.id);
+      return descending ? -comparison : comparison;
+    }));
+  }
+
   private bookingWithPermissions(booking: Booking, actor: Membership): Booking {
     const createdByActor = booking.bookedByMemberId === actor.id;
     const affectsActor = booking.memberId === actor.id;
@@ -1594,7 +1758,10 @@ export class DemoTransport {
 
   private createPayment(command: PaymentCommand & { amountMinor?: number }, reasonMode: ReasonMode = this.groupSettings.otherPaymentReasonMode, attachment?: File): Payment {
     const member = this.members.find((entry) => entry.id === command.membershipId);
+    const groupId = this.session.activeGroupId ?? this.session.groups[0]?.id ?? '';
+    const actor = this.currentMembership(groupId);
     if (!member) throw new Error(i18n.t('errors.memberNotFound'));
+    if (!actor) throw new Error(i18n.t('errors.memberNotFound'));
     if (reasonMode === 'REQUIRED' && !command.reference?.trim()) throw new Error(i18n.t('selfPayment.referenceRequired'));
     const paymentMethod = this.groupSettings.paymentMethods.find((entry) => entry.id === command.method);
     if (!paymentMethod) throw new Error(i18n.t('errors.requestFailed'));
@@ -1605,6 +1772,11 @@ export class DemoTransport {
       id: identifier('payment'),
       memberName: member.displayName,
       membershipStatus: member.status,
+      memberAvatarUrl: member.avatarUrl,
+      actorMembershipId: actor.id,
+      actorName: actor.displayName,
+      actorStatus: actor.status,
+      actorAvatarUrl: actor.avatarUrl,
       status: 'POSTED',
       ...command,
       reference: effectiveReference,
@@ -1613,7 +1785,6 @@ export class DemoTransport {
       ...(attachment ? { attachment: { fileName: attachment.name, mediaType: attachment.type, sizeBytes: attachment.size, url: '' } } : {}),
     };
     if (attachment && payment.attachment) {
-      const groupId = this.session.activeGroupId ?? this.session.groups[0]?.id ?? '';
       payment.attachment.url = `/api/v1/groups/${encodeURIComponent(groupId)}/payments/${encodeURIComponent(payment.id)}/attachment`;
       this.paymentAttachments.set(payment.id, attachment);
     }

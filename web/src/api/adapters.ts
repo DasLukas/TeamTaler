@@ -1,5 +1,6 @@
 import type {
   AccountSummary,
+  ActivityEntry,
   AuditEntry,
   Booking,
   BookingContext,
@@ -943,6 +944,51 @@ export function adaptBooking(input: unknown, members?: Membership[], fallbackMem
 }
 
 /**
+ * Adapts one normalized server-side account activity without changing its
+ * signed member-receivable amount.
+ *
+ * @param input - Unified activity wire value.
+ * @returns Canonical activity used directly by the activities table.
+ */
+export function adaptActivity(input: unknown): ActivityEntry {
+  const source = asRecord(input);
+  const attachment = paymentAttachmentSummary(source.attachment);
+  const targetStatus = source.targetMembershipStatus === 'ARCHIVED' || source.targetMembershipStatus === 'DELETED'
+    ? source.targetMembershipStatus
+    : 'ACTIVE';
+  const actorStatus = source.actorMembershipStatus === 'ARCHIVED' || source.actorMembershipStatus === 'DELETED'
+    ? source.actorMembershipStatus
+    : source.actorMembershipId ? 'ACTIVE' : undefined;
+  return {
+    id: String(source.id),
+    sourceId: String(source.sourceId),
+    periodId: typeof source.periodId === 'string' && source.periodId ? source.periodId : undefined,
+    kind: source.kind === 'PAYMENT' || source.kind === 'ADJUSTMENT' ? source.kind : 'BOOKING',
+    targetMembershipId: String(source.targetMembershipId),
+    targetDisplayName: String(source.targetDisplayName),
+    targetMembershipStatus: targetStatus,
+    targetAvatarUrl: typeof source.targetAvatarUrl === 'string' && source.targetAvatarUrl ? source.targetAvatarUrl : undefined,
+    actorMembershipId: typeof source.actorMembershipId === 'string' && source.actorMembershipId ? source.actorMembershipId : undefined,
+    actorDisplayName: typeof source.actorDisplayName === 'string' && source.actorDisplayName ? source.actorDisplayName : undefined,
+    actorMembershipStatus: actorStatus,
+    actorAvatarUrl: typeof source.actorAvatarUrl === 'string' && source.actorAvatarUrl ? source.actorAvatarUrl : undefined,
+    detailName: String(source.detailName),
+    detailNote: typeof source.detailNote === 'string' && source.detailNote ? source.detailNote : undefined,
+    categoryId: typeof source.categoryId === 'string' && source.categoryId ? source.categoryId : undefined,
+    categoryName: typeof source.categoryName === 'string' && source.categoryName ? source.categoryName : undefined,
+    productId: typeof source.productId === 'string' && source.productId ? source.productId : undefined,
+    quantity: Number(source.quantity ?? 0) || undefined,
+    amount: money(source.amountMinor, source.currency),
+    occurredAt: String(source.occurredAt),
+    status: source.status === 'REVERSED' ? 'REVERSED' : 'POSTED',
+    ...(attachment ? { attachment } : {}),
+    canReverse: source.canReverse === true,
+    reversalReasonRequired: source.reversalReasonRequired === true,
+    reversalWithoutReasonUntil: typeof source.reversalWithoutReasonUntil === 'string' ? source.reversalWithoutReasonUntil : undefined,
+  };
+}
+
+/**
  * Adapts the grouped dashboard read model.
  *
  * @param input - Dashboard response containing account, period, and recent bookings.
@@ -1060,11 +1106,20 @@ export function adaptPayment(input: unknown): Payment {
   const source = asRecord(input);
   const sourceAmount = source.amount && typeof source.amount === 'object' ? asRecord(source.amount) : undefined;
   const attachment = paymentAttachmentSummary(source.attachment);
+  const memberName = String(source.memberName ?? i18n.t('common.member'));
+  const memberStatus = source.membershipStatus === 'ARCHIVED' || source.membershipStatus === 'DELETED' ? source.membershipStatus : 'ACTIVE';
   return {
     id: String(source.id),
     membershipId: String(source.membershipId),
-    memberName: String(source.memberName ?? i18n.t('common.member')),
-    membershipStatus: source.membershipStatus === 'ARCHIVED' || source.membershipStatus === 'DELETED' ? source.membershipStatus : 'ACTIVE',
+    memberName,
+    membershipStatus: memberStatus,
+    memberAvatarUrl: typeof source.memberAvatarUrl === 'string' && source.memberAvatarUrl ? source.memberAvatarUrl : undefined,
+    actorMembershipId: String(source.actorMembershipId ?? source.membershipId),
+    actorName: String(source.actorDisplayName ?? source.actorName ?? memberName),
+    actorStatus: source.actorMembershipStatus === 'ARCHIVED' || source.actorMembershipStatus === 'DELETED'
+      ? source.actorMembershipStatus
+      : source.actorStatus === 'ARCHIVED' || source.actorStatus === 'DELETED' ? source.actorStatus : memberStatus,
+    actorAvatarUrl: typeof source.actorAvatarUrl === 'string' && source.actorAvatarUrl ? source.actorAvatarUrl : undefined,
     amount: sourceAmount ? money(sourceAmount.minorUnits, sourceAmount.currency) : money(source.amountMinor, source.currency),
     receivedAt: String(source.receivedAt),
     method: source.method as Payment['method'],

@@ -24,6 +24,24 @@ export interface CollectionPage<Item> {
   limit: number;
 }
 
+/** Server-backed unified account-activity search, filter, and sort options. */
+export interface ActivityCollectionQuery extends CollectionQuery<'kind' | 'targetName' | 'actorName' | 'detailName' | 'categoryName' | 'occurredAt' | 'amount' | 'status'> {
+  /** One or more repeated transaction kinds combined with OR semantics. */
+  kind?: ActivityKind | readonly ActivityKind[];
+  targetMembershipId?: string;
+  /** One or more repeated category IDs; matching is booking-specific. */
+  categoryId?: string | readonly string[];
+  /** One or more repeated product IDs; matching is booking-specific. */
+  productId?: string | readonly string[];
+  status?: 'POSTED' | 'REVERSED';
+  occurredFrom?: string;
+  occurredTo?: string;
+  /** Inclusive signed lower amount in minor units. */
+  amountMin?: string;
+  /** Inclusive signed upper amount in minor units. */
+  amountMax?: string;
+}
+
 /** Server-backed activity search, filter, and sort options. */
 export interface BookingCollectionQuery extends CollectionQuery<'createdAt' | 'amount' | 'targetName' | 'actorName' | 'productName' | 'categoryName' | 'status'> {
   periodId?: string;
@@ -52,8 +70,30 @@ export interface BookingFilterOptions {
   members: MemberFilterOption[];
 }
 
+/** Booking category present in the authorized unified activity feed. */
+export interface ActivityCategoryFilterOption {
+  categoryId: string;
+  name: string;
+  icon: CategoryIcon;
+}
+
+/** Booking product present in the authorized unified activity feed. */
+export interface ActivityProductFilterOption {
+  productId: string;
+  categoryId: string;
+  name: string;
+  imageUrl?: string;
+}
+
+/** Complete member and booking catalog derived from the authorized unified feed. */
+export interface ActivityFilterOptions {
+  members: MemberFilterOption[];
+  categories: ActivityCategoryFilterOption[];
+  products: ActivityProductFilterOption[];
+}
+
 /** Server-backed incoming-payment search, filter, and sort options. */
-export interface PaymentCollectionQuery extends CollectionQuery<'receivedAt' | 'amount' | 'memberName' | 'method' | 'status'> {
+export interface PaymentCollectionQuery extends CollectionQuery<'receivedAt' | 'amount' | 'memberName' | 'actorName' | 'method' | 'status'> {
   membershipId?: string;
   method?: string;
   status?: 'POSTED' | 'REVERSED';
@@ -710,6 +750,38 @@ export interface Booking {
   voidWithoutReasonUntil?: string;
 }
 
+/** Transaction source represented by the unified account activity feed. */
+export type ActivityKind = 'BOOKING' | 'PAYMENT' | 'ADJUSTMENT';
+
+/** One permission-scoped transaction in the unified account activity feed. */
+export interface ActivityEntry {
+  id: string;
+  sourceId: string;
+  periodId?: string;
+  kind: ActivityKind;
+  targetMembershipId: string;
+  targetDisplayName: string;
+  targetMembershipStatus: MembershipStatus;
+  targetAvatarUrl?: string;
+  actorMembershipId?: string;
+  actorDisplayName?: string;
+  actorMembershipStatus?: MembershipStatus;
+  actorAvatarUrl?: string;
+  detailName: string;
+  detailNote?: string;
+  categoryId?: string;
+  categoryName?: string;
+  productId?: string;
+  quantity?: number;
+  amount: Money;
+  occurredAt: string;
+  status: 'POSTED' | 'REVERSED';
+  attachment?: PaymentAttachmentSummary;
+  canReverse: boolean;
+  reversalReasonRequired: boolean;
+  reversalWithoutReasonUntil?: string;
+}
+
 /** Aggregated category amount shown on the dashboard. */
 export interface CategoryTotal {
   categoryId: string;
@@ -819,6 +891,11 @@ export interface Payment {
   membershipId: string;
   memberName: string;
   membershipStatus: MembershipStatus;
+  memberAvatarUrl?: string;
+  actorMembershipId?: string;
+  actorName?: string;
+  actorStatus?: MembershipStatus;
+  actorAvatarUrl?: string;
   amount: Money;
   receivedAt: string;
   method: string;

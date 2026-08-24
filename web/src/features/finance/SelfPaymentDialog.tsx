@@ -95,6 +95,7 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
       : api.createOwnPayment(activeGroupId, input),
     onSuccess: async (payment) => {
       await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['activities', activeGroupId] }),
         queryClient.invalidateQueries({ queryKey: ['dashboard', activeGroupId] }),
         queryClient.invalidateQueries({ queryKey: ['ledger', activeGroupId] }),
         queryClient.invalidateQueries({ queryKey: ['payments', activeGroupId] }),

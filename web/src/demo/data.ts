@@ -322,6 +322,7 @@ export const demoDashboard: Dashboard = {
 /** Demo account ledger. */
 export const demoLedger: LedgerEntry[] = [
   { id: 'ledger-1', occurredAt: '2026-08-04T19:45:00+02:00', kind: 'BOOKING', description: 'Bier', amount: { minorUnits: '200', currency: 'EUR' }, balance: { minorUnits: '2340', currency: 'EUR' }, referenceId: 'booking-1' },
+  { id: 'ledger-correction-1', occurredAt: '2026-08-03T14:20:00+02:00', kind: 'CREDIT', description: 'Manual correction', amount: { minorUnits: '-150', currency: 'EUR' }, balance: { minorUnits: '2140', currency: 'EUR' }, referenceId: 'correction-1' },
   { id: 'ledger-2', occurredAt: '2026-08-02T17:10:00+02:00', kind: 'BOOKING', description: 'Zu spät zum Training', amount: { minorUnits: '500', currency: 'EUR' }, balance: { minorUnits: '2140', currency: 'EUR' }, referenceId: 'booking-old-2' },
   { id: 'ledger-3', occurredAt: '2026-08-01T09:00:00+02:00', kind: 'PAYMENT', description: 'Zahlungseingang', amount: { minorUnits: '-2000', currency: 'EUR' }, balance: { minorUnits: '1640', currency: 'EUR' }, referenceId: 'payment-1' },
 ];
@@ -336,8 +337,8 @@ export const demoAccountSummaries: AccountSummary[] = [
 
 /** Demo payments managed by finance users. */
 export const demoPayments: Payment[] = [
-  { id: 'payment-1', membershipId: 'member-lukas', memberName: 'Lukas Waschul', membershipStatus: 'ACTIVE', amount: { minorUnits: '2000', currency: 'EUR' }, receivedAt: '2026-08-01', method: 'BANK_TRANSFER', methodLabel: 'Bank transfer', reference: 'Juli', status: 'POSTED' },
-  { id: 'payment-2', membershipId: 'member-mara', memberName: 'Mara Becker', membershipStatus: 'ACTIVE', amount: { minorUnits: '1500', currency: 'EUR' }, receivedAt: '2026-07-30', method: 'CASH', methodLabel: 'Cash', status: 'POSTED' },
+  { id: 'payment-1', membershipId: 'member-lukas', memberName: 'Lukas Waschul', membershipStatus: 'ACTIVE', actorMembershipId: 'member-mara', actorName: 'Mara Becker', actorStatus: 'ACTIVE', amount: { minorUnits: '2000', currency: 'EUR' }, receivedAt: '2026-08-01T09:00:00+02:00', method: 'BANK_TRANSFER', methodLabel: 'Bank transfer', reference: 'Juli', status: 'POSTED' },
+  { id: 'payment-2', membershipId: 'member-mara', memberName: 'Mara Becker', membershipStatus: 'ACTIVE', actorMembershipId: 'member-mara', actorName: 'Mara Becker', actorStatus: 'ACTIVE', amount: { minorUnits: '1500', currency: 'EUR' }, receivedAt: '2026-07-30T18:30:00+02:00', method: 'CASH', methodLabel: 'Cash', status: 'POSTED' },
 ];
 
 /** Demo settlements generated from closed periods. */
