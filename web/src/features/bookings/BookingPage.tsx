@@ -103,6 +103,7 @@ function BookingWorkspace({ groupId, categories, context, compact }: BookingWork
         queryClient.invalidateQueries({ queryKey: ['dashboard', groupId] }),
         queryClient.invalidateQueries({ queryKey: ['booking-context', groupId] }),
         queryClient.invalidateQueries({ queryKey: ['bookings', groupId] }),
+        queryClient.invalidateQueries({ queryKey: ['activities', groupId] }),
         queryClient.invalidateQueries({ queryKey: ['ledger', groupId] }),
         queryClient.invalidateQueries({ queryKey: ['account-summaries', groupId] }),
         ...(temporaryGuestDisplayNames.length > 0 ? [queryClient.invalidateQueries({ queryKey: ['members', groupId] })] : []),

@@ -13,6 +13,7 @@ import type { LoginCommand } from '@/api/types';
 import { preferredAuthenticatedPath } from '@/app/groupCapabilities';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
+import { formatGermanDateTime } from '@/features/shared/dateFormat';
 import { AuthLayout } from './AuthLayout';
 import formStyles from './AuthForms.module.css';
 import { loginErrorMessage } from './loginError';
@@ -78,7 +79,7 @@ export function PublicJoinPage() {
       {previewQuery.isLoading ? <p>{t('common.loading')}</p> : null}
       {previewQuery.data ? (
         <div className={styles.content}>
-          {previewQuery.data.expiresAt ? <p className={styles.expiry}>{t('publicJoin.expires', { date: new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(previewQuery.data.expiresAt)) })}</p> : null}
+          {previewQuery.data.expiresAt ? <p className={styles.expiry}>{t('publicJoin.expires', { date: formatGermanDateTime(previewQuery.data.expiresAt) })}</p> : null}
           {session ? (
             <section className={styles.accountCard}>
               <CheckCircle2 aria-hidden="true" size={28} />

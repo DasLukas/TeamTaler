@@ -141,3 +141,12 @@ func TestFormatEmailMoneyUsesCurrencyExponentWithoutFloatingPoint(t *testing.T) 
 		}
 	}
 }
+
+func TestRenderNotificationCopyFormatsSettlementDueDateInGerman(t *testing.T) {
+	_, body := renderNotificationCopy(appnotifications.TypeSettlementCreated, appnotifications.EventContext{
+		PeriodLabel: "August", AmountMinor: 3200, Currency: "EUR", DueAt: "2026-09-07",
+	})
+	if body != "Die Abrechnung „August“ ist bereit. Offener Betrag: 32,00 EUR. Fällig am 07.09.2026." {
+		t.Fatalf("notification body=%q", body)
+	}
+}

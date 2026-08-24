@@ -1,8 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import i18n from '@/i18n';
-import { adaptAccountSummaries, adaptBooking, adaptCategories, adaptDashboard, adaptGroupNotificationSettings, adaptGroupSettings, adaptInstanceCapabilities, adaptLedger, adaptMembership, adaptNotification, adaptNotificationDestination, adaptNotificationPreferences, adaptPayment, adaptPermissionDefinition, adaptPermissionGrants, adaptProduct, adaptPushSubscriptions, adaptRole, adaptSession, adaptSettlement, adaptSystemAudit, adaptSystemGroupDeletionImpact, adaptSystemGroups, adaptSystemSettings, adaptTransactionSettings } from './adapters';
+import { adaptAccountSummaries, adaptActivity, adaptBooking, adaptCategories, adaptDashboard, adaptGroupNotificationSettings, adaptGroupSettings, adaptInstanceCapabilities, adaptLedger, adaptMembership, adaptNotification, adaptNotificationDestination, adaptNotificationPreferences, adaptPayment, adaptPermissionDefinition, adaptPermissionGrants, adaptProduct, adaptPushSubscriptions, adaptRole, adaptSession, adaptSettlement, adaptSystemAudit, adaptSystemGroupDeletionImpact, adaptSystemGroups, adaptSystemSettings, adaptTransactionSettings } from './adapters';
 
 describe('API adapters', () => {
+  it('adapts signed unified activities and source action metadata', () => {
+    expect(adaptActivity({
+      id: 'payment:pay-a', sourceId: 'pay-a', kind: 'PAYMENT',
+      targetMembershipId: 'member-a', targetDisplayName: 'Alex', targetMembershipStatus: 'ACTIVE',
+      actorMembershipId: 'member-manager', actorDisplayName: 'Manager', actorMembershipStatus: 'ARCHIVED',
+      detailName: 'Cash', detailNote: 'August', paymentMethod: 'CASH', amountMinor: '-1250', currency: 'EUR',
+      occurredAt: '2026-08-20T10:00:00Z', status: 'POSTED', canReverse: true,
+      reversalReasonRequired: true, attachment: { fileName: 'receipt.pdf', mediaType: 'application/pdf', sizeBytes: 42, url: '/receipt' },
+    })).toMatchObject({
+      id: 'payment:pay-a', sourceId: 'pay-a', kind: 'PAYMENT', amount: { minorUnits: '-1250', currency: 'EUR' },
+      actorMembershipStatus: 'ARCHIVED', detailName: 'Bar', paymentMethod: 'CASH', canReverse: true, reversalReasonRequired: true,
+      attachment: { fileName: 'receipt.pdf' },
+    });
+    expect(adaptActivity({
+      id: 'payment:legacy', sourceId: 'legacy', kind: 'PAYMENT',
+      targetMembershipId: 'member-a', targetDisplayName: 'Alex', targetMembershipStatus: 'ACTIVE',
+      detailName: '', paymentMethod: 'CASH', amountMinor: '-500', currency: 'EUR',
+      occurredAt: '2026-08-20T10:00:00Z', status: 'POSTED', canReverse: false, reversalReasonRequired: false,
+    })).toMatchObject({ detailName: 'Bar', paymentMethod: 'CASH' });
+  });
+
   it('keeps group-less system-administrator sessions valid', () => {
     expect(adaptSession({
       user: { id: 'system-user', displayName: 'System Admin', email: 'admin@example.test' },
@@ -381,6 +402,18 @@ describe('API adapters', () => {
 
     expect(notification.title).toBe(i18n.t('notifications.fallback.paymentTitle'));
     expect(notification.message).toBe(i18n.t('notifications.fallback.paymentMessage'));
+  });
+
+  it('formats settlement due dates in German notification copy', () => {
+    const notification = adaptNotification({
+      id: 'notification-settlement',
+      type: 'SETTLEMENT_CREATED',
+      createdAt: '2026-08-21T16:48:00Z',
+      context: { periodLabel: 'August', amountMinor: '3200', currency: 'EUR', dueAt: '2026-09-07' },
+    });
+
+    expect(notification.message).toContain('Fällig am 07.09.2026.');
+    expect(notification.message).not.toContain('2026-09-07');
   });
 
   it('includes cross-period corrections in settlement obligations and payments', () => {

@@ -57,7 +57,7 @@ describe('DashboardPage information-only overview', () => {
     expect(personalBalanceHeading.tagName).toBe('H2');
     expect(personalBalanceHeading.nextElementSibling?.querySelector('strong')).toHaveTextContent(/23,40/);
     expect(screen.getAllByText(i18n.t('booking.openBalance'))).toHaveLength(1);
-    expect(screen.getByText(/23,40/, { selector: 'strong' })).toBeVisible();
+    expect(screen.getByText(/23,40/, { selector: 'strong[data-financial-state="due"]' })).toBeVisible();
     expect(screen.getByText(i18n.t('dashboard.settlement', { label: 'August' }))).toBeVisible();
     expect(screen.getByText(i18n.t('dashboard.paymentNoteSelf'))).toBeVisible();
     expect(screen.getByRole('button', { name: i18n.t('selfPayment.action') })).toBeVisible();
@@ -110,6 +110,15 @@ describe('DashboardPage information-only overview', () => {
     render(<QueryClientProvider client={queryClient}><DashboardPage /></QueryClientProvider>);
 
     expect(await screen.findByText(/-2,50/, { selector: 'strong[data-financial-state="credit"]' })).toBeVisible();
+  });
+
+  it('marks a zero open balance as balanced', async () => {
+    mocks.getDashboard.mockResolvedValue({ ...demoDashboard, openBalance: { minorUnits: '0', currency: 'EUR' } });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    render(<QueryClientProvider client={queryClient}><DashboardPage /></QueryClientProvider>);
+
+    expect(await screen.findByText(/^0,00/, { selector: 'strong[data-financial-state="balanced"]' })).toBeVisible();
   });
 
   it('removes period and category references while keeping the same group balance when settlements are disabled', async () => {

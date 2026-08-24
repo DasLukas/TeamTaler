@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/DasLukas/TeamTaler/internal/activities"
 	"github.com/DasLukas/TeamTaler/internal/auth"
 	"github.com/DasLukas/TeamTaler/internal/bookings"
 	"github.com/DasLukas/TeamTaler/internal/catalog"
@@ -53,6 +54,7 @@ const systemSettingsKey contextKey = "system-settings"
 type Server struct {
 	config            config.Config
 	db                *sql.DB
+	activities        activities.Service
 	auth              auth.Service
 	groups            groups.Service
 	catalog           catalog.Service
@@ -138,6 +140,7 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	server := &Server{
 		config:            cfg,
 		db:                db,
+		activities:        activities.Service{DB: db},
 		auth:              auth.Service{DB: db, SessionLifetime: cfg.SessionLifetime, TokenSealer: tokenSealer, EmailDeliveryAvailable: emailInfrastructureAvailable},
 		groups:            groupService,
 		catalog:           catalog.Service{DB: db},
@@ -256,7 +259,10 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/products/{productID}", server.handleDeleteProduct)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/products/{productID}/image", server.handleProductImage)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/images/{imageKey}", server.handleImage)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/activities", server.handleActivities)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/activities/filter-options", server.handleActivityFilterOptions)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/bookings", server.handleListBookings)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/bookings/filter-options", server.handleBookingFilterOptions)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/booking-context", server.handleBookingContext)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/bookings", server.handleCreateBooking)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/bookings/batch", server.handleCreateBookingBatch)

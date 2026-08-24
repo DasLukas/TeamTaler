@@ -1,4 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
+import Archive from 'lucide-react/dist/esm/icons/archive';
+import CircleCheck from 'lucide-react/dist/esm/icons/circle-check';
+import CircleDollarSign from 'lucide-react/dist/esm/icons/circle-dollar-sign';
+import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
+import WalletCards from 'lucide-react/dist/esm/icons/wallet-cards';
 import { useDeferredValue, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
@@ -8,6 +13,7 @@ import { useActiveGroup } from '@/app/useActiveGroup';
 import { Avatar } from '@/components/ui/Avatar';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { DataTable, type DataTableColumnDef, type DataTableFilterDefinition, type DataTableNumberRange } from '@/features/shared/DataTable';
+import { createMemberFilterOption } from '@/features/shared/memberFilterOption';
 import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
 import { deriveAccountOverview } from './accountOverview';
@@ -20,7 +26,7 @@ function balanceState(account: AccountSummary): 'due' | 'settled' | 'credit' {
   return 'settled';
 }
 
-type AccountFilterId = 'membershipStatus' | 'balanceState' | 'amount';
+type AccountFilterId = 'membershipId' | 'membershipStatus' | 'balanceState' | 'amount';
 const accountCollator = new Intl.Collator('de-DE', { numeric: true, sensitivity: 'base' });
 
 /**
@@ -35,27 +41,40 @@ export function AccountBalancesPanel() {
   const accountsQuery = useQuery({ queryKey: ['account-summaries', activeGroupId], queryFn: () => api.getAccountSummaries(activeGroupId) });
   const filterDefinitions = useMemo<readonly DataTableFilterDefinition<AccountFilterId>[]>(() => [
     {
+      allLabel: t('dataTable.allValues'),
+      id: 'membershipId',
+      kind: 'select',
+      label: t('common.member'),
+      options: (accountsQuery.data ?? []).map(createMemberFilterOption),
+    },
+    {
+      allLabel: t('dataTable.allValues'),
+      dropdown: true,
+      emptyLabel: t('dataTable.noOptions'),
       id: 'membershipStatus',
       kind: 'multi-select',
       label: t('financeWorkspace.membershipStatus'),
       options: [
-        { label: t('financeWorkspace.active'), value: 'ACTIVE' },
-        { label: t('financeWorkspace.archived'), value: 'ARCHIVED' },
-        { label: t('common.deleted'), value: 'DELETED' },
+        { label: t('financeWorkspace.active'), value: 'ACTIVE', visual: <CircleCheck size={19} /> },
+        { label: t('financeWorkspace.archived'), value: 'ARCHIVED', visual: <Archive size={19} /> },
+        { label: t('common.deleted'), value: 'DELETED', visual: <Trash2 size={19} /> },
       ],
     },
     {
+      allLabel: t('dataTable.allValues'),
+      dropdown: true,
+      emptyLabel: t('dataTable.noOptions'),
       id: 'balanceState',
       kind: 'multi-select',
-      label: t('common.status'),
+      label: t('financeWorkspace.balanceState'),
       options: [
-        { label: t('financeWorkspace.states.due'), value: 'due' },
-        { label: t('financeWorkspace.states.settled'), value: 'settled' },
-        { label: t('financeWorkspace.states.credit'), value: 'credit' },
+        { label: t('financeWorkspace.states.due'), value: 'due', visual: <CircleDollarSign size={19} /> },
+        { label: t('financeWorkspace.states.settled'), value: 'settled', visual: <CircleCheck size={19} /> },
+        { label: t('financeWorkspace.states.credit'), value: 'credit', visual: <WalletCards size={19} /> },
       ],
     },
     { id: 'amount', kind: 'number-range', label: `${t('financeWorkspace.balance')} (${activeGroup.currency})`, maximumLabel: t('dataTable.maximum'), minimumLabel: t('dataTable.minimum'), step: 0.01 },
-  ], [activeGroup.currency, t]);
+  ], [accountsQuery.data, activeGroup.currency, t]);
   const tableState = useDataTableUrlState<AccountFilterId>({
     filterDefinitions,
     initialSorting: [{ id: 'memberName', desc: false }],
@@ -74,6 +93,7 @@ export function AccountBalancesPanel() {
     const filtered = (accountsQuery.data ?? []).filter((account) => {
       const amount = BigInt(account.balance.minorUnits);
       return (!deferredSearch || account.displayName.toLocaleLowerCase('de-DE').includes(deferredSearch))
+        && (!tableState.filters.membershipId || account.membershipId === tableState.filters.membershipId)
         && (statuses.length === 0 || statuses.includes(account.status))
         && (states.length === 0 || states.includes(balanceState(account)))
         && (minimum === undefined || amount >= minimum)
@@ -104,9 +124,9 @@ export function AccountBalancesPanel() {
       accessorFn: balanceState,
       cell: ({ row }) => { const state = balanceState(row.original); return <span className={`${styles.state} ${styles[state]}`}>{t(`financeWorkspace.states.${state}`)}</span>; },
       enableSorting: true,
-      header: t('common.status'),
+      header: t('financeWorkspace.balanceState'),
       id: 'balanceState',
-      meta: { label: t('common.status') },
+      meta: { label: t('financeWorkspace.balanceState') },
     },
     { accessorFn: (account) => account.balance.minorUnits, cell: ({ row }) => <strong>{formatMoney(row.original.balance)}</strong>, enableSorting: true, header: t('financeWorkspace.balance'), id: 'amount', meta: { align: 'end', label: t('financeWorkspace.balance') } },
   ], [t]);

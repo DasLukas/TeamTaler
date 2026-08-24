@@ -3,15 +3,18 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Booking, Category, Session } from '@/api/types';
+import type { ActivityEntry, ActivityFilterOptions, CollectionPage, Session } from '@/api/types';
 import { ActiveGroupContext } from '@/app/active-group-context';
+import modalStyles from '@/components/ui/Modal.module.css';
 import i18n from '@/i18n';
 import { ActivitiesPage } from './ActivitiesPage';
 
 const apiMock = vi.hoisted(() => ({
-  getBookingsPage: vi.fn(),
-  getCategories: vi.fn(),
+  getActivitiesPage: vi.fn(),
+  getActivityFilterOptions: vi.fn(),
+  getPaymentAttachment: vi.fn(),
   reverseBooking: vi.fn(),
+  reversePayment: vi.fn(),
 }));
 
 vi.mock('@/api/client', () => ({ api: apiMock }));
@@ -24,266 +27,233 @@ const session: Session = {
   systemRoles: [],
 };
 
-const thirdPartyBooking: Booking = {
-  id: 'booking-third-party',
-  memberId: 'member-target',
-  memberName: 'Target Member',
-  memberStatus: 'ACTIVE',
-  memberAvatarUrl: '/avatars/target.png',
-  productId: 'product-penalty',
-  productName: 'Late arrival',
+const booking: ActivityEntry = {
+  id: 'BOOKING:booking-a',
+  sourceId: 'booking-a',
+  kind: 'BOOKING',
+  targetMembershipId: 'member-target',
+  targetDisplayName: 'Target Member',
+  targetMembershipStatus: 'ACTIVE',
+  targetAvatarUrl: '/avatars/target.png',
+  actorMembershipId: 'member-manager',
+  actorDisplayName: 'Assigning Manager',
+  actorMembershipStatus: 'ACTIVE',
+  actorAvatarUrl: '/avatars/manager.png',
+  detailName: 'Late arrival',
   categoryId: 'category-penalties',
   categoryName: 'Penalties',
+  productId: 'product-penalty',
   quantity: 1,
-  unitPrice: { minorUnits: '500', currency: 'EUR' },
-  total: { minorUnits: '500', currency: 'EUR' },
-  bookedAt: '2026-08-04T12:00:00Z',
-  bookedByName: 'Assigning Manager',
-  bookedByStatus: 'ACTIVE',
-  bookedByMemberId: 'member-manager',
-  bookedByAvatarUrl: '/avatars/manager.png',
+  amount: { minorUnits: '500', currency: 'EUR' },
+  occurredAt: '2026-08-04T12:00:00Z',
   status: 'POSTED',
-  canVoid: false,
+  canReverse: false,
+  reversalReasonRequired: false,
 };
 
-const bookingPage = (items: Booking[]) => ({ hasMore: false, items, limit: 50 });
-
-const penaltiesCategory: Category = {
-  id: thirdPartyBooking.categoryId,
-  version: 1,
-  name: thirdPartyBooking.categoryName,
-  icon: 'penalty',
-  active: true,
-  sortOrder: 1,
-  products: [{
-    id: thirdPartyBooking.productId,
-    categoryId: thirdPartyBooking.categoryId,
-    version: 1,
-    name: thirdPartyBooking.productName,
-    pricingMode: 'FIXED',
-    currency: 'EUR',
-    price: thirdPartyBooking.unitPrice,
-    imageUrl: '/api/v1/groups/group-a/images/late-arrival.png',
-    active: true,
-    sortOrder: 1,
-  }],
+const payment: ActivityEntry = {
+  id: 'PAYMENT:payment-a',
+  sourceId: 'payment-a',
+  kind: 'PAYMENT',
+  targetMembershipId: 'member-target',
+  targetDisplayName: 'Target Member',
+  targetMembershipStatus: 'ACTIVE',
+  targetAvatarUrl: '/avatars/target.png',
+  actorMembershipId: 'member-manager',
+  actorDisplayName: 'Assigning Manager',
+  actorMembershipStatus: 'ACTIVE',
+  actorAvatarUrl: '/avatars/manager.png',
+  detailName: 'Bank transfer',
+  detailNote: 'August',
+  amount: { minorUnits: '-2000', currency: 'EUR' },
+  occurredAt: '2026-08-04T13:00:00Z',
+  status: 'POSTED',
+  attachment: { fileName: 'receipt.jpg', mediaType: 'image/jpeg', sizeBytes: 1200, url: '/receipt' },
+  canReverse: true,
+  reversalReasonRequired: true,
 };
 
-const snacksCategory: Category = {
-  id: 'category-snacks',
-  version: 1,
-  name: 'Snacks',
-  icon: 'food',
-  active: true,
-  sortOrder: 2,
-  products: [{
-    id: 'product-pretzel',
-    categoryId: 'category-snacks',
-    version: 1,
-    name: 'Pretzel',
-    pricingMode: 'FIXED',
-    currency: 'EUR',
-    price: { minorUnits: '250', currency: 'EUR' },
-    imageUrl: '/api/v1/groups/group-a/images/pretzel.png',
-    active: true,
-    sortOrder: 1,
-  }],
+const adjustment: ActivityEntry = {
+  id: 'ADJUSTMENT:ledger-a',
+  sourceId: 'ledger-a',
+  kind: 'ADJUSTMENT',
+  targetMembershipId: 'member-target',
+  targetDisplayName: 'Target Member',
+  targetMembershipStatus: 'ACTIVE',
+  detailName: 'Manual correction',
+  amount: { minorUnits: '-150', currency: 'EUR' },
+  occurredAt: '2026-08-04T14:00:00Z',
+  status: 'POSTED',
+  canReverse: false,
+  reversalReasonRequired: false,
 };
 
-function renderActivities(sessionValue: Session = session): void {
+const filterOptions: ActivityFilterOptions = {
+  kinds: ['BOOKING', 'PAYMENT', 'ADJUSTMENT'],
+  members: [{ membershipId: 'member-target', displayName: 'Target Member', avatarUrl: '/avatars/target.png' }],
+  categories: [{ categoryId: 'category-penalties', name: 'Penalties', icon: 'penalty' }],
+  products: [{ productId: 'product-penalty', categoryId: 'category-penalties', name: 'Late arrival', imageUrl: '/images/late-arrival.png' }],
+};
+
+function activityPage(items: ActivityEntry[], nextCursor?: string): CollectionPage<ActivityEntry> {
+  return { hasMore: Boolean(nextCursor), items, limit: 50, nextCursor };
+}
+
+function renderActivities(): QueryClient {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>
-      <ActiveGroupContext.Provider value={{ session: sessionValue, activeGroup: sessionValue.groups[0], activeGroupId: 'group-a', setActiveGroupId: vi.fn() }}>
+      <ActiveGroupContext.Provider value={{ session, activeGroup: session.groups[0], activeGroupId: 'group-a', setActiveGroupId: vi.fn() }}>
         {children}
       </ActiveGroupContext.Provider>
     </QueryClientProvider>
   );
   render(<ActivitiesPage />, { wrapper });
+  return queryClient;
 }
 
-describe('ActivitiesPage booking traceability', () => {
+describe('ActivitiesPage unified feed', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.history.replaceState({}, '', '/activities');
+    apiMock.getActivityFilterOptions.mockResolvedValue(filterOptions);
+    apiMock.getActivitiesPage.mockResolvedValue(activityPage([adjustment, payment, booking]));
+    apiMock.getPaymentAttachment.mockResolvedValue(new Blob(['receipt'], { type: 'image/jpeg' }));
     apiMock.reverseBooking.mockResolvedValue(undefined);
-    apiMock.getBookingsPage.mockResolvedValue(bookingPage([thirdPartyBooking]));
-    apiMock.getCategories.mockResolvedValue([penaltiesCategory]);
+    apiMock.reversePayment.mockResolvedValue(undefined);
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:receipt');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
   });
 
-  it('shows target and actor distinctly and includes the actor in search', async () => {
-    const user = userEvent.setup();
-    renderActivities();
-
-    const heading = await screen.findByRole('heading', { level: 1, name: i18n.t('activities.title') });
-    expect(heading.parentElement?.querySelector('p')).not.toBeInTheDocument();
-    const row = await screen.findByRole('row', { name: /Target Member.*Assigning Manager/ });
-    expect(within(row).getByText(thirdPartyBooking.memberName)).toBeVisible();
-    expect(within(row).getByText(thirdPartyBooking.bookedByName)).toBeVisible();
-    await waitFor(() => expect(row.querySelector('img[src="/api/v1/groups/group-a/images/late-arrival.png"]')).toBeInTheDocument());
-    expect(row.querySelector('img[src="/avatars/target.png"]')).toHaveAttribute('alt', '');
-    expect(row.querySelector('img[src="/avatars/manager.png"]')).toHaveAttribute('alt', '');
-    expect(screen.getByRole('columnheader', { name: new RegExp(i18n.t('activities.bookedFor')) })).toBeVisible();
-    expect(screen.getByRole('columnheader', { name: new RegExp(i18n.t('activities.bookedBy')) })).toBeVisible();
-    expect(within(row).getByRole('cell', { name: /Target Member/ })).toBeVisible();
-    expect(within(row).getByRole('cell', { name: /Assigning Manager/ })).toBeVisible();
-    expect(within(row).getByRole('cell', { name: thirdPartyBooking.productName })).toBeVisible();
-    expect(row.querySelector('time')).toHaveAttribute('datetime', thirdPartyBooking.bookedAt);
-    expect(within(row).getByRole('img', { name: i18n.t('common.booked') })).toHaveAttribute('title', i18n.t('common.booked'));
-
-    await user.type(screen.getByLabelText(i18n.t('activities.searchLabel')), thirdPartyBooking.bookedByName);
-    expect(await screen.findByRole('row', { name: /Target Member.*Assigning Manager/ })).toBeVisible();
-    await waitFor(() => expect(apiMock.getBookingsPage).toHaveBeenLastCalledWith(
-      'group-a',
-      expect.objectContaining({ q: thirdPartyBooking.bookedByName }),
-    ));
-  });
-
-  it('preserves activities as a semantic table with vertical booking rows', async () => {
+  it('renders bookings, payments, and corrections from one semantic feed', async () => {
     renderActivities();
 
     const table = await screen.findByRole('table', { name: i18n.t('activities.title') });
-    await within(table).findByRole('row', { name: /Target Member.*Assigning Manager/ });
-    expect(within(table).getAllByRole('columnheader')).toHaveLength(8);
-    const rows = within(table).getAllByRole('row');
-    expect(rows).toHaveLength(2);
-    expect(within(rows[1]).getAllByRole('cell')).toHaveLength(8);
+    await waitFor(() => expect(within(table).getAllByRole('row')).toHaveLength(4));
+    expect(within(table).getByRole('img', { name: i18n.t('activities.bookingType') })).toBeVisible();
+    expect(within(table).getByRole('img', { name: i18n.t('activities.paymentType') })).toBeVisible();
+    expect(within(table).getByRole('img', { name: i18n.t('activities.adjustmentType') })).toBeVisible();
+    expect(within(table).getByText(/\+5,00/)).toBeVisible();
+    expect(within(table).getByText(/-20,00/)).toBeVisible();
+    expect(within(table).getByLabelText(i18n.t('activities.actorUnavailable'))).toBeVisible();
+    expect(apiMock.getActivitiesPage).toHaveBeenCalledWith('group-a', expect.objectContaining({ limit: 50, sort: 'occurredAt', direction: 'desc' }));
   });
 
-  it('orders visual category and product multi-selects and sends repeated filters', async () => {
+  it('refetches feed-derived filter options through the shared activity cache prefix', async () => {
+    const queryClient = renderActivities();
+    await waitFor(() => expect(apiMock.getActivityFilterOptions).toHaveBeenCalledTimes(1));
+
+    await queryClient.invalidateQueries({ queryKey: ['activities', 'group-a'] });
+
+    await waitFor(() => expect(apiMock.getActivityFilterOptions).toHaveBeenCalledTimes(2));
+  });
+
+  it('hides the correction filter when the authorized feed has no corrections', async () => {
     const user = userEvent.setup();
-    apiMock.getCategories.mockResolvedValue([penaltiesCategory, snacksCategory]);
+    apiMock.getActivityFilterOptions.mockResolvedValue({ ...filterOptions, kinds: ['BOOKING', 'PAYMENT'] });
+    renderActivities();
+
+    await screen.findByRole('table', { name: i18n.t('activities.title') });
+    await user.click(screen.getByRole('button', { name: i18n.t('dataTable.filterButton') }));
+    const filterDialog = screen.getByRole('dialog', { name: i18n.t('dataTable.filterHeading') });
+    await user.click(within(filterDialog).getByRole('button', { name: i18n.t('activities.transaction') }));
+    const kindMenu = screen.getByRole('dialog', { name: i18n.t('activities.transaction') });
+
+    expect(within(kindMenu).getByRole('checkbox', { name: i18n.t('activities.bookingType') })).toBeVisible();
+    expect(within(kindMenu).getByRole('checkbox', { name: i18n.t('activities.paymentType') })).toBeVisible();
+    expect(within(kindMenu).queryByRole('checkbox', { name: i18n.t('activities.adjustmentType') })).not.toBeInTheDocument();
+  });
+
+  it('sends member, repeated type, category, and product filters to the unified endpoint', async () => {
+    const user = userEvent.setup();
     renderActivities();
     await screen.findByRole('table', { name: i18n.t('activities.title') });
 
     await user.click(screen.getByRole('button', { name: i18n.t('dataTable.filterButton') }));
-    const dialog = screen.getByRole('dialog', { name: i18n.t('dataTable.filterHeading') });
-    const categoryTrigger = within(dialog).getByRole('button', { name: i18n.t('common.category') });
-    const productTrigger = within(dialog).getByRole('button', { name: i18n.t('common.product') });
-    expect(categoryTrigger.compareDocumentPosition(productTrigger) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const filterDialog = screen.getByRole('dialog', { name: i18n.t('dataTable.filterHeading') });
+    await user.click(within(filterDialog).getByRole('combobox', { name: i18n.t('common.member') }));
+    await user.click(within(screen.getByRole('listbox', { name: i18n.t('common.member') })).getByRole('option', { name: 'Target Member' }));
+    await user.click(within(filterDialog).getByRole('button', { name: i18n.t('activities.transaction') }));
+    const kindMenu = screen.getByRole('dialog', { name: i18n.t('activities.transaction') });
+    await user.click(within(kindMenu).getByRole('checkbox', { name: i18n.t('activities.paymentType') }));
+    await user.click(within(kindMenu).getByRole('checkbox', { name: i18n.t('activities.adjustmentType') }));
+    await user.click(within(filterDialog).getByRole('button', { name: i18n.t('common.category') }));
+    await user.click(within(screen.getByRole('dialog', { name: i18n.t('common.category') })).getByRole('checkbox', { name: 'Penalties' }));
+    await user.click(within(filterDialog).getByRole('button', { name: i18n.t('common.product') }));
+    await user.click(within(screen.getByRole('dialog', { name: i18n.t('common.product') })).getByRole('checkbox', { name: 'Late arrival' }));
+    await user.click(within(filterDialog).getByRole('button', { name: i18n.t('dataTable.applyFilters') }));
 
-    await user.click(categoryTrigger);
-    const categoryMenu = screen.getByRole('dialog', { name: i18n.t('common.category') });
-    expect(categoryMenu.querySelector('[data-category-icon="penalty"]')).not.toBeNull();
-    await user.click(within(categoryMenu).getByRole('checkbox', { name: penaltiesCategory.name }));
-    await user.click(within(categoryMenu).getByRole('checkbox', { name: snacksCategory.name }));
-
-    await user.click(productTrigger);
-    const productMenu = screen.getByRole('dialog', { name: i18n.t('common.product') });
-    expect(productMenu.querySelector(`img[src="${penaltiesCategory.products[0].imageUrl}"]`)).not.toBeNull();
-    expect(productMenu.querySelector(`img[src="${snacksCategory.products[0].imageUrl}"]`)).not.toBeNull();
-    await user.click(within(productMenu).getByRole('checkbox', { name: penaltiesCategory.products[0].name }));
-    await user.click(within(productMenu).getByRole('checkbox', { name: snacksCategory.products[0].name }));
-    await user.click(within(dialog).getByRole('button', { name: i18n.t('dataTable.applyFilters') }));
-
-    await waitFor(() => expect(apiMock.getBookingsPage).toHaveBeenLastCalledWith('group-a', expect.objectContaining({
-      categoryId: [penaltiesCategory.id, snacksCategory.id],
-      productId: [penaltiesCategory.products[0].id, snacksCategory.products[0].id],
+    await waitFor(() => expect(apiMock.getActivitiesPage).toHaveBeenLastCalledWith('group-a', expect.objectContaining({
+      categoryId: ['category-penalties'],
+      kind: ['PAYMENT', 'ADJUSTMENT'],
+      productId: ['product-penalty'],
+      targetMembershipId: 'member-target',
     })));
   });
 
-  it('renders reversed bookings as accessible compact status badges', async () => {
-    apiMock.getBookingsPage.mockResolvedValue(bookingPage([{ ...thirdPartyBooking, status: 'REVERSED' }]));
-    renderActivities();
-
-    const row = await screen.findByRole('row', { name: /Target Member.*Assigning Manager/ });
-    expect(within(row).getByRole('img', { name: i18n.t('common.reversed') })).toHaveAttribute('title', i18n.t('common.reversed'));
-  });
-
-  it('uses the current session avatar when stale booking data omits it', async () => {
-    const avatarUrl = '/avatars/current-user.png';
-    const selfBooking: Booking = {
-      ...thirdPartyBooking,
-      memberId: 'member-viewer',
-      memberName: 'Viewer',
-      memberAvatarUrl: undefined,
-      bookedByMemberId: 'member-viewer',
-      bookedByName: 'Viewer',
-      bookedByAvatarUrl: undefined,
-    };
-    apiMock.getBookingsPage.mockResolvedValue(bookingPage([selfBooking]));
-    renderActivities({ ...session, user: { ...session.user, avatarUrl } });
-
-    const row = await screen.findByRole('row', { name: /Viewer.*Viewer/ });
-    expect(row.querySelectorAll(`img[src="${avatarUrl}"]`)).toHaveLength(2);
-  });
-
-  it('allows a self-created booking inside the server-provided window without a reason', async () => {
+  it('loads every server page without truncating a full first source page', async () => {
     const user = userEvent.setup();
-    apiMock.getBookingsPage.mockResolvedValue(bookingPage([{
-      ...thirdPartyBooking,
-      id: 'booking-self-created',
-      memberId: 'member-viewer',
-      memberName: 'Viewer',
-      bookedByMemberId: 'member-viewer',
-      bookedByName: 'Viewer',
-      canVoid: true,
-      voidReasonRequired: false,
-      voidWithoutReasonUntil: '2026-08-07T12:00:30Z',
-    }]));
+    const firstPage = Array.from({ length: 50 }, (_, index) => ({ ...booking, id: `BOOKING:${index}`, sourceId: `booking-${index}`, detailName: `Booking ${index}` }));
+    apiMock.getActivitiesPage.mockImplementation((_groupId: string, query: { cursor?: string }) => Promise.resolve(
+      query.cursor ? activityPage([payment]) : activityPage(firstPage, 'cursor-2'),
+    ));
     renderActivities();
 
-    await user.click(await screen.findByRole('button', { name: i18n.t('activities.reverse') }));
-    const reason = screen.getByLabelText(i18n.t('finance.reason'));
-    expect(reason).not.toBeRequired();
-    expect(screen.getByText(/ohne Begründung/)).toBeVisible();
-    await user.click(screen.getByRole('button', { name: i18n.t('activities.confirmReverse') }));
-
-    await waitFor(() => expect(apiMock.reverseBooking).toHaveBeenCalledWith('group-a', 'booking-self-created', ''));
+    await waitFor(() => expect(screen.getAllByRole('row')).toHaveLength(51));
+    await user.click(screen.getByRole('button', { name: i18n.t('dataTable.loadMore') }));
+    await screen.findByRole('row', { name: /Einzahlung.*Target Member/ });
+    expect(screen.getAllByRole('row')).toHaveLength(52);
+    expect(apiMock.getActivitiesPage).toHaveBeenLastCalledWith('group-a', expect.objectContaining({ cursor: 'cursor-2' }));
   });
 
-  it('always requires a reason for a received booking created by another member', async () => {
+  it('opens protected payment receipts and uses payment reversal metadata', async () => {
     const user = userEvent.setup();
-    apiMock.getBookingsPage.mockResolvedValue(bookingPage([{
-      ...thirdPartyBooking,
-      memberId: 'member-viewer',
-      memberName: 'Viewer',
-      canVoid: true,
-      voidReasonRequired: true,
-      voidWithoutReasonUntil: undefined,
-    }]));
     renderActivities();
+    const paymentRow = await screen.findByRole('row', { name: /Einzahlung.*Target Member/ });
 
-    await user.click(await screen.findByRole('button', { name: i18n.t('activities.reverse') }));
-    const reason = screen.getByLabelText(i18n.t('finance.reason'));
-    const submit = screen.getByRole('button', { name: i18n.t('activities.confirmReverse') });
+    await user.click(within(paymentRow).getByRole('button', { name: i18n.t('paymentAttachment.action') }));
+    expect(await screen.findByRole('dialog', { name: 'receipt.jpg' })).toBeVisible();
+    expect(apiMock.getPaymentAttachment).toHaveBeenCalledWith('group-a', 'payment-a');
+    await user.click(within(paymentRow).getByRole('button', { name: i18n.t('activities.reverse') }));
+    const reversalDialog = screen.getByRole('dialog', { name: i18n.t('finance.reverseTitle') });
+    expect(reversalDialog).toHaveClass(modalStyles.sheet);
+    expect(reversalDialog.querySelector(`button[aria-label="${i18n.t('dialog.sheetHandle')}"]`)).toBeInTheDocument();
+    const reason = screen.getByLabelText(`${i18n.t('finance.reason')} *`);
     expect(reason).toBeRequired();
-    expect(submit).toBeDisabled();
-    await user.type(reason, 'Incorrect assignment');
-    await user.click(submit);
-
-    await waitFor(() => expect(apiMock.reverseBooking).toHaveBeenCalledWith('group-a', thirdPartyBooking.id, 'Incorrect assignment'));
+    expect(screen.queryByText(i18n.t('activities.reasonRequired'))).not.toBeInTheDocument();
+    await user.type(reason, 'Duplicate payment');
+    await user.click(screen.getByRole('button', { name: i18n.t('finance.confirmReverse') }));
+    await waitFor(() => expect(apiMock.reversePayment).toHaveBeenCalledWith('group-a', 'payment-a', 'Duplicate payment'));
   });
 
-  it('marks deleted historical actors and targets without exposing prior avatars', async () => {
-    apiMock.getBookingsPage.mockResolvedValue(bookingPage([{
-      ...thirdPartyBooking,
-      memberStatus: 'DELETED',
-      memberAvatarUrl: undefined,
-      bookedByStatus: 'DELETED',
-      bookedByAvatarUrl: undefined,
+  it('uses booking-specific action metadata and preserves reversed originals', async () => {
+    const user = userEvent.setup();
+    apiMock.getActivitiesPage.mockResolvedValue(activityPage([{ ...booking, status: 'REVERSED' }, {
+      ...booking,
+      id: 'BOOKING:reversible',
+      sourceId: 'reversible',
+      detailName: 'Reversible booking',
+      canReverse: true,
+      reversalReasonRequired: false,
+      reversalWithoutReasonUntil: '2026-08-07T12:00:30Z',
     }]));
     renderActivities();
 
-    const row = await screen.findByRole('row', { name: /Target Member.*Gelöscht.*Assigning Manager.*Gelöscht/ });
-    const deletedMarkers = within(row).getAllByRole('img', { name: i18n.t('common.deleted') });
-    expect(deletedMarkers).toHaveLength(2);
-    expect(deletedMarkers[0]).toHaveAttribute('title', i18n.t('common.deleted'));
-    expect(row.querySelector('img[src="/avatars/target.png"]')).not.toBeInTheDocument();
-    expect(row.querySelector('img[src="/avatars/manager.png"]')).not.toBeInTheDocument();
+    expect(await screen.findByRole('img', { name: i18n.t('common.reversed') })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: i18n.t('activities.reverse') }));
+    expect(screen.getByLabelText(i18n.t('finance.reason'))).not.toBeRequired();
+    expect(screen.queryByLabelText(`${i18n.t('finance.reason')} *`)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: i18n.t('activities.confirmReverse') }));
+    await waitFor(() => expect(apiMock.reverseBooking).toHaveBeenCalledWith('group-a', 'reversible', ''));
   });
 
-  it('marks archived historical actors and targets with accessible tooltips', async () => {
-    apiMock.getBookingsPage.mockResolvedValue(bookingPage([{
-      ...thirdPartyBooking,
-      memberStatus: 'ARCHIVED',
-      bookedByStatus: 'ARCHIVED',
-    }]));
+  it('shows loading and request failures in the table', async () => {
+    let rejectRequest: ((reason: Error) => void) | undefined;
+    apiMock.getActivitiesPage.mockImplementation(() => new Promise((_resolve, reject) => { rejectRequest = reject; }));
     renderActivities();
+    expect(screen.getByText(i18n.t('common.loading'))).toBeVisible();
 
-    const row = await screen.findByRole('row', { name: /Target Member.*Archiviert.*Assigning Manager.*Archiviert/ });
-    const archivedMarkers = within(row).getAllByRole('img', { name: i18n.t('common.archived') });
-    expect(archivedMarkers).toHaveLength(2);
-    expect(archivedMarkers[0]).toHaveAttribute('title', i18n.t('common.archived'));
+    rejectRequest?.(new Error('network failed'));
+    expect(await screen.findByText(i18n.t('activities.error'))).toBeVisible();
   });
 });

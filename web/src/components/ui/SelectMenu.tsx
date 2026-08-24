@@ -1,13 +1,17 @@
 import Check from 'lucide-react/dist/esm/icons/check';
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down';
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import styles from './SelectMenu.module.css';
 
-/** One value and visible label offered by a {@link SelectMenu}. */
+/** One value, visible label, and optional leading visual offered by a {@link SelectMenu}. */
 export interface SelectMenuOption<Value extends string = string> {
   value: Value;
   label: string;
+  /** Optional visible group heading shared by adjacent related options. */
+  group?: string;
+  /** Decorative visual rendered before the option label and selected value. */
+  visual?: ReactNode;
 }
 
 /** Properties accepted by the anchored single-value selection menu. */
@@ -44,6 +48,12 @@ export function SelectMenu<Value extends string>({ ariaDescribedBy, ariaLabel, c
   const [panelStyle, setPanelStyle] = useState<CSSProperties>({ position: 'fixed', visibility: 'hidden' });
   const selectedIndex = Math.max(0, options.findIndex((option) => option.value === value));
   const selectedOption = options[selectedIndex];
+  const defaultChoice = (option: SelectMenuOption<Value>) => (
+    <span className={styles.choice}>
+      {option.visual ? <span aria-hidden="true" className={styles.visual}>{option.visual}</span> : null}
+      <span className={styles.choiceLabel}>{option.label}</span>
+    </span>
+  );
 
   const close = (restoreFocus = false) => {
     setOpen(false);
@@ -108,13 +118,13 @@ export function SelectMenu<Value extends string>({ ariaDescribedBy, ariaLabel, c
   useEffect(() => {
     if (!open) return;
     const panel = panelRef.current;
-    const option = panel?.children.item(activeIndex) as HTMLElement | null;
+    const option = document.getElementById(`${listboxId}-${activeIndex}`);
     if (!panel || !option) return;
     const optionTop = option.offsetTop;
     const optionBottom = optionTop + option.offsetHeight;
     if (optionTop < panel.scrollTop) panel.scrollTop = optionTop;
     else if (optionBottom > panel.scrollTop + panel.clientHeight) panel.scrollTop = optionBottom - panel.clientHeight;
-  }, [activeIndex, open, panelStyle]);
+  }, [activeIndex, listboxId, open, panelStyle]);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (!open) {
@@ -161,24 +171,26 @@ export function SelectMenu<Value extends string>({ ariaDescribedBy, ariaLabel, c
         title={title}
         type="button"
       >
-        <span className={styles.value}>{selectedOption ? (renderValue?.(selectedOption) ?? selectedOption.label) : ''}</span>
+        <span className={styles.value}>{selectedOption ? (renderValue?.(selectedOption) ?? defaultChoice(selectedOption)) : ''}</span>
         <ChevronDown aria-hidden="true" className={styles.chevron} size={18} />
       </button>
       {open && portalTarget ? createPortal(
         <ul aria-label={ariaLabel} className={styles.menu} id={listboxId} ref={panelRef} role="listbox" style={panelStyle}>
           {options.map((option, index) => (
-            <li
-              aria-selected={option.value === value}
-              className={`${styles.option} ${index === activeIndex ? styles.active : ''}`}
-              id={`${listboxId}-${index}`}
-              key={option.value}
-              onClick={() => choose(index)}
-              onPointerEnter={() => setActiveIndex(index)}
-              role="option"
-            >
-              <span>{renderOption?.(option) ?? option.label}</span>
-              {option.value === value ? <Check aria-hidden="true" size={17} /> : null}
-            </li>
+            <Fragment key={option.value}>
+              {option.group && option.group !== options[index - 1]?.group ? <li className={styles.groupLabel} role="presentation">{option.group}</li> : null}
+              <li
+                aria-selected={option.value === value}
+                className={`${styles.option} ${index === activeIndex ? styles.active : ''}`}
+                id={`${listboxId}-${index}`}
+                onClick={() => choose(index)}
+                onPointerEnter={() => setActiveIndex(index)}
+                role="option"
+              >
+                <span>{renderOption?.(option) ?? defaultChoice(option)}</span>
+                {option.value === value ? <Check aria-hidden="true" size={17} /> : null}
+              </li>
+            </Fragment>
           ))}
         </ul>,
         portalTarget,

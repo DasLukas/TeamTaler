@@ -16,6 +16,7 @@ import { TextInput } from '@/components/ui/FormField';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { Toggle } from '@/components/ui/Toggle';
 import { notificationEventCopy } from '@/features/notifications/notificationEventCopy';
+import { formatGermanDateTime } from '@/features/shared/dateFormat';
 import {
   disableWebPushForCurrentBrowser,
   enableWebPush,
@@ -111,7 +112,7 @@ function PushDeviceRow({ currentDeviceId, device, onChanged }: PushDeviceRowProp
     onSuccess: onChanged,
   });
   const localizedDate = device.lastUsedAt || device.createdAt
-    ? new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(device.lastUsedAt || device.createdAt))
+    ? formatGermanDateTime(device.lastUsedAt || device.createdAt)
     : '–';
   return <li className={styles.deviceRow}>
     <Smartphone aria-hidden="true" size={22} />

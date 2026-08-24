@@ -7,6 +7,7 @@ import { useActiveGroup } from '@/app/useActiveGroup';
 import { AuditEventTable } from '@/features/shared/AuditEventTable';
 import { createAuditFilterDefinitions, mergeAuditFilterOptions, type AuditEventFilterId } from '@/features/shared/auditFilters';
 import type { DataTableDateRange } from '@/features/shared/DataTable';
+import { createMemberFilterOption } from '@/features/shared/memberFilterOption';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
 import styles from './AuditPanel.module.css';
 
@@ -21,7 +22,8 @@ export function AuditPanel() {
   const { t } = useTranslation();
   const { activeGroupId } = useActiveGroup();
   const filterOptionsQuery = useQuery({ queryFn: () => api.getAuditFilterOptions(activeGroupId), queryKey: ['audit', activeGroupId, 'filter-options'] });
-  const queryFilterDefinitions = useMemo(() => createAuditFilterDefinitions(t, filterOptionsQuery.data), [filterOptionsQuery.data, t]);
+  const memberOptions = useMemo(() => (filterOptionsQuery.data?.actors ?? []).map(createMemberFilterOption), [filterOptionsQuery.data?.actors]);
+  const queryFilterDefinitions = useMemo(() => createAuditFilterDefinitions(t, filterOptionsQuery.data, memberOptions), [filterOptionsQuery.data, memberOptions, t]);
   const tableState = useDataTableUrlState<AuditEventFilterId>({
     filterDefinitions: queryFilterDefinitions,
     initialSorting: [{ id: 'occurredAt', desc: true }],
@@ -34,6 +36,7 @@ export function AuditPanel() {
     const sorting = tableState.sorting[0];
     return {
       action: tableState.filters.action as string[] | undefined,
+      actorMembershipId: tableState.filters.actorMembershipId as string | undefined,
       direction: sorting?.desc === false ? 'asc' : 'desc',
       limit: auditPageSize,
       occurredFrom: dateRange?.from,
@@ -54,7 +57,7 @@ export function AuditPanel() {
     filterOptionsQuery.data,
     entries.map((entry) => ({ action: entry.action, resourceType: entry.resourceType })),
   ), [entries, filterOptionsQuery.data]);
-  const filterDefinitions = useMemo(() => createAuditFilterDefinitions(t, visibleFilterOptions), [t, visibleFilterOptions]);
+  const filterDefinitions = useMemo(() => createAuditFilterDefinitions(t, visibleFilterOptions, memberOptions), [memberOptions, t, visibleFilterOptions]);
   return (
     <div className={styles.content}>
       <header><h2>{t('audit.title')}</h2><p>{t('audit.intro')}</p></header>

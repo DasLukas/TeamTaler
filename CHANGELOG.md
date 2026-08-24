@@ -4,6 +4,28 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-08-24
+
+### Added
+
+- Activity and audit tables now support transaction-type filters, grouped avatar-backed member filters, and chronological sorting backed by optimized query plans.
+
+### Changed
+
+- Authentication, finance, settlement, account-balance, form, modal, navigation, and safe-area layouts now adapt more reliably across narrow phones, tablets, and short viewports.
+- User-facing email, notification, activity, and audit timestamps now use consistent German date and time formatting.
+- Member selection menus now group matching people consistently and retain current profile images across booking and administration workflows.
+- Document scanning now warms OpenCV before publishing contours, normalizes difficult lighting, scores document-like quadrilaterals instead of selecting the largest outline, smooths accepted corners over time, and aligns the overlay with the contained camera frame.
+- Scanner color and grayscale modes now use deterministic pixel processing shared by the live editor preview and PDF renderer, while Original remains an unmodified tonal path.
+- User-defined booking products now use clearer price-selection copy and more compact price labels in responsive product lists.
+
+### Fixed
+
+- Legacy payment-method labels remain visible in activity feeds after payment-method configuration changes.
+- Decimal inputs, empty balance states, settlement filters, Web Push tests, and constrained form controls now preserve valid values and avoid misleading or overflowing states.
+- Low-confidence or frame-sized document detections are no longer displayed or reused for manual capture, preventing unstable table and camera-edge crops.
+- Color, grayscale, and original document selections now produce visibly distinct editor previews and persist into final PDF generation.
+
 ## [1.0.0] - 2026-08-21
 
 ### Added
@@ -282,7 +304,8 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Explicit acting and charged membership display for every booking, including searchable third-party-assignment cues.
 - Canonical backup-entry allowlisting, target-width Argon2 parameter parsing, and directory-confined SPA asset serving with traversal regression coverage.
 
-[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/DasLukas/TeamTaler/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/DasLukas/TeamTaler/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/DasLukas/TeamTaler/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/DasLukas/TeamTaler/compare/v0.7.0...v0.8.0

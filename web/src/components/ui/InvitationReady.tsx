@@ -3,6 +3,7 @@ import CircleCheck from 'lucide-react/dist/esm/icons/circle-check';
 import MailPlus from 'lucide-react/dist/esm/icons/mail-plus';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { formatGermanDate } from '@/features/shared/dateFormat';
 import { Button } from './Button';
 import { TextInput } from './FormField';
 import styles from './InvitationReady.module.css';
@@ -61,7 +62,7 @@ export function InvitationReady({ acceptUrl, deliveryStatus, errorMessage, expir
         <p>{deliveryStatus.description}</p>
       </section>
       {errorMessage ? <p className={styles.error} role="alert">{errorMessage}</p> : null}
-      <p>{t('members.invitationExpiry', { date: new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(expiresAt)) })}</p>
+      <p>{t('members.invitationExpiry', { date: formatGermanDate(expiresAt) })}</p>
       <div className={styles.fallbackLink}>
         {fallbackHint ? <p>{fallbackHint}</p> : null}
         <div className={styles.copyRow}>

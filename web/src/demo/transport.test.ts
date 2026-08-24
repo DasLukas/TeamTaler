@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AccountSummary, AuthenticationCapabilities, Booking, Category, CreatedInvitation, Dashboard, Group, GroupSettings, InvitationImportResult, InvitationMetadata, LedgerEntry, Membership, Payment, PermissionDefinition, Product, PublicJoinLink, PublicJoinPreview, Role, RoleAssignment, Session, User } from '@/api/types';
+import type { AccountSummary, ActivityEntry, ActivityFilterOptions, AuthenticationCapabilities, Booking, Category, CreatedInvitation, Dashboard, Group, GroupSettings, InvitationImportResult, InvitationMetadata, LedgerEntry, Membership, Payment, PermissionDefinition, Product, PublicJoinLink, PublicJoinPreview, Role, RoleAssignment, Session, User } from '@/api/types';
 import i18n from '@/i18n';
 import { DemoTransport } from './transport';
 
@@ -577,6 +577,20 @@ describe('DemoTransport catalog order', () => {
 });
 
 describe('DemoTransport finance accounts', () => {
+  it('serves one globally sorted activity collection with signed filters', async () => {
+    const transport = new DemoTransport();
+    const payments = await transport.request<ActivityEntry[]>('/groups/group-sv-adler/activities?kind=PAYMENT&amountMin=-2500&amountMax=-1000&sort=amount&direction=asc');
+    const options = await transport.request<ActivityFilterOptions>('/groups/group-sv-adler/activities/filter-options');
+
+    expect(payments).not.toHaveLength(0);
+    expect(payments.every((entry) => entry.kind === 'PAYMENT' && BigInt(entry.amount.minorUnits) < 0n)).toBe(true);
+    expect(payments.map((entry) => BigInt(entry.amount.minorUnits))).toEqual([...payments].map((entry) => BigInt(entry.amount.minorUnits)).sort((left, right) => left < right ? -1 : left > right ? 1 : 0));
+    expect(options.kinds).toEqual(['BOOKING', 'PAYMENT', 'ADJUSTMENT']);
+    expect(options.members.some((member) => member.membershipId === 'member-lukas')).toBe(true);
+    expect(options.categories.some((category) => category.categoryId === 'category-drinks')).toBe(true);
+    expect(options.products.some((product) => product.productId === 'product-beer' && product.categoryId === 'category-drinks')).toBe(true);
+  });
+
   it('lists active and archived summaries and applies booking movements', async () => {
     const transport = new DemoTransport();
     const before = await transport.request<AccountSummary[]>('/groups/group-sv-adler/accounts');

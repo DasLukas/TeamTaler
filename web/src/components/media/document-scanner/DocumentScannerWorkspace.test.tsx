@@ -3,11 +3,13 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '@/i18n';
 import { createDocumentPdf } from './createDocumentPdf';
+import { renderDocumentFilterPreview } from './imageProcessing';
 import { DocumentScannerWorkspace } from './DocumentScannerWorkspace';
 
 const cameraState = vi.hoisted(() => ({ file: null as File | null }));
 
 vi.mock('./createDocumentPdf', () => ({ createDocumentPdf: vi.fn() }));
+vi.mock('./imageProcessing', () => ({ renderDocumentFilterPreview: vi.fn() }));
 vi.mock('./DocumentCamera', () => ({
   DocumentCamera: ({ active, onCapture }: { active: boolean; onCapture: (file: File, corners: Array<{ x: number; y: number }>) => void }) => (
     <section aria-label={i18n.t('documentScanner.cameraTitle')}>
@@ -23,7 +25,7 @@ vi.mock('./DocumentCamera', () => ({
   ),
 }));
 
-const createObjectURL = vi.fn((file: File) => `blob:${file.name}-${Math.random()}`);
+const createObjectURL = vi.fn((value: Blob) => `blob:${value instanceof File ? value.name : 'filter-preview'}-${Math.random()}`);
 const revokeObjectURL = vi.fn();
 
 function imageFile(name: string, type: 'image/jpeg' | 'image/png' | 'image/webp' = 'image/png', width = 100, height = 140, size = 32): File {
@@ -62,6 +64,7 @@ describe('DocumentScannerWorkspace', () => {
     createObjectURL.mockClear();
     revokeObjectURL.mockClear();
     vi.mocked(createDocumentPdf).mockReset();
+    vi.mocked(renderDocumentFilterPreview).mockReset().mockResolvedValue(new Blob(['preview'], { type: 'image/jpeg' }));
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL });
     Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL });
   });
@@ -196,6 +199,27 @@ describe('DocumentScannerWorkspace', () => {
     await user.click(screen.getByRole('button', { name: i18n.t('documentScanner.applyChanges') }));
     await user.click(screen.getByAltText(i18n.t('documentScanner.pageNumber', { number: 1 })).closest('button') as HTMLButtonElement);
     expect(screen.getByAltText(i18n.t('documentScanner.pagePreview'))).toHaveAttribute('data-rotation', '90');
+  });
+
+  it('previews and commits the selected filter to PDF generation', async () => {
+    const user = userEvent.setup();
+    const output = new File(['pdf'], 'scan.pdf', { type: 'application/pdf' });
+    vi.mocked(createDocumentPdf).mockResolvedValue(output);
+    render(<DocumentScannerWorkspace maxBytes={1024} onCancel={vi.fn()} onComplete={vi.fn()} open />);
+    await capture(imageFile('page.png', 'image/png', 100, 200));
+    await user.click((await screen.findByAltText(i18n.t('documentScanner.pageNumber', { number: 1 }))).closest('button') as HTMLButtonElement);
+
+    await waitFor(() => expect(renderDocumentFilterPreview).toHaveBeenCalledWith(expect.objectContaining({ filter: 'color' })));
+    await user.click(screen.getByRole('button', { name: i18n.t('documentScanner.filterGrayscaleShort') }));
+
+    await waitFor(() => expect(renderDocumentFilterPreview).toHaveBeenLastCalledWith(expect.objectContaining({ filter: 'grayscale' })));
+    expect(screen.getByAltText(i18n.t('documentScanner.pagePreview'))).toHaveAttribute('data-filter', 'grayscale');
+    await user.click(screen.getByRole('button', { name: i18n.t('documentScanner.applyChanges') }));
+    await user.click(screen.getByRole('button', { name: i18n.t('documentScanner.useDocument') }));
+
+    await waitFor(() => expect(createDocumentPdf).toHaveBeenCalledWith([
+      expect.objectContaining({ filter: 'grayscale' }),
+    ], 1024));
   });
 
   it('routes Escape from the editor back to the scanner without cancelling the session', async () => {

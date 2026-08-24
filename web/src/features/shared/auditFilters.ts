@@ -1,9 +1,9 @@
 import type { TFunction } from 'i18next';
 import type { AuditFilterOptions } from '@/api/types';
-import type { DataTableFilterDefinition } from './DataTable';
+import type { DataTableFilterDefinition, DataTableFilterOption } from './DataTable';
 
 /** Filter identifiers supported by group and system audit collections. */
-export type AuditEventFilterId = 'action' | 'resourceType' | 'occurredAt';
+export type AuditEventFilterId = 'actorMembershipId' | 'action' | 'resourceType' | 'occurredAt';
 
 /** Minimal persisted event identity used to augment an audit filter catalog. */
 export interface AuditFilterEvent {
@@ -54,6 +54,7 @@ export function mergeAuditFilterOptions(options: AuditFilterOptions | undefined,
 
   return {
     actions: [...actions].sort(compareFilterValues),
+    ...(options?.actors ? { actors: options.actors } : {}),
     resourceTypes: [...resourceTypes].sort(compareFilterValues),
     actionResourceTypes: Object.fromEntries([...actionResourceTypes].map(([action, relatedResourceTypes]) => [
       action,
@@ -68,11 +69,13 @@ export function mergeAuditFilterOptions(options: AuditFilterOptions | undefined,
  *
  * @param t - Active localization function.
  * @param options - Complete filter catalog returned for the authorized scope.
+ * @param memberOptions - Optional avatar-backed group actors; omitted for system audit.
  * @returns Typed filter definitions in stable display order.
  */
-export function createAuditFilterDefinitions(t: TFunction, options?: AuditFilterOptions): readonly DataTableFilterDefinition<AuditEventFilterId>[] {
+export function createAuditFilterDefinitions(t: TFunction, options?: AuditFilterOptions, memberOptions: readonly DataTableFilterOption[] = []): readonly DataTableFilterDefinition<AuditEventFilterId>[] {
   const toOptions = (values: readonly string[] = []) => values.map((value) => ({ label: value, value }));
   return [
+    ...(memberOptions.length > 0 ? [{ allLabel: t('dataTable.allValues'), id: 'actorMembershipId' as const, kind: 'select' as const, label: t('common.member'), options: memberOptions }] : []),
     { allLabel: t('audit.allResourceTypes'), dropdown: true, emptyLabel: t('audit.noResourceTypes'), id: 'resourceType', kind: 'multi-select', label: t('audit.resourceType'), noResultsLabel: t('audit.noMatchingOptions'), options: toOptions(options?.resourceTypes), searchLabel: t('audit.searchResourceTypes') },
     { allLabel: t('audit.allActions'), dependsOn: 'resourceType', dropdown: true, emptyLabel: t('audit.noActions'), id: 'action', kind: 'multi-select', label: t('audit.action'), noResultsLabel: t('audit.noMatchingOptions'), options: (options?.actions ?? []).map((action) => ({ label: action, parentValues: options?.actionResourceTypes?.[action] ?? [], value: action })), searchLabel: t('audit.searchActions') },
     { fromLabel: t('dataTable.from'), id: 'occurredAt', kind: 'date-range', label: t('audit.time'), toLabel: t('dataTable.to') },

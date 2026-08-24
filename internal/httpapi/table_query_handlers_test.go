@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DasLukas/TeamTaler/internal/activities"
 	"github.com/DasLukas/TeamTaler/internal/bookings"
 	"github.com/DasLukas/TeamTaler/internal/catalog"
 	"github.com/DasLukas/TeamTaler/internal/domain"
@@ -23,6 +24,7 @@ func TestTableQueryHandlersFilterSortAndPaginateWithoutChangingArrayBodies(t *te
 	membership = assignTestTemplateRoles(t, ctx, server.groups, principal, membership,
 		domain.RoleTemplateMember, domain.RoleTemplateCatalog, domain.RoleTemplateFinance)
 	server.catalog = catalog.Service{DB: server.db}
+	server.activities = activities.Service{DB: server.db}
 	server.bookings = bookings.Service{DB: server.db, Groups: server.groups}
 	server.finance = finance.Service{DB: server.db}
 
@@ -61,6 +63,61 @@ func TestTableQueryHandlersFilterSortAndPaginateWithoutChangingArrayBodies(t *te
 			t.Fatalf("create payment %d: %v", index, err)
 		}
 	}
+	if _, err := server.db.ExecContext(ctx, `INSERT INTO ledger_entries(id,group_id,period_id,membership_id,account,amount_minor,description,created_at)
+		VALUES('table-adjustment',?,?,?,?,50,'Manual adjustment','2026-08-18T13:00:00Z')`, membership.GroupID, periodID, membership.ID, "MEMBER_RECEIVABLE"); err != nil {
+		t.Fatalf("create adjustment: %v", err)
+	}
+
+	unifiedResponse := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/activities?sort=amount&direction=asc&limit=4", server.handleActivities)
+	if unifiedResponse.Code != http.StatusOK || unifiedResponse.Header().Get("X-Has-More") != "true" || unifiedResponse.Header().Get("X-Next-Cursor") == "" {
+		t.Fatalf("unified response status=%d headers=%v body=%s", unifiedResponse.Code, unifiedResponse.Header(), unifiedResponse.Body.String())
+	}
+	var firstUnified []activities.Entry
+	if err := json.Unmarshal(unifiedResponse.Body.Bytes(), &firstUnified); err != nil || len(firstUnified) != 4 {
+		t.Fatalf("unified first page=%#v err=%v body=%s", firstUnified, err, unifiedResponse.Body.String())
+	}
+	wantFirstAmounts := []int64{-300, -200, -100, 50}
+	for index, want := range wantFirstAmounts {
+		if firstUnified[index].AmountMinor != want {
+			t.Fatalf("unified first amounts=%#v, index %d want %d", firstUnified, index, want)
+		}
+	}
+	unifiedCursor := url.QueryEscape(unifiedResponse.Header().Get("X-Next-Cursor"))
+	nextUnifiedResponse := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/activities?sort=amount&direction=asc&limit=4&cursor="+unifiedCursor, server.handleActivities)
+	var nextUnified []activities.Entry
+	if err := json.Unmarshal(nextUnifiedResponse.Body.Bytes(), &nextUnified); err != nil || nextUnifiedResponse.Code != http.StatusOK || len(nextUnified) != 3 || nextUnified[0].AmountMinor != 100 || nextUnified[2].AmountMinor != 300 {
+		t.Fatalf("unified next page status=%d items=%#v err=%v body=%s", nextUnifiedResponse.Code, nextUnified, err, nextUnifiedResponse.Body.String())
+	}
+	adjustmentResponse := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/activities?kind=ADJUSTMENT&amountMin=50&amountMax=50", server.handleActivities)
+	var adjustments []activities.Entry
+	if err := json.Unmarshal(adjustmentResponse.Body.Bytes(), &adjustments); err != nil || adjustmentResponse.Code != http.StatusOK || len(adjustments) != 1 || adjustments[0].Kind != activities.KindAdjustment {
+		t.Fatalf("adjustments status=%d items=%#v err=%v body=%s", adjustmentResponse.Code, adjustments, err, adjustmentResponse.Body.String())
+	}
+	unifiedOptionsResponse := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/activities/filter-options", server.handleActivityFilterOptions)
+	var unifiedOptions activities.FilterOptions
+	if err := json.Unmarshal(unifiedOptionsResponse.Body.Bytes(), &unifiedOptions); err != nil || unifiedOptionsResponse.Code != http.StatusOK ||
+		len(unifiedOptions.Kinds) != 3 || len(unifiedOptions.Members) != 1 || len(unifiedOptions.Categories) != 1 || len(unifiedOptions.Products) != 3 {
+		t.Fatalf("unified options status=%d options=%#v err=%v body=%s", unifiedOptionsResponse.Code, unifiedOptions, err, unifiedOptionsResponse.Body.String())
+	}
+	mismatchedUnifiedCursor := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/activities?sort=amount&direction=asc&limit=4&kind=PAYMENT&cursor="+unifiedCursor, server.handleActivities)
+	if mismatchedUnifiedCursor.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("mismatched unified cursor status=%d body=%s", mismatchedUnifiedCursor.Code, mismatchedUnifiedCursor.Body.String())
+	}
+	maliciousUnifiedSort := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/activities?sort="+url.QueryEscape("amount DESC; DROP TABLE payments;--"), server.handleActivities)
+	if maliciousUnifiedSort.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("malicious unified sort status=%d body=%s", maliciousUnifiedSort.Code, maliciousUnifiedSort.Body.String())
+	}
+	invalidUnifiedAmount := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/activities?amountMin=not-a-number", server.handleActivities)
+	if invalidUnifiedAmount.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid unified amount status=%d body=%s", invalidUnifiedAmount.Code, invalidUnifiedAmount.Body.String())
+	}
 
 	multiActivityResponse := performTableGET(t, principal, membership.GroupID,
 		"/api/v1/groups/"+membership.GroupID+"/bookings?categoryId="+url.QueryEscape(category.ID)+"&categoryId=missing-category&productId="+url.QueryEscape(products[0].ID)+"&productId="+url.QueryEscape(products[2].ID)+"&sort=amount&direction=asc&limit=10",
@@ -68,6 +125,12 @@ func TestTableQueryHandlersFilterSortAndPaginateWithoutChangingArrayBodies(t *te
 	var multiActivity []domain.Booking
 	if err := json.Unmarshal(multiActivityResponse.Body.Bytes(), &multiActivity); err != nil || multiActivityResponse.Code != http.StatusOK || len(multiActivity) != 2 || multiActivity[0].ProductName != "Coffee" || multiActivity[1].ProductName != "Juice" {
 		t.Fatalf("multi-value activity status=%d items=%#v err=%v body=%s", multiActivityResponse.Code, multiActivity, err, multiActivityResponse.Body.String())
+	}
+	activityOptionsResponse := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/bookings/filter-options", server.handleBookingFilterOptions)
+	var activityOptions bookings.ActivityFilterOptions
+	if err := json.Unmarshal(activityOptionsResponse.Body.Bytes(), &activityOptions); err != nil || activityOptionsResponse.Code != http.StatusOK || len(activityOptions.Members) != 1 || activityOptions.Members[0].MembershipID != membership.ID {
+		t.Fatalf("activity options status=%d options=%#v err=%v body=%s", activityOptionsResponse.Code, activityOptions, err, activityOptionsResponse.Body.String())
 	}
 
 	activityResponse := performTableGET(t, principal, membership.GroupID,
@@ -117,7 +180,7 @@ func TestTableQueryHandlersFilterSortAndPaginateWithoutChangingArrayBodies(t *te
 		"/api/v1/groups/"+membership.GroupID+"/payments?q=payment&status=POSTED&sort=amount&direction=desc&limit=2",
 		server.handleListPayments)
 	var paymentItems []domain.Payment
-	if err := json.Unmarshal(paymentResponse.Body.Bytes(), &paymentItems); err != nil || paymentResponse.Code != http.StatusOK || len(paymentItems) != 2 || paymentItems[0].AmountMinor != 300 || paymentItems[1].AmountMinor != 200 {
+	if err := json.Unmarshal(paymentResponse.Body.Bytes(), &paymentItems); err != nil || paymentResponse.Code != http.StatusOK || len(paymentItems) != 2 || paymentItems[0].AmountMinor != 300 || paymentItems[1].AmountMinor != 200 || paymentItems[0].ActorMembershipID != membership.ID || paymentItems[0].ActorDisplayName != membership.DisplayName {
 		t.Fatalf("payments status=%d items=%#v err=%v body=%s", paymentResponse.Code, paymentItems, err, paymentResponse.Body.String())
 	}
 
@@ -148,8 +211,11 @@ func TestTableQueryHandlersFilterSortAndPaginateWithoutChangingArrayBodies(t *te
 		Actions             []string            `json:"actions"`
 		ResourceTypes       []string            `json:"resourceTypes"`
 		ActionResourceTypes map[string][]string `json:"actionResourceTypes"`
+		Actors              []struct {
+			MembershipID string `json:"membershipId"`
+		} `json:"actors"`
 	}
-	if err := json.Unmarshal(auditOptionsResponse.Body.Bytes(), &auditOptions); err != nil || auditOptionsResponse.Code != http.StatusOK || !containsString(auditOptions.Actions, "booking.created") || !containsString(auditOptions.ResourceTypes, "payment") || !containsString(auditOptions.ActionResourceTypes["booking.created"], "booking") {
+	if err := json.Unmarshal(auditOptionsResponse.Body.Bytes(), &auditOptions); err != nil || auditOptionsResponse.Code != http.StatusOK || !containsString(auditOptions.Actions, "booking.created") || !containsString(auditOptions.ResourceTypes, "payment") || !containsString(auditOptions.ActionResourceTypes["booking.created"], "booking") || len(auditOptions.Actors) != 1 || auditOptions.Actors[0].MembershipID != membership.ID {
 		t.Fatalf("audit options status=%d options=%#v err=%v body=%s", auditOptionsResponse.Code, auditOptions, err, auditOptionsResponse.Body.String())
 	}
 }

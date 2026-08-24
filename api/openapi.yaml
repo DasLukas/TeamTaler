@@ -28,6 +28,7 @@ tags:
   - name: System
   - name: Groups
   - name: Catalog
+  - name: Activities
   - name: Bookings
   - name: Finance
   - name: Periods
@@ -2401,6 +2402,125 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { description: Image not found }
+  /groups/{groupId}/activities:
+    get:
+      tags: [Activities]
+      summary: List the unified account activity feed visible to the current member
+      description: |
+        Combines bookings, payments, and direct receivable adjustments before
+        filtering, sorting, and cursor pagination. Members always see their own
+        account movements and bookings they recorded for somebody else.
+        `VIEW_ALL_BOOKING_ACTIVITY` adds all group bookings, while
+        `FINANCE_MANAGEMENT` independently adds all group payments and
+        adjustments. Reversals update the original transaction status and do
+        not create a second feed row.
+
+        Amounts use their visible receivable sign: bookings are positive,
+        payments are negative, and adjustments retain their ledger sign.
+        Repeated `kind`, `categoryId`, and `productId` values use OR semantics
+        within each field and AND semantics across fields. Authorization scope
+        and the complete filter set are bound to the opaque cursor fingerprint.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/TableSearch'
+        - $ref: '#/components/parameters/TableCursor'
+        - $ref: '#/components/parameters/SortDirection'
+        - name: kind
+          in: query
+          description: One or more transaction kinds. Repeat the parameter for multiple values.
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 200
+            items: { $ref: '#/components/schemas/ActivityKind' }
+        - name: targetMembershipId
+          in: query
+          schema: { type: string }
+        - name: categoryId
+          in: query
+          description: One or more booking category identifiers.
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 200
+            items: { type: string }
+        - name: productId
+          in: query
+          description: One or more booking product identifiers.
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 200
+            items: { type: string }
+        - name: status
+          in: query
+          schema: { type: string, enum: [POSTED, REVERSED] }
+        - name: occurredFrom
+          in: query
+          schema:
+            oneOf:
+              - { type: string, format: date }
+              - { type: string, format: date-time }
+        - name: occurredTo
+          in: query
+          schema:
+            oneOf:
+              - { type: string, format: date }
+              - { type: string, format: date-time }
+        - name: amountMin
+          in: query
+          description: Inclusive signed lower amount in minor units.
+          schema: { type: integer, format: int64 }
+        - name: amountMax
+          in: query
+          description: Inclusive signed upper amount in minor units.
+          schema: { type: integer, format: int64 }
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [kind, targetName, actorName, detailName, categoryName, occurredAt, amount, status]
+            default: occurredAt
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Globally sorted visible activities
+          headers:
+            X-Next-Cursor:
+              description: Opaque cursor for the next page; omitted on the final page.
+              schema: { type: string }
+            X-Has-More:
+              description: Whether another matching page exists.
+              schema: { type: boolean }
+            X-Page-Limit:
+              description: Effective maximum number of rows in this page.
+              schema: { type: integer, minimum: 1, maximum: 200 }
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ActivityEntry' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/activities/filter-options:
+    get:
+      tags: [Activities]
+      summary: List filter options available in the authorized activity feed
+      description: Derives distinct transaction kinds, target identities, categories, and products from the same permission-scoped source set as the unified feed, including historical product tombstones.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Permission-scoped activity filter catalog
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActivityFilterOptions' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/bookings:
     get:
       tags: [Bookings]
@@ -2529,6 +2649,21 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/bookings/filter-options:
+    get:
+      tags: [Bookings]
+      summary: List member filter options for visible activity
+      description: Returns every distinct booking target in the caller's own-or-all authorized activity scope without exposing email, role, or grant data.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Privacy-minimized activity member catalog
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BookingFilterOptions' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/bookings/{bookingId}/void:
     post:
       tags: [Bookings]
@@ -2677,8 +2812,9 @@ paths:
         existing payment array. `receivedFrom` is inclusive and `receivedTo` is
         exclusive for RFC 3339 timestamps. Date-only bounds select UTC calendar
         days; a date-only upper bound advances to the next day's 00:00 UTC. `q`
-        searches member name, method identifier and label, reference, note,
-        amount minor units, and posting status.
+        searches member name, recording member name, method identifier and label, reference, note,
+        amount minor units, and posting status. Every row includes the current
+        identity of the membership that recorded it for mixed activity views.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/TableSearch'
@@ -2716,7 +2852,7 @@ paths:
           schema: { type: integer, format: int64, minimum: 0 }
         - name: sort
           in: query
-          schema: { type: string, enum: [receivedAt, amount, memberName, method, status], default: receivedAt }
+          schema: { type: string, enum: [receivedAt, amount, memberName, actorName, method, status], default: receivedAt }
         - $ref: '#/components/parameters/Limit'
       responses:
         '200':
@@ -3211,7 +3347,7 @@ paths:
     get:
       tags: [Groups]
       summary: List group-audit filter options
-      description: Returns every distinct action and resource type currently present in the authorized group audit log. Newly recorded values appear automatically.
+      description: Returns every distinct membership actor, action, and resource type currently present in the authorized group audit log. Newly recorded values appear automatically.
       parameters:
         - $ref: '#/components/parameters/GroupId'
       responses:
@@ -3815,6 +3951,66 @@ components:
           additionalProperties:
             type: array
             items: { type: string }
+        actors:
+          type: array
+          description: Distinct group-membership actors present in group-scoped audit events; omitted for system audit.
+          items: { $ref: '#/components/schemas/MemberFilterOption' }
+    MemberFilterOption:
+      type: object
+      additionalProperties: false
+      required: [membershipId, displayName]
+      properties:
+        membershipId: { type: string }
+        displayName: { type: string }
+        avatarUrl: { type: string }
+    BookingFilterOptions:
+      type: object
+      additionalProperties: false
+      required: [members]
+      properties:
+        members:
+          type: array
+          items: { $ref: '#/components/schemas/MemberFilterOption' }
+    ActivityFilterOptions:
+      type: object
+      additionalProperties: false
+      required: [kinds, members, categories, products]
+      properties:
+        kinds:
+          type: array
+          description: Distinct transaction kinds present in the caller's authorized unified feed.
+          items: { $ref: '#/components/schemas/ActivityKind' }
+        members:
+          type: array
+          description: Distinct targets present in the caller's authorized unified feed.
+          items: { $ref: '#/components/schemas/MemberFilterOption' }
+        categories:
+          type: array
+          description: Distinct booking categories present in the caller's authorized unified feed.
+          items: { $ref: '#/components/schemas/ActivityCategoryFilterOption' }
+        products:
+          type: array
+          description: Distinct booking products present in the caller's authorized unified feed, including retained historical products.
+          items: { $ref: '#/components/schemas/ActivityProductFilterOption' }
+    ActivityCategoryFilterOption:
+      type: object
+      additionalProperties: false
+      required: [categoryId, name, icon]
+      properties:
+        categoryId: { type: string }
+        name: { type: string }
+        icon: { $ref: '#/components/schemas/CategoryIcon' }
+    ActivityProductFilterOption:
+      type: object
+      additionalProperties: false
+      required: [productId, categoryId, name]
+      properties:
+        productId: { type: string }
+        categoryId: { type: string }
+        name: { type: string }
+        imageUrl:
+          type: string
+          description: Current same-origin image projection when the visible product still has an image.
     PasswordResetRequest:
       type: object
       additionalProperties: false
@@ -4979,6 +5175,73 @@ components:
             targetMembershipIds: { minItems: 1 }
         - required: [temporaryGuestDisplayNames]
       description: At least one target array must be non-empty. The target arrays may contain at most 100 entries combined, and items multiplied by targets may create at most 500 bookings.
+    ActivityKind:
+      type: string
+      enum: [BOOKING, PAYMENT, ADJUSTMENT]
+    ActivityEntry:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - sourceId
+        - kind
+        - targetMembershipId
+        - targetDisplayName
+        - targetMembershipStatus
+        - detailName
+        - amountMinor
+        - currency
+        - occurredAt
+        - status
+        - canReverse
+        - reversalReasonRequired
+      properties:
+        id:
+          type: string
+          description: Stable feed identity namespaced by transaction kind.
+        sourceId:
+          type: string
+          description: Identifier accepted by the source-specific action endpoint.
+        periodId: { type: string }
+        kind: { $ref: '#/components/schemas/ActivityKind' }
+        targetMembershipId: { type: string }
+        targetDisplayName: { type: string }
+        targetMembershipStatus: { type: string, enum: [ACTIVE, ARCHIVED, DELETED] }
+        targetAvatarUrl: { type: string }
+        actorMembershipId: { type: string }
+        actorDisplayName:
+          type: string
+          description: Omitted for system adjustments without a persisted actor.
+        actorMembershipStatus: { type: string, enum: [ACTIVE, ARCHIVED, DELETED] }
+        actorAvatarUrl: { type: string }
+        detailName:
+          type: string
+          description: Immutable product or payment-method label snapshot. Legacy payments created before label snapshots may return an empty value; paymentMethod remains available as the stable fallback identifier.
+        detailNote: { type: string }
+        paymentMethod:
+          type: string
+          description: Stable payment-method identifier used to localize built-in immutable label snapshots.
+        categoryId: { type: string }
+        categoryName: { type: string }
+        productId: { type: string }
+        quantity: { type: integer, minimum: 1 }
+        amountMinor:
+          allOf: [{ $ref: '#/components/schemas/MinorUnits' }]
+          description: Signed visible receivable effect; bookings are positive and payments negative.
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        occurredAt:
+          type: string
+          format: date-time
+          description: Audited creation time of the activity; payment value dates remain available on the finance payment resource.
+        status: { type: string, enum: [POSTED, REVERSED] }
+        attachment: { $ref: '#/components/schemas/PaymentAttachmentSummary' }
+        canReverse:
+          type: boolean
+          description: Whether the current caller may invoke the source-specific reversal action.
+        reversalReasonRequired:
+          type: boolean
+          description: Whether the currently available reversal requires a non-empty reason.
+        reversalWithoutReasonUntil: { type: string, format: date-time }
     Booking:
       type: object
       required: [id, groupId, periodId, categoryId, productId, actorMembershipId, actorDisplayName, actorMembershipStatus, targetMembershipId, targetDisplayName, targetMembershipStatus, quantity, unitPriceMinor, totalMinor, currency, productName, categoryName, createdAt, canVoid, voidReasonRequired]
@@ -5147,7 +5410,7 @@ components:
           description: Same-origin protected download route; never a storage key.
     Payment:
       type: object
-      required: [id, groupId, membershipId, memberName, membershipStatus, amountMinor, currency, receivedAt, method, methodLabel, status, allocations]
+      required: [id, groupId, membershipId, memberName, membershipStatus, actorMembershipId, actorDisplayName, actorMembershipStatus, amountMinor, currency, receivedAt, method, methodLabel, status, allocations]
       properties:
         id: { type: string }
         groupId: { type: string }
@@ -5157,6 +5420,22 @@ components:
           type: string
           enum: [ACTIVE, ARCHIVED, DELETED]
           description: Current lifecycle state used to mark retained historical payment accounts.
+        memberAvatarUrl:
+          type: string
+          description: Current same-origin avatar projection for the payment account membership.
+        actorMembershipId:
+          type: string
+          description: Membership that recorded the payment.
+        actorDisplayName:
+          type: string
+          description: Current display name of the membership that recorded the payment.
+        actorMembershipStatus:
+          type: string
+          enum: [ACTIVE, ARCHIVED, DELETED]
+          description: Current lifecycle state of the membership that recorded the payment.
+        actorAvatarUrl:
+          type: string
+          description: Current same-origin avatar projection for the membership that recorded the payment.
         amountMinor: { $ref: '#/components/schemas/MinorUnits' }
         currency: { type: string }
         receivedAt: { type: string, format: date-time }

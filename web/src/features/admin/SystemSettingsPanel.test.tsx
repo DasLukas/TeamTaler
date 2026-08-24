@@ -33,6 +33,7 @@ const apiMock = vi.hoisted(() => ({
 
 vi.mock('@/api/client', () => ({ api: apiMock }));
 vi.mock('@/app/useSession', () => ({ useSession: () => ({ user: { id: 'system-user' } }) }));
+vi.mock('@/features/push/webPush', () => ({ currentWebPushDeviceId: () => 'device-a' }));
 
 const value = <T,>(settingValue: T, source: 'CODE' | 'ENVIRONMENT' | 'DATABASE' = 'CODE') => ({ value: settingValue, source, overrideVersion: source === 'DATABASE' ? 1 : null, updatedAt: source === 'DATABASE' ? '2026-08-15T10:00:00Z' : null });
 
@@ -216,6 +217,25 @@ describe('SystemSettingsPanel', () => {
     const generateButton = await screen.findByRole('button', { name: i18n.t('systemSettings.webPush.generateKey') });
     expect(generateButton).toBeDisabled();
     expect(apiMock.generateSystemWebPushKey).not.toHaveBeenCalled();
+  });
+
+  it('keeps Web Push testing disabled while the configuration is incomplete', async () => {
+    apiMock.getSystemSettings.mockResolvedValue({
+      ...settings,
+      webPush: {
+        ...settings.webPush,
+        enabled: value(true, 'DATABASE'),
+        privateKeyConfigured: true,
+        active: true,
+        configurationValid: false,
+      },
+    });
+    renderPanel();
+
+    const testButton = await screen.findByRole('button', { name: i18n.t('systemSettings.webPush.test') });
+
+    expect(testButton).toBeDisabled();
+    expect(apiMock.testSystemWebPush).not.toHaveBeenCalled();
   });
 
   it('still permits fail-closed disabling when an active Web Push setup becomes incomplete', async () => {

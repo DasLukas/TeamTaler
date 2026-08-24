@@ -6,12 +6,10 @@
   max-height: 100dvh;
   flex-direction: column;
   overflow: hidden;
+  padding-bottom: var(--space-4);
   padding-inline: 48px;
 }
 
-.searchControl { position: relative; }
-.searchControl svg { position: absolute; z-index: 1; top: 14px; left: 14px; color: var(--color-muted); }
-.searchControl input { padding-left: 42px; }
 .member {
   display: inline-grid;
   width: 100%;
@@ -22,9 +20,12 @@
 }
 .memberName {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: visible;
+  overflow-wrap: break-word;
+  line-height: 1.35;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: normal;
 }
 .membershipState {
   display: inline-flex;
@@ -38,46 +39,62 @@
 .membershipStateArchived { color: #9a5a00; background: var(--color-orange-100); }
 .membershipStateDeleted { color: var(--color-red-600); background: var(--color-red-100); }
 .membershipStateText { display: none; }
-.bookingState {
-  width: 26px;
-  padding-inline: 0;
-  justify-content: center;
+.activityType {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  white-space: nowrap;
 }
-.bookingStateText { display: none; }
-.bookingProduct { display: inline-flex; min-width: 0; align-items: center; gap: var(--space-3); }
-.bookingProduct > span { min-width: 0; overflow-wrap: anywhere; }
-.bookingProduct > img { width: 40px; height: 40px; flex: 0 0 40px; border-radius: var(--radius-sm); object-fit: cover; background: var(--color-surface-muted); }
+.activityTypeBooking { border-color: color-mix(in srgb, var(--color-orange-600) 24%, transparent); color: #a64f00; background: var(--color-orange-100); }
+.activityTypePayment { border-color: color-mix(in srgb, var(--color-teal-600) 24%, transparent); color: var(--color-teal-700); background: var(--color-surface-teal); }
+.activityTypeAdjustment { border-color: color-mix(in srgb, var(--color-navy-700) 22%, transparent); color: var(--color-navy-700); background: var(--color-surface-muted); }
+.activityState { gap: 5px; white-space: nowrap; }
+.missingActor { color: var(--color-muted); }
+.activityDetails { display: inline-flex; min-width: 0; align-items: center; gap: var(--space-2); }
+.activityDetails > span { min-width: 0; overflow-wrap: anywhere; }
+.activityDetails > img { width: 40px; height: 40px; flex: 0 0 40px; border-radius: var(--radius-sm); object-fit: cover; background: var(--color-surface-muted); }
+.activityAmount { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.activityAmountBooking { color: #c45d00; }
+.activityAmountPayment { color: var(--color-teal-700); }
+.activityAmountReversed { color: var(--color-muted); text-decoration: line-through; text-decoration-thickness: 1px; }
 .activityList {
   flex: 1;
   min-height: 0;
   contain: paint;
-  overflow: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-  -webkit-overflow-scrolling: touch;
+  overflow: hidden;
 }
-.activityTable { min-width: 1120px; table-layout: fixed; }
-.activityTable th,
-.activityTable td { vertical-align: middle; white-space: normal; overflow-wrap: anywhere; }
-.activityTable th { white-space: nowrap; }
-.activityTable thead th {
+.activityList table { table-layout: fixed; }
+.activityList th,
+.activityList td { vertical-align: middle; white-space: normal; overflow-wrap: anywhere; }
+.activityList th { white-space: nowrap; }
+.activityList thead th {
   position: sticky;
   z-index: 1;
   top: 0;
 }
-.activityTable th:nth-child(1) { width: 19%; }
-.activityTable th:nth-child(2) { width: 17%; }
-.activityTable th:nth-child(3) { width: 15%; }
-.activityTable th:nth-child(4) { width: 10%; }
-.activityTable th:nth-child(5) { width: 14%; }
-.activityTable th:nth-child(6) { width: 8%; }
-.activityTable th:nth-child(7) { width: 7%; }
-.activityTable th:nth-child(8) { width: 10%; }
-.activityTable td small { display: block; margin-top: 4px; color: var(--color-muted); }
-.activityTable td:last-child button { white-space: nowrap; }
-.categoryCell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap !important; }
-.timeCell,
-.amountCell { overflow-wrap: normal !important; white-space: nowrap !important; }
+.activityList th:nth-child(1) { width: 9%; }
+.activityList th:nth-child(2) { width: 13%; }
+.activityList th:nth-child(3) { width: 13%; }
+.activityList th:nth-child(4) { width: 13%; }
+.activityList th:nth-child(5) { width: 8%; }
+.activityList th:nth-child(6) { width: 12%; }
+.activityList th:nth-child(7) { width: 8%; }
+.activityList th:nth-child(8) { width: 12%; }
+.activityList th:nth-child(9) { width: 12%; }
+.activityList td small { display: block; margin-top: 4px; color: var(--color-muted); }
+.activityList td:nth-child(5) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activityList td:nth-child(6),
+.activityList td:nth-child(7) { overflow-wrap: normal; white-space: nowrap; }
+.activityList th:nth-child(9),
+.activityList td:nth-child(9) { padding-inline: var(--space-2); }
+.activityList td:last-child button { white-space: nowrap; }
+.rowActions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-1); }
 .reversalForm { display: grid; gap: var(--space-5); padding: var(--space-4) var(--space-6) var(--space-6); }
 .reversalForm p { margin: 0; color: var(--color-muted); line-height: 1.55; }
 .actions { display: flex; justify-content: flex-end; gap: var(--space-3); }
@@ -85,11 +102,12 @@
 .reversalForm .windowNotice { padding: var(--space-3); border-radius: var(--radius-md); color: var(--color-teal-700); background: var(--color-surface-teal); font-size: var(--font-size-sm); }
 
 @media (min-width: 1800px) {
-  .activityTable th:nth-child(1) { width: 18%; }
-  .activityTable th:nth-child(3) { width: 16%; }
-  .activityTable th:nth-child(5) { width: 13%; }
-  .activityTable th:nth-child(7) { width: 9%; }
-  .activityTable th:nth-child(8) { width: 9%; }
+  .activityList th:nth-child(1) { width: 9%; }
+  .activityList th:nth-child(2) { width: 14%; }
+  .activityList th:nth-child(3) { width: 14%; }
+  .activityList th:nth-child(4) { width: 13%; }
+  .activityList th:nth-child(8) { width: 11%; }
+  .activityList th:nth-child(9) { width: 11%; }
 
   .membershipState {
     width: auto;
@@ -104,33 +122,36 @@
     white-space: nowrap;
   }
 
-  .bookingState {
-    width: auto;
-    padding-inline: 9px;
-    gap: 5px;
-  }
+}
 
-  .bookingStateText {
-    display: inline;
-    white-space: nowrap;
-  }
+@media (min-width: 768px) and (max-width: 1199px) {
+  .activityList th:nth-child(1) { width: 12%; }
+  .activityList th:nth-child(2),
+  .activityList th:nth-child(3) { width: 14%; }
+  .activityList th:nth-child(4) { width: 12%; }
+  .activityList th:nth-child(5) { width: 7%; }
+  .activityList th:nth-child(6) { width: 11%; }
+  .activityList th:nth-child(7) { width: 7%; }
+  .activityList th:nth-child(8) { width: 11%; }
+  .activityList th:nth-child(9) { width: 12%; }
 }
 
 @media (max-width: 767px) {
   .page {
     height: calc(100dvh - 92px - var(--bottom-nav-height) - env(safe-area-inset-top) - env(safe-area-inset-bottom));
     max-height: calc(100dvh - 92px - var(--bottom-nav-height) - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    padding-bottom: var(--space-3);
     padding-inline: var(--space-5);
   }
 
-  .activityList {
-    margin-inline: 0;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
+  .activityType {
+    width: 32px;
+    min-height: 32px;
+    justify-content: center;
+    padding: 0;
   }
 
-  .activityTable { min-width: 1040px; }
-
-  .activityList .activityTable th,
-  .activityList .activityTable td { padding-inline: var(--space-3); }
+  .activityTypeText { display: none; }
+  .activityList th,
+  .activityList td { padding-inline: var(--space-3); }
 }

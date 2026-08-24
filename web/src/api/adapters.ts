@@ -1,5 +1,6 @@
 import type {
   AccountSummary,
+  ActivityEntry,
   AuditEntry,
   Booking,
   BookingContext,
@@ -53,6 +54,7 @@ import { DEFAULT_ATTACHMENT_UPLOAD_MAX_BYTES, DEFAULT_MEDIA_UPLOAD_MAX_BYTES, is
 import { formatMoney } from './money';
 import i18n from '@/i18n';
 import { defaultPaymentMethods, historicalPaymentMethodLabel, localizedPaymentMethodLabel } from '@/features/finance/paymentMethods';
+import { formatGermanDate } from '@/features/shared/dateFormat';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -942,6 +944,57 @@ export function adaptBooking(input: unknown, members?: Membership[], fallbackMem
 }
 
 /**
+ * Adapts one normalized server-side account activity without changing its
+ * signed member-receivable amount.
+ *
+ * @param input - Unified activity wire value.
+ * @returns Canonical activity used directly by the activities table.
+ */
+export function adaptActivity(input: unknown): ActivityEntry {
+  const source = asRecord(input);
+  const attachment = paymentAttachmentSummary(source.attachment);
+  const kind = source.kind === 'PAYMENT' || source.kind === 'ADJUSTMENT' ? source.kind : 'BOOKING';
+  const paymentMethod = kind === 'PAYMENT' && typeof source.paymentMethod === 'string' && source.paymentMethod
+    ? source.paymentMethod as Payment['method']
+    : undefined;
+  const detailName = String(source.detailName);
+  const targetStatus = source.targetMembershipStatus === 'ARCHIVED' || source.targetMembershipStatus === 'DELETED'
+    ? source.targetMembershipStatus
+    : 'ACTIVE';
+  const actorStatus = source.actorMembershipStatus === 'ARCHIVED' || source.actorMembershipStatus === 'DELETED'
+    ? source.actorMembershipStatus
+    : source.actorMembershipId ? 'ACTIVE' : undefined;
+  return {
+    id: String(source.id),
+    sourceId: String(source.sourceId),
+    periodId: typeof source.periodId === 'string' && source.periodId ? source.periodId : undefined,
+    kind,
+    targetMembershipId: String(source.targetMembershipId),
+    targetDisplayName: String(source.targetDisplayName),
+    targetMembershipStatus: targetStatus,
+    targetAvatarUrl: typeof source.targetAvatarUrl === 'string' && source.targetAvatarUrl ? source.targetAvatarUrl : undefined,
+    actorMembershipId: typeof source.actorMembershipId === 'string' && source.actorMembershipId ? source.actorMembershipId : undefined,
+    actorDisplayName: typeof source.actorDisplayName === 'string' && source.actorDisplayName ? source.actorDisplayName : undefined,
+    actorMembershipStatus: actorStatus,
+    actorAvatarUrl: typeof source.actorAvatarUrl === 'string' && source.actorAvatarUrl ? source.actorAvatarUrl : undefined,
+    detailName: paymentMethod ? historicalPaymentMethodLabel(paymentMethod, detailName) : detailName,
+    detailNote: typeof source.detailNote === 'string' && source.detailNote ? source.detailNote : undefined,
+    paymentMethod,
+    categoryId: typeof source.categoryId === 'string' && source.categoryId ? source.categoryId : undefined,
+    categoryName: typeof source.categoryName === 'string' && source.categoryName ? source.categoryName : undefined,
+    productId: typeof source.productId === 'string' && source.productId ? source.productId : undefined,
+    quantity: Number(source.quantity ?? 0) || undefined,
+    amount: money(source.amountMinor, source.currency),
+    occurredAt: String(source.occurredAt),
+    status: source.status === 'REVERSED' ? 'REVERSED' : 'POSTED',
+    ...(attachment ? { attachment } : {}),
+    canReverse: source.canReverse === true,
+    reversalReasonRequired: source.reversalReasonRequired === true,
+    reversalWithoutReasonUntil: typeof source.reversalWithoutReasonUntil === 'string' ? source.reversalWithoutReasonUntil : undefined,
+  };
+}
+
+/**
  * Adapts the grouped dashboard read model.
  *
  * @param input - Dashboard response containing account, period, and recent bookings.
@@ -1059,13 +1112,23 @@ export function adaptPayment(input: unknown): Payment {
   const source = asRecord(input);
   const sourceAmount = source.amount && typeof source.amount === 'object' ? asRecord(source.amount) : undefined;
   const attachment = paymentAttachmentSummary(source.attachment);
+  const memberName = String(source.memberName ?? i18n.t('common.member'));
+  const memberStatus = source.membershipStatus === 'ARCHIVED' || source.membershipStatus === 'DELETED' ? source.membershipStatus : 'ACTIVE';
   return {
     id: String(source.id),
     membershipId: String(source.membershipId),
-    memberName: String(source.memberName ?? i18n.t('common.member')),
-    membershipStatus: source.membershipStatus === 'ARCHIVED' || source.membershipStatus === 'DELETED' ? source.membershipStatus : 'ACTIVE',
+    memberName,
+    membershipStatus: memberStatus,
+    memberAvatarUrl: typeof source.memberAvatarUrl === 'string' && source.memberAvatarUrl ? source.memberAvatarUrl : undefined,
+    actorMembershipId: String(source.actorMembershipId ?? source.membershipId),
+    actorName: String(source.actorDisplayName ?? source.actorName ?? memberName),
+    actorStatus: source.actorMembershipStatus === 'ARCHIVED' || source.actorMembershipStatus === 'DELETED'
+      ? source.actorMembershipStatus
+      : source.actorStatus === 'ARCHIVED' || source.actorStatus === 'DELETED' ? source.actorStatus : memberStatus,
+    actorAvatarUrl: typeof source.actorAvatarUrl === 'string' && source.actorAvatarUrl ? source.actorAvatarUrl : undefined,
     amount: sourceAmount ? money(sourceAmount.minorUnits, sourceAmount.currency) : money(source.amountMinor, source.currency),
     receivedAt: String(source.receivedAt),
+    createdAt: typeof source.createdAt === 'string' && source.createdAt ? source.createdAt : undefined,
     method: source.method as Payment['method'],
     methodLabel: historicalPaymentMethodLabel(
       String(source.method),
@@ -1151,7 +1214,7 @@ export function adaptNotification(input: unknown): Notification {
     const rawAmount = BigInt(context.amountMinor);
     const settlementAmount = formatMoney({ minorUnits: (rawAmount < 0n ? -rawAmount : rawAmount).toString(), currency: context.currency });
     const message = rawAmount > 0n
-      ? i18n.t('notifications.events.settlementDueMessage', { period: context.periodLabel, amount: settlementAmount, dueAt: context.dueAt ?? '–' })
+      ? i18n.t('notifications.events.settlementDueMessage', { period: context.periodLabel, amount: settlementAmount, dueAt: context.dueAt ? formatGermanDate(context.dueAt) : '–' })
       : rawAmount < 0n
         ? i18n.t('notifications.events.settlementCreditMessage', { period: context.periodLabel, amount: settlementAmount })
         : i18n.t('notifications.events.settlementPaidMessage', { period: context.periodLabel });

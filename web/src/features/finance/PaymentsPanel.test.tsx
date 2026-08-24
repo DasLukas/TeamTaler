@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AccountSummary } from '@/api/types';
+import modalStyles from '@/components/ui/Modal.module.css';
 import i18n from '@/i18n';
 import { PaymentsPanel } from './PaymentsPanel';
 
@@ -14,14 +15,16 @@ const apiMock = vi.hoisted(() => ({
   reversePayment: vi.fn(),
   getTransactionSettings: vi.fn(),
 }));
+const mediaQueryMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@/api/client', () => ({ api: apiMock }));
 vi.mock('@/app/useActiveGroup', () => ({
   useActiveGroup: () => ({ activeGroupId: 'group-a', activeGroup: { currency: 'EUR' } }),
 }));
+vi.mock('@/hooks/useMediaQuery', () => ({ useMediaQuery: (query: string) => mediaQueryMock(query) }));
 
 const accounts: AccountSummary[] = [
-  { membershipId: 'member-active', displayName: 'Active Account', isTemporaryGuest: false, status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '0', currency: 'EUR' } },
+  { membershipId: 'member-active', displayName: 'Active Account', avatarUrl: '/avatars/active-account.png', isTemporaryGuest: false, status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '0', currency: 'EUR' } },
   { membershipId: 'member-guest', displayName: 'Temporary Guest', isTemporaryGuest: true, status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '100', currency: 'EUR' } },
   { membershipId: 'member-archived', displayName: 'Archived Account', isTemporaryGuest: false, status: 'ARCHIVED', currency: 'EUR', balance: { minorUnits: '500', currency: 'EUR' } },
   { membershipId: 'member-deleted', displayName: 'Deleted Account', isTemporaryGuest: false, status: 'DELETED', currency: 'EUR', balance: { minorUnits: '250', currency: 'EUR' } },
@@ -37,6 +40,7 @@ function renderPayments(): void {
 describe('PaymentsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mediaQueryMock.mockReturnValue(false);
     window.history.replaceState({}, '', '/finance');
     apiMock.getPaymentsPage.mockResolvedValue({ hasMore: false, items: [], limit: 50 });
     apiMock.getAccountSummaries.mockResolvedValue(accounts);
@@ -50,6 +54,19 @@ describe('PaymentsPanel', () => {
     });
   });
 
+  it('renders payment entry as a bottom sheet on compact screens', async () => {
+    const user = userEvent.setup();
+    mediaQueryMock.mockReturnValue(true);
+    renderPayments();
+
+    await user.click((await screen.findAllByRole('button', { name: i18n.t('finance.record') }))[0]);
+
+    const sheet = screen.getByRole('dialog', { name: i18n.t('finance.record') });
+    expect(mediaQueryMock).toHaveBeenCalledWith('(max-width: 600px)');
+    expect(sheet).toHaveClass(modalStyles.sheet);
+    expect(sheet.querySelector(`button[aria-label="${i18n.t('dialog.sheetHandle')}"]`)).toBeInTheDocument();
+  });
+
   it('uses finance account summaries without requesting the protected member directory', async () => {
     const user = userEvent.setup();
     renderPayments();
@@ -57,18 +74,18 @@ describe('PaymentsPanel', () => {
     await waitFor(() => expect(apiMock.getAccountSummaries).toHaveBeenCalledWith('group-a'));
     await user.click((await screen.findAllByRole('button', { name: i18n.t('finance.record') }))[0]);
 
-    const accountSelect = screen.getByLabelText(i18n.t('common.member'));
-    const groups = within(accountSelect).getAllByRole('group');
-    expect(groups).toHaveLength(4);
-    expect(groups[0]).toHaveAttribute('label', i18n.t('booking.regularMembers'));
-    expect(within(groups[0]).getByRole('option', { name: 'Active Account' })).toBeVisible();
-    expect(groups[1]).toHaveAttribute('label', i18n.t('booking.guests'));
-    expect(within(groups[1]).getByRole('option', { name: 'Temporary Guest' })).toBeVisible();
-    expect(groups[2]).toHaveAttribute('label', i18n.t('financeWorkspace.archivedMembers'));
-    expect(within(groups[2]).getByRole('option', { name: 'Archived Account' })).toBeVisible();
-    expect(groups[3]).toHaveAttribute('label', i18n.t('financeWorkspace.deletedAccounts'));
-    expect(within(groups[3]).getByRole('option', { name: 'Deleted Account' })).toBeVisible();
-    expect(screen.queryByRole('option', { name: 'Deleted Credit' })).not.toBeInTheDocument();
+    const accountSelect = screen.getByRole('combobox', { name: i18n.t('common.member') });
+    await user.click(accountSelect);
+    const listbox = screen.getByRole('listbox', { name: i18n.t('common.member') });
+    expect(within(listbox).getByText(i18n.t('booking.regularMembers'))).toBeVisible();
+    expect(within(listbox).getByText(i18n.t('booking.guests'))).toBeVisible();
+    expect(within(listbox).getByText(i18n.t('financeWorkspace.archivedMembers'))).toBeVisible();
+    expect(within(listbox).getByText(i18n.t('financeWorkspace.deletedAccounts'))).toBeVisible();
+    expect(within(listbox).getByRole('option', { name: 'Active Account' }).querySelector('img')).toHaveAttribute('src', '/avatars/active-account.png');
+    expect(within(listbox).getByRole('option', { name: 'Temporary Guest' })).toHaveTextContent('TG');
+    expect(within(listbox).getByRole('option', { name: 'Archived Account' })).toHaveTextContent('AA');
+    expect(within(listbox).getByRole('option', { name: 'Deleted Account' })).toBeVisible();
+    expect(within(listbox).queryByRole('option', { name: 'Deleted Credit' })).not.toBeInTheDocument();
   });
 
   it('marks the amount as required while keeping the optional reference unmarked', async () => {
@@ -77,7 +94,10 @@ describe('PaymentsPanel', () => {
 
     await user.click((await screen.findAllByRole('button', { name: i18n.t('finance.record') }))[0]);
 
-    expect(screen.getByLabelText(`${i18n.t('finance.amountIn', { currency: 'EUR' })} *`)).toBeRequired();
+    const amountInput = screen.getByLabelText(`${i18n.t('finance.amountIn', { currency: 'EUR' })} *`);
+    expect(amountInput).toBeRequired();
+    expect(amountInput).toHaveAttribute('inputmode', 'decimal');
+    expect(amountInput).toHaveAttribute('type', 'text');
     expect(screen.getByLabelText(i18n.t('finance.reason'))).not.toBeRequired();
     expect(screen.queryByLabelText(`${i18n.t('finance.reason')} *`)).not.toBeInTheDocument();
     expect(screen.getByLabelText(i18n.t('finance.paymentType'))).toHaveValue('CASH');

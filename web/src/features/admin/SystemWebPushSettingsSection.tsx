@@ -71,6 +71,7 @@ export function SystemWebPushSettingsSection({ settings }: { settings: SystemSet
   const pending = save.isPending || generate.isPending || reset.isPending || test.isPending;
   const validSubject = VAPID_SUBJECT_PATTERN.test(subject.trim());
   const canEnable = webPush.privateKeyConfigured && webPush.storageKeyConfigured;
+  const canTest = webPush.configurationValid && webPush.active && Boolean(currentDeviceId);
   const submit = (event: FormEvent) => { event.preventDefault(); save.mutate(); };
   return <section aria-labelledby="system-web-push-title" className={styles.section}>
     <header><h3 id="system-web-push-title">{t('systemSettings.webPush.title')}</h3><p>{t('systemSettings.webPush.intro')}</p></header>
@@ -85,7 +86,7 @@ export function SystemWebPushSettingsSection({ settings }: { settings: SystemSet
       {save.isError || generate.isError || reset.isError || test.isError ? <p className={styles.error} role="alert">{t('systemSettings.webPush.error')}</p> : null}
       {save.isSuccess || generate.isSuccess || reset.isSuccess || test.isSuccess ? <p className={styles.success} role="status">{test.isSuccess ? t('systemSettings.webPush.testQueued') : t('systemSettings.saved')}</p> : null}
       <div className={styles.actions}>
-        <Button disabled={pending || !webPush.active || !currentDeviceId} leadingIcon={<BellRing size={17} />} onClick={() => test.mutate()} variant="secondary">{test.isPending ? t('systemSettings.webPush.testing') : t('systemSettings.webPush.test')}</Button>
+        <Button disabled={pending || !canTest} leadingIcon={<BellRing size={17} />} onClick={() => test.mutate()} variant="secondary">{test.isPending ? t('systemSettings.webPush.testing') : t('systemSettings.webPush.test')}</Button>
         <Button disabled={pending || !webPush.storageKeyConfigured} leadingIcon={<KeyRound size={17} />} onClick={() => setGenerateOpen(true)} variant="secondary">{webPush.privateKeyConfigured ? t('systemSettings.webPush.rotateKey') : t('systemSettings.webPush.generateKey')}</Button>
         <Button disabled={pending || !webPush.privateKeyConfigured && webPush.enabled.source !== 'DATABASE' && webPush.subject.source !== 'DATABASE'} leadingIcon={<RotateCcw size={17} />} onClick={() => setResetOpen(true)} variant="secondary">{t('systemSettings.reset')}</Button>
         <Button disabled={pending || !changed || !validSubject && (subjectChanged || enabled) || enabled && !canEnable} leadingIcon={<Save size={17} />} type="submit">{save.isPending ? t('common.saving') : t('common.save')}</Button>

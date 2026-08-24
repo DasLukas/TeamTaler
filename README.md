@@ -10,6 +10,8 @@ This README is the primary entry point for the person who installs and operates 
 - Group-owned roles and granular permissions for administration, bookings, finance, catalogue management, and reporting.
 - Fixed-price and user-defined-price products with category, file or camera image capture, archive, and ordering support.
 - Account balances, incoming payments with optional or required image/PDF receipts, immutable corrections, optional accounting periods, and settlement history.
+- One server-paginated chronological activity history for authorized bookings, incoming payments, and account corrections, including member identity, signed amounts, receipts, status badges, and transaction-type filtering.
+- A focused personal account view for balance, payments, settlement history, printing, and CSV export without duplicating the unified activity table.
 - Searchable, column-filterable, sortable operational tables with shareable filter state, cursor-backed loading, and complete horizontally scrollable mobile columns.
 - Individual invitations, CSV invitation imports, public join links, and temporary guest accounts.
 - Local accounts with profile images, password recovery, verified email changes, and server-side sessions.
@@ -60,7 +62,7 @@ At minimum, edit these values:
 
 ```dotenv
 TEAMTALER_PUBLIC_URL=https://teamtaler.example.com
-TEAMTALER_VERSION=1.0.0
+TEAMTALER_VERSION=1.0.1
 TEAMTALER_HOST_PORT=8080
 TEAMTALER_TRUSTED_PROXY_CIDRS=
 ```
@@ -180,6 +182,8 @@ The standard container also uses fixed runtime paths from `.env.example`. Detail
 The media and receipt limits are editable without a restart through the System tab or `teamtaler admin system settings set`. Media must be a whole MiB value from 1 through 25 MiB; receipts must be a whole MiB value from 1 through 50 MiB. The server applies each live value plus a 1-MiB multipart reserve to the matching routes, independently of `TEAMTALER_MAX_REQUEST_BYTES`. Receipt images are decoded, dimension-checked, metadata-stripped, and normalized; bounded PDFs are validated and stored as opaque documents. Configure a reverse proxy for at least 51 MiB so it does not override the maximum receipt setting.
 
 Group administrators configure receipt handling independently for every payment method as disabled, optional, or required. New groups start with Bank transfer without a receipt, Shopping with a required receipt, Cash and PayPal without receipts, and Other with an optional receipt. Members may select a JPEG, PNG, WebP, or PDF from the device, use a photo-library source, or create a locally processed multi-page PDF through the camera-only document scanner. Imported files remain separate from camera scan sessions. A payment keeps exactly one immutable receipt, including after reversal. The affected member and current holders of `FINANCE_MANAGEMENT` may retrieve it; storage identifiers are never exposed through the API.
+
+The scanner prepares OpenCV locally before exposing automatic contours, rejects low-confidence and frame-edge candidates, smooths accepted corners, and keeps the overlay aligned with the actual contained camera image. Manual capture remains available when automatic detection cannot initialize and uses default editable corners unless a recent validated contour exists. The editor provides Original, optimized Color, and Grayscale modes. Color performs bounded white balancing, tonal normalization, restrained saturation, and sharpening; Grayscale performs luminance-based contrast normalization and sharpening. The editor preview and generated PDF use the same deterministic pixel implementation, so the selected mode is visible before applying it and does not depend on browser canvas-filter support.
 
 ### SMTP and email delivery
 

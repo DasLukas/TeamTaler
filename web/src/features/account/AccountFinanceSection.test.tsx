@@ -1,6 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '@/i18n';
 import { AccountFinanceSection } from './AccountFinanceSection';
@@ -37,9 +36,17 @@ describe('AccountFinanceSection settlement visibility', () => {
   it('omits settlement UI when the feature is disabled and no history exists', async () => {
     renderSection();
 
-    expect(await screen.findByRole('heading', { name: i18n.t('account.movements') })).toBeVisible();
+    expect(await screen.findByText(i18n.t('account.currentOpenAmount'))).toBeVisible();
     expect(screen.queryByRole('heading', { name: i18n.t('account.closedSettlements') })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: i18n.t('account.settlementHistory') })).not.toBeInTheDocument();
+  });
+
+  it('omits the legacy personal movement table replaced by the unified activities page', async () => {
+    renderSection();
+
+    expect(await screen.findByText(i18n.t('account.currentOpenAmount'))).toBeVisible();
+    expect(screen.queryByRole('heading', { name: i18n.t('account.movements') })).not.toBeInTheDocument();
+    expect(screen.queryByRole('table', { name: i18n.t('account.movements') })).not.toBeInTheDocument();
   });
 
   it('shows matching settlement history read-only while the feature is disabled', async () => {
@@ -67,21 +74,5 @@ describe('AccountFinanceSection settlement visibility', () => {
 
     expect(await screen.findByRole('heading', { name: i18n.t('account.closedSettlements') })).toBeVisible();
     expect(screen.getByText(i18n.t('account.noSettlements'))).toBeVisible();
-  });
-
-  it('renders transaction kinds in the shared custom multi-select dropdown', async () => {
-    const user = userEvent.setup();
-    renderSection();
-
-    await screen.findByRole('heading', { name: i18n.t('account.movements') });
-    await user.click(screen.getByRole('button', { name: i18n.t('dataTable.filterButton') }));
-    const filterDialog = screen.getByRole('dialog', { name: i18n.t('dataTable.filterHeading') });
-    await user.click(within(filterDialog).getByRole('button', { name: i18n.t('account.transaction') }));
-    const kindMenu = screen.getByRole('dialog', { name: i18n.t('account.transaction') });
-
-    expect(within(kindMenu).getByRole('checkbox', { name: i18n.t('account.kind.booking') })).toBeVisible();
-    expect(within(kindMenu).getByRole('checkbox', { name: i18n.t('account.kind.payment') })).toBeVisible();
-    expect(within(kindMenu).getByRole('checkbox', { name: i18n.t('account.kind.reversal') })).toBeVisible();
-    expect(within(kindMenu).getByRole('checkbox', { name: i18n.t('account.kind.credit') })).toBeVisible();
   });
 });

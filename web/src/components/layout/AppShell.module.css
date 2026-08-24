@@ -1,6 +1,11 @@
 .shell {
+  --shell-safe-area-top: env(safe-area-inset-top, 0px);
+  --shell-safe-area-right: env(safe-area-inset-right, 0px);
+  --shell-safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --shell-safe-area-left: env(safe-area-inset-left, 0px);
   --shell-sidebar-width: var(--sidebar-width);
-  --shell-content-offset: var(--shell-sidebar-width);
+  --shell-navigation-width: calc(var(--shell-sidebar-width) + var(--shell-safe-area-left));
+  --shell-content-offset: var(--shell-navigation-width);
 
   width: 100%;
   max-width: 100%;
@@ -12,13 +17,14 @@
   min-width: 0;
   min-height: 100vh;
   margin-left: var(--shell-content-offset);
+  padding-right: var(--shell-safe-area-right);
   transition: margin-left var(--motion-normal) ease;
 }
 
 .sidebarBackdrop {
   position: fixed;
   z-index: 29;
-  inset: 0 0 0 var(--sidebar-width);
+  inset: 0 0 0 var(--shell-navigation-width);
   padding: 0;
   border: 0;
   background: rgb(4 23 42 / 18%);
@@ -30,7 +36,7 @@
   display: grid;
   min-height: 100vh;
   place-items: center;
-  padding: var(--space-6);
+  padding: max(var(--space-6), env(safe-area-inset-top, 0px)) max(var(--space-6), env(safe-area-inset-right, 0px)) max(var(--space-6), env(safe-area-inset-bottom, 0px)) max(var(--space-6), env(safe-area-inset-left, 0px));
 }
 
 .center > * {
@@ -64,23 +70,31 @@
 }
 
 @media (max-width: 767px) {
+  .shell {
+    display: flex;
+    min-height: 100dvh;
+    flex-direction: column;
+  }
+
   .main {
-    min-height: calc(100vh - var(--bottom-nav-height));
+    min-height: 0;
+    flex: 1 0 auto;
     margin-left: 0;
-    padding-bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom));
+    padding-right: var(--shell-safe-area-right);
+    padding-bottom: calc(var(--bottom-nav-height) + var(--shell-safe-area-bottom));
+    padding-left: var(--shell-safe-area-left);
   }
 }
 
 @media (min-width: 768px) and (max-width: 1279px) {
   .sidebarCollapsed {
     --shell-sidebar-width: var(--sidebar-collapsed-width);
-    --shell-content-offset: var(--sidebar-collapsed-width);
   }
 }
 
 @media (min-width: 768px) and (max-width: 959px) {
   .sidebarOverlayMode {
-    --shell-content-offset: var(--sidebar-collapsed-width);
+    --shell-content-offset: calc(var(--sidebar-collapsed-width) + var(--shell-safe-area-left));
   }
 }
 

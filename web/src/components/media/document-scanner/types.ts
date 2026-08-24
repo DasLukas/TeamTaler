@@ -39,8 +39,10 @@ export interface ScannerPage {
 export interface DetectionResult {
   /** Correlation identifier copied from the detection request. */
   requestId: number;
-  /** Detected quadrilateral ordered clockwise from top-left. */
-  corners: DocumentCorners;
+  /** Detector runtime state after attempting to process this frame. */
+  status: 'ready' | 'unavailable';
+  /** Validated quadrilateral ordered clockwise from top-left, when one was found. */
+  corners?: DocumentCorners;
   /** Detector confidence from zero to one. */
   confidence: number;
 }

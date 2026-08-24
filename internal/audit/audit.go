@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/DasLukas/TeamTaler/internal/media"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/tablequery"
 )
@@ -67,12 +68,21 @@ type Page struct {
 }
 
 // FilterOptions contains every action and resource type currently present in
-// an authorized audit log, including the persisted action-to-resource
-// relationships. Values are distinct and sorted.
+// an authorized audit log, including persisted action-to-resource relationships
+// and optional group-membership actors. Values are distinct and sorted.
 type FilterOptions struct {
 	Actions             []string            `json:"actions"`
 	ResourceTypes       []string            `json:"resourceTypes"`
 	ActionResourceTypes map[string][]string `json:"actionResourceTypes"`
+	Actors              []ActorFilterOption `json:"actors,omitempty"`
+}
+
+// ActorFilterOption is a privacy-minimized group-membership actor identity
+// present in an authorized audit scope.
+type ActorFilterOption struct {
+	MembershipID string `json:"membershipId"`
+	DisplayName  string `json:"displayName"`
+	AvatarURL    string `json:"avatarUrl,omitempty"`
 }
 
 // ScanFilterOptions consumes distinct action/resource-type pairs and builds a
@@ -125,9 +135,9 @@ func sortAuditFilterValues(values []string) {
 	})
 }
 
-// ListFilterOptions returns the complete data-derived filter catalog for one
-// group. Recording a new action or resource type makes it available without a
-// separate registry update.
+// ListFilterOptions returns the complete data-derived actor, action, and
+// resource-type filter catalog for one group. Recording a new event makes its
+// values available without a separate registry update.
 func ListFilterOptions(ctx context.Context, db *sql.DB, groupID string) (FilterOptions, error) {
 	rows, err := db.QueryContext(ctx, `SELECT DISTINCT action,resource_type
 		FROM audit_events WHERE group_id=?`, groupID)
@@ -137,6 +147,28 @@ func ListFilterOptions(ctx context.Context, db *sql.DB, groupID string) (FilterO
 	options, err := ScanFilterOptions(rows)
 	if err != nil {
 		return FilterOptions{}, fmt.Errorf("list audit filter options: %w", err)
+	}
+	actorRows, err := db.QueryContext(ctx, `SELECT DISTINCT event.actor_membership_id,coalesce(actor.display_name,''),actor.id,coalesce(actor.avatar_key,'')
+		FROM audit_events event
+		JOIN users actor ON actor.id=event.actor_user_id
+		WHERE event.group_id=? AND event.actor_membership_id IS NOT NULL
+		ORDER BY lower(actor.display_name),event.actor_membership_id`, groupID)
+	if err != nil {
+		return FilterOptions{}, fmt.Errorf("list audit actor filter options: %w", err)
+	}
+	defer actorRows.Close()
+	options.Actors = []ActorFilterOption{}
+	for actorRows.Next() {
+		var actor ActorFilterOption
+		var userID, avatarKey string
+		if err := actorRows.Scan(&actor.MembershipID, &actor.DisplayName, &userID, &avatarKey); err != nil {
+			return FilterOptions{}, err
+		}
+		actor.AvatarURL = media.UserAvatarURL(userID, avatarKey)
+		options.Actors = append(options.Actors, actor)
+	}
+	if err := actorRows.Err(); err != nil {
+		return FilterOptions{}, err
 	}
 	return options, nil
 }
