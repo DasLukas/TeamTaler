@@ -13,13 +13,13 @@ import { api } from '@/api/client';
 import { currencyExponent, formatMoney } from '@/api/money';
 import type { Period, Settlement } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
-import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { DataTable, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange } from '@/features/shared/DataTable';
 import { formatGermanDate } from '@/features/shared/dateFormat';
+import { createMemberFilterOption } from '@/features/shared/memberFilterOption';
 import tableStyles from '@/features/shared/Table.module.css';
 import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
@@ -57,21 +57,21 @@ export function SettlementsPanel({ settlements, settlementsEnabled }: Settlement
   const filterDefinitions = useMemo<readonly DataTableFilterDefinition<SettlementFilterId>[]>(() => [
     {
       allLabel: t('dataTable.allValues'),
+      id: 'membershipId',
+      kind: 'select',
+      label: t('common.member'),
+      options: [...new Map(settlements.map((settlement) => [settlement.membershipId, createMemberFilterOption({
+        avatarUrl: accountAvatarUrls.get(settlement.membershipId),
+        displayName: settlement.memberName,
+        membershipId: settlement.membershipId,
+      })])).values()],
+    },
+    {
+      allLabel: t('dataTable.allValues'),
       id: 'periodId',
       kind: 'select',
       label: t('periods.period'),
       options: [...new Map(settlements.map((settlement) => [settlement.periodId, { label: settlement.periodLabel, value: settlement.periodId }])).values()],
-    },
-    {
-      allLabel: t('dataTable.allValues'),
-      id: 'membershipId',
-      kind: 'select',
-      label: t('common.member'),
-      options: [...new Map(settlements.map((settlement) => [settlement.membershipId, {
-        label: settlement.memberName,
-        value: settlement.membershipId,
-        visual: <Avatar decorative name={settlement.memberName} size="small" src={accountAvatarUrls.get(settlement.membershipId)} />,
-      }])).values()],
     },
     { fromLabel: t('dataTable.from'), id: 'dueAt', kind: 'date-range', label: t('periods.due'), toLabel: t('dataTable.to') },
     { id: 'amount', kind: 'number-range', label: t('periods.claim'), maximumLabel: t('dataTable.maximum'), minimumLabel: t('dataTable.minimum'), step: 0.01 },

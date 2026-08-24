@@ -1248,4 +1248,13 @@ describe('server-backed collection API contract', () => {
       '/api/v1/system/audit/filter-options',
     ]);
   });
+
+  it('loads privacy-minimized activity member filter options', async () => {
+    const options = { members: [{ membershipId: 'member-a', displayName: 'Alex', avatarUrl: '/avatars/alex.png' }] };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(options));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.getBookingFilterOptions('group/a')).resolves.toEqual(options);
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/groups/group%2Fa/bookings/filter-options', expect.anything());
+  });
 });

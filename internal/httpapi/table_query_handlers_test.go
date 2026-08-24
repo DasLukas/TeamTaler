@@ -69,6 +69,12 @@ func TestTableQueryHandlersFilterSortAndPaginateWithoutChangingArrayBodies(t *te
 	if err := json.Unmarshal(multiActivityResponse.Body.Bytes(), &multiActivity); err != nil || multiActivityResponse.Code != http.StatusOK || len(multiActivity) != 2 || multiActivity[0].ProductName != "Coffee" || multiActivity[1].ProductName != "Juice" {
 		t.Fatalf("multi-value activity status=%d items=%#v err=%v body=%s", multiActivityResponse.Code, multiActivity, err, multiActivityResponse.Body.String())
 	}
+	activityOptionsResponse := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/bookings/filter-options", server.handleBookingFilterOptions)
+	var activityOptions bookings.ActivityFilterOptions
+	if err := json.Unmarshal(activityOptionsResponse.Body.Bytes(), &activityOptions); err != nil || activityOptionsResponse.Code != http.StatusOK || len(activityOptions.Members) != 1 || activityOptions.Members[0].MembershipID != membership.ID {
+		t.Fatalf("activity options status=%d options=%#v err=%v body=%s", activityOptionsResponse.Code, activityOptions, err, activityOptionsResponse.Body.String())
+	}
 
 	activityResponse := performTableGET(t, principal, membership.GroupID,
 		"/api/v1/groups/"+membership.GroupID+"/bookings?q=e&createdFrom=2026-08-18&createdTo=2026-08-18&sort=amount&direction=asc&limit=1",
@@ -148,8 +154,11 @@ func TestTableQueryHandlersFilterSortAndPaginateWithoutChangingArrayBodies(t *te
 		Actions             []string            `json:"actions"`
 		ResourceTypes       []string            `json:"resourceTypes"`
 		ActionResourceTypes map[string][]string `json:"actionResourceTypes"`
+		Actors              []struct {
+			MembershipID string `json:"membershipId"`
+		} `json:"actors"`
 	}
-	if err := json.Unmarshal(auditOptionsResponse.Body.Bytes(), &auditOptions); err != nil || auditOptionsResponse.Code != http.StatusOK || !containsString(auditOptions.Actions, "booking.created") || !containsString(auditOptions.ResourceTypes, "payment") || !containsString(auditOptions.ActionResourceTypes["booking.created"], "booking") {
+	if err := json.Unmarshal(auditOptionsResponse.Body.Bytes(), &auditOptions); err != nil || auditOptionsResponse.Code != http.StatusOK || !containsString(auditOptions.Actions, "booking.created") || !containsString(auditOptions.ResourceTypes, "payment") || !containsString(auditOptions.ActionResourceTypes["booking.created"], "booking") || len(auditOptions.Actors) != 1 || auditOptions.Actors[0].MembershipID != membership.ID {
 		t.Fatalf("audit options status=%d options=%#v err=%v body=%s", auditOptionsResponse.Code, auditOptions, err, auditOptionsResponse.Body.String())
 	}
 }

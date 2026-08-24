@@ -40,6 +40,18 @@ export interface BookingCollectionQuery extends CollectionQuery<'createdAt' | 'a
   amountMax?: string;
 }
 
+/** Privacy-minimized member identity exposed to member filter controls. */
+export interface MemberFilterOption {
+  membershipId: string;
+  displayName: string;
+  avatarUrl?: string;
+}
+
+/** Complete member catalog available to the authorized activity viewer. */
+export interface BookingFilterOptions {
+  members: MemberFilterOption[];
+}
+
 /** Server-backed incoming-payment search, filter, and sort options. */
 export interface PaymentCollectionQuery extends CollectionQuery<'receivedAt' | 'amount' | 'memberName' | 'method' | 'status'> {
   membershipId?: string;
@@ -72,6 +84,8 @@ export interface AuditFilterOptions {
   resourceTypes: string[];
   /** Persisted resource types observed for each action. */
   actionResourceTypes?: Record<string, string[]>;
+  /** Group-membership actors present in the authorized audit scope. */
+  actors?: MemberFilterOption[];
 }
 
 /** Determines whether a product price is fixed by the catalog or chosen per booking. */

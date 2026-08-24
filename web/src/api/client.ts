@@ -39,6 +39,7 @@ import type {
   AuditEntry,
   AuditFilterOptions,
   Booking,
+  BookingFilterOptions,
   BookingCollectionQuery,
   BookingBatchCommand,
   BookingBulkCommand,
@@ -668,6 +669,7 @@ export const api = {
   })),
   permanentlyDeleteMember: async (groupId: string, membershipId: string): Promise<void> => request<void>(groupPath(groupId, `members/${encodeURIComponent(membershipId)}/permanent`), { method: 'DELETE' }),
   getBookings: async (groupId: string): Promise<Booking[]> => (await request<unknown[]>(groupPath(groupId, 'bookings'))).map((booking) => adaptBooking(booking)),
+  getBookingFilterOptions: (groupId: string): Promise<BookingFilterOptions> => request<BookingFilterOptions>(groupPath(groupId, 'bookings/filter-options')),
   getBookingsPage: async (groupId: string, query: BookingCollectionQuery = {}): Promise<CollectionPage<Booking>> => {
     const response = await requestWithMetadata<unknown[]>(collectionPath(groupPath(groupId, 'bookings'), query));
     return collectionPage(response.data.map((booking) => adaptBooking(booking)), response.headers, query.limit);

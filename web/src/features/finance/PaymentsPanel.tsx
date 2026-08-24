@@ -18,6 +18,7 @@ import { SelectMenu, type SelectMenuOption } from '@/components/ui/SelectMenu';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { DataTable, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange } from '@/features/shared/DataTable';
 import { formatGermanDate } from '@/features/shared/dateFormat';
+import { createMemberFilterOption } from '@/features/shared/memberFilterOption';
 import tableStyles from '@/features/shared/Table.module.css';
 import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
@@ -76,7 +77,7 @@ export function PaymentsPanel() {
       id: 'membershipId',
       kind: 'select',
       label: t('common.member'),
-      options: (accountsQuery.data ?? []).map((account) => accountSelectOption(account)),
+      options: (accountsQuery.data ?? []).map(createMemberFilterOption),
     },
     {
       allLabel: t('dataTable.allValues'),

@@ -55,6 +55,22 @@ func (s *Server) handleListBookings(response http.ResponseWriter, request *http.
 	writeJSON(response, http.StatusOK, page.Items)
 }
 
+// handleBookingFilterOptions returns privacy-minimized member choices from the
+// same authorized activity scope as handleListBookings.
+func (s *Server) handleBookingFilterOptions(response http.ResponseWriter, request *http.Request) {
+	_, membership, err := s.membership(request)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	options, err := s.bookings.ListActivityFilterOptions(request.Context(), membership)
+	if err != nil {
+		writeProblem(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, options)
+}
+
 func (s *Server) handleCreateBooking(response http.ResponseWriter, request *http.Request) {
 	principal, membership, err := s.membership(request)
 	if err != nil {

@@ -257,6 +257,7 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/products/{productID}/image", server.handleProductImage)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/images/{imageKey}", server.handleImage)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/bookings", server.handleListBookings)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/bookings/filter-options", server.handleBookingFilterOptions)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/booking-context", server.handleBookingContext)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/bookings", server.handleCreateBooking)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/bookings/batch", server.handleCreateBookingBatch)

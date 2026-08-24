@@ -13,6 +13,7 @@ import { useActiveGroup } from '@/app/useActiveGroup';
 import { Avatar } from '@/components/ui/Avatar';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { DataTable, type DataTableColumnDef, type DataTableFilterDefinition, type DataTableNumberRange } from '@/features/shared/DataTable';
+import { createMemberFilterOption } from '@/features/shared/memberFilterOption';
 import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
 import { deriveAccountOverview } from './accountOverview';
@@ -25,7 +26,7 @@ function balanceState(account: AccountSummary): 'due' | 'settled' | 'credit' {
   return 'settled';
 }
 
-type AccountFilterId = 'membershipStatus' | 'balanceState' | 'amount';
+type AccountFilterId = 'membershipId' | 'membershipStatus' | 'balanceState' | 'amount';
 const accountCollator = new Intl.Collator('de-DE', { numeric: true, sensitivity: 'base' });
 
 /**
@@ -39,6 +40,13 @@ export function AccountBalancesPanel() {
   const labels = useDataTableLabels();
   const accountsQuery = useQuery({ queryKey: ['account-summaries', activeGroupId], queryFn: () => api.getAccountSummaries(activeGroupId) });
   const filterDefinitions = useMemo<readonly DataTableFilterDefinition<AccountFilterId>[]>(() => [
+    {
+      allLabel: t('dataTable.allValues'),
+      id: 'membershipId',
+      kind: 'select',
+      label: t('common.member'),
+      options: (accountsQuery.data ?? []).map(createMemberFilterOption),
+    },
     {
       allLabel: t('dataTable.allValues'),
       dropdown: true,
@@ -66,7 +74,7 @@ export function AccountBalancesPanel() {
       ],
     },
     { id: 'amount', kind: 'number-range', label: `${t('financeWorkspace.balance')} (${activeGroup.currency})`, maximumLabel: t('dataTable.maximum'), minimumLabel: t('dataTable.minimum'), step: 0.01 },
-  ], [activeGroup.currency, t]);
+  ], [accountsQuery.data, activeGroup.currency, t]);
   const tableState = useDataTableUrlState<AccountFilterId>({
     filterDefinitions,
     initialSorting: [{ id: 'memberName', desc: false }],
@@ -85,6 +93,7 @@ export function AccountBalancesPanel() {
     const filtered = (accountsQuery.data ?? []).filter((account) => {
       const amount = BigInt(account.balance.minorUnits);
       return (!deferredSearch || account.displayName.toLocaleLowerCase('de-DE').includes(deferredSearch))
+        && (!tableState.filters.membershipId || account.membershipId === tableState.filters.membershipId)
         && (statuses.length === 0 || statuses.includes(account.status))
         && (states.length === 0 || states.includes(balanceState(account)))
         && (minimum === undefined || amount >= minimum)

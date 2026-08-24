@@ -9,6 +9,7 @@ import i18n from '@/i18n';
 import { ActivitiesPage } from './ActivitiesPage';
 
 const apiMock = vi.hoisted(() => ({
+  getBookingFilterOptions: vi.fn(),
   getBookingsPage: vi.fn(),
   getCategories: vi.fn(),
   reverseBooking: vi.fn(),
@@ -107,6 +108,7 @@ describe('ActivitiesPage booking traceability', () => {
     vi.clearAllMocks();
     window.history.replaceState({}, '', '/activities');
     apiMock.reverseBooking.mockResolvedValue(undefined);
+    apiMock.getBookingFilterOptions.mockResolvedValue({ members: [{ membershipId: 'member-target', displayName: 'Target Member', avatarUrl: '/avatars/target.png' }] });
     apiMock.getBookingsPage.mockResolvedValue(bookingPage([thirdPartyBooking]));
     apiMock.getCategories.mockResolvedValue([penaltiesCategory]);
   });
@@ -158,9 +160,16 @@ describe('ActivitiesPage booking traceability', () => {
 
     await user.click(screen.getByRole('button', { name: i18n.t('dataTable.filterButton') }));
     const dialog = screen.getByRole('dialog', { name: i18n.t('dataTable.filterHeading') });
+    const memberTrigger = within(dialog).getByRole('combobox', { name: i18n.t('common.member') });
     const categoryTrigger = within(dialog).getByRole('button', { name: i18n.t('common.category') });
     const productTrigger = within(dialog).getByRole('button', { name: i18n.t('common.product') });
     expect(categoryTrigger.compareDocumentPosition(productTrigger) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    await user.click(memberTrigger);
+    const memberMenu = screen.getByRole('listbox', { name: i18n.t('common.member') });
+    const targetOption = within(memberMenu).getByRole('option', { name: thirdPartyBooking.memberName });
+    expect(targetOption.querySelector('img')).toHaveAttribute('src', thirdPartyBooking.memberAvatarUrl);
+    await user.click(targetOption);
 
     await user.click(categoryTrigger);
     const categoryMenu = screen.getByRole('dialog', { name: i18n.t('common.category') });
@@ -179,6 +188,7 @@ describe('ActivitiesPage booking traceability', () => {
     await waitFor(() => expect(apiMock.getBookingsPage).toHaveBeenLastCalledWith('group-a', expect.objectContaining({
       categoryId: [penaltiesCategory.id, snacksCategory.id],
       productId: [penaltiesCategory.products[0].id, snacksCategory.products[0].id],
+      targetMembershipId: thirdPartyBooking.memberId,
     })));
   });
 

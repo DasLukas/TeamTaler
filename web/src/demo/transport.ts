@@ -1,5 +1,6 @@
 import type {
   AccountSummary,
+  AuditFilterOptions,
   Booking,
   BookingBatchCommand,
   BookingBulkCommand,
@@ -88,6 +89,7 @@ const DEMO_ROUTE_POLICIES: readonly DemoRoutePolicy[] = [
   { methods: ['GET'], resource: /^periods\/[^/]+\/statements$/, anyOf: ['FINANCE_MANAGEMENT'] },
   { methods: ['GET'], resource: /^settlements$/, anyOf: ['FINANCE_MANAGEMENT'] },
   { methods: ['GET'], resource: /^audit$/, anyOf: ['GROUP_ADMINISTRATION'] },
+  { methods: ['GET'], resource: /^audit\/filter-options$/, anyOf: ['GROUP_ADMINISTRATION'] },
   { methods: ['GET'], resource: /^roles$/, anyOf: ['MEMBER_MANAGEMENT', 'ROLE_MANAGEMENT'] },
   { methods: ['GET'], resource: /^roles\/[^/]+$/, anyOf: ['ROLE_MANAGEMENT'] },
   { methods: ['GET'], resource: /^role-assignments$/, anyOf: ['MEMBER_MANAGEMENT'] },
@@ -501,6 +503,14 @@ export class DemoTransport {
     }
     if (resource === 'members' && method === 'GET') return clone(this.members.filter((member) => member.status !== 'DELETED')) as T;
     if (resource === 'categories' && method === 'GET') return clone(this.categories) as T;
+    if (resource === 'bookings/filter-options' && method === 'GET') {
+      const members = [...new Map(this.listBookings(groupId).map((booking) => [booking.memberId, {
+        membershipId: booking.memberId,
+        displayName: booking.memberName,
+        avatarUrl: booking.memberAvatarUrl,
+      }])).values()].sort((left, right) => left.displayName.localeCompare(right.displayName, 'de-DE'));
+      return clone({ members }) as T;
+    }
     if (resource === 'bookings' && method === 'GET') return this.listBookings(groupId) as T;
     if (resource === 'bookings' && method === 'POST') return this.createBooking(groupId, body as BookingCommand) as T;
     if (resource === 'bookings/batch' && method === 'POST') return this.createBookingBatch(groupId, body as BookingBatchCommand & { unitPriceMinor?: number }) as T;
@@ -530,6 +540,22 @@ export class DemoTransport {
       return { readAt, unreadCount: this.notifications.filter((entry) => !entry.readAt).length } as T;
     }
     if (resource === 'audit' && method === 'GET') return clone(this.audit) as T;
+    if (resource === 'audit/filter-options' && method === 'GET') {
+      const actionResourceTypes = this.audit.reduce<Record<string, string[]>>((result, entry) => {
+        const related = result[entry.action] ?? [];
+        if (!related.includes(entry.resourceType)) related.push(entry.resourceType);
+        result[entry.action] = related;
+        return result;
+      }, {});
+      const actorNames = new Set(this.audit.map((entry) => entry.actorName));
+      const options: AuditFilterOptions = {
+        actions: [...new Set(this.audit.map((entry) => entry.action))].sort(),
+        actors: this.members.filter((member) => actorNames.has(member.displayName)).map((member) => ({ membershipId: member.id, displayName: member.displayName, avatarUrl: member.avatarUrl })),
+        resourceTypes: [...new Set(this.audit.map((entry) => entry.resourceType))].sort(),
+        actionResourceTypes,
+      };
+      return clone(options) as T;
+    }
     if (resource === 'roles' && method === 'GET') return clone(this.recountedRoles()) as T;
     if (resource === 'roles' && method === 'POST') {
       this.requirePermission(groupId, 'ROLE_MANAGEMENT');

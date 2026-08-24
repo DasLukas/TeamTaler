@@ -2529,6 +2529,21 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/bookings/filter-options:
+    get:
+      tags: [Bookings]
+      summary: List member filter options for visible activity
+      description: Returns every distinct booking target in the caller's own-or-all authorized activity scope without exposing email, role, or grant data.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Privacy-minimized activity member catalog
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BookingFilterOptions' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/bookings/{bookingId}/void:
     post:
       tags: [Bookings]
@@ -3211,7 +3226,7 @@ paths:
     get:
       tags: [Groups]
       summary: List group-audit filter options
-      description: Returns every distinct action and resource type currently present in the authorized group audit log. Newly recorded values appear automatically.
+      description: Returns every distinct membership actor, action, and resource type currently present in the authorized group audit log. Newly recorded values appear automatically.
       parameters:
         - $ref: '#/components/parameters/GroupId'
       responses:
@@ -3815,6 +3830,26 @@ components:
           additionalProperties:
             type: array
             items: { type: string }
+        actors:
+          type: array
+          description: Distinct group-membership actors present in group-scoped audit events; omitted for system audit.
+          items: { $ref: '#/components/schemas/MemberFilterOption' }
+    MemberFilterOption:
+      type: object
+      additionalProperties: false
+      required: [membershipId, displayName]
+      properties:
+        membershipId: { type: string }
+        displayName: { type: string }
+        avatarUrl: { type: string }
+    BookingFilterOptions:
+      type: object
+      additionalProperties: false
+      required: [members]
+      properties:
+        members:
+          type: array
+          items: { $ref: '#/components/schemas/MemberFilterOption' }
     PasswordResetRequest:
       type: object
       additionalProperties: false

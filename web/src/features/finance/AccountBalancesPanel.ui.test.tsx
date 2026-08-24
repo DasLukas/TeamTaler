@@ -55,10 +55,17 @@ describe('AccountBalancesPanel', () => {
     await screen.findByText(i18n.t('financeWorkspace.receivables'));
     await user.click(screen.getByRole('button', { name: i18n.t('dataTable.filterButton') }));
     const filterDialog = screen.getByRole('dialog', { name: i18n.t('dataTable.filterHeading') });
+    const memberTrigger = within(filterDialog).getByRole('combobox', { name: i18n.t('common.member') });
     const membershipTrigger = within(filterDialog).getByRole('button', { name: i18n.t('financeWorkspace.membershipStatus') });
     const balanceStateTrigger = within(filterDialog).getByRole('button', { name: i18n.t('financeWorkspace.balanceState') });
     expect(within(filterDialog).getByRole('spinbutton', { name: i18n.t('dataTable.minimum') })).toHaveAttribute('inputmode', 'decimal');
     expect(within(filterDialog).getByRole('spinbutton', { name: i18n.t('dataTable.maximum') })).toHaveAttribute('inputmode', 'decimal');
+
+    await user.click(memberTrigger);
+    const memberMenu = screen.getByRole('listbox', { name: i18n.t('common.member') });
+    const piaOption = within(memberMenu).getByRole('option', { name: 'Pia Lehmann' });
+    expect(piaOption).toHaveTextContent('PL');
+    await user.click(piaOption);
 
     await user.click(membershipTrigger);
     const membershipMenu = screen.getByRole('dialog', { name: i18n.t('financeWorkspace.membershipStatus') });

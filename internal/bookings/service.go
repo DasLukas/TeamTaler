@@ -823,6 +823,20 @@ type ActivityPage struct {
 	NextCursor string
 }
 
+// MemberFilterOption is a privacy-minimized booking target identity available
+// to the authorized activity viewer.
+type MemberFilterOption struct {
+	MembershipID string `json:"membershipId"`
+	DisplayName  string `json:"displayName"`
+	AvatarURL    string `json:"avatarUrl,omitempty"`
+}
+
+// ActivityFilterOptions contains the complete target-member catalog for the
+// activity rows visible to one membership.
+type ActivityFilterOptions struct {
+	Members []MemberFilterOption `json:"members"`
+}
+
 var activitySorts = map[string]struct{}{
 	"createdAt": {}, "amount": {}, "targetName": {}, "actorName": {},
 	"productName": {}, "categoryName": {}, "status": {},
@@ -893,6 +907,47 @@ func (s Service) QueryActivity(ctx context.Context, membership domain.Membership
 		return ActivityPage{}, err
 	}
 	return s.queryActivity(ctx, membership, input, viewAll)
+}
+
+// ListActivityFilterOptions returns every distinct booking target present in
+// the caller's authorized activity scope. It applies the same all-activity
+// permission boundary as QueryActivity and exposes no email, role, or grant
+// data.
+func (s Service) ListActivityFilterOptions(ctx context.Context, membership domain.Membership) (ActivityFilterOptions, error) {
+	viewAll, err := canPermission(ctx, s.DB, membership, domain.PermissionViewAllBookingActivity)
+	if err != nil {
+		return ActivityFilterOptions{}, err
+	}
+	query := `SELECT DISTINCT target_member.id,target_user.display_name,target_user.id,coalesce(target_user.avatar_key,'')
+		FROM bookings booking
+		JOIN memberships target_member ON target_member.id=booking.target_membership_id AND target_member.group_id=booking.group_id
+		JOIN users target_user ON target_user.id=target_member.user_id
+		WHERE booking.group_id=?`
+	args := []any{membership.GroupID}
+	if !viewAll {
+		query += ` AND (booking.target_membership_id=? OR booking.actor_membership_id=?)`
+		args = append(args, membership.ID, membership.ID)
+	}
+	query += ` ORDER BY lower(target_user.display_name),target_member.id`
+	rows, err := s.DB.QueryContext(ctx, query, args...)
+	if err != nil {
+		return ActivityFilterOptions{}, fmt.Errorf("list activity member filter options: %w", err)
+	}
+	defer rows.Close()
+	options := ActivityFilterOptions{Members: []MemberFilterOption{}}
+	for rows.Next() {
+		var member MemberFilterOption
+		var userID, avatarKey string
+		if err := rows.Scan(&member.MembershipID, &member.DisplayName, &userID, &avatarKey); err != nil {
+			return ActivityFilterOptions{}, err
+		}
+		member.AvatarURL = media.UserAvatarURL(userID, avatarKey)
+		options.Members = append(options.Members, member)
+	}
+	if err := rows.Err(); err != nil {
+		return ActivityFilterOptions{}, err
+	}
+	return options, nil
 }
 
 func (s Service) list(ctx context.Context, membership domain.Membership, periodID string, limit int, viewAll bool) ([]domain.Booking, error) {

@@ -18,13 +18,14 @@ import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { CategoryIcon } from '@/features/shared/CategoryIcon';
 import { DataTable, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange } from '@/features/shared/DataTable';
 import { formatGermanDateTime } from '@/features/shared/dateFormat';
+import { createMemberFilterOption } from '@/features/shared/memberFilterOption';
 import tableStyles from '@/features/shared/Table.module.css';
 import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
 import styles from './ActivitiesPage.module.css';
 
 const activityPageSize = 50;
-type ActivityFilterId = 'productId' | 'categoryId' | 'status' | 'createdAt' | 'amount';
+type ActivityFilterId = 'targetMembershipId' | 'productId' | 'categoryId' | 'status' | 'createdAt' | 'amount';
 
 interface MembershipIdentityProps {
   avatarUrl?: string;
@@ -97,10 +98,18 @@ export function ActivitiesPage() {
   const queryClient = useQueryClient();
   const reversalFormId = useId();
   const categoriesQuery = useQuery({ queryKey: ['categories', activeGroupId], queryFn: () => api.getCategories(activeGroupId) });
+  const filterOptionsQuery = useQuery({ queryKey: ['booking-filter-options', activeGroupId], queryFn: () => api.getBookingFilterOptions(activeGroupId) });
   const [reversal, setReversal] = useState<Booking | null>(null);
   const [reason, setReason] = useState('');
   const labels = useDataTableLabels();
   const filterDefinitions = useMemo<readonly DataTableFilterDefinition<ActivityFilterId>[]>(() => [
+    {
+      allLabel: t('dataTable.allValues'),
+      id: 'targetMembershipId',
+      kind: 'select',
+      label: t('common.member'),
+      options: (filterOptionsQuery.data?.members ?? []).map(createMemberFilterOption),
+    },
     {
       allLabel: t('dataTable.allValues'),
       id: 'categoryId',
@@ -151,7 +160,7 @@ export function ActivitiesPage() {
       minimumLabel: t('dataTable.minimum'),
       step: 0.01,
     },
-  ], [activeGroup.currency, categoriesQuery.data, t]);
+  ], [activeGroup.currency, categoriesQuery.data, filterOptionsQuery.data?.members, t]);
   const tableState = useDataTableUrlState<ActivityFilterId>({
     filterDefinitions,
     initialSorting: [{ id: 'createdAt', desc: true }],
@@ -178,6 +187,7 @@ export function ActivitiesPage() {
       q: deferredSearch || undefined,
       sort: (sorting?.id ?? 'createdAt') as BookingCollectionQuery['sort'],
       status: tableState.filters.status as BookingCollectionQuery['status'],
+      targetMembershipId: tableState.filters.targetMembershipId as string | undefined,
     };
   }, [activeGroup.currency, deferredSearch, tableState.filters, tableState.sorting]);
   const bookingsQuery = useInfiniteQuery({
