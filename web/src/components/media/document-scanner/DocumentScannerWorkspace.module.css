@@ -23,7 +23,7 @@
 
 .thumbnailPreview:focus-visible,
 .thumbnailActions button:focus-visible,
-.cornerHandle:focus-visible { outline: 3px solid color-mix(in srgb, var(--color-teal-600) 34%, transparent); outline-offset: 2px; }
+.cornerHandle:focus-visible { outline: 3px solid color-mix(in srgb, var(--color-brand-hover) 34%, transparent); outline-offset: 2px; }
 
 .accessiblePageCount { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .emptyPageStrip { display: grid; place-items: center; }
@@ -42,13 +42,13 @@
 .editorContent {
   grid-template-rows: auto minmax(0, 1fr);
   gap: var(--space-3);
-  background: var(--color-white);
+  background: var(--color-surface);
 }
 
 .editorTitle {
   margin: 0;
   outline: 0;
-  color: var(--color-ink);
+  color: var(--color-text-strong);
   font-size: var(--font-size-lg);
   line-height: 1.2;
 }
@@ -60,7 +60,7 @@
   overflow-x: hidden;
   overflow-y: auto;
   border-left: 1px solid var(--color-border);
-  background: var(--color-white);
+  background: var(--color-surface);
 }
 
 .thumbnail {
@@ -73,7 +73,7 @@
   border-radius: var(--radius-md);
 }
 
-.selectedThumbnail { border-color: var(--color-teal-600); background: color-mix(in srgb, var(--color-teal-600) 7%, white); }
+.selectedThumbnail { border-color: var(--color-brand-hover); background: color-mix(in srgb, var(--color-brand-hover) 7%, white); }
 
 .thumbnailPreview {
   position: relative;
@@ -133,7 +133,7 @@
 .cameraControls > * { pointer-events: auto; }
 .detectionWarning { position: absolute; top: var(--space-3); left: var(--space-3); max-width: min(420px, calc(100% - 2 * var(--space-3))); margin: 0; padding: var(--space-2) var(--space-3); border: 1px solid rgb(255 255 255 / 25%); border-radius: var(--radius-md); color: white; background: rgb(3 24 47 / 82%); box-shadow: var(--shadow-sm); font-size: var(--font-size-sm); }
 .autoCaptureToggle { position: absolute; bottom: calc(var(--space-4) + 8px); left: var(--space-4); display: inline-flex; min-height: 48px; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid rgb(255 255 255 / 28%); border-radius: var(--radius-full); color: white; background: rgb(3 24 47 / 70%); box-shadow: var(--shadow-sm); font-size: var(--font-size-sm); cursor: pointer; }
-.autoCaptureToggle input { accent-color: var(--color-teal-600); }
+.autoCaptureToggle input { accent-color: var(--color-brand-hover); }
 .autoCaptureToggle:has(input:disabled) { opacity: 0.55; cursor: default; }
 
 .cameraControls .captureControl,
@@ -150,11 +150,11 @@
   width: 64px;
   height: 64px;
   border: 4px solid white;
-  background: var(--color-teal-600);
+  background: var(--color-brand-hover);
   transform: translateX(-50%);
 }
 
-.cameraControls .captureControl:hover:not(:disabled) { background: var(--color-teal-700); }
+.cameraControls .captureControl:hover:not(:disabled) { background: var(--color-brand); }
 .cameraControls .captureControl:disabled { color: rgb(255 255 255 / 68%); background: rgb(85 101 113 / 74%); opacity: 0.72; }
 
 .cameraControls .switchCameraControl {
@@ -175,7 +175,7 @@
 .cornerFrame img { position: absolute; top: 50%; left: 50%; display: block; max-width: none; max-height: none; object-fit: fill; transform-origin: center; }
 .cornerOverlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .cornerOverlay polygon { fill: rgb(21 201 177 / 12%); stroke: #11a990; stroke-width: 0.8; vector-effect: non-scaling-stroke; }
-.cornerHandle { position: absolute; width: 30px; height: 30px; padding: 0; border: 3px solid white; border-radius: 50%; background: var(--color-teal-600); box-shadow: 0 2px 8px rgb(3 24 47 / 35%); cursor: grab; transform: translate(-50%, -50%); touch-action: none; }
+.cornerHandle { position: absolute; width: 30px; height: 30px; padding: 0; border: 3px solid white; border-radius: 50%; background: var(--color-brand-hover); box-shadow: 0 2px 8px rgb(3 24 47 / 35%); cursor: grab; transform: translate(-50%, -50%); touch-action: none; }
 .cornerHandle:active { cursor: grabbing; }
 .accessibleEditorInstructions {
   position: absolute;
@@ -196,7 +196,7 @@
   padding: var(--space-2);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  background: var(--color-white);
+  background: var(--color-surface);
   box-shadow: var(--shadow-sm);
 }
 
@@ -259,18 +259,18 @@
 
 .filterOption[aria-pressed='true'] {
   border-color: var(--color-border);
-  color: var(--color-teal-700);
-  background: var(--color-white);
+  color: var(--color-brand);
+  background: var(--color-surface);
   box-shadow: var(--shadow-sm);
 }
 
 .filterOption:focus-visible {
   z-index: 1;
-  outline: 3px solid color-mix(in srgb, var(--color-teal-600) 34%, transparent);
+  outline: 3px solid color-mix(in srgb, var(--color-brand-hover) 34%, transparent);
   outline-offset: 1px;
 }
 
-.error { grid-area: error; margin: 0; padding: var(--space-2) var(--space-5); color: var(--color-danger-700, #a4262c); background: var(--color-danger-50, #fff1f1); font-size: var(--font-size-sm); }
+.error { grid-area: error; margin: 0; padding: var(--space-2) var(--space-5); color: var(--color-status-danger); background: var(--color-status-danger-subtle); font-size: var(--font-size-sm); }
 
 .footerActions {
   display: flex;

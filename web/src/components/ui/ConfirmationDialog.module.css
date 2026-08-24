@@ -10,7 +10,7 @@
   line-height: 1.55;
 }
 
-.error { color: var(--color-red-600); }
+.error { color: var(--color-status-danger); }
 
 .actions {
   display: flex;

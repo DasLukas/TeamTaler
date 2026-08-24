@@ -5,8 +5,8 @@
   flex: 0 0 auto;
   border: 1px solid var(--color-border-strong);
   border-radius: 50%;
-  color: var(--color-navy-800);
-  background: var(--color-white);
+  color: var(--color-text-strong);
+  background: var(--color-surface);
   font-weight: 600;
   overflow: hidden;
 }

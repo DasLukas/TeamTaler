@@ -1,0 +1,116 @@
+.picker {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.picker legend {
+  margin-bottom: var(--space-3);
+  font-weight: 700;
+}
+
+.options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: var(--space-3);
+}
+
+.option {
+  position: relative;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.option input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.optionBody {
+  display: grid;
+  min-height: 92px;
+  align-content: center;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  gap: var(--space-3);
+  transition: border-color var(--motion-fast), box-shadow var(--motion-fast), transform var(--motion-fast);
+}
+
+.option:hover .optionBody {
+  border-color: var(--color-border-strong);
+  transform: translateY(-1px);
+}
+
+.option input:checked + .optionBody {
+  border-color: var(--color-border-brand);
+  box-shadow: 0 0 0 2px var(--color-focus-ring);
+}
+
+.option input:focus-visible + .optionBody {
+  outline: 3px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+.option input:disabled + .optionBody {
+  cursor: not-allowed;
+  opacity: 0.6;
+  transform: none;
+}
+
+.palette {
+  display: grid;
+  width: 88px;
+  height: 28px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-shadow) 100%, transparent);
+  border-radius: var(--radius-full);
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.palette[data-preview-theme='TEAMTALER'] span:nth-child(1) { background: #0c335b; }
+.palette[data-preview-theme='TEAMTALER'] span:nth-child(2) { background: #008f84; }
+.palette[data-preview-theme='TEAMTALER'] span:nth-child(3) { background: #eefaf8; }
+.palette[data-preview-theme='NRW'] span:nth-child(1) { background: #009136; }
+.palette[data-preview-theme='NRW'] span:nth-child(2) { background: #ffffff; }
+.palette[data-preview-theme='NRW'] span:nth-child(3) { background: #e2001a; }
+.palette[data-preview-theme='TIEF_IM_WESTEN'] span:nth-child(1) { background: #0f2864; }
+.palette[data-preview-theme='TIEF_IM_WESTEN'] span:nth-child(2) { background: #0ab4ff; }
+.palette[data-preview-theme='TIEF_IM_WESTEN'] span:nth-child(3) { background: #ffcc01; }
+.palette[data-preview-theme='FIRE'] span:nth-child(1) { background: #962a27; }
+.palette[data-preview-theme='FIRE'] span:nth-child(2) { background: #e65c00; }
+.palette[data-preview-theme='FIRE'] span:nth-child(3) { background: #23272f; }
+
+.name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+
+.label {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.badge {
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--color-surface-brand-subtle);
+  color: var(--color-text-brand);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+@media (max-width: 520px) {
+  .options { grid-template-columns: minmax(0, 1fr); }
+  .optionBody { min-height: 78px; grid-template-columns: auto minmax(0, 1fr); align-items: center; }
+}

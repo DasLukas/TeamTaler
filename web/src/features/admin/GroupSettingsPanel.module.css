@@ -19,7 +19,7 @@
 
 .header p {
   margin-top: var(--space-2);
-  color: var(--color-muted);
+  color: var(--color-text-muted);
 }
 
 .cards {
@@ -33,7 +33,7 @@
   padding: var(--space-6);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  background: var(--color-white);
+  background: var(--color-surface);
   box-shadow: var(--shadow-sm);
   grid-template-columns: 180px minmax(0, 1fr);
   gap: var(--space-8);
@@ -76,11 +76,11 @@
 }
 
 .error {
-  color: var(--color-red-600);
+  color: var(--color-status-danger);
 }
 
 .success {
-  color: var(--color-green-600);
+  color: var(--color-status-success);
 }
 
 @media (max-width: 900px) {

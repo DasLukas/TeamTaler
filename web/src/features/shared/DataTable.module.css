@@ -27,14 +27,14 @@
   padding: 0 var(--space-3);
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-md);
-  color: var(--color-muted);
-  background: var(--color-white);
+  color: var(--color-text-muted);
+  background: var(--color-surface);
   transition: border-color var(--motion-fast), box-shadow var(--motion-fast);
 }
 
 .searchField:focus-within {
-  border-color: var(--color-teal-700);
-  box-shadow: 0 0 0 3px var(--color-teal-100);
+  border-color: var(--color-brand);
+  box-shadow: 0 0 0 3px var(--color-surface-brand-subtle);
 }
 
 .searchField input {
@@ -58,15 +58,15 @@
   padding: 0;
   border: 0;
   border-radius: var(--radius-full);
-  color: var(--color-muted);
+  color: var(--color-text-muted);
   background: transparent;
 }
 
-.clearSearch:hover { color: var(--color-teal-700); background: var(--color-surface-teal); }
+.clearSearch:hover { color: var(--color-brand); background: var(--color-surface-brand-subtle); }
 .clearSearch:focus-visible,
 .filterChip button:focus-visible,
 .resetLink:focus-visible,
-.sortButton:focus-visible { outline: 3px solid color-mix(in srgb, var(--color-teal-600) 28%, transparent); outline-offset: 2px; }
+.sortButton:focus-visible { outline: 3px solid color-mix(in srgb, var(--color-brand-hover) 28%, transparent); outline-offset: 2px; }
 
 .toolbarButtons {
   display: flex;
@@ -83,8 +83,8 @@
   margin-inline-start: var(--space-2);
   padding-inline: 6px;
   border-radius: var(--radius-full);
-  color: var(--color-white);
-  background: var(--color-teal-700);
+  color: var(--color-text-on-brand);
+  background: var(--color-brand);
   font-size: var(--font-size-xs);
   font-variant-numeric: tabular-nums;
 }
@@ -104,10 +104,10 @@
   align-items: center;
   gap: var(--space-1);
   padding: 4px 5px 4px var(--space-3);
-  border: 1px solid var(--color-teal-600);
+  border: 1px solid var(--color-brand-hover);
   border-radius: var(--radius-full);
-  color: var(--color-teal-700);
-  background: var(--color-surface-teal);
+  color: var(--color-brand);
+  background: var(--color-surface-brand-subtle);
   font-size: var(--font-size-xs);
 }
 
@@ -131,13 +131,13 @@
   background: transparent;
 }
 
-.filterChip button:hover { background: var(--color-teal-100); }
+.filterChip button:hover { background: var(--color-surface-brand-subtle); }
 
 .resetLink {
   min-height: 34px;
   padding: 0 var(--space-2);
   border: 0;
-  color: var(--color-teal-700);
+  color: var(--color-brand);
   background: transparent;
   font-size: var(--font-size-xs);
   font-weight: 700;
@@ -174,7 +174,7 @@
 .checkboxGroup legend,
 .rangeGroup legend {
   margin-bottom: var(--space-2);
-  color: var(--color-ink);
+  color: var(--color-text-strong);
   font-size: var(--font-size-sm);
   font-weight: 700;
 }
@@ -190,7 +190,7 @@
 .checkboxGroup input {
   width: 20px;
   height: 20px;
-  accent-color: var(--color-teal-700);
+  accent-color: var(--color-brand);
 }
 
 .rangeGroup { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -221,12 +221,12 @@
 
 .viewportFrame::before {
   left: 1px;
-  background: linear-gradient(90deg, rgb(3 24 47 / 18%), transparent);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--color-shadow) 100%, transparent), transparent);
 }
 
 .viewportFrame::after {
   right: 1px;
-  background: linear-gradient(270deg, rgb(3 24 47 / 18%), transparent);
+  background: linear-gradient(270deg, color-mix(in srgb, var(--color-shadow) 100%, transparent), transparent);
 }
 
 .viewportFrame[data-scroll-position='start']::after,
@@ -240,7 +240,7 @@
 }
 
 .viewport:focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--color-teal-600) 28%, transparent);
+  outline: 3px solid color-mix(in srgb, var(--color-brand-hover) 28%, transparent);
   outline-offset: 2px;
 }
 
@@ -263,7 +263,7 @@
   text-transform: inherit;
 }
 
-.sortButton:hover { color: var(--color-teal-700); background: var(--color-teal-100); }
+.sortButton:hover { color: var(--color-brand); background: var(--color-surface-brand-subtle); }
 .sortButton svg { flex: 0 0 auto; }
 
 .start { text-align: left !important; }
@@ -274,7 +274,7 @@
 
 .tableState {
   padding-block: var(--space-8) !important;
-  color: var(--color-muted);
+  color: var(--color-text-muted);
   text-align: center !important;
   white-space: normal !important;
 }
@@ -285,7 +285,7 @@
   justify-content: center;
   gap: var(--space-2);
   margin: var(--space-2) 0 0;
-  color: var(--color-muted);
+  color: var(--color-text-muted);
   font-size: var(--font-size-xs);
 }
 
@@ -297,7 +297,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  color: var(--color-muted);
+  color: var(--color-text-muted);
   font-size: var(--font-size-sm);
 }
 

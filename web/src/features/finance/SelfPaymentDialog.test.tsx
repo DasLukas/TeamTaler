@@ -18,10 +18,12 @@ const session: Session = {
     id: 'group-a',
     name: 'Group A',
     currency: 'EUR',
-    membership: { id: 'member-a', roles: ['MEMBER'], groupPermissions: ['SELF_RECORD_PAYMENT'] },
+    defaultTheme: 'TEAMTALER',
+    membership: { id: 'member-a', roles: ['MEMBER'], groupPermissions: ['SELF_RECORD_PAYMENT'], themeOverride: null },
   }],
   activeGroupId: 'group-a',
   defaultGroupId: null,
+  colorMode: 'SYSTEM',
   systemRoles: [],
 };
 

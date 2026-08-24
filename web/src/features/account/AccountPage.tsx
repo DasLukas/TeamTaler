@@ -5,6 +5,7 @@ import { AccountDetailsPanel } from './AccountDetailsPanel';
 import { AccountFinanceSection } from './AccountFinanceSection';
 import { ProfileImagePanel } from './ProfileImagePanel';
 import { NotificationPreferencesPanel } from './NotificationPreferencesPanel';
+import { AppearanceSettingsPanel } from './AppearanceSettingsPanel';
 
 /**
  * Renders independent account settings, profile image, and financial sections.
@@ -17,6 +18,7 @@ export function AccountPage() {
   return (
     <Page intro={t(hasActiveGroup ? 'account.intro' : 'account.systemOnlyIntro')} title={t('account.title')} wide>
       <AccountDetailsPanel />
+      <AppearanceSettingsPanel />
       <ProfileImagePanel />
       <NotificationPreferencesPanel />
       {hasActiveGroup ? <AccountFinanceSection /> : null}

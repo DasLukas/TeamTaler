@@ -12,22 +12,22 @@
 }
 
 .plain {
-  color: var(--color-ink);
+  color: var(--color-text-strong);
 }
 
 .plain:hover {
-  color: var(--color-teal-700);
-  background: var(--color-surface-teal);
+  color: var(--color-brand);
+  background: var(--color-surface-brand-subtle);
 }
 
 .surface {
-  color: var(--color-ink);
-  background: var(--color-white);
+  color: var(--color-text-strong);
+  background: var(--color-surface);
   border-color: var(--color-border);
 }
 
 .dark {
-  color: var(--color-white);
-  background: rgb(255 255 255 / 8%);
-  border-color: rgb(255 255 255 / 26%);
+  color: var(--color-text-on-brand);
+  background: var(--color-navigation-hover);
+  border-color: var(--color-border-on-brand);
 }

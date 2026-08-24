@@ -10,7 +10,7 @@
 }
 
 .searchControl { position: relative; }
-.searchControl svg { position: absolute; z-index: 1; top: 14px; left: 14px; color: var(--color-muted); }
+.searchControl svg { position: absolute; z-index: 1; top: 14px; left: 14px; color: var(--color-text-muted); }
 .searchControl input { padding-left: 42px; }
 .member {
   display: inline-grid;
@@ -35,8 +35,8 @@
   justify-content: center;
   border-radius: var(--radius-full);
 }
-.membershipStateArchived { color: #9a5a00; background: var(--color-orange-100); }
-.membershipStateDeleted { color: var(--color-red-600); background: var(--color-red-100); }
+.membershipStateArchived { color: var(--color-status-warning); background: var(--color-status-warning-subtle); }
+.membershipStateDeleted { color: var(--color-status-danger); background: var(--color-status-danger-subtle); }
 .membershipStateText { display: none; }
 .bookingState {
   width: 26px;
@@ -73,16 +73,16 @@
 .activityTable th:nth-child(6) { width: 8%; }
 .activityTable th:nth-child(7) { width: 7%; }
 .activityTable th:nth-child(8) { width: 10%; }
-.activityTable td small { display: block; margin-top: 4px; color: var(--color-muted); }
+.activityTable td small { display: block; margin-top: 4px; color: var(--color-text-muted); }
 .activityTable td:last-child button { white-space: nowrap; }
 .categoryCell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap !important; }
 .timeCell,
 .amountCell { overflow-wrap: normal !important; white-space: nowrap !important; }
 .reversalForm { display: grid; gap: var(--space-5); padding: var(--space-4) var(--space-6) var(--space-6); }
-.reversalForm p { margin: 0; color: var(--color-muted); line-height: 1.55; }
+.reversalForm p { margin: 0; color: var(--color-text-muted); line-height: 1.55; }
 .actions { display: flex; justify-content: flex-end; gap: var(--space-3); }
-.error { color: var(--color-red-600) !important; }
-.reversalForm .windowNotice { padding: var(--space-3); border-radius: var(--radius-md); color: var(--color-teal-700); background: var(--color-surface-teal); font-size: var(--font-size-sm); }
+.error { color: var(--color-status-danger) !important; }
+.reversalForm .windowNotice { padding: var(--space-3); border-radius: var(--radius-md); color: var(--color-brand); background: var(--color-surface-brand-subtle); font-size: var(--font-size-sm); }
 
 @media (min-width: 1800px) {
   .activityTable th:nth-child(1) { width: 18%; }

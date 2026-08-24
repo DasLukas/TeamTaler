@@ -5,7 +5,7 @@
   padding: var(--space-6);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  background: var(--color-white);
+  background: var(--color-surface);
   box-shadow: var(--shadow-sm);
 }
 
@@ -30,20 +30,20 @@
 .preferenceRow > button { align-self: center; grid-row: 1; }
 .preferenceRow > .preference { grid-row: 1 / span 2; }
 .preference { display: grid; gap: var(--space-2); }
-.preferenceHint { color: var(--color-muted); font-size: var(--font-size-xs); line-height: 1.45; }
+.preferenceHint { color: var(--color-text-muted); font-size: var(--font-size-xs); line-height: 1.45; }
 .groupSelect { width: 100%; }
 .groupChoice { display: flex; min-width: 0; align-items: center; gap: var(--space-3); }
 .groupChoice > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .groupMark,
 .groupPreferenceIcon { width: 32px; height: 32px; flex: 0 0 auto; }
 .groupMark { font-size: var(--font-size-xs); }
-.groupPreferenceIcon { display: grid; place-items: center; border: 1px solid var(--color-border); border-radius: var(--radius-sm); color: var(--color-navy-700); background: var(--color-surface-muted); }
+.groupPreferenceIcon { display: grid; place-items: center; border: 1px solid var(--color-border); border-radius: var(--radius-sm); color: var(--color-text-strong); background: var(--color-surface-muted); }
 .modalBody { padding: var(--space-3) var(--space-6) var(--space-6); }
 .form,
 .result { display: grid; gap: var(--space-5); }
 .dialogActions { display: flex; justify-content: flex-end; gap: var(--space-3); }
-.error { margin: 0; color: var(--color-red-600); }
-.success { color: var(--color-green-600); }
+.error { margin: 0; color: var(--color-status-danger); }
+.success { color: var(--color-status-success); }
 .result h3,
 .result p { margin: 0; }
 

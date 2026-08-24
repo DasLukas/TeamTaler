@@ -21,7 +21,7 @@
 }
 
 .preview:focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--color-teal-600) 24%, transparent);
+  outline: 3px solid color-mix(in srgb, var(--color-brand-hover) 24%, transparent);
   outline-offset: 2px;
 }
 
@@ -39,7 +39,7 @@
 
 .hint {
   margin: 0;
-  color: var(--color-muted);
+  color: var(--color-text-muted);
   font-size: var(--font-size-xs);
 }
 

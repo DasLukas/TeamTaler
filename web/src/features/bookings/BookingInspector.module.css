@@ -25,7 +25,7 @@
 .imageFallback {
   display: grid;
   place-items: center;
-  color: var(--color-teal-700);
+  color: var(--color-brand);
   font-size: 2rem;
 }
 
@@ -36,7 +36,7 @@
 }
 
 .product strong {
-  color: var(--color-ink);
+  color: var(--color-text-strong);
   font-size: var(--font-size-2xl);
   overflow-wrap: anywhere;
 }
@@ -86,7 +86,7 @@
 }
 
 .total small {
-  color: var(--color-muted);
+  color: var(--color-text-muted);
   font-size: var(--font-size-xs);
   font-weight: 500;
   line-height: 1.25;
@@ -94,7 +94,7 @@
 
 .total strong {
   align-self: center;
-  color: var(--color-teal-700);
+  color: var(--color-brand);
   font-size: 2.25rem;
   line-height: 1;
 }
@@ -113,15 +113,15 @@
   align-items: center;
   gap: var(--space-2);
   margin: -12px 0 0;
-  color: var(--color-muted);
+  color: var(--color-text-muted);
   font-size: var(--font-size-xs);
 }
 
-.note svg { color: var(--color-teal-700); }
+.note svg { color: var(--color-brand); }
 
 .error {
   margin: -12px 0;
-  color: var(--color-red-600);
+  color: var(--color-status-danger);
   font-size: var(--font-size-sm);
 }
 
@@ -132,13 +132,13 @@
   align-content: center;
   gap: var(--space-4);
   padding: var(--space-8);
-  color: var(--color-teal-700);
+  color: var(--color-brand);
   text-align: center;
 }
 
 .success h2,
 .success p { margin: 0; }
-.success p { color: var(--color-muted); }
+.success p { color: var(--color-text-muted); }
 
 .compact {
   gap: var(--space-6);

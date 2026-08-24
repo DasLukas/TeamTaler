@@ -1,5 +1,6 @@
 import type {
   AccountSummary,
+  AppearancePreference,
   AuditEntry,
   Booking,
   BookingContext,
@@ -47,9 +48,10 @@ import type {
   SystemSmtpSettings,
   SystemWebPushSettings,
   TransactionSettings,
+  ThemePreference,
   User,
 } from './types';
-import { DEFAULT_ATTACHMENT_UPLOAD_MAX_BYTES, DEFAULT_MEDIA_UPLOAD_MAX_BYTES, isCategoryIcon, isPermissionKey } from './types';
+import { DEFAULT_ATTACHMENT_UPLOAD_MAX_BYTES, DEFAULT_MEDIA_UPLOAD_MAX_BYTES, isCategoryIcon, isColorMode, isPermissionKey, isThemeId } from './types';
 import { formatMoney } from './money';
 import i18n from '@/i18n';
 import { defaultPaymentMethods, historicalPaymentMethodLabel, localizedPaymentMethodLabel } from '@/features/finance/paymentMethods';
@@ -478,6 +480,7 @@ export function adaptGroupSettings(input: unknown): GroupSettings {
   const ownPaymentReasonMode = reasonMode(source.ownPaymentReasonMode, source.ownPaymentReasonRequired, 'REQUIRED');
   const otherPaymentReasonMode = reasonMode(source.otherPaymentReasonMode, source.otherPaymentReasonRequired, 'OPTIONAL');
   return {
+    defaultTheme: isThemeId(source.defaultTheme) ? source.defaultTheme : 'TEAMTALER',
     settlementsEnabled: source.settlementsEnabled === true,
     notificationEmailsEnabled: source.notificationEmailsEnabled === true,
     notificationEmailDeliveryAvailable: source.notificationEmailDeliveryAvailable === true,
@@ -694,6 +697,7 @@ export function adaptSession(input: unknown): Session {
       name: String(group.name),
       currency: String(group.currency || 'EUR'),
       logoUrl: typeof group.logoUrl === 'string' ? group.logoUrl : undefined,
+      defaultTheme: isThemeId(group.defaultTheme) ? group.defaultTheme : 'TEAMTALER',
       membership: membership ? {
         id: String(membership.id),
         roles: [...(membership.roles as GroupRole[] ?? []), 'MEMBER'],
@@ -701,6 +705,7 @@ export function adaptSession(input: unknown): Session {
         roleIds: Array.isArray(membership.roleIds) ? membership.roleIds.map(String) : [],
         effectiveGrants: adaptPermissionGrants(membership.effectiveGrants),
         roleAssignmentsVersion: Number(membership.roleAssignmentsVersion ?? 1),
+        themeOverride: isThemeId(membership.themeOverride) ? membership.themeOverride : null,
       } : undefined,
     } satisfies Group;
   });
@@ -711,9 +716,32 @@ export function adaptSession(input: unknown): Session {
       ? source.activeGroupId
       : groups[0]?.id ?? null,
     defaultGroupId: typeof source.defaultGroupId === 'string' ? source.defaultGroupId : null,
+    colorMode: isColorMode(source.colorMode) ? source.colorMode : 'SYSTEM',
     systemRoles: Array.isArray(source.systemRoles) && source.systemRoles.includes('SYSTEM_ADMINISTRATOR') ? ['SYSTEM_ADMINISTRATOR'] : [],
     demo: source.demo === true,
   };
+}
+
+/**
+ * Adapts the persisted account color-mode response with a safe system fallback.
+ *
+ * @param input - Untrusted response from the account appearance endpoint.
+ * @returns A validated account color-mode preference.
+ */
+export function adaptAppearancePreference(input: unknown): AppearancePreference {
+  const source = asRecord(input);
+  return { colorMode: isColorMode(source.colorMode) ? source.colorMode : 'SYSTEM' };
+}
+
+/**
+ * Adapts the current membership's optional group-theme override.
+ *
+ * @param input - Untrusted response from the group theme-preference endpoint.
+ * @returns A validated theme override or `null` for group inheritance.
+ */
+export function adaptThemePreference(input: unknown): ThemePreference {
+  const source = asRecord(input);
+  return { themeOverride: isThemeId(source.themeOverride) ? source.themeOverride : null };
 }
 
 /**
@@ -798,6 +826,7 @@ export function adaptMembership(input: unknown, etag?: string): Membership {
     roleIds: Array.isArray(source.roleIds) ? source.roleIds.map(String) : [],
     effectiveGrants: adaptPermissionGrants(source.effectiveGrants),
     roleAssignmentsVersion: Number(source.roleAssignmentsVersion ?? 1),
+    themeOverride: isThemeId(source.themeOverride) ? source.themeOverride : null,
     status,
     active: status === 'ACTIVE',
     etag: etag ?? source.etag as string | undefined,
@@ -822,6 +851,7 @@ export function adaptMembership(input: unknown, etag?: string): Membership {
     roleIds: Array.isArray(source.roleIds) ? source.roleIds.map(String) : [],
     effectiveGrants: adaptPermissionGrants(source.effectiveGrants),
     roleAssignmentsVersion: Number(source.roleAssignmentsVersion ?? 1),
+    themeOverride: isThemeId(source.themeOverride) ? source.themeOverride : null,
     status,
     active: status === 'ACTIVE',
     etag,

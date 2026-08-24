@@ -17,7 +17,7 @@
   gap: var(--space-3);
 }
 
-.success { color: var(--color-teal-700); font-weight: 700; }
+.success { color: var(--color-brand); font-weight: 700; }
 
 @media (min-width: 768px) and (max-width: 1100px) {
   .headerActions { flex-wrap: nowrap; }
@@ -43,8 +43,8 @@
   min-height: 22px;
   padding: 2px 7px;
   border-radius: var(--radius-full);
-  color: var(--color-teal-700);
-  background: var(--color-surface-teal);
+  color: var(--color-brand);
+  background: var(--color-surface-brand-subtle);
   font-size: var(--font-size-xs);
   font-weight: 800;
   white-space: nowrap;
@@ -52,7 +52,7 @@
 
 .temporaryGuestRole,
 .claimPending {
-  color: var(--color-muted);
+  color: var(--color-text-muted);
   font-size: var(--font-size-sm);
 }
 
@@ -68,7 +68,7 @@
 
 .claimUnavailable {
   max-width: 22rem;
-  color: var(--color-muted);
+  color: var(--color-text-muted);
   font-size: var(--font-size-xs);
 }
 
@@ -86,8 +86,8 @@
   min-width: 28px;
   padding: 3px 8px;
   border-radius: 999px;
-  color: var(--color-teal-700);
-  background: var(--color-surface-teal);
+  color: var(--color-brand);
+  background: var(--color-surface-brand-subtle);
   font-size: var(--font-size-sm);
   font-weight: 700;
   text-align: center;
@@ -98,7 +98,7 @@
   padding: var(--space-5);
   border: 1px dashed var(--color-border-strong);
   border-radius: var(--radius-md);
-  color: var(--color-muted);
+  color: var(--color-text-muted);
 }
 
 .rowLink {
@@ -114,17 +114,17 @@
   cursor: pointer;
 }
 
-.rowLink:hover strong { color: var(--color-teal-700); text-decoration: underline; }
+.rowLink:hover strong { color: var(--color-brand); text-decoration: underline; }
 
 .roleCell { min-width: 280px; }
 
 .tableScrollRegion:focus-visible {
-  outline: 3px solid var(--color-teal-700);
+  outline: 3px solid var(--color-brand);
   outline-offset: 2px;
 }
 
 .tableActions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-1); }
-.expired { color: var(--color-red-600); font-weight: 700; }
+.expired { color: var(--color-status-danger); font-weight: 700; }
 
 .form,
 .invitationReady,
@@ -144,25 +144,25 @@
 .formGrid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
 .confirmDialog { display: grid; gap: var(--space-5); padding: var(--space-4) var(--space-6) var(--space-6); }
 .confirmDialog p { margin: 0; line-height: 1.55; }
-.warning { color: var(--color-red-600); font-weight: 700; }
+.warning { color: var(--color-status-danger); font-weight: 700; }
 
 .claimNotice {
   margin: 0;
   padding: var(--space-4);
   border-radius: var(--radius-md);
-  color: var(--color-teal-700);
-  background: var(--color-surface-teal);
+  color: var(--color-brand);
+  background: var(--color-surface-brand-subtle);
   font-size: var(--font-size-sm);
   font-weight: 700;
   line-height: 1.5;
 }
 
-.error { color: var(--color-red-600); }
+.error { color: var(--color-status-danger); }
 
 .expiry,
 .selectedFile {
   margin: 0;
-  color: var(--color-muted);
+  color: var(--color-text-muted);
   font-size: var(--font-size-sm);
 }
 
@@ -171,19 +171,19 @@
   padding: var(--space-4);
   border-radius: var(--radius-md);
   background: var(--color-surface-muted);
-  color: var(--color-muted);
+  color: var(--color-text-muted);
 }
 
 .invitationReady {
   place-items: center;
-  color: var(--color-teal-700);
+  color: var(--color-brand);
   text-align: center;
 }
 
 .invitationReady h3,
 .invitationReady p { margin: 0; }
 
-.invitationReady p { color: var(--color-muted); }
+.invitationReady p { color: var(--color-text-muted); }
 .invitationReady > button { width: 100%; }
 
 .fallbackLink {
@@ -218,7 +218,7 @@
 .importIntro p { margin: 0; }
 
 .importIntro p:last-child {
-  color: var(--color-teal-700);
+  color: var(--color-brand);
   font-weight: 700;
 }
 
@@ -231,7 +231,7 @@
 
 .templateRow p {
   margin: 0;
-  color: var(--color-muted);
+  color: var(--color-text-muted);
   font-size: var(--font-size-sm);
   line-height: 1.5;
 }
@@ -252,7 +252,7 @@
 
 .importSummary > div:first-child p {
   margin-top: var(--space-2);
-  color: var(--color-muted);
+  color: var(--color-text-muted);
 }
 
 .summaryGrid {
@@ -267,16 +267,16 @@
   padding: var(--space-3);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  background: var(--color-white);
+  background: var(--color-surface);
 }
 
 .summaryGrid strong {
-  color: var(--color-teal-700);
+  color: var(--color-brand);
   font-size: var(--font-size-xl);
 }
 
 .summaryGrid span {
-  color: var(--color-muted);
+  color: var(--color-text-muted);
   font-size: var(--font-size-xs);
   font-weight: 700;
   text-transform: uppercase;
@@ -286,7 +286,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2) var(--space-5);
-  color: var(--color-muted);
+  color: var(--color-text-muted);
   font-size: var(--font-size-sm);
 }
 
@@ -299,7 +299,7 @@
 
 .detailCell {
   max-width: 280px;
-  color: var(--color-muted);
+  color: var(--color-text-muted);
   white-space: normal !important;
 }
 
@@ -312,8 +312,8 @@
 .rowDetail button { margin-inline-start: calc(var(--space-3) * -1); }
 
 .statusError {
-  color: var(--color-red-600);
-  background: var(--color-red-100);
+  color: var(--color-status-danger);
+  background: var(--color-status-danger-subtle);
 }
 
 .state { padding: var(--space-8) 0; }

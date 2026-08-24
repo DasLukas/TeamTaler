@@ -12,8 +12,8 @@
     justify-content: space-between;
     gap: var(--space-3);
     padding: max(var(--space-4), env(safe-area-inset-top)) var(--space-5) var(--space-4);
-    color: var(--color-white);
-    background: linear-gradient(150deg, var(--color-navy-950), #052b50);
+    color: var(--color-navigation-text);
+    background: linear-gradient(150deg, var(--color-navigation), var(--color-navigation-gradient-end));
   }
 
   .header :global(.brand) {

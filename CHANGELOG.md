@@ -4,6 +4,20 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+### Added
+
+- Account-synchronized light, dark, and system color modes plus four accessible color themes: TeamTaler, NRW, Tief im Westen, and Fire.
+- Group-managed default themes with inheritable per-membership overrides that remain stable across sessions and group switches.
+
+### Changed
+
+- Shared frontend colors now use semantic appearance tokens with complete light and dark variants instead of component-level brand literals.
+- The personal theme picker presents the current group default once with a dedicated inheritance badge instead of duplicating the same palette as an override.
+
+### Fixed
+
+- Shared table zebra and hover rows now retain dark semantic surfaces and readable text in dark mode.
+
 ## [1.0.0] - 2026-08-21
 
 ### Added

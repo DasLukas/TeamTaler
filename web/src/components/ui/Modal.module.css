@@ -5,7 +5,7 @@
   border: 0;
   border-radius: var(--radius-xl);
   color: var(--color-text);
-  background: var(--color-white);
+  background: var(--color-surface);
   box-shadow: var(--shadow-md);
   overflow: hidden;
 }
@@ -38,7 +38,7 @@
 .fullscreen { --modal-max-width: 980px; }
 
 .dialog::backdrop {
-  background: rgb(3 24 47 / 42%);
+  background: var(--color-backdrop);
   backdrop-filter: blur(2px);
 }
 
@@ -70,8 +70,8 @@
   z-index: 1;
   padding: var(--space-3) var(--space-6) var(--space-6);
   border-top: 1px solid var(--color-border);
-  background: var(--color-white);
-  box-shadow: 0 -10px 24px rgb(3 24 47 / 6%);
+  background: var(--color-surface);
+  box-shadow: 0 -10px 24px color-mix(in srgb, var(--color-shadow) 50%, transparent);
 }
 
 .footer:empty { display: none; }
@@ -159,7 +159,7 @@
   }
 
   .sheet .sheetHandle:active { cursor: grabbing; }
-  .sheet .sheetHandle:focus-visible { border-radius: var(--radius-full); outline: 3px solid color-mix(in srgb, var(--color-teal-600) 28%, transparent); outline-offset: -2px; }
+  .sheet .sheetHandle:focus-visible { border-radius: var(--radius-full); outline: 3px solid color-mix(in srgb, var(--color-brand-hover) 28%, transparent); outline-offset: -2px; }
 
   .sheet .sheetHandle .handle {
     display: block;
@@ -167,7 +167,7 @@
     height: 5px;
     margin-top: var(--space-2);
     border-radius: var(--radius-full);
-    background: #b5bcc5;
+    background: var(--color-border-strong);
   }
 }
 

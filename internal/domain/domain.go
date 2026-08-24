@@ -227,6 +227,53 @@ type Principal struct {
 	CSRFToken   string
 }
 
+// ColorMode controls whether the application uses the light palette, the dark
+// palette, or follows the operating-system preference for one account.
+type ColorMode string
+
+const (
+	// ColorModeSystem follows the operating-system color-scheme preference.
+	ColorModeSystem ColorMode = "SYSTEM"
+	// ColorModeLight always uses the light color palette.
+	ColorModeLight ColorMode = "LIGHT"
+	// ColorModeDark always uses the dark color palette.
+	ColorModeDark ColorMode = "DARK"
+)
+
+// Valid reports whether mode is supported by the appearance API and database.
+func (mode ColorMode) Valid() bool {
+	switch mode {
+	case ColorModeSystem, ColorModeLight, ColorModeDark:
+		return true
+	default:
+		return false
+	}
+}
+
+// ThemeID identifies one predefined TeamTaler color theme.
+type ThemeID string
+
+const (
+	// ThemeTeamTaler is the standard TeamTaler navy and teal theme.
+	ThemeTeamTaler ThemeID = "TEAMTALER"
+	// ThemeNRW uses the North Rhine-Westphalia red, green, and white palette.
+	ThemeNRW ThemeID = "NRW"
+	// ThemeTiefImWesten uses Bochum-inspired blue, light blue, and yellow colors.
+	ThemeTiefImWesten ThemeID = "TIEF_IM_WESTEN"
+	// ThemeFire uses a fire-service-inspired RAL 3000 red palette.
+	ThemeFire ThemeID = "FIRE"
+)
+
+// Valid reports whether theme is supported by the appearance API and database.
+func (theme ThemeID) Valid() bool {
+	switch theme {
+	case ThemeTeamTaler, ThemeNRW, ThemeTiefImWesten, ThemeFire:
+		return true
+	default:
+		return false
+	}
+}
+
 // Membership describes one user's participation in a group.
 type Membership struct {
 	ID                     string                          `json:"id"`
@@ -243,6 +290,7 @@ type Membership struct {
 	RoleIDs                []string                        `json:"roleIds"`
 	EffectiveGrants        []PermissionGrant               `json:"effectiveGrants"`
 	RoleAssignmentsVersion int64                           `json:"roleAssignmentsVersion"`
+	ThemeOverride          *ThemeID                        `json:"themeOverride"`
 }
 
 const (
@@ -256,11 +304,12 @@ const (
 
 // Group is the top-level isolation and accounting boundary.
 type Group struct {
-	ID         string     `json:"id"`
-	Name       string     `json:"name"`
-	Currency   string     `json:"currency"`
-	LogoURL    string     `json:"logoUrl,omitempty"`
-	Membership Membership `json:"membership"`
+	ID           string     `json:"id"`
+	Name         string     `json:"name"`
+	Currency     string     `json:"currency"`
+	LogoURL      string     `json:"logoUrl,omitempty"`
+	DefaultTheme ThemeID    `json:"defaultTheme"`
+	Membership   Membership `json:"membership"`
 }
 
 // ReasonMode controls whether a transaction reason is hidden, optional, or
@@ -325,6 +374,7 @@ func (mode AttachmentMode) Required() bool { return mode == AttachmentModeRequir
 // GroupSettings contains administrator-managed behavior shared by every member
 // of one group.
 type GroupSettings struct {
+	DefaultTheme                 ThemeID            `json:"defaultTheme"`
 	NotificationEmailsEnabled    bool               `json:"notificationEmailsEnabled"`
 	SettlementsEnabled           bool               `json:"settlementsEnabled"`
 	DefaultRoleID                *string            `json:"defaultRoleId"`

@@ -21,12 +21,12 @@
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-md);
   color: var(--color-text);
-  background: var(--color-white);
+  background: var(--color-surface);
   font: inherit;
 }
 
 .search:focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--color-teal-600) 26%, transparent);
+  outline: 3px solid color-mix(in srgb, var(--color-brand-hover) 26%, transparent);
   outline-offset: 1px;
 }
 
@@ -48,13 +48,13 @@
   padding: 10px var(--space-3);
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-md);
-  background: var(--color-white);
+  background: var(--color-surface);
   cursor: pointer;
 }
 
 .option:has(input:checked) {
-  border-color: var(--color-teal-600);
-  background: var(--color-surface-teal);
+  border-color: var(--color-brand-hover);
+  background: var(--color-surface-brand-subtle);
 }
 
 .optionDisabled {
@@ -70,7 +70,7 @@
 
 .copy small {
   overflow: hidden;
-  color: var(--color-muted);
+  color: var(--color-text-muted);
   font-size: var(--font-size-xs);
   line-height: 1.35;
   text-overflow: ellipsis;
@@ -78,7 +78,7 @@
 }
 
 .restriction {
-  color: var(--color-teal-700);
+  color: var(--color-brand);
   font-size: var(--font-size-xs);
   font-style: normal;
   font-weight: 700;
@@ -88,7 +88,7 @@
 .empty {
   margin: 0;
   padding: var(--space-3);
-  color: var(--color-muted);
+  color: var(--color-text-muted);
   text-align: center;
 }
 

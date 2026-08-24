@@ -212,6 +212,38 @@ export type SettlementStatus = 'OPEN' | 'PARTIAL' | 'PAID' | 'CREDIT';
 /** Operational lifecycle state of one group membership. */
 export type MembershipStatus = 'ACTIVE' | 'ARCHIVED' | 'DELETED';
 
+/** Supported account-level color-scheme preferences. */
+export const COLOR_MODE_VALUES = ['SYSTEM', 'LIGHT', 'DARK'] as const;
+
+/** Account preference controlling how light and dark palettes are resolved. */
+export type ColorMode = typeof COLOR_MODE_VALUES[number];
+
+/** Stable identifiers for every predefined group color theme. */
+export const THEME_ID_VALUES = ['TEAMTALER', 'NRW', 'TIEF_IM_WESTEN', 'FIRE'] as const;
+
+/** One predefined group color theme. */
+export type ThemeId = typeof THEME_ID_VALUES[number];
+
+/**
+ * Determines whether an untrusted value is a supported color-mode preference.
+ *
+ * @param value - Wire or user-provided value to validate.
+ * @returns Whether the value belongs to the supported color-mode registry.
+ */
+export function isColorMode(value: unknown): value is ColorMode {
+  return typeof value === 'string' && COLOR_MODE_VALUES.some((mode) => mode === value);
+}
+
+/**
+ * Determines whether an untrusted value is a supported predefined theme.
+ *
+ * @param value - Wire or user-provided value to validate.
+ * @returns Whether the value belongs to the predefined theme registry.
+ */
+export function isThemeId(value: unknown): value is ThemeId {
+  return typeof value === 'string' && THEME_ID_VALUES.some((theme) => theme === value);
+}
+
 /** A signed-in user account. */
 export interface User {
   id: string;
@@ -258,20 +290,25 @@ export interface EmailChangeRequestResult {
   verificationRequired: true;
 }
 
+/** Current user's group membership projected into the authenticated session. */
+export interface SessionMembership {
+  id: string;
+  roles: GroupRole[];
+  groupPermissions: GroupPermission[];
+  roleIds?: string[];
+  effectiveGrants?: PermissionGrant[];
+  roleAssignmentsVersion?: number;
+  themeOverride: ThemeId | null;
+}
+
 /** A group available to the signed-in user. */
 export interface Group {
   id: string;
   name: string;
   currency: string;
   logoUrl?: string;
-  membership?: {
-    id: string;
-    roles: GroupRole[];
-    groupPermissions: GroupPermission[];
-    roleIds?: string[];
-    effectiveGrants?: PermissionGrant[];
-    roleAssignmentsVersion?: number;
-  };
+  defaultTheme: ThemeId;
+  membership?: SessionMembership;
 }
 
 /** One stable, ordered, administrator-managed transaction form option. */
@@ -308,6 +345,7 @@ export interface TransactionSettings {
 
 /** Administrator-managed group behavior shared by one group. */
 export interface GroupSettings {
+  defaultTheme: ThemeId;
   settlementsEnabled: boolean;
   notificationEmailsEnabled: boolean;
   notificationEmailDeliveryAvailable: boolean;
@@ -328,6 +366,7 @@ export interface GroupSettings {
  * Group notification-settings update accepted by the API.
  */
 export interface GroupSettingsUpdateInput {
+  defaultTheme?: ThemeId;
   settlementsEnabled?: boolean;
   notificationEmailsEnabled?: boolean;
   defaultRoleId?: string;
@@ -381,8 +420,19 @@ export interface Session {
   groups: Group[];
   activeGroupId: string | null;
   defaultGroupId: string | null;
+  colorMode: ColorMode;
   systemRoles: SystemRole[];
   demo?: boolean;
+}
+
+/** Persisted account-level appearance preference. */
+export interface AppearancePreference {
+  colorMode: ColorMode;
+}
+
+/** Persisted group-scoped theme override for the signed-in membership. */
+export interface ThemePreference {
+  themeOverride: ThemeId | null;
 }
 
 /** Provenance of one effective instance-setting value. */
@@ -664,6 +714,7 @@ export interface Membership {
   roleIds?: string[];
   effectiveGrants?: PermissionGrant[];
   roleAssignmentsVersion?: number;
+  themeOverride: ThemeId | null;
   status: MembershipStatus;
   active: boolean;
   etag?: string;

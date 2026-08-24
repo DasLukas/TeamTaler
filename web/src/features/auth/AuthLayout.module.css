@@ -9,13 +9,13 @@
   justify-content: space-between;
   flex-direction: column;
   padding: 48px;
-  color: var(--color-white);
-  background: linear-gradient(150deg, var(--color-navy-950), #06345e);
+  color: var(--color-navigation-text);
+  background: linear-gradient(150deg, var(--color-navigation), var(--color-navigation-gradient-end));
 }
 
 .brandPanel h1 {
   margin-bottom: var(--space-5);
-  color: var(--color-white);
+  color: var(--color-navigation-text);
   font-size: clamp(2.4rem, 4vw, 4.5rem);
   line-height: 1.03;
 }
@@ -23,7 +23,7 @@
 .brandPanel p {
   max-width: 500px;
   margin: 0;
-  color: rgb(255 255 255 / 76%);
+  color: var(--color-navigation-text-muted);
   font-size: var(--font-size-lg);
   line-height: 1.6;
 }
@@ -45,13 +45,13 @@
 
 .card > p {
   margin-bottom: var(--space-8);
-  color: var(--color-muted);
+  color: var(--color-text-muted);
   line-height: 1.55;
 }
 
 .card footer {
   margin-top: var(--space-6);
-  color: var(--color-muted);
+  color: var(--color-text-muted);
   font-size: var(--font-size-sm);
   text-align: center;
 }
@@ -59,9 +59,9 @@
 .mobileBrand { display: none; }
 
 @media (max-width: 767px) {
-  .layout { display: block; background: var(--color-white); }
+  .layout { display: block; background: var(--color-surface); }
   .brandPanel { display: none; }
   .formPanel { min-height: 100vh; place-items: start center; padding: 0 var(--space-5) var(--space-8); }
-  .mobileBrand { display: flex; width: calc(100% + 40px); min-height: 112px; align-items: center; margin: 0 -20px var(--space-8); padding: var(--space-5); background: var(--color-navy-950); }
+  .mobileBrand { display: flex; width: calc(100% + 40px); min-height: 112px; align-items: center; margin: 0 -20px var(--space-8); padding: var(--space-5); background: var(--color-navigation); }
   .card > h1 { font-size: 2rem; }
 }

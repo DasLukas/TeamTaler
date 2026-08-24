@@ -1,15 +1,15 @@
 .fieldset { display: grid; min-width: 0; gap: var(--space-3); margin: 0; padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-md); }
 .fieldset legend { padding: 0 var(--space-1); font-weight: 700; }
 .hint, .error { margin: 0; font-size: var(--font-size-sm); }
-.hint { color: var(--color-muted); }
-.error { color: var(--color-red-600); }
+.hint { color: var(--color-text-muted); }
+.error { color: var(--color-status-danger); }
 .hiddenInput { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
 .sourceActions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .selection { display: grid; min-width: 0; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); padding: var(--space-3); border-radius: var(--radius-md); background: var(--color-surface-muted); }
 .selection img { width: 48px; height: 48px; border-radius: var(--radius-sm); object-fit: cover; }
 .selection > span { display: grid; min-width: 0; gap: 2px; }
 .selection strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.selection small { color: var(--color-muted); }
+.selection small { color: var(--color-text-muted); }
 
 @media (max-width: 600px) {
   .sourceActions { display: grid; }

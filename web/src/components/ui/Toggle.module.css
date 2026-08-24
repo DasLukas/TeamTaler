@@ -7,7 +7,7 @@
   padding: 2px;
   border: 0;
   border-radius: var(--radius-full);
-  background: #b8c1cb;
+  background: var(--color-border-strong);
   transition: background var(--motion-normal);
 }
 
@@ -17,7 +17,7 @@
 }
 
 .checked {
-  background: var(--color-teal-700);
+  background: var(--color-brand);
 }
 
 .thumb {
@@ -25,8 +25,8 @@
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  background: var(--color-white);
-  box-shadow: 0 1px 3px rgb(3 24 47 / 30%);
+  background: var(--color-surface);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--color-shadow) 100%, transparent);
   transform: translateX(0);
   transition: transform var(--motion-normal);
 }

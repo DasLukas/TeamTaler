@@ -3,22 +3,22 @@
 .selector > button[role='combobox'] {
   min-height: 48px;
   padding: 0 12px;
-  border-color: rgb(255 255 255 / 24%);
-  color: var(--color-white);
+  border-color: color-mix(in srgb, var(--color-navigation-text) 24%, transparent);
+  color: var(--color-navigation-text);
   background: transparent;
 }
 
 .selector > button[role='combobox']:hover:not(:disabled) {
-  border-color: rgb(255 255 255 / 48%);
-  background: rgb(255 255 255 / 8%);
+  border-color: var(--color-border-on-brand);
+  background: var(--color-navigation-hover);
 }
 
 .selector > button[role='combobox']:focus-visible {
-  border-color: #53d7ce;
-  outline-color: rgb(83 215 206 / 36%);
+  border-color: var(--color-navigation-accent);
+  outline-color: color-mix(in srgb, var(--color-navigation-accent) 36%, transparent);
 }
 
-.selector > button[role='combobox'] > svg { color: rgb(255 255 255 / 80%); }
+.selector > button[role='combobox'] > svg { color: var(--color-navigation-text-muted); }
 
 .choice {
   display: flex;

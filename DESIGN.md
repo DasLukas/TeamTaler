@@ -10,6 +10,25 @@ This document is the durable source of truth for TeamTaler's visual language, re
 - Design member workflows mobile-first. Administrative workspaces may prioritize larger screens but must remain complete and usable on phones.
 - Use Lucide as the interface icon family. Icons clarify actions; they never replace an accessible name.
 
+## Appearance, color modes, and themes
+
+Appearance is a color-only layer over the stable TeamTaler component system. A theme may change brand, navigation, selection, focus, and decorative accent colors; it must not change typography, spacing, geometry, icons, content hierarchy, financial semantics, or product identity. Component styles consume semantic tokens rather than palette names or raw theme colors.
+
+The root document exposes the effective `data-theme` and resolved `data-color-scheme` attributes. `SYSTEM` follows the live `prefers-color-scheme` media query, while explicit `LIGHT` and `DARK` selections ignore later operating-system changes. Native controls use the matching CSS `color-scheme`. Public and signed-out surfaces always use the TeamTaler theme, but retain the locally mirrored account color mode to avoid a flash during startup. Authenticated group surfaces resolve their theme as the current membership override followed by the group's default.
+
+Every palette has complete light and dark variants for canvas, raised and muted surfaces, primary and muted text, borders, shadows, shell navigation, primary interaction, selected surfaces, focus, and decorative accents. Status colors remain semantic and independent: success stays green, warning stays amber or orange, and danger stays red even when a brand palette contains the same hue. Financial credit and outstanding-balance meanings remain unchanged.
+
+The four supported palettes use these immutable visual anchors:
+
+- **TeamTaler** preserves the existing navy and teal identity, led by `#03182f` and `#007c73`.
+- **NRW** uses green `#009136`, white `#ffffff`, and red `#e2001a`, sampled from the [official NRW flag image](https://www.im.nrw/themen/verwaltung/beflaggung-und-wappen/landesflagge). Controls use darker or lighter derived greens where the anchor itself does not meet text contrast.
+- **Tief im Westen** uses Bochum dark blue `#0f2864`, link blue `#002d9a`, bright blue `#0ab4ff`, and yellow `#ffcc01`, taken from the [official City of Bochum web presentation](https://www.bochum.de/Kultur-in-Bochum/Informationen-fuer-Kulturschaffende).
+- **Fire** uses the [official RAL 3000 web swatch](https://www.ral-farben.de/farbe/ral-classic/ral-3000/9127), `#962a27`, as its screen reference and combines it with ember amber and charcoal. The CSS value is a reproducible screen approximation, not a colorimetric substitute for a physical RAL sample.
+
+Normal text and controls meet WCAG AA contrast in all eight theme and color-scheme combinations. Focus indicators retain at least 3:1 contrast with adjacent colors. Bright anchors such as Bochum blue and yellow use dark foreground text; dark anchors use white. Theme previews show the immutable palette anchors listed above, while their selection, focus, surface, and text states continue to use the active semantic tokens.
+
+The account appearance controls apply and persist each selection immediately. A failed write restores both the previous rendered appearance and session cache. The current group default appears once in the personal picker with a visible `Gruppenstandard` badge; choosing it stores the durable null override instead of copying the current theme value, so later administrator changes continue to propagate. The group-administration default requires the standard explicit Save action because it changes every inheriting membership.
+
 ## Action buttons
 
 `web/src/components/ui/Button.tsx` is the only standard component for labelled actions. Feature code must not recreate its spacing, variants, or responsive behavior.

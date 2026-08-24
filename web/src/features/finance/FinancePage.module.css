@@ -2,8 +2,8 @@
 .page > header { margin-bottom: var(--space-4); }
 .tabs { display: flex; gap: var(--space-8); border-bottom: 1px solid var(--color-border); overflow-x: auto; }
 .tabs button { position: relative; min-height: 48px; padding: 0; border: 0; color: var(--color-text); background: transparent; white-space: nowrap; }
-.tabs .activeTab { color: var(--color-teal-700); font-weight: 700; }
-.tabs .activeTab::after { position: absolute; inset: auto 0 0; height: 3px; background: var(--color-teal-700); content: ''; }
+.tabs .activeTab { color: var(--color-brand); font-weight: 700; }
+.tabs .activeTab::after { position: absolute; inset: auto 0 0; height: 3px; background: var(--color-brand); content: ''; }
 .panel { min-height: 560px; }
 
 @media (max-width: 767px) {
