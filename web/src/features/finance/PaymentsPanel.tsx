@@ -19,6 +19,7 @@ import { formatGermanDate } from '@/features/shared/dateFormat';
 import tableStyles from '@/features/shared/Table.module.css';
 import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
 import styles from './PaymentsPanel.module.css';
 import { PaymentAttachmentAction } from './PaymentAttachmentAction';
 import { PaymentAttachmentField } from './PaymentAttachmentField';
@@ -36,6 +37,7 @@ export function PaymentsPanel() {
   const { activeGroupId, activeGroup } = useActiveGroup();
   const queryClient = useQueryClient();
   const { attachmentUploadMaxBytes } = useInstanceCapabilities();
+  const compact = useMediaQuery('(max-width: 600px)');
   const paymentFormId = useId();
   const reversalFormId = useId();
   const accountsQuery = useQuery({ queryKey: ['account-summaries', activeGroupId], queryFn: () => api.getAccountSummaries(activeGroupId) });
@@ -237,7 +239,7 @@ export function PaymentsPanel() {
         onLoadMore={() => void paymentsQuery.fetchNextPage()}
         {...tableState}
       />
-      <Modal onClose={closeRecordDialog} open={dialogOpen} title={t('finance.record')}>
+      <Modal onClose={closeRecordDialog} open={dialogOpen} title={t('finance.record')} variant={compact ? 'sheet' : 'dialog'}>
         <form className={styles.form} id={paymentFormId} onSubmit={(event) => { event.preventDefault(); paymentMutation.mutate(); }}>
           <Field htmlFor="payment-member" label={t('common.member')}>
             <SelectInput id="payment-member" onChange={(event) => setMembershipId(event.target.value)} value={membershipId || defaultAccount?.membershipId}>

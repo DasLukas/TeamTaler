@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AccountSummary } from '@/api/types';
+import modalStyles from '@/components/ui/Modal.module.css';
 import i18n from '@/i18n';
 import { PaymentsPanel } from './PaymentsPanel';
 
@@ -14,11 +15,13 @@ const apiMock = vi.hoisted(() => ({
   reversePayment: vi.fn(),
   getTransactionSettings: vi.fn(),
 }));
+const mediaQueryMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@/api/client', () => ({ api: apiMock }));
 vi.mock('@/app/useActiveGroup', () => ({
   useActiveGroup: () => ({ activeGroupId: 'group-a', activeGroup: { currency: 'EUR' } }),
 }));
+vi.mock('@/hooks/useMediaQuery', () => ({ useMediaQuery: (query: string) => mediaQueryMock(query) }));
 
 const accounts: AccountSummary[] = [
   { membershipId: 'member-active', displayName: 'Active Account', isTemporaryGuest: false, status: 'ACTIVE', currency: 'EUR', balance: { minorUnits: '0', currency: 'EUR' } },
@@ -37,6 +40,7 @@ function renderPayments(): void {
 describe('PaymentsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mediaQueryMock.mockReturnValue(false);
     window.history.replaceState({}, '', '/finance');
     apiMock.getPaymentsPage.mockResolvedValue({ hasMore: false, items: [], limit: 50 });
     apiMock.getAccountSummaries.mockResolvedValue(accounts);
@@ -48,6 +52,19 @@ describe('PaymentsPanel', () => {
       bookingReasons: [],
       paymentReasons: [{ id: 'CORRECTION', label: 'Korrektur' }],
     });
+  });
+
+  it('renders payment entry as a bottom sheet on compact screens', async () => {
+    const user = userEvent.setup();
+    mediaQueryMock.mockReturnValue(true);
+    renderPayments();
+
+    await user.click((await screen.findAllByRole('button', { name: i18n.t('finance.record') }))[0]);
+
+    const sheet = screen.getByRole('dialog', { name: i18n.t('finance.record') });
+    expect(mediaQueryMock).toHaveBeenCalledWith('(max-width: 600px)');
+    expect(sheet).toHaveClass(modalStyles.sheet);
+    expect(sheet.querySelector(`button[aria-label="${i18n.t('dialog.sheetHandle')}"]`)).toBeInTheDocument();
   });
 
   it('uses finance account summaries without requesting the protected member directory', async () => {

@@ -1,7 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import CalendarCheck from 'lucide-react/dist/esm/icons/calendar-check';
+import CircleCheck from 'lucide-react/dist/esm/icons/circle-check';
+import CircleDashed from 'lucide-react/dist/esm/icons/circle-dashed';
+import CircleDollarSign from 'lucide-react/dist/esm/icons/circle-dollar-sign';
 import LockKeyhole from 'lucide-react/dist/esm/icons/lock-keyhole';
 import Printer from 'lucide-react/dist/esm/icons/printer';
+import WalletCards from 'lucide-react/dist/esm/icons/wallet-cards';
 import X from 'lucide-react/dist/esm/icons/x';
 import { useDeferredValue, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -18,6 +22,7 @@ import { formatGermanDate } from '@/features/shared/dateFormat';
 import tableStyles from '@/features/shared/Table.module.css';
 import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
 import styles from './SettlementsPanel.module.css';
 
 type SettlementFilterId = 'periodId' | 'membershipId' | 'dueAt' | 'amount' | 'status';
@@ -39,6 +44,7 @@ export function SettlementsPanel({ settlements, settlementsEnabled }: Settlement
   const { t } = useTranslation();
   const { activeGroupId } = useActiveGroup();
   const queryClient = useQueryClient();
+  const compact = useMediaQuery('(max-width: 600px)');
   const closePeriodFormId = useId();
   const labels = useDataTableLabels();
   const periodsQuery = useQuery({ queryKey: ['periods', activeGroupId], queryFn: () => api.getPeriods(activeGroupId), enabled: settlementsEnabled });
@@ -63,14 +69,17 @@ export function SettlementsPanel({ settlements, settlementsEnabled }: Settlement
     { fromLabel: t('dataTable.from'), id: 'dueAt', kind: 'date-range', label: t('periods.due'), toLabel: t('dataTable.to') },
     { id: 'amount', kind: 'number-range', label: t('periods.claim'), maximumLabel: t('dataTable.maximum'), minimumLabel: t('dataTable.minimum'), step: 0.01 },
     {
+      allLabel: t('dataTable.allValues'),
+      dropdown: true,
+      emptyLabel: t('dataTable.noOptions'),
       id: 'status',
       kind: 'multi-select',
-      label: t('common.status'),
+      label: t('financeWorkspace.balanceState'),
       options: [
-        { label: t('common.open'), value: 'OPEN' },
-        { label: t('common.partiallyPaid'), value: 'PARTIAL' },
-        { label: t('common.paid'), value: 'PAID' },
-        { label: t('common.credit'), value: 'CREDIT' },
+        { label: t('common.open'), value: 'OPEN', visual: <CircleDollarSign size={19} /> },
+        { label: t('common.partiallyPaid'), value: 'PARTIAL', visual: <CircleDashed size={19} /> },
+        { label: t('common.paid'), value: 'PAID', visual: <CircleCheck size={19} /> },
+        { label: t('common.credit'), value: 'CREDIT', visual: <WalletCards size={19} /> },
       ],
     },
   ], [settlements, t]);
@@ -140,9 +149,9 @@ export function SettlementsPanel({ settlements, settlementsEnabled }: Settlement
       accessorKey: 'status',
       cell: ({ row }) => <span className={`${tableStyles.status} ${row.original.status === 'PARTIAL' || row.original.status === 'OPEN' ? tableStyles.statusWarning : ''}`}>{row.original.status === 'PAID' ? t('common.paid') : row.original.status === 'PARTIAL' ? t('common.partiallyPaid') : row.original.status === 'CREDIT' ? t('common.credit') : t('common.open')}</span>,
       enableSorting: true,
-      header: t('common.status'),
+      header: t('financeWorkspace.balanceState'),
       id: 'status',
-      meta: { label: t('common.status') },
+      meta: { label: t('financeWorkspace.balanceState') },
     },
     { cell: () => <Button leadingIcon={<Printer size={16} />} onClick={() => window.print()} size="small" variant="ghost">{t('common.print')}</Button>, enableSorting: false, header: () => <span className="sr-only">{t('common.action')}</span>, id: 'action', meta: { label: t('common.action') } },
   ], [t]);
@@ -166,7 +175,7 @@ export function SettlementsPanel({ settlements, settlementsEnabled }: Settlement
         minTableWidth="980px"
         {...tableState}
       />
-      <Modal onClose={() => setPeriodToClose(null)} open={Boolean(periodToClose)} title={t('periods.closeDialog')}>
+      <Modal onClose={() => setPeriodToClose(null)} open={Boolean(periodToClose)} title={t('periods.closeDialog')} variant={compact ? 'sheet' : 'dialog'}>
         <form className={styles.form} id={closePeriodFormId} onSubmit={(event) => { event.preventDefault(); closeMutation.mutate(); }}>
           <p>{t('periods.closeExplanation')}</p>
           <Field htmlFor="period-label" label={t('periods.label')}><TextInput id="period-label" onChange={(event) => setLabel(event.target.value)} required value={label} /></Field>
