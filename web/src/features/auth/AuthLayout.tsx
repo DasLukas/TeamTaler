@@ -29,7 +29,6 @@ export function AuthLayout({ title, intro, children, footer }: AuthLayoutProps) 
         </div>
       </section>
       <section className={styles.formPanel}>
-        <div className={styles.mobileBrand}><Brand /></div>
         <div className={styles.card}>
           <h1>{title}</h1>
           <p>{intro}</p>
