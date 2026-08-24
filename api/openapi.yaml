@@ -2509,13 +2509,13 @@ paths:
   /groups/{groupId}/activities/filter-options:
     get:
       tags: [Activities]
-      summary: List member and booking options available in the authorized activity feed
-      description: Derives distinct target identities, categories, and products from the same permission-scoped source set as the unified feed, including historical product tombstones.
+      summary: List filter options available in the authorized activity feed
+      description: Derives distinct transaction kinds, target identities, categories, and products from the same permission-scoped source set as the unified feed, including historical product tombstones.
       parameters:
         - $ref: '#/components/parameters/GroupId'
       responses:
         '200':
-          description: Privacy-minimized activity member catalog
+          description: Permission-scoped activity filter catalog
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ActivityFilterOptions' }
@@ -3974,8 +3974,12 @@ components:
     ActivityFilterOptions:
       type: object
       additionalProperties: false
-      required: [members, categories, products]
+      required: [kinds, members, categories, products]
       properties:
+        kinds:
+          type: array
+          description: Distinct transaction kinds present in the caller's authorized unified feed.
+          items: { $ref: '#/components/schemas/ActivityKind' }
         members:
           type: array
           description: Distinct targets present in the caller's authorized unified feed.
@@ -5212,6 +5216,9 @@ components:
         actorAvatarUrl: { type: string }
         detailName: { type: string }
         detailNote: { type: string }
+        paymentMethod:
+          type: string
+          description: Stable payment-method identifier used to localize built-in immutable label snapshots.
         categoryId: { type: string }
         categoryName: { type: string }
         productId: { type: string }
@@ -5220,7 +5227,10 @@ components:
           allOf: [{ $ref: '#/components/schemas/MinorUnits' }]
           description: Signed visible receivable effect; bookings are positive and payments negative.
         currency: { type: string, pattern: '^[A-Z]{3}$' }
-        occurredAt: { type: string, format: date-time }
+        occurredAt:
+          type: string
+          format: date-time
+          description: Audited creation time of the activity; payment value dates remain available on the finance payment resource.
         status: { type: string, enum: [POSTED, REVERSED] }
         attachment: { $ref: '#/components/schemas/PaymentAttachmentSummary' }
         canReverse:

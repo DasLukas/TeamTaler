@@ -8,12 +8,12 @@ describe('API adapters', () => {
       id: 'payment:pay-a', sourceId: 'pay-a', kind: 'PAYMENT',
       targetMembershipId: 'member-a', targetDisplayName: 'Alex', targetMembershipStatus: 'ACTIVE',
       actorMembershipId: 'member-manager', actorDisplayName: 'Manager', actorMembershipStatus: 'ARCHIVED',
-      detailName: 'Bank transfer', detailNote: 'August', amountMinor: '-1250', currency: 'EUR',
+      detailName: 'Cash', detailNote: 'August', paymentMethod: 'CASH', amountMinor: '-1250', currency: 'EUR',
       occurredAt: '2026-08-20T10:00:00Z', status: 'POSTED', canReverse: true,
       reversalReasonRequired: true, attachment: { fileName: 'receipt.pdf', mediaType: 'application/pdf', sizeBytes: 42, url: '/receipt' },
     })).toMatchObject({
       id: 'payment:pay-a', sourceId: 'pay-a', kind: 'PAYMENT', amount: { minorUnits: '-1250', currency: 'EUR' },
-      actorMembershipStatus: 'ARCHIVED', canReverse: true, reversalReasonRequired: true,
+      actorMembershipStatus: 'ARCHIVED', detailName: 'Bar', paymentMethod: 'CASH', canReverse: true, reversalReasonRequired: true,
       attachment: { fileName: 'receipt.pdf' },
     });
   });

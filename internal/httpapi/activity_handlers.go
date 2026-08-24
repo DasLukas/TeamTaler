@@ -41,8 +41,8 @@ func (s *Server) handleActivities(response http.ResponseWriter, request *http.Re
 	writeJSON(response, http.StatusOK, page.Items)
 }
 
-// handleActivityFilterOptions returns member and booking catalog choices from
-// the same authorized source scope as handleActivities.
+// handleActivityFilterOptions returns transaction kind, member, and booking
+// catalog choices from the same authorized source scope as handleActivities.
 func (s *Server) handleActivityFilterOptions(response http.ResponseWriter, request *http.Request) {
 	_, membership, err := s.membership(request)
 	if err != nil {

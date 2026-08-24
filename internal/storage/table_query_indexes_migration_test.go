@@ -23,6 +23,7 @@ func TestTableQueryIndexesMigration(t *testing.T) {
 		"bookings_group_product_created_page_idx", "payments_group_received_page_idx",
 		"payments_group_member_received_page_idx", "payments_group_method_received_page_idx",
 		"payments_group_reversed_received_page_idx", "ledger_member_movements_page_idx",
+		"payments_group_created_page_idx", "payments_group_member_created_page_idx",
 		"audit_group_time_page_idx", "audit_group_actor_time_page_idx",
 		"audit_group_action_time_page_idx", "audit_group_resource_time_page_idx",
 		"system_audit_time_page_idx", "system_audit_actor_time_page_idx", "system_audit_action_time_page_idx",
@@ -44,9 +45,16 @@ func TestTableQueryIndexesMigration(t *testing.T) {
 	if migrationCount != 1 {
 		t.Fatalf("migration ledger count = %d, want 1", migrationCount)
 	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version='0039_activity_payment_created_indexes.sql'`).Scan(&migrationCount); err != nil {
+		t.Fatalf("read activity payment index migration ledger: %v", err)
+	}
+	if migrationCount != 1 {
+		t.Fatalf("activity payment index migration ledger count = %d, want 1", migrationCount)
+	}
 
 	assertQueryPlanUsesIndex(t, db, `SELECT id FROM bookings WHERE group_id=? ORDER BY strftime('%Y-%m-%dT%H:%M:%fZ',created_at) DESC,id DESC LIMIT 101`, "bookings_group_created_page_idx", "grp")
 	assertQueryPlanUsesIndex(t, db, `SELECT id FROM payments WHERE group_id=? ORDER BY strftime('%Y-%m-%dT%H:%M:%fZ',received_at) DESC,id DESC LIMIT 101`, "payments_group_received_page_idx", "grp")
+	assertQueryPlanUsesIndex(t, db, `SELECT id FROM payments WHERE group_id=? ORDER BY strftime('%Y-%m-%dT%H:%M:%fZ',created_at) DESC,id DESC LIMIT 101`, "payments_group_created_page_idx", "grp")
 	assertQueryPlanUsesIndex(t, db, `SELECT id FROM ledger_entries WHERE group_id=? AND membership_id=? AND account='MEMBER_RECEIVABLE' ORDER BY strftime('%Y-%m-%dT%H:%M:%fZ',created_at) DESC,id DESC LIMIT 101`, "ledger_member_movements_page_idx", "grp", "mem")
 	assertQueryPlanUsesIndex(t, db, `SELECT id FROM audit_events WHERE group_id=? ORDER BY strftime('%Y-%m-%dT%H:%M:%fZ',occurred_at) DESC,id DESC LIMIT 101`, "audit_group_time_page_idx", "grp")
 	assertQueryPlanUsesIndex(t, db, `SELECT id FROM system_audit_events ORDER BY strftime('%Y-%m-%dT%H:%M:%fZ',occurred_at) DESC,id DESC LIMIT 101`, "system_audit_time_page_idx")

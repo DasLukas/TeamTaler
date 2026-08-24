@@ -162,6 +162,8 @@ export interface DataTableProps<Data extends RowData, FilterId extends string = 
   emptyContent: ReactNode;
   filterDefinitions?: readonly DataTableFilterDefinition<FilterId>[];
   filters?: DataTableFilterState<FilterId>;
+  /** Fills the available block size while keeping only the table viewport scrollable. */
+  fillAvailableHeight?: boolean;
   getRowId?: (row: Data, index: number) => string;
   hasMore?: boolean;
   isLoading?: boolean;
@@ -612,6 +614,7 @@ export function DataTable<Data extends RowData, FilterId extends string = string
   emptyContent,
   filterDefinitions,
   filters,
+  fillAvailableHeight = false,
   getRowId,
   hasMore = false,
   isLoading = false,
@@ -644,7 +647,7 @@ export function DataTable<Data extends RowData, FilterId extends string = string
   });
 
   return (
-    <div className={styles.root}>
+    <div className={`${styles.root} ${fillAvailableHeight ? styles.fillAvailableHeight : ''}`}>
       {showControls ? <DataTableControls
         definitions={resolvedFilterDefinitions}
         filters={resolvedFilters}

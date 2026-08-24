@@ -511,7 +511,9 @@ export class DemoTransport {
       const members = new Map<string, ActivityFilterOptions['members'][number]>();
       const categories = new Map<string, ActivityFilterOptions['categories'][number]>();
       const products = new Map<string, ActivityFilterOptions['products'][number]>();
+      const kinds = new Set<ActivityFilterOptions['kinds'][number]>();
       for (const activity of activities) {
+        kinds.add(activity.kind);
         members.set(activity.targetMembershipId, {
           membershipId: activity.targetMembershipId,
           displayName: activity.targetDisplayName,
@@ -535,6 +537,7 @@ export class DemoTransport {
       }
       const collator = new Intl.Collator('de-DE', { numeric: true, sensitivity: 'base' });
       const options: ActivityFilterOptions = {
+        kinds: (['BOOKING', 'PAYMENT', 'ADJUSTMENT'] as const).filter((kind) => kinds.has(kind)),
         members: [...members.values()].sort((left, right) => collator.compare(left.displayName, right.displayName)),
         categories: [...categories.values()].sort((left, right) => collator.compare(left.name, right.name)),
         products: [...products.values()].sort((left, right) => collator.compare(left.name, right.name)),
@@ -1212,8 +1215,9 @@ export class DemoTransport {
         actorAvatarUrl: payment.actorAvatarUrl,
         detailName: payment.methodLabel,
         detailNote: payment.reference ?? payment.note,
+        paymentMethod: payment.method,
         amount: { ...payment.amount, minorUnits: (-BigInt(payment.amount.minorUnits)).toString() },
-        occurredAt: payment.receivedAt,
+        occurredAt: payment.createdAt ?? payment.receivedAt,
         status: payment.status,
         attachment: payment.attachment,
         canReverse: canManageFinance && payment.status === 'POSTED',
@@ -1777,6 +1781,7 @@ export class DemoTransport {
       actorName: actor.displayName,
       actorStatus: actor.status,
       actorAvatarUrl: actor.avatarUrl,
+      createdAt: new Date().toISOString(),
       status: 'POSTED',
       ...command,
       reference: effectiveReference,

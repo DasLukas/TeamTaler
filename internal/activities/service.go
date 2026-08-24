@@ -48,6 +48,7 @@ type Entry struct {
 	ActorAvatarURL             string                           `json:"actorAvatarUrl,omitempty"`
 	DetailName                 string                           `json:"detailName"`
 	DetailNote                 string                           `json:"detailNote,omitempty"`
+	PaymentMethod              string                           `json:"paymentMethod,omitempty"`
 	CategoryID                 string                           `json:"categoryId,omitempty"`
 	CategoryName               string                           `json:"categoryName,omitempty"`
 	ProductID                  string                           `json:"productId,omitempty"`
@@ -113,12 +114,44 @@ type ProductFilterOption struct {
 	ImageURL   string `json:"imageUrl,omitempty"`
 }
 
-// FilterOptions contains every member, category, and product choice derived
-// from the authorized feed.
+// FilterOptions contains every transaction kind, member, category, and product
+// choice derived from the authorized feed.
 type FilterOptions struct {
+	Kinds      []Kind                 `json:"kinds"`
 	Members    []MemberFilterOption   `json:"members"`
 	Categories []CategoryFilterOption `json:"categories"`
 	Products   []ProductFilterOption  `json:"products"`
+}
+
+func (s Service) listKindFilterOptions(ctx context.Context, membership domain.Membership, access permissions) ([]Kind, error) {
+	query, args := visibleActivityCTE(membership, access)
+	query += ` SELECT DISTINCT kind FROM activity`
+	rows, err := s.DB.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list unified activity kind filter options: %w", err)
+	}
+	defer rows.Close()
+	present := make(map[Kind]struct{})
+	for rows.Next() {
+		var kind Kind
+		if err := rows.Scan(&kind); err != nil {
+			return nil, err
+		}
+		switch kind {
+		case KindBooking, KindPayment, KindAdjustment:
+			present[kind] = struct{}{}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	options := make([]Kind, 0, len(present))
+	for _, kind := range []Kind{KindBooking, KindPayment, KindAdjustment} {
+		if _, exists := present[kind]; exists {
+			options = append(options, kind)
+		}
+	}
+	return options, nil
 }
 
 // Service queries unified activities from the shared application database.
@@ -248,7 +281,7 @@ func visibleActivityCTE(membership domain.Membership, access permissions) (strin
 			actor_member.id AS actor_membership_id,actor_user.display_name AS actor_name,
 			CASE WHEN actor_member.deleted_at IS NOT NULL THEN 'DELETED' ELSE actor_member.status END AS actor_status,
 			actor_user.id AS actor_user_id,coalesce(actor_user.avatar_key,'') AS actor_avatar_key,
-			b.product_name AS detail_name,coalesce(b.reason,'') AS detail_note,b.category_id,b.category_name,b.product_id,b.quantity,
+			b.product_name AS detail_name,coalesce(b.reason,'') AS detail_note,NULL AS payment_method,b.category_id,b.category_name,b.product_id,b.quantity,
 			b.total_minor AS amount_minor,g.currency,b.created_at AS occurred_at,
 			CASE WHEN b.voided_at IS NULL THEN 'POSTED' ELSE 'REVERSED' END AS status,
 			NULL AS attachment_name,NULL AS attachment_type,NULL AS attachment_size
@@ -266,8 +299,8 @@ func visibleActivityCTE(membership domain.Membership, access permissions) (strin
 			actor_member.id,actor_user.display_name,
 			CASE WHEN actor_member.deleted_at IS NOT NULL THEN 'DELETED' ELSE actor_member.status END,
 			actor_user.id,coalesce(actor_user.avatar_key,''),
-			coalesce(nullif(p.method_label,''),p.method),coalesce(nullif(p.reference,''),nullif(p.note,''),''),NULL,'',NULL,NULL,
-			-p.amount_minor,g.currency,p.received_at,
+			coalesce(nullif(p.method_label,''),p.method),coalesce(nullif(p.reference,''),nullif(p.note,''),''),p.method,NULL,'',NULL,NULL,
+			-p.amount_minor,g.currency,p.created_at,
 			CASE WHEN p.reversed_at IS NULL THEN 'POSTED' ELSE 'REVERSED' END,
 			attachment.original_filename,attachment.media_type,attachment.size_bytes
 		FROM payments p JOIN groups g ON g.id=p.group_id
@@ -282,7 +315,7 @@ func visibleActivityCTE(membership domain.Membership, access permissions) (strin
 			target_member.id,target_user.display_name,
 			CASE WHEN target_member.deleted_at IS NOT NULL THEN 'DELETED' ELSE target_member.status END,
 			target_user.id,coalesce(target_user.avatar_key,''),
-			NULL,'','',NULL,'',entry.description,'',NULL,'',NULL,NULL,
+			NULL,'','',NULL,'',entry.description,'',NULL,NULL,'',NULL,NULL,
 			entry.amount_minor,g.currency,entry.created_at,'POSTED',NULL,NULL,NULL
 		FROM ledger_entries entry JOIN groups g ON g.id=entry.group_id
 		JOIN memberships target_member ON target_member.group_id=entry.group_id AND target_member.id=entry.membership_id
@@ -466,7 +499,7 @@ func (s Service) QueryEntries(ctx context.Context, membership domain.Membership,
 	for rows.Next() {
 		var item Entry
 		var periodID, actorMembershipID, actorName, actorStatus, actorUserID, actorAvatarKey sql.NullString
-		var categoryID, categoryName, productID sql.NullString
+		var paymentMethod, categoryID, categoryName, productID sql.NullString
 		var quantity sql.NullInt64
 		var attachmentName, attachmentType sql.NullString
 		var attachmentSize sql.NullInt64
@@ -475,7 +508,7 @@ func (s Service) QueryEntries(ctx context.Context, membership domain.Membership,
 			&item.ID, &item.SourceID, &periodID, &item.Kind,
 			&item.TargetMembershipID, &item.TargetDisplayName, &item.TargetMembershipStatus, &targetUserID, &targetAvatarKey,
 			&actorMembershipID, &actorName, &actorStatus, &actorUserID, &actorAvatarKey,
-			&item.DetailName, &item.DetailNote, &categoryID, &categoryName, &productID, &quantity,
+			&item.DetailName, &item.DetailNote, &paymentMethod, &categoryID, &categoryName, &productID, &quantity,
 			&item.AmountMinor, &item.Currency, &item.OccurredAt, &item.Status,
 			&attachmentName, &attachmentType, &attachmentSize, &sortKey,
 		); err != nil {
@@ -490,6 +523,7 @@ func (s Service) QueryEntries(ctx context.Context, membership domain.Membership,
 			item.ActorAvatarURL = media.UserAvatarURL(actorUserID.String, actorAvatarKey.String)
 		}
 		item.CategoryID = categoryID.String
+		item.PaymentMethod = paymentMethod.String
 		item.CategoryName = categoryName.String
 		item.ProductID = productID.String
 		item.Quantity = int(quantity.Int64)
@@ -600,7 +634,7 @@ func (s Service) listCatalogFilterOptions(ctx context.Context, membership domain
 	return categories, products, nil
 }
 
-// ListFilterOptions returns every target, category, and product reachable
+// ListFilterOptions returns every kind, target, category, and product reachable
 // through the same authorization boundary as QueryEntries.
 //
 // Parameters:
@@ -617,6 +651,10 @@ func (s Service) ListFilterOptions(ctx context.Context, membership domain.Member
 	if err != nil {
 		return FilterOptions{}, err
 	}
+	kinds, err := s.listKindFilterOptions(ctx, membership, access)
+	if err != nil {
+		return FilterOptions{}, err
+	}
 	members, err := s.listMemberFilterOptions(ctx, membership, access)
 	if err != nil {
 		return FilterOptions{}, err
@@ -625,5 +663,5 @@ func (s Service) ListFilterOptions(ctx context.Context, membership domain.Member
 	if err != nil {
 		return FilterOptions{}, err
 	}
-	return FilterOptions{Members: members, Categories: categories, Products: products}, nil
+	return FilterOptions{Kinds: kinds, Members: members, Categories: categories, Products: products}, nil
 }

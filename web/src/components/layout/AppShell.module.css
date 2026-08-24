@@ -70,8 +70,15 @@
 }
 
 @media (max-width: 767px) {
+  .shell {
+    display: flex;
+    min-height: 100dvh;
+    flex-direction: column;
+  }
+
   .main {
-    min-height: calc(100vh - var(--bottom-nav-height));
+    min-height: 0;
+    flex: 1 0 auto;
     margin-left: 0;
     padding-right: var(--shell-safe-area-right);
     padding-bottom: calc(var(--bottom-nav-height) + var(--shell-safe-area-bottom));

@@ -143,7 +143,9 @@ export function ActivitiesPage() {
       options: [
         { label: t('activities.bookingType'), value: 'BOOKING', visual: <BookOpenCheck aria-hidden="true" size={19} /> },
         { label: t('activities.paymentType'), value: 'PAYMENT', visual: <CircleDollarSign aria-hidden="true" size={19} /> },
-        { label: t('activities.adjustmentType'), value: 'ADJUSTMENT', visual: <Scale aria-hidden="true" size={19} /> },
+        ...(filterOptionsQuery.data?.kinds.includes('ADJUSTMENT')
+          ? [{ label: t('activities.adjustmentType'), value: 'ADJUSTMENT', visual: <Scale aria-hidden="true" size={19} /> }]
+          : []),
       ],
     },
     {
@@ -203,7 +205,7 @@ export function ActivitiesPage() {
       minimumLabel: t('dataTable.minimum'),
       step: 0.01,
     },
-  ], [activeGroup.currency, categoryIcons, filterOptionsQuery.data?.categories, filterOptionsQuery.data?.products, memberFilterOptions, t]);
+  ], [activeGroup.currency, categoryIcons, filterOptionsQuery.data?.categories, filterOptionsQuery.data?.kinds, filterOptionsQuery.data?.products, memberFilterOptions, t]);
   const tableState = useDataTableUrlState<ActivityFilterId>({
     filterDefinitions,
     initialSorting: [{ id: 'occurredAt', desc: true }],
@@ -365,22 +367,23 @@ export function ActivitiesPage() {
           columns={columns}
           data={activities}
           emptyContent={activitiesQuery.isError ? t('activities.error') : t('activities.noResults')}
+          fillAvailableHeight
           filterDefinitions={filterDefinitions}
           getRowId={(activity) => activity.id}
           hasMore={activitiesQuery.hasNextPage}
           isLoading={activitiesQuery.isLoading}
           isLoadingMore={activitiesQuery.isFetchingNextPage}
           labels={{ ...labels, searchLabel: t('activities.searchLabel'), searchPlaceholder: t('activities.searchPlaceholder') }}
-          minTableWidth="1240px"
+          minTableWidth="1480px"
           onLoadMore={() => void activitiesQuery.fetchNextPage()}
           {...tableState}
         />
       </div>
-      <Modal onClose={() => { setReversal(null); setReason(''); }} open={Boolean(reversal)} title={t(reversingPayment ? 'finance.reverseTitle' : 'activities.reverseTitle')}>
+      <Modal onClose={() => { setReversal(null); setReason(''); }} open={Boolean(reversal)} title={t(reversingPayment ? 'finance.reverseTitle' : 'activities.reverseTitle')} variant="sheet">
         <form className={styles.reversalForm} id={reversalFormId} onSubmit={(event) => { event.preventDefault(); reverseMutation.mutate(); }}>
           <p>{t(reversingPayment ? 'finance.reverseExplanation' : 'activities.reverseExplanation')}</p>
           {reversal?.reversalWithoutReasonUntil && !reversal.reversalReasonRequired ? <p className={styles.windowNotice}>{t('activities.reasonOptionalUntil', { time: new Intl.DateTimeFormat('de-DE', { timeStyle: 'short' }).format(new Date(reversal.reversalWithoutReasonUntil)) })}</p> : null}
-          <Field hint={reversal?.reversalReasonRequired ? t('activities.reasonRequired') : t('activities.reasonOptional')} htmlFor="reversal-reason" label={t('finance.reason')}>
+          <Field hint={reversal?.reversalReasonRequired ? undefined : t('activities.reasonOptional')} htmlFor="reversal-reason" label={`${t('finance.reason')}${reversal?.reversalReasonRequired ? ' *' : ''}`}>
             <TextInput id="reversal-reason" onChange={(event) => setReason(event.target.value)} required={reversal?.reversalReasonRequired} value={reason} />
           </Field>
           {reverseMutation.isError ? <p className={styles.error} role="alert">{reverseMutation.error.message}</p> : null}

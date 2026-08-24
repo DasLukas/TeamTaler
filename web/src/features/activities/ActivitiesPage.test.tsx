@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActivityEntry, ActivityFilterOptions, CollectionPage, Session } from '@/api/types';
 import { ActiveGroupContext } from '@/app/active-group-context';
+import modalStyles from '@/components/ui/Modal.module.css';
 import i18n from '@/i18n';
 import { ActivitiesPage } from './ActivitiesPage';
 
@@ -88,6 +89,7 @@ const adjustment: ActivityEntry = {
 };
 
 const filterOptions: ActivityFilterOptions = {
+  kinds: ['BOOKING', 'PAYMENT', 'ADJUSTMENT'],
   members: [{ membershipId: 'member-target', displayName: 'Target Member', avatarUrl: '/avatars/target.png' }],
   categories: [{ categoryId: 'category-penalties', name: 'Penalties', icon: 'penalty' }],
   products: [{ productId: 'product-penalty', categoryId: 'category-penalties', name: 'Late arrival', imageUrl: '/images/late-arrival.png' }],
@@ -146,6 +148,22 @@ describe('ActivitiesPage unified feed', () => {
     await waitFor(() => expect(apiMock.getActivityFilterOptions).toHaveBeenCalledTimes(2));
   });
 
+  it('hides the correction filter when the authorized feed has no corrections', async () => {
+    const user = userEvent.setup();
+    apiMock.getActivityFilterOptions.mockResolvedValue({ ...filterOptions, kinds: ['BOOKING', 'PAYMENT'] });
+    renderActivities();
+
+    await screen.findByRole('table', { name: i18n.t('activities.title') });
+    await user.click(screen.getByRole('button', { name: i18n.t('dataTable.filterButton') }));
+    const filterDialog = screen.getByRole('dialog', { name: i18n.t('dataTable.filterHeading') });
+    await user.click(within(filterDialog).getByRole('button', { name: i18n.t('activities.transaction') }));
+    const kindMenu = screen.getByRole('dialog', { name: i18n.t('activities.transaction') });
+
+    expect(within(kindMenu).getByRole('checkbox', { name: i18n.t('activities.bookingType') })).toBeVisible();
+    expect(within(kindMenu).getByRole('checkbox', { name: i18n.t('activities.paymentType') })).toBeVisible();
+    expect(within(kindMenu).queryByRole('checkbox', { name: i18n.t('activities.adjustmentType') })).not.toBeInTheDocument();
+  });
+
   it('sends member, repeated type, category, and product filters to the unified endpoint', async () => {
     const user = userEvent.setup();
     renderActivities();
@@ -197,8 +215,12 @@ describe('ActivitiesPage unified feed', () => {
     expect(await screen.findByRole('dialog', { name: 'receipt.jpg' })).toBeVisible();
     expect(apiMock.getPaymentAttachment).toHaveBeenCalledWith('group-a', 'payment-a');
     await user.click(within(paymentRow).getByRole('button', { name: i18n.t('activities.reverse') }));
-    expect(screen.getByRole('heading', { name: i18n.t('finance.reverseTitle') })).toBeVisible();
-    const reason = screen.getByLabelText(i18n.t('finance.reason'));
+    const reversalDialog = screen.getByRole('dialog', { name: i18n.t('finance.reverseTitle') });
+    expect(reversalDialog).toHaveClass(modalStyles.sheet);
+    expect(reversalDialog.querySelector(`button[aria-label="${i18n.t('dialog.sheetHandle')}"]`)).toBeInTheDocument();
+    const reason = screen.getByLabelText(`${i18n.t('finance.reason')} *`);
+    expect(reason).toBeRequired();
+    expect(screen.queryByText(i18n.t('activities.reasonRequired'))).not.toBeInTheDocument();
     await user.type(reason, 'Duplicate payment');
     await user.click(screen.getByRole('button', { name: i18n.t('finance.confirmReverse') }));
     await waitFor(() => expect(apiMock.reversePayment).toHaveBeenCalledWith('group-a', 'payment-a', 'Duplicate payment'));
@@ -220,6 +242,7 @@ describe('ActivitiesPage unified feed', () => {
     expect(await screen.findByRole('img', { name: i18n.t('common.reversed') })).toBeVisible();
     await user.click(screen.getByRole('button', { name: i18n.t('activities.reverse') }));
     expect(screen.getByLabelText(i18n.t('finance.reason'))).not.toBeRequired();
+    expect(screen.queryByLabelText(`${i18n.t('finance.reason')} *`)).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: i18n.t('activities.confirmReverse') }));
     await waitFor(() => expect(apiMock.reverseBooking).toHaveBeenCalledWith('group-a', 'reversible', ''));
   });

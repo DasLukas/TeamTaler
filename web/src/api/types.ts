@@ -85,8 +85,9 @@ export interface ActivityProductFilterOption {
   imageUrl?: string;
 }
 
-/** Complete member and booking catalog derived from the authorized unified feed. */
+/** Complete transaction-kind, member, and booking catalog derived from the authorized unified feed. */
 export interface ActivityFilterOptions {
+  kinds: ActivityKind[];
   members: MemberFilterOption[];
   categories: ActivityCategoryFilterOption[];
   products: ActivityProductFilterOption[];
@@ -769,6 +770,7 @@ export interface ActivityEntry {
   actorAvatarUrl?: string;
   detailName: string;
   detailNote?: string;
+  paymentMethod?: Payment['method'];
   categoryId?: string;
   categoryName?: string;
   productId?: string;
@@ -898,6 +900,7 @@ export interface Payment {
   actorAvatarUrl?: string;
   amount: Money;
   receivedAt: string;
+  createdAt?: string;
   method: string;
   methodLabel: string;
   reference?: string;

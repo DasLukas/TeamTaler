@@ -1288,6 +1288,7 @@ describe('server-backed collection API contract', () => {
     const bookingOptions = { members: [{ membershipId: 'member-a', displayName: 'Alex', avatarUrl: '/avatars/alex.png' }] };
     const activityOptions = {
       ...bookingOptions,
+      kinds: ['BOOKING', 'PAYMENT', 'ADJUSTMENT'],
       categories: [{ categoryId: 'category-a', name: 'Penalties', icon: 'penalty' }],
       products: [{ productId: 'product-a', categoryId: 'category-a', name: 'Late arrival' }],
     };

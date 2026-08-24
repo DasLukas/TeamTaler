@@ -953,6 +953,11 @@ export function adaptBooking(input: unknown, members?: Membership[], fallbackMem
 export function adaptActivity(input: unknown): ActivityEntry {
   const source = asRecord(input);
   const attachment = paymentAttachmentSummary(source.attachment);
+  const kind = source.kind === 'PAYMENT' || source.kind === 'ADJUSTMENT' ? source.kind : 'BOOKING';
+  const paymentMethod = kind === 'PAYMENT' && typeof source.paymentMethod === 'string' && source.paymentMethod
+    ? source.paymentMethod as Payment['method']
+    : undefined;
+  const detailName = String(source.detailName);
   const targetStatus = source.targetMembershipStatus === 'ARCHIVED' || source.targetMembershipStatus === 'DELETED'
     ? source.targetMembershipStatus
     : 'ACTIVE';
@@ -963,7 +968,7 @@ export function adaptActivity(input: unknown): ActivityEntry {
     id: String(source.id),
     sourceId: String(source.sourceId),
     periodId: typeof source.periodId === 'string' && source.periodId ? source.periodId : undefined,
-    kind: source.kind === 'PAYMENT' || source.kind === 'ADJUSTMENT' ? source.kind : 'BOOKING',
+    kind,
     targetMembershipId: String(source.targetMembershipId),
     targetDisplayName: String(source.targetDisplayName),
     targetMembershipStatus: targetStatus,
@@ -972,8 +977,9 @@ export function adaptActivity(input: unknown): ActivityEntry {
     actorDisplayName: typeof source.actorDisplayName === 'string' && source.actorDisplayName ? source.actorDisplayName : undefined,
     actorMembershipStatus: actorStatus,
     actorAvatarUrl: typeof source.actorAvatarUrl === 'string' && source.actorAvatarUrl ? source.actorAvatarUrl : undefined,
-    detailName: String(source.detailName),
+    detailName: paymentMethod ? historicalPaymentMethodLabel(paymentMethod, detailName) : detailName,
     detailNote: typeof source.detailNote === 'string' && source.detailNote ? source.detailNote : undefined,
+    paymentMethod,
     categoryId: typeof source.categoryId === 'string' && source.categoryId ? source.categoryId : undefined,
     categoryName: typeof source.categoryName === 'string' && source.categoryName ? source.categoryName : undefined,
     productId: typeof source.productId === 'string' && source.productId ? source.productId : undefined,
@@ -1122,6 +1128,7 @@ export function adaptPayment(input: unknown): Payment {
     actorAvatarUrl: typeof source.actorAvatarUrl === 'string' && source.actorAvatarUrl ? source.actorAvatarUrl : undefined,
     amount: sourceAmount ? money(sourceAmount.minorUnits, sourceAmount.currency) : money(source.amountMinor, source.currency),
     receivedAt: String(source.receivedAt),
+    createdAt: typeof source.createdAt === 'string' && source.createdAt ? source.createdAt : undefined,
     method: source.method as Payment['method'],
     methodLabel: historicalPaymentMethodLabel(
       String(source.method),

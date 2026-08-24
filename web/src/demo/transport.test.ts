@@ -585,6 +585,7 @@ describe('DemoTransport finance accounts', () => {
     expect(payments).not.toHaveLength(0);
     expect(payments.every((entry) => entry.kind === 'PAYMENT' && BigInt(entry.amount.minorUnits) < 0n)).toBe(true);
     expect(payments.map((entry) => BigInt(entry.amount.minorUnits))).toEqual([...payments].map((entry) => BigInt(entry.amount.minorUnits)).sort((left, right) => left < right ? -1 : left > right ? 1 : 0));
+    expect(options.kinds).toEqual(['BOOKING', 'PAYMENT', 'ADJUSTMENT']);
     expect(options.members.some((member) => member.membershipId === 'member-lukas')).toBe(true);
     expect(options.categories.some((category) => category.categoryId === 'category-drinks')).toBe(true);
     expect(options.products.some((product) => product.productId === 'product-beer' && product.categoryId === 'category-drinks')).toBe(true);

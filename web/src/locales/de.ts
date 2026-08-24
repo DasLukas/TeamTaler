@@ -341,7 +341,7 @@ export const de = {
     bookingType: 'Buchung',
     paymentType: 'Einzahlung',
     adjustmentType: 'Korrektur',
-    paymentReceived: 'Eingegangen',
+    paymentReceived: 'Eingezahlt',
     adjustmentPosted: 'Verbucht',
     recordedBy: 'Erfasst von',
     actorUnavailable: 'Kein Akteur hinterlegt',

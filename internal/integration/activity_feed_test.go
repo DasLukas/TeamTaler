@@ -2,6 +2,7 @@ package integration_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/DasLukas/TeamTaler/internal/activities"
@@ -81,19 +82,41 @@ func TestUnifiedActivityFeedAppliesIndependentVisibilityGrants(t *testing.T) {
 	assertActivityKinds(t, f.ctx, service, f.membership, map[activities.Kind]int{
 		activities.KindBooking: 2, activities.KindPayment: 2, activities.KindAdjustment: 2,
 	})
+	var alicePaymentCreatedAt string
+	if err := f.db.QueryRowContext(f.ctx, `SELECT created_at FROM payments WHERE id=?`, alicePayment.ID).Scan(&alicePaymentCreatedAt); err != nil {
+		t.Fatalf("read Alice payment creation time: %v", err)
+	}
+	adminPage, err := service.QueryEntries(f.ctx, f.membership, activities.Query{Limit: 20})
+	if err != nil {
+		t.Fatalf("query administrator activity feed: %v", err)
+	}
+	var alicePaymentEntry *activities.Entry
+	for index := range adminPage.Items {
+		if adminPage.Items[index].SourceID == alicePayment.ID {
+			alicePaymentEntry = &adminPage.Items[index]
+			break
+		}
+	}
+	if alicePaymentEntry == nil || alicePaymentEntry.PaymentMethod != "CASH" || alicePaymentEntry.DetailName != "Cash" ||
+		alicePaymentEntry.OccurredAt != alicePaymentCreatedAt || alicePaymentEntry.OccurredAt == alicePayment.ReceivedAt {
+		t.Fatalf("Alice payment activity=%#v, createdAt=%q receivedAt=%q", alicePaymentEntry, alicePaymentCreatedAt, alicePayment.ReceivedAt)
+	}
 
 	aliceOptions, err := service.ListFilterOptions(f.ctx, alice)
-	if err != nil || len(aliceOptions.Members) != 1 || aliceOptions.Members[0].MembershipID != alice.ID ||
+	if err != nil || !slices.Equal(aliceOptions.Kinds, []activities.Kind{activities.KindBooking, activities.KindPayment, activities.KindAdjustment}) ||
+		len(aliceOptions.Members) != 1 || aliceOptions.Members[0].MembershipID != alice.ID ||
 		len(aliceOptions.Categories) != 1 || aliceOptions.Categories[0].CategoryID != category.ID ||
 		len(aliceOptions.Products) != 1 || aliceOptions.Products[0].ProductID != product.ID {
 		t.Fatalf("Alice filter options=%#v err=%v", aliceOptions, err)
 	}
 	bookingOptions, err := service.ListFilterOptions(f.ctx, bookingViewer)
-	if err != nil || len(bookingOptions.Members) != 2 || len(bookingOptions.Categories) != 1 || len(bookingOptions.Products) != 1 {
+	if err != nil || !slices.Equal(bookingOptions.Kinds, []activities.Kind{activities.KindBooking}) ||
+		len(bookingOptions.Members) != 2 || len(bookingOptions.Categories) != 1 || len(bookingOptions.Products) != 1 {
 		t.Fatalf("booking viewer filter options=%#v err=%v", bookingOptions, err)
 	}
 	financeOptions, err := service.ListFilterOptions(f.ctx, financeViewer)
-	if err != nil || len(financeOptions.Members) != 2 || len(financeOptions.Categories) != 0 || len(financeOptions.Products) != 0 {
+	if err != nil || !slices.Equal(financeOptions.Kinds, []activities.Kind{activities.KindPayment, activities.KindAdjustment}) ||
+		len(financeOptions.Members) != 2 || len(financeOptions.Categories) != 0 || len(financeOptions.Products) != 0 {
 		t.Fatalf("finance viewer filter options=%#v err=%v", financeOptions, err)
 	}
 
