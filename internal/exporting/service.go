@@ -288,11 +288,13 @@ func (service *Service) OpenDownload(ctx context.Context, userID, jobID string) 
 		Filename: "teamtaler-" + strings.ToLower(string(record.Scope)) + "-export.zip", LastModified: info.ModTime()}, nil
 }
 
-// Cancel marks one actor-owned non-terminal or READY job cancelled and removes any artifact.
-func (service *Service) Cancel(ctx context.Context, userID, jobID string) error {
+// Remove cancels one actor-owned active job or permanently deletes a terminal
+// job and its published artifact. Artifact deletion completes before the
+// terminal database record is removed so a failed filesystem operation remains
+// visible and retryable.
+func (service *Service) Remove(ctx context.Context, userID, jobID string) error {
 	userID, jobID = strings.TrimSpace(userID), strings.TrimSpace(jobID)
-	var artifactName string
-	err := storage.WithTx(ctx, service.db, func(tx *sql.Tx) error {
+	return storage.WithTx(ctx, service.db, func(tx *sql.Tx) error {
 		record, err := getRecordQuery(ctx, tx, userID, jobID)
 		if err != nil {
 			return err
@@ -300,12 +302,28 @@ func (service *Service) Cancel(ctx context.Context, userID, jobID string) error 
 		if err := authorizeScope(ctx, tx, record.GroupID, record.MembershipID, userID, record.Scope); err != nil {
 			return err
 		}
-		artifactName = record.ArtifactName
-		if record.Status == StatusCancelled || record.Status == StatusExpired {
+		if record.Status.Terminal() {
+			if record.ArtifactName != "" {
+				if err := service.artifacts.Remove(record.ArtifactName); err != nil {
+					return fmt.Errorf("remove export artifact: %w", err)
+				}
+			}
+			if err := audit.Record(ctx, tx, record.GroupID, userID, record.MembershipID,
+				"DATA_EXPORT_DELETED", "EXPORT_JOB", record.ID, map[string]any{"scope": record.Scope}); err != nil {
+				return err
+			}
+			result, err := tx.ExecContext(ctx, `DELETE FROM export_jobs WHERE id=? AND requested_by_user_id=?`, jobID, userID)
+			if err != nil {
+				return fmt.Errorf("delete export job: %w", err)
+			}
+			affected, err := result.RowsAffected()
+			if err != nil {
+				return fmt.Errorf("read deleted export job count: %w", err)
+			}
+			if affected != 1 {
+				return fmt.Errorf("delete export job: affected=%d", affected)
+			}
 			return nil
-		}
-		if record.Status == StatusFailed {
-			return domain.ErrPrecondition
 		}
 		now := platform.Timestamp(service.now())
 		_, err = tx.ExecContext(ctx, `UPDATE export_jobs SET status='CANCELLED',completed_at=coalesce(completed_at,?),
@@ -316,19 +334,6 @@ func (service *Service) Cancel(ctx context.Context, userID, jobID string) error 
 		return audit.Record(ctx, tx, record.GroupID, userID, record.MembershipID,
 			"DATA_EXPORT_CANCELLED", "EXPORT_JOB", record.ID, map[string]any{"scope": record.Scope})
 	})
-	if err != nil {
-		return err
-	}
-	if artifactName != "" {
-		if err := service.artifacts.Remove(artifactName); err != nil {
-			return err
-		}
-		if _, err := service.db.ExecContext(ctx, `UPDATE export_jobs SET artifact_name=NULL,updated_at=?
-			WHERE id=? AND requested_by_user_id=? AND artifact_name=?`, platform.Timestamp(service.now()), jobID, userID, artifactName); err != nil {
-			return fmt.Errorf("clear cancelled export artifact name: %w", err)
-		}
-	}
-	return nil
 }
 
 func authorizeScope(ctx context.Context, queryer interface {

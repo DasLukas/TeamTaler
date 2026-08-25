@@ -162,15 +162,15 @@ func dataExportListLimit(request *http.Request) int {
 	return value
 }
 
-// handleDeleteDataExport cancels an actor-owned job and removes any published
-// archive. Repeated deletion of a cancelled or expired job is idempotent.
+// handleDeleteDataExport cancels an actor-owned active job or permanently
+// removes a terminal job together with any published archive.
 func (s *Server) handleDeleteDataExport(response http.ResponseWriter, request *http.Request) {
 	principal, err := s.principal(request)
 	if err != nil {
 		writeProblem(response, request, err)
 		return
 	}
-	if err := s.exports.Cancel(request.Context(), principal.UserID, request.PathValue("exportID")); err != nil {
+	if err := s.exports.Remove(request.Context(), principal.UserID, request.PathValue("exportID")); err != nil {
 		writeProblem(response, request, err)
 		return
 	}

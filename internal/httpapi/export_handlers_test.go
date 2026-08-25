@@ -70,6 +70,19 @@ func TestRawDataExportHandlersCreateProcessListAndDownload(t *testing.T) {
 		t.Fatalf("download status=%d headers=%v prefix=%q", downloadResponse.Code, downloadResponse.Header(), downloadResponse.Body.Bytes()[:min(8, downloadResponse.Body.Len())])
 	}
 
+	deleteRequest := authenticatedJSONRequest(http.MethodDelete, "/api/v1/exports/"+queued.ID, "", principal)
+	deleteRequest.SetPathValue("exportID", queued.ID)
+	deleteResponse := httptest.NewRecorder()
+	server.handleDeleteDataExport(deleteResponse, deleteRequest)
+	if deleteResponse.Code != http.StatusNoContent {
+		t.Fatalf("delete status=%d body=%s", deleteResponse.Code, deleteResponse.Body.String())
+	}
+	deletedListResponse := httptest.NewRecorder()
+	server.handleListDataExports(deletedListResponse, listRequest)
+	if err := json.Unmarshal(deletedListResponse.Body.Bytes(), &jobs); err != nil || deletedListResponse.Code != http.StatusOK || len(jobs) != 0 {
+		t.Fatalf("list after delete status=%d jobs=%#v err=%v body=%s", deletedListResponse.Code, jobs, err, deletedListResponse.Body.String())
+	}
+
 	badRequest := authenticatedJSONRequest(http.MethodPost, "/api/v1/groups/"+membership.GroupID+"/me/exports", `{"currentPassword":"incorrect-password"}`, principal)
 	badRequest.SetPathValue("groupID", membership.GroupID)
 	badRequest.Header.Set("Idempotency-Key", "raw-handler-export-0002")

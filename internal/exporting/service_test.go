@@ -322,7 +322,7 @@ func TestCancelledClaimCannotBecomeReadyOrFailed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := service.Cancel(ctx, userID, queued.ID); err != nil {
+	if err := service.Remove(ctx, userID, queued.ID); err != nil {
 		t.Fatal(err)
 	}
 	claimed.ArtifactName = artifactNameFor(claimed.ID, claimed.LeaseToken)
@@ -335,6 +335,45 @@ func TestCancelledClaimCannotBecomeReadyOrFailed(t *testing.T) {
 	failed, err := service.failClaim(ctx, claimed, "generation_failed", errors.New("obsolete worker"))
 	if err != nil || failed.Status != StatusCancelled {
 		t.Fatalf("fail cancelled claim = %#v, %v", failed, err)
+	}
+}
+
+func TestRemoveReadyExportDeletesArtifactAndJob(t *testing.T) {
+	ctx := context.Background()
+	db, groupID, membershipID, userID := exportFixture(t)
+	defer db.Close()
+	service := newExportTestService(t, db, nil)
+	queued, err := service.Create(ctx, CreateInput{GroupID: groupID, MembershipID: membershipID, UserID: userID,
+		Scope: ScopePersonal, CurrentPassword: exportTestPassword, IdempotencyKey: "delete-ready-export"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, err := service.ProcessNext(ctx)
+	if err != nil || completed.Status != StatusReady {
+		t.Fatalf("process export = %#v, %v", completed, err)
+	}
+	record, err := service.getRecord(ctx, userID, queued.ID)
+	if err != nil || record.ArtifactName == "" {
+		t.Fatalf("ready export record = %#v, %v", record, err)
+	}
+	artifact, err := service.artifacts.Open(record.ArtifactName)
+	if err != nil {
+		t.Fatalf("open ready artifact: %v", err)
+	}
+	artifact.Close()
+
+	if err := service.Remove(ctx, userID, queued.ID); err != nil {
+		t.Fatalf("remove ready export: %v", err)
+	}
+	if _, err := service.Get(ctx, userID, queued.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("get deleted export error = %v, want not found", err)
+	}
+	if _, err := service.artifacts.Open(record.ArtifactName); !errors.Is(err, ErrArtifactUnavailable) {
+		t.Fatalf("open deleted artifact error = %v, want unavailable", err)
+	}
+	var auditCount int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM audit_events WHERE action='DATA_EXPORT_DELETED' AND resource_id=?`, queued.ID).Scan(&auditCount); err != nil || auditCount != 1 {
+		t.Fatalf("delete audit count = %d, %v", auditCount, err)
 	}
 }
 

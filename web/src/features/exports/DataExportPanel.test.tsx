@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DataExportJob } from '@/api/types';
@@ -37,6 +37,7 @@ describe('DataExportPanel', () => {
     mocks.getDataExports.mockResolvedValue([readyJob]);
     mocks.getDataExportDownloadURL.mockReturnValue('/api/v1/exports/export-a/download');
     mocks.createPersonalDataExport.mockResolvedValue({ ...readyJob, id: 'export-b', status: 'QUEUED' });
+    mocks.deleteDataExport.mockResolvedValue(undefined);
   });
 
   it('requires the current password and starts a personal export', async () => {
@@ -70,6 +71,20 @@ describe('DataExportPanel', () => {
     expect(download).toBe('teamtaler-benutzerdaten-2026-08-25.zip');
     expect(click).toHaveBeenCalledOnce();
     click.mockRestore();
+  });
+
+  it('permanently removes a deleted ready export from the list', async () => {
+    const user = userEvent.setup();
+    mocks.getDataExports.mockResolvedValueOnce([readyJob]).mockResolvedValue([]);
+    renderPanel();
+
+    await user.click(await screen.findByRole('button', { name: 'Exportdatei löschen' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('Die bereitgestellte ZIP-Datei und der Exportauftrag werden dauerhaft gelöscht.')).toBeVisible();
+    await user.click(within(dialog).getByRole('button', { name: 'Exportdatei löschen' }));
+
+    await waitFor(() => expect(mocks.deleteDataExport).toHaveBeenCalledWith('export-a'));
+    await waitFor(() => expect(screen.queryByText('Persönlicher Export')).not.toBeInTheDocument());
   });
 
   it('does not offer destructive actions for terminal jobs without an artifact', async () => {

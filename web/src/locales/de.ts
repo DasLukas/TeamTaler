@@ -536,8 +536,8 @@ export const de = {
       cancelTitle: 'Export abbrechen?',
       cancelMessage: 'Die Erstellung wird beendet. Der Auftrag bleibt mit dem Status „Abgebrochen“ in deiner Exporthistorie sichtbar.',
       removeFile: 'Exportdatei löschen',
-      removeFileTitle: 'Exportdatei löschen?',
-      removeFileMessage: 'Die bereitgestellte ZIP-Datei wird gelöscht. Der Auftrag bleibt mit dem Status „Abgebrochen“ in deiner Exporthistorie sichtbar.',
+      removeFileTitle: 'Export dauerhaft löschen?',
+      removeFileMessage: 'Die bereitgestellte ZIP-Datei und der Exportauftrag werden dauerhaft gelöscht.',
       removeError: 'Der Export konnte nicht abgebrochen oder entfernt werden.',
       status: {
         QUEUED: 'Wartet',

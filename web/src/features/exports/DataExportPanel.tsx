@@ -85,8 +85,9 @@ export function DataExportPanel({ groupId, intro, scope, title }: DataExportPane
   });
   const deleteMutation = useMutation({
     mutationFn: (exportId: string) => api.deleteDataExport(exportId),
-    onSuccess: async () => {
+    onSuccess: async (_, exportId) => {
       setJobToDelete(null);
+      queryClient.setQueryData<DataExportJob[]>(exportQueryKey(groupId), (current) => current?.filter((job) => job.id !== exportId));
       await queryClient.invalidateQueries({ queryKey: exportQueryKey(groupId) });
     },
   });
