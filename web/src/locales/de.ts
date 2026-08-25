@@ -518,7 +518,7 @@ export const de = {
     table: {
       action: 'Exportieren',
       title: '{{title}} exportieren',
-      intro: 'Alle Treffer der aktuellen Suche, Filter und Sortierung werden exportiert – unabhängig von der geladenen Seite.',
+      intro: 'Alle Treffer der aktuellen Suche, Filter und Sortierung werden exportiert.',
       csv: 'Als CSV herunterladen',
       pdf: 'Als PDF herunterladen',
       error: 'Die Tabelle konnte nicht exportiert werden.',
