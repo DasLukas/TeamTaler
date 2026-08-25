@@ -1,0 +1,113 @@
+.card {
+  display: grid;
+  gap: var(--space-6);
+  margin-bottom: var(--space-8);
+  padding: var(--space-6);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.heading {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.heading h2,
+.heading p,
+.hint,
+.error,
+.success {
+  margin: 0;
+}
+
+.heading p,
+.hint {
+  color: var(--color-text-muted);
+}
+
+.colorMode {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.colorMode legend {
+  margin-bottom: var(--space-3);
+  font-weight: 700;
+}
+
+.colorModeOptions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.colorModeOptions label {
+  position: relative;
+  cursor: pointer;
+}
+
+.colorModeOptions input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.colorModeOptions label > span {
+  display: flex;
+  min-height: 54px;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  transition: border-color var(--motion-fast), box-shadow var(--motion-fast);
+}
+
+.colorModeOptions input:checked + span {
+  border-color: var(--color-border-brand);
+  box-shadow: 0 0 0 2px var(--color-focus-ring);
+  color: var(--color-text-brand);
+}
+
+.colorModeOptions input:focus-visible + span {
+  outline: 3px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+.colorModeOptions input:disabled + span {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.themeSection {
+  display: grid;
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--color-border);
+  gap: var(--space-3);
+}
+
+.hint,
+.error,
+.success {
+  font-size: var(--font-size-sm);
+}
+
+.error { color: var(--color-status-danger); }
+.success { color: var(--color-status-success); }
+
+@media (max-width: 560px) {
+  .card { padding: var(--space-5); }
+  .colorModeOptions { grid-template-columns: minmax(0, 1fr); }
+  .colorModeOptions label > span { justify-content: flex-start; }
+}
+
+@media print { .card { display: none; } }

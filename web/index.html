@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#041b38" />
+    <meta name="theme-color" content="#03182f" />
     <meta name="description" content="TeamTaler – lightweight self-hosted expense management for groups and teams." />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -14,6 +14,28 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />
     <link rel="manifest" href="/site.webmanifest" />
     <title>TeamTaler</title>
+    <script>
+      (() => {
+        const storageKey = 'teamtaler:appearance:v1';
+        let colorMode = 'SYSTEM';
+        try {
+          const storedAppearance = JSON.parse(localStorage.getItem(storageKey) || 'null');
+          if (storedAppearance?.version === 1 && ['SYSTEM', 'LIGHT', 'DARK'].includes(storedAppearance.colorMode)) {
+            colorMode = storedAppearance.colorMode;
+          }
+        } catch {
+          // Browser storage is optional; system appearance remains the safe default.
+        }
+        const colorScheme = colorMode === 'SYSTEM'
+          ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+          : colorMode.toLowerCase();
+        const root = document.documentElement;
+        root.dataset.theme = 'TEAMTALER';
+        root.dataset.colorMode = colorMode;
+        root.dataset.colorScheme = colorScheme;
+        root.style.colorScheme = colorScheme;
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

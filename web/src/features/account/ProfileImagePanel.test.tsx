@@ -24,9 +24,10 @@ vi.mock('@/components/media/imageUpload', async (importOriginal) => ({
 
 const baseSession: Session = {
   user: { id: 'user-a', displayName: 'Alex Member', email: 'alex@example.test' },
-  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', roles: ['MEMBER'], groupPermissions: [] } }],
+  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', defaultTheme: 'TEAMTALER', membership: { id: 'member-a', roles: ['MEMBER'], groupPermissions: [], themeOverride: null } }],
   activeGroupId: 'group-a',
   defaultGroupId: null,
+  colorMode: 'SYSTEM',
   systemRoles: [],
 };
 
@@ -42,6 +43,7 @@ function renderProfileImage(session: Session = baseSession, mediaUploadMaxBytes 
     roles: ['MEMBER'],
     groupPermissions: [],
     categoryPermissions: [],
+    themeOverride: null,
     status: 'ACTIVE',
     active: true,
   };

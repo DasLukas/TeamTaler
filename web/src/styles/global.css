@@ -67,7 +67,7 @@ p {
 h1,
 h2,
 h3 {
-  color: var(--color-ink);
+  color: var(--color-text-strong);
   letter-spacing: -0.025em;
 }
 
@@ -90,13 +90,13 @@ h3 {
 }
 
 :focus-visible {
-  outline: 3px solid rgb(0 143 132 / 28%);
+  outline: 3px solid var(--color-focus-ring);
   outline-offset: 2px;
 }
 
 ::selection {
-  color: var(--color-white);
-  background: var(--color-teal-700);
+  color: var(--color-text-on-brand);
+  background: var(--color-brand);
 }
 
 time {

@@ -16,7 +16,7 @@
 
 .secondaryLink {
   margin-top: calc(var(--space-3) * -1);
-  color: var(--color-teal-700);
+  color: var(--color-brand);
   font-size: var(--font-size-sm);
   text-align: right;
 }
@@ -26,8 +26,8 @@
   width: fit-content;
   padding: var(--space-3) var(--space-5);
   border-radius: var(--radius-md);
-  color: var(--color-white);
-  background: var(--color-teal-700);
+  color: var(--color-text-on-brand);
+  background: var(--color-brand);
   font-weight: 700;
   text-decoration: none;
 }
@@ -42,12 +42,12 @@
 }
 
 .error {
-  color: var(--color-red-600);
-  background: var(--color-red-100);
+  color: var(--color-status-danger);
+  background: var(--color-status-danger-subtle);
 }
 
 .warning {
   margin-bottom: var(--space-5);
-  color: #805100;
-  background: #fff4d6;
+  color: var(--color-status-warning);
+  background: var(--color-status-warning-subtle);
 }

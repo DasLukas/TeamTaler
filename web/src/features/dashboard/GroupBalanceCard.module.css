@@ -17,13 +17,13 @@
 }
 
 .card > span {
-  color: var(--color-muted);
+  color: var(--color-text-muted);
   font-weight: 700;
 }
 
 .card > strong {
   margin-top: var(--space-2);
-  color: var(--color-ink);
+  color: var(--color-text-strong);
   font-size: clamp(2.25rem, 4vw, 3rem);
   letter-spacing: -0.04em;
   line-height: 1.1;
@@ -33,20 +33,20 @@
 .card > p {
   max-width: 28ch;
   margin: var(--space-3) 0 0;
-  color: var(--color-muted);
+  color: var(--color-text-muted);
   line-height: 1.45;
 }
 
 .card.due > strong {
-  color: var(--color-orange-600);
+  color: var(--color-status-warning);
 }
 
 .card.credit > strong {
-  color: var(--color-green-600);
+  color: var(--color-status-success);
 }
 
 .card.balanced > span {
-  color: var(--color-teal-700);
+  color: var(--color-brand);
 }
 
 @media (max-width: 767px) {

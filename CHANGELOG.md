@@ -4,6 +4,23 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-25
+
+### Added
+
+- Account-synchronized light, dark, and system color modes plus four accessible color themes: TeamTaler, NRW, Tief im Westen, and Fire.
+- Group-managed default themes with inheritable per-membership overrides that remain stable across sessions and group switches.
+
+### Changed
+
+- Shared frontend colors now use semantic appearance tokens with complete light and dark variants instead of component-level brand literals.
+- Dark themes now use theme-specific tonal surface, border, text, overlay, and shadow scales rather than sharing the TeamTaler navy foundation.
+- The personal theme picker presents the current group default once with a dedicated inheritance badge instead of duplicating the same palette as an override.
+
+### Fixed
+
+- Shared table zebra and hover rows now retain dark semantic surfaces and readable text in dark mode.
+
 ## [1.0.1] - 2026-08-24
 
 ### Added
@@ -304,7 +321,8 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Explicit acting and charged membership display for every booking, including searchable third-party-assignment cues.
 - Canonical backup-entry allowlisting, target-width Argon2 parameter parsing, and directory-confined SPA asset serving with traversal regression coverage.
 
-[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/DasLukas/TeamTaler/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/DasLukas/TeamTaler/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/DasLukas/TeamTaler/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/DasLukas/TeamTaler/compare/v0.8.0...v0.9.0

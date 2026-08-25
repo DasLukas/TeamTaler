@@ -51,9 +51,10 @@ const createdProduct: Product = {
 
 const session: Session = {
   user: { id: 'user-a', displayName: 'Alex', email: 'alex@example.test' },
-  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', roles: ['CATALOG_MANAGER', 'MEMBER'], groupPermissions: [] } }],
+  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', defaultTheme: 'TEAMTALER', membership: { id: 'member-a', roles: ['CATALOG_MANAGER', 'MEMBER'], groupPermissions: [], themeOverride: null } }],
   activeGroupId: 'group-a',
   defaultGroupId: null,
+  colorMode: 'SYSTEM',
   systemRoles: [],
 };
 

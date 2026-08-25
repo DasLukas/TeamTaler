@@ -42,9 +42,10 @@ const importResult: InvitationImportResult = {
 function session(userId: string): Session {
   return {
     user: { id: userId, displayName: userId, email: `${userId}@example.test` },
-    groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: `member-${userId}`, roles: ['MEMBER'], groupPermissions: [] } }],
+    groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', defaultTheme: 'TEAMTALER', membership: { id: `member-${userId}`, roles: ['MEMBER'], groupPermissions: [], themeOverride: null } }],
     activeGroupId: 'group-a',
     defaultGroupId: null,
+    colorMode: 'SYSTEM',
     systemRoles: [],
   };
 }
@@ -77,6 +78,24 @@ describe('high-risk API idempotency', () => {
   });
 
   afterEach(() => vi.unstubAllGlobals());
+
+  it('persists account color mode and a nullable group theme override through their stable endpoints', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ colorMode: 'DARK' }))
+      .mockResolvedValueOnce(jsonResponse({ themeOverride: 'TIEF_IM_WESTEN' }))
+      .mockResolvedValueOnce(jsonResponse({ themeOverride: null }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.updateAppearance('DARK')).resolves.toEqual({ colorMode: 'DARK' });
+    await expect(api.updateThemePreference('group-a', 'TIEF_IM_WESTEN')).resolves.toEqual({ themeOverride: 'TIEF_IM_WESTEN' });
+    await expect(api.updateThemePreference('group-a', null)).resolves.toEqual({ themeOverride: null });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/me/appearance');
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ colorMode: 'DARK' });
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/groups/group-a/theme-preference');
+    expect(requestBody(fetchMock.mock.calls[1])).toEqual({ themeOverride: 'TIEF_IM_WESTEN' });
+    expect(requestBody(fetchMock.mock.calls[2])).toEqual({ themeOverride: null });
+  });
 
   it('reuses the same key after a lost network response', async () => {
     const fetchMock = vi.fn()

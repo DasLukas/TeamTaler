@@ -35,9 +35,9 @@
 }
 
 .balanceAmount { display: grid; gap: var(--space-2); }
-.balanceAmount > span { color: var(--color-muted); font-size: var(--font-size-lg); }
+.balanceAmount > span { color: var(--color-text-muted); font-size: var(--font-size-lg); }
 .balanceAmount > strong {
-  color: var(--color-orange-600);
+  color: var(--color-status-warning);
   font-size: clamp(1.75rem, 4vw, 2.6rem);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.04em;
@@ -45,15 +45,15 @@
 }
 .balanceAmount > strong.balanceAmountReduced { font-size: clamp(1.45rem, 3.3vw, 2.2rem); }
 .balanceAmount > strong.balanceAmountCompact { font-size: clamp(1.2rem, 2.55vw, 1.75rem); }
-.balanceAmount > strong.creditBalance { color: var(--color-green-600); }
-.balance > svg { justify-self: end; color: var(--color-navy-950); }
+.balanceAmount > strong.creditBalance { color: var(--color-status-success); }
+.balance > svg { justify-self: end; color: var(--color-text-strong); }
 
 .targetControl {
   min-width: 0;
 }
 
 
-.confirmation { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-5); padding: var(--space-4); border-radius: var(--radius-md); color: var(--color-teal-800); background: var(--color-surface-teal); font-weight: 700; }
+.confirmation { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-5); padding: var(--space-4); border-radius: var(--radius-md); color: var(--color-text-brand); background: var(--color-surface-brand-subtle); font-weight: 700; }
 
 .inspector {
   position: sticky;
@@ -78,17 +78,17 @@
   align-content: center;
   gap: var(--space-3);
   padding: var(--space-8);
-  color: var(--color-muted);
+  color: var(--color-text-muted);
   text-align: center;
 }
 
-.inspectorEmpty svg { color: var(--color-teal-700); }
-.inspectorEmpty strong { color: var(--color-ink); font-size: var(--font-size-lg); }
+.inspectorEmpty svg { color: var(--color-brand); }
+.inspectorEmpty strong { color: var(--color-text-strong); font-size: var(--font-size-lg); }
 .inspectorEmpty p { max-width: 300px; margin: 0; line-height: 1.5; }
 
 .state { display: grid; min-height: 100vh; place-items: center; padding: var(--space-8); }
 .state > * { width: min(100%, 640px); }
-.catalogLink { display: inline-flex; min-height: 44px; align-items: center; padding: 0 var(--space-5); border-radius: var(--radius-md); color: var(--color-white); background: var(--color-teal-700); font-weight: 700; }
+.catalogLink { display: inline-flex; min-height: 44px; align-items: center; padding: 0 var(--space-5); border-radius: var(--radius-md); color: var(--color-text-on-brand); background: var(--color-brand); font-weight: 700; }
 
 @media (max-width: 767px) {
   .layout { display: block; }

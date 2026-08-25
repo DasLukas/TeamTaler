@@ -13,11 +13,12 @@ vi.mock('@/api/client', () => ({ api: apiMock }));
 const session: Session = {
   user: { id: 'user-a', displayName: 'Alex', email: 'alex@example.test' },
   groups: [
-    { id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', roles: ['MEMBER'], groupPermissions: [] } },
-    { id: 'group-b', name: 'Group B', currency: 'EUR', membership: { id: 'member-b', roles: ['MEMBER'], groupPermissions: [] } },
+    { id: 'group-a', name: 'Group A', currency: 'EUR', defaultTheme: 'TEAMTALER', membership: { id: 'member-a', roles: ['MEMBER'], groupPermissions: [], themeOverride: null } },
+    { id: 'group-b', name: 'Group B', currency: 'EUR', defaultTheme: 'TEAMTALER', membership: { id: 'member-b', roles: ['MEMBER'], groupPermissions: [], themeOverride: null } },
   ],
   activeGroupId: 'group-a',
   defaultGroupId: null,
+  colorMode: 'SYSTEM',
   systemRoles: [],
 };
 

@@ -20,6 +20,31 @@ describe('DemoTransport account security', () => {
   });
 });
 
+describe('DemoTransport appearance preferences', () => {
+  it('persists account mode, membership overrides, and administrator-managed defaults', async () => {
+    const transport = new DemoTransport();
+
+    await expect(transport.request('/me/appearance', jsonRequest('PUT', { colorMode: 'DARK' }))).resolves.toEqual({ colorMode: 'DARK' });
+    await expect(transport.request('/groups/group-sv-adler/theme-preference', jsonRequest('PUT', { themeOverride: 'FIRE' }))).resolves.toEqual({ themeOverride: 'FIRE' });
+    await expect(transport.request('/groups/group-sv-adler/settings', jsonRequest('PATCH', { defaultTheme: 'NRW' }))).resolves.toMatchObject({ defaultTheme: 'NRW' });
+
+    const updated = await transport.request<Session>('/session');
+    expect(updated.colorMode).toBe('DARK');
+    expect(updated.groups.find((group) => group.id === 'group-sv-adler')).toMatchObject({
+      defaultTheme: 'NRW',
+      membership: { themeOverride: 'FIRE' },
+    });
+  });
+
+  it('rejects unsupported appearance values without changing the session', async () => {
+    const transport = new DemoTransport();
+
+    await expect(transport.request('/me/appearance', jsonRequest('PUT', { colorMode: 'SEPIA' }))).rejects.toThrow(/not supported/i);
+    await expect(transport.request('/groups/group-sv-adler/theme-preference', jsonRequest('PUT', { themeOverride: 'CUSTOM' }))).rejects.toThrow(/not supported/i);
+    await expect(transport.request<Session>('/session')).resolves.toMatchObject({ colorMode: 'SYSTEM' });
+  });
+});
+
 async function demoteCurrentAdministrator(transport: DemoTransport, replacementRoleIds: string[] = ['role-member']): Promise<void> {
   await transport.request<RoleAssignment>('/groups/group-sv-adler/members/member-jonas/roles', {
     ...jsonRequest('PUT', { roleIds: ['role-admin', 'role-member'] }),

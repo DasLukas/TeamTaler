@@ -27,14 +27,14 @@ func TestGroupSettingsExposeOnlyNotificationDelivery(t *testing.T) {
 		t.Fatalf("default settings = %#v", settings)
 	}
 
-	update := roleHandlerRequest(principal, administrator.GroupID, http.MethodPatch, `{"settlementsEnabled":true}`)
+	update := roleHandlerRequest(principal, administrator.GroupID, http.MethodPatch, `{"settlementsEnabled":true,"defaultTheme":"NRW"}`)
 	updatedResponse := httptest.NewRecorder()
 	server.handleUpdateGroupSettings(updatedResponse, update)
 	if updatedResponse.Code != http.StatusOK {
 		t.Fatalf("settings update status = %d, body = %s", updatedResponse.Code, updatedResponse.Body.String())
 	}
 	var updatedSettings domain.GroupSettings
-	if err := json.Unmarshal(updatedResponse.Body.Bytes(), &updatedSettings); err != nil || !updatedSettings.SettlementsEnabled {
+	if err := json.Unmarshal(updatedResponse.Body.Bytes(), &updatedSettings); err != nil || !updatedSettings.SettlementsEnabled || updatedSettings.DefaultTheme != domain.ThemeNRW {
 		t.Fatalf("updated settings = %#v, err = %v", updatedSettings, err)
 	}
 

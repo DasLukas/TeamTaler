@@ -36,8 +36,8 @@
   justify-content: center;
   border-radius: var(--radius-full);
 }
-.membershipStateArchived { color: #9a5a00; background: var(--color-orange-100); }
-.membershipStateDeleted { color: var(--color-red-600); background: var(--color-red-100); }
+.membershipStateArchived { color: var(--color-status-warning); background: var(--color-status-warning-subtle); }
+.membershipStateDeleted { color: var(--color-status-danger); background: var(--color-status-danger-subtle); }
 .membershipStateText { display: none; }
 .activityType {
   display: inline-flex;
@@ -51,18 +51,18 @@
   font-weight: 700;
   white-space: nowrap;
 }
-.activityTypeBooking { border-color: color-mix(in srgb, var(--color-orange-600) 24%, transparent); color: #a64f00; background: var(--color-orange-100); }
-.activityTypePayment { border-color: color-mix(in srgb, var(--color-teal-600) 24%, transparent); color: var(--color-teal-700); background: var(--color-surface-teal); }
-.activityTypeAdjustment { border-color: color-mix(in srgb, var(--color-navy-700) 22%, transparent); color: var(--color-navy-700); background: var(--color-surface-muted); }
+.activityTypeBooking { border-color: var(--color-status-warning-border); color: var(--color-status-warning); background: var(--color-status-warning-subtle); }
+.activityTypePayment { border-color: color-mix(in srgb, var(--color-status-success) 46%, transparent); color: var(--color-status-success); background: var(--color-status-success-subtle); }
+.activityTypeAdjustment { border-color: color-mix(in srgb, var(--color-status-info) 46%, transparent); color: var(--color-status-info); background: var(--color-status-info-subtle); }
 .activityState { gap: 5px; white-space: nowrap; }
-.missingActor { color: var(--color-muted); }
+.missingActor { color: var(--color-text-muted); }
 .activityDetails { display: inline-flex; min-width: 0; align-items: center; gap: var(--space-2); }
 .activityDetails > span { min-width: 0; overflow-wrap: anywhere; }
 .activityDetails > img { width: 40px; height: 40px; flex: 0 0 40px; border-radius: var(--radius-sm); object-fit: cover; background: var(--color-surface-muted); }
 .activityAmount { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.activityAmountBooking { color: #c45d00; }
-.activityAmountPayment { color: var(--color-teal-700); }
-.activityAmountReversed { color: var(--color-muted); text-decoration: line-through; text-decoration-thickness: 1px; }
+.activityAmountBooking { color: var(--color-status-warning); }
+.activityAmountPayment { color: var(--color-status-success); }
+.activityAmountReversed { color: var(--color-text-muted); text-decoration: line-through; text-decoration-thickness: 1px; }
 .activityList {
   flex: 1;
   min-height: 0;
@@ -87,7 +87,7 @@
 .activityList th:nth-child(7) { width: 8%; }
 .activityList th:nth-child(8) { width: 12%; }
 .activityList th:nth-child(9) { width: 12%; }
-.activityList td small { display: block; margin-top: 4px; color: var(--color-muted); }
+.activityList td small { display: block; margin-top: 4px; color: var(--color-text-muted); }
 .activityList td:nth-child(5) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .activityList td:nth-child(6),
 .activityList td:nth-child(7) { overflow-wrap: normal; white-space: nowrap; }
@@ -96,10 +96,10 @@
 .activityList td:last-child button { white-space: nowrap; }
 .rowActions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-1); }
 .reversalForm { display: grid; gap: var(--space-5); padding: var(--space-4) var(--space-6) var(--space-6); }
-.reversalForm p { margin: 0; color: var(--color-muted); line-height: 1.55; }
+.reversalForm p { margin: 0; color: var(--color-text-muted); line-height: 1.55; }
 .actions { display: flex; justify-content: flex-end; gap: var(--space-3); }
-.error { color: var(--color-red-600) !important; }
-.reversalForm .windowNotice { padding: var(--space-3); border-radius: var(--radius-md); color: var(--color-teal-700); background: var(--color-surface-teal); font-size: var(--font-size-sm); }
+.error { color: var(--color-status-danger) !important; }
+.reversalForm .windowNotice { padding: var(--space-3); border-radius: var(--radius-md); color: var(--color-brand); background: var(--color-surface-brand-subtle); font-size: var(--font-size-sm); }
 
 @media (min-width: 1800px) {
   .activityList th:nth-child(1) { width: 9%; }
