@@ -263,11 +263,13 @@ describe('BookingPage multi-product workspace', () => {
     await screen.findByText(i18n.t('booking.openBalance'));
     await user.click(screen.getByRole('button', { name: /Wasser.*1,00.*hinzufügen/i }));
     await user.click(screen.getByRole('tab', { name: 'Strafen' }));
-    await user.click(screen.getByRole('button', { name: /Ausrüstung vergessen.*Preis eingeben.*hinzufügen/i }));
+    await user.click(screen.getByRole('button', { name: /Ausrüstung vergessen.*Preis wählen.*hinzufügen/i }));
 
     expect(screen.queryByRole('button', { name: /Warenkorb öffnen/ })).not.toBeInTheDocument();
     const priceInput = screen.getByLabelText(i18n.t('booking.unitPriceForProduct', { name: 'Ausrüstung vergessen', currency: 'EUR' }));
     expect(priceInput).toBeVisible();
+    expect(priceInput).toHaveAttribute('inputmode', 'decimal');
+    expect(priceInput).toHaveAttribute('type', 'text');
     await waitFor(() => expect(priceInput).toHaveFocus());
   });
 
@@ -278,10 +280,12 @@ describe('BookingPage multi-product workspace', () => {
     await screen.findByText(i18n.t('booking.openBalance'));
     await user.click(screen.getByRole('button', { name: /Wasser.*1,00.*hinzufügen/i }));
     await user.click(screen.getByRole('tab', { name: 'Strafen' }));
-    await user.click(screen.getByRole('button', { name: /Ausrüstung vergessen.*Preis eingeben.*hinzufügen/i }));
+    await user.click(screen.getByRole('button', { name: /Ausrüstung vergessen.*Preis wählen.*hinzufügen/i }));
 
     const priceInput = screen.getByLabelText(i18n.t('booking.unitPriceForProduct', { name: 'Ausrüstung vergessen', currency: 'EUR' }));
     expect(priceInput).toBeVisible();
+    expect(priceInput).toHaveAttribute('inputmode', 'decimal');
+    expect(priceInput).toHaveAttribute('type', 'text');
     await waitFor(() => expect(priceInput).toHaveFocus());
   });
 

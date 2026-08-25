@@ -4,8 +4,8 @@
 .notification[data-focused] { outline: 3px solid color-mix(in srgb, var(--color-status-warning) 45%, transparent); outline-offset: 3px; }
 .notification h2, .notification p { margin: 0; }
 .notification h2 { font-size: var(--font-size-md); }
-.notification p { margin-top: var(--space-1); color: var(--color-text-muted); line-height: 1.5; }
-.notification time { display: block; margin-top: var(--space-2); color: var(--color-text-subtle); font-size: var(--font-size-xs); }
+.notification p { margin-top: var(--space-1); overflow-wrap: normal; color: var(--color-text-muted); line-height: 1.5; word-break: normal; }
+.notification time { display: block; width: fit-content; margin-top: var(--space-2); color: var(--color-text-subtle); font-size: var(--font-size-xs); }
 .icon { display: grid; width: 44px; height: 44px; place-items: center; border-radius: 50%; color: var(--color-brand); background: var(--color-surface); }
 .label { color: var(--color-text-muted); font-size: var(--font-size-xs); }
 .acknowledgementError { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-4); padding: var(--space-3) var(--space-4); border: 1px solid var(--color-status-danger-border); border-radius: var(--radius-md); color: var(--color-status-danger); background: var(--color-status-danger-subtle); }

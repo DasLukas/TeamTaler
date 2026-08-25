@@ -9,6 +9,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/DasLukas/TeamTaler/internal/activities"
 	"github.com/DasLukas/TeamTaler/internal/config"
 	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/finance"
@@ -34,6 +35,11 @@ func TestPaymentAttachmentModesStorageIdempotencyAndReads(t *testing.T) {
 	}
 	if payment.Attachment == nil || payment.Attachment.FileName != "receipt.png" || payment.Attachment.MediaType != "image/png" || payment.Attachment.SizeBytes < 1 {
 		t.Fatalf("payment attachment summary=%#v", payment.Attachment)
+	}
+	activityPage, err := (activities.Service{DB: fixture.db}).QueryEntries(fixture.ctx, fixture.membership, activities.Query{Kinds: []string{"PAYMENT"}})
+	if err != nil || len(activityPage.Items) != 1 || activityPage.Items[0].Attachment == nil ||
+		activityPage.Items[0].Attachment.FileName != "receipt.png" || activityPage.Items[0].Attachment.URL != "/api/v1/groups/"+fixture.group.ID+"/payments/"+payment.ID+"/attachment" {
+		t.Fatalf("payment activity attachment=%#v err=%v", activityPage.Items, err)
 	}
 	if _, err := fixture.db.ExecContext(fixture.ctx, `DELETE FROM payment_attachments WHERE payment_id=?`, payment.ID); err == nil {
 		t.Fatal("immutable payment attachment was deleted outside group purge")

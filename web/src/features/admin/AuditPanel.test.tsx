@@ -44,6 +44,7 @@ describe('AuditPanel filters', () => {
     window.history.replaceState({}, '', '/admin');
     apiMock.getAuditFilterOptions.mockResolvedValue({
       actions: ['booking.created', 'payment.created'],
+      actors: [{ membershipId: 'member-a', displayName: 'Ada Admin', avatarUrl: '/avatars/ada.png' }],
       resourceTypes: ['booking', 'payment'],
       actionResourceTypes: { 'booking.created': ['booking'], 'payment.created': ['payment'] },
     });
@@ -57,6 +58,12 @@ describe('AuditPanel filters', () => {
     await user.click(screen.getByRole('button', { name: 'Filter' }));
     const filterDialog = screen.getByRole('dialog', { name: 'Ergebnisse filtern' });
 
+    await user.click(within(filterDialog).getByRole('combobox', { name: 'Mitglied' }));
+    const memberMenu = screen.getByRole('listbox', { name: 'Mitglied' });
+    const memberOption = within(memberMenu).getByRole('option', { name: 'Ada Admin' });
+    expect(memberOption.querySelector('img')).toHaveAttribute('src', '/avatars/ada.png');
+    await user.click(memberOption);
+
     await user.click(within(filterDialog).getByRole('button', { name: 'Ressourcentyp' }));
     await user.click(within(screen.getByRole('dialog', { name: 'Ressourcentyp' })).getByRole('checkbox', { name: 'payment' }));
     await user.click(within(filterDialog).getByRole('button', { name: 'Aktion' }));
@@ -67,6 +74,7 @@ describe('AuditPanel filters', () => {
 
     await waitFor(() => expect(apiMock.getAuditPage).toHaveBeenLastCalledWith('group-a', expect.objectContaining({
       action: ['payment.created'],
+      actorMembershipId: 'member-a',
       resourceType: ['payment'],
     })));
   });

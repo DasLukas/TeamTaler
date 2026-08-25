@@ -3,9 +3,9 @@
   z-index: 30;
   inset: 0 auto 0 0;
   display: flex;
-  width: var(--shell-sidebar-width, var(--sidebar-width));
+  width: var(--shell-navigation-width, var(--sidebar-width));
   flex-direction: column;
-  padding: 30px 18px 24px;
+  padding: calc(30px + var(--shell-safe-area-top, 0px)) 18px calc(24px + var(--shell-safe-area-bottom, 0px)) calc(18px + var(--shell-safe-area-left, 0px));
   color: var(--color-navigation-text);
   background: linear-gradient(165deg, var(--color-navigation) 0%, var(--color-navigation-gradient-end) 100%);
   overflow-x: hidden;
@@ -37,7 +37,7 @@
   position: fixed;
   z-index: 2;
   top: 50%;
-  left: var(--shell-sidebar-width, var(--sidebar-width));
+  left: var(--shell-navigation-width, var(--sidebar-width));
   display: none;
   width: 14px;
   height: 92px;
@@ -159,7 +159,8 @@
   .collapseButton { display: grid; }
 
   .collapsed {
-    padding-inline: 12px;
+    padding-right: 12px;
+    padding-left: calc(12px + var(--shell-safe-area-left, 0px));
   }
 
   .collapsed .sidebarHeader {

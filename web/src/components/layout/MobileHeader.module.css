@@ -11,7 +11,7 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--space-3);
-    padding: max(var(--space-4), env(safe-area-inset-top)) var(--space-5) var(--space-4);
+    padding: max(var(--space-4), var(--shell-safe-area-top)) calc(var(--space-5) + var(--shell-safe-area-right)) var(--space-4) calc(var(--space-5) + var(--shell-safe-area-left));
     color: var(--color-navigation-text);
     background: linear-gradient(150deg, var(--color-navigation), var(--color-navigation-gradient-end));
   }
@@ -28,7 +28,10 @@
 }
 
 @media (max-width: 480px) {
-  .header { padding-inline: var(--space-4); }
+  .header {
+    padding-right: calc(var(--space-4) + var(--shell-safe-area-right));
+    padding-left: calc(var(--space-4) + var(--shell-safe-area-left));
+  }
 
   .group {
     flex: 0 0 50px;

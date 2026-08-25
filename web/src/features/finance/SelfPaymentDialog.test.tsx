@@ -224,6 +224,8 @@ describe('SelfPaymentDialog', () => {
     await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.action') }));
     const paymentDialog = screen.getByRole('dialog', { name: i18n.t('selfPayment.entryTitle') });
     const amount = within(paymentDialog).getByLabelText(i18n.t('finance.amountIn', { currency: 'EUR' }));
+    expect(amount).toHaveAttribute('inputmode', 'decimal');
+    expect(amount).toHaveAttribute('type', 'text');
     await user.type(amount, '12,50');
     const scanTrigger = within(paymentDialog).getByRole('button', { name: i18n.t('paymentAttachment.scan') });
 

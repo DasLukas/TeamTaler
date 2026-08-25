@@ -534,22 +534,27 @@ type Booking struct {
 
 // Payment records received money and its period allocations.
 type Payment struct {
-	ID           string                    `json:"id"`
-	GroupID      string                    `json:"groupId"`
-	MembershipID string                    `json:"membershipId"`
-	MemberName   string                    `json:"memberName"`
-	MemberStatus string                    `json:"membershipStatus"`
-	AmountMinor  int64                     `json:"amountMinor,string"`
-	Currency     string                    `json:"currency"`
-	ReceivedAt   string                    `json:"receivedAt"`
-	Method       string                    `json:"method"`
-	MethodLabel  string                    `json:"methodLabel"`
-	Reference    string                    `json:"reference,omitempty"`
-	Note         string                    `json:"note,omitempty"`
-	ReversedAt   *string                   `json:"reversedAt,omitempty"`
-	Status       string                    `json:"status"`
-	Allocations  []PaymentAllocation       `json:"allocations"`
-	Attachment   *PaymentAttachmentSummary `json:"attachment,omitempty"`
+	ID                    string                    `json:"id"`
+	GroupID               string                    `json:"groupId"`
+	MembershipID          string                    `json:"membershipId"`
+	MemberName            string                    `json:"memberName"`
+	MemberStatus          string                    `json:"membershipStatus"`
+	MemberAvatarURL       string                    `json:"memberAvatarUrl,omitempty"`
+	ActorMembershipID     string                    `json:"actorMembershipId"`
+	ActorDisplayName      string                    `json:"actorDisplayName"`
+	ActorMembershipStatus string                    `json:"actorMembershipStatus"`
+	ActorAvatarURL        string                    `json:"actorAvatarUrl,omitempty"`
+	AmountMinor           int64                     `json:"amountMinor,string"`
+	Currency              string                    `json:"currency"`
+	ReceivedAt            string                    `json:"receivedAt"`
+	Method                string                    `json:"method"`
+	MethodLabel           string                    `json:"methodLabel"`
+	Reference             string                    `json:"reference,omitempty"`
+	Note                  string                    `json:"note,omitempty"`
+	ReversedAt            *string                   `json:"reversedAt,omitempty"`
+	Status                string                    `json:"status"`
+	Allocations           []PaymentAllocation       `json:"allocations"`
+	Attachment            *PaymentAttachmentSummary `json:"attachment,omitempty"`
 }
 
 // PaymentAttachmentSummary exposes safe immutable receipt metadata. URL is a

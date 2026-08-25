@@ -27,6 +27,7 @@ import { Button } from '@/components/ui/Button';
 import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { Modal } from '@/components/ui/Modal';
 import { MultiSelectMenu } from '@/components/ui/MultiSelectMenu';
+import { SelectMenu } from '@/components/ui/SelectMenu';
 import { availableDataTableFilterOptions, isDataTableFilterActive, normalizeDataTableFilters } from './dataTableFilters';
 import styles from './DataTable.module.css';
 import tableStyles from './Table.module.css';
@@ -161,6 +162,8 @@ export interface DataTableProps<Data extends RowData, FilterId extends string = 
   emptyContent: ReactNode;
   filterDefinitions?: readonly DataTableFilterDefinition<FilterId>[];
   filters?: DataTableFilterState<FilterId>;
+  /** Fills the available block size while keeping only the table viewport scrollable. */
+  fillAvailableHeight?: boolean;
   getRowId?: (row: Data, index: number) => string;
   hasMore?: boolean;
   isLoading?: boolean;
@@ -343,6 +346,20 @@ function FilterEditor<FilterId extends string>({ definition, filters, onChange, 
   }
 
   if (definition.kind === 'select') {
+    if (definition.options.some((option) => option.visual)) {
+      const options = [{ label: definition.allLabel, value: '' }, ...definition.options];
+      return (
+        <Field htmlFor={controlId} label={definition.label}>
+          <SelectMenu
+            ariaLabel={definition.label}
+            id={controlId}
+            onChange={(nextValue) => onChange(nextValue || undefined)}
+            options={options}
+            value={typeof value === 'string' ? value : ''}
+          />
+        </Field>
+      );
+    }
     return (
       <Field htmlFor={controlId} label={definition.label}>
         <SelectInput id={controlId} onChange={(event) => onChange(event.target.value || undefined)} value={typeof value === 'string' ? value : ''}>
@@ -417,6 +434,7 @@ function FilterEditor<FilterId extends string>({ definition, filters, onChange, 
       <Field htmlFor={`${controlId}-minimum`} label={definition.minimumLabel}>
         <TextInput
           id={`${controlId}-minimum`}
+          inputMode="decimal"
           onChange={(event) => {
             const minimum = event.target.valueAsNumber;
             onChange({ ...range, min: event.target.value === '' || !Number.isFinite(minimum) ? undefined : minimum });
@@ -429,6 +447,7 @@ function FilterEditor<FilterId extends string>({ definition, filters, onChange, 
       <Field htmlFor={`${controlId}-maximum`} label={definition.maximumLabel}>
         <TextInput
           id={`${controlId}-maximum`}
+          inputMode="decimal"
           onChange={(event) => {
             const maximum = event.target.valueAsNumber;
             onChange({ ...range, max: event.target.value === '' || !Number.isFinite(maximum) ? undefined : maximum });
@@ -595,6 +614,7 @@ export function DataTable<Data extends RowData, FilterId extends string = string
   emptyContent,
   filterDefinitions,
   filters,
+  fillAvailableHeight = false,
   getRowId,
   hasMore = false,
   isLoading = false,
@@ -627,7 +647,7 @@ export function DataTable<Data extends RowData, FilterId extends string = string
   });
 
   return (
-    <div className={styles.root}>
+    <div className={`${styles.root} ${fillAvailableHeight ? styles.fillAvailableHeight : ''}`}>
       {showControls ? <DataTableControls
         definitions={resolvedFilterDefinitions}
         filters={resolvedFilters}

@@ -29,6 +29,28 @@
   flex: 1;
 }
 
+.choice {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.visual {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+}
+
+.choiceLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .menu {
   z-index: 100;
   margin: 0;
@@ -43,6 +65,15 @@
   overscroll-behavior: contain;
 }
 
+.groupLabel {
+  padding: var(--space-2) var(--space-3) var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .option {
   display: flex;
   min-height: 42px;
@@ -53,6 +84,8 @@
   border-radius: var(--radius-sm);
   cursor: pointer;
 }
+
+.option > span { min-width: 0; }
 
 .option.active { background: var(--color-surface-brand-subtle); }
 .option[aria-selected='true'] { color: var(--color-brand); font-weight: 700; }

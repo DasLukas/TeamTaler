@@ -4,8 +4,7 @@ import { DataTable, type DataTableColumnDef, type DataTableFilterDefinition } fr
 import type { AuditEventFilterId } from './auditFilters';
 import { useDataTableLabels } from './useDataTableLabels';
 import type { DataTableUrlState } from './useDataTableUrlState';
-
-const auditDateTimeFormatter = new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' });
+import { formatGermanDateTime } from './dateFormat';
 
 /** One normalized row rendered by the shared audit-event table. */
 export interface AuditEventTableEntry {
@@ -45,7 +44,7 @@ export function AuditEventTable({ emptyMessage, entries, filterDefinitions, hasM
   const columns = useMemo<DataTableColumnDef<AuditEventTableEntry>[]>(() => [
     {
       accessorKey: 'occurredAt',
-      cell: ({ row }) => <time dateTime={row.original.occurredAt}>{auditDateTimeFormatter.format(new Date(row.original.occurredAt))}</time>,
+      cell: ({ row }) => <time dateTime={row.original.occurredAt}>{formatGermanDateTime(row.original.occurredAt)}</time>,
       enableSorting: true,
       header: t('audit.time'),
       id: 'occurredAt',

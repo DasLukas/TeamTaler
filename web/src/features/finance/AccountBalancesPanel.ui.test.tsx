@@ -47,6 +47,43 @@ describe('AccountBalancesPanel', () => {
     expect(screen.getAllByText('Pia Lehmann').length).toBeGreaterThan(0);
   });
 
+  it('filters membership and balance states with visual multi-select menus', async () => {
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><AccountBalancesPanel /></QueryClientProvider>);
+
+    await screen.findByText(i18n.t('financeWorkspace.receivables'));
+    await user.click(screen.getByRole('button', { name: i18n.t('dataTable.filterButton') }));
+    const filterDialog = screen.getByRole('dialog', { name: i18n.t('dataTable.filterHeading') });
+    const memberTrigger = within(filterDialog).getByRole('combobox', { name: i18n.t('common.member') });
+    const membershipTrigger = within(filterDialog).getByRole('button', { name: i18n.t('financeWorkspace.membershipStatus') });
+    const balanceStateTrigger = within(filterDialog).getByRole('button', { name: i18n.t('financeWorkspace.balanceState') });
+    expect(within(filterDialog).getByRole('spinbutton', { name: i18n.t('dataTable.minimum') })).toHaveAttribute('inputmode', 'decimal');
+    expect(within(filterDialog).getByRole('spinbutton', { name: i18n.t('dataTable.maximum') })).toHaveAttribute('inputmode', 'decimal');
+
+    await user.click(memberTrigger);
+    const memberMenu = screen.getByRole('listbox', { name: i18n.t('common.member') });
+    const piaOption = within(memberMenu).getByRole('option', { name: 'Pia Lehmann' });
+    expect(piaOption).toHaveTextContent('PL');
+    await user.click(piaOption);
+
+    await user.click(membershipTrigger);
+    const membershipMenu = screen.getByRole('dialog', { name: i18n.t('financeWorkspace.membershipStatus') });
+    expect(membershipMenu.querySelectorAll('svg')).toHaveLength(3);
+    await user.click(within(membershipMenu).getByRole('checkbox', { name: i18n.t('financeWorkspace.archived') }));
+
+    await user.click(balanceStateTrigger);
+    const balanceStateMenu = screen.getByRole('dialog', { name: i18n.t('financeWorkspace.balanceState') });
+    expect(balanceStateMenu.querySelectorAll('svg')).toHaveLength(3);
+    await user.click(within(balanceStateMenu).getByRole('checkbox', { name: i18n.t('financeWorkspace.states.settled') }));
+    await user.click(within(filterDialog).getByRole('button', { name: i18n.t('dataTable.applyFilters') }));
+
+    const table = screen.getByRole('table', { name: i18n.t('financeWorkspace.overviewTitle') });
+    expect(within(table).getByRole('columnheader', { name: i18n.t('financeWorkspace.balanceState') })).toBeVisible();
+    expect(within(table).getByText('Pia Lehmann')).toBeVisible();
+    expect(within(table).queryByText('Lukas Waschul')).not.toBeInTheDocument();
+  });
+
   it('keeps deleted accounts in the complete operational table', async () => {
     mocks.getAccountSummaries.mockResolvedValue([...demoAccountSummaries, {
       membershipId: 'member-deleted', displayName: 'Deleted Account', isTemporaryGuest: false, status: 'DELETED',

@@ -31,6 +31,13 @@ textarea {
   font: inherit;
 }
 
+input,
+select,
+textarea {
+  min-width: 0;
+  max-width: 100%;
+}
+
 button,
 a {
   -webkit-tap-highlight-color: transparent;
@@ -90,6 +97,10 @@ h3 {
 ::selection {
   color: var(--color-text-on-brand);
   background: var(--color-brand);
+}
+
+time {
+  white-space: nowrap;
 }
 
 .sr-only {

@@ -14,6 +14,7 @@ import { useInstanceCapabilities } from '@/app/useSession';
 import { Button } from '@/components/ui/Button';
 import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
+import { formatGermanDate } from '@/features/shared/dateFormat';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import styles from './SelfPaymentDialog.module.css';
 import { PaymentAttachmentField } from './PaymentAttachmentField';
@@ -94,6 +95,7 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
       : api.createOwnPayment(activeGroupId, input),
     onSuccess: async (payment) => {
       await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['activities', activeGroupId] }),
         queryClient.invalidateQueries({ queryKey: ['dashboard', activeGroupId] }),
         queryClient.invalidateQueries({ queryKey: ['ledger', activeGroupId] }),
         queryClient.invalidateQueries({ queryKey: ['payments', activeGroupId] }),
@@ -175,7 +177,7 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
             <dl>
               <div><dt>{t('selfPayment.account')}</dt><dd>{session.user.displayName}</dd></div>
               <div><dt>{t('common.amount')}</dt><dd><strong className={styles.paymentAmount} data-financial-state="payment">{formatMoney(command.amount)}</strong></dd></div>
-              <div><dt>{t('common.date')}</dt><dd>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(`${receivedAt}T12:00:00`))}</dd></div>
+              <div><dt>{t('common.date')}</dt><dd>{formatGermanDate(receivedAt)}</dd></div>
               <div><dt>{t('finance.paymentType')}</dt><dd>{paymentMethod}</dd></div>
               {reasonEnabled ? <div><dt>{t('finance.reason')}</dt><dd>{command.reference || '–'}</dd></div> : null}
               {attachment ? <div><dt>{t('paymentAttachment.label', { defaultValue: 'Receipt' })}</dt><dd>{attachment.name}</dd></div> : null}

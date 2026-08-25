@@ -713,14 +713,14 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 		if !reasonMode.Enabled() {
 			effectiveReference = ""
 		}
-		var currency, memberName, memberStatus string
+		var currency, memberName, memberStatus, memberUserID, memberAvatarKey string
 		var deletedAt sql.NullString
 		var currentBalance int64
-		if err := tx.QueryRowContext(ctx, `SELECT u.display_name,m.status,m.deleted_at,
+		if err := tx.QueryRowContext(ctx, `SELECT u.display_name,m.status,m.deleted_at,u.id,coalesce(u.avatar_key,''),
 			coalesce((SELECT sum(le.amount_minor) FROM ledger_entries le
 				WHERE le.group_id=m.group_id AND le.membership_id=m.id AND le.account='MEMBER_RECEIVABLE'),0)
 			FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.id=? AND m.group_id=?`, input.MembershipID, membership.GroupID).
-			Scan(&memberName, &memberStatus, &deletedAt, &currentBalance); errors.Is(err, sql.ErrNoRows) {
+			Scan(&memberName, &memberStatus, &deletedAt, &memberUserID, &memberAvatarKey, &currentBalance); errors.Is(err, sql.ErrNoRows) {
 			return domain.ErrNotFound
 		} else if err != nil {
 			return err
@@ -747,7 +747,8 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 		if effectiveReference != "" {
 			ledgerDescription += ": " + effectiveReference
 		}
-		payment = domain.Payment{ID: paymentID, GroupID: membership.GroupID, MembershipID: input.MembershipID, MemberName: memberName, MemberStatus: memberStatus, AmountMinor: input.AmountMinor,
+		payment = domain.Payment{ID: paymentID, GroupID: membership.GroupID, MembershipID: input.MembershipID, MemberName: memberName, MemberStatus: memberStatus, MemberAvatarURL: media.UserAvatarURL(memberUserID, memberAvatarKey),
+			ActorMembershipID: membership.ID, ActorDisplayName: membership.DisplayName, ActorMembershipStatus: domain.MembershipStatusActive, ActorAvatarURL: membership.AvatarURL, AmountMinor: input.AmountMinor,
 			Currency: currency, ReceivedAt: platform.Timestamp(receivedAt), Method: input.Method, MethodLabel: payment.MethodLabel, Reference: effectiveReference, Note: input.Note, Status: "POSTED", Allocations: []domain.PaymentAllocation{}}
 		_, err = tx.ExecContext(ctx, `INSERT INTO payments(id,group_id,membership_id,amount_minor,received_at,method,method_label,reference,note,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
 			paymentID, membership.GroupID, input.MembershipID, input.AmountMinor, payment.ReceivedAt, input.Method, payment.MethodLabel, nullable(effectiveReference), nullable(input.Note), membership.ID, now)
@@ -907,7 +908,7 @@ type PaymentPage struct {
 }
 
 var paymentSorts = map[string]struct{}{
-	"receivedAt": {}, "amount": {}, "memberName": {}, "method": {}, "status": {},
+	"receivedAt": {}, "amount": {}, "memberName": {}, "actorName": {}, "method": {}, "status": {},
 }
 
 const (
@@ -924,6 +925,8 @@ func paymentSortExpression(sortKey string) string {
 		return "p.amount_minor"
 	case "memberName":
 		return "lower(u.display_name)"
+	case "actorName":
+		return "lower(actor_user.display_name)"
 	case "method":
 		return "lower(coalesce(p.method_label,p.method))"
 	case "status":
@@ -994,9 +997,14 @@ func (s Service) QueryPayments(ctx context.Context, membership domain.Membership
 	orderKeyword, comparison := tablequery.SQLOrderFragments(input.Direction)
 	query := `SELECT p.id,p.group_id,p.membership_id,u.display_name,
 		CASE WHEN m.deleted_at IS NOT NULL THEN 'DELETED' ELSE m.status END,
+		u.id,coalesce(u.avatar_key,''),
+		p.created_by,actor_user.display_name,actor_user.id,coalesce(actor_user.avatar_key,''),
+		CASE WHEN actor_member.deleted_at IS NOT NULL THEN 'DELETED' ELSE actor_member.status END,
 		p.amount_minor,g.currency,p.received_at,p.method,coalesce(p.method_label,''),coalesce(p.reference,''),coalesce(p.note,''),p.reversed_at,
 		attachment.original_filename,attachment.media_type,attachment.size_bytes,CAST(` + sortExpression + ` AS TEXT)
 		FROM payments p JOIN groups g ON g.id=p.group_id JOIN memberships m ON m.id=p.membership_id JOIN users u ON u.id=m.user_id
+		JOIN memberships actor_member ON actor_member.id=p.created_by AND actor_member.group_id=p.group_id
+		JOIN users actor_user ON actor_user.id=actor_member.user_id
 		LEFT JOIN payment_attachments attachment ON attachment.group_id=p.group_id AND attachment.payment_id=p.id
 		WHERE p.group_id=?`
 	args := []any{membership.GroupID}
@@ -1032,13 +1040,14 @@ func (s Service) QueryPayments(ctx context.Context, membership domain.Membership
 	if input.Search != "" {
 		pattern := tablequery.LikePattern(input.Search)
 		query += ` AND (u.display_name LIKE ? ESCAPE '\' COLLATE NOCASE
+			OR actor_user.display_name LIKE ? ESCAPE '\' COLLATE NOCASE
 			OR p.method LIKE ? ESCAPE '\' COLLATE NOCASE
 			OR coalesce(p.method_label,'') LIKE ? ESCAPE '\' COLLATE NOCASE
 			OR coalesce(p.reference,'') LIKE ? ESCAPE '\' COLLATE NOCASE
 			OR coalesce(p.note,'') LIKE ? ESCAPE '\' COLLATE NOCASE
 			OR CAST(p.amount_minor AS TEXT) LIKE ? ESCAPE '\'
 			OR ` + paymentStatusExpression + ` LIKE ? ESCAPE '\' COLLATE NOCASE)`
-		args = append(args, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
+		args = append(args, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
 	}
 	if cursorID != "" {
 		var boundKey any = cursorKey
@@ -1063,11 +1072,17 @@ func (s Service) QueryPayments(ctx context.Context, membership domain.Membership
 	for rows.Next() {
 		var item domain.Payment
 		var sortKey string
+		var memberUserID, memberAvatarKey, actorUserID, actorAvatarKey string
 		var fileName, mediaType sql.NullString
 		var sizeBytes sql.NullInt64
-		if err := rows.Scan(&item.ID, &item.GroupID, &item.MembershipID, &item.MemberName, &item.MemberStatus, &item.AmountMinor, &item.Currency, &item.ReceivedAt, &item.Method, &item.MethodLabel, &item.Reference, &item.Note, &item.ReversedAt, &fileName, &mediaType, &sizeBytes, &sortKey); err != nil {
+		if err := rows.Scan(&item.ID, &item.GroupID, &item.MembershipID, &item.MemberName, &item.MemberStatus, &memberUserID, &memberAvatarKey,
+			&item.ActorMembershipID, &item.ActorDisplayName, &actorUserID, &actorAvatarKey, &item.ActorMembershipStatus,
+			&item.AmountMinor, &item.Currency, &item.ReceivedAt, &item.Method, &item.MethodLabel, &item.Reference, &item.Note,
+			&item.ReversedAt, &fileName, &mediaType, &sizeBytes, &sortKey); err != nil {
 			return PaymentPage{}, err
 		}
+		item.MemberAvatarURL = media.UserAvatarURL(memberUserID, memberAvatarKey)
+		item.ActorAvatarURL = media.UserAvatarURL(actorUserID, actorAvatarKey)
 		item.Attachment = attachmentSummaryFromNull(item.GroupID, &item.ID, fileName, mediaType, sizeBytes)
 		item.Status = "POSTED"
 		if item.ReversedAt != nil {
@@ -1258,12 +1273,25 @@ func (s Service) ReversePayment(ctx context.Context, actor domain.Principal, mem
 }
 
 func refreshPaymentMemberStateTx(ctx context.Context, tx *sql.Tx, payment *domain.Payment) error {
-	if payment == nil || payment.MembershipID == "" {
+	if payment == nil || payment.MembershipID == "" || payment.ID == "" {
 		return domain.ValidationError{Field: "payment", Message: "requires a membership id"}
 	}
-	return tx.QueryRowContext(ctx, `SELECT u.display_name,CASE WHEN m.deleted_at IS NOT NULL THEN 'DELETED' ELSE m.status END
-		FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.id=?`, payment.MembershipID).
-		Scan(&payment.MemberName, &payment.MemberStatus)
+	var memberUserID, memberAvatarKey, actorUserID, actorAvatarKey string
+	err := tx.QueryRowContext(ctx, `SELECT target_user.display_name,CASE WHEN target_member.deleted_at IS NOT NULL THEN 'DELETED' ELSE target_member.status END,target_user.id,coalesce(target_user.avatar_key,''),
+		p.created_by,actor_user.display_name,actor_user.id,coalesce(actor_user.avatar_key,''),CASE WHEN actor_member.deleted_at IS NOT NULL THEN 'DELETED' ELSE actor_member.status END
+		FROM payments p
+		JOIN memberships target_member ON target_member.id=p.membership_id AND target_member.group_id=p.group_id
+		JOIN users target_user ON target_user.id=target_member.user_id
+		JOIN memberships actor_member ON actor_member.id=p.created_by AND actor_member.group_id=p.group_id
+		JOIN users actor_user ON actor_user.id=actor_member.user_id
+		WHERE p.id=? AND p.membership_id=?`, payment.ID, payment.MembershipID).
+		Scan(&payment.MemberName, &payment.MemberStatus, &memberUserID, &memberAvatarKey, &payment.ActorMembershipID, &payment.ActorDisplayName, &actorUserID, &actorAvatarKey, &payment.ActorMembershipStatus)
+	if err != nil {
+		return err
+	}
+	payment.MemberAvatarURL = media.UserAvatarURL(memberUserID, memberAvatarKey)
+	payment.ActorAvatarURL = media.UserAvatarURL(actorUserID, actorAvatarKey)
+	return nil
 }
 
 func insertLedger(ctx context.Context, tx *sql.Tx, groupID, periodID, membershipID, paymentID, reversalOf, account string, amount int64, description, createdAt string) error {

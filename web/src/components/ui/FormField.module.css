@@ -1,5 +1,6 @@
 .field {
   display: grid;
+  min-width: 0;
   gap: var(--space-2);
 }
 
@@ -10,6 +11,8 @@
 }
 
 .control {
+  box-sizing: border-box;
+  display: block;
   width: 100%;
   min-width: 0;
   max-width: 100%;
@@ -19,6 +22,17 @@
   border-radius: var(--radius-md);
   background: var(--color-surface);
   font-size: var(--font-size-md);
+}
+
+/*
+ * iOS WebKit overflows percentage-sized native date/time controls when they
+ * also have inline padding. Let the field grid stretch an auto-sized control
+ * instead, so its border box stays inside the available grid track.
+ */
+.control:is([type='date'], [type='datetime-local'], [type='month'], [type='time'], [type='week']) {
+  width: auto;
+  max-width: none;
+  justify-self: stretch;
 }
 
 .control[type='file'] {

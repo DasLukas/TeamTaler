@@ -1,5 +1,6 @@
 import { applyPerspectiveTransform, createPerspectiveTransform, estimateWarpSize, isValidDocumentCorners } from './geometry';
-import type { DocumentCorners, DocumentFilter, NormalizedPoint, PageRotation, ScannerPage } from './types';
+import { applyDocumentFilter } from './documentFilters';
+import type { DocumentCorners, NormalizedPoint, PageRotation, ScannerPage } from './types';
 
 const MAX_SOURCE_EDGE = 3000;
 const WARP_MESH_SIZE = 18;
@@ -10,6 +11,9 @@ interface RenderedDocumentPage {
   width: number;
 }
 
+/** Source fields required to build a filter-only editor preview. */
+export type DocumentFilterPreviewSource = Pick<ScannerPage, 'file' | 'filter' | 'sourceHeight' | 'sourceWidth'>;
+
 function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
@@ -19,16 +23,26 @@ function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number):
   });
 }
 
-async function decodeBoundedBitmap(page: ScannerPage): Promise<ImageBitmap> {
+async function decodeBoundedBitmap(page: DocumentFilterPreviewSource, maximumEdge = MAX_SOURCE_EDGE): Promise<ImageBitmap> {
+  const boundedEdge = Math.max(32, Math.min(MAX_SOURCE_EDGE, maximumEdge));
   const sourceEdge = Math.max(page.sourceWidth, page.sourceHeight);
-  if (sourceEdge <= MAX_SOURCE_EDGE) return createImageBitmap(page.file, { imageOrientation: 'from-image' });
-  const scale = MAX_SOURCE_EDGE / sourceEdge;
+  if (sourceEdge <= boundedEdge) return createImageBitmap(page.file, { imageOrientation: 'from-image' });
+  const scale = boundedEdge / sourceEdge;
   return createImageBitmap(page.file, {
     imageOrientation: 'from-image',
     resizeHeight: Math.max(1, Math.round(page.sourceHeight * scale)),
     resizeQuality: 'high',
     resizeWidth: Math.max(1, Math.round(page.sourceWidth * scale)),
   });
+}
+
+function applyCanvasFilter(canvas: HTMLCanvasElement, page: Pick<ScannerPage, 'filter'>): void {
+  if (page.filter === 'original') return;
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  if (!context) throw new Error('Canvas pixel processing is unavailable.');
+  const image = context.getImageData(0, 0, canvas.width, canvas.height);
+  applyDocumentFilter(image, page.filter);
+  context.putImageData(image, 0, 0);
 }
 
 function interpolateQuad(corners: readonly NormalizedPoint[], horizontal: number, vertical: number): NormalizedPoint {
@@ -99,14 +113,6 @@ function renderTriangle(
   context.restore();
 }
 
-function filterValue(filter: DocumentFilter): string {
-  switch (filter) {
-    case 'color': return 'contrast(1.08) saturate(0.92) brightness(1.02)';
-    case 'grayscale': return 'grayscale(1) contrast(1.16) brightness(1.04)';
-    case 'original': return 'none';
-  }
-}
-
 function rotateCanvas(source: HTMLCanvasElement, rotation: PageRotation): HTMLCanvasElement {
   if (rotation === 0) return source;
   const output = document.createElement('canvas');
@@ -119,6 +125,37 @@ function rotateCanvas(source: HTMLCanvasElement, rotation: PageRotation): HTMLCa
   context.rotate(rotation * Math.PI / 180);
   context.drawImage(source, -source.width / 2, -source.height / 2);
   return output;
+}
+
+/**
+ * Produces a bounded editor preview with the exact enhancement used by PDF export.
+ *
+ * The source remains uncropped so corner handles continue to address original
+ * image coordinates. Perspective correction is intentionally deferred to PDF
+ * generation, while tonal and grayscale processing share the production pixel
+ * implementation byte-for-byte.
+ *
+ * @param page - Scanner page whose file and filter should be previewed.
+ * @param maximumEdge - Maximum preview edge in pixels; defaults to 1200.
+ * @returns A metadata-free JPEG preview blob.
+ * @throws {Error} When decoding, pixel processing, or JPEG encoding fails.
+ */
+export async function renderDocumentFilterPreview(page: DocumentFilterPreviewSource, maximumEdge = 1_200): Promise<Blob> {
+  const bitmap = await decodeBoundedBitmap(page, maximumEdge);
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Canvas rendering is unavailable.');
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = 'high';
+    context.drawImage(bitmap, 0, 0);
+    applyCanvasFilter(canvas, page);
+    return canvasToBlob(canvas, 'image/jpeg', 0.88);
+  } finally {
+    bitmap.close();
+  }
 }
 
 /**
@@ -144,7 +181,6 @@ export async function renderDocumentPage(page: ScannerPage): Promise<RenderedDoc
     if (!context) throw new Error('Canvas rendering is unavailable.');
     context.imageSmoothingEnabled = true;
     context.imageSmoothingQuality = 'high';
-    context.filter = filterValue(page.filter);
 
     const sourcePixels = page.corners.map((point) => ({ x: point.x * bitmap.width, y: point.y * bitmap.height })) as unknown as DocumentCorners;
     const destination: DocumentCorners = [
@@ -174,6 +210,7 @@ export async function renderDocumentPage(page: ScannerPage): Promise<RenderedDoc
       }
     }
 
+    applyCanvasFilter(canvas, page);
     const rotated = rotateCanvas(canvas, page.rotation);
     return {
       blob: await canvasToBlob(rotated, 'image/jpeg', 0.9),

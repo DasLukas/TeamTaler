@@ -313,7 +313,10 @@ describe('CatalogPanel', () => {
 
     await screen.findByText(existingProduct.name);
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.editProduct', { name: existingProduct.name }) }));
-    expect(screen.getByLabelText(i18n.t('catalog.price', { currency: 'EUR' }))).toHaveValue('1,00');
+    const priceInput = screen.getByLabelText(i18n.t('catalog.price', { currency: 'EUR' }));
+    expect(priceInput).toHaveValue('1,00');
+    expect(priceInput).toHaveAttribute('inputmode', 'decimal');
+    expect(priceInput).toHaveAttribute('type', 'text');
     expect(screen.getByLabelText(i18n.t('common.category'))).toBeDisabled();
     const name = screen.getByLabelText(i18n.t('catalog.productName'));
     await user.clear(name);

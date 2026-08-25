@@ -39,7 +39,7 @@ const filterDefinitions: readonly DataTableFilterDefinition<TestFilterId>[] = [
     kind: 'select',
     label: 'Status',
     options: [
-      { label: 'Open', value: 'open' },
+      { label: 'Open', value: 'open', visual: <span data-testid="open-visual">O</span> },
       { label: 'Paid', value: 'paid' },
     ],
   },
@@ -196,7 +196,10 @@ describe('DataTable', () => {
 
     await user.click(screen.getByRole('button', { name: 'Filters' }));
     const dialog = screen.getByRole('dialog', { name: 'Filter results' });
-    await user.selectOptions(within(dialog).getByLabelText('Status'), 'open');
+    await user.click(within(dialog).getByRole('combobox', { name: 'Status' }));
+    const statusMenu = screen.getByRole('listbox', { name: 'Status' });
+    expect(within(statusMenu).getByTestId('open-visual')).toBeVisible();
+    await user.click(within(statusMenu).getByRole('option', { name: 'Open' }));
     fireEvent.change(within(dialog).getByLabelText('From'), { target: { value: '2026-08-01' } });
 
     expect(screen.getByRole('button', { name: 'Filters' })).toHaveAccessibleName('Filters');

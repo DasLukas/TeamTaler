@@ -4,6 +4,24 @@
   gap: var(--space-4);
 }
 
+.fillAvailableHeight {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.fillAvailableHeight > .controls,
+.fillAvailableHeight > .resultBar {
+  flex: 0 0 auto;
+}
+
+.fillAvailableHeight > .viewportShell {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .controls {
   display: grid;
   min-width: 0;
@@ -200,10 +218,21 @@
   min-width: 0;
 }
 
+.fillAvailableHeight .viewportShell {
+  display: flex;
+  flex-direction: column;
+}
+
 .viewportFrame {
   position: relative;
   min-width: 0;
   border-radius: var(--radius-md);
+}
+
+.fillAvailableHeight .viewportFrame {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .viewportFrame::before,
@@ -237,6 +266,12 @@
 .viewport.viewport {
   scrollbar-gutter: stable;
   -webkit-overflow-scrolling: touch;
+}
+
+.fillAvailableHeight .viewport.viewport {
+  height: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .viewport:focus-visible {

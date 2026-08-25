@@ -84,13 +84,6 @@
 
 .securityWarning { margin: 0; font-size: var(--font-size-sm); }
 
-.settingsPanel :global(input[type='datetime-local']) {
-  display: block;
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
-}
-
 .actions {
   display: flex;
   flex-wrap: wrap;

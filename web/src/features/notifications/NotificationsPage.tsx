@@ -9,6 +9,7 @@ import { useActiveGroup } from '@/app/useActiveGroup';
 import { Page } from '@/components/layout/Page';
 import { Button } from '@/components/ui/Button';
 import { StatePanel } from '@/components/ui/StatePanel';
+import { formatGermanDateTime } from '@/features/shared/dateFormat';
 import { notificationIdFromHref } from './notificationDeepLink';
 import { notificationSummaryKey } from './notification-summary';
 import styles from './NotificationsPage.module.css';
@@ -197,7 +198,7 @@ export function NotificationsPage() {
           {notifications.map((notification) => (
             <article className={`${styles.notification} ${notification.readAt ? styles.read : ''}`} data-focused={focusedNotificationId === notification.id || undefined} data-notification-id={notification.id} data-unread={notification.readAt ? 'false' : 'true'} id={`notification-${notification.id}`} key={notification.id} tabIndex={-1}>
               <span className={styles.icon}><Bell aria-hidden="true" size={21} /></span>
-              <div><h2>{notification.title}</h2><p>{notification.message}</p><time>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(notification.createdAt))}</time></div>
+              <div><h2>{notification.title}</h2><p>{notification.message}</p><time dateTime={notification.createdAt}>{formatGermanDateTime(notification.createdAt)}</time></div>
               <span className={styles.label}>{notification.readAt ? t('notifications.read') : t('notifications.new')}</span>
             </article>
           ))}

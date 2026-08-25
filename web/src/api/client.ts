@@ -2,6 +2,7 @@ import { minorUnitsToSafeNumber, normalizeMoney } from './money';
 import {
   adaptAccountSummaries,
   adaptAppearancePreference,
+  adaptActivity,
   adaptAuditEntry,
   adaptBooking,
   adaptBookingContext,
@@ -38,10 +39,14 @@ import {
 import type {
   AccountSummary,
   AppearancePreference,
+  ActivityCollectionQuery,
+  ActivityEntry,
+  ActivityFilterOptions,
   AuthenticationCapabilities,
   AuditEntry,
   AuditFilterOptions,
   Booking,
+  BookingFilterOptions,
   BookingCollectionQuery,
   BookingBatchCommand,
   BookingBulkCommand,
@@ -679,6 +684,12 @@ export const api = {
   })),
   permanentlyDeleteMember: async (groupId: string, membershipId: string): Promise<void> => request<void>(groupPath(groupId, `members/${encodeURIComponent(membershipId)}/permanent`), { method: 'DELETE' }),
   getBookings: async (groupId: string): Promise<Booking[]> => (await request<unknown[]>(groupPath(groupId, 'bookings'))).map((booking) => adaptBooking(booking)),
+  getActivityFilterOptions: (groupId: string): Promise<ActivityFilterOptions> => request<ActivityFilterOptions>(groupPath(groupId, 'activities/filter-options')),
+  getActivitiesPage: async (groupId: string, query: ActivityCollectionQuery = {}): Promise<CollectionPage<ActivityEntry>> => {
+    const response = await requestWithMetadata<unknown[]>(collectionPath(groupPath(groupId, 'activities'), query));
+    return collectionPage(response.data.map(adaptActivity), response.headers, query.limit);
+  },
+  getBookingFilterOptions: (groupId: string): Promise<BookingFilterOptions> => request<BookingFilterOptions>(groupPath(groupId, 'bookings/filter-options')),
   getBookingsPage: async (groupId: string, query: BookingCollectionQuery = {}): Promise<CollectionPage<Booking>> => {
     const response = await requestWithMetadata<unknown[]>(collectionPath(groupPath(groupId, 'bookings'), query));
     return collectionPage(response.data.map((booking) => adaptBooking(booking)), response.headers, query.limit);

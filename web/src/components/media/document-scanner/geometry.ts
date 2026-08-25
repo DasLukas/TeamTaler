@@ -24,6 +24,20 @@ export function constrainPoint(point: NormalizedPoint): NormalizedPoint {
   };
 }
 
+/**
+ * Fits one aspect ratio inside a bounded rectangle without cropping.
+ *
+ * @param width - Available width in CSS pixels.
+ * @param height - Available height in CSS pixels.
+ * @param aspect - Desired width divided by height.
+ * @returns Contained dimensions, or `undefined` for invalid input.
+ */
+export function containedAspectSize(width: number, height: number, aspect: number): { height: number; width: number } | undefined {
+  if (width <= 0 || height <= 0 || !Number.isFinite(aspect) || aspect <= 0) return undefined;
+  if (width / height > aspect) return { height, width: height * aspect };
+  return { height: width / aspect, width };
+}
+
 function cross(a: NormalizedPoint, b: NormalizedPoint, c: NormalizedPoint): number {
   return (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
 }

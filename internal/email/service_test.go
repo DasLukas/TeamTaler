@@ -74,7 +74,7 @@ func TestSMTPDeliversInvitationOverSecureTransports(t *testing.T) {
 			if err != nil {
 				t.Fatalf("decode delivered body: %v", err)
 			}
-			for _, expected := range []string{"Hello Alex Member,", "join Alpha Team", "https://teamtaler.example.test/invite#token=one-time-token", "11 Aug 2026"} {
+			for _, expected := range []string{"Hello Alex Member,", "join Alpha Team", "https://teamtaler.example.test/invite#token=one-time-token", "11.08.2026, 12:00 UTC"} {
 				if !bytes.Contains(body, []byte(expected)) {
 					t.Fatalf("delivered body does not contain %q: %q", expected, body)
 				}
