@@ -1,6 +1,7 @@
 import { minorUnitsToSafeNumber, normalizeMoney } from './money';
 import {
   adaptAccountSummaries,
+  adaptAppearancePreference,
   adaptActivity,
   adaptAuditEntry,
   adaptBooking,
@@ -32,10 +33,12 @@ import {
   adaptSystemGroupInvitationResult,
   adaptSystemGroupDeletionImpact,
   adaptSystemSettings,
+  adaptThemePreference,
   adaptUser,
 } from './adapters';
 import type {
   AccountSummary,
+  AppearancePreference,
   ActivityCollectionQuery,
   ActivityEntry,
   ActivityFilterOptions,
@@ -120,6 +123,9 @@ import type {
   SystemSettingsUpdate,
   SystemSmtpSettingsUpdate,
   SystemWebPushSettingsUpdate,
+  ThemeId,
+  ThemePreference,
+  ColorMode,
   User,
 } from './types';
 import i18n from '@/i18n';
@@ -503,6 +509,7 @@ export const api = {
     clearAuthenticatedClientState();
   },
   updateProfile: async (displayName: string): Promise<User> => adaptUser(await request<unknown>('/me/profile', { method: 'PATCH', body: json({ displayName }) })),
+  updateAppearance: async (colorMode: ColorMode): Promise<AppearancePreference> => adaptAppearancePreference(await request<unknown>('/me/appearance', { method: 'PUT', body: json({ colorMode }) })),
   updateDefaultGroup: async (defaultGroupId: string | null): Promise<GroupPreference> => request<GroupPreference>('/me/group-preference', { method: 'PUT', body: json({ defaultGroupId }) }),
   recordLastUsedGroup: async (groupId: string): Promise<void> => request<void>('/me/group-preference/last-used', { method: 'PUT', body: json({ groupId }) }),
   changePassword: async (currentPassword: string, newPassword: string): Promise<void> => {
@@ -632,6 +639,10 @@ export const api = {
   updateGroupSettings: async (groupId: string, settings: GroupSettingsUpdateInput): Promise<GroupSettings> => adaptGroupSettings(await request<unknown>(groupPath(groupId, 'settings'), {
     method: 'PATCH',
     body: json(settings),
+  })),
+  updateThemePreference: async (groupId: string, themeOverride: ThemeId | null): Promise<ThemePreference> => adaptThemePreference(await request<unknown>(groupPath(groupId, 'theme-preference'), {
+    method: 'PUT',
+    body: json({ themeOverride }),
   })),
   getPublicJoinLink: async (groupId: string): Promise<PublicJoinLink> => request<PublicJoinLink>(groupPath(groupId, 'public-join-link')),
   updatePublicJoinLink: async (groupId: string, update: PublicJoinLinkUpdate, version: number): Promise<PublicJoinLink> => request<PublicJoinLink>(groupPath(groupId, 'public-join-link'), {

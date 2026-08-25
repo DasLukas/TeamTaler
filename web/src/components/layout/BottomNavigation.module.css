@@ -10,7 +10,7 @@
     grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
     padding: 0 var(--shell-safe-area-right) var(--shell-safe-area-bottom) var(--shell-safe-area-left);
     border-top: 1px solid var(--color-border);
-    background: rgb(255 255 255 / 96%);
+    background: color-mix(in srgb, var(--color-surface) 96%, transparent);
     backdrop-filter: blur(14px);
   }
 
@@ -22,7 +22,7 @@
     justify-content: center;
     flex-direction: column;
     gap: 5px;
-    color: var(--color-navy-950);
+    color: var(--color-text-strong);
     font-size: 0.72rem;
     text-align: center;
   }
@@ -46,14 +46,14 @@
     position: absolute;
     top: -9px;
     right: -17px;
-    border-color: var(--color-white);
+    border-color: var(--color-surface);
   }
 
   .active {
-    color: var(--color-teal-700);
+    color: var(--color-brand);
   }
 
   .active::before {
-    background: var(--color-teal-700);
+    background: var(--color-brand);
   }
 }

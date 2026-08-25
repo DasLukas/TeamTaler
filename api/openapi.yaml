@@ -211,6 +211,27 @@ paths:
               schema:
                 $ref: '#/components/schemas/Session'
         '401': { $ref: '#/components/responses/Problem' }
+  /me/appearance:
+    put:
+      tags: [Authentication]
+      summary: Update the current account's color mode
+      description: Persists SYSTEM, LIGHT, or DARK for the authenticated account across devices.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Appearance' }
+      responses:
+        '200':
+          description: Persisted account appearance
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Appearance' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /me/profile:
     patch:
       tags: [Authentication]
@@ -1317,7 +1338,7 @@ paths:
       tags: [Groups]
       summary: Partially update group or membership settings
       description: |
-        `defaultRoleId` requires `ROLE_MANAGEMENT` or
+        `defaultTheme` requires `GROUP_ADMINISTRATION`. `defaultRoleId` requires `ROLE_MANAGEMENT` or
         `GROUP_ADMINISTRATION`. The deprecated `notificationEmailsEnabled`
         compatibility field requires `GROUP_ADMINISTRATION`. Finance and booking fields require
         `GROUP_ADMINISTRATION` or `FINANCE_MANAGEMENT`.
@@ -1335,6 +1356,31 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/GroupSettings' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/theme-preference:
+    put:
+      tags: [Groups]
+      summary: Update the current member's theme preference
+      description: |
+        Stores a theme override only on the authenticated account's active
+        membership in this group. Null follows the group's current and future
+        default theme.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ThemePreference' }
+      responses:
+        '200':
+          description: Persisted membership theme preference
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ThemePreference' }
+        '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/notification-settings:
@@ -4066,6 +4112,28 @@ components:
       required: [groupId]
       properties:
         groupId: { type: string, minLength: 1 }
+    ColorMode:
+      type: string
+      enum: [SYSTEM, LIGHT, DARK]
+    ThemeId:
+      type: string
+      enum: [TEAMTALER, NRW, TIEF_IM_WESTEN, FIRE]
+    Appearance:
+      type: object
+      additionalProperties: false
+      required: [colorMode]
+      properties:
+        colorMode: { $ref: '#/components/schemas/ColorMode' }
+    ThemePreference:
+      type: object
+      additionalProperties: false
+      required: [themeOverride]
+      properties:
+        themeOverride:
+          oneOf:
+            - $ref: '#/components/schemas/ThemeId'
+            - type: 'null'
+          description: Null follows the group default; a theme identifier remains a per-group override.
     PasswordUpdate:
       type: object
       additionalProperties: false
@@ -4204,10 +4272,11 @@ components:
           description: Null means unlimited while enabled; finite values must be between one hour and 365 days in the future.
     Session:
       type: object
-      required: [user, csrfToken, groups, activeGroupId, defaultGroupId, systemRoles]
+      required: [user, csrfToken, colorMode, groups, activeGroupId, defaultGroupId, systemRoles]
       properties:
         user: { $ref: '#/components/schemas/User' }
         csrfToken: { type: string }
+        colorMode: { $ref: '#/components/schemas/ColorMode' }
         groups:
           type: array
           items: { $ref: '#/components/schemas/Group' }
@@ -4233,18 +4302,20 @@ components:
         avatarUrl: { type: string }
     Group:
       type: object
-      required: [id, name, currency, membership]
+      required: [id, name, currency, defaultTheme, membership]
       properties:
         id: { type: string }
         name: { type: string }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         logoUrl: { type: string }
+        defaultTheme: { $ref: '#/components/schemas/ThemeId' }
         membership: { $ref: '#/components/schemas/Membership' }
     GroupSettings:
       type: object
       additionalProperties: false
-      required: [notificationEmailsEnabled, notificationEmailDeliveryAvailable, settlementsEnabled, defaultRoleId, ownBookingReasonMode, foreignBookingReasonMode, ownPaymentReasonMode, otherPaymentReasonMode, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
+      required: [defaultTheme, notificationEmailsEnabled, notificationEmailDeliveryAvailable, settlementsEnabled, defaultRoleId, ownBookingReasonMode, foreignBookingReasonMode, ownPaymentReasonMode, otherPaymentReasonMode, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
       properties:
+        defaultTheme: { $ref: '#/components/schemas/ThemeId' }
         notificationEmailsEnabled:
           type: boolean
           deprecated: true
@@ -4297,6 +4368,7 @@ components:
       additionalProperties: false
       minProperties: 1
       properties:
+        defaultTheme: { $ref: '#/components/schemas/ThemeId' }
         notificationEmailsEnabled:
           type: boolean
           deprecated: true
@@ -4487,7 +4559,7 @@ components:
           items: { $ref: '#/components/schemas/ConfigurableItem' }
     Membership:
       type: object
-      required: [id, groupId, userId, displayName, isTemporaryGuest, status, roleIds, effectiveGrants, roleAssignmentsVersion, roles, groupPermissions, categoryGrants]
+      required: [id, groupId, userId, displayName, isTemporaryGuest, status, themeOverride, roleIds, effectiveGrants, roleAssignmentsVersion, roles, groupPermissions, categoryGrants]
       properties:
         id: { type: string }
         groupId: { type: string }
@@ -4504,6 +4576,11 @@ components:
           readOnly: true
           description: Server-derived only from missing email and password credentials.
         avatarUrl: { type: string }
+        themeOverride:
+          oneOf:
+            - $ref: '#/components/schemas/ThemeId'
+            - type: 'null'
+          description: Null follows the group's default theme.
         status:
           type: string
           enum: [ACTIVE, ARCHIVED, DELETED]

@@ -18,7 +18,7 @@
   padding: var(--space-6);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  background: var(--color-white);
+  background: var(--color-surface);
   box-shadow: var(--shadow-sm);
 }
 
@@ -33,7 +33,7 @@
 .section > header p,
 .subsection > p,
 .groupCard p,
-.toggleRow span { color: var(--color-muted); }
+.toggleRow span { color: var(--color-text-muted); }
 
 .section > header p { margin-top: var(--space-2); }
 
@@ -93,8 +93,8 @@
 
 .error,
 .success { margin: 0; font-size: var(--font-size-sm); }
-.error { color: var(--color-red-600); }
-.success { color: var(--color-green-600); }
+.error { color: var(--color-status-danger); }
+.success { color: var(--color-status-success); }
 
 .smtpStatus {
   display: flex;
@@ -103,7 +103,7 @@
   gap: var(--space-2);
 }
 
-.smtpStatus[data-status='failed'] { color: var(--color-red-600); }
+.smtpStatus[data-status='failed'] { color: var(--color-status-danger); }
 
 .subsection {
   display: grid;
@@ -202,14 +202,14 @@
   column-gap: var(--space-2);
 }
 .compactImpact dt,
-.impact dt { color: var(--color-muted); font-size: var(--font-size-xs); }
+.impact dt { color: var(--color-text-muted); font-size: var(--font-size-xs); }
 .compactImpact dd,
 .impact dd { margin: 0; font-weight: 700; }
 .compactImpact dd { overflow-wrap: anywhere; }
 
 .activeStatus {
   display: block;
-  color: var(--color-green-600);
+  color: var(--color-status-success);
 }
 
 .purgeForm {
@@ -223,10 +223,10 @@
   align-items: flex-start;
   gap: var(--space-3);
   padding: var(--space-5);
-  border: 1px solid #efb0aa;
+  border: 1px solid var(--color-status-danger-border);
   border-radius: var(--radius-md);
-  color: #7e1c12;
-  background: #fff3f1;
+  color: var(--color-status-danger);
+  background: var(--color-status-danger-subtle);
 }
 
 .dangerNotice > div {
@@ -242,8 +242,8 @@
   place-items: center;
   flex: 0 0 auto;
   border-radius: var(--radius-full);
-  color: var(--color-red-600);
-  background: var(--color-white);
+  color: var(--color-status-danger);
+  background: var(--color-surface);
 }
 
 .impactPanel,
@@ -269,7 +269,7 @@
 
 .confirmationPanel > p {
   margin-top: var(--space-1);
-  color: var(--color-muted);
+  color: var(--color-text-muted);
 }
 
 .impactPanel .impact > div {

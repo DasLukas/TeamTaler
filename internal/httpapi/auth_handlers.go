@@ -18,6 +18,7 @@ type loginRequest struct {
 type sessionResponse struct {
 	User           userResponse       `json:"user"`
 	CSRFToken      string             `json:"csrfToken"`
+	ColorMode      domain.ColorMode   `json:"colorMode"`
 	Groups         any                `json:"groups"`
 	ActiveGroupID  *string            `json:"activeGroupId"`
 	DefaultGroupID *string            `json:"defaultGroupId"`
@@ -185,6 +186,10 @@ func (s *Server) newSessionResponse(ctx context.Context, principal domain.Princi
 	if err != nil {
 		return sessionResponse{}, err
 	}
+	colorMode, err := s.auth.ReadColorMode(ctx, principal.UserID)
+	if err != nil {
+		return sessionResponse{}, err
+	}
 	available := make(map[string]struct{}, len(groupItems))
 	for _, group := range groupItems {
 		available[group.ID] = struct{}{}
@@ -210,7 +215,7 @@ func (s *Server) newSessionResponse(ctx context.Context, principal domain.Princi
 		value := groupItems[0].ID
 		activeGroupID = &value
 	}
-	return sessionResponse{User: userResponse{ID: principal.UserID, Email: principal.Email, DisplayName: principal.DisplayName, AvatarURL: principal.AvatarURL}, CSRFToken: csrf, Groups: groupItems, ActiveGroupID: activeGroupID, DefaultGroupID: defaultGroupID, SystemRoles: systemRoles}, nil
+	return sessionResponse{User: userResponse{ID: principal.UserID, Email: principal.Email, DisplayName: principal.DisplayName, AvatarURL: principal.AvatarURL}, CSRFToken: csrf, ColorMode: colorMode, Groups: groupItems, ActiveGroupID: activeGroupID, DefaultGroupID: defaultGroupID, SystemRoles: systemRoles}, nil
 }
 
 func (s *Server) acquirePasswordSlot() bool {

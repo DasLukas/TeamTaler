@@ -1,6 +1,7 @@
 import { useEffect, useMemo, type ReactNode } from 'react';
 import type { InstanceCapabilities, Session } from '@/api/types';
 import { reconcileWebPush } from '@/features/push/webPush';
+import { useApplyAuthenticatedColorMode } from './useAppearance';
 import { SessionContext } from './session-context';
 
 /** Properties accepted by the global authenticated-session provider. */
@@ -17,6 +18,7 @@ export interface SessionProviderProps {
  * @returns A stable context provider for authenticated routes.
  */
 export function SessionProvider({ children, instanceCapabilities, session }: SessionProviderProps) {
+  useApplyAuthenticatedColorMode(session.colorMode);
   const value = useMemo(() => ({ session, instanceCapabilities }), [instanceCapabilities, session]);
 
   useEffect(() => {

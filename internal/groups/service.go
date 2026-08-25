@@ -89,7 +89,7 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, name, curre
 	if err != nil {
 		return domain.Group{}, fmt.Errorf("create group: %w", err)
 	}
-	group := domain.Group{ID: groupID, Name: name, Currency: currency, Membership: domain.Membership{
+	group := domain.Group{ID: groupID, Name: name, Currency: currency, DefaultTheme: domain.ThemeTeamTaler, Membership: domain.Membership{
 		ID: membershipID, GroupID: groupID, UserID: actor.UserID, Email: &actor.Email, DisplayName: actor.DisplayName, AvatarURL: actor.AvatarURL, Status: "ACTIVE", Roles: []domain.Role{domain.RoleAdmin}, GroupPermissions: []domain.GroupPermission{}, CategoryGrants: map[string][]domain.CategoryPermission{},
 	}}
 	if err := s.hydrateMembershipAuthorization(ctx, &group.Membership); err != nil {
@@ -101,8 +101,8 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, name, curre
 // List returns all active groups and effective permissions for userID. ctx
 // bounds the query; an empty result is valid, while database errors are returned.
 func (s Service) List(ctx context.Context, userID string) ([]domain.Group, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT g.id,g.name,g.currency,g.logo_key,m.id,m.status,u.email,u.display_name,u.avatar_key
-		FROM memberships m JOIN groups g ON g.id=m.group_id JOIN users u ON u.id=m.user_id
+	rows, err := s.DB.QueryContext(ctx, `SELECT g.id,g.name,g.currency,g.logo_key,settings.default_theme,m.id,m.status,m.theme_override,u.email,u.display_name,u.avatar_key
+		FROM memberships m JOIN groups g ON g.id=m.group_id JOIN group_settings settings ON settings.group_id=g.id JOIN users u ON u.id=m.user_id
 		WHERE m.user_id=? AND m.status='ACTIVE' AND g.status='ACTIVE' ORDER BY lower(g.name)`, userID)
 	if err != nil {
 		return nil, err
@@ -111,11 +111,12 @@ func (s Service) List(ctx context.Context, userID string) ([]domain.Group, error
 	result := make([]domain.Group, 0)
 	for rows.Next() {
 		var group domain.Group
-		var logoKey, avatarKey sql.NullString
+		var logoKey, avatarKey, themeOverride sql.NullString
 		group.Membership.UserID = userID
-		if err := rows.Scan(&group.ID, &group.Name, &group.Currency, &logoKey, &group.Membership.ID, &group.Membership.Status, &group.Membership.Email, &group.Membership.DisplayName, &avatarKey); err != nil {
+		if err := rows.Scan(&group.ID, &group.Name, &group.Currency, &logoKey, &group.DefaultTheme, &group.Membership.ID, &group.Membership.Status, &themeOverride, &group.Membership.Email, &group.Membership.DisplayName, &avatarKey); err != nil {
 			return nil, err
 		}
+		group.Membership.ThemeOverride = nullableThemeID(themeOverride)
 		if logoKey.Valid {
 			group.LogoURL = "/api/v1/groups/" + group.ID + "/images/" + logoKey.String
 		}
@@ -187,6 +188,7 @@ func (s Service) Settings(ctx context.Context, membership domain.Membership) (do
 
 // SettingsUpdate describes a partial change to group behavior.
 type SettingsUpdate struct {
+	DefaultTheme                 *domain.ThemeID
 	NotificationEmailsEnabled    *bool
 	SettlementsEnabled           *bool
 	DefaultRoleID                *string
@@ -203,11 +205,11 @@ type SettingsUpdate struct {
 }
 
 // UpdateSettings atomically applies the supplied group-wide behavior changes.
-// ROLE_MANAGEMENT or GROUP_ADMINISTRATION protects the default role;
-// GROUP_ADMINISTRATION protects notification delivery, while either
+// GROUP_ADMINISTRATION protects the default theme and notification delivery;
+// ROLE_MANAGEMENT or GROUP_ADMINISTRATION protects the default role, while either
 // GROUP_ADMINISTRATION or FINANCE_MANAGEMENT protects finance and booking configuration.
 func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, membership domain.Membership, update SettingsUpdate) (domain.GroupSettings, error) {
-	if update.NotificationEmailsEnabled == nil && update.SettlementsEnabled == nil && update.DefaultRoleID == nil &&
+	if update.DefaultTheme == nil && update.NotificationEmailsEnabled == nil && update.SettlementsEnabled == nil && update.DefaultRoleID == nil &&
 		update.OwnBookingReasonMode == nil && update.ForeignBookingReasonMode == nil &&
 		update.OwnPaymentReasonMode == nil && update.OtherPaymentReasonMode == nil &&
 		update.ForeignBookingReasonRequired == nil && update.OwnPaymentReasonRequired == nil &&
@@ -221,6 +223,9 @@ func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, mem
 			return domain.GroupSettings{}, domain.ValidationError{Field: "defaultRoleId", Message: "is required"}
 		}
 		update.DefaultRoleID = &trimmed
+	}
+	if update.DefaultTheme != nil && !update.DefaultTheme.Valid() {
+		return domain.GroupSettings{}, domain.ValidationError{Field: "defaultTheme", Message: "must be TEAMTALER, NRW, TIEF_IM_WESTEN, or FIRE"}
 	}
 	if err := validateReasonModeUpdates(update); err != nil {
 		return domain.GroupSettings{}, err
@@ -240,6 +245,9 @@ func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, mem
 			return err
 		}
 		next := previous
+		if update.DefaultTheme != nil {
+			next.DefaultTheme = *update.DefaultTheme
+		}
 		if update.NotificationEmailsEnabled != nil {
 			next.NotificationEmailsEnabled = *update.NotificationEmailsEnabled
 		}
@@ -306,10 +314,10 @@ func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, mem
 			return nil
 		}
 		now := platform.Timestamp(platform.Now())
-		if _, err := tx.ExecContext(ctx, `UPDATE group_settings SET notification_emails_enabled=?,settlements_enabled=?,default_role_id=?,
+		if _, err := tx.ExecContext(ctx, `UPDATE group_settings SET default_theme=?,notification_emails_enabled=?,settlements_enabled=?,default_role_id=?,
 			own_booking_reason_mode=?,foreign_booking_reason_mode=?,own_payment_reason_mode=?,other_payment_reason_mode=?,
 			foreign_booking_reason_required=?,own_payment_reason_required=?,other_payment_reason_required=?,updated_at=? WHERE group_id=?`,
-			next.NotificationEmailsEnabled, next.SettlementsEnabled, nullableText(next.DefaultRoleID), next.OwnBookingReasonMode,
+			next.DefaultTheme, next.NotificationEmailsEnabled, next.SettlementsEnabled, nullableText(next.DefaultRoleID), next.OwnBookingReasonMode,
 			next.ForeignBookingReasonMode, next.OwnPaymentReasonMode, next.OtherPaymentReasonMode, next.ForeignBookingReasonRequired,
 			next.OwnPaymentReasonRequired, next.OtherPaymentReasonRequired, now, membership.GroupID); err != nil {
 			return err
@@ -330,6 +338,7 @@ func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, mem
 			}
 		}
 		if err := audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "group.settings.updated", "group", membership.GroupID, map[string]any{
+			"defaultTheme":              map[string]domain.ThemeID{"previous": previous.DefaultTheme, "current": next.DefaultTheme},
 			"notificationEmailsEnabled": map[string]bool{"previous": previous.NotificationEmailsEnabled, "current": next.NotificationEmailsEnabled},
 			"settlementsEnabled":        map[string]bool{"previous": previous.SettlementsEnabled, "current": next.SettlementsEnabled},
 			"defaultRoleId":             map[string]any{"previous": previous.DefaultRoleID, "current": next.DefaultRoleID},
@@ -352,6 +361,11 @@ func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, mem
 }
 
 func requireSettingsUpdatePermissions(ctx context.Context, queryer authorization.Queryer, membership domain.Membership, update SettingsUpdate) error {
+	if update.DefaultTheme != nil {
+		if err := requireCurrentPermission(ctx, queryer, membership, domain.PermissionGroupAdministration); err != nil {
+			return err
+		}
+	}
 	if update.DefaultRoleID != nil {
 		if err := requireAnyCurrentPermission(ctx, queryer, membership, domain.PermissionRoleManagement, domain.PermissionGroupAdministration); err != nil {
 			return err
@@ -390,11 +404,11 @@ type settingsQueryer interface {
 
 func querySettings(ctx context.Context, queryer settingsQueryer, groupID string, settings *domain.GroupSettings) error {
 	var defaultRoleID sql.NullString
-	if err := queryer.QueryRowContext(ctx, `SELECT notification_emails_enabled,settlements_enabled,default_role_id,
+	if err := queryer.QueryRowContext(ctx, `SELECT default_theme,notification_emails_enabled,settlements_enabled,default_role_id,
 		own_booking_reason_mode,foreign_booking_reason_mode,own_payment_reason_mode,other_payment_reason_mode,
 		foreign_booking_reason_required,own_payment_reason_required,other_payment_reason_required
 		FROM group_settings WHERE group_id=?`, groupID).
-		Scan(&settings.NotificationEmailsEnabled, &settings.SettlementsEnabled, &defaultRoleID, &settings.OwnBookingReasonMode,
+		Scan(&settings.DefaultTheme, &settings.NotificationEmailsEnabled, &settings.SettlementsEnabled, &defaultRoleID, &settings.OwnBookingReasonMode,
 			&settings.ForeignBookingReasonMode, &settings.OwnPaymentReasonMode, &settings.OtherPaymentReasonMode, &settings.ForeignBookingReasonRequired,
 			&settings.OwnPaymentReasonRequired, &settings.OtherPaymentReasonRequired); err != nil {
 		return err
@@ -583,7 +597,7 @@ func replacePaymentMethods(ctx context.Context, queryer settingsExecutor, groupI
 }
 
 func groupSettingsEqual(left, right domain.GroupSettings) bool {
-	return left.NotificationEmailsEnabled == right.NotificationEmailsEnabled && left.SettlementsEnabled == right.SettlementsEnabled && nullableStringsEqual(left.DefaultRoleID, right.DefaultRoleID) &&
+	return left.DefaultTheme == right.DefaultTheme && left.NotificationEmailsEnabled == right.NotificationEmailsEnabled && left.SettlementsEnabled == right.SettlementsEnabled && nullableStringsEqual(left.DefaultRoleID, right.DefaultRoleID) &&
 		left.OwnBookingReasonMode == right.OwnBookingReasonMode && left.ForeignBookingReasonMode == right.ForeignBookingReasonMode &&
 		left.OwnPaymentReasonMode == right.OwnPaymentReasonMode && left.OtherPaymentReasonMode == right.OtherPaymentReasonMode &&
 		left.ForeignBookingReasonRequired == right.ForeignBookingReasonRequired && left.OwnPaymentReasonRequired == right.OwnPaymentReasonRequired &&
@@ -726,11 +740,11 @@ func (s Service) RemoveLogo(ctx context.Context, actor domain.Principal, members
 // returned.
 func (s Service) MembershipForUser(ctx context.Context, groupID, userID string) (domain.Membership, error) {
 	var membership domain.Membership
-	var avatarKey sql.NullString
-	err := s.DB.QueryRowContext(ctx, `SELECT m.id,m.group_id,m.user_id,u.email,u.display_name,u.avatar_key,m.status
+	var avatarKey, themeOverride sql.NullString
+	err := s.DB.QueryRowContext(ctx, `SELECT m.id,m.group_id,m.user_id,u.email,u.display_name,u.avatar_key,m.status,m.theme_override
 		FROM memberships m JOIN users u ON u.id=m.user_id JOIN groups g ON g.id=m.group_id
 		WHERE m.group_id=? AND m.user_id=? AND m.status='ACTIVE' AND g.status='ACTIVE'`, groupID, userID).
-		Scan(&membership.ID, &membership.GroupID, &membership.UserID, &membership.Email, &membership.DisplayName, &avatarKey, &membership.Status)
+		Scan(&membership.ID, &membership.GroupID, &membership.UserID, &membership.Email, &membership.DisplayName, &avatarKey, &membership.Status, &themeOverride)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Membership{}, domain.ErrForbidden
 	}
@@ -738,6 +752,7 @@ func (s Service) MembershipForUser(ctx context.Context, groupID, userID string) 
 		return domain.Membership{}, err
 	}
 	membership.AvatarURL = media.UserAvatarURL(membership.UserID, avatarKey.String)
+	membership.ThemeOverride = nullableThemeID(themeOverride)
 	err = s.hydrateMembershipAuthorization(ctx, &membership)
 	return membership, err
 }
@@ -812,7 +827,7 @@ func (s Service) ListMembers(ctx context.Context, membership domain.Membership) 
 		return nil, err
 	}
 	groupID := membership.GroupID
-	rows, err := s.DB.QueryContext(ctx, `SELECT m.id,m.group_id,m.user_id,u.email,u.display_name,u.avatar_key,m.status,
+	rows, err := s.DB.QueryContext(ctx, `SELECT m.id,m.group_id,m.user_id,u.email,u.display_name,u.avatar_key,m.status,m.theme_override,
 		(u.email IS NULL AND u.password_hash IS NULL)
 		FROM memberships m JOIN users u ON u.id=m.user_id
 		WHERE m.group_id=? AND m.deleted_at IS NULL ORDER BY m.status,lower(u.display_name)`, groupID)
@@ -823,10 +838,11 @@ func (s Service) ListMembers(ctx context.Context, membership domain.Membership) 
 	result := make([]domain.Membership, 0)
 	for rows.Next() {
 		var item domain.Membership
-		var avatarKey sql.NullString
-		if err := rows.Scan(&item.ID, &item.GroupID, &item.UserID, &item.Email, &item.DisplayName, &avatarKey, &item.Status, &item.IsTemporaryGuest); err != nil {
+		var avatarKey, themeOverride sql.NullString
+		if err := rows.Scan(&item.ID, &item.GroupID, &item.UserID, &item.Email, &item.DisplayName, &avatarKey, &item.Status, &themeOverride, &item.IsTemporaryGuest); err != nil {
 			return nil, err
 		}
+		item.ThemeOverride = nullableThemeID(themeOverride)
 		item.AvatarURL = media.UserAvatarURL(item.UserID, avatarKey.String)
 		result = append(result, item)
 	}

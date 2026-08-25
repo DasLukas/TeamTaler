@@ -1,9 +1,9 @@
 .profile { display: flex; align-items: center; gap: var(--space-4); margin-bottom: var(--space-8); padding: var(--space-5); border: 1px solid var(--color-border); border-radius: var(--radius-lg); }
 .profile div { display: grid; gap: 3px; }
 .profile strong { font-size: var(--font-size-lg); }
-.profile span, .profile small { color: var(--color-muted); }
+.profile span, .profile small { color: var(--color-text-muted); }
 .links { border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; }
-.links a, .links .logout { display: grid; width: 100%; min-height: 62px; grid-template-columns: 30px 1fr 20px; align-items: center; gap: var(--space-3); padding: 0 var(--space-4); border: 0; border-bottom: 1px solid var(--color-border); background: var(--color-white); text-align: left; }
+.links a, .links .logout { display: grid; width: 100%; min-height: 62px; grid-template-columns: 30px 1fr 20px; align-items: center; gap: var(--space-3); padding: 0 var(--space-4); border: 0; border-bottom: 1px solid var(--color-border); background: var(--color-surface); text-align: left; }
 .links .logout { border-bottom: 0; }
-.links a:hover, .links .logout:hover { color: var(--color-teal-700); background: var(--color-surface-teal); }
+.links a:hover, .links .logout:hover { color: var(--color-brand); background: var(--color-surface-brand-subtle); }
 .end { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2); }

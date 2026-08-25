@@ -23,14 +23,16 @@ vi.mock('@/api/client', () => ({ api: apiMock }));
 
 const session: Session = {
   user: { id: 'user-a', displayName: 'Admin', email: 'admin@example.test' },
-  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', roles: ['ADMIN', 'MEMBER'], groupPermissions: [], effectiveGrants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } }] } }],
+  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', defaultTheme: 'TEAMTALER', membership: { id: 'member-a', roles: ['ADMIN', 'MEMBER'], groupPermissions: [], effectiveGrants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } }], themeOverride: null } }],
   activeGroupId: 'group-a',
   defaultGroupId: null,
+  colorMode: 'SYSTEM',
   systemRoles: [],
 };
 
 function renderPanel(): QueryClient {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  queryClient.setQueryData(['session'], session);
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>
       <ActiveGroupContext.Provider value={{ session, activeGroup: session.groups[0], activeGroupId: 'group-a', setActiveGroupId: vi.fn() }}>
@@ -49,6 +51,7 @@ describe('BehaviorSettingsPanel', () => {
     { id: 'role-finance', name: 'Finance', grants: [{ permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } }], version: 1, memberCount: 0, pendingInvitationCount: 0 },
   ];
   const settings: GroupSettings = {
+    defaultTheme: 'TEAMTALER',
     settlementsEnabled: false,
     notificationEmailsEnabled: false,
     notificationEmailDeliveryAvailable: true,
@@ -188,6 +191,20 @@ describe('BehaviorSettingsPanel', () => {
     await user.click(within(defaultRoleRegion).getByRole('button', { name: i18n.t('common.save') }));
 
     await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { defaultRoleId: 'role-finance' }));
+  });
+
+  it('persists the group default theme only after explicit save and refreshes the session projection', async () => {
+    const user = userEvent.setup();
+    apiMock.updateGroupSettings.mockResolvedValue({ ...settings, defaultTheme: 'FIRE' });
+    const queryClient = renderPanel();
+
+    const defaultThemeRegion = await screen.findByRole('region', { name: i18n.t('behaviorSettings.defaultThemeTitle') });
+    await user.click(within(defaultThemeRegion).getByRole('radio', { name: i18n.t('appearance.themes.FIRE') }));
+    expect(apiMock.updateGroupSettings).not.toHaveBeenCalled();
+    await user.click(within(defaultThemeRegion).getByRole('button', { name: i18n.t('common.save') }));
+
+    await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { defaultTheme: 'FIRE' }));
+    expect(queryClient.getQueryData<Session>(['session'])?.groups[0]?.defaultTheme).toBe('FIRE');
   });
 
   it('hides the membership default from a pure member manager', async () => {

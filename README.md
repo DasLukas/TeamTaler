@@ -7,6 +7,7 @@ This README is the primary entry point for the person who installs and operates 
 ## What TeamTaler provides
 
 - Multiple isolated groups in one installation.
+- Account-synchronized light, dark, and system color modes with group defaults and optional per-member theme choices.
 - Group-owned roles and granular permissions for administration, bookings, finance, catalogue management, and reporting.
 - Fixed-price and user-defined-price products with category, file or camera image capture, archive, and ordering support.
 - Account balances, incoming payments with optional or required image/PDF receipts, immutable corrections, optional accounting periods, and settlement history.

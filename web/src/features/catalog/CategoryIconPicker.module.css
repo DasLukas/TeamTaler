@@ -25,24 +25,24 @@
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-md);
   color: var(--color-text);
-  background: var(--color-white);
+  background: var(--color-surface);
   cursor: pointer;
 }
 
 .picker button:hover {
-  border-color: var(--color-teal-700);
+  border-color: var(--color-brand);
 }
 
 .picker button:focus-visible {
-  outline: 3px solid var(--color-teal-100);
+  outline: 3px solid var(--color-surface-brand-subtle);
   outline-offset: 2px;
 }
 
 .picker button[aria-pressed='true'] {
-  border-color: var(--color-teal-700);
-  color: var(--color-teal-700);
-  background: var(--color-teal-100);
-  box-shadow: inset 0 0 0 1px var(--color-teal-700);
+  border-color: var(--color-brand);
+  color: var(--color-brand);
+  background: var(--color-surface-brand-subtle);
+  box-shadow: inset 0 0 0 1px var(--color-brand);
 }
 
 @media (max-width: 520px) {

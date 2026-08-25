@@ -2,7 +2,7 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-3);
-  color: var(--color-white);
+  color: var(--color-navigation-text);
   font-size: 1.62rem;
   letter-spacing: -0.045em;
   white-space: nowrap;

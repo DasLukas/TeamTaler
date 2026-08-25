@@ -10,7 +10,7 @@
   width: 100%;
   max-width: 100%;
   min-height: 100vh;
-  background: var(--color-white);
+  background: var(--color-canvas);
 }
 
 .main {
@@ -27,7 +27,7 @@
   inset: 0 0 0 var(--shell-navigation-width);
   padding: 0;
   border: 0;
-  background: rgb(4 23 42 / 18%);
+  background: color-mix(in srgb, var(--color-backdrop) 42%, transparent);
   backdrop-filter: blur(1px);
   cursor: pointer;
 }
@@ -48,9 +48,9 @@
   z-index: 20;
   top: 0;
   padding: 6px var(--space-5);
-  color: var(--color-navy-900);
-  background: #fff2c8;
-  border-bottom: 1px solid #ead58d;
+  color: var(--color-status-warning);
+  background: var(--color-status-warning-subtle);
+  border-bottom: 1px solid var(--color-status-warning-border);
   font-size: var(--font-size-xs);
   font-weight: 700;
   text-align: center;
@@ -61,9 +61,9 @@
   z-index: 19;
   top: 0;
   padding: 9px var(--space-5);
-  color: #5c2500;
-  background: #fff0df;
-  border-bottom: 1px solid #e7b37d;
+  color: var(--color-status-warning);
+  background: var(--color-status-warning-subtle);
+  border-bottom: 1px solid var(--color-status-warning-border);
   font-size: var(--font-size-sm);
   font-weight: 700;
   text-align: center;

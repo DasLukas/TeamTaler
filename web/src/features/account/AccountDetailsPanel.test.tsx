@@ -25,17 +25,18 @@ vi.mock('@tanstack/react-router', () => ({ useNavigate: () => navigateMock }));
 const session: Session = {
   user: { id: 'user-a', displayName: 'Alex Member', email: 'alex@example.test' },
   groups: [
-    { id: 'group-a', name: 'Group A', currency: 'EUR', logoUrl: '/group-a.png', membership: { id: 'member-a', roles: ['MEMBER'], groupPermissions: [] } },
-    { id: 'group-b', name: 'Group B', currency: 'EUR', logoUrl: '/group-b.png', membership: { id: 'member-b', roles: ['MEMBER'], groupPermissions: [] } },
+    { id: 'group-a', name: 'Group A', currency: 'EUR', logoUrl: '/group-a.png', defaultTheme: 'TEAMTALER', membership: { id: 'member-a', roles: ['MEMBER'], groupPermissions: [], themeOverride: null } },
+    { id: 'group-b', name: 'Group B', currency: 'EUR', logoUrl: '/group-b.png', defaultTheme: 'TEAMTALER', membership: { id: 'member-b', roles: ['MEMBER'], groupPermissions: [], themeOverride: null } },
   ],
   activeGroupId: 'group-a',
   defaultGroupId: null,
+  colorMode: 'SYSTEM',
   systemRoles: [],
 };
 
 function renderPanel(sessionValue: Session = session): QueryClient {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  const member: Membership = { id: 'member-a', userId: 'user-a', displayName: 'Alex Member', email: 'alex@example.test', initials: 'AM', isTemporaryGuest: false, roles: ['MEMBER'], groupPermissions: [], categoryPermissions: [], status: 'ACTIVE', active: true };
+  const member: Membership = { id: 'member-a', userId: 'user-a', displayName: 'Alex Member', email: 'alex@example.test', initials: 'AM', isTemporaryGuest: false, roles: ['MEMBER'], groupPermissions: [], categoryPermissions: [], themeOverride: null, status: 'ACTIVE', active: true };
   queryClient.setQueryData(['session'], sessionValue);
   queryClient.setQueryData(['members', 'group-a'], [member]);
   const wrapper = ({ children }: { children: ReactNode }) => (

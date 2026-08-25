@@ -17,8 +17,8 @@
   place-items: center;
   overflow: hidden;
   border-radius: var(--radius-sm);
-  color: var(--color-muted);
-  background: var(--color-ink);
+  color: var(--color-text-muted);
+  background: var(--color-text-strong);
 }
 
 .preview video {
@@ -36,7 +36,7 @@
   margin: 0;
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-md);
-  color: var(--color-white);
+  color: var(--color-text-on-brand);
   background: rgb(3 24 47 / 78%);
   line-height: 1.45;
   text-align: center;

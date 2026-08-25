@@ -77,6 +77,7 @@ func (s *Server) handleGetGroupSettings(response http.ResponseWriter, request *h
 	}
 	runtimeSettings, _ := effectiveSystemSettings(request)
 	writeJSON(response, http.StatusOK, map[string]any{
+		"defaultTheme":                       settings.DefaultTheme,
 		"notificationEmailsEnabled":          settings.NotificationEmailsEnabled,
 		"notificationEmailDeliveryAvailable": runtimeSettings.SMTP.Active,
 		"settlementsEnabled":                 settings.SettlementsEnabled,
@@ -121,6 +122,7 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		return
 	}
 	var input struct {
+		DefaultTheme                 *domain.ThemeID            `json:"defaultTheme"`
 		NotificationEmailsEnabled    *bool                      `json:"notificationEmailsEnabled"`
 		SettlementsEnabled           *bool                      `json:"settlementsEnabled"`
 		DefaultRoleID                *string                    `json:"defaultRoleId"`
@@ -139,7 +141,7 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		writeProblem(response, request, err)
 		return
 	}
-	if input.NotificationEmailsEnabled == nil && input.SettlementsEnabled == nil && input.DefaultRoleID == nil &&
+	if input.DefaultTheme == nil && input.NotificationEmailsEnabled == nil && input.SettlementsEnabled == nil && input.DefaultRoleID == nil &&
 		input.OwnBookingReasonMode == nil && input.ForeignBookingReasonMode == nil && input.OwnPaymentReasonMode == nil && input.OtherPaymentReasonMode == nil &&
 		input.ForeignBookingReasonRequired == nil &&
 		input.OwnPaymentReasonRequired == nil && input.OtherPaymentReasonRequired == nil && input.PaymentMethods == nil &&
@@ -153,6 +155,7 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		return
 	}
 	settings, err := s.groups.UpdateSettings(request.Context(), principal, membership, groups.SettingsUpdate{
+		DefaultTheme:                 input.DefaultTheme,
 		NotificationEmailsEnabled:    input.NotificationEmailsEnabled,
 		SettlementsEnabled:           input.SettlementsEnabled,
 		DefaultRoleID:                input.DefaultRoleID,
@@ -172,6 +175,7 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		return
 	}
 	writeJSON(response, http.StatusOK, map[string]any{
+		"defaultTheme":                       settings.DefaultTheme,
 		"notificationEmailsEnabled":          settings.NotificationEmailsEnabled,
 		"notificationEmailDeliveryAvailable": runtimeSettings.SMTP.Active,
 		"settlementsEnabled":                 settings.SettlementsEnabled,

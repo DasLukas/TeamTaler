@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import i18n from '@/i18n';
-import { adaptAccountSummaries, adaptActivity, adaptBooking, adaptCategories, adaptDashboard, adaptGroupNotificationSettings, adaptGroupSettings, adaptInstanceCapabilities, adaptLedger, adaptMembership, adaptNotification, adaptNotificationDestination, adaptNotificationPreferences, adaptPayment, adaptPermissionDefinition, adaptPermissionGrants, adaptProduct, adaptPushSubscriptions, adaptRole, adaptSession, adaptSettlement, adaptSystemAudit, adaptSystemGroupDeletionImpact, adaptSystemGroups, adaptSystemSettings, adaptTransactionSettings } from './adapters';
+import { adaptAccountSummaries, adaptActivity, adaptAppearancePreference, adaptBooking, adaptCategories, adaptDashboard, adaptGroupNotificationSettings, adaptGroupSettings, adaptInstanceCapabilities, adaptLedger, adaptMembership, adaptNotification, adaptNotificationDestination, adaptNotificationPreferences, adaptPayment, adaptPermissionDefinition, adaptPermissionGrants, adaptProduct, adaptPushSubscriptions, adaptRole, adaptSession, adaptSettlement, adaptSystemAudit, adaptSystemGroupDeletionImpact, adaptSystemGroups, adaptSystemSettings, adaptThemePreference, adaptTransactionSettings } from './adapters';
 
 describe('API adapters', () => {
   it('adapts signed unified activities and source action metadata', () => {
@@ -22,6 +22,23 @@ describe('API adapters', () => {
       detailName: '', paymentMethod: 'CASH', amountMinor: '-500', currency: 'EUR',
       occurredAt: '2026-08-20T10:00:00Z', status: 'POSTED', canReverse: false, reversalReasonRequired: false,
     })).toMatchObject({ detailName: 'Bar', paymentMethod: 'CASH' });
+  });
+
+  it('validates appearance enums while preserving safe inheritance defaults', () => {
+    expect(adaptAppearancePreference({ colorMode: 'DARK' })).toEqual({ colorMode: 'DARK' });
+    expect(adaptAppearancePreference({ colorMode: 'SEPIA' })).toEqual({ colorMode: 'SYSTEM' });
+    expect(adaptThemePreference({ themeOverride: 'TIEF_IM_WESTEN' })).toEqual({ themeOverride: 'TIEF_IM_WESTEN' });
+    expect(adaptThemePreference({ themeOverride: 'CUSTOM' })).toEqual({ themeOverride: null });
+
+    expect(adaptSession({
+      user: { id: 'user-a', displayName: 'Alex', email: 'alex@example.test' },
+      colorMode: 'LIGHT',
+      groups: [{ id: 'group-a', name: 'Group A', defaultTheme: 'NRW', membership: { id: 'member-a', themeOverride: 'FIRE' } }],
+      activeGroupId: 'group-a',
+    })).toMatchObject({
+      colorMode: 'LIGHT',
+      groups: [{ defaultTheme: 'NRW', membership: { themeOverride: 'FIRE' } }],
+    });
   });
 
   it('keeps group-less system-administrator sessions valid', () => {

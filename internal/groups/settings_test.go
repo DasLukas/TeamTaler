@@ -36,7 +36,7 @@ func TestGroupSettingsDefaultAuthorizationPersistenceAndAudit(t *testing.T) {
 	admin := items[0].Membership
 	settings, err := service.Settings(ctx, admin)
 	guestRoleID := authorization.GuestRoleID(admin.GroupID)
-	if err != nil || settings.NotificationEmailsEnabled || settings.SettlementsEnabled || settings.DefaultRoleID == nil || *settings.DefaultRoleID != guestRoleID {
+	if err != nil || settings.DefaultTheme != domain.ThemeTeamTaler || settings.NotificationEmailsEnabled || settings.SettlementsEnabled || settings.DefaultRoleID == nil || *settings.DefaultRoleID != guestRoleID {
 		t.Fatalf("default settings=%#v err=%v", settings, err)
 	}
 	if !settings.ForeignBookingReasonRequired || !settings.OwnPaymentReasonRequired || settings.OtherPaymentReasonRequired || len(settings.PaymentMethods) != 5 {
@@ -69,8 +69,17 @@ func TestGroupSettingsDefaultAuthorizationPersistenceAndAudit(t *testing.T) {
 	if _, err := service.UpdateSettings(ctx, session.Principal, regularMember, SettingsUpdate{NotificationEmailsEnabled: &notifications}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("regular-member settings update error=%v, want forbidden", err)
 	}
+	nrwTheme := domain.ThemeNRW
+	if _, err := service.UpdateSettings(ctx, session.Principal, regularMember, SettingsUpdate{DefaultTheme: &nrwTheme}); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("regular-member theme update error=%v, want forbidden", err)
+	}
+	fireTheme := domain.ThemeFire
+	updated, err := service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{DefaultTheme: &fireTheme})
+	if err != nil || updated.DefaultTheme != domain.ThemeFire {
+		t.Fatalf("updated default theme=%#v err=%v", updated, err)
+	}
 
-	updated, err := service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{NotificationEmailsEnabled: &notifications})
+	updated, err = service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{NotificationEmailsEnabled: &notifications})
 	if err != nil || !updated.NotificationEmailsEnabled {
 		t.Fatalf("updated settings=%#v err=%v", updated, err)
 	}
@@ -116,8 +125,8 @@ func TestGroupSettingsDefaultAuthorizationPersistenceAndAudit(t *testing.T) {
 		t.Fatalf("persisted settings=%#v err=%v", persisted, err)
 	}
 	var auditCount int
-	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM audit_events WHERE group_id=? AND action='group.settings.updated'`, admin.GroupID).Scan(&auditCount); err != nil || auditCount != 3 {
-		t.Fatalf("settings audit count=%d err=%v, want three", auditCount, err)
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM audit_events WHERE group_id=? AND action='group.settings.updated'`, admin.GroupID).Scan(&auditCount); err != nil || auditCount != 4 {
+		t.Fatalf("settings audit count=%d err=%v, want four", auditCount, err)
 	}
 }
 

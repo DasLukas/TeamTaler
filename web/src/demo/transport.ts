@@ -39,7 +39,7 @@ import type {
   ReasonMode,
   Session,
 } from '@/api/types';
-import { isCategoryIcon } from '@/api/types';
+import { isCategoryIcon, isColorMode, isThemeId } from '@/api/types';
 import { can } from '@/app/permissions';
 import { MAX_PRODUCT_PRICE_MINOR } from '@/api/money';
 import {
@@ -249,6 +249,7 @@ export class DemoTransport {
   private invitations: InvitationMetadata[] = [];
   private invitationTokens = new Map<string, string>();
   private groupSettings: GroupSettings = {
+    defaultTheme: 'TEAMTALER',
     settlementsEnabled: false,
     notificationEmailsEnabled: false,
     notificationEmailDeliveryAvailable: true,
@@ -310,6 +311,12 @@ export class DemoTransport {
       this.session.user.displayName = displayName;
       this.members = this.members.map((member) => member.userId === this.session.user.id ? { ...member, displayName } : member);
       return clone(this.session.user) as T;
+    }
+    if (cleanPath === '/me/appearance' && method === 'PUT') {
+      const colorMode = (body as { colorMode?: unknown }).colorMode;
+      if (!isColorMode(colorMode)) throw new Error('The color mode is not supported.');
+      this.session.colorMode = colorMode;
+      return { colorMode } as T;
     }
     if (cleanPath === '/me/group-preference' && method === 'PUT') {
       const defaultGroupId = (body as { defaultGroupId?: unknown }).defaultGroupId;
@@ -382,6 +389,7 @@ export class DemoTransport {
     if (resource === 'settings' && method === 'GET') return clone(this.groupSettings) as T;
     if (resource === 'settings' && method === 'PATCH') {
       const update = body as Partial<GroupSettings>;
+      const updatesDefaultTheme = update.defaultTheme !== undefined;
       const updatesSettlements = update.settlementsEnabled !== undefined;
       const updatesNotificationEmails = update.notificationEmailsEnabled !== undefined;
       const updatesDefaultRole = update.defaultRoleId !== undefined;
@@ -395,7 +403,11 @@ export class DemoTransport {
         || update.paymentMethods !== undefined
         || update.bookingReasons !== undefined
         || update.paymentReasons !== undefined;
-      if (!updatesSettlements && !updatesNotificationEmails && !updatesDefaultRole && !updatesTransactionSettings) throw new Error('At least one group setting is required.');
+      if (!updatesDefaultTheme && !updatesSettlements && !updatesNotificationEmails && !updatesDefaultRole && !updatesTransactionSettings) throw new Error('At least one group setting is required.');
+      if (updatesDefaultTheme) {
+        this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
+        if (!isThemeId(update.defaultTheme)) throw new Error('The default theme is not supported.');
+      }
       if (updatesDefaultRole) {
         this.requireAnyPermission(groupId, ['ROLE_MANAGEMENT', 'GROUP_ADMINISTRATION']);
       }
@@ -418,6 +430,7 @@ export class DemoTransport {
         ?? (update.otherPaymentReasonRequired === undefined ? this.groupSettings.otherPaymentReasonMode : update.otherPaymentReasonRequired ? 'REQUIRED' : 'OPTIONAL');
       this.groupSettings = {
         ...this.groupSettings,
+        ...(updatesDefaultTheme ? { defaultTheme: update.defaultTheme as GroupSettings['defaultTheme'] } : {}),
         ...(updatesSettlements ? { settlementsEnabled: update.settlementsEnabled as boolean } : {}),
         ...(updatesNotificationEmails ? { notificationEmailsEnabled: update.notificationEmailsEnabled as boolean } : {}),
         ...(updatesDefaultRole ? { defaultRoleId: update.defaultRoleId as string } : {}),
@@ -432,7 +445,21 @@ export class DemoTransport {
         ...(update.bookingReasons !== undefined ? { bookingReasons: clone(update.bookingReasons) } : {}),
         ...(update.paymentReasons !== undefined ? { paymentReasons: clone(update.paymentReasons) } : {}),
       };
+      if (updatesDefaultTheme) {
+        const group = this.session.groups.find((candidate) => candidate.id === groupId);
+        if (group) group.defaultTheme = this.groupSettings.defaultTheme;
+      }
       return clone(this.groupSettings) as T;
+    }
+    if (resource === 'theme-preference' && method === 'PUT') {
+      const sessionGroup = this.session.groups.find((candidate) => candidate.id === groupId);
+      const currentMember = this.currentMembership(groupId);
+      if (!sessionGroup?.membership || !currentMember) throw new Error('An active group membership is required.');
+      const themeOverride = (body as { themeOverride?: unknown }).themeOverride;
+      if (themeOverride !== null && !isThemeId(themeOverride)) throw new Error('The theme override is not supported.');
+      sessionGroup.membership.themeOverride = themeOverride;
+      currentMember.themeOverride = themeOverride;
+      return { themeOverride } as T;
     }
     if (resource === 'public-join-link' && method === 'GET') return clone(this.publicJoinLink) as T;
     if (resource === 'public-join-link' && method === 'PUT') {
@@ -1101,6 +1128,7 @@ export class DemoTransport {
         groupPermissions: [],
         categoryPermissions: [],
         roleAssignmentsVersion: 1,
+        themeOverride: null,
         status: 'ACTIVE',
         active: true,
       };

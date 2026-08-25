@@ -3,13 +3,14 @@ import Save from 'lucide-react/dist/esm/icons/save';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
-import type { GroupSettings, GroupSettingsUpdateInput, ReasonMode, Role } from '@/api/types';
+import type { GroupSettings, GroupSettingsUpdateInput, ReasonMode, Role, Session, ThemeId } from '@/api/types';
 import { can } from '@/app/permissions';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Button } from '@/components/ui/Button';
 import { Field, SelectInput } from '@/components/ui/FormField';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { Toggle } from '@/components/ui/Toggle';
+import { ThemePicker } from '@/features/appearance/ThemePicker';
 import { ConfigurableListEditor } from './ConfigurableListEditor';
 import { PaymentMethodEditor } from './PaymentMethodEditor';
 import { GroupSettingsPanel } from './GroupSettingsPanel';
@@ -30,6 +31,11 @@ interface SettingsFormProps {
 interface DefaultRoleSettingProps {
   groupId: string;
   roles: Role[];
+  settings: GroupSettings;
+}
+
+interface DefaultThemeSettingProps {
+  groupId: string;
   settings: GroupSettings;
 }
 
@@ -108,6 +114,51 @@ function DefaultRoleSetting({ groupId, roles, settings }: DefaultRoleSettingProp
 }
 
 /**
+ * Renders the group theme inherited by members without a personal override.
+ *
+ * @param props - Active group identifier and persisted group settings.
+ * @returns A reusable theme picker with explicit save feedback.
+ */
+function DefaultThemeSetting({ groupId, settings }: DefaultThemeSettingProps) {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const [defaultTheme, setDefaultTheme] = useState<ThemeId>(settings.defaultTheme);
+  const mutation = useMutation({
+    mutationFn: () => api.updateGroupSettings(groupId, { defaultTheme }),
+    onSuccess: (persisted) => {
+      queryClient.setQueryData<GroupSettings>(['group-settings', groupId], persisted);
+      queryClient.setQueryData<Session>(['session'], (session) => session ? {
+        ...session,
+        groups: session.groups.map((group) => group.id === groupId ? { ...group, defaultTheme: persisted.defaultTheme } : group),
+      } : session);
+    },
+  });
+
+  return (
+    <section aria-labelledby="default-theme-setting-title" className={`${styles.card} ${styles.themeCard}`}>
+      <div>
+        <h4 id="default-theme-setting-title">{t('behaviorSettings.defaultThemeTitle')}</h4>
+        <p>{t('behaviorSettings.defaultThemeDescription')}</p>
+      </div>
+      <ThemePicker
+        disabled={mutation.isPending}
+        label={t('behaviorSettings.defaultThemeFieldLabel')}
+        onChange={(theme) => {
+          if (theme) setDefaultTheme(theme);
+          mutation.reset();
+        }}
+        value={defaultTheme}
+      />
+      <div className={styles.defaultRoleActions}>
+        {mutation.isError ? <p className={styles.error} role="alert">{t('behaviorSettings.defaultThemeSaveError')}</p> : null}
+        {mutation.isSuccess ? <p className={styles.success} role="status">{t('behaviorSettings.defaultThemeSaved')}</p> : null}
+        <Button disabled={defaultTheme === settings.defaultTheme || mutation.isPending} leadingIcon={<Save size={17} />} onClick={() => mutation.mutate()}>{mutation.isPending ? t('behaviorSettings.saving') : t('common.save')}</Button>
+      </div>
+    </section>
+  );
+}
+
+/**
  * Renders grouped identity, notification, finance, and transaction settings for one group.
  *
  * @param props - Group identifier and persisted settings.
@@ -174,6 +225,7 @@ function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canMan
       <section aria-labelledby="group-settings-section-title" className={styles.settingsSection}>
         <header><h3 id="group-settings-section-title">{t('behaviorSettings.groupSectionTitle')}</h3></header>
         {canManageGroup ? <GroupSettingsPanel embedded /> : null}
+        {canManageGroup ? <DefaultThemeSetting groupId={groupId} key={`${groupId}:${settings.defaultTheme}`} settings={settings} /> : null}
         {canManageGroup ? <GroupNotificationSettingsSection groupId={groupId} /> : null}
         {canManageDefaultRole && roles ? <DefaultRoleSetting groupId={groupId} key={`${groupId}:${settings.defaultRoleId ?? ''}`} roles={roles} settings={settings} /> : null}
       </section>

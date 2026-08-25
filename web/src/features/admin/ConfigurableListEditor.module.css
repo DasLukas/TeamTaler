@@ -7,4 +7,4 @@
 .item + .item { border-top: 1px solid var(--color-border); }
 .item > input { min-width: 0; }
 .actions { display: flex; flex: 0 0 auto; gap: var(--space-1); }
-.empty { padding: var(--space-3); border: 1px dashed var(--color-border); border-radius: var(--radius-md); color: var(--color-muted); }
+.empty { padding: var(--space-3); border: 1px dashed var(--color-border); border-radius: var(--radius-md); color: var(--color-text-muted); }

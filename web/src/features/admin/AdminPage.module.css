@@ -36,7 +36,7 @@
 }
 
 .tabs .activeTab {
-  color: var(--color-teal-700);
+  color: var(--color-brand);
   font-weight: 700;
 }
 
@@ -44,7 +44,7 @@
   position: absolute;
   inset: auto 0 0;
   height: 3px;
-  background: var(--color-teal-700);
+  background: var(--color-brand);
   content: '';
 }
 
