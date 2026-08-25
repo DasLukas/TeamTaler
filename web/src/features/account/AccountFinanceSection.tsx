@@ -101,6 +101,19 @@ export function AccountFinanceSection() {
       return sorting.desc ? -comparison : comparison;
     });
   }, [deferredSettlementSearch, ownSettlements, settlementTableState.filters, settlementTableState.sorting]);
+  const settlementExportQuery = useMemo(() => {
+    const dueRange = settlementTableState.filters.dueAt as DataTableDateRange | undefined;
+    const sorting = settlementTableState.sorting[0];
+    return {
+      direction: sorting?.desc ? 'desc' : 'asc',
+      dueFrom: dueRange?.from,
+      dueTo: dueRange?.to,
+      periodId: settlementTableState.filters.periodId as string | undefined,
+      q: deferredSettlementSearch || undefined,
+      sort: sorting?.id ?? 'dueAt',
+      status: Array.isArray(settlementTableState.filters.status) ? settlementTableState.filters.status : undefined,
+    };
+  }, [deferredSettlementSearch, settlementTableState.filters, settlementTableState.sorting]);
   const settlementColumns = useMemo<DataTableColumnDef<Settlement>[]>(() => [
     { accessorKey: 'periodLabel', cell: ({ row }) => <strong>{row.original.periodLabel}</strong>, enableSorting: true, header: t('account.period'), id: 'periodLabel', meta: { label: t('account.period') } },
     { accessorKey: 'dueAt', cell: ({ row }) => row.original.dueAt ? <time dateTime={row.original.dueAt}>{formatGermanDate(row.original.dueAt)}</time> : '–', enableSorting: true, header: t('account.due'), id: 'dueAt', meta: { label: t('account.due') } },
@@ -130,7 +143,7 @@ export function AccountFinanceSection() {
       </section>
       {showSettlements ? <section className={styles.settlements}>
         <h2>{t(settlementsEnabled ? 'account.closedSettlements' : 'account.settlementHistory')}</h2>
-        <DataTable ariaLabel={t('account.closedSettlements')} columns={settlementColumns} data={visibleSettlements} emptyContent={t('account.noSettlements')} filterDefinitions={settlementFilters} getRowId={(settlement) => settlement.id} labels={{ ...labels, searchLabel: t('account.settlementSearchLabel'), searchPlaceholder: t('account.settlementSearchPlaceholder') }} minTableWidth="980px" {...settlementTableState} />
+        <DataTable ariaLabel={t('account.closedSettlements')} columns={settlementColumns} data={visibleSettlements} emptyContent={t('account.noSettlements')} exportConfig={{ disabled: deferredSettlementSearch !== settlementTableState.searchValue.trim().toLocaleLowerCase('de-DE'), groupId: activeGroupId, query: settlementExportQuery, table: 'PERSONAL_SETTLEMENTS', title: t('account.closedSettlements') }} filterDefinitions={settlementFilters} getRowId={(settlement) => settlement.id} labels={{ ...labels, searchLabel: t('account.settlementSearchLabel'), searchPlaceholder: t('account.settlementSearchPlaceholder') }} minTableWidth="980px" {...settlementTableState} />
       </section> : null}
     </section>
   );

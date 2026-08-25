@@ -110,6 +110,21 @@ export function AccountBalancesPanel() {
       return sorting.desc ? -comparison : comparison;
     });
   }, [accountsQuery.data, activeGroup.currency, deferredSearch, tableState.filters, tableState.sorting]);
+  const exportQuery = useMemo(() => {
+    const amountRange = tableState.filters.amount as DataTableNumberRange | undefined;
+    const sorting = tableState.sorting[0];
+    const toMinorUnits = (value: number | undefined) => value === undefined ? undefined : Math.round(value * (10 ** currencyExponent(activeGroup.currency))).toString();
+    return {
+      amountMax: toMinorUnits(amountRange?.max),
+      amountMin: toMinorUnits(amountRange?.min),
+      balanceState: Array.isArray(tableState.filters.balanceState) ? tableState.filters.balanceState : undefined,
+      direction: sorting?.desc ? 'desc' : 'asc',
+      membershipId: tableState.filters.membershipId as string | undefined,
+      membershipStatus: Array.isArray(tableState.filters.membershipStatus) ? tableState.filters.membershipStatus : undefined,
+      q: deferredSearch || undefined,
+      sort: sorting?.id ?? 'memberName',
+    };
+  }, [activeGroup.currency, deferredSearch, tableState.filters, tableState.sorting]);
   const columns = useMemo<DataTableColumnDef<AccountSummary>[]>(() => [
     {
       accessorKey: 'displayName',
@@ -147,6 +162,7 @@ export function AccountBalancesPanel() {
         columns={columns}
         data={visibleAccounts}
         emptyContent={tableState.searchValue || Object.keys(tableState.filters).length > 0 ? t('financeWorkspace.noSearchResults') : t('financeWorkspace.noAccounts')}
+        exportConfig={{ disabled: deferredSearch !== tableState.searchValue.trim().toLocaleLowerCase('de-DE'), groupId: activeGroupId, query: exportQuery, table: 'ACCOUNT_BALANCES', title: t('financeWorkspace.overviewTitle') }}
         filterDefinitions={filterDefinitions}
         getRowId={(account) => account.membershipId}
         labels={{ ...labels, searchLabel: t('financeWorkspace.search'), searchPlaceholder: t('financeWorkspace.searchPlaceholder') }}

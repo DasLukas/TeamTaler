@@ -8,6 +8,8 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 - Account-synchronized light, dark, and system color modes plus four accessible color themes: TeamTaler, NRW, Tief im Westen, and Fire.
 - Group-managed default themes with inheritable per-membership overrides that remain stable across sessions and group switches.
+- Password-confirmed asynchronous personal and group structured-data exports with actor-owned job history, in-app completion notices, integrity metadata, and automatic 24-hour expiry.
+- Authorization-preserving CSV and A4-landscape PDF downloads for activities, payments, account balances, group and personal settlements, active and archived members, and group and system audit tables. Downloads include every filtered and sorted matching row without interactive action columns.
 
 ### Changed
 
@@ -18,6 +20,11 @@ All notable TeamTaler changes are documented in this file. The project follows [
 ### Fixed
 
 - Shared table zebra and hover rows now retain dark semantic surfaces and readable text in dark mode.
+
+### Security
+
+- Group raw-data archives require `GROUP_ADMINISTRATION` and current-password reauthentication, are deliberately structured-only with no media or receipt bytes, and remain visible and downloadable only to their requesting actor. Personal archives are limited to the actor's profile and current-group data; no system-wide raw export exists.
+- Table export requests accept only registered table identifiers and validated query state, reuse the table's existing live authorization, neutralize spreadsheet formulas, render logos from local validated bytes, and fail without truncation at bounded row, byte, and time limits.
 
 ## [1.0.1] - 2026-08-24
 

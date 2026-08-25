@@ -367,6 +367,13 @@ export function ActivitiesPage() {
           columns={columns}
           data={activities}
           emptyContent={activitiesQuery.isError ? t('activities.error') : t('activities.noResults')}
+          exportConfig={{
+            disabled: deferredSearch !== tableState.searchValue.trim(),
+            groupId: activeGroupId,
+            query: { ...collectionQuery, limit: undefined },
+            table: 'ACTIVITIES',
+            title: t('activities.title'),
+          }}
           fillAvailableHeight
           filterDefinitions={filterDefinitions}
           getRowId={(activity) => activity.id}

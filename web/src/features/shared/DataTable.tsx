@@ -29,6 +29,7 @@ import { Modal } from '@/components/ui/Modal';
 import { MultiSelectMenu } from '@/components/ui/MultiSelectMenu';
 import { SelectMenu } from '@/components/ui/SelectMenu';
 import { availableDataTableFilterOptions, isDataTableFilterActive, normalizeDataTableFilters } from './dataTableFilters';
+import { TableExportMenu, type TableExportConfig } from './TableExportMenu';
 import styles from './DataTable.module.css';
 import tableStyles from './Table.module.css';
 
@@ -160,6 +161,8 @@ export interface DataTableProps<Data extends RowData, FilterId extends string = 
   columns: DataTableColumnDef<Data>[];
   data: Data[];
   emptyContent: ReactNode;
+  /** Enables a server-rendered export of the complete current table query. */
+  exportConfig?: TableExportConfig;
   filterDefinitions?: readonly DataTableFilterDefinition<FilterId>[];
   filters?: DataTableFilterState<FilterId>;
   /** Fills the available block size while keeping only the table viewport scrollable. */
@@ -612,6 +615,7 @@ export function DataTable<Data extends RowData, FilterId extends string = string
   columns,
   data,
   emptyContent,
+  exportConfig,
   filterDefinitions,
   filters,
   fillAvailableHeight = false,
@@ -645,6 +649,10 @@ export function DataTable<Data extends RowData, FilterId extends string = string
     onSortingChange,
     state: { sorting },
   });
+  const exportAction = exportConfig && data.length > 0 ? (
+    <TableExportMenu {...exportConfig} disabled={exportConfig.disabled || isLoading} />
+  ) : null;
+  const resolvedToolbarActions = toolbarActions || exportAction ? <>{toolbarActions}{exportAction}</> : undefined;
 
   return (
     <div className={`${styles.root} ${fillAvailableHeight ? styles.fillAvailableHeight : ''}`}>
@@ -655,8 +663,8 @@ export function DataTable<Data extends RowData, FilterId extends string = string
         onFiltersChange={onFiltersChange ?? ignoreFilterChange}
         onSearchChange={onSearchChange}
         searchValue={searchValue}
-        toolbarActions={toolbarActions}
-      /> : null}
+        toolbarActions={resolvedToolbarActions}
+      /> : resolvedToolbarActions ? <div className={styles.actionToolbar}>{resolvedToolbarActions}</div> : null}
       <DataTableViewport ariaLabel={ariaLabel} minTableWidth={minTableWidth} scrollHint={labels.scrollHint}>
         <table aria-label={ariaLabel} className={`${tableStyles.table} ${styles.dataTable}`}>
           <thead>

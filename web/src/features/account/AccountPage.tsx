@@ -6,6 +6,7 @@ import { AccountFinanceSection } from './AccountFinanceSection';
 import { ProfileImagePanel } from './ProfileImagePanel';
 import { NotificationPreferencesPanel } from './NotificationPreferencesPanel';
 import { AppearanceSettingsPanel } from './AppearanceSettingsPanel';
+import { DataExportPanel } from '@/features/exports/DataExportPanel';
 
 /**
  * Renders independent account settings, profile image, and financial sections.
@@ -14,13 +15,15 @@ import { AppearanceSettingsPanel } from './AppearanceSettingsPanel';
  */
 export function AccountPage() {
   const { t } = useTranslation();
-  const hasActiveGroup = useOptionalActiveGroup() !== null;
+  const groupContext = useOptionalActiveGroup();
+  const hasActiveGroup = groupContext !== null;
   return (
     <Page intro={t(hasActiveGroup ? 'account.intro' : 'account.systemOnlyIntro')} title={t('account.title')} wide>
       <AccountDetailsPanel />
       <AppearanceSettingsPanel />
       <ProfileImagePanel />
       <NotificationPreferencesPanel />
+      {groupContext ? <DataExportPanel groupId={groupContext.activeGroupId} intro={t('exports.data.personalIntro')} scope="PERSONAL" title={t('exports.data.personalTitle')} /> : null}
       {hasActiveGroup ? <AccountFinanceSection /> : null}
     </Page>
   );

@@ -14,6 +14,7 @@ This README is the primary entry point for the person who installs and operates 
 - One server-paginated chronological activity history for authorized bookings, incoming payments, and account corrections, including member identity, signed amounts, receipts, status badges, and transaction-type filtering.
 - A focused personal account view for balance, payments, settlement history, printing, and CSV export without duplicating the unified activity table.
 - Searchable, column-filterable, sortable operational tables with shareable filter state, cursor-backed loading, and complete horizontally scrollable mobile columns.
+- Authorization-preserving CSV and A4-landscape PDF exports for operational tables, plus password-confirmed, asynchronous structured-data archives for a member or an administered group.
 - Individual invitations, CSV invitation imports, public join links, and temporary guest accounts.
 - Local accounts with profile images, password recovery, verified email changes, and server-side sessions.
 - In-app notifications plus independently configurable SMTP and standards-based Web Push delivery.
@@ -389,6 +390,18 @@ teamtaler healthcheck [--url URL] [--timeout DURATION]
 teamtaler backup create --output FILE.tar.gz
 teamtaler restore --input FILE.tar.gz [--force]
 ```
+
+## Data and table exports
+
+Every member may request a structured archive of their own profile and data in the currently active group. A member with `GROUP_ADMINISTRATION` may instead request the complete structured data of that group. The group archive intentionally includes finance and other group-owned records even when the administrator does not hold the corresponding narrower operational permission; `GROUP_ADMINISTRATION` is therefore the explicit data-disclosure boundary for this operation. TeamTaler does not provide a system-wide raw-data export.
+
+Starting either raw-data export requires the current account password and a unique `Idempotency-Key`. The request creates an actor-owned background job instead of holding the HTTP connection open. Its persistent status is `QUEUED`, `RUNNING`, `READY`, `FAILED`, `CANCELLED`, or `EXPIRED`; ready and failed results also appear in the in-app inbox. A ready archive remains downloadable for 24 hours, is cancelled when its authorization is revoked, and is visible, downloadable, or cancellable only by the account that requested it. ZIP downloads stream directly through the browser and are not buffered in the application's JavaScript memory.
+
+Raw exports are ZIP archives containing UTF-8 CSV datasets, `manifest.json`, and `schema.json`. They use stable English technical headers, RFC 3339 UTC timestamps, and exact minor-unit integer strings. They contain structured database fields and attachment metadata only: group logos, profile and product images, payment-receipt bytes, secrets, password hashes, sessions, and other media are never copied into the archive. Archives are derived sensitive data. Keep the application data volume private, download them only over HTTPS, remove local copies when no longer needed, and do not treat the 24-hour application retention as a policy for browser downloads or backups.
+
+The visible Activities, Payments, Account balances, Group settlements, Personal settlements, Active members, Archived members, Group audit, and System audit tables offer CSV and PDF exports to users who can already read the corresponding table. The backend replays the current validated filters and deterministic ordering across all matching rows; client pagination and interactive action columns are not exported. CSV output uses localized visible values. PDF output uses A4 landscape, repeats column headings, wraps content instead of clipping it, and repeats a three-part header on every page: group logo or TeamTaler fallback, canonical table title, and localized export time with page `n/m`. The system-audit export uses the TeamTaler mark and remains the only system-level export.
+
+Table exports are generated synchronously and fail without a partial download when a bound is exceeded. CSV exports allow at most 100,000 rows, 100 MiB, and 120 seconds; PDF exports allow at most 10,000 rows, 50 MiB, and 60 seconds. Apply filters before exporting unusually large tables.
 
 ## Backup, restore, and upgrades
 

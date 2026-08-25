@@ -125,6 +125,25 @@ export function SettlementsPanel({ settlements, settlementsEnabled }: Settlement
       return sorting.desc ? -comparison : comparison;
     });
   }, [deferredSearch, settlements, tableState.filters, tableState.sorting]);
+  const exportQuery = useMemo(() => {
+    const dueRange = tableState.filters.dueAt as DataTableDateRange | undefined;
+    const amountRange = tableState.filters.amount as DataTableNumberRange | undefined;
+    const sorting = tableState.sorting[0];
+    const currency = settlements[0]?.amount.currency ?? 'EUR';
+    const toMinorUnits = (value: number | undefined) => value === undefined ? undefined : Math.round(value * (10 ** currencyExponent(currency))).toString();
+    return {
+      amountMax: toMinorUnits(amountRange?.max),
+      amountMin: toMinorUnits(amountRange?.min),
+      direction: sorting?.desc ? 'desc' : 'asc',
+      dueFrom: dueRange?.from,
+      dueTo: dueRange?.to,
+      membershipId: tableState.filters.membershipId as string | undefined,
+      periodId: tableState.filters.periodId as string | undefined,
+      q: deferredSearch || undefined,
+      sort: sorting?.id ?? 'dueAt',
+      status: Array.isArray(tableState.filters.status) ? tableState.filters.status : undefined,
+    };
+  }, [deferredSearch, settlements, tableState.filters, tableState.sorting]);
   const closeMutation = useMutation({
     mutationFn: () => periodToClose ? api.closePeriod(activeGroupId, periodToClose.id, { label: label.trim(), dueAt }) : Promise.reject(new Error(t('periods.noSelection'))),
     onSuccess: async () => {
@@ -176,6 +195,7 @@ export function SettlementsPanel({ settlements, settlementsEnabled }: Settlement
         columns={columns}
         data={visibleSettlements}
         emptyContent={t('periods.empty')}
+        exportConfig={{ disabled: deferredSearch !== tableState.searchValue.trim().toLocaleLowerCase('de-DE'), groupId: activeGroupId, query: exportQuery, table: 'GROUP_SETTLEMENTS', title: t('periods.closedSettlements') }}
         filterDefinitions={filterDefinitions}
         getRowId={(settlement) => settlement.id}
         labels={{ ...labels, searchLabel: t('periods.searchLabel'), searchPlaceholder: t('periods.searchPlaceholder') }}

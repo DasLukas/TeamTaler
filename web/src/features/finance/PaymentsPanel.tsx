@@ -255,6 +255,13 @@ export function PaymentsPanel() {
         columns={columns}
         data={payments}
         emptyContent={paymentsQuery.isError ? t('finance.error') : t('finance.empty')}
+        exportConfig={{
+          disabled: deferredSearch !== tableState.searchValue.trim(),
+          groupId: activeGroupId,
+          query: { ...collectionQuery, limit: undefined },
+          table: 'PAYMENTS',
+          title: t('finance.title'),
+        }}
         filterDefinitions={filterDefinitions}
         getRowId={(payment) => payment.id}
         hasMore={paymentsQuery.hasNextPage}

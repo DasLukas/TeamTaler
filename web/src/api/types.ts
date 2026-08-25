@@ -24,6 +24,57 @@ export interface CollectionPage<Item> {
   limit: number;
 }
 
+/** Stable identifiers for server-rendered table exports. */
+export type TableExportId =
+  | 'ACTIVITIES'
+  | 'PAYMENTS'
+  | 'ACCOUNT_BALANCES'
+  | 'GROUP_SETTLEMENTS'
+  | 'PERSONAL_SETTLEMENTS'
+  | 'ACTIVE_MEMBERS'
+  | 'ARCHIVED_MEMBERS'
+  | 'GROUP_AUDIT'
+  | 'SYSTEM_AUDIT';
+
+/** File formats supported by the synchronous table-export endpoint. */
+export type TableExportFormat = 'CSV' | 'PDF';
+
+/** Normalized request for exporting the complete filtered and sorted table. */
+export interface TableExportCommand {
+  table: TableExportId;
+  format: TableExportFormat;
+  timeZone: string;
+  query: Record<string, unknown>;
+}
+
+/** Scope of an asynchronous structured-data export. */
+export type DataExportScope = 'GROUP' | 'PERSONAL';
+
+/** Lifecycle states exposed by structured-data export jobs. */
+export type DataExportStatus = 'QUEUED' | 'RUNNING' | 'READY' | 'FAILED' | 'CANCELLED' | 'EXPIRED';
+
+/** Optional determinate progress reported by a structured-data export worker. */
+export interface DataExportProgress {
+  completed: number;
+  total: number;
+}
+
+/** Sensitive structured-data export owned by the current actor. */
+export interface DataExportJob {
+  id: string;
+  scope: DataExportScope;
+  status: DataExportStatus;
+  requestedAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  expiresAt?: string;
+  sizeBytes?: string;
+  sha256?: string;
+  progress?: DataExportProgress;
+  downloadUrl?: string;
+  errorCode?: string;
+}
+
 /** Server-backed unified account-activity search, filter, and sort options. */
 export interface ActivityCollectionQuery extends CollectionQuery<'kind' | 'targetName' | 'actorName' | 'detailName' | 'categoryName' | 'occurredAt' | 'amount' | 'status'> {
   /** One or more repeated transaction kinds combined with OR semantics. */
@@ -1026,14 +1077,19 @@ export type NotificationEventType =
   | 'SETTLEMENT_CREATED'
   | 'SETTLEMENT_DUE_SOON'
   | 'SETTLEMENT_OVERDUE'
+  | 'DATA_EXPORT_READY'
+  | 'DATA_EXPORT_FAILED'
   | 'SYSTEM';
+
+/** Notification events whose optional external channels are user-configurable. */
+export type ConfigurableNotificationEventType = Exclude<NotificationEventType, 'DATA_EXPORT_READY' | 'DATA_EXPORT_FAILED' | 'SYSTEM'>;
 
 /** Optional external delivery channels controlled by system, group, and member policy. */
 export type NotificationChannel = 'EMAIL' | 'PUSH';
 
 /** User-facing metadata for one event from the server-owned notification catalog. */
 export interface NotificationEventDefinition {
-  eventType: Exclude<NotificationEventType, 'SYSTEM'>;
+  eventType: ConfigurableNotificationEventType;
   category: string;
   name: string;
   description: string;
@@ -1067,7 +1123,7 @@ export interface GroupNotificationSettingsUpdate {
   timezone: string;
   dueSoonLeadDays: number;
   overdueRepeatDays: number;
-  events: Array<{ eventType: Exclude<NotificationEventType, 'SYSTEM'>; enabled: boolean }>;
+  events: Array<{ eventType: ConfigurableNotificationEventType; enabled: boolean }>;
 }
 
 /** One member's effective preferences for a group event. */
@@ -1089,7 +1145,7 @@ export interface NotificationPreferences {
 export interface NotificationPreferencesUpdate {
   version: number;
   events: Array<{
-    eventType: Exclude<NotificationEventType, 'SYSTEM'>;
+    eventType: ConfigurableNotificationEventType;
     email?: boolean;
     push?: boolean;
   }>;
@@ -1131,6 +1187,8 @@ export interface NotificationContext {
   currency?: string;
   periodLabel?: string;
   dueAt?: string;
+  exportId?: string;
+  exportScope?: DataExportScope;
 }
 
 /** An in-app notification addressed to the signed-in user. */
