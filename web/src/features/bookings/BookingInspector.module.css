@@ -132,7 +132,7 @@
   align-content: center;
   gap: var(--space-4);
   padding: var(--space-8);
-  color: var(--color-brand);
+  color: var(--color-status-success);
   text-align: center;
 }
 

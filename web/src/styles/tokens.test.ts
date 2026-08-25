@@ -50,6 +50,7 @@ describe('semantic theme tokens', () => {
         ['--color-text', '--color-canvas'],
         ['--color-text-strong', '--color-surface'],
         ['--color-text-muted', '--color-surface'],
+        ['--color-text-subtle', '--color-surface-brand-subtle'],
         ['--color-text-brand', '--color-surface'],
         ['--color-text-on-brand', '--color-brand'],
         ['--color-navigation-text', '--color-navigation'],
@@ -70,4 +71,38 @@ describe('semantic theme tokens', () => {
       });
     },
   );
+
+  it.each(themes.flatMap((theme) => schemes.map((scheme) => [theme, scheme] as const)))(
+    'keeps critical %s %s graphical indicators at non-text contrast',
+    (theme, scheme) => {
+      const tokens = resolveHexTokens(theme, scheme);
+      const pairs = [
+        ['--color-border-brand', '--color-surface'],
+        ['--color-focus-ring', '--color-surface'],
+        ['--color-navigation-accent', '--color-navigation'],
+      ] as const;
+
+      pairs.forEach(([indicatorToken, adjacentToken]) => {
+        const indicator = tokens[indicatorToken];
+        const adjacent = tokens[adjacentToken];
+        expect(indicator, `${indicatorToken} must resolve to a hex color`).toBeDefined();
+        expect(adjacent, `${adjacentToken} must resolve to a hex color`).toBeDefined();
+        expect(
+          contrastRatio(indicator, adjacent),
+          `${theme}/${scheme}: ${indicatorToken} against ${adjacentToken}`,
+        ).toBeGreaterThanOrEqual(3);
+      });
+    },
+  );
+
+  it('uses distinct tonal surface scales for every dark theme', () => {
+    const darkThemes = themes.map((theme) => resolveHexTokens(theme, 'dark'));
+
+    expect(new Set(darkThemes.map((tokens) => tokens['--color-canvas']))).toHaveLength(themes.length);
+    expect(new Set(darkThemes.map((tokens) => tokens['--color-surface']))).toHaveLength(themes.length);
+    darkThemes.forEach((tokens) => {
+      expect(relativeLuminance(tokens['--color-canvas'])).toBeLessThan(relativeLuminance(tokens['--color-surface']));
+      expect(relativeLuminance(tokens['--color-surface'])).toBeLessThan(relativeLuminance(tokens['--color-surface-raised']));
+    });
+  });
 });

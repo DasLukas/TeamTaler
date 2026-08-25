@@ -27,10 +27,10 @@ export const SYSTEM_DARK_QUERY = '(prefers-color-scheme: dark)';
 export const PUBLIC_THEME: ThemeId = 'TEAMTALER';
 
 const THEME_COLORS: Record<ThemeId, Record<ResolvedColorScheme, string>> = {
-  TEAMTALER: { light: '#03182f', dark: '#03182f' },
-  NRW: { light: '#006d32', dark: '#063d20' },
-  TIEF_IM_WESTEN: { light: '#0f2864', dark: '#08183d' },
-  FIRE: { light: '#962a27', dark: '#3b0f0d' },
+  TEAMTALER: { light: '#03182f', dark: '#03101f' },
+  NRW: { light: '#006d32', dark: '#06351c' },
+  TIEF_IM_WESTEN: { light: '#0f2864', dark: '#07183a' },
+  FIRE: { light: '#962a27', dark: '#2c0d0b' },
 };
 
 /**

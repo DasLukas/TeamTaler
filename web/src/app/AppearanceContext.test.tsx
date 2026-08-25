@@ -88,7 +88,7 @@ describe('AppearanceProvider', () => {
 
     expect(screen.getByLabelText('appearance')).toHaveTextContent('DARK:TEAMTALER:dark');
     expect(document.documentElement).toHaveAttribute('data-color-scheme', 'dark');
-    expect(document.querySelector('meta[name="theme-color"]')).toHaveAttribute('content', '#03182f');
+    expect(document.querySelector('meta[name="theme-color"]')).toHaveAttribute('content', '#03101f');
   });
 
   it('reacts live to system scheme changes only while system mode is active', () => {
@@ -144,7 +144,7 @@ describe('AppearanceProvider', () => {
 
     act(() => screen.getByRole('button', { name: 'Switch group' }).click());
     expect(screen.getByLabelText('appearance')).toHaveTextContent('DARK:TIEF_IM_WESTEN:dark');
-    expect(document.querySelector('meta[name="theme-color"]')).toHaveAttribute('content', '#08183d');
+    expect(document.querySelector('meta[name="theme-color"]')).toHaveAttribute('content', '#07183a');
 
     act(() => screen.getByRole('button', { name: 'Sign out' }).click());
     expect(screen.getByLabelText('appearance')).toHaveTextContent('DARK:TEAMTALER:dark');

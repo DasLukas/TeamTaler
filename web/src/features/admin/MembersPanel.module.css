@@ -17,7 +17,7 @@
   gap: var(--space-3);
 }
 
-.success { color: var(--color-brand); font-weight: 700; }
+.success { color: var(--color-status-success); font-weight: 700; }
 
 @media (min-width: 768px) and (max-width: 1100px) {
   .headerActions { flex-wrap: nowrap; }
