@@ -69,7 +69,7 @@ export function TableExportMenu({ disabled = false, groupId, query, system = fal
 
   return (
     <div className={styles.triggerWrap}>
-      <Button disabled={disabled || mutation.isPending} leadingIcon={<Download size={18} />} onClick={() => { mutation.reset(); setOpen(true); }} variant="secondary">
+      <Button aria-label={t('exports.table.action')} disabled={disabled || mutation.isPending} iconOnly leadingIcon={<Download size={18} />} onClick={() => { mutation.reset(); setOpen(true); }} title={t('exports.table.action')} variant="secondary">
         {t('exports.table.action')}
       </Button>
       <Modal onClose={() => setOpen(false)} open={open} title={t('exports.table.title', { title })}>

@@ -365,9 +365,7 @@ export const de = {
     intro: 'Alle Belastungen, Zahlungen und Korrekturen auf deinem gemeinsamen Gruppenkonto.',
     systemOnlyIntro: 'Verwalte dein persönliches Konto und deine Anmeldedaten.',
     error: 'Dein Konto konnte nicht geladen werden.',
-    csvExport: 'CSV exportieren',
     financeTitle: 'Finanzen',
-    csvFileName: 'teamtaler-konto.csv',
     currentOpenAmount: 'Aktueller offener Betrag',
     closedSettlements: 'Abgeschlossene Abrechnungen',
     settlementHistory: 'Abrechnungshistorie',
@@ -437,13 +435,6 @@ export const de = {
       payment: 'Zahlung',
       reversal: 'Storno',
       credit: 'Guthaben',
-    },
-    csv: {
-      date: 'Datum',
-      kind: 'Art',
-      description: 'Beschreibung',
-      amount: 'Betrag',
-      balance: 'Saldo',
     },
   },
   appearance: {

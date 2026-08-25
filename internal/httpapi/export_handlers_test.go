@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DasLukas/TeamTaler/internal/activities"
 	"github.com/DasLukas/TeamTaler/internal/config"
@@ -105,6 +106,12 @@ func TestGroupTableExportCSVUsesCanonicalServerColumnsAndRecordsAudit(t *testing
 	var auditCount int
 	if err := server.db.QueryRow(`SELECT count(*) FROM audit_events WHERE group_id=? AND action='table.exported' AND resource_id='activities'`, membership.GroupID).Scan(&auditCount); err != nil || auditCount != 1 {
 		t.Fatalf("table export audit count=%d err=%v", auditCount, err)
+	}
+	document, err := server.buildGroupTableDocument(context.Background(), membership,
+		tableExportCommand{Table: "ACTIVITIES", Format: "PDF", TimeZone: "Europe/Berlin", Query: json.RawMessage(`{"sort":"occurredAt","direction":"desc"}`)},
+		tableExportDefinitions["ACTIVITIES"], time.FixedZone("CEST", 2*60*60), tableExportPDFRowLimit)
+	if err != nil || document.GroupName != "Import Team" {
+		t.Fatalf("group export branding = %q, %v", document.GroupName, err)
 	}
 }
 

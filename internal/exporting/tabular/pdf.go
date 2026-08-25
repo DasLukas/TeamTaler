@@ -52,9 +52,9 @@ type columnBand struct {
 
 // WritePDF validates document and writes a deterministic, Unicode-capable A4
 // landscape PDF to output. Every page has the group logo or TeamTaler fallback
-// mark, centered title, localized export timestamp, page n/m, and a repeated
-// table header. Wide tables use horizontal bands with identity columns repeated;
-// tall rows wrap and continue without clipping.
+// mark, optional group name, centered title, localized export timestamp, page
+// n/m, and a repeated table header. Wide tables use horizontal bands with
+// identity columns repeated; tall rows wrap and continue without clipping.
 //
 // Validation, image normalization, layout, and write failures are returned to
 // the caller. The caller should render to a restrictive temporary file before
@@ -82,12 +82,30 @@ func WritePDFContext(ctx context.Context, output io.Writer, document Document) e
 		return fmt.Errorf("validate PDF document: %w", err)
 	}
 
+	countingPDF := newPDFDocument(document)
+	totalPages, err := renderPDFPages(ctx, countingPDF, document, 0)
+	if err != nil {
+		return err
+	}
+	countingPDF = nil
+
+	pdf := newPDFDocument(document)
+	if _, err := renderPDFPages(ctx, pdf, document, totalPages); err != nil {
+		return err
+	}
+	if err := pdf.Output(contextWriter{context: ctx, writer: output}); err != nil {
+		return fmt.Errorf("write PDF: %w", err)
+	}
+	return nil
+}
+
+// newPDFDocument creates one consistently configured A4-landscape renderer.
+func newPDFDocument(document Document) *fpdf.Fpdf {
 	pdf := fpdf.NewCustom(&fpdf.InitType{
 		OrientationStr: "L",
 		UnitStr:        "mm",
 		SizeStr:        "A4",
 	})
-	pdf.AliasNbPages("")
 	pdf.AddUTF8FontFromBytes(regularFontFamily, "", notoSansRegular)
 	pdf.AddUTF8FontFromBytes(regularFontFamily, "B", notoSansSemibold)
 	pdf.SetCatalogSort(true)
@@ -101,48 +119,50 @@ func WritePDFContext(ctx context.Context, output io.Writer, document Document) e
 	pdf.SetAuthor("TeamTaler", true)
 	pdf.SetCreator("TeamTaler", true)
 	pdf.SetLang("de-DE")
+	return pdf
+}
 
+// renderPDFPages draws every horizontal band and row and returns the resulting
+// page count. A zero totalPages value is used only by the counting pass.
+func renderPDFPages(ctx context.Context, pdf *fpdf.Fpdf, document Document, totalPages int) (int, error) {
 	logoRegistered := registerLogo(pdf, document.LogoPNG)
 	pdf.SetFont(regularFontFamily, "", bodyFontSize)
 	bands := buildColumnBands(pdf, document)
 	if len(bands) == 0 {
-		return fmt.Errorf("calculate PDF column layout: no column bands")
+		return 0, fmt.Errorf("calculate PDF column layout: no column bands")
 	}
 
 	currentBand := bands[0]
 	bodyStartY := tableHeaderY
 	pdf.SetHeaderFuncMode(func() {
-		drawDocumentHeader(pdf, document, logoRegistered)
+		drawDocumentHeader(pdf, document, logoRegistered, totalPages)
 		bodyStartY = drawTableHeader(pdf, document, currentBand)
 		pdf.SetXY(pageMarginMM, bodyStartY)
 	}, false)
 
 	for _, band := range bands {
 		if err := ctx.Err(); err != nil {
-			return err
+			return 0, err
 		}
 		currentBand = band
 		pdf.AddPage()
 		if err := pdf.Error(); err != nil {
-			return fmt.Errorf("start PDF page: %w", err)
+			return 0, fmt.Errorf("start PDF page: %w", err)
 		}
 		if len(document.Rows) == 0 {
 			continue
 		}
 		for rowIndex, row := range document.Rows {
 			if err := ctx.Err(); err != nil {
-				return err
+				return 0, err
 			}
 			renderWrappedRow(pdf, document, band, row, rowIndex, &bodyStartY)
 			if err := pdf.Error(); err != nil {
-				return fmt.Errorf("render PDF row %d: %w", rowIndex, err)
+				return 0, fmt.Errorf("render PDF row %d: %w", rowIndex, err)
 			}
 		}
 	}
-	if err := pdf.Output(contextWriter{context: ctx, writer: output}); err != nil {
-		return fmt.Errorf("write PDF: %w", err)
-	}
-	return nil
+	return pdf.PageNo(), nil
 }
 
 func registerLogo(pdf *fpdf.Fpdf, source []byte) bool {
@@ -173,8 +193,9 @@ func normalizeLogo(source []byte) ([]byte, bool) {
 	return normalized.Bytes(), true
 }
 
-func drawDocumentHeader(pdf *fpdf.Fpdf, document Document, logoRegistered bool) {
+func drawDocumentHeader(pdf *fpdf.Fpdf, document Document, logoRegistered bool, totalPages int) {
 	regionWidth := pageContentWidth / 3
+	brandNameX := pageMarginMM + 15
 	if logoRegistered {
 		info := pdf.GetImageInfo("teamtaler-export-logo")
 		if info != nil {
@@ -190,23 +211,68 @@ func drawDocumentHeader(pdf *fpdf.Fpdf, document Document, logoRegistered bool) 
 				0,
 				"",
 			)
+			brandNameX = pageMarginMM + width + 3
 		}
 	} else {
 		drawFallbackMark(pdf, pageMarginMM, pageMarginMM)
 	}
+	drawGroupName(pdf, document.GroupName, brandNameX, pageMarginMM, pageMarginMM+regionWidth-brandNameX)
 
 	pdf.SetTextColor(brandDarkRed, brandDarkGreen, brandDarkBlue)
 	drawCenteredTitle(pdf, document.Title, pageMarginMM+regionWidth, pageMarginMM, regionWidth)
 
 	pdf.SetFont(regularFontFamily, "", 7.5)
-	pdf.SetXY(pageMarginMM+2*regionWidth, pageMarginMM+1)
-	pdf.CellFormat(regionWidth, 4.2, "Exportiert: "+document.ExportedAt.Format("02.01.2006 15:04 MST"), "", 0, "R", false, 0, "")
-	pdf.SetXY(pageMarginMM+2*regionWidth, pageMarginMM+5.5)
-	pdf.CellFormat(regionWidth, 4.2, fmt.Sprintf("Seite %d/{nb}", pdf.PageNo()), "", 0, "R", false, 0, "")
+	drawRightHeaderLine(pdf, pageMarginMM+2*regionWidth, pageMarginMM+1, regionWidth, document.ExportedAt.Format("02.01.2006 15:04"))
+	drawRightHeaderLine(pdf, pageMarginMM+2*regionWidth, pageMarginMM+5.5, regionWidth, fmt.Sprintf("Seite %d/%d", pdf.PageNo(), totalPages))
 
 	pdf.SetDrawColor(185, 195, 207)
 	pdf.SetLineWidth(0.25)
 	pdf.Line(pageMarginMM, headerDividerY, pageWidthMM-pageMarginMM, headerDividerY)
+}
+
+func drawRightHeaderLine(pdf *fpdf.Fpdf, x, y, width float64, value string) {
+	pdf.SetXY(x, y)
+	pdf.CellFormat(width, 4.2, value, "", 0, "R", false, 0, "")
+}
+
+func drawGroupName(pdf *fpdf.Fpdf, name string, x, y, width float64) {
+	name = strings.TrimSpace(cleanText(name))
+	if name == "" || width < 8 {
+		return
+	}
+	pdf.SetTextColor(brandDarkRed, brandDarkGreen, brandDarkBlue)
+	fontSize := 9.0
+	var lines []string
+	for fontSize >= 6 {
+		pdf.SetFont(regularFontFamily, "B", fontSize)
+		lines = splitText(pdf, name, width)
+		if len(lines) <= 2 {
+			break
+		}
+		fontSize -= 0.5
+	}
+	if len(lines) > 2 {
+		remaining := strings.Join(lines[1:], " ")
+		lines = []string{lines[0], truncatePDFText(pdf, remaining, width)}
+	}
+	lineHeight := 4.2
+	startY := y + (12-float64(len(lines))*lineHeight)/2
+	for index, line := range lines {
+		pdf.SetXY(x, startY+float64(index)*lineHeight)
+		pdf.CellFormat(width, lineHeight, line, "", 0, "L", false, 0, "")
+	}
+}
+
+func truncatePDFText(pdf *fpdf.Fpdf, value string, width float64) string {
+	value = strings.TrimSpace(value)
+	if pdf.GetStringWidth(value) <= width {
+		return value
+	}
+	runes := []rune(value)
+	for len(runes) > 0 && pdf.GetStringWidth(string(runes)+"...") > width {
+		runes = runes[:len(runes)-1]
+	}
+	return strings.TrimSpace(string(runes)) + "..."
 }
 
 func drawFallbackMark(pdf *fpdf.Fpdf, x, y float64) {

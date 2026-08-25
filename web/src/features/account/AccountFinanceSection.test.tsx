@@ -6,7 +6,6 @@ import { AccountFinanceSection } from './AccountFinanceSection';
 
 const mocks = vi.hoisted(() => ({
   getDashboard: vi.fn(),
-  getLedger: vi.fn(),
   getSettlements: vi.fn(),
   getTransactionSettings: vi.fn(),
 }));
@@ -28,7 +27,6 @@ describe('AccountFinanceSection settlement visibility', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getDashboard.mockResolvedValue({ openBalance: { minorUnits: '0', currency: 'EUR' } });
-    mocks.getLedger.mockResolvedValue([]);
     mocks.getSettlements.mockResolvedValue([]);
     mocks.getTransactionSettings.mockResolvedValue({ settlementsEnabled: false });
   });
@@ -47,6 +45,14 @@ describe('AccountFinanceSection settlement visibility', () => {
     expect(await screen.findByText(i18n.t('account.currentOpenAmount'))).toBeVisible();
     expect(screen.queryByRole('heading', { name: i18n.t('account.movements') })).not.toBeInTheDocument();
     expect(screen.queryByRole('table', { name: i18n.t('account.movements') })).not.toBeInTheDocument();
+  });
+
+  it('omits the redundant personal CSV and print actions', async () => {
+    renderSection();
+
+    expect(await screen.findByText(i18n.t('account.currentOpenAmount'))).toBeVisible();
+    expect(screen.queryByRole('button', { name: /csv/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: i18n.t('common.print') })).not.toBeInTheDocument();
   });
 
   it('shows matching settlement history read-only while the feature is disabled', async () => {

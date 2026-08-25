@@ -14,10 +14,11 @@ import (
 )
 
 const (
-	maxColumns     = 64
-	maxTitleRunes  = 200
-	maxHeaderRunes = 120
-	maxLogoBytes   = 10 << 20
+	maxColumns        = 64
+	maxTitleRunes     = 200
+	maxGroupNameRunes = 120
+	maxHeaderRunes    = 120
+	maxLogoBytes      = 10 << 20
 )
 
 var (
@@ -53,9 +54,9 @@ const (
 )
 
 // Document is the canonical, transport-independent representation of one table
-// export. ExportedAt must already carry the validated display timezone. LogoPNG
-// may contain a normalized group logo; missing or invalid bytes use the built-in
-// TeamTaler mark instead.
+// export. ExportedAt must already carry the validated display timezone. GroupName
+// is rendered beside LogoPNG in group exports; missing or invalid logo bytes use
+// the built-in TeamTaler mark instead. System exports leave GroupName empty.
 //
 // Example:
 //
@@ -67,6 +68,7 @@ const (
 //	}
 type Document struct {
 	Title      string
+	GroupName  string
 	ExportedAt time.Time
 	LogoPNG    []byte
 	Columns    []Column
@@ -123,6 +125,9 @@ func (document Document) Validate() error {
 	}
 	if utf8.RuneCountInString(title) > maxTitleRunes {
 		return fmt.Errorf("table title exceeds %d characters", maxTitleRunes)
+	}
+	if utf8.RuneCountInString(strings.TrimSpace(document.GroupName)) > maxGroupNameRunes {
+		return fmt.Errorf("group name exceeds %d characters", maxGroupNameRunes)
 	}
 	if document.ExportedAt.IsZero() {
 		return errors.New("export timestamp must not be zero")

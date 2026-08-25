@@ -368,7 +368,8 @@
   .toolbar { align-items: stretch; flex-direction: column; }
   .searchField { width: 100%; }
   .toolbarButtons { justify-content: stretch; }
-  .toolbarButtons > * { flex: 1 1 auto; }
+  .toolbarButtons > * { flex: 0 0 auto; }
+  .toolbarButtons > .filterButton { flex: 1 1 auto; }
   .scrollHint { display: flex; }
   .filterForm { padding: var(--space-2) var(--space-5) var(--space-5); }
   .filterActions { display: grid; grid-template-columns: 1fr 1fr; }

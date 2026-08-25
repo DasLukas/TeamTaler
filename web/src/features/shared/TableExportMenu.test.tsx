@@ -29,7 +29,9 @@ describe('TableExportMenu', () => {
     const user = userEvent.setup();
     renderMenu();
 
-    await user.click(screen.getByRole('button', { name: 'Exportieren' }));
+    const trigger = screen.getByRole('button', { name: 'Exportieren' });
+    expect(trigger.className).toContain('iconOnly');
+    await user.click(trigger);
     await user.click(screen.getByRole('button', { name: 'Als CSV herunterladen' }));
 
     await waitFor(() => expect(mocks.exportGroupTable).toHaveBeenCalledTimes(1));

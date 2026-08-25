@@ -36,6 +36,30 @@ func TestWritePDFIsDeterministicUnicodeLandscapeDocument(t *testing.T) {
 	}
 }
 
+func TestRenderPDFPageCountMatchesOutput(t *testing.T) {
+	document := pdfFixtureDocument(120, true)
+	countingPDF := newPDFDocument(document)
+	counted, err := renderPDFPages(context.Background(), countingPDF, document, 0)
+	if err != nil {
+		t.Fatalf("count PDF pages: %v", err)
+	}
+	if counted < 3 {
+		t.Fatalf("counted pages = %d, want a multi-page fixture", counted)
+	}
+	finalPDF := newPDFDocument(document)
+	if _, err := renderPDFPages(context.Background(), finalPDF, document, counted); err != nil {
+		t.Fatalf("render counted PDF: %v", err)
+	}
+	var output bytes.Buffer
+	if err := finalPDF.Output(&output); err != nil {
+		t.Fatalf("write counted PDF: %v", err)
+	}
+	actual := len(pageObjectPattern.FindAll(output.Bytes(), -1))
+	if counted != actual {
+		t.Fatalf("counted pages = %d, output pages = %d", counted, actual)
+	}
+}
+
 func TestWritePDFFallsBackForDamagedLogo(t *testing.T) {
 	document := basicFixtureDocument()
 	document.LogoPNG = []byte("not a PNG")

@@ -536,6 +536,7 @@ function DataTableControls<FilterId extends string>({ definitions, filters, labe
             <Button
               aria-expanded={filterDialogOpen}
               aria-haspopup="dialog"
+              className={styles.filterButton}
               leadingIcon={<Filter size={18} />}
               onClick={openFilterDialog}
               variant="secondary"

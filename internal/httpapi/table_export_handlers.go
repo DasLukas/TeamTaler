@@ -273,11 +273,11 @@ func (s *Server) buildGroupTableDocument(ctx context.Context, membership domain.
 	if err != nil {
 		return tabular.Document{}, err
 	}
-	logo, err := s.groupExportLogo(ctx, membership.GroupID)
+	groupName, logo, err := s.groupExportBrand(ctx, membership.GroupID)
 	if err != nil {
 		return tabular.Document{}, err
 	}
-	return tabular.Document{Title: definition.Title, ExportedAt: platform.Now().In(location), LogoPNG: logo, Columns: columns, Rows: rows}, nil
+	return tabular.Document{Title: definition.Title, GroupName: groupName, ExportedAt: platform.Now().In(location), LogoPNG: logo, Columns: columns, Rows: rows}, nil
 }
 
 func (s *Server) buildSystemTableDocument(ctx context.Context, command tableExportCommand, definition tableExportDefinition, location *time.Location, rowLimit int) (tabular.Document, error) {
@@ -953,28 +953,29 @@ func parseOptionalMinorUnits(field string, value *string) (*int64, error) {
 	return &parsed, nil
 }
 
-func (s *Server) groupExportLogo(ctx context.Context, groupID string) ([]byte, error) {
+func (s *Server) groupExportBrand(ctx context.Context, groupID string) (string, []byte, error) {
+	var groupName string
 	var imageKey sql.NullString
-	if err := s.db.QueryRowContext(ctx, `SELECT logo_key FROM groups WHERE id=?`, groupID).Scan(&imageKey); errors.Is(err, sql.ErrNoRows) {
-		return nil, domain.ErrNotFound
+	if err := s.db.QueryRowContext(ctx, `SELECT name,logo_key FROM groups WHERE id=?`, groupID).Scan(&groupName, &imageKey); errors.Is(err, sql.ErrNoRows) {
+		return "", nil, domain.ErrNotFound
 	} else if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	if !imageKey.Valid || imageKey.String == "" {
-		return nil, nil
+		return groupName, nil, nil
 	}
 	imagePath, err := media.ResolveImage(s.config.DataDirectory, imageKey.String)
 	if err != nil {
-		return nil, nil
+		return groupName, nil, nil
 	}
 	content, err := os.ReadFile(imagePath)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return groupName, nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
-	return content, nil
+	return groupName, content, nil
 }
 
 func (s *Server) recordGroupTableExport(ctx context.Context, principal domain.Principal, membership domain.Membership, command tableExportCommand, rowCount int) error {

@@ -20,6 +20,7 @@ func TestDocumentValidateRejectsMalformedData(t *testing.T) {
 		match  string
 	}{
 		{name: "empty title", mutate: func(document *Document) { document.Title = " " }, match: "title"},
+		{name: "long group name", mutate: func(document *Document) { document.GroupName = strings.Repeat("a", maxGroupNameRunes+1) }, match: "group name"},
 		{name: "missing timestamp", mutate: func(document *Document) { document.ExportedAt = time.Time{} }, match: "timestamp"},
 		{name: "invalid column ID", mutate: func(document *Document) { document.Columns[0].ID = "Member Name" }, match: "invalid ID"},
 		{name: "duplicate column ID", mutate: func(document *Document) { document.Columns[1].ID = document.Columns[0].ID }, match: "duplicated"},
@@ -65,6 +66,7 @@ func TestFormatMoneyUsesExactMinorUnits(t *testing.T) {
 func basicFixtureDocument() Document {
 	return Document{
 		Title:      "Aktivitäten",
+		GroupName:  "Testgruppe Süd",
 		ExportedAt: time.Date(2026, time.August, 25, 14, 32, 10, 0, time.FixedZone("CEST", 2*60*60)),
 		Columns: []Column{
 			{ID: "member", Header: "Mitglied", Kind: TextColumn, Identity: true},

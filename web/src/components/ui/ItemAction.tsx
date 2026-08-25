@@ -2,7 +2,7 @@ import type { ButtonProps } from './Button';
 import { Button } from './Button';
 
 /** Properties accepted by a contextual action attached to one list or card item. */
-export type ItemActionProps = Omit<ButtonProps, 'collapseLabelAt' | 'size' | 'variant'>;
+export type ItemActionProps = Omit<ButtonProps, 'collapseLabelAt' | 'iconOnly' | 'size' | 'variant'>;
 
 /**
  * Renders a compact, link-style action for one item in a list, table, or card.
