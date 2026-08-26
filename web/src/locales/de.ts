@@ -511,7 +511,11 @@ export const de = {
       title: '{{title}} exportieren',
       intro: 'Alle Treffer der aktuellen Suche, Filter und Sortierung werden exportiert.',
       csv: 'Als CSV herunterladen',
-      pdf: 'Als PDF herunterladen',
+      pdf: 'PDF-Vorschau öffnen',
+      previewTitle: '{{title}} – PDF-Vorschau',
+      previewLoading: 'PDF-Vorschau wird erstellt …',
+      previewBlocked: 'Die PDF-Vorschau wurde vom Browser blockiert. Erlaube Pop-ups für TeamTaler und versuche es erneut.',
+      previewClosed: 'Die PDF-Vorschau wurde geschlossen, bevor der Export fertig war.',
       error: 'Die Tabelle konnte nicht exportiert werden.',
     },
     data: {

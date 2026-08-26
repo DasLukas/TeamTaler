@@ -8,6 +8,7 @@ readonly server_root="${project_root}/tmp/test-server"
 readonly binary_dir="${server_root}/bin"
 readonly local_env_file="${project_root}/.env.test-server.local"
 readonly readiness_timeout_seconds="${TEAMTALER_TEST_SERVER_READY_TIMEOUT_SECONDS:-60}"
+readonly test_password="TeamTaler-Test-2026!"
 
 backend_pid=""
 frontend_pid=""
@@ -113,6 +114,15 @@ wait_for_server() {
   return 1
 }
 
+# Print one Markdown-compatible access row.
+#
+# Arguments:
+#   $1 - Group name or group-less account description.
+#   $2 - Login email address.
+print_access_row() {
+  printf '| %s | %s | %s |\n' "$1" "$2" "${test_password}"
+}
+
 if [[ ! "${readiness_timeout_seconds}" =~ ^[1-9][0-9]*$ ]]; then
   echo "TEAMTALER_TEST_SERVER_READY_TIMEOUT_SECONDS must be a positive integer." >&2
   exit 1
@@ -189,14 +199,21 @@ if ! wait_for_server "Frontend" "${frontend_pid}" "http://127.0.0.1:5173/health/
 fi
 
 echo
-echo "TeamTaler test server is ready at http://127.0.0.1:5173"
-echo "Shared password: TeamTaler-Test-2026!"
-echo "Groups: TeamTaler Demo Club, TeamTaler Weekend Club"
-echo "Accounts: admin@example.test, marie@example.test, jonas@example.test, lena@example.test, noah@example.test, systemonly@example.test"
-echo "Second-group-only account: noah@example.test"
-echo "Group-less system administrator: systemonly@example.test"
-echo "Second-group catalog: Refreshments / Club Coffee (EUR 1.80)"
-echo "Stop the action to remove its disposable database."
+echo "TeamTaler-Testserver ist bereit: http://127.0.0.1:5173"
+echo
+printf '| Gruppe | Nutzer | Passwort |\n'
+printf '|---|---|---|\n'
+print_access_row "TSV Sonnenberg" "admin@example.test"
+print_access_row "TSV Sonnenberg" "marie@example.test"
+print_access_row "TSV Sonnenberg" "jonas@example.test"
+print_access_row "TSV Sonnenberg" "lena@example.test"
+print_access_row "TSV Sonnenberg" "emil@example.test"
+print_access_row "Freizeitteam Wochenende" "admin@example.test"
+print_access_row "Freizeitteam Wochenende" "lena@example.test"
+print_access_row "Freizeitteam Wochenende" "noah@example.test"
+print_access_row "Keine Gruppe (Systemverwaltung)" "systemonly@example.test"
+echo
+echo "Beim Beenden der Aktion wird die temporäre Datenbank gelöscht."
 
 while true; do
   if ! kill -0 "${backend_pid}" 2>/dev/null; then

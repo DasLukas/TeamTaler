@@ -8,7 +8,7 @@ import { api } from '@/api/client';
 import type { TableExportCommand, TableExportFormat, TableExportId } from '@/api/types';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
-import { downloadExportBlob } from './exportDownload';
+import { downloadExportBlob, openPdfPreviewWindow, showPdfInPreviewWindow } from './exportDownload';
 import styles from './TableExportMenu.module.css';
 
 /** Server-owned configuration for one complete filtered and sorted table export. */
@@ -39,32 +39,47 @@ function safeFileStem(value: string): string {
  * Renders an accessible format chooser for a server-rendered table export.
  *
  * @param props - Stable table identifier, current query, title, and authorization scope.
- * @returns A button and modal offering CSV and PDF downloads.
+ * @returns A button and modal offering CSV download and native PDF preview.
  */
 export function TableExportMenu({ disabled = false, groupId, query, system = false, table, title }: TableExportMenuProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const mutation = useMutation({
-    mutationFn: async (format: TableExportFormat) => {
+    mutationFn: async ({ format, previewWindow }: { format: TableExportFormat; previewWindow?: Window | null }) => {
+      if (format === 'PDF' && !previewWindow) throw new Error(t('exports.table.previewBlocked'));
       const command: TableExportCommand = {
         table,
         format,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
         query,
       };
-      if (system) return api.exportSystemTable(command);
-      if (!groupId) throw new Error(t('exports.groupMissing'));
-      return api.exportGroupTable(groupId, command);
-    },
-    onSuccess: (blob, format) => {
+      let blob: Blob;
+      if (system) blob = await api.exportSystemTable(command);
+      else {
+        if (!groupId) throw new Error(t('exports.groupMissing'));
+        blob = await api.exportGroupTable(groupId, command);
+      }
       const extension = format.toLocaleLowerCase('en-US');
-      downloadExportBlob(blob, `${safeFileStem(title)}-${new Date().toISOString().slice(0, 10)}.${extension}`);
+      const fileName = `${safeFileStem(title)}-${new Date().toISOString().slice(0, 10)}.${extension}`;
+      if (format === 'PDF') {
+        if (!showPdfInPreviewWindow(previewWindow!, blob, fileName)) throw new Error(t('exports.table.previewClosed'));
+      } else {
+        downloadExportBlob(blob, fileName);
+      }
+    },
+    onError: (_error, variables) => {
+      if (variables.previewWindow && !variables.previewWindow.closed) variables.previewWindow.close();
+    },
+    onSuccess: () => {
       setOpen(false);
     },
   });
   const startExport = (format: TableExportFormat) => {
     mutation.reset();
-    mutation.mutate(format);
+    const previewWindow = format === 'PDF'
+      ? openPdfPreviewWindow(t('exports.table.previewTitle', { title }), t('exports.table.previewLoading'))
+      : undefined;
+    mutation.mutate({ format, previewWindow });
   };
 
   return (
