@@ -1,11 +1,9 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import Archive from 'lucide-react/dist/esm/icons/archive';
 import BookOpenCheck from 'lucide-react/dist/esm/icons/book-open-check';
 import CircleCheck from 'lucide-react/dist/esm/icons/circle-check';
 import CircleDollarSign from 'lucide-react/dist/esm/icons/circle-dollar-sign';
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
 import Scale from 'lucide-react/dist/esm/icons/scale';
-import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
 import X from 'lucide-react/dist/esm/icons/x';
 import { useDeferredValue, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -23,6 +21,7 @@ import { CategoryIcon } from '@/features/shared/CategoryIcon';
 import { DataTable, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange } from '@/features/shared/DataTable';
 import { formatGermanDateTime } from '@/features/shared/dateFormat';
 import { createMemberFilterOption } from '@/features/shared/memberFilterOption';
+import { MembershipStateIcon } from '@/features/shared/MembershipStateIcon';
 import tableStyles from '@/features/shared/Table.module.css';
 import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
@@ -46,24 +45,11 @@ interface MembershipIdentityProps {
 function MembershipIdentity({ avatarUrl, name, status }: MembershipIdentityProps) {
   const { t } = useTranslation();
   if (!name) return <span aria-label={t('activities.actorUnavailable')} className={styles.missingActor}>–</span>;
-  const statusLabel = status === 'ARCHIVED' ? t('common.archived') : status === 'DELETED' ? t('common.deleted') : undefined;
-  const StatusIcon = status === 'ARCHIVED' ? Archive : Trash2;
-
   return (
     <span className={styles.member}>
       <Avatar name={name} size="small" src={avatarUrl} />
       <span className={styles.memberName} title={name}>{name}</span>
-      {statusLabel ? (
-        <span
-          aria-label={statusLabel}
-          className={`${styles.membershipState} ${status === 'DELETED' ? styles.membershipStateDeleted : styles.membershipStateArchived}`}
-          role="img"
-          title={statusLabel}
-        >
-          <StatusIcon aria-hidden="true" size={14} />
-          <span className={styles.membershipStateText}>{statusLabel}</span>
-        </span>
-      ) : null}
+      <MembershipStateIcon showLabelAtWide status={status} />
     </span>
   );
 }

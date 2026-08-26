@@ -1026,7 +1026,6 @@ export const de = {
     balance: 'Saldo',
     balanceState: 'Saldostand',
     active: 'Aktiv',
-    archived: 'Ehemalig',
     states: {
       due: 'Offen',
       settled: 'Ausgeglichen',

@@ -1,0 +1,36 @@
+.state {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+}
+
+.archived {
+  color: var(--color-status-warning);
+  background: var(--color-status-warning-subtle);
+}
+
+.deleted {
+  color: var(--color-status-danger);
+  background: var(--color-status-danger-subtle);
+}
+
+.label { display: none; }
+
+@media (min-width: 1800px) {
+  .wide {
+    width: auto;
+    padding-inline: 8px;
+    gap: 5px;
+  }
+
+  .wide .label {
+    display: inline;
+    font-size: var(--font-size-xs);
+    font-weight: 700;
+    white-space: nowrap;
+  }
+}

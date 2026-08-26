@@ -57,7 +57,7 @@ export function AccountBalancesPanel() {
       label: t('financeWorkspace.membershipStatus'),
       options: [
         { label: t('financeWorkspace.active'), value: 'ACTIVE', visual: <CircleCheck size={19} /> },
-        { label: t('financeWorkspace.archived'), value: 'ARCHIVED', visual: <Archive size={19} /> },
+        { label: t('common.archived'), value: 'ARCHIVED', visual: <Archive size={19} /> },
         { label: t('common.deleted'), value: 'DELETED', visual: <Trash2 size={19} /> },
       ],
     },

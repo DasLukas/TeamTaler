@@ -70,10 +70,16 @@ describe('SettlementsPanel feature modes', () => {
     expect(mocks.getPeriods).not.toHaveBeenCalled();
   });
 
-  it('renders former memberships with the warning color', () => {
+  it('renders archived memberships with the warning color', () => {
     renderPanel(false, [{ ...history[0], membershipStatus: 'ARCHIVED' }]);
 
-    expect(screen.getByText(i18n.t('financeWorkspace.archived'))).toHaveClass(tableStyles.statusWarning);
+    expect(screen.getByText(i18n.t('common.archived'))).toHaveClass(tableStyles.statusWarning);
+  });
+
+  it('renders deleted memberships with the danger color', () => {
+    renderPanel(false, [{ ...history[0], membershipStatus: 'DELETED' }]);
+
+    expect(screen.getByText(i18n.t('common.deleted'))).toHaveClass(tableStyles.statusDanger);
   });
 
   it('restores the open period and close action when enabled', async () => {

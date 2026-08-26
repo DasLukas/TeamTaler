@@ -27,18 +27,6 @@
   white-space: normal;
   word-break: normal;
 }
-.membershipState {
-  display: inline-flex;
-  width: 24px;
-  height: 24px;
-  flex: 0 0 24px;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-full);
-}
-.membershipStateArchived { color: var(--color-status-warning); background: var(--color-status-warning-subtle); }
-.membershipStateDeleted { color: var(--color-status-danger); background: var(--color-status-danger-subtle); }
-.membershipStateText { display: none; }
 .activityType {
   display: inline-flex;
   min-height: 30px;
@@ -108,19 +96,6 @@
   .activityList th:nth-child(4) { width: 13%; }
   .activityList th:nth-child(8) { width: 11%; }
   .activityList th:nth-child(9) { width: 11%; }
-
-  .membershipState {
-    width: auto;
-    padding-inline: 8px;
-    gap: 5px;
-  }
-
-  .membershipStateText {
-    display: inline;
-    font-size: var(--font-size-xs);
-    font-weight: 700;
-    white-space: nowrap;
-  }
 
 }
 
