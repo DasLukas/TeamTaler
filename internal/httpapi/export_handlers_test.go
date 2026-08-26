@@ -5,6 +5,9 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"log/slog"
 	"net/http"
@@ -15,11 +18,14 @@ import (
 	"time"
 
 	"github.com/DasLukas/TeamTaler/internal/activities"
+	"github.com/DasLukas/TeamTaler/internal/authorization"
 	"github.com/DasLukas/TeamTaler/internal/config"
+	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/exporting"
 	exportingtabular "github.com/DasLukas/TeamTaler/internal/exporting/tabular"
 	"github.com/DasLukas/TeamTaler/internal/exportnotifications"
 	"github.com/DasLukas/TeamTaler/internal/finance"
+	"github.com/DasLukas/TeamTaler/internal/media"
 	"github.com/DasLukas/TeamTaler/internal/periods"
 	systemadmin "github.com/DasLukas/TeamTaler/internal/system"
 )
@@ -128,6 +134,70 @@ func TestGroupTableExportCSVUsesCanonicalServerColumnsAndRecordsAudit(t *testing
 	}
 }
 
+func TestPDFTableRowsEmbedManagedMemberImagesAndActivityTones(t *testing.T) {
+	server, _, membership := invitationImportServer(t, false)
+	server.config = config.Config{DataDirectory: t.TempDir()}
+	canvas := image.NewRGBA(image.Rect(0, 0, 24, 24))
+	for y := 0; y < 24; y++ {
+		for x := 0; x < 24; x++ {
+			canvas.SetRGBA(x, y, color.RGBA{R: 16, G: 142, B: 124, A: 255})
+		}
+	}
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, canvas); err != nil {
+		t.Fatalf("encode member fixture: %v", err)
+	}
+	imageKey, _, err := media.NormalizeAndStoreImage(server.config.DataDirectory, bytes.NewReader(encoded.Bytes()))
+	if err != nil {
+		t.Fatalf("store member fixture: %v", err)
+	}
+	if _, err := server.db.Exec(`UPDATE users SET avatar_key=? WHERE id=?`, imageKey, membership.UserID); err != nil {
+		t.Fatalf("attach member fixture: %v", err)
+	}
+
+	_, pdfRows, err := server.memberExportRows(context.Background(), membership, json.RawMessage(`{}`), true, 100, true)
+	if err != nil {
+		t.Fatalf("build PDF member rows: %v", err)
+	}
+	if len(pdfRows) == 0 || len(pdfRows[0].Cells[0].ImagePNG) == 0 {
+		t.Fatal("PDF member rows did not embed the managed avatar")
+	}
+	_, csvRows, err := server.memberExportRows(context.Background(), membership, json.RawMessage(`{}`), true, 100, false)
+	if err != nil {
+		t.Fatalf("build CSV member rows: %v", err)
+	}
+	if len(csvRows) == 0 || len(csvRows[0].Cells[0].ImagePNG) != 0 {
+		t.Fatal("CSV member rows unexpectedly loaded PDF-only media")
+	}
+	if !csvRows[0].Cells[0].ImageSlot {
+		t.Fatal("image-capable member cell did not reserve a stable alignment slot")
+	}
+	if got := activityKindCell(activities.KindBooking, true).Tone; got != exportingtabular.ToneWarning {
+		t.Fatalf("booking tone = %v, want %v", got, exportingtabular.ToneWarning)
+	}
+	if got := activityKindCell(activities.KindPayment, true).Tone; got != exportingtabular.ToneSuccess {
+		t.Fatalf("payment tone = %v, want %v", got, exportingtabular.ToneSuccess)
+	}
+	if got := activityMoneyCell(-1250, "EUR", activities.KindPayment, true).Tone; got != exportingtabular.ToneSuccess {
+		t.Fatalf("payment amount tone = %v, want %v", got, exportingtabular.ToneSuccess)
+	}
+	if got := balanceTone(1250); got != exportingtabular.ToneDanger {
+		t.Fatalf("open balance tone = %v, want %v", got, exportingtabular.ToneDanger)
+	}
+	if got := balanceTone(0); got != exportingtabular.ToneSuccess {
+		t.Fatalf("settled balance tone = %v, want %v", got, exportingtabular.ToneSuccess)
+	}
+	if got := balanceTone(-1250); got != exportingtabular.ToneSuccess {
+		t.Fatalf("credit balance tone = %v, want %v", got, exportingtabular.ToneSuccess)
+	}
+	if got := settlementTone("PARTIAL"); got != exportingtabular.ToneWarning {
+		t.Fatalf("partial settlement tone = %v, want %v", got, exportingtabular.ToneWarning)
+	}
+	if got := transactionTone("REVERSED"); got != exportingtabular.ToneDanger {
+		t.Fatalf("reversed payment tone = %v, want %v", got, exportingtabular.ToneDanger)
+	}
+}
+
 func TestSettlementAndMemberExportsMatchVisibleColumnAndPrivacyBoundaries(t *testing.T) {
 	server, _, membership := invitationImportServer(t, false)
 	server.periods = periods.Service{DB: server.db}
@@ -142,7 +212,7 @@ func TestSettlementAndMemberExportsMatchVisibleColumnAndPrivacyBoundaries(t *tes
 		args  []any
 	}{
 		{`INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES(?,NULL,'Guest Export',NULL,?,?)`, []any{guestUserID, timestamp, timestamp}},
-		{`INSERT INTO memberships(id,group_id,user_id,status,joined_at) VALUES(?,?,?,'ACTIVE',?)`, []any{guestMembershipID, membership.GroupID, guestUserID, timestamp}},
+		{`INSERT INTO memberships(id,group_id,user_id,status,joined_at,archived_at) VALUES(?,?,?,'ARCHIVED',?,?)`, []any{guestMembershipID, membership.GroupID, guestUserID, timestamp, timestamp}},
 		{`INSERT INTO periods(id,group_id,label,status,starts_at,closed_at,due_at,created_at) VALUES(?,?,'August 2026','CLOSED',?,?,?,?)`, []any{periodID, membership.GroupID, timestamp, timestamp, "2026-09-10", timestamp}},
 		{`INSERT INTO period_statements(id,group_id,period_id,membership_id,display_name,email,charges_minor,payments_allocated_minor,amount_due_minor,status,created_at) VALUES('stmt_export_admin',?,?,?,'Admin','admin@example.test',1200,0,1200,'OPEN',?)`, []any{membership.GroupID, periodID, membership.ID, timestamp}},
 		{`INSERT INTO period_statements(id,group_id,period_id,membership_id,display_name,email,charges_minor,payments_allocated_minor,amount_due_minor,status,created_at) VALUES('stmt_export_guest',?,?,?,'Guest Export','guest-export@example.test',3400,0,3400,'OPEN',?)`, []any{membership.GroupID, periodID, guestMembershipID, timestamp}},
@@ -152,8 +222,11 @@ func TestSettlementAndMemberExportsMatchVisibleColumnAndPrivacyBoundaries(t *tes
 			t.Fatalf("prepare export fixture: %v", err)
 		}
 	}
+	if _, err := server.db.Exec(`INSERT OR IGNORE INTO membership_role_assignments(group_id,membership_id,role_id,assigned_at,assigned_by) VALUES(?,?,?,?,?)`, membership.GroupID, membership.ID, authorization.TemplateRoleID(membership.GroupID, domain.RoleTemplateFinance), timestamp, membership.ID); err != nil {
+		t.Fatalf("grant finance role for group settlement export: %v", err)
+	}
 
-	personalColumns, personalRows, err := server.settlementExportRows(context.Background(), membership, json.RawMessage(`{}`), true, 100)
+	personalColumns, personalRows, err := server.settlementExportRows(context.Background(), membership, json.RawMessage(`{}`), true, 100, false)
 	if err != nil {
 		t.Fatalf("personal settlement export: %v", err)
 	}
@@ -164,15 +237,44 @@ func TestSettlementAndMemberExportsMatchVisibleColumnAndPrivacyBoundaries(t *tes
 		t.Fatalf("personal settlement columns = %v", got)
 	}
 
-	groupColumns, _, err := server.settlementExportRows(context.Background(), membership, json.RawMessage(`{}`), false, 100)
+	groupColumns, _, err := server.settlementExportRows(context.Background(), membership, json.RawMessage(`{}`), false, 100, false)
 	if err != nil {
 		t.Fatalf("group settlement export: %v", err)
 	}
-	if got := columnIDs(groupColumns); !slicesEqual(got, []string{"period", "member", "due_at", "amount", "paid", "status"}) {
+	if got := columnIDs(groupColumns); !slicesEqual(got, []string{"period", "member", "membership_status", "due_at", "amount", "paid", "status"}) {
 		t.Fatalf("group settlement columns = %v", got)
 	}
+	_, decoratedGroupRows, err := server.settlementExportRows(context.Background(), membership, json.RawMessage(`{}`), false, 100, true)
+	if err != nil {
+		t.Fatalf("decorated group settlement export: %v", err)
+	}
+	for rowIndex, row := range decoratedGroupRows {
+		if got := row.Cells[4].Tone; got != exportingtabular.ToneDanger {
+			t.Fatalf("group settlement row %d claim tone = %q, want danger", rowIndex, got)
+		}
+		if got := row.Cells[5].Tone; got != exportingtabular.ToneSuccess {
+			t.Fatalf("group settlement row %d paid tone = %q, want success for zero payment", rowIndex, got)
+		}
+	}
+	statusTones := map[string]exportingtabular.CellTone{}
+	for _, row := range decoratedGroupRows {
+		statusTones[row.Cells[1].Text] = row.Cells[2].Tone
+	}
+	if got := statusTones["Admin"]; got != exportingtabular.ToneSuccess {
+		t.Fatalf("active membership tone = %q, want success", got)
+	}
+	if got := statusTones["Guest Export"]; got != exportingtabular.ToneWarning {
+		t.Fatalf("archived membership tone = %q, want warning", got)
+	}
+	_, archivedRows, err := server.settlementExportRows(context.Background(), membership, json.RawMessage(`{"membershipStatus":["ARCHIVED"]}`), false, 100, false)
+	if err != nil {
+		t.Fatalf("filtered group settlement export: %v", err)
+	}
+	if len(archivedRows) != 1 || archivedRows[0].Cells[1].Text != "Guest Export" {
+		t.Fatalf("archived settlement rows = %#v, want Guest Export", archivedRows)
+	}
 
-	archivedColumns, _, err := server.memberExportRows(context.Background(), membership, json.RawMessage(`{}`), false, 100)
+	archivedColumns, _, err := server.memberExportRows(context.Background(), membership, json.RawMessage(`{}`), false, 100, false)
 	if err != nil {
 		t.Fatalf("archived member export: %v", err)
 	}
@@ -187,6 +289,9 @@ func TestTableExportNaturalGermanOrdering(t *testing.T) {
 	}
 	if compareText("Änne", "Zora") >= 0 {
 		t.Fatal("German collation did not place Änne before Zora")
+	}
+	if got, want := tableArtifactFilename("Aktivitäten", "PDF", "pdf", time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)), "2026-08-26_Aktivitäten.pdf"; got != want {
+		t.Fatalf("PDF artifact filename = %q, want %q", got, want)
 	}
 }
 

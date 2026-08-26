@@ -29,6 +29,10 @@ func TestDocumentValidateRejectsMalformedData(t *testing.T) {
 			document.Rows[0].Cells[0].Money = &Money{MinorUnits: "1", Currency: "EUR", DecimalPlaces: 2}
 		}, match: "money in a text"},
 		{name: "text in money", mutate: func(document *Document) { document.Rows[0].Cells[1].Text = "1,00 EUR" }, match: "text in a money"},
+		{name: "image in money", mutate: func(document *Document) { document.Rows[0].Cells[1].ImagePNG = []byte("image") }, match: "decorates a money"},
+		{name: "image slot in money", mutate: func(document *Document) { document.Rows[0].Cells[1].ImageSlot = true }, match: "decorates a money"},
+		{name: "unsupported tone", mutate: func(document *Document) { document.Rows[0].Cells[0].Tone = CellTone(99) }, match: "unsupported tone"},
+		{name: "oversized cell image", mutate: func(document *Document) { document.Rows[0].Cells[0].ImagePNG = make([]byte, maxCellImageBytes+1) }, match: "image exceeds"},
 		{name: "invalid currency", mutate: func(document *Document) { document.Rows[0].Cells[1].Money.Currency = "euro" }, match: "currency"},
 		{name: "noncanonical units", mutate: func(document *Document) { document.Rows[0].Cells[1].Money.MinorUnits = "01" }, match: "canonical"},
 	}

@@ -588,6 +588,7 @@ type Statement struct {
 	ID                       string  `json:"id"`
 	PeriodID                 string  `json:"periodId"`
 	MembershipID             string  `json:"membershipId"`
+	MembershipStatus         string  `json:"membershipStatus"`
 	DisplayName              string  `json:"displayName"`
 	Email                    *string `json:"email,omitempty"`
 	ChargesMinor             int64   `json:"chargesMinor,string"`

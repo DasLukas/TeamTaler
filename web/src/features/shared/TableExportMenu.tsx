@@ -28,11 +28,17 @@ export interface TableExportMenuProps extends TableExportConfig {
 
 function safeFileStem(value: string): string {
   return value
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^A-Za-z0-9_-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .toLocaleLowerCase('de-DE') || 'export';
+    .normalize('NFC')
+    .trim()
+    .replace(/[^\p{L}\p{N}]+/gu, '_')
+    .replace(/^_+|_+$/g, '') || 'Export';
+}
+
+function localISODate(value: Date): string {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 /**
@@ -60,7 +66,10 @@ export function TableExportMenu({ disabled = false, groupId, query, system = fal
         blob = await api.exportGroupTable(groupId, command);
       }
       const extension = format.toLocaleLowerCase('en-US');
-      const fileName = `${safeFileStem(title)}-${new Date().toISOString().slice(0, 10)}.${extension}`;
+      const exportDate = localISODate(new Date());
+      const fileName = format === 'PDF'
+        ? `${exportDate}_${safeFileStem(title)}.${extension}`
+        : `${safeFileStem(title)}-${exportDate}.${extension}`;
       if (format === 'PDF') {
         if (!showPdfInPreviewWindow(previewWindow!, blob, fileName)) throw new Error(t('exports.table.previewClosed'));
       } else {

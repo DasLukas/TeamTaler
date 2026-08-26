@@ -1182,9 +1182,11 @@ export function adaptPayment(input: unknown): Payment {
  */
 export function adaptSettlement(input: unknown, periods: Period[]): Settlement {
   const source = asRecord(input);
+  const membershipStatus = source.membershipStatus === 'ARCHIVED' || source.membershipStatus === 'DELETED' ? source.membershipStatus : 'ACTIVE';
   if ('periodLabel' in source) return {
     ...source as unknown as Settlement,
     email: typeof source.email === 'string' ? source.email : null,
+    membershipStatus,
   };
   const period = periods.find((entry) => entry.id === source.periodId);
   const obligationMinor = (BigInt(String(source.chargesMinor ?? 0)) + BigInt(String(source.adjustmentsProvidedMinor ?? 0))).toString();
@@ -1194,6 +1196,7 @@ export function adaptSettlement(input: unknown, periods: Period[]): Settlement {
     periodId: String(source.periodId),
     periodLabel: period?.label ?? i18n.t('common.settlementFallback'),
     membershipId: String(source.membershipId),
+    membershipStatus,
     memberName: String(source.displayName ?? i18n.t('common.member')),
     email: typeof source.email === 'string' ? source.email : null,
     amount: money(obligationMinor, source.currency),

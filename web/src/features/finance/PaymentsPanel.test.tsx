@@ -88,6 +88,28 @@ describe('PaymentsPanel', () => {
     expect(within(listbox).queryByRole('option', { name: 'Deleted Credit' })).not.toBeInTheDocument();
   });
 
+  it('renders member avatars in the payments table', async () => {
+    apiMock.getPaymentsPage.mockResolvedValue({
+      hasMore: false,
+      items: [{
+        id: 'payment-active',
+        membershipId: 'member-active',
+        memberName: 'Active Account',
+        membershipStatus: 'ACTIVE',
+        amount: { minorUnits: '500', currency: 'EUR' },
+        receivedAt: '2026-08-30T10:00:00Z',
+        method: 'CASH',
+        methodLabel: 'Bar',
+        status: 'POSTED',
+      }],
+      limit: 50,
+    });
+    renderPayments();
+
+    const member = await screen.findByText('Active Account');
+    expect(member.closest('td')?.querySelector('img')).toHaveAttribute('src', '/avatars/active-account.png');
+  });
+
   it('marks the amount as required while keeping the optional reference unmarked', async () => {
     const user = userEvent.setup();
     renderPayments();

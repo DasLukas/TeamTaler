@@ -136,6 +136,7 @@ export function PaymentsPanel() {
     queryKey: ['payments', activeGroupId, 'collection', collectionQuery],
   });
   const payments = useMemo(() => paymentsQuery.data?.pages.flatMap((page) => page.items) ?? [], [paymentsQuery.data]);
+  const accountAvatarUrls = useMemo(() => new Map((accountsQuery.data ?? []).map((account) => [account.membershipId, account.avatarUrl])), [accountsQuery.data]);
   const activeAccounts = accountsQuery.data?.filter((account) => account.status === 'ACTIVE') ?? [];
   const regularAccounts = activeAccounts.filter((account) => !account.isTemporaryGuest);
   const temporaryGuestAccounts = activeAccounts.filter((account) => account.isTemporaryGuest);
@@ -206,7 +207,7 @@ export function PaymentsPanel() {
     },
     {
       accessorKey: 'memberName',
-      cell: ({ row }) => <><strong>{row.original.memberName}</strong>{row.original.membershipStatus === 'DELETED' ? <span className={tableStyles.status}>{t('common.deleted')}</span> : null}</>,
+      cell: ({ row }) => <span className={styles.member}><Avatar name={row.original.memberName} size="small" src={accountAvatarUrls.get(row.original.membershipId)} /><strong>{row.original.memberName}</strong>{row.original.membershipStatus === 'DELETED' ? <span className={tableStyles.status}>{t('common.deleted')}</span> : null}</span>,
       enableSorting: true,
       header: t('common.member'),
       id: 'memberName',
@@ -240,7 +241,7 @@ export function PaymentsPanel() {
       id: 'action',
       meta: { label: t('common.action') },
     },
-  ], [activeGroupId, t]);
+  ], [accountAvatarUrls, activeGroupId, t]);
 
   if (accountsQuery.isLoading || transactionSettingsQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
   if (!accountsQuery.data || !transactionSettingsQuery.data) return <div className={styles.state}><StatePanel kind="error" message={t('finance.error')} /></div>;

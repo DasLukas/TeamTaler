@@ -1059,6 +1059,7 @@ export interface Settlement {
   periodId: string;
   periodLabel: string;
   membershipId: string;
+  membershipStatus: MembershipStatus;
   memberName: string;
   email: string | null;
   amount: Money;

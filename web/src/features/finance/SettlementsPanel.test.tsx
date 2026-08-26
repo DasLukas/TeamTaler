@@ -1,9 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AccountSummary, Settlement } from '@/api/types';
 import modalStyles from '@/components/ui/Modal.module.css';
+import tableStyles from '@/features/shared/Table.module.css';
 import i18n from '@/i18n';
 import { SettlementsPanel } from './SettlementsPanel';
 
@@ -23,6 +24,7 @@ const history: Settlement[] = [{
   periodId: 'period-a',
   periodLabel: 'Juli 2026',
   membershipId: 'member-a',
+  membershipStatus: 'ACTIVE',
   memberName: 'Alex Example',
   email: null,
   dueAt: '2026-08-15',
@@ -55,14 +57,23 @@ describe('SettlementsPanel feature modes', () => {
     mocks.getPeriods.mockResolvedValue([{ id: 'period-open', label: 'August 2026', status: 'OPEN', startsAt: '2026-08-01T00:00:00Z' }]);
   });
 
-  it('renders immutable history without loading or showing an open period when disabled', () => {
+  it('renders immutable history without loading or showing an open period when disabled', async () => {
     renderPanel(false);
 
     expect(screen.getByRole('heading', { name: i18n.t('periods.historyTitle') })).toBeVisible();
     expect(screen.getByText('Juli 2026')).toBeVisible();
+    expect(screen.getByRole('columnheader', { name: i18n.t('financeWorkspace.membershipStatus') })).toBeVisible();
+    expect(screen.getByText(i18n.t('financeWorkspace.active'))).toBeVisible();
+    await waitFor(() => expect(screen.getByText('Alex Example').closest('td')?.querySelector('img')).toHaveAttribute('src', '/avatars/alex-example.png'));
     expect(screen.queryByText(i18n.t('periods.current'))).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: i18n.t('periods.close') })).not.toBeInTheDocument();
     expect(mocks.getPeriods).not.toHaveBeenCalled();
+  });
+
+  it('renders former memberships with the warning color', () => {
+    renderPanel(false, [{ ...history[0], membershipStatus: 'ARCHIVED' }]);
+
+    expect(screen.getByText(i18n.t('financeWorkspace.archived'))).toHaveClass(tableStyles.statusWarning);
   });
 
   it('restores the open period and close action when enabled', async () => {

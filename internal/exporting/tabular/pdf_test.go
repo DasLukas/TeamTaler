@@ -87,6 +87,23 @@ func TestWritePDFAcceptsNormalizedGroupLogo(t *testing.T) {
 	}
 }
 
+func TestPDFExportTitleUsesISODatePrefix(t *testing.T) {
+	document := basicFixtureDocument()
+	if got, want := pdfExportTitle(document), "2026-08-25_Aktivitäten"; got != want {
+		t.Fatalf("pdfExportTitle() = %q, want %q", got, want)
+	}
+}
+
+func TestWritePDFEmbedsCellImagesAndActivityTones(t *testing.T) {
+	document := basicFixtureDocument()
+	document.Rows[0].Cells[0].ImagePNG = fixtureImagePNG()
+	document.Rows[0].Cells[0].Tone = ToneSuccess
+	output := renderPDFForTest(t, document)
+	if !bytes.Contains(output, []byte("/Subtype /Image")) {
+		t.Fatal("WritePDF() did not embed the cell image")
+	}
+}
+
 func TestBuildColumnBandsRepeatsIdentityColumns(t *testing.T) {
 	document := pdfFixtureDocument(1, true)
 	pdf := newTestPDF()
@@ -148,6 +165,71 @@ func TestWritePDFVisualFixture(t *testing.T) {
 	}
 }
 
+func TestWritePDFBalanceVisualFixture(t *testing.T) {
+	path := os.Getenv("TEAMTALER_BALANCE_PDF_FIXTURE")
+	if path == "" {
+		t.Skip("set TEAMTALER_BALANCE_PDF_FIXTURE to write the balance visual QA fixture")
+	}
+	document := basicFixtureDocument()
+	document.Title = "Kontostände"
+	document.Columns = []Column{
+		{ID: "member", Header: "Mitglied", Kind: TextColumn, WidthMM: 90, Identity: true},
+		{ID: "membership", Header: "Mitgliedschaft", Kind: TextColumn, WidthMM: 60},
+		{ID: "state", Header: "Saldostand", Kind: TextColumn, WidthMM: 60},
+		{ID: "balance", Header: "Saldo", Kind: MoneyColumn, Alignment: AlignRight, WidthMM: 60},
+	}
+	document.Rows = []Row{
+		{Cells: []Cell{{Text: "Anna Offen", ImagePNG: fixtureImagePNG(), ImageSlot: true}, {Text: "Aktiv", Tone: ToneSuccess}, {Text: "Offen", Tone: ToneDanger}, {Money: &Money{MinorUnits: "1250", Currency: "EUR", DecimalPlaces: 2}, Tone: ToneDanger}}},
+		{Cells: []Cell{{Text: "Ben Ausgeglichen", ImageSlot: true}, {Text: "Aktiv", Tone: ToneSuccess}, {Text: "Ausgeglichen", Tone: ToneSuccess}, {Money: &Money{MinorUnits: "0", Currency: "EUR", DecimalPlaces: 2}, Tone: ToneSuccess}}},
+		{Cells: []Cell{{Text: "Carla Guthaben", ImagePNG: fixtureImagePNG(), ImageSlot: true}, {Text: "Aktiv", Tone: ToneSuccess}, {Text: "Guthaben", Tone: ToneSuccess}, {Money: &Money{MinorUnits: "-800", Currency: "EUR", DecimalPlaces: 2}, Tone: ToneSuccess}}},
+	}
+	file, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatalf("create balance PDF fixture: %v", err)
+	}
+	if err := WritePDF(file, document); err != nil {
+		file.Close()
+		t.Fatalf("write balance PDF fixture: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close balance PDF fixture: %v", err)
+	}
+}
+
+func TestWritePDFSettlementVisualFixture(t *testing.T) {
+	path := os.Getenv("TEAMTALER_SETTLEMENT_PDF_FIXTURE")
+	if path == "" {
+		t.Skip("set TEAMTALER_SETTLEMENT_PDF_FIXTURE to write the settlement visual QA fixture")
+	}
+	document := basicFixtureDocument()
+	document.Title = "Abgeschlossene Abrechnungen"
+	document.Columns = []Column{
+		{ID: "period", Header: "Zeitraum", Kind: TextColumn, WidthMM: 42},
+		{ID: "member", Header: "Mitglied", Kind: TextColumn, WidthMM: 50, Identity: true},
+		{ID: "membership", Header: "Mitgliedschaft", Kind: TextColumn, WidthMM: 36},
+		{ID: "due_at", Header: "Fällig", Kind: TextColumn, WidthMM: 28},
+		{ID: "amount", Header: "Forderung", Kind: MoneyColumn, Alignment: AlignRight, WidthMM: 32},
+		{ID: "paid", Header: "Bezahlt", Kind: MoneyColumn, Alignment: AlignRight, WidthMM: 32},
+		{ID: "status", Header: "Status", Kind: TextColumn, WidthMM: 28},
+	}
+	document.Rows = []Row{
+		{Cells: []Cell{{Text: "August 2026"}, {Text: "Anna Offen", ImagePNG: fixtureImagePNG(), ImageSlot: true}, {Text: "Aktiv", Tone: ToneSuccess}, {Text: "10.09.2026"}, {Money: &Money{MinorUnits: "1250", Currency: "EUR", DecimalPlaces: 2}, Tone: ToneDanger}, {Money: &Money{MinorUnits: "0", Currency: "EUR", DecimalPlaces: 2}, Tone: ToneSuccess}, {Text: "Offen", Tone: ToneDanger}}},
+		{Cells: []Cell{{Text: "September 2026"}, {Text: "Ben Nullsaldo", ImageSlot: true}, {Text: "Ehemalig", Tone: ToneWarning}, {Text: "10.10.2026"}, {Money: &Money{MinorUnits: "0", Currency: "EUR", DecimalPlaces: 2}, Tone: ToneSuccess}, {Money: &Money{MinorUnits: "0", Currency: "EUR", DecimalPlaces: 2}, Tone: ToneSuccess}, {Text: "Bezahlt", Tone: ToneSuccess}}},
+		{Cells: []Cell{{Text: "Oktober 2026"}, {Text: "Carla Bezahlt", ImagePNG: fixtureImagePNG(), ImageSlot: true}, {Text: "Aktiv", Tone: ToneSuccess}, {Text: "10.11.2026"}, {Money: &Money{MinorUnits: "2000", Currency: "EUR", DecimalPlaces: 2}, Tone: ToneDanger}, {Money: &Money{MinorUnits: "2000", Currency: "EUR", DecimalPlaces: 2}, Tone: ToneSuccess}, {Text: "Bezahlt", Tone: ToneSuccess}}},
+	}
+	file, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatalf("create settlement PDF fixture: %v", err)
+	}
+	if err := WritePDF(file, document); err != nil {
+		file.Close()
+		t.Fatalf("write settlement PDF fixture: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close settlement PDF fixture: %v", err)
+	}
+}
+
 func renderPDFForTest(t *testing.T, document Document) []byte {
 	t.Helper()
 	var output bytes.Buffer
@@ -184,11 +266,28 @@ func pdfFixtureDocument(rowCount int, wide bool) Document {
 	}
 	document.Rows = make([]Row, rowCount)
 	for index := 0; index < rowCount; index++ {
+		tone := ToneWarning
+		activity := "Buchung"
+		if index%3 == 1 {
+			tone = ToneSuccess
+			activity = "Einzahlung"
+		} else if index%3 == 2 {
+			tone = ToneInfo
+			activity = "Korrektur"
+		}
+		memberImage := []byte(nil)
+		productImage := []byte(nil)
+		if index%2 == 0 {
+			memberImage = fixtureImagePNG()
+		}
+		if index%3 != 2 {
+			productImage = fixtureImagePNG()
+		}
 		cells := []Cell{
-			{Text: fmt.Sprintf("Jörg Müller %03d", index+1)},
-			{Text: "Getränk gebucht"},
-			{Text: "Mehrzeiliger Inhalt mit Umlauten: Äpfel, Öl und Grüße. Eine längere Beschreibung prüft den sauberen Zeilenumbruch ohne Abschneiden."},
-			{Money: &Money{MinorUnits: fmt.Sprintf("%d", 1250+index), Currency: "EUR", DecimalPlaces: 2}},
+			{Text: fmt.Sprintf("Jörg Müller %03d", index+1), ImagePNG: memberImage, ImageSlot: true},
+			{Text: activity, Tone: tone},
+			{Text: "Mehrzeiliger Inhalt mit Umlauten: Äpfel, Öl und Grüße. Eine längere Beschreibung prüft den sauberen Zeilenumbruch ohne Abschneiden.", ImagePNG: productImage, ImageSlot: true},
+			{Money: &Money{MinorUnits: fmt.Sprintf("%d", 1250+index), Currency: "EUR", DecimalPlaces: 2}, Tone: tone},
 		}
 		if wide {
 			cells = append(cells,
@@ -204,15 +303,21 @@ func pdfFixtureDocument(rowCount int, wide bool) Document {
 
 func fixtureLogoPNG(t *testing.T) []byte {
 	t.Helper()
-	canvas := image.NewRGBA(image.Rect(0, 0, 120, 60))
-	for y := 0; y < 60; y++ {
-		for x := 0; x < 120; x++ {
-			canvas.SetRGBA(x, y, color.RGBA{R: 0, G: 124, B: 115, A: 255})
+	return fixtureImagePNG()
+}
+
+func fixtureImagePNG() []byte {
+	canvas := image.NewRGBA(image.Rect(0, 0, 72, 72))
+	for y := 0; y < 72; y++ {
+		for x := 0; x < 72; x++ {
+			pixel := color.RGBA{R: 0, G: 124, B: 115, A: 255}
+			if (x-36)*(x-36)+(y-27)*(y-27) < 13*13 || (x > 18 && x < 54 && y > 42 && y < 67) {
+				pixel = color.RGBA{R: 255, G: 204, B: 77, A: 255}
+			}
+			canvas.SetRGBA(x, y, pixel)
 		}
 	}
 	var encoded bytes.Buffer
-	if err := png.Encode(&encoded, canvas); err != nil {
-		t.Fatalf("encode fixture logo: %v", err)
-	}
+	_ = png.Encode(&encoded, canvas)
 	return encoded.Bytes()
 }

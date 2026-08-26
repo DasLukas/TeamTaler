@@ -19,6 +19,7 @@ const (
 	maxGroupNameRunes = 120
 	maxHeaderRunes    = 120
 	maxLogoBytes      = 10 << 20
+	maxCellImageBytes = 10 << 20
 )
 
 var (
@@ -51,6 +52,23 @@ const (
 	AlignCenter
 	// AlignRight aligns content to the right edge of its PDF cell.
 	AlignRight
+)
+
+// CellTone selects an optional semantic PDF text color. CSV output always
+// keeps the localized cell value without visual decoration.
+type CellTone uint8
+
+const (
+	// ToneDefault renders the regular table text color.
+	ToneDefault CellTone = iota
+	// ToneWarning renders warning or booking values in amber.
+	ToneWarning
+	// ToneSuccess renders successful, settled, or credit values in green.
+	ToneSuccess
+	// ToneInfo renders informational or adjustment values in blue.
+	ToneInfo
+	// ToneDanger renders open, reversed, or deleted values in red.
+	ToneDanger
 )
 
 // Document is the canonical, transport-independent representation of one table
@@ -94,10 +112,16 @@ type Row struct {
 
 // Cell contains either visible Text or exact Money according to its column kind.
 // A money cell must set Money and leave Text empty; a text cell must do the
-// inverse. Newlines in text are preserved and wrapped in PDF output.
+// inverse. Newlines in text are preserved and wrapped in PDF output. ImagePNG,
+// ImageSlot, and Tone are optional PDF-only presentation metadata; ImageSlot
+// keeps text aligned when a neighboring row has an image. CSV output
+// deliberately ignores all three and remains text-only.
 type Cell struct {
-	Text  string
-	Money *Money
+	Text      string
+	Money     *Money
+	ImagePNG  []byte
+	ImageSlot bool
+	Tone      CellTone
 }
 
 // Money stores an exact signed integer amount in minor units. DecimalPlaces is
@@ -171,12 +195,21 @@ func (document Document) Validate() error {
 		}
 		for columnIndex, cell := range row.Cells {
 			column := document.Columns[columnIndex]
+			if len(cell.ImagePNG) > maxCellImageBytes {
+				return fmt.Errorf("row %d column %q image exceeds %d bytes", rowIndex, column.ID, maxCellImageBytes)
+			}
+			if cell.Tone > ToneDanger {
+				return fmt.Errorf("row %d column %q has an unsupported tone", rowIndex, column.ID)
+			}
 			switch column.Kind {
 			case TextColumn:
 				if cell.Money != nil {
 					return fmt.Errorf("row %d column %q contains money in a text column", rowIndex, column.ID)
 				}
 			case MoneyColumn:
+				if len(cell.ImagePNG) > 0 || cell.ImageSlot {
+					return fmt.Errorf("row %d column %q decorates a money column", rowIndex, column.ID)
+				}
 				if cell.Money == nil {
 					return fmt.Errorf("row %d column %q has no money value", rowIndex, column.ID)
 				}

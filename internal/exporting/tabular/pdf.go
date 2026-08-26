@@ -3,6 +3,7 @@ package tabular
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	_ "embed"
 	"fmt"
 	"image"
@@ -27,6 +28,9 @@ const (
 	bodyFontSize     = 8.0
 	bodyLineHeight   = 4.1
 	cellPadding      = 1.3
+	cellImageSizeMM  = 7.0
+	cellImageGapMM   = 1.2
+	decoratedRowMM   = 9.6
 	minimumColumnMM  = 20.0
 	maximumColumnMM  = 75.0
 	brandRed         = 0
@@ -49,6 +53,8 @@ type columnBand struct {
 	indexes []int
 	widths  []float64
 }
+
+type cellImageRegistry map[[sha256.Size]byte]string
 
 // WritePDF validates document and writes a deterministic, Unicode-capable A4
 // landscape PDF to output. Every page has the group logo or TeamTaler fallback
@@ -114,7 +120,7 @@ func newPDFDocument(document Document) *fpdf.Fpdf {
 	pdf.SetAutoPageBreak(false, pageMarginMM)
 	pdf.SetCreationDate(document.ExportedAt)
 	pdf.SetModificationDate(document.ExportedAt)
-	pdf.SetTitle(document.Title, true)
+	pdf.SetTitle(pdfExportTitle(document), true)
 	pdf.SetSubject("TeamTaler table export", true)
 	pdf.SetAuthor("TeamTaler", true)
 	pdf.SetCreator("TeamTaler", true)
@@ -122,10 +128,18 @@ func newPDFDocument(document Document) *fpdf.Fpdf {
 	return pdf
 }
 
+func pdfExportTitle(document Document) string {
+	return document.ExportedAt.Format("2006-01-02") + "_" + strings.TrimSpace(document.Title)
+}
+
 // renderPDFPages draws every horizontal band and row and returns the resulting
 // page count. A zero totalPages value is used only by the counting pass.
 func renderPDFPages(ctx context.Context, pdf *fpdf.Fpdf, document Document, totalPages int) (int, error) {
 	logoRegistered := registerLogo(pdf, document.LogoPNG)
+	cellImages, err := registerCellImages(ctx, pdf, document)
+	if err != nil {
+		return 0, err
+	}
 	pdf.SetFont(regularFontFamily, "", bodyFontSize)
 	bands := buildColumnBands(pdf, document)
 	if len(bands) == 0 {
@@ -156,7 +170,7 @@ func renderPDFPages(ctx context.Context, pdf *fpdf.Fpdf, document Document, tota
 			if err := ctx.Err(); err != nil {
 				return 0, err
 			}
-			renderWrappedRow(pdf, document, band, row, rowIndex, &bodyStartY)
+			renderWrappedRow(pdf, document, band, row, rowIndex, &bodyStartY, cellImages)
 			if err := pdf.Error(); err != nil {
 				return 0, fmt.Errorf("render PDF row %d: %w", rowIndex, err)
 			}
@@ -165,8 +179,41 @@ func renderPDFPages(ctx context.Context, pdf *fpdf.Fpdf, document Document, tota
 	return pdf.PageNo(), nil
 }
 
+func registerCellImages(ctx context.Context, pdf *fpdf.Fpdf, document Document) (cellImageRegistry, error) {
+	registered := make(cellImageRegistry)
+	for rowIndex, row := range document.Rows {
+		if rowIndex%64 == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
+		for _, cell := range row.Cells {
+			if len(cell.ImagePNG) == 0 {
+				continue
+			}
+			digest := sha256.Sum256(cell.ImagePNG)
+			if _, exists := registered[digest]; exists {
+				continue
+			}
+			normalized, ok := normalizePDFImage(cell.ImagePNG)
+			if !ok {
+				registered[digest] = ""
+				continue
+			}
+			name := fmt.Sprintf("teamtaler-cell-image-%x", digest)
+			pdf.RegisterImageOptionsReader(name, fpdf.ImageOptions{ImageType: "PNG"}, bytes.NewReader(normalized))
+			if pdf.Error() != nil {
+				registered[digest] = ""
+				continue
+			}
+			registered[digest] = name
+		}
+	}
+	return registered, nil
+}
+
 func registerLogo(pdf *fpdf.Fpdf, source []byte) bool {
-	logo, ok := normalizeLogo(source)
+	logo, ok := normalizePDFImage(source)
 	if !ok {
 		return false
 	}
@@ -174,7 +221,7 @@ func registerLogo(pdf *fpdf.Fpdf, source []byte) bool {
 	return pdf.Error() == nil
 }
 
-func normalizeLogo(source []byte) ([]byte, bool) {
+func normalizePDFImage(source []byte) ([]byte, bool) {
 	if len(source) == 0 || len(source) > maxLogoBytes {
 		return nil, false
 	}
@@ -335,12 +382,19 @@ func drawTableHeader(pdf *fpdf.Fpdf, document Document, band columnBand) float64
 	return tableHeaderY + height + 1.2
 }
 
-func renderWrappedRow(pdf *fpdf.Fpdf, document Document, band columnBand, row Row, rowIndex int, bodyStartY *float64) {
+func renderWrappedRow(pdf *fpdf.Fpdf, document Document, band columnBand, row Row, rowIndex int, bodyStartY *float64, cellImages cellImageRegistry) {
 	pdf.SetFont(regularFontFamily, "", bodyFontSize)
 	lineSets := make([][]string, len(band.indexes))
 	maximumLines := 1
+	minimumHeight := 0.0
 	for position, columnIndex := range band.indexes {
-		lineSets[position] = splitText(pdf, normalizedLineBreaks(cellDisplay(document.Columns[columnIndex], row.Cells[columnIndex])), band.widths[position]-2*cellPadding)
+		cell := row.Cells[columnIndex]
+		textWidth := band.widths[position] - 2*cellPadding
+		if cellHasImageSlot(cell, cellImages) {
+			textWidth -= cellImageSizeMM + cellImageGapMM
+			minimumHeight = decoratedRowMM
+		}
+		lineSets[position] = splitText(pdf, normalizedLineBreaks(cellDisplay(document.Columns[columnIndex], cell)), textWidth)
 		if len(lineSets[position]) > maximumLines {
 			maximumLines = len(lineSets[position])
 		}
@@ -349,7 +403,11 @@ func renderWrappedRow(pdf *fpdf.Fpdf, document Document, band columnBand, row Ro
 	lineOffset := 0
 	for lineOffset < maximumLines {
 		y := pdf.GetY()
-		fullHeight := float64(maximumLines-lineOffset)*bodyLineHeight + 2
+		if lineOffset == 0 && minimumHeight > 0 && y+minimumHeight > pageBottomY {
+			pdf.AddPage()
+			y = pdf.GetY()
+		}
+		fullHeight := math.Max(float64(maximumLines-lineOffset)*bodyLineHeight+2, minimumHeight)
 		maximumBodyHeight := pageBottomY - *bodyStartY
 		if fullHeight <= maximumBodyHeight && y+fullHeight > pageBottomY {
 			pdf.AddPage()
@@ -367,7 +425,10 @@ func renderWrappedRow(pdf *fpdf.Fpdf, document Document, band columnBand, row Ro
 		}
 		linesInChunk := min(maximumLines-lineOffset, availableLines)
 		chunkHeight := float64(linesInChunk)*bodyLineHeight + 2
-		drawRowChunk(pdf, document, band, lineSets, lineOffset, linesInChunk, rowIndex, y, chunkHeight)
+		if lineOffset == 0 {
+			chunkHeight = math.Max(chunkHeight, minimumHeight)
+		}
+		drawRowChunk(pdf, document, band, row, lineSets, lineOffset, linesInChunk, rowIndex, y, chunkHeight, cellImages)
 		pdf.SetXY(pageMarginMM, y+chunkHeight)
 		lineOffset += linesInChunk
 		if lineOffset < maximumLines {
@@ -376,9 +437,10 @@ func renderWrappedRow(pdf *fpdf.Fpdf, document Document, band columnBand, row Ro
 	}
 }
 
-func drawRowChunk(pdf *fpdf.Fpdf, document Document, band columnBand, lineSets [][]string, offset, count, rowIndex int, y, height float64) {
+func drawRowChunk(pdf *fpdf.Fpdf, document Document, band columnBand, row Row, lineSets [][]string, offset, count, rowIndex int, y, height float64, cellImages cellImageRegistry) {
 	x := pageMarginMM
 	for position, columnIndex := range band.indexes {
+		cell := row.Cells[columnIndex]
 		width := band.widths[position]
 		if rowIndex%2 == 0 {
 			pdf.SetFillColor(248, 250, 252)
@@ -388,18 +450,72 @@ func drawRowChunk(pdf *fpdf.Fpdf, document Document, band columnBand, lineSets [
 		pdf.SetDrawColor(214, 220, 228)
 		pdf.SetLineWidth(0.15)
 		pdf.Rect(x, y, width, height, "FD")
-		pdf.SetTextColor(16, 23, 37)
+		setCellTone(pdf, cell.Tone)
+		if cell.Tone != ToneDefault {
+			pdf.SetFont(regularFontFamily, "B", bodyFontSize)
+		}
 		alignment := pdfAlignment(document.Columns[columnIndex])
+		contentX := x + cellPadding
+		contentWidth := width - 2*cellPadding
+		if offset == 0 {
+			if cellHasImageSlot(cell, cellImages) {
+				if imageName := cellImageName(cell, cellImages); imageName != "" {
+					drawCellImage(pdf, imageName, contentX, y+(height-cellImageSizeMM)/2)
+				}
+				contentX += cellImageSizeMM + cellImageGapMM
+				contentWidth -= cellImageSizeMM + cellImageGapMM
+			}
+		}
+		textY := y + 1
+		if offset == 0 {
+			textY = y + (height-float64(count)*bodyLineHeight)/2
+		}
 		for lineIndex := 0; lineIndex < count; lineIndex++ {
 			absoluteLine := offset + lineIndex
 			line := ""
 			if absoluteLine < len(lineSets[position]) {
 				line = lineSets[position][absoluteLine]
 			}
-			pdf.SetXY(x+cellPadding, y+1+float64(lineIndex)*bodyLineHeight)
-			pdf.CellFormat(width-2*cellPadding, bodyLineHeight, line, "", 0, alignment, false, 0, "")
+			pdf.SetXY(contentX, textY+float64(lineIndex)*bodyLineHeight)
+			pdf.CellFormat(contentWidth, bodyLineHeight, line, "", 0, alignment, false, 0, "")
 		}
+		pdf.SetFont(regularFontFamily, "", bodyFontSize)
 		x += width
+	}
+}
+
+func cellImageName(cell Cell, registered cellImageRegistry) string {
+	if len(cell.ImagePNG) == 0 {
+		return ""
+	}
+	return registered[sha256.Sum256(cell.ImagePNG)]
+}
+
+func cellHasImageSlot(cell Cell, registered cellImageRegistry) bool {
+	return cell.ImageSlot || cellImageName(cell, registered) != ""
+}
+
+func drawCellImage(pdf *fpdf.Fpdf, name string, x, y float64) {
+	info := pdf.GetImageInfo(name)
+	if info == nil {
+		return
+	}
+	width, height := fitRectangle(info.Width(), info.Height(), cellImageSizeMM, cellImageSizeMM)
+	pdf.ImageOptions(name, x+(cellImageSizeMM-width)/2, y+(cellImageSizeMM-height)/2, width, height, false, fpdf.ImageOptions{ImageType: "PNG"}, 0, "")
+}
+
+func setCellTone(pdf *fpdf.Fpdf, tone CellTone) {
+	switch tone {
+	case ToneWarning:
+		pdf.SetTextColor(151, 96, 0)
+	case ToneSuccess:
+		pdf.SetTextColor(27, 112, 57)
+	case ToneInfo:
+		pdf.SetTextColor(32, 95, 145)
+	case ToneDanger:
+		pdf.SetTextColor(180, 35, 45)
+	default:
+		pdf.SetTextColor(16, 23, 37)
 	}
 }
 

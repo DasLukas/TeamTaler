@@ -72,7 +72,7 @@ describe('TableExportMenu', () => {
     expect(previewDocument.body.textContent).toContain('PDF-Vorschau wird erstellt …');
     await waitFor(() => expect(replacePreviewLocation).toHaveBeenCalledWith('blob:export'));
     expect(mocks.exportGroupTable).toHaveBeenCalledWith('group-a', expect.objectContaining({ format: 'PDF' }));
-    expect(URL.createObjectURL).toHaveBeenCalledWith(expect.objectContaining({ name: expect.stringMatching(/^aktivitaten-\d{4}-\d{2}-\d{2}\.pdf$/), type: 'application/pdf' }));
+    expect(URL.createObjectURL).toHaveBeenCalledWith(expect.objectContaining({ name: expect.stringMatching(/^\d{4}-\d{2}-\d{2}_Aktivitäten\.pdf$/), type: 'application/pdf' }));
     expect(HTMLAnchorElement.prototype.click).not.toHaveBeenCalled();
   });
 

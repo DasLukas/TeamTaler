@@ -17,6 +17,7 @@ import { createMemberFilterOption } from '@/features/shared/memberFilterOption';
 import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
 import { deriveAccountOverview } from './accountOverview';
+import { MembershipStatusBadge } from './MembershipStatusBadge';
 import styles from './AccountBalancesPanel.module.css';
 
 function balanceState(account: AccountSummary): 'due' | 'settled' | 'credit' {
@@ -134,7 +135,7 @@ export function AccountBalancesPanel() {
       id: 'memberName',
       meta: { label: t('common.member') },
     },
-    { accessorKey: 'status', cell: ({ row }) => row.original.status === 'ACTIVE' ? t('financeWorkspace.active') : row.original.status === 'ARCHIVED' ? t('financeWorkspace.archived') : t('common.deleted'), enableSorting: true, header: t('financeWorkspace.membershipStatus'), id: 'membershipStatus', meta: { label: t('financeWorkspace.membershipStatus') } },
+    { accessorKey: 'status', cell: ({ row }) => <MembershipStatusBadge status={row.original.status} />, enableSorting: true, header: t('financeWorkspace.membershipStatus'), id: 'membershipStatus', meta: { label: t('financeWorkspace.membershipStatus') } },
     {
       accessorFn: balanceState,
       cell: ({ row }) => { const state = balanceState(row.original); return <span className={`${styles.state} ${styles[state]}`}>{t(`financeWorkspace.states.${state}`)}</span>; },

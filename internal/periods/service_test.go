@@ -63,11 +63,14 @@ func TestSnapshotStatementsSkipsOnlyIdleTemporaryGuestsAndKeepsNullableEmail(t *
 	if managedEmail.Valid {
 		t.Fatalf("managed statement email=%q, want NULL", managedEmail.String)
 	}
+	if _, err := db.ExecContext(ctx, `UPDATE memberships SET status='ARCHIVED',archived_at=? WHERE id='member-managed-active'`, now); err != nil {
+		t.Fatalf("archive managed membership: %v", err)
+	}
 	items, err := service.Statements(ctx, domain.Membership{ID: "member-managed-active", GroupID: "group-one"}, "period-one")
 	if err != nil {
 		t.Fatalf("list managed statement: %v", err)
 	}
-	if len(items) != 1 || items[0].Email != nil || items[0].AmountDueMinor != 500 {
+	if len(items) != 1 || items[0].Email != nil || items[0].AmountDueMinor != 500 || items[0].MembershipStatus != domain.MembershipStatusArchived {
 		t.Fatalf("managed statements=%#v", items)
 	}
 }

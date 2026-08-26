@@ -291,18 +291,21 @@ func statementStatus(charges, paid int64) string {
 
 // Statements returns immutable close snapshots visible to membership, optionally
 // restricted to periodID, and enriches them with later payment/correction
-// allocations so settlement status remains useful. ctx bounds database access;
-// the method returns the result or SQL errors.
+// allocations and the current membership lifecycle so settlement status remains
+// useful. ctx bounds database access; the method returns the result or SQL errors.
 func (s Service) Statements(ctx context.Context, membership domain.Membership, periodID string) ([]domain.Statement, error) {
 	viewAll, err := authorization.NewPolicy(s.DB).Can(ctx, membership.GroupID, membership.ID, domain.PermissionFinanceManagement, authorization.ResourceContext{GroupID: membership.GroupID})
 	if err != nil {
 		return nil, err
 	}
-	query := `SELECT ps.id,ps.period_id,ps.membership_id,ps.display_name,ps.email,ps.charges_minor,
+	query := `SELECT ps.id,ps.period_id,ps.membership_id,m.status,ps.display_name,ps.email,ps.charges_minor,
 		coalesce((SELECT sum(pa.amount_minor) FROM payment_allocations pa JOIN payments py ON py.id=pa.payment_id WHERE pa.period_id=ps.period_id AND py.membership_id=ps.membership_id AND py.reversed_at IS NULL),0),
 		coalesce((SELECT sum(aa.amount_minor) FROM period_adjustment_allocations aa WHERE aa.target_period_id=ps.period_id AND aa.membership_id=ps.membership_id),0),
 		coalesce((SELECT sum(aa.amount_minor) FROM period_adjustment_allocations aa WHERE aa.source_period_id=ps.period_id AND aa.membership_id=ps.membership_id),0),g.currency
-		FROM period_statements ps JOIN groups g ON g.id=ps.group_id WHERE ps.group_id=?`
+		FROM period_statements ps
+		JOIN groups g ON g.id=ps.group_id
+		JOIN memberships m ON m.id=ps.membership_id AND m.group_id=ps.group_id
+		WHERE ps.group_id=?`
 	args := []any{membership.GroupID}
 	if periodID != "" {
 		query += ` AND ps.period_id=?`
@@ -322,7 +325,7 @@ func (s Service) Statements(ctx context.Context, membership domain.Membership, p
 	for rows.Next() {
 		var item domain.Statement
 		var email sql.NullString
-		if err := rows.Scan(&item.ID, &item.PeriodID, &item.MembershipID, &item.DisplayName, &email, &item.ChargesMinor, &item.PaymentsAllocatedMinor, &item.AdjustmentsAppliedMinor, &item.AdjustmentsProvidedMinor, &item.Currency); err != nil {
+		if err := rows.Scan(&item.ID, &item.PeriodID, &item.MembershipID, &item.MembershipStatus, &item.DisplayName, &email, &item.ChargesMinor, &item.PaymentsAllocatedMinor, &item.AdjustmentsAppliedMinor, &item.AdjustmentsProvidedMinor, &item.Currency); err != nil {
 			return nil, err
 		}
 		if email.Valid {

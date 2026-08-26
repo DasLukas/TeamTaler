@@ -9,8 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
+	"net/url"
 	"os"
+	"path"
 	"slices"
 	"sort"
 	"strconv"
@@ -290,11 +293,33 @@ func (s *Server) buildSystemTableDocument(ctx context.Context, command tableExpo
 		return tabular.Document{}, err
 	}
 	columns := auditExportColumns()
+	includeMedia := command.Format == "PDF"
+	imageLoader := newTableExportImageLoader(s.config.DataDirectory)
+	actorImages := map[string]string{}
+	if includeMedia {
+		actorIDs := make([]string, 0, len(items))
+		for _, item := range items {
+			if item.ActorUserID != nil {
+				actorIDs = append(actorIDs, *item.ActorUserID)
+			}
+		}
+		actorImages, err = loadUserImageKeys(ctx, s.db, actorIDs)
+		if err != nil {
+			return tabular.Document{}, err
+		}
+	}
 	rows := make([]tabular.Row, 0, len(items))
 	for _, item := range items {
+		var actorImage []byte
+		if includeMedia && item.ActorUserID != nil {
+			actorImage, err = imageLoader.loadKey(actorImages[*item.ActorUserID])
+			if err != nil {
+				return tabular.Document{}, err
+			}
+		}
 		rows = append(rows, tabular.Row{Cells: []tabular.Cell{
 			textCell(formatGermanDateTime(item.OccurredAt, location)),
-			textCell(fallbackText(item.ActorDisplayName, "System")),
+			imageTextCell(fallbackText(item.ActorDisplayName, "System"), actorImage),
 			textCell(item.Action), textCell(auditSubject(item.ResourceType, item.ResourceID)), textCell(jsonDisplay(item.Metadata)),
 		}})
 	}
@@ -302,27 +327,28 @@ func (s *Server) buildSystemTableDocument(ctx context.Context, command tableExpo
 }
 
 func (s *Server) groupTableRows(ctx context.Context, membership domain.Membership, command tableExportCommand, location *time.Location, rowLimit int) ([]tabular.Column, []tabular.Row, error) {
+	includeMedia := command.Format == "PDF"
 	switch command.Table {
 	case "ACTIVITIES":
-		return s.activityExportRows(ctx, membership, command.Query, location, rowLimit)
+		return s.activityExportRows(ctx, membership, command.Query, location, rowLimit, includeMedia)
 	case "PAYMENTS":
-		return s.paymentExportRows(ctx, membership, command.Query, location, rowLimit)
+		return s.paymentExportRows(ctx, membership, command.Query, location, rowLimit, includeMedia)
 	case "ACCOUNT_BALANCES":
-		return s.accountExportRows(ctx, membership, command.Query, rowLimit)
+		return s.accountExportRows(ctx, membership, command.Query, rowLimit, includeMedia)
 	case "GROUP_SETTLEMENTS":
 		if err := authorization.Require(ctx, s.db, membership.GroupID, membership.ID, domain.PermissionFinanceManagement, authorization.GroupResource(membership.GroupID)); err != nil {
 			return nil, nil, err
 		}
-		return s.settlementExportRows(ctx, membership, command.Query, false, rowLimit)
+		return s.settlementExportRows(ctx, membership, command.Query, false, rowLimit, includeMedia)
 	case "PERSONAL_SETTLEMENTS":
-		return s.settlementExportRows(ctx, membership, command.Query, true, rowLimit)
+		return s.settlementExportRows(ctx, membership, command.Query, true, rowLimit, includeMedia)
 	case "ACTIVE_MEMBERS", "ARCHIVED_MEMBERS":
 		if err := authorization.Require(ctx, s.db, membership.GroupID, membership.ID, domain.PermissionMemberManagement, authorization.GroupResource(membership.GroupID)); err != nil {
 			return nil, nil, err
 		}
-		return s.memberExportRows(ctx, membership, command.Query, command.Table == "ACTIVE_MEMBERS", rowLimit)
+		return s.memberExportRows(ctx, membership, command.Query, command.Table == "ACTIVE_MEMBERS", rowLimit, includeMedia)
 	case "GROUP_AUDIT":
-		return s.groupAuditExportRows(ctx, membership, command.Query, location, rowLimit)
+		return s.groupAuditExportRows(ctx, membership, command.Query, location, rowLimit, includeMedia)
 	default:
 		return nil, nil, domain.ValidationError{Field: "table", Message: "is not supported"}
 	}
@@ -343,7 +369,7 @@ type activityExportQuery struct {
 	AmountMax          *string  `json:"amountMax"`
 }
 
-func (s *Server) activityExportRows(ctx context.Context, membership domain.Membership, raw json.RawMessage, location *time.Location, limit int) ([]tabular.Column, []tabular.Row, error) {
+func (s *Server) activityExportRows(ctx context.Context, membership domain.Membership, raw json.RawMessage, location *time.Location, limit int, includeMedia bool) ([]tabular.Column, []tabular.Row, error) {
 	var wire activityExportQuery
 	if err := decodeTableQuery(raw, &wire); err != nil {
 		return nil, nil, err
@@ -361,6 +387,18 @@ func (s *Server) activityExportRows(ctx context.Context, membership domain.Membe
 	if err != nil {
 		return nil, nil, err
 	}
+	imageLoader := newTableExportImageLoader(s.config.DataDirectory)
+	productImages := map[string]string{}
+	if includeMedia {
+		productIDs := make([]string, 0, len(items))
+		for _, item := range items {
+			productIDs = append(productIDs, item.ProductID)
+		}
+		productImages, err = loadProductImageKeys(ctx, s.db, membership.GroupID, productIDs)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
 	columns := []tabular.Column{
 		{ID: "kind", Header: "Vorgang", Identity: true, WidthMM: 25},
 		{ID: "member", Header: "Mitglied", Identity: true, WidthMM: 34},
@@ -373,6 +411,18 @@ func (s *Server) activityExportRows(ctx context.Context, membership domain.Membe
 	}
 	rows := make([]tabular.Row, 0, len(items))
 	for _, item := range items {
+		var targetImage, actorImage, productImage []byte
+		if includeMedia {
+			if targetImage, err = imageLoader.loadURL(item.TargetAvatarURL); err != nil {
+				return nil, nil, err
+			}
+			if actorImage, err = imageLoader.loadURL(item.ActorAvatarURL); err != nil {
+				return nil, nil, err
+			}
+			if productImage, err = imageLoader.loadKey(productImages[item.ProductID]); err != nil {
+				return nil, nil, err
+			}
+		}
 		details := item.DetailName
 		if item.Quantity > 1 {
 			details += " × " + strconv.Itoa(item.Quantity)
@@ -381,9 +431,9 @@ func (s *Server) activityExportRows(ctx context.Context, membership domain.Membe
 			details += "\n" + item.DetailNote
 		}
 		rows = append(rows, tabular.Row{Cells: []tabular.Cell{
-			textCell(activityKindLabel(item.Kind)), textCell(item.TargetDisplayName), textCell(fallbackText(item.ActorDisplayName, "Kein Akteur hinterlegt")),
-			textCell(details), textCell(fallbackText(item.CategoryName, "–")), textCell(formatGermanDateTime(item.OccurredAt, location)),
-			moneyCell(item.AmountMinor, item.Currency), textCell(activityStatusLabel(item.Kind, item.Status)),
+			activityKindCell(item.Kind, includeMedia), imageTextCell(item.TargetDisplayName, targetImage), imageTextCell(fallbackText(item.ActorDisplayName, "Kein Akteur hinterlegt"), actorImage),
+			imageTextCell(details, productImage), textCell(fallbackText(item.CategoryName, "–")), textCell(formatGermanDateTime(item.OccurredAt, location)),
+			activityMoneyCell(item.AmountMinor, item.Currency, item.Kind, includeMedia), activityStatusCell(item.Kind, item.Status, includeMedia),
 		}})
 	}
 	return columns, rows, nil
@@ -402,7 +452,7 @@ type paymentExportQuery struct {
 	AmountMax    *string `json:"amountMax"`
 }
 
-func (s *Server) paymentExportRows(ctx context.Context, membership domain.Membership, raw json.RawMessage, location *time.Location, limit int) ([]tabular.Column, []tabular.Row, error) {
+func (s *Server) paymentExportRows(ctx context.Context, membership domain.Membership, raw json.RawMessage, location *time.Location, limit int, includeMedia bool) ([]tabular.Column, []tabular.Row, error) {
 	var wire paymentExportQuery
 	if err := decodeTableQuery(raw, &wire); err != nil {
 		return nil, nil, err
@@ -429,14 +479,23 @@ func (s *Server) paymentExportRows(ctx context.Context, membership domain.Member
 		{ID: "status", Header: "Status", WidthMM: 30},
 	}
 	rows := make([]tabular.Row, 0, len(items))
+	imageLoader := newTableExportImageLoader(s.config.DataDirectory)
 	for _, item := range items {
+		var memberImage []byte
+		if includeMedia {
+			memberImage, err = imageLoader.loadURL(item.MemberAvatarURL)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
 		member := item.MemberName
 		if item.MemberStatus == domain.MembershipStatusDeleted {
 			member += " (Gelöscht)"
 		}
 		rows = append(rows, tabular.Row{Cells: []tabular.Cell{
-			textCell(formatGermanDate(item.ReceivedAt, location)), textCell(member), textCell(paymentMethodLabel(item.Method, item.MethodLabel)),
-			textCell(fallbackText(item.Reference, "–")), moneyCell(item.AmountMinor, item.Currency), textCell(transactionStatusLabel(item.Status)),
+			textCell(formatGermanDate(item.ReceivedAt, location)), imageTextCell(member, memberImage), textCell(paymentMethodLabel(item.Method, item.MethodLabel)),
+			textCell(fallbackText(item.Reference, "–")), tonedMoneyCell(item.AmountMinor, item.Currency, transactionTone(item.Status), includeMedia),
+			tonedTextCell(transactionStatusLabel(item.Status), transactionTone(item.Status), includeMedia),
 		}})
 	}
 	return columns, rows, nil
@@ -453,7 +512,7 @@ type accountExportQuery struct {
 	AmountMax        *string  `json:"amountMax"`
 }
 
-func (s *Server) accountExportRows(ctx context.Context, membership domain.Membership, raw json.RawMessage, limit int) ([]tabular.Column, []tabular.Row, error) {
+func (s *Server) accountExportRows(ctx context.Context, membership domain.Membership, raw json.RawMessage, limit int, includeMedia bool) ([]tabular.Column, []tabular.Row, error) {
 	var query accountExportQuery
 	if err := decodeTableQuery(raw, &query); err != nil {
 		return nil, nil, err
@@ -523,36 +582,49 @@ func (s *Server) accountExportRows(ctx context.Context, membership domain.Member
 		moneyColumn("amount", "Saldo", 50),
 	}
 	rows := make([]tabular.Row, 0, len(items))
+	imageLoader := newTableExportImageLoader(s.config.DataDirectory)
 	for _, item := range items {
-		rows = append(rows, tabular.Row{Cells: []tabular.Cell{textCell(item.DisplayName), textCell(membershipStatusLabel(item.Status)), textCell(balanceStateLabel(item.BalanceMinor)), moneyCell(item.BalanceMinor, item.Currency)}})
+		var memberImage []byte
+		if includeMedia {
+			memberImage, err = imageLoader.loadURL(item.AvatarURL)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+		rows = append(rows, tabular.Row{Cells: []tabular.Cell{
+			imageTextCell(item.DisplayName, memberImage), tonedTextCell(membershipStatusLabel(item.Status), membershipTone(item.Status), includeMedia),
+			tonedTextCell(balanceStateLabel(item.BalanceMinor), balanceTone(item.BalanceMinor), includeMedia),
+			tonedMoneyCell(item.BalanceMinor, item.Currency, balanceTone(item.BalanceMinor), includeMedia),
+		}})
 	}
 	return columns, rows, nil
 }
 
 type settlementExportQuery struct {
-	Q            string   `json:"q"`
-	Sort         string   `json:"sort"`
-	Direction    string   `json:"direction"`
-	MembershipID string   `json:"membershipId"`
-	PeriodID     string   `json:"periodId"`
-	DueFrom      string   `json:"dueFrom"`
-	DueTo        string   `json:"dueTo"`
-	AmountMin    *string  `json:"amountMin"`
-	AmountMax    *string  `json:"amountMax"`
-	Status       []string `json:"status"`
+	Q                string   `json:"q"`
+	Sort             string   `json:"sort"`
+	Direction        string   `json:"direction"`
+	MembershipID     string   `json:"membershipId"`
+	MembershipStatus []string `json:"membershipStatus"`
+	PeriodID         string   `json:"periodId"`
+	DueFrom          string   `json:"dueFrom"`
+	DueTo            string   `json:"dueTo"`
+	AmountMin        *string  `json:"amountMin"`
+	AmountMax        *string  `json:"amountMax"`
+	Status           []string `json:"status"`
 }
 
 type settlementExportItem struct {
-	ID, PeriodID, PeriodLabel, MembershipID, MemberName, Email, DueAt, Currency, Status string
-	AmountMinor, PaidMinor, OpenMinor                                                   int64
+	ID, PeriodID, PeriodLabel, MembershipID, MembershipStatus, MemberName, Email, DueAt, Currency, Status string
+	AmountMinor, PaidMinor, OpenMinor                                                                     int64
 }
 
-func (s *Server) settlementExportRows(ctx context.Context, membership domain.Membership, raw json.RawMessage, personal bool, limit int) ([]tabular.Column, []tabular.Row, error) {
+func (s *Server) settlementExportRows(ctx context.Context, membership domain.Membership, raw json.RawMessage, personal bool, limit int, includeMedia bool) ([]tabular.Column, []tabular.Row, error) {
 	var query settlementExportQuery
 	if err := decodeTableQuery(raw, &query); err != nil {
 		return nil, nil, err
 	}
-	if personal && (query.MembershipID != "" || query.AmountMin != nil || query.AmountMax != nil) {
+	if personal && (query.MembershipID != "" || len(query.MembershipStatus) > 0 || query.AmountMin != nil || query.AmountMax != nil) {
 		return nil, nil, domain.ValidationError{Field: "query", Message: "contains filters unavailable for personal settlements"}
 	}
 	var err error
@@ -560,7 +632,7 @@ func (s *Server) settlementExportRows(ctx context.Context, membership domain.Mem
 	if err != nil {
 		return nil, nil, err
 	}
-	allowedSorts := stringSet("periodLabel", "dueAt", "amount", "paidAmount", "status", "memberName")
+	allowedSorts := stringSet("periodLabel", "dueAt", "amount", "paidAmount", "status", "memberName", "membershipStatus")
 	if personal {
 		allowedSorts = stringSet("periodLabel", "dueAt", "amount", "paidAmount", "openAmount", "status")
 	}
@@ -588,6 +660,10 @@ func (s *Server) settlementExportRows(ctx context.Context, membership domain.Mem
 		return nil, nil, domain.ValidationError{Field: "dueTo", Message: "must be on or after dueFrom"}
 	}
 	query.Status, err = normalizeExportSet("status", query.Status, stringSet("OPEN", "PARTIAL", "PAID", "CREDIT"))
+	if err != nil {
+		return nil, nil, err
+	}
+	query.MembershipStatus, err = normalizeExportSet("membershipStatus", query.MembershipStatus, stringSet(domain.MembershipStatusActive, domain.MembershipStatusArchived, domain.MembershipStatusDeleted))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -629,11 +705,12 @@ func (s *Server) settlementExportRows(ctx context.Context, membership domain.Mem
 		if statement.Email != nil {
 			email = *statement.Email
 		}
-		item := settlementExportItem{ID: statement.ID, PeriodID: statement.PeriodID, PeriodLabel: fallbackText(period.Label, "Unbekannte Periode"), MembershipID: statement.MembershipID, MemberName: statement.DisplayName, Email: email, Currency: statement.Currency, Status: statement.Status, AmountMinor: statement.ChargesMinor + statement.AdjustmentsProvidedMinor, PaidMinor: statement.PaymentsAllocatedMinor + statement.AdjustmentsAppliedMinor, OpenMinor: statement.AmountDueMinor}
+		item := settlementExportItem{ID: statement.ID, PeriodID: statement.PeriodID, PeriodLabel: fallbackText(period.Label, "Unbekannte Periode"), MembershipID: statement.MembershipID, MembershipStatus: statement.MembershipStatus, MemberName: statement.DisplayName, Email: email, Currency: statement.Currency, Status: statement.Status, AmountMinor: statement.ChargesMinor + statement.AdjustmentsProvidedMinor, PaidMinor: statement.PaymentsAllocatedMinor + statement.AdjustmentsAppliedMinor, OpenMinor: statement.AmountDueMinor}
 		if period.DueAt != nil {
 			item.DueAt = *period.DueAt
 		}
 		if (query.MembershipID != "" && item.MembershipID != query.MembershipID) ||
+			(len(query.MembershipStatus) > 0 && !slices.Contains(query.MembershipStatus, item.MembershipStatus)) ||
 			(query.DueFrom != "" && item.DueAt < query.DueFrom) || (query.DueTo != "" && item.DueAt > query.DueTo) ||
 			(minimum != nil && item.AmountMinor < *minimum) || (maximum != nil && item.AmountMinor > *maximum) ||
 			(len(query.Status) > 0 && !slices.Contains(query.Status, item.Status)) {
@@ -654,29 +731,53 @@ func (s *Server) settlementExportRows(ctx context.Context, membership domain.Mem
 	if err := enforceTableRowLimit(len(items), limit); err != nil {
 		return nil, nil, err
 	}
-	columns := []tabular.Column{{ID: "period", Header: "Periode", Identity: true, WidthMM: 50}}
+	columns := []tabular.Column{{ID: "period", Header: "Periode", Identity: true, WidthMM: 42}}
 	if !personal {
-		columns = append(columns, tabular.Column{ID: "member", Header: "Mitglied", Identity: true, WidthMM: 55})
+		columns = append(columns,
+			tabular.Column{ID: "member", Header: "Mitglied", Identity: true, WidthMM: 50},
+			tabular.Column{ID: "membership_status", Header: "Mitgliedschaft", WidthMM: 36},
+		)
 	}
 	columns = append(columns,
-		tabular.Column{ID: "due_at", Header: "Fällig", WidthMM: 30},
-		moneyColumn("amount", "Forderung", 34), moneyColumn("paid", "Bezahlt", 34),
+		tabular.Column{ID: "due_at", Header: "Fällig", WidthMM: 28},
+		moneyColumn("amount", "Forderung", 32), moneyColumn("paid", "Bezahlt", 32),
 	)
 	if personal {
 		columns = append(columns, moneyColumn("open", "Offen", 34))
 	}
-	columns = append(columns, tabular.Column{ID: "status", Header: "Status", WidthMM: 30})
+	columns = append(columns, tabular.Column{ID: "status", Header: "Status", WidthMM: 28})
+	imageLoader := newTableExportImageLoader(s.config.DataDirectory)
+	membershipImages := map[string]string{}
+	if includeMedia && !personal {
+		membershipIDs := make([]string, 0, len(items))
+		for _, item := range items {
+			membershipIDs = append(membershipIDs, item.MembershipID)
+		}
+		membershipImages, err = loadMembershipImageKeys(ctx, s.db, membership.GroupID, membershipIDs)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
 	rows := make([]tabular.Row, 0, len(items))
 	for _, item := range items {
 		cells := []tabular.Cell{textCell(item.PeriodLabel)}
 		if !personal {
-			cells = append(cells, textCell(item.MemberName))
+			var memberImage []byte
+			if includeMedia {
+				memberImage, err = imageLoader.loadKey(membershipImages[item.MembershipID])
+				if err != nil {
+					return nil, nil, err
+				}
+			}
+			cells = append(cells, imageTextCell(item.MemberName, memberImage), tonedTextCell(membershipStatusLabel(item.MembershipStatus), membershipTone(item.MembershipStatus), includeMedia))
 		}
-		cells = append(cells, textCell(formatGermanDate(item.DueAt, time.UTC)), moneyCell(item.AmountMinor, item.Currency), moneyCell(item.PaidMinor, item.Currency))
+		cells = append(cells, textCell(formatGermanDate(item.DueAt, time.UTC)),
+			tonedMoneyCell(item.AmountMinor, item.Currency, balanceTone(item.AmountMinor), includeMedia),
+			tonedMoneyCell(item.PaidMinor, item.Currency, paidAmountTone(item.PaidMinor), includeMedia))
 		if personal {
-			cells = append(cells, moneyCell(item.OpenMinor, item.Currency))
+			cells = append(cells, tonedMoneyCell(item.OpenMinor, item.Currency, balanceTone(item.OpenMinor), includeMedia))
 		}
-		cells = append(cells, textCell(settlementStatusLabel(item.Status)))
+		cells = append(cells, tonedTextCell(settlementStatusLabel(item.Status), settlementTone(item.Status), includeMedia))
 		rows = append(rows, tabular.Row{Cells: cells})
 	}
 	return columns, rows, nil
@@ -687,7 +788,7 @@ type memberExportQuery struct {
 	Direction string `json:"direction"`
 }
 
-func (s *Server) memberExportRows(ctx context.Context, membership domain.Membership, raw json.RawMessage, active bool, limit int) ([]tabular.Column, []tabular.Row, error) {
+func (s *Server) memberExportRows(ctx context.Context, membership domain.Membership, raw json.RawMessage, active bool, limit int, includeMedia bool) ([]tabular.Column, []tabular.Row, error) {
 	var query memberExportQuery
 	if err := decodeTableQuery(raw, &query); err != nil {
 		return nil, nil, err
@@ -728,7 +829,15 @@ func (s *Server) memberExportRows(ctx context.Context, membership domain.Members
 		columns = append(columns, tabular.Column{ID: "roles", Header: "Rollen", WidthMM: 90})
 	}
 	rows := make([]tabular.Row, 0, len(items))
+	imageLoader := newTableExportImageLoader(s.config.DataDirectory)
 	for _, item := range items {
+		var memberImage []byte
+		if includeMedia {
+			memberImage, err = imageLoader.loadURL(item.AvatarURL)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
 		name := item.DisplayName
 		if item.IsTemporaryGuest {
 			name += " (Temporärer Gast)"
@@ -737,7 +846,7 @@ func (s *Server) memberExportRows(ctx context.Context, membership domain.Members
 		if item.Email != nil {
 			email = *item.Email
 		}
-		cells := []tabular.Cell{textCell(name), textCell(fallbackText(email, "–"))}
+		cells := []tabular.Cell{imageTextCell(name, memberImage), textCell(fallbackText(email, "–"))}
 		if active {
 			cells = append(cells, textCell(strings.Join(resolvedRoleNames(item, roleNames), ", ")))
 		}
@@ -746,7 +855,7 @@ func (s *Server) memberExportRows(ctx context.Context, membership domain.Members
 	return columns, rows, nil
 }
 
-func (s *Server) groupAuditExportRows(ctx context.Context, membership domain.Membership, raw json.RawMessage, location *time.Location, limit int) ([]tabular.Column, []tabular.Row, error) {
+func (s *Server) groupAuditExportRows(ctx context.Context, membership domain.Membership, raw json.RawMessage, location *time.Location, limit int, includeMedia bool) ([]tabular.Column, []tabular.Row, error) {
 	if err := authorization.Require(ctx, s.db, membership.GroupID, membership.ID, domain.PermissionGroupAdministration, authorization.GroupResource(membership.GroupID)); err != nil {
 		return nil, nil, err
 	}
@@ -759,10 +868,31 @@ func (s *Server) groupAuditExportRows(ctx context.Context, membership domain.Mem
 		return nil, nil, err
 	}
 	columns := auditExportColumns()
+	imageLoader := newTableExportImageLoader(s.config.DataDirectory)
+	actorImages := map[string]string{}
+	if includeMedia {
+		actorIDs := make([]string, 0, len(items))
+		for _, item := range items {
+			if item.ActorUserID != nil {
+				actorIDs = append(actorIDs, *item.ActorUserID)
+			}
+		}
+		actorImages, err = loadUserImageKeys(ctx, s.db, actorIDs)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
 	rows := make([]tabular.Row, 0, len(items))
 	for _, item := range items {
+		var actorImage []byte
+		if includeMedia && item.ActorUserID != nil {
+			actorImage, err = imageLoader.loadKey(actorImages[*item.ActorUserID])
+			if err != nil {
+				return nil, nil, err
+			}
+		}
 		rows = append(rows, tabular.Row{Cells: []tabular.Cell{
-			textCell(formatGermanDateTime(item.OccurredAt, location)), textCell(fallbackText(item.ActorDisplayName, "System")), textCell(item.Action),
+			textCell(formatGermanDateTime(item.OccurredAt, location)), imageTextCell(fallbackText(item.ActorDisplayName, "System"), actorImage), textCell(item.Action),
 			textCell(auditSubject(item.ResourceType, item.ResourceID)), textCell(jsonDisplay(item.Metadata)),
 		}})
 	}
@@ -953,6 +1083,123 @@ func parseOptionalMinorUnits(field string, value *string) (*int64, error) {
 	return &parsed, nil
 }
 
+type tableExportImageLoader struct {
+	dataDirectory string
+	cache         map[string][]byte
+	loaded        map[string]bool
+}
+
+// newTableExportImageLoader creates a request-local, content-keyed media cache.
+func newTableExportImageLoader(dataDirectory string) *tableExportImageLoader {
+	return &tableExportImageLoader{dataDirectory: dataDirectory, cache: map[string][]byte{}, loaded: map[string]bool{}}
+}
+
+// loadURL extracts only a validated managed-image key from an internal URL.
+func (loader *tableExportImageLoader) loadURL(value string) ([]byte, error) {
+	if strings.TrimSpace(value) == "" {
+		return nil, nil
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return nil, nil
+	}
+	return loader.loadKey(path.Base(parsed.Path))
+}
+
+// loadKey reads one validated managed image at most once per table export.
+func (loader *tableExportImageLoader) loadKey(key string) ([]byte, error) {
+	if !media.ValidImageKey(key) {
+		return nil, nil
+	}
+	if loader.loaded[key] {
+		return loader.cache[key], nil
+	}
+	loader.loaded[key] = true
+	imagePath, err := media.ResolveImage(loader.dataDirectory, key)
+	if err != nil {
+		return nil, nil
+	}
+	content, err := os.ReadFile(imagePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read table export image: %w", err)
+	}
+	loader.cache[key] = content
+	return content, nil
+}
+
+// loadProductImageKeys resolves only product IDs already present in authorized rows.
+func loadProductImageKeys(ctx context.Context, db *sql.DB, groupID string, productIDs []string) (map[string]string, error) {
+	return queryTableExportImageKeys(ctx, db,
+		`SELECT id,coalesce(image_key,'') FROM products WHERE group_id=? AND id IN (%s)`, []any{groupID}, productIDs)
+}
+
+// loadMembershipImageKeys resolves group-scoped membership avatars in bounded batches.
+func loadMembershipImageKeys(ctx context.Context, db *sql.DB, groupID string, membershipIDs []string) (map[string]string, error) {
+	return queryTableExportImageKeys(ctx, db,
+		`SELECT membership.id,coalesce(user.avatar_key,'') FROM memberships membership JOIN users user ON user.id=membership.user_id WHERE membership.group_id=? AND membership.id IN (%s)`, []any{groupID}, membershipIDs)
+}
+
+// loadUserImageKeys resolves actor avatars for already-authorized audit rows.
+func loadUserImageKeys(ctx context.Context, db *sql.DB, userIDs []string) (map[string]string, error) {
+	return queryTableExportImageKeys(ctx, db,
+		`SELECT id,coalesce(avatar_key,'') FROM users WHERE id IN (%s)`, nil, userIDs)
+}
+
+// queryTableExportImageKeys deduplicates identifiers and stays below SQLite's bind limit.
+func queryTableExportImageKeys(ctx context.Context, db *sql.DB, queryTemplate string, scopeArguments []any, identifiers []string) (map[string]string, error) {
+	const batchSize = 200
+	unique := make(map[string]struct{}, len(identifiers))
+	for _, identifier := range identifiers {
+		if identifier = strings.TrimSpace(identifier); identifier != "" {
+			unique[identifier] = struct{}{}
+		}
+	}
+	ordered := make([]string, 0, len(unique))
+	for identifier := range unique {
+		ordered = append(ordered, identifier)
+	}
+	sort.Strings(ordered)
+	result := make(map[string]string, len(ordered))
+	for start := 0; start < len(ordered); start += batchSize {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		end := min(start+batchSize, len(ordered))
+		batch := ordered[start:end]
+		arguments := append([]any(nil), scopeArguments...)
+		placeholders := make([]string, len(batch))
+		for index, identifier := range batch {
+			placeholders[index] = "?"
+			arguments = append(arguments, identifier)
+		}
+		rows, err := db.QueryContext(ctx, fmt.Sprintf(queryTemplate, strings.Join(placeholders, ",")), arguments...)
+		if err != nil {
+			return nil, fmt.Errorf("load table export image keys: %w", err)
+		}
+		for rows.Next() {
+			var identifier, imageKey string
+			if err := rows.Scan(&identifier, &imageKey); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if media.ValidImageKey(imageKey) {
+				result[identifier] = imageKey
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
 func (s *Server) groupExportBrand(ctx context.Context, groupID string) (string, []byte, error) {
 	var groupName string
 	var imageKey sql.NullString
@@ -1093,9 +1340,9 @@ func serveTableArtifact(response http.ResponseWriter, request *http.Request, art
 		writeProblem(response, request, err)
 		return
 	}
-	filename := safeTableExportFilename(title) + "-" + exportedAt.Format("2006-01-02") + "." + artifact.Extension
+	filename := tableArtifactFilename(title, format, artifact.Extension, exportedAt)
 	response.Header().Set("Content-Type", artifact.ContentType)
-	response.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, filename))
+	response.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))
 	response.Header().Set("Content-Length", strconv.FormatInt(metadata.Size(), 10))
 	response.Header().Set("Cache-Control", "private, no-store")
 	response.Header().Set("X-Content-Type-Options", "nosniff")
@@ -1103,30 +1350,123 @@ func serveTableArtifact(response http.ResponseWriter, request *http.Request, art
 	http.ServeContent(response, request, filename, exportedAt, artifact.File)
 }
 
+func tableArtifactFilename(title, format, extension string, exportedAt time.Time) string {
+	stem := safeTableExportFilename(title)
+	date := exportedAt.Format("2006-01-02")
+	if format == "PDF" {
+		return date + "_" + stem + "." + extension
+	}
+	return stem + "-" + date + "." + extension
+}
+
 func safeTableExportFilename(title string) string {
 	var builder strings.Builder
-	for _, character := range strings.ToLower(title) {
-		switch {
-		case character >= 'a' && character <= 'z', character >= '0' && character <= '9':
-			builder.WriteRune(character)
-		case character == 'ä':
-			builder.WriteString("ae")
-		case character == 'ö':
-			builder.WriteString("oe")
-		case character == 'ü':
-			builder.WriteString("ue")
-		case character == 'ß':
-			builder.WriteString("ss")
-		default:
-			if builder.Len() > 0 && !strings.HasSuffix(builder.String(), "-") {
-				builder.WriteByte('-')
+	separatorPending := false
+	for _, character := range strings.TrimSpace(title) {
+		if unicode.IsLetter(character) || unicode.IsDigit(character) {
+			if separatorPending && builder.Len() > 0 {
+				builder.WriteByte('_')
 			}
+			builder.WriteRune(character)
+			separatorPending = false
+		} else if builder.Len() > 0 {
+			separatorPending = true
 		}
 	}
-	return strings.Trim(builder.String(), "-")
+	if builder.Len() == 0 {
+		return "Export"
+	}
+	return builder.String()
 }
 
 func textCell(value string) tabular.Cell { return tabular.Cell{Text: value} }
+
+func imageTextCell(value string, imagePNG []byte) tabular.Cell {
+	return tabular.Cell{Text: value, ImagePNG: imagePNG, ImageSlot: true}
+}
+
+func activityKindCell(kind activities.Kind, decorate bool) tabular.Cell {
+	return tonedTextCell(activityKindLabel(kind), activityTone(kind), decorate)
+}
+
+func activityMoneyCell(amount int64, currency string, kind activities.Kind, decorate bool) tabular.Cell {
+	return tonedMoneyCell(amount, currency, activityTone(kind), decorate)
+}
+
+func activityStatusCell(kind activities.Kind, status string, decorate bool) tabular.Cell {
+	tone := activityTone(kind)
+	if status == "REVERSED" {
+		tone = tabular.ToneDanger
+	}
+	return tonedTextCell(activityStatusLabel(kind, status), tone, decorate)
+}
+
+func activityTone(kind activities.Kind) tabular.CellTone {
+	switch kind {
+	case activities.KindBooking:
+		return tabular.ToneWarning
+	case activities.KindPayment:
+		return tabular.ToneSuccess
+	default:
+		return tabular.ToneInfo
+	}
+}
+
+func transactionTone(status string) tabular.CellTone {
+	if status == "REVERSED" {
+		return tabular.ToneDanger
+	}
+	return tabular.ToneSuccess
+}
+
+func membershipTone(status string) tabular.CellTone {
+	switch status {
+	case domain.MembershipStatusActive:
+		return tabular.ToneSuccess
+	case domain.MembershipStatusArchived:
+		return tabular.ToneWarning
+	default:
+		return tabular.ToneDanger
+	}
+}
+
+func balanceTone(amount int64) tabular.CellTone {
+	if amount > 0 {
+		return tabular.ToneDanger
+	}
+	return tabular.ToneSuccess
+}
+
+func settlementTone(status string) tabular.CellTone {
+	switch status {
+	case "PAID", "CREDIT":
+		return tabular.ToneSuccess
+	case "PARTIAL":
+		return tabular.ToneWarning
+	default:
+		return tabular.ToneDanger
+	}
+}
+
+func paidAmountTone(_ int64) tabular.CellTone {
+	return tabular.ToneSuccess
+}
+
+func tonedTextCell(value string, tone tabular.CellTone, decorate bool) tabular.Cell {
+	cell := textCell(value)
+	if decorate {
+		cell.Tone = tone
+	}
+	return cell
+}
+
+func tonedMoneyCell(amount int64, currency string, tone tabular.CellTone, decorate bool) tabular.Cell {
+	cell := moneyCell(amount, currency)
+	if decorate {
+		cell.Tone = tone
+	}
+	return cell
+}
 
 func moneyCell(amount int64, currency string) tabular.Cell {
 	return tabular.Cell{Money: &tabular.Money{MinorUnits: strconv.FormatInt(amount, 10), Currency: strings.ToUpper(currency), DecimalPlaces: platform.CurrencyExponent(currency)}}
@@ -1371,7 +1711,7 @@ func sortSettlements(items []settlementExportItem, field, direction string, pers
 	if personal {
 		allowed = append(allowed, "openAmount")
 	} else {
-		allowed = append(allowed, "memberName")
+		allowed = append(allowed, "memberName", "membershipStatus")
 	}
 	if !slices.Contains(allowed, field) {
 		return domain.ValidationError{Field: "sort", Message: "is not supported"}
@@ -1387,6 +1727,8 @@ func sortSettlements(items []settlementExportItem, field, direction string, pers
 			comparison = compareText(items[i].PeriodLabel, items[j].PeriodLabel)
 		case "memberName":
 			comparison = compareText(items[i].MemberName, items[j].MemberName)
+		case "membershipStatus":
+			comparison = compareText(items[i].MembershipStatus, items[j].MembershipStatus)
 		case "amount":
 			comparison = compareInt64(items[i].AmountMinor, items[j].AmountMinor)
 		case "paidAmount":
