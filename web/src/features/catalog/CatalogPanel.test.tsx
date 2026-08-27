@@ -256,6 +256,33 @@ describe('CatalogPanel', () => {
     expect(dialog).toBeVisible();
   });
 
+  it('renders category creation and editing as bottom sheets on compact viewports', async () => {
+    const user = userEvent.setup();
+    responsiveMock.useMediaQuery.mockReturnValue(true);
+    renderCatalog();
+
+    await user.click(await screen.findByRole('button', { name: i18n.t('catalog.categoryAction') }));
+    const createDialog = screen.getByRole('dialog', { name: i18n.t('catalog.categoryDialog') });
+    expect(createDialog).toHaveClass(modalStyles.sheet);
+    expect(createDialog.querySelector(`button[aria-label="${i18n.t('dialog.sheetHandle')}"]`)).toBeInTheDocument();
+    await user.click(within(createDialog).getByRole('button', { name: i18n.t('common.cancel') }));
+
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.editCategory', { name: category.name }) }));
+    const editDialog = screen.getByRole('dialog', { name: i18n.t('catalog.editCategoryDialog') });
+    expect(editDialog).toHaveClass(modalStyles.sheet);
+    expect(editDialog.querySelector(`button[aria-label="${i18n.t('dialog.sheetHandle')}"]`)).toBeInTheDocument();
+  });
+
+  it('keeps category creation as a dialog on wider viewports', async () => {
+    const user = userEvent.setup();
+    renderCatalog();
+
+    await user.click(await screen.findByRole('button', { name: i18n.t('catalog.categoryAction') }));
+    const dialog = screen.getByRole('dialog', { name: i18n.t('catalog.categoryDialog') });
+    expect(dialog).not.toHaveClass(modalStyles.sheet);
+    expect(dialog.querySelector(`button[aria-label="${i18n.t('dialog.sheetHandle')}"]`)).not.toBeInTheDocument();
+  });
+
   it('renders the product editor as a bottom sheet on compact viewports', async () => {
     const user = userEvent.setup();
     responsiveMock.useMediaQuery.mockReturnValue(true);

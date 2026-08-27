@@ -355,7 +355,7 @@ export function CatalogPanel() {
           onReorder={(categories) => reorderMutation.mutate(categories)}
         />
       )}
-      <Modal onClose={clearCategoryDialog} open={dialog === 'category'} title={editingCategory ? t('catalog.editCategoryDialog') : t('catalog.categoryDialog')}>
+      <Modal onClose={clearCategoryDialog} open={dialog === 'category'} title={editingCategory ? t('catalog.editCategoryDialog') : t('catalog.categoryDialog')} variant={compact ? 'sheet' : 'dialog'}>
         <form className={styles.form} id={categoryFormId} onSubmit={(event) => { event.preventDefault(); categoryMutation.mutate(); }}>
           <Field htmlFor="category-name" label={t('common.name')}><TextInput id="category-name" onChange={(event) => setCategoryName(event.target.value)} required value={categoryName} /></Field>
           <CategoryIconPicker onChange={setCategoryIcon} value={categoryIcon} />
