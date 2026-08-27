@@ -369,14 +369,19 @@
 .scrollHint[hidden] { display: none; }
 
 .resultBar {
-  display: flex;
+  display: grid;
   min-height: 40px;
   align-items: center;
-  justify-content: space-between;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  justify-content: normal;
   gap: var(--space-3);
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
+  text-align: center;
 }
+
+.resultBar > span:first-child { grid-column: 2; }
+.resultBar > :last-child:not(:first-child) { grid-column: 3; justify-self: end; }
 
 .loadMoreSentinel {
   width: 100%;
@@ -449,7 +454,7 @@
 @media (max-width: 480px) {
   .rangeGroup { grid-template-columns: 1fr; }
   .rangeGroup legend { grid-column: auto; }
-  .resultBar { align-items: stretch; flex-direction: column; }
+  .resultBar { display: flex; align-items: stretch; flex-direction: column; justify-content: center; }
   .resultBar button { width: 100%; }
 }
 
