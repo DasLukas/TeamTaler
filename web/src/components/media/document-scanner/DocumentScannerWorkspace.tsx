@@ -10,6 +10,7 @@ import { Modal } from '@/components/ui/Modal';
 import { createDocumentPdf } from './createDocumentPdf';
 import { DocumentCamera } from './DocumentCamera';
 import { DocumentCornerEditor } from './DocumentCornerEditor';
+import { DocumentPageThumbnail } from './DocumentPageThumbnail';
 import { DEFAULT_DOCUMENT_CORNERS } from './geometry';
 import { readImageDimensions } from './imageDimensions';
 import { MAX_SCANNER_SOURCE_PIXELS, scannerSourceByteBudget } from './resourceLimits';
@@ -328,8 +329,11 @@ export function DocumentScannerWorkspace({ open, onCancel, onComplete, maxBytes,
                 }}
                 type="button"
               >
-                <img alt={t('documentScanner.pageNumber', { number: index + 1, defaultValue: `Page ${index + 1}` })} src={page.previewUrl} />
-                <span>{index + 1}</span>
+                <DocumentPageThumbnail
+                  alt={t('documentScanner.pageNumber', { number: index + 1, defaultValue: `Page ${index + 1}` })}
+                  page={page}
+                />
+                <span className={styles.thumbnailNumber}>{index + 1}</span>
               </button>
               <div className={styles.thumbnailActions}>
                 <button aria-label={t('documentScanner.moveEarlier', { defaultValue: 'Move page earlier' })} disabled={index === 0} onClick={() => movePage(page.id, -1)} type="button"><ArrowUp size={15} /></button>

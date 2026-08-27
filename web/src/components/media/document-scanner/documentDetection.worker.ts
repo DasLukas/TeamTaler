@@ -1,8 +1,8 @@
 import { detectDocumentWithOpenCv, type OpenCvRuntime } from './openCvDocumentDetection';
-import type { DetectionRequest, DetectionResult } from './types';
+import type { DetectionRequest, DetectionResult, DetectionWorkerRequest } from './types';
 
 interface DetectionWorkerScope {
-  onmessage: ((event: MessageEvent<DetectionRequest>) => void) | null;
+  onmessage: ((event: MessageEvent<DetectionWorkerRequest>) => void) | null;
   postMessage(message: DetectionResult): void;
 }
 
@@ -15,13 +15,8 @@ function loadOpenCv(): Promise<OpenCvRuntime> {
 }
 
 async function detect(request: DetectionRequest): Promise<void> {
-  const { bitmap, requestId } = request;
+  const { imageData, requestId } = request;
   try {
-    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-    const context = canvas.getContext('2d', { willReadFrequently: true });
-    if (!context) throw new Error('Worker canvas rendering is unavailable.');
-    context.drawImage(bitmap, 0, 0);
-    const imageData = context.getImageData(0, 0, bitmap.width, bitmap.height);
     let runtime: OpenCvRuntime;
     try {
       runtime = await loadOpenCv();
@@ -43,13 +38,21 @@ async function detect(request: DetectionRequest): Promise<void> {
     });
   } catch {
     workerScope.postMessage({ confidence: 0, requestId, status: 'unavailable' });
-  } finally {
-    bitmap.close();
+  }
+}
+
+async function initialize(): Promise<void> {
+  try {
+    await loadOpenCv();
+    workerScope.postMessage({ confidence: 0, requestId: 0, status: 'ready' });
+  } catch {
+    workerScope.postMessage({ confidence: 0, requestId: 0, status: 'unavailable' });
   }
 }
 
 workerScope.onmessage = (event) => {
-  if (event.data.type === 'detect') void detect(event.data);
+  if (event.data.type === 'initialize') void initialize();
+  else void detect(event.data);
 };
 
 export {};

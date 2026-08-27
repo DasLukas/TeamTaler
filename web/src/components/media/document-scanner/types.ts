@@ -37,7 +37,7 @@ export interface ScannerPage {
 
 /** Result emitted by the asynchronous document detector. */
 export interface DetectionResult {
-  /** Correlation identifier copied from the detection request. */
+  /** Correlation identifier copied from the detection request; zero identifies worker initialization. */
   requestId: number;
   /** Detector runtime state after attempting to process this frame. */
   status: 'ready' | 'unavailable';
@@ -47,12 +47,21 @@ export interface DetectionResult {
   confidence: number;
 }
 
+/** Message that eagerly initializes the detector before camera frames are scheduled. */
+export interface DetectionInitializeRequest {
+  /** Discriminator for the worker readiness handshake. */
+  type: 'initialize';
+}
+
 /** Message accepted by the document detection worker. */
 export interface DetectionRequest {
   /** Discriminator used for safe worker-message parsing. */
   type: 'detect';
   /** Monotonically increasing request identifier. */
   requestId: number;
-  /** Transferable camera preview frame owned by the worker after posting. */
-  bitmap: ImageBitmap;
+  /** Bounded RGBA camera preview copied into a transferable buffer. */
+  imageData: ImageData;
 }
+
+/** Complete request protocol accepted by the document detection worker. */
+export type DetectionWorkerRequest = DetectionInitializeRequest | DetectionRequest;
