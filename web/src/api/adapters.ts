@@ -981,12 +981,22 @@ export function adaptBooking(input: unknown, members?: Membership[], fallbackMem
  *
  * @param input - Unified activity wire value.
  * @returns Canonical activity used directly by the activities table.
+ * @throws {TypeError} When a reversal omits its original transaction kind.
+ *
+ * @example
+ * adaptActivity({ kind: 'REVERSAL', reversalSourceKind: 'BOOKING', amountMinor: -500, currency: 'EUR' });
  */
 export function adaptActivity(input: unknown): ActivityEntry {
   const source = asRecord(input);
-  const attachment = paymentAttachmentSummary(source.attachment);
-  const kind = source.kind === 'PAYMENT' || source.kind === 'ADJUSTMENT' ? source.kind : 'BOOKING';
-  const paymentMethod = kind === 'PAYMENT' && typeof source.paymentMethod === 'string' && source.paymentMethod
+  const kind = source.kind === 'PAYMENT' || source.kind === 'REVERSAL' || source.kind === 'ADJUSTMENT' ? source.kind : 'BOOKING';
+  const reversalSourceKind = source.reversalSourceKind === 'BOOKING' || source.reversalSourceKind === 'PAYMENT'
+    ? source.reversalSourceKind
+    : undefined;
+  if (kind === 'REVERSAL' && !reversalSourceKind) {
+    throw new TypeError('Reversal activities require a BOOKING or PAYMENT reversalSourceKind.');
+  }
+  const attachment = kind === 'PAYMENT' ? paymentAttachmentSummary(source.attachment) : undefined;
+  const paymentMethod = (kind === 'PAYMENT' || reversalSourceKind === 'PAYMENT') && typeof source.paymentMethod === 'string' && source.paymentMethod
     ? source.paymentMethod as Payment['method']
     : undefined;
   const detailName = String(source.detailName);
@@ -1018,11 +1028,13 @@ export function adaptActivity(input: unknown): ActivityEntry {
     quantity: Number(source.quantity ?? 0) || undefined,
     amount: money(source.amountMinor, source.currency),
     occurredAt: String(source.occurredAt),
-    status: source.status === 'REVERSED' ? 'REVERSED' : 'POSTED',
+    status: kind !== 'REVERSAL' && source.status === 'REVERSED' ? 'REVERSED' : 'POSTED',
+    relatedActivityId: typeof source.relatedActivityId === 'string' && source.relatedActivityId ? source.relatedActivityId : undefined,
+    reversalSourceKind,
     ...(attachment ? { attachment } : {}),
-    canReverse: source.canReverse === true,
-    reversalReasonRequired: source.reversalReasonRequired === true,
-    reversalWithoutReasonUntil: typeof source.reversalWithoutReasonUntil === 'string' ? source.reversalWithoutReasonUntil : undefined,
+    canReverse: kind !== 'REVERSAL' && source.canReverse === true,
+    reversalReasonRequired: kind !== 'REVERSAL' && source.reversalReasonRequired === true,
+    reversalWithoutReasonUntil: kind !== 'REVERSAL' && typeof source.reversalWithoutReasonUntil === 'string' ? source.reversalWithoutReasonUntil : undefined,
   };
 }
 

@@ -268,10 +268,37 @@ func run() error {
 		}); bookingErr != nil {
 			return fmt.Errorf("create current bookings: %w", bookingErr)
 		}
-		return seedPayments(ctx, financeService, adminSession.Principal, adminGroup.Membership, platform.Timestamp(seedNow), []paymentSeed{
+		if err := seedPayments(ctx, financeService, adminSession.Principal, adminGroup.Membership, platform.Timestamp(seedNow), []paymentSeed{
 			{key: "seed-current-payment-lena", membershipID: lena.membership.ID, amountMinor: 500, method: "CASH", reference: "Bareinzahlung"},
 			{key: "seed-current-payment-jonas", membershipID: jonas.membership.ID, amountMinor: 350, method: "CARD", reference: "Mannschaftskasse"},
+		}); err != nil {
+			return err
+		}
+
+		seedNow = baseNow.AddDate(0, 0, 4).Add(30 * time.Minute)
+		reversedBooking, bookingErr := bookingService.Create(ctx, adminSession.Principal, adminGroup.Membership, "seed-current-booking-to-reverse", bookings.CreateInput{
+			ProductID: products.water.ID, ProductVersion: products.water.Version, ExpectedPeriodID: august.OpenPeriod.ID, Quantity: 1,
+			TargetMembershipID: marie.membership.ID, Reason: "Mannschaftsabend",
 		})
+		if bookingErr != nil {
+			return fmt.Errorf("create booking reversal fixture: %w", bookingErr)
+		}
+		reversedPayment, paymentErr := financeService.CreatePayment(ctx, adminSession.Principal, adminGroup.Membership, "seed-current-payment-to-reverse", finance.CreatePaymentInput{
+			MembershipID: marie.membership.ID, AmountMinor: 425, ReceivedAt: platform.Timestamp(seedNow), Method: "CASH", Reference: "Bareinzahlung", Note: "Doppelt erfasst",
+		})
+		if paymentErr != nil {
+			return fmt.Errorf("create payment reversal fixture: %w", paymentErr)
+		}
+
+		seedNow = baseNow.AddDate(0, 0, 4).Add(time.Hour)
+		if _, bookingErr := bookingService.Void(ctx, adminSession.Principal, adminGroup.Membership, "seed-current-booking-reversal", reversedBooking.ID, "Doppelte Testbuchung"); bookingErr != nil {
+			return fmt.Errorf("reverse booking fixture: %w", bookingErr)
+		}
+		seedNow = baseNow.AddDate(0, 0, 4).Add(90 * time.Minute)
+		if paymentErr := financeService.ReversePayment(ctx, adminSession.Principal, adminGroup.Membership, "seed-current-payment-reversal", reversedPayment.ID, "Doppelte Testzahlung"); paymentErr != nil {
+			return fmt.Errorf("reverse payment fixture: %w", paymentErr)
+		}
+		return nil
 	}); err != nil {
 		return err
 	}
@@ -446,12 +473,12 @@ func assignAdministratorStandardRoles(ctx context.Context, service groups.Servic
 	return updated, nil
 }
 
-// withTemporaryBookingGrants adds two seed-only grants and always removes them.
+// withTemporaryBookingGrants adds seed-only booking grants and always removes them.
 func withTemporaryBookingGrants(ctx context.Context, db *sql.DB, groupID string, fn func() error) error {
 	roleID := authorization.PresetRoleID(groupID, domain.RolePresetGroupAdministrator)
 	now := platform.Timestamp(platform.Now())
 	if err := storage.WithTx(ctx, db, func(tx *sql.Tx) error {
-		for _, permission := range []domain.PermissionKey{domain.PermissionBookForOthers, domain.PermissionBookForGuests} {
+		for _, permission := range []domain.PermissionKey{domain.PermissionBookForOthers, domain.PermissionBookForGuests, domain.PermissionVoidAnyBooking} {
 			if _, err := tx.ExecContext(ctx, `INSERT INTO role_permission_grants(group_id,role_id,permission_key,scope_type,version,created_at,updated_at) VALUES(?,?,?,'GROUP',1,?,?)`, groupID, roleID, permission, now, now); err != nil {
 				return fmt.Errorf("grant temporary fixture permission %q: %w", permission, err)
 			}
@@ -461,7 +488,7 @@ func withTemporaryBookingGrants(ctx context.Context, db *sql.DB, groupID string,
 		return err
 	}
 	seedErr := fn()
-	_, cleanupErr := db.ExecContext(ctx, `DELETE FROM role_permission_grants WHERE group_id=? AND role_id=? AND permission_key IN (?,?)`, groupID, roleID, domain.PermissionBookForOthers, domain.PermissionBookForGuests)
+	_, cleanupErr := db.ExecContext(ctx, `DELETE FROM role_permission_grants WHERE group_id=? AND role_id=? AND permission_key IN (?,?,?)`, groupID, roleID, domain.PermissionBookForOthers, domain.PermissionBookForGuests, domain.PermissionVoidAnyBooking)
 	if cleanupErr != nil {
 		cleanupErr = fmt.Errorf("remove temporary fixture booking grants: %w", cleanupErr)
 	}

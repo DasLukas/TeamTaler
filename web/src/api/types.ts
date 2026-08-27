@@ -78,6 +78,8 @@ export interface DataExportJob {
 
 /** Server-backed unified account-activity search, filter, and sort options. */
 export interface ActivityCollectionQuery extends CollectionQuery<'kind' | 'targetName' | 'actorName' | 'detailName' | 'categoryName' | 'occurredAt' | 'amount' | 'status'> {
+  /** Stable activity ID used to request a permission-scoped context window around one row. */
+  anchorId?: string;
   /** One or more repeated transaction kinds combined with OR semantics. */
   kind?: ActivityKind | readonly ActivityKind[];
   targetMembershipId?: string;
@@ -855,7 +857,10 @@ export interface Booking {
 }
 
 /** Transaction source represented by the unified account activity feed. */
-export type ActivityKind = 'BOOKING' | 'PAYMENT' | 'ADJUSTMENT';
+export type ActivityKind = 'BOOKING' | 'PAYMENT' | 'REVERSAL' | 'ADJUSTMENT';
+
+/** Original transaction kind whose financial effect is cancelled by a reversal activity. */
+export type ActivityReversalSourceKind = 'BOOKING' | 'PAYMENT';
 
 /** One permission-scoped transaction in the unified account activity feed. */
 export interface ActivityEntry {
@@ -881,6 +886,10 @@ export interface ActivityEntry {
   amount: Money;
   occurredAt: string;
   status: 'POSTED' | 'REVERSED';
+  /** Stable feed ID of the corresponding original or reversal entry. */
+  relatedActivityId?: string;
+  /** Original transaction kind; present for every `REVERSAL` activity. */
+  reversalSourceKind?: ActivityReversalSourceKind;
   attachment?: PaymentAttachmentSummary;
   canReverse: boolean;
   reversalReasonRequired: boolean;

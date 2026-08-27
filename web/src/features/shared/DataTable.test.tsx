@@ -328,6 +328,51 @@ describe('DataTable', () => {
     expect(screen.getByRole('status')).toHaveTextContent('2 results');
   });
 
+  it('centers, focuses, marks, and announces a persistent row in tables and cards', () => {
+    const scrollIntoView = vi.fn();
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus');
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+    const viewportRef = vi.fn();
+    const commonProps = {
+      ariaLabel: 'Members table',
+      columns,
+      data: rows,
+      emptyContent: 'No members',
+      getRowId: (row: TestRow) => row.id,
+      labels,
+      onSearchChange: () => undefined,
+      onSortingChange: () => undefined,
+      rowFocus: { announcement: 'Grace is marked', rowId: 'row-2' },
+      searchValue: '',
+      sorting: [] as SortingState,
+      viewportRef,
+    };
+    const { rerender } = render(<DataTable {...commonProps} />);
+
+    const focusedRow = screen.getByRole('row', { name: /Grace/ });
+    expect(focusedRow).toHaveAttribute('data-focused', 'true');
+    expect(focusedRow).toHaveAttribute('tabindex', '-1');
+    expect(screen.getByText('Grace is marked')).toHaveAttribute('role', 'status');
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center', inline: 'nearest' });
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+    expect(viewportRef).toHaveBeenLastCalledWith(focusedRow.closest('[role="region"]'));
+
+    scrollIntoView.mockClear();
+    focus.mockClear();
+    rerender(<DataTable
+      {...commonProps}
+      cardView={{ ariaLabel: 'Members cards', renderItem: (row) => <article>{row.name}</article> }}
+      viewMode="cards"
+    />);
+
+    const focusedCard = screen.getByText('Grace').closest('li');
+    expect(focusedCard).toHaveAttribute('data-focused', 'true');
+    expect(focusedCard).toHaveAttribute('tabindex', '-1');
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center', inline: 'nearest' });
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+    expect(viewportRef).toHaveBeenLastCalledWith(screen.getByRole('region', { name: 'Members cards' }));
+  });
+
   it('renders visual custom multi-selects and removes products outside selected categories', async () => {
     const user = userEvent.setup();
     render(<ControlledDependentTable />);

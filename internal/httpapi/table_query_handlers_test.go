@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,6 +49,7 @@ func TestTableQueryHandlersFilterSortAndPaginateWithoutChangingArrayBodies(t *te
 	}
 	originalNow := platform.Now
 	t.Cleanup(func() { platform.Now = originalNow })
+	payments := make([]domain.Payment, 0, len(products))
 	for index, product := range products {
 		occurredAt := time.Date(2026, 8, 18, 10+index, 0, 0, 0, time.UTC)
 		platform.Now = func() time.Time { return occurredAt }
@@ -56,16 +58,22 @@ func TestTableQueryHandlersFilterSortAndPaginateWithoutChangingArrayBodies(t *te
 		}); err != nil {
 			t.Fatalf("create booking %d: %v", index, err)
 		}
-		if _, err := server.finance.CreatePayment(ctx, principal, membership, "table-payment-key-"+string(rune('a'+index)), finance.CreatePaymentInput{
+		payment, err := server.finance.CreatePayment(ctx, principal, membership, "table-payment-key-"+string(rune('a'+index)), finance.CreatePaymentInput{
 			MembershipID: membership.ID, AmountMinor: prices[index], ReceivedAt: occurredAt.Format(time.RFC3339),
 			Method: "CASH", Reference: []string{"first", "second", "third"}[index], Note: "Table query payment",
-		}); err != nil {
+		})
+		if err != nil {
 			t.Fatalf("create payment %d: %v", index, err)
 		}
+		payments = append(payments, payment)
 	}
 	if _, err := server.db.ExecContext(ctx, `INSERT INTO ledger_entries(id,group_id,period_id,membership_id,account,amount_minor,description,created_at)
 		VALUES('table-adjustment',?,?,?,?,50,'Manual adjustment','2026-08-18T13:00:00Z')`, membership.GroupID, periodID, membership.ID, "MEMBER_RECEIVABLE"); err != nil {
 		t.Fatalf("create adjustment: %v", err)
+	}
+	platform.Now = func() time.Time { return time.Date(2026, 8, 18, 14, 0, 0, 0, time.UTC) }
+	if err := server.finance.ReversePayment(ctx, principal, membership, "table-reverse-payment-key", payments[0].ID, "Duplicate table payment"); err != nil {
+		t.Fatalf("reverse table payment: %v", err)
 	}
 
 	unifiedResponse := performTableGET(t, principal, membership.GroupID,
@@ -87,8 +95,34 @@ func TestTableQueryHandlersFilterSortAndPaginateWithoutChangingArrayBodies(t *te
 	nextUnifiedResponse := performTableGET(t, principal, membership.GroupID,
 		"/api/v1/groups/"+membership.GroupID+"/activities?sort=amount&direction=asc&limit=4&cursor="+unifiedCursor, server.handleActivities)
 	var nextUnified []activities.Entry
-	if err := json.Unmarshal(nextUnifiedResponse.Body.Bytes(), &nextUnified); err != nil || nextUnifiedResponse.Code != http.StatusOK || len(nextUnified) != 3 || nextUnified[0].AmountMinor != 100 || nextUnified[2].AmountMinor != 300 {
+	if err := json.Unmarshal(nextUnifiedResponse.Body.Bytes(), &nextUnified); err != nil || nextUnifiedResponse.Code != http.StatusOK || len(nextUnified) != 4 || nextUnified[0].AmountMinor != 100 || nextUnified[3].AmountMinor != 300 {
 		t.Fatalf("unified next page status=%d items=%#v err=%v body=%s", nextUnifiedResponse.Code, nextUnified, err, nextUnifiedResponse.Body.String())
+	}
+	reversalResponse := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/activities?kind=REVERSAL", server.handleActivities)
+	var reversalItems []activities.Entry
+	if err := json.Unmarshal(reversalResponse.Body.Bytes(), &reversalItems); err != nil || reversalResponse.Code != http.StatusOK || len(reversalItems) != 1 ||
+		reversalItems[0].ID != "reversal:payment:"+payments[0].ID || reversalItems[0].RelatedActivityID != "payment:"+payments[0].ID ||
+		reversalItems[0].ReversalSourceKind != activities.KindPayment || reversalItems[0].AmountMinor != 100 || reversalItems[0].Status != "POSTED" ||
+		reversalItems[0].CanReverse || reversalItems[0].Attachment != nil || !strings.Contains(reversalResponse.Body.String(), `"amountMinor":"100"`) {
+		t.Fatalf("unified reversal status=%d items=%#v err=%v body=%s", reversalResponse.Code, reversalItems, err, reversalResponse.Body.String())
+	}
+	anchorID := firstUnified[1].ID
+	anchorResponse := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/activities?anchorId="+url.QueryEscape(anchorID)+"&kind=BOOKING&q=does-not-match&sort=amount&direction=asc&limit=3", server.handleActivities)
+	var anchorItems []activities.Entry
+	if err := json.Unmarshal(anchorResponse.Body.Bytes(), &anchorItems); err != nil || anchorResponse.Code != http.StatusOK || len(anchorItems) != 3 || !containsActivityID(anchorItems, anchorID) {
+		t.Fatalf("unified anchor status=%d items=%#v err=%v body=%s", anchorResponse.Code, anchorItems, err, anchorResponse.Body.String())
+	}
+	anchorConflict := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/activities?anchorId="+url.QueryEscape(anchorID)+"&cursor="+unifiedCursor, server.handleActivities)
+	if anchorConflict.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("unified anchor conflict status=%d body=%s", anchorConflict.Code, anchorConflict.Body.String())
+	}
+	missingAnchor := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/activities?anchorId=payment%3Amissing", server.handleActivities)
+	if missingAnchor.Code != http.StatusNotFound {
+		t.Fatalf("missing unified anchor status=%d body=%s", missingAnchor.Code, missingAnchor.Body.String())
 	}
 	adjustmentResponse := performTableGET(t, principal, membership.GroupID,
 		"/api/v1/groups/"+membership.GroupID+"/activities?kind=ADJUSTMENT&amountMin=50&amountMax=50", server.handleActivities)
@@ -100,7 +134,7 @@ func TestTableQueryHandlersFilterSortAndPaginateWithoutChangingArrayBodies(t *te
 		"/api/v1/groups/"+membership.GroupID+"/activities/filter-options", server.handleActivityFilterOptions)
 	var unifiedOptions activities.FilterOptions
 	if err := json.Unmarshal(unifiedOptionsResponse.Body.Bytes(), &unifiedOptions); err != nil || unifiedOptionsResponse.Code != http.StatusOK ||
-		len(unifiedOptions.Kinds) != 3 || len(unifiedOptions.Members) != 1 || len(unifiedOptions.Categories) != 1 || len(unifiedOptions.Products) != 3 {
+		len(unifiedOptions.Kinds) != 4 || len(unifiedOptions.Members) != 1 || len(unifiedOptions.Categories) != 1 || len(unifiedOptions.Products) != 3 {
 		t.Fatalf("unified options status=%d options=%#v err=%v body=%s", unifiedOptionsResponse.Code, unifiedOptions, err, unifiedOptionsResponse.Body.String())
 	}
 	mismatchedUnifiedCursor := performTableGET(t, principal, membership.GroupID,
@@ -223,6 +257,15 @@ func TestTableQueryHandlersFilterSortAndPaginateWithoutChangingArrayBodies(t *te
 func containsString(values []string, expected string) bool {
 	for _, value := range values {
 		if value == expected {
+			return true
+		}
+	}
+	return false
+}
+
+func containsActivityID(entries []activities.Entry, expected string) bool {
+	for _, entry := range entries {
+		if entry.ID == expected {
 			return true
 		}
 	}

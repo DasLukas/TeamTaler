@@ -24,6 +24,26 @@ describe('API adapters', () => {
     })).toMatchObject({ detailName: 'Bar', paymentMethod: 'CASH' });
   });
 
+  it('enforces reversal linkage metadata and strips inapplicable actions', () => {
+    expect(adaptActivity({
+      id: 'reversal:payment:pay-a', sourceId: 'pay-a', kind: 'REVERSAL', reversalSourceKind: 'PAYMENT',
+      relatedActivityId: 'payment:pay-a', targetMembershipId: 'member-a', targetDisplayName: 'Alex', targetMembershipStatus: 'ACTIVE',
+      actorMembershipId: 'member-manager', actorDisplayName: 'Manager', actorMembershipStatus: 'ACTIVE',
+      detailName: 'Cash', detailNote: 'Duplicate payment', paymentMethod: 'CASH', amountMinor: '1250', currency: 'EUR',
+      occurredAt: '2026-08-20T11:00:00Z', status: 'REVERSED', canReverse: true, reversalReasonRequired: true,
+      attachment: { fileName: 'receipt.pdf', mediaType: 'application/pdf', sizeBytes: 42, url: '/receipt' },
+    })).toMatchObject({
+      id: 'reversal:payment:pay-a', kind: 'REVERSAL', relatedActivityId: 'payment:pay-a', reversalSourceKind: 'PAYMENT',
+      detailName: 'Bar', amount: { minorUnits: '1250', currency: 'EUR' }, status: 'POSTED', canReverse: false, reversalReasonRequired: false,
+    });
+    expect(adaptActivity({
+      id: 'reversal:payment:pay-a', sourceId: 'pay-a', kind: 'REVERSAL', reversalSourceKind: 'PAYMENT',
+      relatedActivityId: 'payment:pay-a', targetMembershipId: 'member-a', targetDisplayName: 'Alex', targetMembershipStatus: 'ACTIVE',
+      detailName: 'Cash', amountMinor: '1250', currency: 'EUR', occurredAt: '2026-08-20T11:00:00Z',
+    })).not.toHaveProperty('attachment');
+    expect(() => adaptActivity({ kind: 'REVERSAL' })).toThrow('Reversal activities require a BOOKING or PAYMENT reversalSourceKind.');
+  });
+
   it('validates appearance enums while preserving safe inheritance defaults', () => {
     expect(adaptAppearancePreference({ colorMode: 'DARK' })).toEqual({ colorMode: 'DARK' });
     expect(adaptAppearancePreference({ colorMode: 'SEPIA' })).toEqual({ colorMode: 'SYSTEM' });

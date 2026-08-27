@@ -293,6 +293,16 @@
 
 .dataTable { min-width: var(--data-table-min-width, 720px); }
 
+.dataTable tbody tr[data-focused='true'] > td {
+  border-top: 2px solid var(--color-brand);
+  border-bottom: 2px solid var(--color-brand);
+  background: var(--color-surface-brand-subtle);
+}
+
+.dataTable tbody tr[data-focused='true'] > td:first-child { border-left: 2px solid var(--color-brand); }
+.dataTable tbody tr[data-focused='true'] > td:last-child { border-right: 2px solid var(--color-brand); }
+.dataTable tbody tr[data-focused='true']:focus-visible { outline: 3px solid var(--color-brand); outline-offset: -3px; }
+
 .cardViewport {
   min-width: 0;
   overflow-y: auto;
@@ -310,6 +320,18 @@
 }
 
 .cardList > li { min-width: 0; }
+
+.cardList > li[data-focused='true'] {
+  border-radius: var(--radius-lg);
+  outline: 3px solid var(--color-brand);
+  outline-offset: -3px;
+  background: var(--color-surface-brand-subtle);
+}
+
+.cardList > li[data-focused='true']:focus-visible {
+  outline-width: 4px;
+  outline-offset: 2px;
+}
 
 .collectionState {
   display: grid;

@@ -1,6 +1,7 @@
 import BookOpenCheck from 'lucide-react/dist/esm/icons/book-open-check';
 import CircleCheck from 'lucide-react/dist/esm/icons/circle-check';
 import CircleDollarSign from 'lucide-react/dist/esm/icons/circle-dollar-sign';
+import Link2 from 'lucide-react/dist/esm/icons/link-2';
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
 import Scale from 'lucide-react/dist/esm/icons/scale';
 import { useTranslation } from 'react-i18next';
@@ -28,13 +29,33 @@ interface ActivityDetailsProps {
 interface ActivityActionsProps {
   activity: ActivityEntry;
   groupId: string;
+  onNavigateRelated: (activityId: string) => void;
   onReverse: (activity: ActivityEntry) => void;
 }
 
 interface ActivityCardProps extends ActivityActionsProps {
   actorAvatarUrl?: string;
+  marked?: boolean;
   productImageUrl?: string;
   targetAvatarUrl?: string;
+}
+
+interface ActivityTypeProps extends Pick<ActivityEntry, 'kind'> {
+  marked?: boolean;
+}
+
+/**
+ * Resolves the localized feed label shared by table badges, cards, and reversal origins.
+ *
+ * @param kind - Canonical unified-feed activity kind.
+ * @param t - Active i18next translation function.
+ * @returns Localized activity-kind label.
+ */
+function activityTypeLabel(kind: ActivityEntry['kind'], t: ReturnType<typeof useTranslation>['t']): string {
+  if (kind === 'BOOKING') return t('activities.bookingType');
+  if (kind === 'PAYMENT') return t('activities.paymentType');
+  if (kind === 'REVERSAL') return t('activities.reversalType');
+  return t('activities.adjustmentType');
 }
 
 /**
@@ -59,18 +80,23 @@ export function MembershipIdentity({ avatarUrl, name, status }: MembershipIdenti
  * Renders one transaction kind with an icon-only narrow-screen state.
  *
  * @param props - Unified activity kind.
- * @returns An accessible booking, payment, or adjustment badge.
+ * @returns An accessible booking, payment, reversal, or adjustment badge.
  */
-export function ActivityType({ kind }: Pick<ActivityEntry, 'kind'>) {
+export function ActivityType({ kind, marked = false }: ActivityTypeProps) {
   const { t } = useTranslation();
-  const label = kind === 'BOOKING' ? t('activities.bookingType') : kind === 'PAYMENT' ? t('activities.paymentType') : t('activities.adjustmentType');
-  const TypeIcon = kind === 'BOOKING' ? BookOpenCheck : kind === 'PAYMENT' ? CircleDollarSign : Scale;
-  const tone = kind === 'BOOKING' ? styles.activityTypeBooking : kind === 'PAYMENT' ? styles.activityTypePayment : styles.activityTypeAdjustment;
+  const label = activityTypeLabel(kind, t);
+  const TypeIcon = kind === 'BOOKING' ? BookOpenCheck : kind === 'PAYMENT' ? CircleDollarSign : kind === 'REVERSAL' ? RotateCcw : Scale;
+  const tone = kind === 'BOOKING'
+    ? styles.activityTypeBooking
+    : kind === 'PAYMENT' ? styles.activityTypePayment : kind === 'REVERSAL' ? styles.activityTypeReversal : styles.activityTypeAdjustment;
 
   return (
-    <span aria-label={label} className={`${styles.activityType} ${tone}`} role="img" title={label}>
-      <TypeIcon aria-hidden="true" size={16} />
-      <span aria-hidden="true" className={styles.activityTypeText}>{label}</span>
+    <span className={styles.activityTypeGroup}>
+      <span aria-label={label} className={`${styles.activityType} ${tone}`} role="img" title={label}>
+        <TypeIcon aria-hidden="true" size={16} />
+        <span aria-hidden="true" className={styles.activityTypeText}>{label}</span>
+      </span>
+      {marked ? <span className={styles.markedBadge}>{t('activities.marked')}</span> : null}
     </span>
   );
 }
@@ -86,7 +112,9 @@ export function ActivityState({ kind, status }: Pick<ActivityEntry, 'kind' | 'st
   const reversed = status === 'REVERSED';
   const label = reversed
     ? t('common.reversed')
-    : kind === 'BOOKING' ? t('common.booked') : kind === 'PAYMENT' ? t('activities.paymentReceived') : t('activities.adjustmentPosted');
+    : kind === 'BOOKING'
+      ? t('common.booked')
+      : kind === 'PAYMENT' ? t('activities.paymentReceived') : kind === 'REVERSAL' ? t('activities.reversalPosted') : t('activities.adjustmentPosted');
   const StatusIcon = reversed ? RotateCcw : CircleCheck;
   const tone = reversed ? tableStyles.statusMuted : kind === 'BOOKING' ? tableStyles.statusWarning : '';
   return (
@@ -104,10 +132,17 @@ export function ActivityState({ kind, status }: Pick<ActivityEntry, 'kind' | 'st
  * @returns A compact detail identity shared by tables and cards.
  */
 export function ActivityDetails({ activity, productImageUrl }: ActivityDetailsProps) {
+  const { t } = useTranslation();
+  const reversalSource = activity.reversalSourceKind ? activityTypeLabel(activity.reversalSourceKind, t) : undefined;
   return (
     <span className={styles.activityDetails}>
       {productImageUrl ? <img alt="" decoding="async" loading="lazy" src={productImageUrl} /> : null}
-      <span><strong>{activity.detailName}</strong>{activity.quantity && activity.quantity > 1 ? ` × ${activity.quantity}` : ''}{activity.detailNote ? <small>{activity.detailNote}</small> : null}</span>
+      <span>
+        <strong>{activity.detailName}</strong>
+        {activity.quantity && activity.quantity > 1 ? ` × ${activity.quantity}` : ''}
+        {reversalSource ? <small>{t('activities.reversalSource', { source: reversalSource })}</small> : null}
+        {activity.detailNote ? <small>{activity.detailNote}</small> : null}
+      </span>
     </span>
   );
 }
@@ -128,18 +163,31 @@ export function ActivityAmount({ amount, status }: Pick<ActivityEntry, 'amount' 
 }
 
 /**
- * Renders the receipt and reversal actions available for one authorized activity.
+ * Renders related-entry navigation, receipt, and reversal actions for one authorized activity.
  *
- * @param props - Activity action metadata, group scope, and reversal callback.
- * @returns Available actions or nothing for immutable rows without an attachment.
+ * @param props - Activity action metadata, group scope, related navigation, and reversal callback.
+ * @returns Available actions or nothing for immutable, unrelated rows.
  */
-export function ActivityActions({ activity, groupId, onReverse }: ActivityActionsProps) {
+export function ActivityActions({ activity, groupId, onNavigateRelated, onReverse }: ActivityActionsProps) {
   const { t } = useTranslation();
-  if (!activity.attachment && !activity.canReverse) return null;
+  const isReversal = activity.kind === 'REVERSAL';
+  const relatedActivityId = activity.relatedActivityId;
+  if (!relatedActivityId && (isReversal || (!activity.attachment && !activity.canReverse))) return null;
   return (
     <div className={styles.rowActions}>
-      {activity.attachment ? <PaymentAttachmentAction attachment={activity.attachment} groupId={groupId} paymentId={activity.sourceId} /> : null}
-      {activity.canReverse ? <Button leadingIcon={<RotateCcw size={16} />} onClick={() => onReverse(activity)} size="small" variant="ghost">{t('activities.reverse')}</Button> : null}
+      {relatedActivityId ? (
+        <Button
+          aria-label={t(isReversal ? 'activities.linkToOriginalAccessible' : 'activities.linkToReversalAccessible')}
+          leadingIcon={<Link2 size={16} />}
+          onClick={() => onNavigateRelated(relatedActivityId)}
+          size="small"
+          variant="ghost"
+        >
+          {t(isReversal ? 'activities.linkToOriginal' : 'activities.linkToReversal')}
+        </Button>
+      ) : null}
+      {!isReversal && activity.attachment ? <PaymentAttachmentAction attachment={activity.attachment} groupId={groupId} paymentId={activity.sourceId} /> : null}
+      {!isReversal && activity.canReverse ? <Button leadingIcon={<RotateCcw size={16} />} onClick={() => onReverse(activity)} size="small" variant="ghost">{t('activities.reverse')}</Button> : null}
     </div>
   );
 }
@@ -150,13 +198,13 @@ export function ActivityActions({ activity, groupId, onReverse }: ActivityAction
  * @param props - Activity, resolved media projections, group scope, and action callback.
  * @returns A semantic card containing every field exposed by the desktop table.
  */
-export function ActivityCard({ activity, actorAvatarUrl, groupId, onReverse, productImageUrl, targetAvatarUrl }: ActivityCardProps) {
+export function ActivityCard({ activity, actorAvatarUrl, groupId, marked = false, onNavigateRelated, onReverse, productImageUrl, targetAvatarUrl }: ActivityCardProps) {
   const { t } = useTranslation();
-  const typeLabel = activity.kind === 'BOOKING' ? t('activities.bookingType') : activity.kind === 'PAYMENT' ? t('activities.paymentType') : t('activities.adjustmentType');
+  const typeLabel = activityTypeLabel(activity.kind, t);
   return (
     <article aria-label={t('activities.cardLabel', { type: typeLabel, detail: activity.detailName })} className={styles.activityCard}>
       <header className={styles.cardHeader}>
-        <ActivityType kind={activity.kind} />
+        <ActivityType kind={activity.kind} marked={marked} />
         <ActivityAmount amount={activity.amount} status={activity.status} />
       </header>
       <div className={styles.cardDetails}><span className={styles.cardLabel}>{t('common.details')}</span><ActivityDetails activity={activity} productImageUrl={productImageUrl} /></div>
@@ -180,7 +228,7 @@ export function ActivityCard({ activity, actorAvatarUrl, groupId, onReverse, pro
       </dl>
       <footer className={styles.cardFooter}>
         <ActivityState kind={activity.kind} status={activity.status} />
-        <ActivityActions activity={activity} groupId={groupId} onReverse={onReverse} />
+        <ActivityActions activity={activity} groupId={groupId} onNavigateRelated={onNavigateRelated} onReverse={onReverse} />
       </footer>
     </article>
   );

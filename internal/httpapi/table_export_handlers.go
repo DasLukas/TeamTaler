@@ -1571,6 +1571,8 @@ func activityTone(kind activities.Kind) tabular.CellTone {
 		return tabular.ToneWarning
 	case activities.KindPayment:
 		return tabular.ToneSuccess
+	case activities.KindReversal:
+		return tabular.ToneDanger
 	default:
 		return tabular.ToneInfo
 	}
@@ -1674,6 +1676,8 @@ func activityKindLabel(kind activities.Kind) string {
 		return "Buchung"
 	case activities.KindPayment:
 		return "Einzahlung"
+	case activities.KindReversal:
+		return "Stornierung"
 	default:
 		return "Korrektur"
 	}

@@ -1,4 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import ArrowLeft from 'lucide-react/dist/esm/icons/arrow-left';
 import ArrowUpDown from 'lucide-react/dist/esm/icons/arrow-up-down';
 import BookOpenCheck from 'lucide-react/dist/esm/icons/book-open-check';
 import CircleDollarSign from 'lucide-react/dist/esm/icons/circle-dollar-sign';
@@ -7,7 +8,7 @@ import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
 import Scale from 'lucide-react/dist/esm/icons/scale';
 import Table2 from 'lucide-react/dist/esm/icons/table-2';
 import X from 'lucide-react/dist/esm/icons/x';
-import { useCallback, useDeferredValue, useId, useMemo, useState } from 'react';
+import { useCallback, useDeferredValue, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { currencyExponent } from '@/api/money';
@@ -19,13 +20,14 @@ import { Field, TextInput } from '@/components/ui/FormField';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { SelectMenu, type SelectMenuOption } from '@/components/ui/SelectMenu';
 import { CategoryIcon } from '@/features/shared/CategoryIcon';
-import { DataTable, type DataTableCardView, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange } from '@/features/shared/DataTable';
+import { DataTable, type DataTableCardRenderContext, type DataTableCardView, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange, type DataTableRowFocus } from '@/features/shared/DataTable';
 import { formatGermanDateTime } from '@/features/shared/dateFormat';
 import { createMemberFilterOption } from '@/features/shared/memberFilterOption';
 import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { ActivityActions, ActivityAmount, ActivityCard, ActivityDetails, ActivityState, ActivityType, MembershipIdentity } from './ActivityEntryPresentation';
+import { useActivityFocusNavigation } from './useActivityFocusNavigation';
 import styles from './ActivitiesPage.module.css';
 
 const activityPageSize = 50;
@@ -71,6 +73,11 @@ export function ActivitiesPage() {
   const { activeGroup, activeGroupId, session } = useActiveGroup();
   const compact = useMediaQuery('(max-width: 767px)');
   const queryClient = useQueryClient();
+  const activityViewportRef = useRef<HTMLDivElement>(null);
+  const loadedActivityIdsRef = useRef<ReadonlySet<string>>(new Set());
+  const assignActivityViewport = useCallback((element: HTMLDivElement | null) => {
+    activityViewportRef.current = element;
+  }, []);
   const reversalFormId = useId();
   const sortFormId = useId();
   const filterOptionsQuery = useQuery({ queryKey: ['activities', activeGroupId, 'filter-options'], queryFn: () => api.getActivityFilterOptions(activeGroupId) });
@@ -100,6 +107,9 @@ export function ActivitiesPage() {
       options: [
         { label: t('activities.bookingType'), value: 'BOOKING', visual: <BookOpenCheck aria-hidden="true" size={19} /> },
         { label: t('activities.paymentType'), value: 'PAYMENT', visual: <CircleDollarSign aria-hidden="true" size={19} /> },
+        ...(filterOptionsQuery.data?.kinds.includes('REVERSAL')
+          ? [{ label: t('activities.reversalType'), value: 'REVERSAL', visual: <RotateCcw aria-hidden="true" size={19} /> }]
+          : []),
         ...(filterOptionsQuery.data?.kinds.includes('ADJUSTMENT')
           ? [{ label: t('activities.adjustmentType'), value: 'ADJUSTMENT', visual: <Scale aria-hidden="true" size={19} /> }]
           : []),
@@ -179,6 +189,14 @@ export function ActivitiesPage() {
     namespace: 'activities',
     sortableColumnIds: ['kind', 'targetName', 'actorName', 'detailName', 'categoryName', 'occurredAt', 'amount', 'status'],
   });
+  const {
+    anchorId,
+    clearFocusForQueryChange,
+    focusedActivityId,
+    leaveFocus,
+    navigateToActivity,
+    restorePendingScrollPosition,
+  } = useActivityFocusNavigation({ loadedActivityIdsRef, viewportRef: activityViewportRef });
   const cardsActive = compact && mobileView === 'cards';
   const selectReversal = useCallback((activity: ActivityEntry) => setReversal(activity), []);
   const changeMobileView = (view: MobileActivityView) => {
@@ -216,26 +234,66 @@ export function ActivitiesPage() {
       targetMembershipId: tableState.filters.targetMembershipId as string | undefined,
     };
   }, [activeGroup.currency, deferredSearch, tableState.filters, tableState.sorting]);
+  const activeCollectionQuery = useMemo<ActivityCollectionQuery>(() => anchorId ? {
+    anchorId,
+    direction: collectionQuery.direction,
+    limit: activityPageSize,
+    sort: collectionQuery.sort,
+  } : collectionQuery, [anchorId, collectionQuery]);
   const activitiesQuery = useInfiniteQuery({
     getNextPageParam: (lastPage: CollectionPage<ActivityEntry>) => lastPage.nextCursor,
     initialPageParam: undefined as string | undefined,
-    queryFn: ({ pageParam }): Promise<CollectionPage<ActivityEntry>> => api.getActivitiesPage(activeGroupId, { ...collectionQuery, cursor: pageParam }),
-    queryKey: ['activities', activeGroupId, 'collection', collectionQuery],
+    queryFn: ({ pageParam }): Promise<CollectionPage<ActivityEntry>> => api.getActivitiesPage(activeGroupId, anchorId && pageParam ? {
+      cursor: pageParam,
+      direction: activeCollectionQuery.direction,
+      limit: activityPageSize,
+      sort: activeCollectionQuery.sort,
+    } : { ...activeCollectionQuery, cursor: pageParam }),
+    queryKey: ['activities', activeGroupId, 'collection', activeCollectionQuery],
   });
   const activities = useMemo(() => activitiesQuery.data?.pages.flatMap((page) => page.items) ?? [], [activitiesQuery.data?.pages]);
+  useLayoutEffect(() => {
+    loadedActivityIdsRef.current = new Set(activities.map((activity) => activity.id));
+  }, [activities]);
+  useLayoutEffect(() => {
+    if (!activitiesQuery.isLoading) restorePendingScrollPosition();
+  }, [activities, activitiesQuery.isLoading, restorePendingScrollPosition]);
+  const focusedActivity = useMemo(
+    () => activities.find((activity) => activity.id === focusedActivityId),
+    [activities, focusedActivityId],
+  );
+  const rowFocus = useMemo<DataTableRowFocus | undefined>(() => focusedActivityId ? {
+    announcement: t('activities.markedAnnouncement', { detail: focusedActivity?.detailName ?? t('activities.focusedEntry') }),
+    rowId: focusedActivityId,
+  } : undefined, [focusedActivity?.detailName, focusedActivityId, t]);
+  const hasPausedQuery = Boolean(anchorId && (tableState.searchValue.trim() || Object.keys(tableState.filters).length > 0));
+  const onFiltersChange = useCallback<typeof tableState.onFiltersChange>((filters) => {
+    clearFocusForQueryChange();
+    tableState.onFiltersChange(filters);
+  }, [clearFocusForQueryChange, tableState]);
+  const onSearchChange = useCallback((value: string) => {
+    clearFocusForQueryChange();
+    tableState.onSearchChange(value);
+  }, [clearFocusForQueryChange, tableState]);
+  const onSortingChange = useCallback<typeof tableState.onSortingChange>((updater) => {
+    clearFocusForQueryChange();
+    tableState.onSortingChange(updater);
+  }, [clearFocusForQueryChange, tableState]);
   const productImages = useMemo(() => new Map(
     filterOptionsQuery.data?.products.map((product) => [product.productId, product.imageUrl] as const) ?? [],
   ), [filterOptionsQuery.data?.products]);
-  const renderActivityCard = useCallback((activity: ActivityEntry) => (
+  const renderActivityCard = useCallback((activity: ActivityEntry, { isFocused }: DataTableCardRenderContext) => (
     <ActivityCard
       activity={activity}
       actorAvatarUrl={activity.actorMembershipId === activeGroup.membership?.id ? session.user.avatarUrl : activity.actorAvatarUrl}
       groupId={activeGroupId}
+      marked={isFocused}
+      onNavigateRelated={navigateToActivity}
       onReverse={selectReversal}
       productImageUrl={activity.productId ? productImages.get(activity.productId) : undefined}
       targetAvatarUrl={activity.targetMembershipId === activeGroup.membership?.id ? session.user.avatarUrl : activity.targetAvatarUrl}
     />
-  ), [activeGroup.membership?.id, activeGroupId, productImages, selectReversal, session.user.avatarUrl]);
+  ), [activeGroup.membership?.id, activeGroupId, navigateToActivity, productImages, selectReversal, session.user.avatarUrl]);
   const cardView = useMemo<DataTableCardView<ActivityEntry>>(() => ({
     ariaLabel: t('activities.cardsAriaLabel'),
     renderItem: renderActivityCard,
@@ -271,7 +329,7 @@ export function ActivitiesPage() {
   const columns = useMemo<DataTableColumnDef<ActivityEntry>[]>(() => [
     {
       accessorKey: 'kind',
-      cell: ({ row }) => <ActivityType kind={row.original.kind} />,
+      cell: ({ row }) => <ActivityType kind={row.original.kind} marked={row.original.id === focusedActivityId} />,
       enableSorting: true,
       header: t('activities.transaction'),
       id: 'kind',
@@ -333,27 +391,40 @@ export function ActivitiesPage() {
     {
       cell: ({ row }) => {
         const activity = row.original;
-        return <ActivityActions activity={activity} groupId={activeGroupId} onReverse={selectReversal} />;
+        return <ActivityActions activity={activity} groupId={activeGroupId} onNavigateRelated={navigateToActivity} onReverse={selectReversal} />;
       },
       enableSorting: false,
       header: () => <span className="sr-only">{t('common.action')}</span>,
       id: 'action',
       meta: { label: t('common.action') },
     },
-  ], [activeGroup.membership?.id, activeGroupId, productImages, selectReversal, session.user.avatarUrl, t]);
+  ], [activeGroup.membership?.id, activeGroupId, focusedActivityId, navigateToActivity, productImages, selectReversal, session.user.avatarUrl, t]);
 
   const reversingPayment = reversal?.kind === 'PAYMENT';
   return (
     <Page className={styles.page} title={t('activities.title')} wide>
       <div className={styles.activityList}>
+        {focusedActivityId ? (
+          <aside className={styles.focusBanner} role="status">
+            <div className={styles.focusBannerText}>
+              <strong>{t(focusedActivity ? 'activities.focusMarked' : 'activities.focusLoading')}</strong>
+              <span>{t(hasPausedQuery ? 'activities.focusFiltersPaused' : 'activities.focusContext')}</span>
+            </div>
+            <div className={styles.focusBannerActions}>
+              <Button leadingIcon={<ArrowLeft size={17} />} onClick={leaveFocus} size="small" variant="secondary">
+                {t(hasPausedQuery ? 'activities.focusReturnFiltered' : 'activities.focusClear')}
+              </Button>
+            </div>
+          </aside>
+        ) : null}
         <DataTable
           ariaLabel={t('activities.title')}
           cardView={cardView}
           columns={columns}
           data={activities}
-          emptyContent={activitiesQuery.isError ? t('activities.error') : t('activities.noResults')}
+          emptyContent={activitiesQuery.isError ? t(focusedActivityId ? 'activities.focusError' : 'activities.error') : t('activities.noResults')}
           exportConfig={{
-            disabled: deferredSearch !== tableState.searchValue.trim(),
+            disabled: Boolean(focusedActivityId) || deferredSearch !== tableState.searchValue.trim(),
             groupId: activeGroupId,
             query: { ...collectionQuery, limit: undefined },
             table: 'ACTIVITIES',
@@ -367,7 +438,13 @@ export function ActivitiesPage() {
           isLoadingMore={activitiesQuery.isFetchingNextPage}
           labels={{ ...labels, searchLabel: t('activities.searchLabel'), searchPlaceholder: t('activities.searchPlaceholder') }}
           minTableWidth="1480px"
+          onFiltersChange={onFiltersChange}
           onLoadMore={() => void activitiesQuery.fetchNextPage()}
+          onSearchChange={onSearchChange}
+          onSortingChange={onSortingChange}
+          rowFocus={rowFocus}
+          searchValue={tableState.searchValue}
+          sorting={tableState.sorting}
           toolbarActions={compact ? <>
             <Button
               aria-expanded={sortDialogOpen}
@@ -393,7 +470,8 @@ export function ActivitiesPage() {
             </Button>
           </> : undefined}
           viewMode={cardsActive ? 'cards' : 'table'}
-          {...tableState}
+          viewportRef={assignActivityViewport}
+          filters={tableState.filters}
         />
       </div>
       <Modal
@@ -408,7 +486,7 @@ export function ActivitiesPage() {
           id={sortFormId}
           onSubmit={(event) => {
             event.preventDefault();
-            tableState.onSortingChange([{ id: draftSortId, desc: draftSortDescending }]);
+            onSortingChange([{ id: draftSortId, desc: draftSortDescending }]);
             setSortDialogOpen(false);
           }}
         >

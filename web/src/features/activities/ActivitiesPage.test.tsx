@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,6 +8,7 @@ import { ActiveGroupContext } from '@/app/active-group-context';
 import modalStyles from '@/components/ui/Modal.module.css';
 import i18n from '@/i18n';
 import { ActivitiesPage } from './ActivitiesPage';
+import activityStyles from './ActivitiesPage.module.css';
 
 const apiMock = vi.hoisted(() => ({
   getActivitiesPage: vi.fn(),
@@ -18,6 +19,8 @@ const apiMock = vi.hoisted(() => ({
 }));
 
 vi.mock('@/api/client', () => ({ api: apiMock }));
+
+const scrollIntoViewMock = vi.fn();
 
 const session: Session = {
   user: { id: 'user-viewer', displayName: 'Viewer', email: 'viewer@example.test' },
@@ -89,8 +92,41 @@ const adjustment: ActivityEntry = {
   reversalReasonRequired: false,
 };
 
+const reversedBooking: ActivityEntry = {
+  ...booking,
+  id: 'booking:booking-a',
+  relatedActivityId: 'reversal:booking:booking-a',
+  status: 'REVERSED',
+};
+
+const bookingReversal: ActivityEntry = {
+  id: 'reversal:booking:booking-a',
+  sourceId: 'booking-a',
+  kind: 'REVERSAL',
+  reversalSourceKind: 'BOOKING',
+  relatedActivityId: 'booking:booking-a',
+  targetMembershipId: 'member-target',
+  targetDisplayName: 'Target Member',
+  targetMembershipStatus: 'ACTIVE',
+  targetAvatarUrl: '/avatars/target.png',
+  actorMembershipId: 'member-reversing-manager',
+  actorDisplayName: 'Reversing Manager',
+  actorMembershipStatus: 'ACTIVE',
+  detailName: 'Late arrival',
+  detailNote: 'Entered twice',
+  categoryId: 'category-penalties',
+  categoryName: 'Penalties',
+  productId: 'product-penalty',
+  quantity: 1,
+  amount: { minorUnits: '-500', currency: 'EUR' },
+  occurredAt: '2026-08-04T12:05:00Z',
+  status: 'POSTED',
+  canReverse: false,
+  reversalReasonRequired: false,
+};
+
 const filterOptions: ActivityFilterOptions = {
-  kinds: ['BOOKING', 'PAYMENT', 'ADJUSTMENT'],
+  kinds: ['BOOKING', 'PAYMENT', 'REVERSAL', 'ADJUSTMENT'],
   members: [{ membershipId: 'member-target', displayName: 'Target Member', avatarUrl: '/avatars/target.png' }],
   categories: [{ categoryId: 'category-penalties', name: 'Penalties', icon: 'penalty' }],
   products: [{ productId: 'product-penalty', categoryId: 'category-penalties', name: 'Late arrival', imageUrl: '/images/late-arrival.png' }],
@@ -144,6 +180,7 @@ describe('ActivitiesPage unified feed', () => {
     apiMock.reversePayment.mockResolvedValue(undefined);
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:receipt');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoViewMock });
   });
 
   it('renders bookings, payments, and corrections from one semantic feed', async () => {
@@ -158,6 +195,114 @@ describe('ActivitiesPage unified feed', () => {
     expect(within(table).getByText(/-20,00/)).toBeVisible();
     expect(within(table).getByLabelText(i18n.t('activities.actorUnavailable'))).toBeVisible();
     expect(apiMock.getActivitiesPage).toHaveBeenCalledWith('group-a', expect.objectContaining({ limit: 50, sort: 'occurredAt', direction: 'desc' }));
+  });
+
+  it('renders audited reversals and links both entries without refetching loaded targets', async () => {
+    const user = userEvent.setup();
+    apiMock.getActivitiesPage.mockResolvedValue(activityPage([bookingReversal, reversedBooking]));
+    renderActivities();
+
+    const table = await screen.findByRole('table', { name: i18n.t('activities.title') });
+    const originalRow = (await within(table).findByRole('img', { name: i18n.t('activities.bookingType') })).closest('tr');
+    const reversalRow = (await within(table).findByRole('img', { name: i18n.t('activities.reversalType') })).closest('tr');
+    expect(originalRow).not.toBeNull();
+    expect(reversalRow).not.toBeNull();
+    expect(within(originalRow as HTMLElement).getByText(/\+5,00/)).toHaveClass(activityStyles.activityAmountReversed);
+    expect(within(reversalRow as HTMLElement).getByText(/-5,00/)).not.toHaveClass(activityStyles.activityAmountReversed);
+    expect(within(reversalRow as HTMLElement).getByText(i18n.t('activities.reversalSource', { source: i18n.t('activities.bookingType') }))).toBeVisible();
+    expect(within(reversalRow as HTMLElement).getByText('Entered twice')).toBeVisible();
+    expect(within(reversalRow as HTMLElement).getByText('Reversing Manager')).toBeVisible();
+    expect(within(reversalRow as HTMLElement).getByRole('img', { name: i18n.t('activities.reversalPosted') })).toBeVisible();
+    expect(within(reversalRow as HTMLElement).queryByRole('button', { name: i18n.t('activities.reverse') })).not.toBeInTheDocument();
+    expect(within(reversalRow as HTMLElement).queryByRole('button', { name: i18n.t('paymentAttachment.action') })).not.toBeInTheDocument();
+
+    await user.click(within(originalRow as HTMLElement).getByRole('button', { name: i18n.t('activities.linkToReversalAccessible') }));
+    await waitFor(() => expect(new URL(window.location.href).searchParams.get('tt.activities.focus')).toBe(bookingReversal.id));
+    expect(reversalRow).toHaveAttribute('data-focused', 'true');
+    expect(within(reversalRow as HTMLElement).getByText(i18n.t('activities.marked'))).toBeVisible();
+    expect(document.activeElement).toBe(reversalRow);
+
+    await user.click(within(reversalRow as HTMLElement).getByRole('button', { name: i18n.t('activities.linkToOriginalAccessible') }));
+    await waitFor(() => expect(new URL(window.location.href).searchParams.get('tt.activities.focus')).toBe(reversedBooking.id));
+    expect(originalRow).toHaveAttribute('data-focused', 'true');
+    expect(within(originalRow as HTMLElement).getByText(i18n.t('activities.marked'))).toBeVisible();
+    expect(apiMock.getActivitiesPage).toHaveBeenCalledTimes(1);
+    expect(scrollIntoViewMock).toHaveBeenLastCalledWith({ block: 'center', inline: 'nearest' });
+
+    await act(async () => {
+      window.history.back();
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+    await waitFor(() => expect(new URL(window.location.href).searchParams.get('tt.activities.focus')).toBe(bookingReversal.id));
+    expect(reversalRow).toHaveAttribute('data-focused', 'true');
+  });
+
+  it('loads missing links through an unfiltered anchor context and exits focus on query changes', async () => {
+    const user = userEvent.setup();
+    window.history.replaceState({}, '', `/activities?tt.activities.search=${encodeURIComponent('Late')}`);
+    apiMock.getActivitiesPage.mockImplementation((_groupId: string, query: { anchorId?: string }) => Promise.resolve(
+      query.anchorId ? activityPage([bookingReversal, reversedBooking]) : activityPage([reversedBooking]),
+    ));
+    renderActivities();
+
+    const originalRow = (await screen.findByRole('img', { name: i18n.t('activities.bookingType') })).closest('tr');
+    await user.click(within(originalRow as HTMLElement).getByRole('button', { name: i18n.t('activities.linkToReversalAccessible') }));
+
+    await waitFor(() => expect(apiMock.getActivitiesPage).toHaveBeenLastCalledWith('group-a', {
+      anchorId: bookingReversal.id,
+      cursor: undefined,
+      direction: 'desc',
+      limit: 50,
+      sort: 'occurredAt',
+    }));
+    expect(screen.getByText(i18n.t('activities.focusFiltersPaused'))).toBeVisible();
+    expect(screen.getByRole('searchbox', { name: i18n.t('activities.searchLabel') })).toHaveValue('Late');
+    expect(screen.getByRole('button', { name: i18n.t('exports.table.action') })).toBeDisabled();
+    expect(await screen.findByText(i18n.t('activities.marked'))).toBeVisible();
+
+    await user.clear(screen.getByRole('searchbox', { name: i18n.t('activities.searchLabel') }));
+    await waitFor(() => expect(new URL(window.location.href).searchParams.has('tt.activities.focus')).toBe(false));
+    expect(screen.queryByText(i18n.t('activities.focusFiltersPaused'))).not.toBeInTheDocument();
+  });
+
+  it('restores the collection scroll position when browser Back leaves a linked focus', async () => {
+    const user = userEvent.setup();
+    apiMock.getActivitiesPage.mockResolvedValue(activityPage([bookingReversal, reversedBooking]));
+    renderActivities();
+
+    const table = await screen.findByRole('table', { name: i18n.t('activities.title') });
+    const viewport = table.closest<HTMLDivElement>('[role="region"]');
+    const originalRow = (await within(table).findByRole('img', { name: i18n.t('activities.bookingType') })).closest('tr');
+    expect(viewport).not.toBeNull();
+    if (viewport) viewport.scrollTop = 280;
+    await user.click(within(originalRow as HTMLElement).getByRole('button', { name: i18n.t('activities.linkToReversalAccessible') }));
+    await waitFor(() => expect(new URL(window.location.href).searchParams.has('tt.activities.focus')).toBe(true));
+    if (viewport) viewport.scrollTop = 0;
+
+    await act(async () => {
+      window.history.back();
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+
+    await waitFor(() => expect(new URL(window.location.href).searchParams.has('tt.activities.focus')).toBe(false));
+    await waitFor(() => expect(viewport?.scrollTop).toBe(280));
+    expect(screen.queryByText(i18n.t('activities.marked'))).not.toBeInTheDocument();
+  });
+
+  it('marks and centers linked activities in the compact card presentation', async () => {
+    const user = userEvent.setup();
+    useCompactViewport();
+    apiMock.getActivitiesPage.mockResolvedValue(activityPage([bookingReversal, reversedBooking]));
+    renderActivities();
+
+    const originalCard = await screen.findByRole('article', { name: i18n.t('activities.cardLabel', { type: i18n.t('activities.bookingType'), detail: reversedBooking.detailName }) });
+    await user.click(within(originalCard).getByRole('button', { name: i18n.t('activities.linkToReversalAccessible') }));
+
+    const reversalCard = await screen.findByRole('article', { name: i18n.t('activities.cardLabel', { type: i18n.t('activities.reversalType'), detail: bookingReversal.detailName }) });
+    expect(reversalCard.closest('li')).toHaveAttribute('data-focused', 'true');
+    expect(within(reversalCard).getByText(i18n.t('activities.marked'))).toBeVisible();
+    expect(document.activeElement).toBe(reversalCard.closest('li'));
+    expect(apiMock.getActivitiesPage).toHaveBeenCalledTimes(1);
   });
 
   it('uses persistent cards by default on compact screens and toggles to the horizontal table', async () => {

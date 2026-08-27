@@ -262,6 +262,7 @@ func TestRemoveCategoryTypeMigrationPreservesExistingRows(t *testing.T) {
 		`INSERT INTO schema_migrations(version) VALUES('0038_payment_attachments.sql')`,
 		`INSERT INTO schema_migrations(version) VALUES('0039_activity_payment_created_indexes.sql')`,
 		`INSERT INTO schema_migrations(version) VALUES('0040_appearance_preferences.sql')`,
+		`INSERT INTO schema_migrations(version) VALUES('0043_activity_reversal_feed_indexes.sql')`,
 		`CREATE TABLE users(id TEXT PRIMARY KEY) STRICT`,
 		`CREATE TABLE groups(id TEXT PRIMARY KEY) STRICT`,
 		`CREATE TABLE invitations(id TEXT PRIMARY KEY, group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE) STRICT`,

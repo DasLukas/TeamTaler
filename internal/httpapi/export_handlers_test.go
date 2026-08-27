@@ -106,6 +106,12 @@ func TestGroupTableExportCSVUsesCanonicalServerColumnsAndRecordsAudit(t *testing
 	server.activities = activities.Service{DB: server.db}
 	server.finance = finance.Service{DB: server.db}
 	server.periods = periods.Service{DB: server.db}
+	if _, err := server.db.Exec(`INSERT INTO payments(
+		id,group_id,membership_id,amount_minor,received_at,method,method_label,reference,note,created_by,created_at,reversed_at,reversed_by,reversal_reason
+	) VALUES('payment-export-reversed',?,?,1250,'2026-08-20T09:00:00Z','CASH','Cash','Original receipt','',?,'2026-08-20T10:00:00Z','2026-08-21T11:00:00Z',?,'Duplicate receipt')`,
+		membership.GroupID, membership.ID, membership.ID, membership.ID); err != nil {
+		t.Fatalf("seed reversed export payment: %v", err)
+	}
 
 	body := `{"table":"ACTIVITIES","format":"CSV","timeZone":"Europe/Berlin","query":{"sort":"occurredAt","direction":"desc"}}`
 	request := authenticatedJSONRequest(http.MethodPost, "/api/v1/groups/"+membership.GroupID+"/table-exports", body, principal)
@@ -121,6 +127,20 @@ func TestGroupTableExportCSVUsesCanonicalServerColumnsAndRecordsAudit(t *testing
 	headers, err := reader.Read()
 	if err != nil || !slicesEqual(headers, []string{"Vorgang", "Mitglied", "Erfasst von", "Details", "Kategorie", "Zeitpunkt", "Betrag", "Status"}) {
 		t.Fatalf("CSV headers=%#v err=%v", headers, err)
+	}
+	records, err := reader.ReadAll()
+	if err != nil || len(records) != 2 {
+		t.Fatalf("CSV activity records=%#v err=%v", records, err)
+	}
+	var reversalRecord []string
+	for _, record := range records {
+		if record[0] == "Stornierung" {
+			reversalRecord = record
+		}
+	}
+	if len(reversalRecord) != len(headers) || reversalRecord[2] != membership.DisplayName ||
+		!strings.Contains(reversalRecord[3], "Duplicate receipt") || reversalRecord[6] != "12,50 EUR" || reversalRecord[7] != "Verbucht" {
+		t.Fatalf("CSV reversal record=%#v", reversalRecord)
 	}
 	var auditCount int
 	if err := server.db.QueryRow(`SELECT count(*) FROM audit_events WHERE group_id=? AND action='table.exported' AND resource_id='activities'`, membership.GroupID).Scan(&auditCount); err != nil || auditCount != 1 {
@@ -164,6 +184,12 @@ func TestPDFTableRowsEmbedManagedMemberImagesAndActivityTones(t *testing.T) {
 	}
 	if got := activityKindCell(activities.KindPayment, true).Tone; got != exportingtabular.ToneSuccess {
 		t.Fatalf("payment tone = %v, want %v", got, exportingtabular.ToneSuccess)
+	}
+	if got := activityKindCell(activities.KindReversal, true); got.Tone != exportingtabular.ToneDanger || got.Text != "Stornierung" {
+		t.Fatalf("reversal kind cell = %#v", got)
+	}
+	if got := activityStatusCell(activities.KindReversal, "POSTED", true); got.Tone != exportingtabular.ToneDanger || got.Text != "Verbucht" {
+		t.Fatalf("reversal status cell = %#v", got)
 	}
 	if got := activityMoneyCell(-1250, "EUR", activities.KindPayment, true).Tone; got != exportingtabular.ToneSuccess {
 		t.Fatalf("payment amount tone = %v, want %v", got, exportingtabular.ToneSuccess)

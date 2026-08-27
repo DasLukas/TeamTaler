@@ -16,8 +16,10 @@ import MoveHorizontal from 'lucide-react/dist/esm/icons/move-horizontal';
 import Search from 'lucide-react/dist/esm/icons/search';
 import X from 'lucide-react/dist/esm/icons/x';
 import {
+  useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -159,8 +161,22 @@ export type DataTableColumnDef<Data extends RowData, Value = unknown> = ColumnDe
 export interface DataTableCardView<Data extends RowData> {
   /** Accessible name applied to the scrollable card collection. */
   ariaLabel: string;
-  /** Renders one feature-specific card from the same sorted row model as the table. */
-  renderItem: (row: Data) => ReactNode;
+  /** Renders one feature-specific card and its current focus presentation state. */
+  renderItem: (row: Data, context: DataTableCardRenderContext) => ReactNode;
+}
+
+/** Presentation context supplied to each feature-owned card renderer. */
+export interface DataTableCardRenderContext {
+  /** Whether this card is the persistent navigation target. */
+  isFocused: boolean;
+}
+
+/** One row that should be centered, focused, marked, and announced. */
+export interface DataTableRowFocus {
+  /** Polite assistive-technology announcement emitted after the row is rendered. */
+  announcement: string;
+  /** Stable row ID returned by the table's `getRowId` callback. */
+  rowId: string;
 }
 
 /** Available representations of one data-table collection. */
@@ -192,6 +208,8 @@ export interface DataTableProps<Data extends RowData, FilterId extends string = 
   onLoadMore?: () => void;
   onSearchChange: (value: string) => void;
   onSortingChange: OnChangeFn<SortingState>;
+  /** Optional persistent row-navigation target shared by table and card representations. */
+  rowFocus?: DataTableRowFocus;
   searchValue: string;
   sorting: SortingState;
   /** Hides search, filter, and toolbar actions for compact collection tables. */
@@ -202,6 +220,8 @@ export interface DataTableProps<Data extends RowData, FilterId extends string = 
   totalCount?: number;
   /** Chooses the semantic table or the supplied card presentation. */
   viewMode?: DataTableViewMode;
+  /** Callback ref receiving the active vertically scrollable table or card viewport. */
+  viewportRef?: (element: HTMLDivElement | null) => void;
 }
 
 /** Properties accepted by the horizontal table viewport. */
@@ -210,6 +230,8 @@ export interface DataTableViewportProps {
   children: ReactNode;
   minTableWidth?: string;
   scrollHint: string;
+  /** Callback ref receiving the horizontal and vertical table viewport element. */
+  viewportRef?: (element: HTMLDivElement | null) => void;
 }
 
 /** Properties accepted by the result and incremental-loading footer. */
@@ -266,9 +288,13 @@ function compactFilters<FilterId extends string>(filters: DataTableFilterState<F
  * @example
  * <DataTableViewport ariaLabel="Payments" scrollHint="Scroll horizontally" minTableWidth="760px"><table /></DataTableViewport>
  */
-export function DataTableViewport({ ariaLabel, children, minTableWidth = '720px', scrollHint }: DataTableViewportProps) {
+export function DataTableViewport({ ariaLabel, children, minTableWidth = '720px', scrollHint, viewportRef: forwardedViewportRef }: DataTableViewportProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const [scrollPosition, setScrollPosition] = useState<ScrollPosition>('none');
+  const assignViewportRef = useCallback((element: HTMLDivElement | null) => {
+    viewportRef.current = element;
+    forwardedViewportRef?.(element);
+  }, [forwardedViewportRef]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -306,7 +332,7 @@ export function DataTableViewport({ ariaLabel, children, minTableWidth = '720px'
         <div
           aria-label={ariaLabel}
           className={`${tableStyles.tableWrap} ${styles.viewport}`}
-          ref={viewportRef}
+          ref={assignViewportRef}
           role="region"
           style={{ '--data-table-min-width': minTableWidth } as CSSProperties}
           tabIndex={scrollPosition === 'none' ? undefined : 0}
@@ -698,6 +724,7 @@ export function DataTable<Data extends RowData, FilterId extends string = string
   onLoadMore,
   onSearchChange,
   onSortingChange,
+  rowFocus,
   searchValue,
   showControls = true,
   showResultBar = true,
@@ -705,7 +732,10 @@ export function DataTable<Data extends RowData, FilterId extends string = string
   toolbarActions,
   totalCount,
   viewMode = 'table',
+  viewportRef,
 }: DataTableProps<Data, FilterId>) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const focusedElementRef = useRef<HTMLElement | null>(null);
   const resolvedFilterDefinitions = filterDefinitions ?? EMPTY_FILTER_DEFINITIONS as readonly DataTableFilterDefinition<FilterId>[];
   const resolvedFilters = filters ?? EMPTY_FILTERS as DataTableFilterState<FilterId>;
   const table = useTable({
@@ -725,9 +755,24 @@ export function DataTable<Data extends RowData, FilterId extends string = string
   const cardRows = table.getRowModel().rows;
   const showsCards = viewMode === 'cards' && cardView !== undefined;
   const automaticLoading = typeof IntersectionObserver !== 'undefined';
+  const focusedRowVisible = rowFocus ? cardRows.some((row) => row.id === rowFocus.rowId) : false;
+
+  useLayoutEffect(() => {
+    if (!rowFocus) {
+      focusedElementRef.current = null;
+      return;
+    }
+    const focusedElement = Array.from(rootRef.current?.querySelectorAll<HTMLElement>('[data-data-table-row-id]') ?? [])
+      .find((element) => element.dataset.dataTableRowId === rowFocus.rowId);
+    if (!focusedElement || focusedElement === focusedElementRef.current) return;
+    focusedElement.scrollIntoView?.({ block: 'center', inline: 'nearest' });
+    focusedElement.focus({ preventScroll: true });
+    focusedElementRef.current = focusedElement;
+  }, [data, rowFocus, showsCards]);
 
   return (
-    <div className={`${styles.root} ${fillAvailableHeight ? styles.fillAvailableHeight : ''}`}>
+    <div className={`${styles.root} ${fillAvailableHeight ? styles.fillAvailableHeight : ''}`} ref={rootRef}>
+      {rowFocus && focusedRowVisible ? <span aria-live="polite" className={styles.visuallyHidden} key={rowFocus.rowId} role="status">{rowFocus.announcement}</span> : null}
       {showControls ? <DataTableControls
         definitions={resolvedFilterDefinitions}
         filters={resolvedFilters}
@@ -738,14 +783,17 @@ export function DataTable<Data extends RowData, FilterId extends string = string
         toolbarActions={resolvedToolbarActions}
       /> : resolvedToolbarActions ? <div className={styles.actionToolbar}>{resolvedToolbarActions}</div> : null}
       {showsCards ? (
-        <div aria-label={cardView.ariaLabel} className={styles.cardViewport} role="region">
+        <div aria-label={cardView.ariaLabel} className={styles.cardViewport} ref={viewportRef} role="region">
           {isLoading && data.length === 0 ? <div className={styles.collectionState} role="status">{labels.loading}</div>
             : cardRows.length === 0 ? <div className={styles.collectionState}>{emptyContent}</div>
-              : <ul className={styles.cardList}>{cardRows.map((row) => <li key={row.id}>{cardView.renderItem(row.original)}</li>)}</ul>}
+              : <ul className={styles.cardList}>{cardRows.map((row) => {
+                const isFocused = row.id === rowFocus?.rowId;
+                return <li data-data-table-row-id={row.id} data-focused={isFocused || undefined} key={row.id} tabIndex={isFocused ? -1 : undefined}>{cardView.renderItem(row.original, { isFocused })}</li>;
+              })}</ul>}
           <DataTableAutoLoadSentinel hasMore={hasMore} isLoadingMore={isLoadingMore} loadedCount={data.length} onLoadMore={onLoadMore} />
         </div>
       ) : (
-        <DataTableViewport ariaLabel={ariaLabel} minTableWidth={minTableWidth} scrollHint={labels.scrollHint}>
+        <DataTableViewport ariaLabel={ariaLabel} minTableWidth={minTableWidth} scrollHint={labels.scrollHint} viewportRef={viewportRef}>
           <table aria-label={ariaLabel} className={`${tableStyles.table} ${styles.dataTable}`}>
             <thead>
               {table.getHeaderGroups().map((headerGroup) => (
@@ -781,7 +829,7 @@ export function DataTable<Data extends RowData, FilterId extends string = string
               ) : cardRows.length === 0 ? (
                 <tr><td className={styles.tableState} colSpan={Math.max(1, columns.length)}>{emptyContent}</td></tr>
               ) : cardRows.map((row) => (
-                <tr key={row.id}>
+                <tr data-data-table-row-id={row.id} data-focused={row.id === rowFocus?.rowId || undefined} key={row.id} tabIndex={row.id === rowFocus?.rowId ? -1 : undefined}>
                   {row.getAllCells().map((cell) => (
                     <td className={styles[cell.column.columnDef.meta?.align ?? 'start']} key={cell.id}>
                       <table.FlexRender cell={cell} />

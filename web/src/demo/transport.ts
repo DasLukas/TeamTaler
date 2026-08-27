@@ -70,6 +70,16 @@ interface DemoRoutePolicy {
   anyOf: readonly PermissionKey[];
 }
 
+/** Development-only metadata required to project one immutable reversal event. */
+interface DemoActivityReversal {
+  actorAvatarUrl?: string;
+  actorDisplayName: string;
+  actorMembershipId: string;
+  actorMembershipStatus: Membership['status'];
+  occurredAt: string;
+  reason?: string;
+}
+
 const DEMO_ROUTE_POLICIES: readonly DemoRoutePolicy[] = [
   { methods: ['GET', 'PATCH'], resource: /^settings$/, anyOf: ['GROUP_ADMINISTRATION', 'MEMBER_MANAGEMENT', 'ROLE_MANAGEMENT', 'FINANCE_MANAGEMENT'] },
   { methods: ['POST', 'DELETE'], resource: /^logo$/, anyOf: ['GROUP_ADMINISTRATION'] },
@@ -240,6 +250,7 @@ export class DemoTransport {
   private accountSummaries: AccountSummary[] = clone(demoAccountSummaries);
   private payments = clone(demoPayments);
   private paymentAttachments = new Map<string, File>();
+  private activityReversals = new Map<string, DemoActivityReversal>();
   private periods = clone(demoPeriods);
   private settlements = clone(demoSettlements);
   private notifications = clone(demoNotifications);
@@ -564,7 +575,7 @@ export class DemoTransport {
       }
       const collator = new Intl.Collator('de-DE', { numeric: true, sensitivity: 'base' });
       const options: ActivityFilterOptions = {
-        kinds: (['BOOKING', 'PAYMENT', 'ADJUSTMENT'] as const).filter((kind) => kinds.has(kind)),
+        kinds: (['BOOKING', 'PAYMENT', 'REVERSAL', 'ADJUSTMENT'] as const).filter((kind) => kinds.has(kind)),
         members: [...members.values()].sort((left, right) => collator.compare(left.displayName, right.displayName)),
         categories: [...categories.values()].sort((left, right) => collator.compare(left.name, right.name)),
         products: [...products.values()].sort((left, right) => collator.compare(left.name, right.name)),
@@ -708,7 +719,9 @@ export class DemoTransport {
     const notificationMatch = resource.match(/^notifications\/([^/]+)$/);
     if (notificationMatch && method === 'PATCH') return this.markNotificationRead(notificationMatch[1]) as T;
     const paymentReverseMatch = resource.match(/^payments\/([^/]+)\/reverse$/);
-    if (paymentReverseMatch && method === 'POST') return this.reversePayment(paymentReverseMatch[1]) as T;
+    if (paymentReverseMatch && method === 'POST') {
+      return this.reversePayment(groupId, paymentReverseMatch[1], String((body as { reason?: string }).reason ?? '')) as T;
+    }
     const productCreateMatch = resource.match(/^categories\/([^/]+)\/products$/);
     if (productCreateMatch && method === 'POST') {
       const input = body as { name?: string; priceMinor?: number; pricingMode?: Product['pricingMode']; sortOrder?: number };
@@ -1201,35 +1214,42 @@ export class DemoTransport {
   private listActivities(groupId: string, parameters: URLSearchParams): ActivityEntry[] {
     const actor = this.currentMembership(groupId);
     if (!actor) return [];
+    if (parameters.has('anchorId') && parameters.has('cursor')) throw new Error('An activity anchor cannot be combined with a cursor.');
     const canManageFinance = can(actor.effectiveGrants, 'FINANCE_MANAGEMENT');
-    const bookingActivities: ActivityEntry[] = this.listBookings(groupId).map((booking) => ({
-      id: `booking:${booking.id}`,
-      sourceId: booking.id,
-      kind: 'BOOKING',
-      targetMembershipId: booking.memberId,
-      targetDisplayName: booking.memberName,
-      targetMembershipStatus: booking.memberStatus,
-      targetAvatarUrl: booking.memberAvatarUrl,
-      actorMembershipId: booking.bookedByMemberId,
-      actorDisplayName: booking.bookedByName,
-      actorMembershipStatus: booking.bookedByStatus,
-      actorAvatarUrl: booking.bookedByAvatarUrl,
-      detailName: booking.productName,
-      detailNote: booking.reason,
-      categoryId: booking.categoryId,
-      categoryName: booking.categoryName,
-      productId: booking.productId,
-      quantity: booking.quantity,
-      amount: booking.total,
-      occurredAt: booking.bookedAt,
-      status: booking.status,
-      canReverse: booking.canVoid === true,
-      reversalReasonRequired: booking.voidReasonRequired === true,
-      reversalWithoutReasonUntil: booking.voidWithoutReasonUntil,
-    }));
-    const paymentActivities: ActivityEntry[] = this.payments
-      .filter((payment) => canManageFinance || payment.membershipId === actor.id)
-      .map((payment) => ({
+    const visibleBookings = this.listBookings(groupId);
+    const bookingActivities: ActivityEntry[] = visibleBookings.map((booking) => {
+      const reversal = this.activityReversals.get(`booking:${booking.id}`);
+      return {
+        id: `booking:${booking.id}`,
+        sourceId: booking.id,
+        kind: 'BOOKING',
+        targetMembershipId: booking.memberId,
+        targetDisplayName: booking.memberName,
+        targetMembershipStatus: booking.memberStatus,
+        targetAvatarUrl: booking.memberAvatarUrl,
+        actorMembershipId: booking.bookedByMemberId,
+        actorDisplayName: booking.bookedByName,
+        actorMembershipStatus: booking.bookedByStatus,
+        actorAvatarUrl: booking.bookedByAvatarUrl,
+        detailName: booking.productName,
+        detailNote: booking.reason,
+        categoryId: booking.categoryId,
+        categoryName: booking.categoryName,
+        productId: booking.productId,
+        quantity: booking.quantity,
+        amount: booking.total,
+        occurredAt: booking.bookedAt,
+        status: booking.status,
+        relatedActivityId: reversal ? `reversal:booking:${booking.id}` : undefined,
+        canReverse: booking.canVoid === true,
+        reversalReasonRequired: booking.voidReasonRequired === true,
+        reversalWithoutReasonUntil: booking.voidWithoutReasonUntil,
+      };
+    });
+    const visiblePayments = this.payments.filter((payment) => canManageFinance || payment.membershipId === actor.id);
+    const paymentActivities: ActivityEntry[] = visiblePayments.map((payment) => {
+      const reversal = this.activityReversals.get(`payment:${payment.id}`);
+      return {
         id: `payment:${payment.id}`,
         sourceId: payment.id,
         kind: 'PAYMENT',
@@ -1248,9 +1268,68 @@ export class DemoTransport {
         occurredAt: payment.createdAt ?? payment.receivedAt,
         status: payment.status,
         attachment: payment.attachment,
+        relatedActivityId: reversal ? `reversal:payment:${payment.id}` : undefined,
         canReverse: canManageFinance && payment.status === 'POSTED',
         reversalReasonRequired: canManageFinance && payment.status === 'POSTED',
-      }));
+      };
+    });
+    const bookingReversals: ActivityEntry[] = visibleBookings.flatMap((booking) => {
+      const reversal = this.activityReversals.get(`booking:${booking.id}`);
+      if (!reversal) return [];
+      return [{
+        id: `reversal:booking:${booking.id}`,
+        sourceId: booking.id,
+        kind: 'REVERSAL',
+        reversalSourceKind: 'BOOKING',
+        relatedActivityId: `booking:${booking.id}`,
+        targetMembershipId: booking.memberId,
+        targetDisplayName: booking.memberName,
+        targetMembershipStatus: booking.memberStatus,
+        targetAvatarUrl: booking.memberAvatarUrl,
+        actorMembershipId: reversal.actorMembershipId,
+        actorDisplayName: reversal.actorDisplayName,
+        actorMembershipStatus: reversal.actorMembershipStatus,
+        actorAvatarUrl: reversal.actorAvatarUrl,
+        detailName: booking.productName,
+        detailNote: reversal.reason,
+        categoryId: booking.categoryId,
+        categoryName: booking.categoryName,
+        productId: booking.productId,
+        quantity: booking.quantity,
+        amount: { ...booking.total, minorUnits: (-BigInt(booking.total.minorUnits)).toString() },
+        occurredAt: reversal.occurredAt,
+        status: 'POSTED',
+        canReverse: false,
+        reversalReasonRequired: false,
+      }];
+    });
+    const paymentReversals: ActivityEntry[] = visiblePayments.flatMap((payment) => {
+      const reversal = this.activityReversals.get(`payment:${payment.id}`);
+      if (!reversal) return [];
+      return [{
+        id: `reversal:payment:${payment.id}`,
+        sourceId: payment.id,
+        kind: 'REVERSAL',
+        reversalSourceKind: 'PAYMENT',
+        relatedActivityId: `payment:${payment.id}`,
+        targetMembershipId: payment.membershipId,
+        targetDisplayName: payment.memberName,
+        targetMembershipStatus: payment.membershipStatus,
+        targetAvatarUrl: payment.memberAvatarUrl,
+        actorMembershipId: reversal.actorMembershipId,
+        actorDisplayName: reversal.actorDisplayName,
+        actorMembershipStatus: reversal.actorMembershipStatus,
+        actorAvatarUrl: reversal.actorAvatarUrl,
+        detailName: payment.methodLabel,
+        detailNote: reversal.reason,
+        paymentMethod: payment.method,
+        amount: clone(payment.amount),
+        occurredAt: reversal.occurredAt,
+        status: 'POSTED',
+        canReverse: false,
+        reversalReasonRequired: false,
+      }];
+    });
     const adjustmentActivities: ActivityEntry[] = this.ledger
       .filter((entry) => entry.kind === 'CREDIT')
       .map((entry) => ({
@@ -1268,6 +1347,7 @@ export class DemoTransport {
         canReverse: false,
         reversalReasonRequired: false,
       }));
+    const anchorId = parameters.get('anchorId');
     const selectedKinds = new Set(parameters.getAll('kind'));
     const selectedCategories = new Set(parameters.getAll('categoryId'));
     const selectedProducts = new Set(parameters.getAll('productId'));
@@ -1278,7 +1358,8 @@ export class DemoTransport {
     const amountMin = parameters.get('amountMin');
     const amountMax = parameters.get('amountMax');
     const search = parameters.get('q')?.trim().toLocaleLowerCase('de-DE') ?? '';
-    const filtered = [...bookingActivities, ...paymentActivities, ...adjustmentActivities].filter((activity) => {
+    const filtered = [...bookingActivities, ...paymentActivities, ...bookingReversals, ...paymentReversals, ...adjustmentActivities].filter((activity) => {
+      if (anchorId) return true;
       const searchable = [activity.targetDisplayName, activity.actorDisplayName, activity.detailName, activity.detailNote, activity.categoryName, activity.kind, activity.status]
         .filter(Boolean).join(' ').toLocaleLowerCase('de-DE');
       const amount = BigInt(activity.amount.minorUnits);
@@ -1296,7 +1377,7 @@ export class DemoTransport {
     const sort = parameters.get('sort') ?? 'occurredAt';
     const descending = parameters.get('direction') !== 'asc';
     const collator = new Intl.Collator('de-DE', { numeric: true, sensitivity: 'base' });
-    return clone(filtered.sort((left, right) => {
+    const sorted = filtered.sort((left, right) => {
       const leftValue = sort === 'kind' ? left.kind
         : sort === 'targetName' ? left.targetDisplayName
           : sort === 'actorName' ? left.actorDisplayName ?? ''
@@ -1314,7 +1395,14 @@ export class DemoTransport {
         : collator.compare(leftValue, rightValue);
       if (comparison === 0) comparison = collator.compare(left.id, right.id);
       return descending ? -comparison : comparison;
-    }));
+    });
+    if (!anchorId) return clone(sorted);
+    const anchorIndex = sorted.findIndex((activity) => activity.id === anchorId);
+    if (anchorIndex < 0) throw new Error('The requested activity was not found.');
+    const requestedLimit = Number(parameters.get('limit') ?? 50);
+    const limit = Number.isInteger(requestedLimit) && requestedLimit > 0 ? Math.min(requestedLimit, 200) : 50;
+    const start = Math.max(0, Math.min(anchorIndex - Math.floor((limit - 1) / 2), sorted.length - limit));
+    return clone(sorted.slice(start, start + limit));
   }
 
   private bookingWithPermissions(booking: Booking, actor: Membership): Booking {
@@ -1360,6 +1448,14 @@ export class DemoTransport {
     }
     booking.status = 'REVERSED';
     booking.canVoid = false;
+    this.activityReversals.set(`booking:${booking.id}`, {
+      actorAvatarUrl: actor.avatarUrl,
+      actorDisplayName: actor.displayName,
+      actorMembershipId: actor.id,
+      actorMembershipStatus: actor.status,
+      occurredAt: new Date().toISOString(),
+      reason: reason.trim() || undefined,
+    });
     return clone(this.bookingWithPermissions(booking, actor));
   }
 
@@ -1871,15 +1967,26 @@ export class DemoTransport {
     }, this.groupSettings.ownPaymentReasonMode, attachment);
   }
 
-  private reversePayment(id: string): void {
+  private reversePayment(groupId: string, id: string, reason: string): void {
     const payment = this.payments.find((entry) => entry.id === id);
+    const actor = this.currentMembership(groupId);
     if (!payment) throw new Error(i18n.t('errors.paymentNotFound'));
+    if (!actor) throw new Error(i18n.t('errors.memberNotFound'));
+    if (!reason.trim()) throw new Error(i18n.t('activities.reasonRequired'));
     if (payment.status === 'POSTED') {
       const reversal = BigInt(payment.amount.minorUnits);
       this.adjustAccountBalance(payment.membershipId, reversal);
       this.adjustGroupOutstanding(reversal);
     }
     payment.status = 'REVERSED';
+    this.activityReversals.set(`payment:${payment.id}`, {
+      actorAvatarUrl: actor.avatarUrl,
+      actorDisplayName: actor.displayName,
+      actorMembershipId: actor.id,
+      actorMembershipStatus: actor.status,
+      occurredAt: new Date().toISOString(),
+      reason: reason.trim(),
+    });
   }
 
   /** Applies an exact complete-ledger movement to the demo group balance. */

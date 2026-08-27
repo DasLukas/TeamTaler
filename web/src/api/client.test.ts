@@ -1257,6 +1257,27 @@ describe('server-backed collection API contract', () => {
     expect(page).toMatchObject({ items: [{ kind: 'PAYMENT', amount: { minorUnits: '-1250', currency: 'EUR' } }], nextCursor: 'activity-cursor', hasMore: true, limit: 50 });
   });
 
+  it('serializes an activity anchor for a server-side focus context', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse([]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.getActivitiesPage('group-a', {
+      anchorId: 'reversal:booking:booking-a',
+      direction: 'desc',
+      limit: 50,
+      sort: 'occurredAt',
+    });
+
+    const requestUrl = new URL(String(fetchMock.mock.calls[0][0]), 'https://teamtaler.example');
+    expect(requestUrl.pathname).toBe('/api/v1/groups/group-a/activities');
+    expect(Object.fromEntries(requestUrl.searchParams)).toEqual({
+      anchorId: 'reversal:booking:booking-a',
+      direction: 'desc',
+      limit: '50',
+      sort: 'occurredAt',
+    });
+  });
+
   it('loads group-audit pages and member identities in parallel', async () => {
     const auditEntry = {
       id: 'audit-a',

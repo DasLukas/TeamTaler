@@ -7,7 +7,8 @@ import (
 )
 
 // handleActivities returns the authenticated membership's globally paginated
-// unified booking, payment, and adjustment feed.
+// unified booking, payment, reversal, and adjustment feed. The optional anchor
+// identity returns an authorized context window centered around that activity.
 func (s *Server) handleActivities(response http.ResponseWriter, request *http.Request) {
 	_, membership, err := s.membership(request)
 	if err != nil {
@@ -30,7 +31,7 @@ func (s *Server) handleActivities(response http.ResponseWriter, request *http.Re
 		CategoryIDs: values["categoryId"], ProductIDs: values["productId"], Status: values.Get("status"),
 		OccurredFrom: values.Get("occurredFrom"), OccurredTo: values.Get("occurredTo"),
 		AmountMin: amountMin, AmountMax: amountMax, Sort: values.Get("sort"), Direction: values.Get("direction"),
-		Cursor: values.Get("cursor"), Limit: queryLimit(request),
+		Cursor: values.Get("cursor"), AnchorID: values.Get("anchorId"), Limit: queryLimit(request),
 	}
 	page, err := s.activities.QueryEntries(request.Context(), membership, query)
 	if err != nil {

@@ -2698,23 +2698,35 @@ paths:
       tags: [Activities]
       summary: List the unified account activity feed visible to the current member
       description: |
-        Combines bookings, payments, and direct receivable adjustments before
-        filtering, sorting, and cursor pagination. Members always see their own
+        Combines bookings, payments, their audited reversals, and direct
+        receivable adjustments before filtering, sorting, and cursor pagination.
+        Every reversed booking or payment remains in the feed with status
+        `REVERSED` and receives one separate `REVERSAL` row at the audited
+        reversal time. The original and reversal expose symmetric stable links.
+        Members always see their own
         account movements and bookings they recorded for somebody else.
         `VIEW_ALL_BOOKING_ACTIVITY` adds all group bookings, while
         `FINANCE_MANAGEMENT` independently adds all group payments and
-        adjustments. Reversals update the original transaction status and do
-        not create a second feed row.
+        adjustments. A reversal always inherits the visibility of its original.
 
         Amounts use their visible receivable sign: bookings are positive,
-        payments are negative, and adjustments retain their ledger sign.
+        payments are negative, reversals contain the opposite effect of their
+        original, and adjustments retain their ledger sign.
         Repeated `kind`, `categoryId`, and `productId` values use OR semantics
         within each field and AND semantics across fields. Authorization scope
         and the complete filter set are bound to the opaque cursor fingerprint.
+        `anchorId` pauses all filters except sorting and returns an authorized
+        context window with the requested entry as close to the center as list
+        boundaries permit. It cannot be combined with `cursor`; any continuation
+        uses the returned cursor without `anchorId` or paused filters.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/TableSearch'
         - $ref: '#/components/parameters/TableCursor'
+        - name: anchorId
+          in: query
+          description: Stable activity identity to center in an unfiltered, permission-scoped context window. Cannot be combined with cursor.
+          schema: { type: string, maxLength: 500 }
         - $ref: '#/components/parameters/SortDirection'
         - name: kind
           in: query
@@ -2796,6 +2808,7 @@ paths:
                 items: { $ref: '#/components/schemas/ActivityEntry' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: Anchor activity does not exist or is not visible to the current member }
         '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/activities/filter-options:
     get:
@@ -5796,7 +5809,7 @@ components:
       description: At least one target array must be non-empty. The target arrays may contain at most 100 entries combined, and items multiplied by targets may create at most 500 bookings.
     ActivityKind:
       type: string
-      enum: [BOOKING, PAYMENT, ADJUSTMENT]
+      enum: [BOOKING, PAYMENT, REVERSAL, ADJUSTMENT]
     ActivityEntry:
       type: object
       additionalProperties: false
@@ -5820,7 +5833,7 @@ components:
           description: Stable feed identity namespaced by transaction kind.
         sourceId:
           type: string
-          description: Identifier accepted by the source-specific action endpoint.
+          description: Underlying booking, payment, or ledger identifier. Reversal rows intentionally expose no action.
         periodId: { type: string }
         kind: { $ref: '#/components/schemas/ActivityKind' }
         targetMembershipId: { type: string }
@@ -5846,14 +5859,21 @@ components:
         quantity: { type: integer, minimum: 1 }
         amountMinor:
           allOf: [{ $ref: '#/components/schemas/MinorUnits' }]
-          description: Signed visible receivable effect; bookings are positive and payments negative.
+          description: Signed visible receivable effect; reversal rows contain the exact opposite amount of their original.
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         occurredAt:
           type: string
           format: date-time
-          description: Audited creation time of the activity; payment value dates remain available on the finance payment resource.
+          description: Audited creation or reversal time; payment value dates remain available on the finance payment resource.
         status: { type: string, enum: [POSTED, REVERSED] }
         attachment: { $ref: '#/components/schemas/PaymentAttachmentSummary' }
+        relatedActivityId:
+          type: string
+          description: Stable identity of the paired original or reversal. Present symmetrically on reversed originals and reversal rows.
+        reversalSourceKind:
+          type: string
+          enum: [BOOKING, PAYMENT]
+          description: Original transaction kind. Present on every REVERSAL row and omitted otherwise.
         canReverse:
           type: boolean
           description: Whether the current caller may invoke the source-specific reversal action.
@@ -5861,6 +5881,12 @@ components:
           type: boolean
           description: Whether the currently available reversal requires a non-empty reason.
         reversalWithoutReasonUntil: { type: string, format: date-time }
+      oneOf:
+        - required: [relatedActivityId, reversalSourceKind]
+          properties:
+            kind: { type: string, enum: [REVERSAL] }
+        - properties:
+            kind: { type: string, enum: [BOOKING, PAYMENT, ADJUSTMENT] }
     Booking:
       type: object
       required: [id, groupId, periodId, categoryId, productId, actorMembershipId, actorDisplayName, actorMembershipStatus, targetMembershipId, targetDisplayName, targetMembershipStatus, quantity, unitPriceMinor, totalMinor, currency, productName, categoryName, createdAt, canVoid, voidReasonRequired]
