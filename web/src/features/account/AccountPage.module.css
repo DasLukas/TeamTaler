@@ -1,5 +1,4 @@
-.finance { display: grid; }
-.financeActions { display: flex; justify-content: flex-end; gap: var(--space-3); margin-bottom: var(--space-5); }
+.finance { display: grid; margin-top: var(--space-8); }
 .balance {
   display: flex;
   min-height: 132px;
@@ -18,7 +17,6 @@
 .paymentAction { flex: 0 0 auto; }
 .settlements { margin-bottom: var(--space-8); }
 @media (max-width: 767px) {
-  .financeActions { align-items: stretch; flex-direction: column; }
   .balance { align-items: flex-start; flex-direction: column; padding: var(--space-5); }
   .paymentAction { width: 100%; }
 }

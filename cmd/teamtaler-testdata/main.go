@@ -1,7 +1,6 @@
 // Command teamtaler-testdata creates a disposable local TeamTaler database
-// containing representative users, permissions, catalog items, bookings, and
-// payments. It is a development helper and is not included in production
-// builds or container images.
+// containing representative German users, groups, catalog items, bookings,
+// payments, notifications, and settlements.
 package main
 
 import (
@@ -22,6 +21,8 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/finance"
 	"github.com/DasLukas/TeamTaler/internal/groups"
 	"github.com/DasLukas/TeamTaler/internal/media"
+	"github.com/DasLukas/TeamTaler/internal/notifications"
+	"github.com/DasLukas/TeamTaler/internal/periods"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/storage"
 	systemadmin "github.com/DasLukas/TeamTaler/internal/system"
@@ -32,24 +33,22 @@ const (
 	testDataSeedTimeout  = 2 * time.Minute
 	adminEmail           = "admin@example.test"
 	systemOnlyAdminEmail = "systemonly@example.test"
-	secondaryGroupName   = "TeamTaler Weekend Club"
+	primaryGroupName     = "TSV Sonnenberg"
+	secondaryGroupName   = "Freizeitteam Wochenende"
 	secondaryMemberEmail = "noah@example.test"
-	secondaryCategory    = "Refreshments"
-	secondaryProduct     = "Club Coffee"
+	secondaryCategory    = "Vereinsheim"
+	secondaryProduct     = "Vereinskaffee"
 )
 
-// fixtureAssets contains the local-only catalog and profile images normalized
-// into the disposable server's protected media store during seeding.
+// fixtureAssets contains local-only media normalized into protected storage.
 //
 //go:embed assets/*.webp
 var fixtureAssets embed.FS
 
 type memberSeed struct {
-	email                   string
-	displayName             string
-	roles                   []domain.Role
-	permissions             []domain.PermissionKey
-	replaceStarterWithGrant bool
+	email       string
+	displayName string
+	roles       []domain.Role
 }
 
 type seededMember struct {
@@ -62,14 +61,27 @@ type imageSeed struct {
 	product   domain.Product
 }
 
+type primaryCatalog struct {
+	water, appleJuice, pretzel, cake, lateFee, trip, contribution domain.Product
+}
+
+type paymentSeed struct {
+	key, membershipID, method, reference, note string
+	amountMinor                                int64
+}
+
 var bookingReasonSeeds = []domain.ConfigurableItem{
-	{ID: "TEAM_EVENT", Label: "Team event"},
-	{ID: "TRAINING_MATERIALS", Label: "Training materials"},
+	{ID: "TEAM_EVENT", Label: "Mannschaftsabend"},
+	{ID: "TRAINING_MATERIALS", Label: "Trainingsmaterial"},
+	{ID: "AWAY_TRIP", Label: "Auswärtsfahrt"},
+	{ID: "LATE_TO_TRAINING", Label: "Verspätung beim Training"},
 }
 
 var paymentReasonSeeds = []domain.ConfigurableItem{
-	{ID: "MONTHLY_SETTLEMENT", Label: "Monthly settlement"},
-	{ID: "CASH_DEPOSIT", Label: "Cash deposit"},
+	{ID: "MONTHLY_SETTLEMENT", Label: "Monatsabrechnung"},
+	{ID: "CASH_DEPOSIT", Label: "Bareinzahlung"},
+	{ID: "PARTIAL_PAYMENT", Label: "Teilzahlung"},
+	{ID: "TEAM_FUND", Label: "Mannschaftskasse"},
 }
 
 func main() {
@@ -78,15 +90,10 @@ func main() {
 	}
 }
 
-// run creates the complete development fixture in the configured empty
-// database. Configuration is read from TEAMTALER_* variables and the operation
-// is bounded to two minutes to accommodate image normalization on race-enabled
-// or resource-constrained systems. It returns validation, storage, or domain-
-// service errors and refuses to modify a database that already contains users.
+// run creates the complete development fixture in an empty configured database.
 func run() error {
 	ctx, cancel := context.WithTimeout(context.Background(), testDataSeedTimeout)
 	defer cancel()
-
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load test-data configuration: %w", err)
@@ -96,7 +103,6 @@ func run() error {
 		return err
 	}
 	defer db.Close()
-
 	var userCount int
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM users`).Scan(&userCount); err != nil {
 		return fmt.Errorf("inspect test database: %w", err)
@@ -105,9 +111,21 @@ func run() error {
 		return errors.New("test-data seeding requires an empty database")
 	}
 
+	seedNow := time.Now().UTC().Truncate(time.Second)
+	baseNow := seedNow
+	originalNow := platform.Now
+	platform.Now = func() time.Time { return seedNow }
+	defer func() { platform.Now = originalNow }()
+
 	authService := auth.Service{DB: db, SessionLifetime: 30 * 24 * time.Hour}
 	groupService := groups.Service{DB: db}
-	if err := authService.Bootstrap(ctx, adminEmail, "Ada Admin", testPassword, "TeamTaler Demo Club", "EUR"); err != nil {
+	notificationService := notifications.Service{DB: db, EmailDeliveryAvailable: true, PushDeliveryAvailable: true}
+	catalogService := catalog.Service{DB: db}
+	bookingService := bookings.Service{DB: db, Groups: groupService, Notifications: notificationService}
+	financeService := finance.Service{DB: db, Notifications: notificationService}
+	periodService := periods.Service{DB: db, Notifications: notificationService}
+
+	if err := authService.Bootstrap(ctx, adminEmail, "Ada Administratorin", testPassword, primaryGroupName, "EUR"); err != nil {
 		return fmt.Errorf("bootstrap administrator: %w", err)
 	}
 	adminSession, err := authService.Login(ctx, adminEmail, testPassword)
@@ -121,160 +139,210 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	adminGroup.Membership, err = grantDevelopmentAdministratorCapabilities(ctx, groupService, adminSession.Principal, adminGroup.Membership)
+	adminGroup.Membership, err = assignAdministratorStandardRoles(ctx, groupService, adminSession.Principal, adminGroup.Membership)
 	if err != nil {
 		return err
 	}
-	if err := seedReasonSuggestions(ctx, groupService, adminSession.Principal, adminGroup.Membership); err != nil {
+	if err := configureGroup(ctx, groupService, adminSession.Principal, adminGroup.Membership); err != nil {
+		return err
+	}
+	products, err := seedPrimaryCatalog(ctx, catalogService, adminSession.Principal, adminGroup.Membership)
+	if err != nil {
 		return err
 	}
 
-	catalogService := catalog.Service{DB: db}
-	drinks, err := catalogService.CreateCategory(ctx, adminSession.Principal, adminGroup.Membership, catalog.CreateCategoryInput{
-		Name: "Beverages", Icon: domain.CategoryIconDrink, SortOrder: 10,
-	})
-	if err != nil {
-		return fmt.Errorf("create drinks category: %w", err)
-	}
-	snacks, err := catalogService.CreateCategory(ctx, adminSession.Principal, adminGroup.Membership, catalog.CreateCategoryInput{
-		Name: "Snacks", Icon: domain.CategoryIconFood, SortOrder: 20,
-	})
-	if err != nil {
-		return fmt.Errorf("create snacks category: %w", err)
-	}
-	penalties, err := catalogService.CreateCategory(ctx, adminSession.Principal, adminGroup.Membership, catalog.CreateCategoryInput{
-		Name: "Team Fund", Icon: domain.CategoryIconPenalty, SortOrder: 30,
-	})
-	if err != nil {
-		return fmt.Errorf("create penalties category: %w", err)
-	}
-
-	water, err := createFixedProduct(ctx, catalogService, adminSession.Principal, adminGroup.Membership, drinks.ID, "seed-product-water", "Mineral Water", 150, 10)
+	marie, err := createMember(ctx, authService, groupService, adminSession.Principal, adminGroup.Membership, memberSeed{email: "marie@example.test", displayName: "Marie Mitglied"})
 	if err != nil {
 		return err
 	}
-	appleJuice, err := createFixedProduct(ctx, catalogService, adminSession.Principal, adminGroup.Membership, drinks.ID, "seed-product-apple", "Apple Spritzer", 220, 20)
+	jonas, err := createMember(ctx, authService, groupService, adminSession.Principal, adminGroup.Membership, memberSeed{email: "jonas@example.test", displayName: "Jonas Kassenwart", roles: []domain.Role{domain.RoleFinanceManager, domain.RoleCatalogManager}})
 	if err != nil {
 		return err
 	}
-	pretzel, err := createFixedProduct(ctx, catalogService, adminSession.Principal, adminGroup.Membership, snacks.ID, "seed-product-pretzel", "Pretzel", 200, 10)
+	lena, err := createMember(ctx, authService, groupService, adminSession.Principal, adminGroup.Membership, memberSeed{email: "lena@example.test", displayName: "Lena Spielerin"})
 	if err != nil {
 		return err
 	}
-	lateFee, err := createFixedProduct(ctx, catalogService, adminSession.Principal, adminGroup.Membership, penalties.ID, "seed-product-late", "Late to Practice", 500, 10)
-	if err != nil {
-		return err
-	}
-	customContribution, err := catalogService.CreateProduct(ctx, adminSession.Principal, adminGroup.Membership, "seed-product-custom", penalties.ID, catalog.CreateProductInput{
-		Name: "Voluntary Contribution", PricingMode: domain.ProductPricingUserDefined, SortOrder: 20,
-	})
-	if err != nil {
-		return fmt.Errorf("create user-defined product: %w", err)
-	}
-
-	marie, err := createMember(ctx, authService, groupService, adminSession.Principal, adminGroup.Membership, memberSeed{
-		email: "marie@example.test", displayName: "Marie Member",
-		permissions: []domain.PermissionKey{domain.PermissionRecordOwnPayment, domain.PermissionBookForOthers},
-	})
-	if err != nil {
-		return err
-	}
-	jonas, err := createMember(ctx, authService, groupService, adminSession.Principal, adminGroup.Membership, memberSeed{
-		email: "jonas@example.test", displayName: "Jonas Treasurer",
-		roles: []domain.Role{domain.RoleFinanceManager, domain.RoleCatalogManager},
-	})
-	if err != nil {
-		return err
-	}
-	lena, err := createMember(ctx, authService, groupService, adminSession.Principal, adminGroup.Membership, memberSeed{
-		email: "lena@example.test", displayName: "Lena Player",
-		permissions:             []domain.PermissionKey{domain.PermissionBookForGuests},
-		replaceStarterWithGrant: true,
-	})
+	emil, err := createMember(ctx, authService, groupService, adminSession.Principal, adminGroup.Membership, memberSeed{email: "emil@example.test", displayName: "Emil Trainer"})
 	if err != nil {
 		return err
 	}
 	for _, avatar := range []struct {
-		assetPath string
+		path      string
 		principal domain.Principal
-	}{
-		{assetPath: "assets/avatar-ada.webp", principal: adminSession.Principal},
-		{assetPath: "assets/avatar-marie.webp", principal: marie.principal},
-		{assetPath: "assets/avatar-jonas.webp", principal: jonas.principal},
-		{assetPath: "assets/avatar-lena.webp", principal: lena.principal},
-	} {
-		if err := seedAvatar(ctx, authService, cfg.DataDirectory, avatar.principal, avatar.assetPath); err != nil {
+	}{{"assets/avatar-ada.webp", adminSession.Principal}, {"assets/avatar-marie.webp", marie.principal}, {"assets/avatar-jonas.webp", jonas.principal}} {
+		if err := seedAvatar(ctx, authService, cfg.DataDirectory, avatar.principal, avatar.path); err != nil {
 			return err
 		}
 	}
-
-	periodID, err := openPeriodID(ctx, db, adminGroup.ID)
-	if err != nil {
+	if err := seedGroupLogo(ctx, groupService, cfg.DataDirectory, adminSession.Principal, adminGroup.Membership, "assets/product-voluntary-contribution.webp"); err != nil {
 		return err
 	}
-	bookingService := bookings.Service{DB: db, Groups: groupService}
-	if _, err := bookingService.Create(ctx, marie.principal, marie.membership, "seed-booking-marie-water", bookings.CreateInput{
-		ProductID: water.ID, ProductVersion: water.Version, ExpectedPeriodID: periodID, Quantity: 2,
-	}); err != nil {
-		return fmt.Errorf("create Marie water booking: %w", err)
-	}
-	if _, err := bookingService.Create(ctx, marie.principal, marie.membership, "seed-booking-marie-apple", bookings.CreateInput{
-		ProductID: appleJuice.ID, ProductVersion: appleJuice.Version, ExpectedPeriodID: periodID, Quantity: 1,
-		TargetMembershipID: lena.membership.ID, Reason: "Drink after practice",
-	}); err != nil {
-		return fmt.Errorf("create assigned drink booking: %w", err)
-	}
-	if _, err := bookingService.Create(ctx, adminSession.Principal, adminGroup.Membership, "seed-booking-jonas-pretzel", bookings.CreateInput{
-		ProductID: pretzel.ID, ProductVersion: pretzel.Version, ExpectedPeriodID: periodID, Quantity: 2,
-		TargetMembershipID: jonas.membership.ID, Reason: "Team snack",
-	}); err != nil {
-		return fmt.Errorf("create assigned Jonas snack booking: %w", err)
-	}
-	if _, err := bookingService.Create(ctx, adminSession.Principal, adminGroup.Membership, "seed-booking-lena-late", bookings.CreateInput{
-		ProductID: lateFee.ID, ProductVersion: lateFee.Version, ExpectedPeriodID: periodID, Quantity: 1,
-		TargetMembershipID: lena.membership.ID, Reason: "15 minutes late",
-	}); err != nil {
-		return fmt.Errorf("create penalty booking: %w", err)
-	}
-	customPrice := int64(750)
-	if _, err := bookingService.Create(ctx, adminSession.Principal, adminGroup.Membership, "seed-booking-admin-custom", bookings.CreateInput{
-		ProductID: customContribution.ID, ProductVersion: customContribution.Version, ExpectedPeriodID: periodID, Quantity: 1,
-		UnitPriceMinor: &customPrice,
-	}); err != nil {
-		return fmt.Errorf("create contribution booking: %w", err)
-	}
 	for _, image := range []imageSeed{
-		{assetPath: "assets/product-mineral-water.webp", product: water},
-		{assetPath: "assets/product-apple-spritzer.webp", product: appleJuice},
-		{assetPath: "assets/product-pretzel.webp", product: pretzel},
-		{assetPath: "assets/product-late-to-practice.webp", product: lateFee},
-		{assetPath: "assets/product-voluntary-contribution.webp", product: customContribution},
+		{"assets/product-mineral-water.webp", products.water},
+		{"assets/product-apple-spritzer.webp", products.appleJuice},
+		{"assets/product-pretzel.webp", products.pretzel},
+		{"assets/product-late-to-practice.webp", products.lateFee},
 	} {
 		if err := seedProductImage(ctx, catalogService, cfg.DataDirectory, adminSession.Principal, adminGroup.Membership, image); err != nil {
 			return err
 		}
 	}
+	products.water.Version++
+	products.appleJuice.Version++
+	products.pretzel.Version++
+	products.lateFee.Version++
 
-	financeService := finance.Service{DB: db}
-	if _, err := financeService.CreatePayment(ctx, adminSession.Principal, adminGroup.Membership, "seed-payment-marie", finance.CreatePaymentInput{
-		MembershipID: marie.membership.ID, AmountMinor: 200, Method: "CASH", Reference: "Training",
+	if err := withTemporaryBookingGrants(ctx, db, adminGroup.ID, func() error {
+		seedNow = baseNow.Add(3 * time.Hour)
+		periodID, periodErr := openPeriodID(ctx, db, adminGroup.ID)
+		if periodErr != nil {
+			return periodErr
+		}
+		if _, bookingErr := bookingService.CreateBulk(ctx, adminSession.Principal, adminGroup.Membership, "seed-july-team-cart", bookings.BulkCreateInput{
+			ExpectedPeriodID:           periodID,
+			Items:                      []bookings.BulkCreateItem{{ProductID: products.water.ID, ProductVersion: products.water.Version, Quantity: 2}, {ProductID: products.pretzel.ID, ProductVersion: products.pretzel.Version, Quantity: 1}},
+			TargetMembershipIDs:        []string{marie.membership.ID, jonas.membership.ID, lena.membership.ID},
+			TemporaryGuestDisplayNames: []string{"Sofia Gast", "Ben Zuschauer"}, Reason: "Mannschaftsabend",
+		}); bookingErr != nil {
+			return fmt.Errorf("create July team bookings: %w", bookingErr)
+		}
+		if _, bookingErr := bookingService.CreateBatch(ctx, adminSession.Principal, adminGroup.Membership, "seed-july-late-fees", bookings.BatchCreateInput{
+			ProductID: products.lateFee.ID, ProductVersion: products.lateFee.Version, ExpectedPeriodID: periodID, Quantity: 1,
+			TargetMembershipIDs: []string{lena.membership.ID, emil.membership.ID}, Reason: "Verspätung beim Training",
+		}); bookingErr != nil {
+			return fmt.Errorf("create July penalty bookings: %w", bookingErr)
+		}
+		tripPrice := int64(1250)
+		if _, bookingErr := bookingService.Create(ctx, adminSession.Principal, adminGroup.Membership, "seed-july-trip", bookings.CreateInput{
+			ProductID: products.trip.ID, ProductVersion: products.trip.Version, ExpectedPeriodID: periodID, Quantity: 1,
+			UnitPriceMinor: &tripPrice, TargetMembershipID: marie.membership.ID, Reason: "Auswärtsfahrt",
+		}); bookingErr != nil {
+			return fmt.Errorf("create July trip booking: %w", bookingErr)
+		}
+		if err := seedPayments(ctx, financeService, adminSession.Principal, adminGroup.Membership, platform.Timestamp(seedNow.Add(time.Hour)), []paymentSeed{
+			{key: "seed-july-payment-marie", membershipID: marie.membership.ID, amountMinor: 700, method: "CASH", reference: "Bareinzahlung", note: "Nach dem Training"},
+			{key: "seed-july-payment-jonas", membershipID: jonas.membership.ID, amountMinor: 550, method: "BANK_TRANSFER", reference: "Monatsabrechnung"},
+			{key: "seed-july-payment-lena", membershipID: lena.membership.ID, amountMinor: 200, method: "PAYPAL", reference: "Teilzahlung"},
+		}); err != nil {
+			return err
+		}
+		if err := configureNotifications(ctx, notificationService, groupService, adminSession.Principal, adminGroup.Membership); err != nil {
+			return err
+		}
+		seedNow = baseNow.AddDate(0, 0, 1)
+		july, closeErr := periodService.Close(ctx, adminSession.Principal, adminGroup.Membership, "seed-close-july", periodID, periods.CloseInput{Label: "Erste Abrechnung", DueAt: seedNow.AddDate(0, 0, 10).Format("2006-01-02"), NextPeriodLabel: "Zweiter Zeitraum"})
+		if closeErr != nil {
+			return fmt.Errorf("close July settlement: %w", closeErr)
+		}
+
+		seedNow = baseNow.AddDate(0, 0, 2)
+		contributionPrice := int64(750)
+		if _, bookingErr := bookingService.CreateBulk(ctx, adminSession.Principal, adminGroup.Membership, "seed-august-team-cart", bookings.BulkCreateInput{
+			ExpectedPeriodID: july.OpenPeriod.ID,
+			Items: []bookings.BulkCreateItem{
+				{ProductID: products.appleJuice.ID, ProductVersion: products.appleJuice.Version, Quantity: 1},
+				{ProductID: products.cake.ID, ProductVersion: products.cake.Version, Quantity: 2},
+				{ProductID: products.contribution.ID, ProductVersion: products.contribution.Version, Quantity: 1, UnitPriceMinor: &contributionPrice},
+			},
+			TargetMembershipIDs: []string{adminGroup.Membership.ID, marie.membership.ID, emil.membership.ID}, Reason: "Trainingsmaterial",
+		}); bookingErr != nil {
+			return fmt.Errorf("create August team bookings: %w", bookingErr)
+		}
+		if err := seedPayments(ctx, financeService, adminSession.Principal, adminGroup.Membership, platform.Timestamp(seedNow.Add(time.Hour)), []paymentSeed{
+			{key: "seed-august-payment-marie", membershipID: marie.membership.ID, amountMinor: 1200, method: "BANK_TRANSFER", reference: "Monatsabrechnung"},
+			{key: "seed-august-payment-emil", membershipID: emil.membership.ID, amountMinor: 600, method: "CARD", reference: "Teilzahlung"},
+			{key: "seed-august-payment-admin", membershipID: adminGroup.Membership.ID, amountMinor: 1000, method: "OTHER", reference: "Mannschaftskasse", note: "Spende beim Sommerfest"},
+		}); err != nil {
+			return err
+		}
+		seedNow = baseNow.AddDate(0, 0, 3)
+		august, closeErr := periodService.Close(ctx, adminSession.Principal, adminGroup.Membership, "seed-close-august", july.OpenPeriod.ID, periods.CloseInput{Label: "Zweite Abrechnung", DueAt: seedNow.AddDate(0, 0, 12).Format("2006-01-02"), NextPeriodLabel: "Aktueller Zeitraum"})
+		if closeErr != nil {
+			return fmt.Errorf("close August settlement: %w", closeErr)
+		}
+		seedNow = baseNow.AddDate(0, 0, 4)
+		if _, bookingErr := bookingService.CreateBatch(ctx, adminSession.Principal, adminGroup.Membership, "seed-current-snacks", bookings.BatchCreateInput{
+			ProductID: products.pretzel.ID, ProductVersion: products.pretzel.Version, ExpectedPeriodID: august.OpenPeriod.ID, Quantity: 2,
+			TargetMembershipIDs: []string{jonas.membership.ID, lena.membership.ID}, Reason: "Mannschaftsabend",
+		}); bookingErr != nil {
+			return fmt.Errorf("create current bookings: %w", bookingErr)
+		}
+		return seedPayments(ctx, financeService, adminSession.Principal, adminGroup.Membership, platform.Timestamp(seedNow), []paymentSeed{
+			{key: "seed-current-payment-lena", membershipID: lena.membership.ID, amountMinor: 500, method: "CASH", reference: "Bareinzahlung"},
+			{key: "seed-current-payment-jonas", membershipID: jonas.membership.ID, amountMinor: 350, method: "CARD", reference: "Mannschaftskasse"},
+		})
 	}); err != nil {
-		return fmt.Errorf("create Marie payment: %w", err)
-	}
-	if err := seedSecondaryGroup(ctx, authService, groupService, catalogService, cfg.DataDirectory, adminSession.Principal); err != nil {
 		return err
 	}
 
+	seedNow = baseNow.AddDate(0, 0, 5)
+	if err := seedSecondaryGroup(ctx, authService, groupService, catalogService, bookingService, financeService, periodService, notificationService, cfg.DataDirectory, adminSession.Principal); err != nil {
+		return err
+	}
 	if _, err := db.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
 		return fmt.Errorf("checkpoint test database: %w", err)
 	}
-	fmt.Println("Development test data created.")
+	fmt.Println("Abwechslungsreiche deutsche Testdaten wurden erstellt.")
 	return nil
 }
 
-// seedSystemOnlyAdministrator creates one credentialed account with the global
-// administrator assignment and deliberately no group membership. It exercises
-// the authenticated system-only shell without widening any tenant access.
+// seedPrimaryCatalog creates German categories and products with mixed pricing.
+func seedPrimaryCatalog(ctx context.Context, service catalog.Service, actor domain.Principal, membership domain.Membership) (primaryCatalog, error) {
+	drinks, err := service.CreateCategory(ctx, actor, membership, catalog.CreateCategoryInput{Name: "Getränke", Icon: domain.CategoryIconDrink, SortOrder: 10})
+	if err != nil {
+		return primaryCatalog{}, fmt.Errorf("create drinks category: %w", err)
+	}
+	snacks, err := service.CreateCategory(ctx, actor, membership, catalog.CreateCategoryInput{Name: "Snacks", Icon: domain.CategoryIconFood, SortOrder: 20})
+	if err != nil {
+		return primaryCatalog{}, fmt.Errorf("create snacks category: %w", err)
+	}
+	fund, err := service.CreateCategory(ctx, actor, membership, catalog.CreateCategoryInput{Name: "Mannschaftskasse", Icon: domain.CategoryIconPenalty, SortOrder: 30})
+	if err != nil {
+		return primaryCatalog{}, fmt.Errorf("create team-fund category: %w", err)
+	}
+	water, err := createFixedProduct(ctx, service, actor, membership, drinks.ID, "seed-product-water", "Mineralwasser", 150, 10)
+	if err != nil {
+		return primaryCatalog{}, err
+	}
+	apple, err := createFixedProduct(ctx, service, actor, membership, drinks.ID, "seed-product-apple", "Apfelschorle", 220, 20)
+	if err != nil {
+		return primaryCatalog{}, err
+	}
+	pretzel, err := createFixedProduct(ctx, service, actor, membership, snacks.ID, "seed-product-pretzel", "Laugenbrezel", 200, 10)
+	if err != nil {
+		return primaryCatalog{}, err
+	}
+	cake, err := createFixedProduct(ctx, service, actor, membership, snacks.ID, "seed-product-cake", "Stück Kuchen", 280, 20)
+	if err != nil {
+		return primaryCatalog{}, err
+	}
+	late, err := createFixedProduct(ctx, service, actor, membership, fund.ID, "seed-product-late", "Zu spät zum Training", 500, 10)
+	if err != nil {
+		return primaryCatalog{}, err
+	}
+	trip, err := service.CreateProduct(ctx, actor, membership, "seed-product-trip", fund.ID, catalog.CreateProductInput{Name: "Mannschaftsfahrt", PricingMode: domain.ProductPricingUserDefined, SortOrder: 20})
+	if err != nil {
+		return primaryCatalog{}, fmt.Errorf("create trip product: %w", err)
+	}
+	contribution, err := service.CreateProduct(ctx, actor, membership, "seed-product-contribution", fund.ID, catalog.CreateProductInput{Name: "Freiwilliger Beitrag", PricingMode: domain.ProductPricingUserDefined, SortOrder: 30})
+	if err != nil {
+		return primaryCatalog{}, fmt.Errorf("create contribution product: %w", err)
+	}
+	return primaryCatalog{water, apple, pretzel, cake, late, trip, contribution}, nil
+}
+
+// seedPayments creates finance-managed payments sharing one received time.
+func seedPayments(ctx context.Context, service finance.Service, actor domain.Principal, membership domain.Membership, receivedAt string, items []paymentSeed) error {
+	for _, item := range items {
+		if _, err := service.CreatePayment(ctx, actor, membership, item.key, finance.CreatePaymentInput{MembershipID: item.membershipID, AmountMinor: item.amountMinor, ReceivedAt: receivedAt, Method: item.method, Reference: item.reference, Note: item.note}); err != nil {
+			return fmt.Errorf("create payment %q: %w", item.key, err)
+		}
+	}
+	return nil
+}
+
+// seedSystemOnlyAdministrator creates one global administrator without a group.
 func seedSystemOnlyAdministrator(ctx context.Context, db *sql.DB, grantingUserID string) error {
 	passwordHash, err := auth.HashPassword(testPassword)
 	if err != nil {
@@ -286,7 +354,7 @@ func seedSystemOnlyAdministrator(ctx context.Context, db *sql.DB, grantingUserID
 	}
 	now := platform.Timestamp(platform.Now())
 	return storage.WithTx(ctx, db, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES(?,?,?,?,?,?)`, userID, systemOnlyAdminEmail, "System Only", passwordHash, now, now); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES(?,?,?,?,?,?)`, userID, systemOnlyAdminEmail, "Systemverwaltung", passwordHash, now, now); err != nil {
 			return fmt.Errorf("insert system-only administrator: %w", err)
 		}
 		if _, err := systemadmin.GrantAdministratorInTx(ctx, tx, userID, grantingUserID); err != nil {
@@ -296,126 +364,164 @@ func seedSystemOnlyAdministrator(ctx context.Context, db *sql.DB, grantingUserID
 	})
 }
 
-// seedSecondaryGroup creates a second disposable group with one catalog item
-// for testing group switching and data isolation. The administrator and Lena
-// reuse their existing accounts, while Noah is created exclusively for the new
-// group. It returns a contextualized group, invitation, or catalog error.
-func seedSecondaryGroup(ctx context.Context, authService auth.Service, groupService groups.Service, catalogService catalog.Service, dataDirectory string, administrator domain.Principal) error {
-	secondaryGroup, err := groupService.Create(ctx, administrator, secondaryGroupName, "EUR")
+// seedSecondaryGroup creates an unbranded group and one closed settlement.
+func seedSecondaryGroup(ctx context.Context, authService auth.Service, groupService groups.Service, catalogService catalog.Service, bookingService bookings.Service, financeService finance.Service, periodService periods.Service, notificationService notifications.Service, dataDirectory string, administrator domain.Principal) error {
+	group, err := groupService.Create(ctx, administrator, secondaryGroupName, "EUR")
 	if err != nil {
 		return fmt.Errorf("create secondary test group: %w", err)
 	}
-	secondaryGroup.Membership, err = grantDevelopmentAdministratorCapabilities(ctx, groupService, administrator, secondaryGroup.Membership)
+	group.Membership, err = assignAdministratorStandardRoles(ctx, groupService, administrator, group.Membership)
 	if err != nil {
 		return err
 	}
-	if err := seedReasonSuggestions(ctx, groupService, administrator, secondaryGroup.Membership); err != nil {
+	if err := configureGroup(ctx, groupService, administrator, group.Membership); err != nil {
 		return err
 	}
-	category, err := catalogService.CreateCategory(ctx, administrator, secondaryGroup.Membership, catalog.CreateCategoryInput{
-		Name: secondaryCategory, Icon: domain.CategoryIconDrink, SortOrder: 10,
+	category, err := catalogService.CreateCategory(ctx, administrator, group.Membership, catalog.CreateCategoryInput{Name: secondaryCategory, Icon: domain.CategoryIconDrink, SortOrder: 10})
+	if err != nil {
+		return fmt.Errorf("create secondary category: %w", err)
+	}
+	coffee, err := createFixedProduct(ctx, catalogService, administrator, group.Membership, category.ID, "seed-secondary-coffee", secondaryProduct, 180, 10)
+	if err != nil {
+		return err
+	}
+	if _, err := createFixedProduct(ctx, catalogService, administrator, group.Membership, category.ID, "seed-secondary-cake", "Kuchen vom Blech", 250, 20); err != nil {
+		return err
+	}
+	if err := seedProductImage(ctx, catalogService, dataDirectory, administrator, group.Membership, imageSeed{"assets/product-club-coffee.webp", coffee}); err != nil {
+		return err
+	}
+	coffee.Version++
+	lena, err := createMember(ctx, authService, groupService, administrator, group.Membership, memberSeed{email: "lena@example.test", displayName: "Lena Spielerin"})
+	if err != nil {
+		return err
+	}
+	noah, err := createMember(ctx, authService, groupService, administrator, group.Membership, memberSeed{email: secondaryMemberEmail, displayName: "Noah Neuzugang"})
+	if err != nil {
+		return err
+	}
+	if err := seedAvatar(ctx, authService, dataDirectory, noah.principal, "assets/avatar-noah.webp"); err != nil {
+		return err
+	}
+	return withTemporaryBookingGrants(ctx, groupService.DB, group.ID, func() error {
+		periodID, periodErr := openPeriodID(ctx, groupService.DB, group.ID)
+		if periodErr != nil {
+			return periodErr
+		}
+		if _, bookingErr := bookingService.CreateBatch(ctx, administrator, group.Membership, "seed-secondary-bookings", bookings.BatchCreateInput{ProductID: coffee.ID, ProductVersion: coffee.Version, ExpectedPeriodID: periodID, Quantity: 2, TargetMembershipIDs: []string{lena.membership.ID, noah.membership.ID}, TemporaryGuestDisplayNames: []string{"Mila Besucherin"}, Reason: "Mannschaftsabend"}); bookingErr != nil {
+			return fmt.Errorf("create secondary bookings: %w", bookingErr)
+		}
+		if err := seedPayments(ctx, financeService, administrator, group.Membership, platform.Timestamp(platform.Now()), []paymentSeed{{key: "seed-secondary-payment-noah", membershipID: noah.membership.ID, amountMinor: 250, method: "CASH", reference: "Bareinzahlung"}}); err != nil {
+			return err
+		}
+		if err := configureNotifications(ctx, notificationService, groupService, administrator, group.Membership); err != nil {
+			return err
+		}
+		result, closeErr := periodService.Close(ctx, administrator, group.Membership, "seed-close-secondary", periodID, periods.CloseInput{Label: "Vereinsabend", DueAt: platform.Now().AddDate(0, 0, 14).Format("2006-01-02"), NextPeriodLabel: "Nächster Vereinsabend"})
+		if closeErr != nil {
+			return fmt.Errorf("close secondary settlement: %w", closeErr)
+		}
+		if _, bookingErr := bookingService.Create(ctx, noah.principal, noah.membership, "seed-secondary-current", bookings.CreateInput{ProductID: coffee.ID, ProductVersion: coffee.Version, ExpectedPeriodID: result.OpenPeriod.ID, Quantity: 1, Reason: "Mannschaftsabend"}); bookingErr != nil {
+			return fmt.Errorf("create secondary current booking: %w", bookingErr)
+		}
+		return nil
 	})
-	if err != nil {
-		return fmt.Errorf("create secondary test category: %w", err)
-	}
-	coffee, err := createFixedProduct(ctx, catalogService, administrator, secondaryGroup.Membership, category.ID, "seed-secondary-product-coffee", secondaryProduct, 180, 10)
-	if err != nil {
-		return fmt.Errorf("create secondary test product: %w", err)
-	}
-	if err := seedProductImage(ctx, catalogService, dataDirectory, administrator, secondaryGroup.Membership, imageSeed{
-		assetPath: "assets/product-club-coffee.webp", product: coffee,
-	}); err != nil {
-		return err
-	}
-	for _, seed := range []memberSeed{
-		{email: "lena@example.test", displayName: "Lena Player"},
-		{email: secondaryMemberEmail, displayName: "Noah Newcomer"},
-	} {
-		member, err := createMember(ctx, authService, groupService, administrator, secondaryGroup.Membership, seed)
-		if err != nil {
-			return fmt.Errorf("seed secondary group member %s: %w", seed.email, err)
-		}
-		if seed.email == secondaryMemberEmail {
-			if err := seedAvatar(ctx, authService, dataDirectory, member.principal, "assets/avatar-noah.webp"); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }
 
-// grantDevelopmentAdministratorCapabilities adds a disposable custom role with
-// the non-administrative capabilities needed to populate every development
-// workspace. Production group defaults remain least-privileged; only local test
-// data receives this explicit supplemental assignment.
-//
-// Parameters:
-//   - ctx: Bounds role creation, assignment, and membership reload operations.
-//   - service: Group service connected to the disposable test database.
-//   - actor: Authenticated group creator receiving the supplemental role.
-//   - membership: Creator membership that already owns the reserved administrator role.
-//
-// Returns:
-//   - domain.Membership: Reloaded membership with combined effective grants.
-//   - error: Role creation, assignment, authorization, or storage failure.
-func grantDevelopmentAdministratorCapabilities(ctx context.Context, service groups.Service, actor domain.Principal, membership domain.Membership) (domain.Membership, error) {
-	permissions := []domain.PermissionKey{
-		domain.PermissionFinanceManagement,
-		domain.PermissionCatalogManagement,
-		domain.PermissionViewGroupStatistics,
-		domain.PermissionViewAllBookingActivity,
-		domain.PermissionRecordOwnPayment,
-		domain.PermissionCreateOwnBooking,
-		domain.PermissionVoidOwnBooking,
-		domain.PermissionVoidAnyBooking,
-		domain.PermissionBookForOthers,
-		domain.PermissionBookForGuests,
+// assignAdministratorStandardRoles combines only built-in standard roles.
+func assignAdministratorStandardRoles(ctx context.Context, service groups.Service, actor domain.Principal, membership domain.Membership) (domain.Membership, error) {
+	roleIDs := []string{
+		authorization.PresetRoleID(membership.GroupID, domain.RolePresetGroupAdministrator),
+		authorization.TemplateRoleID(membership.GroupID, domain.RoleTemplateMember),
+		authorization.TemplateRoleID(membership.GroupID, domain.RoleTemplateFinance),
+		authorization.TemplateRoleID(membership.GroupID, domain.RoleTemplateCatalog),
 	}
-	grants := make([]domain.PermissionGrant, 0, len(permissions))
-	for _, permission := range permissions {
-		grants = append(grants, domain.PermissionGrant{
-			Permission: permission,
-			Scope:      domain.PermissionScope{Type: domain.PermissionScopeGroup},
-		})
-	}
-	role, err := service.CreateRole(ctx, actor, membership, groups.RoleCommand{
-		Name:        "Development administrator capabilities",
-		Description: "Supplemental capabilities for disposable local test data.",
-		Grants:      grants,
-	})
-	if err != nil {
-		return domain.Membership{}, fmt.Errorf("create development administrator role for group %q: %w", membership.GroupID, err)
-	}
-	roleIDs := append(append([]string(nil), membership.RoleIDs...), role.ID)
 	if _, err := service.ReplaceMemberRoles(ctx, actor, membership, membership.ID, roleIDs, membership.RoleAssignmentsVersion); err != nil {
-		return domain.Membership{}, fmt.Errorf("assign development administrator role for group %q: %w", membership.GroupID, err)
+		return domain.Membership{}, fmt.Errorf("assign administrator standard roles for group %q: %w", membership.GroupID, err)
 	}
 	updated, err := service.MembershipForUser(ctx, membership.GroupID, membership.UserID)
 	if err != nil {
-		return domain.Membership{}, fmt.Errorf("reload development administrator for group %q: %w", membership.GroupID, err)
+		return domain.Membership{}, fmt.Errorf("reload administrator for group %q: %w", membership.GroupID, err)
 	}
 	return updated, nil
 }
 
-// seedReasonSuggestions configures the two booking and two payment reasons
-// shared by every disposable group. It returns permission, validation, audit,
-// or storage errors from the group settings service.
-func seedReasonSuggestions(ctx context.Context, service groups.Service, actor domain.Principal, membership domain.Membership) error {
+// withTemporaryBookingGrants adds two seed-only grants and always removes them.
+func withTemporaryBookingGrants(ctx context.Context, db *sql.DB, groupID string, fn func() error) error {
+	roleID := authorization.PresetRoleID(groupID, domain.RolePresetGroupAdministrator)
+	now := platform.Timestamp(platform.Now())
+	if err := storage.WithTx(ctx, db, func(tx *sql.Tx) error {
+		for _, permission := range []domain.PermissionKey{domain.PermissionBookForOthers, domain.PermissionBookForGuests} {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO role_permission_grants(group_id,role_id,permission_key,scope_type,version,created_at,updated_at) VALUES(?,?,?,'GROUP',1,?,?)`, groupID, roleID, permission, now, now); err != nil {
+				return fmt.Errorf("grant temporary fixture permission %q: %w", permission, err)
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	seedErr := fn()
+	_, cleanupErr := db.ExecContext(ctx, `DELETE FROM role_permission_grants WHERE group_id=? AND role_id=? AND permission_key IN (?,?)`, groupID, roleID, domain.PermissionBookForOthers, domain.PermissionBookForGuests)
+	if cleanupErr != nil {
+		cleanupErr = fmt.Errorf("remove temporary fixture booking grants: %w", cleanupErr)
+	}
+	return errors.Join(seedErr, cleanupErr)
+}
+
+// configureGroup enables all group features and German transaction choices.
+func configureGroup(ctx context.Context, service groups.Service, actor domain.Principal, membership domain.Membership) error {
+	enabled := true
+	optional, required := domain.ReasonModeOptional, domain.ReasonModeRequired
+	methods := []domain.PaymentMethod{
+		{ID: "BANK_TRANSFER", Label: "Überweisung", AttachmentMode: domain.AttachmentModeOff},
+		{ID: "CARD", Label: "Karte", AttachmentMode: domain.AttachmentModeOff},
+		{ID: "CASH", Label: "Bar", AttachmentMode: domain.AttachmentModeOff},
+		{ID: "PAYPAL", Label: "PayPal", AttachmentMode: domain.AttachmentModeOff},
+		{ID: "OTHER", Label: "Sonstige", AttachmentMode: domain.AttachmentModeOptional},
+	}
 	bookingReasons := append([]domain.ConfigurableItem(nil), bookingReasonSeeds...)
 	paymentReasons := append([]domain.ConfigurableItem(nil), paymentReasonSeeds...)
-	if _, err := service.UpdateSettings(ctx, actor, membership, groups.SettingsUpdate{
-		BookingReasons: &bookingReasons,
-		PaymentReasons: &paymentReasons,
-	}); err != nil {
-		return fmt.Errorf("seed transaction reason suggestions for group %q: %w", membership.GroupID, err)
+	if _, err := service.UpdateSettings(ctx, actor, membership, groups.SettingsUpdate{NotificationEmailsEnabled: &enabled, SettlementsEnabled: &enabled, OwnBookingReasonMode: &optional, ForeignBookingReasonMode: &required, OwnPaymentReasonMode: &required, OtherPaymentReasonMode: &required, PaymentMethods: &methods, BookingReasons: &bookingReasons, PaymentReasons: &paymentReasons}); err != nil {
+		return fmt.Errorf("configure features for group %q: %w", membership.GroupID, err)
 	}
 	return nil
 }
 
-// seedProductImage normalizes one embedded image into dataDirectory and
-// attaches it to the corresponding product through the catalog service. It
-// returns embedded-file, media-validation, authorization, audit, or storage
-// errors with the affected product name.
+// configureNotifications enables every event and both channels for all members.
+func configureNotifications(ctx context.Context, service notifications.Service, groupService groups.Service, actor domain.Principal, administrator domain.Membership) error {
+	settings, err := service.GetGroupSettings(ctx, administrator)
+	if err != nil {
+		return fmt.Errorf("read notification settings for group %q: %w", administrator.GroupID, err)
+	}
+	events := make([]notifications.GroupEventUpdate, 0, len(notifications.Catalog()))
+	for _, definition := range notifications.Catalog() {
+		events = append(events, notifications.GroupEventUpdate{Type: definition.Type, Enabled: true})
+	}
+	if _, err := service.UpdateGroupSettings(ctx, actor, administrator, notifications.GroupSettingsUpdate{Timezone: "Europe/Berlin", DueSoonLeadDays: 7, OverdueRepeatDays: 3, Events: events}, settings.Version); err != nil {
+		return fmt.Errorf("enable notification events for group %q: %w", administrator.GroupID, err)
+	}
+	members, err := groupService.ListMembers(ctx, administrator)
+	if err != nil {
+		return fmt.Errorf("list notification members for group %q: %w", administrator.GroupID, err)
+	}
+	enabled := true
+	for _, member := range members {
+		preferences, readErr := service.GetPreferences(ctx, member)
+		if readErr != nil {
+			return fmt.Errorf("read notification preferences for %q: %w", member.DisplayName, readErr)
+		}
+		updates := make([]notifications.PreferenceUpdate, 0, len(events))
+		for _, event := range events {
+			updates = append(updates, notifications.PreferenceUpdate{Type: event.Type, Email: &enabled, Push: &enabled})
+		}
+		if _, updateErr := service.UpdatePreferences(ctx, member, notifications.PreferencesUpdate{Events: updates}, preferences.Version); updateErr != nil {
+			return fmt.Errorf("enable notification preferences for %q: %w", member.DisplayName, updateErr)
+		}
+	}
+	return nil
+}
+
+// seedProductImage stores and attaches one embedded product image.
 func seedProductImage(ctx context.Context, service catalog.Service, dataDirectory string, actor domain.Principal, membership domain.Membership, seed imageSeed) error {
 	imageKey, err := storeFixtureImage(dataDirectory, seed.assetPath)
 	if err != nil {
@@ -427,9 +533,19 @@ func seedProductImage(ctx context.Context, service catalog.Service, dataDirector
 	return nil
 }
 
-// seedAvatar normalizes one embedded image into dataDirectory and attaches it
-// to principal's account. It returns embedded-file, media-validation, or
-// storage errors with the affected display name.
+// seedGroupLogo stores and attaches one embedded image to a group.
+func seedGroupLogo(ctx context.Context, service groups.Service, dataDirectory string, actor domain.Principal, membership domain.Membership, assetPath string) error {
+	imageKey, err := storeFixtureImage(dataDirectory, assetPath)
+	if err != nil {
+		return fmt.Errorf("store group logo: %w", err)
+	}
+	if _, _, err := service.SetLogo(ctx, actor, membership, imageKey); err != nil {
+		return fmt.Errorf("attach group logo: %w", err)
+	}
+	return nil
+}
+
+// seedAvatar stores and attaches one embedded profile image.
 func seedAvatar(ctx context.Context, service auth.Service, dataDirectory string, principal domain.Principal, assetPath string) error {
 	imageKey, err := storeFixtureImage(dataDirectory, assetPath)
 	if err != nil {
@@ -441,10 +557,7 @@ func seedAvatar(ctx context.Context, service auth.Service, dataDirectory string,
 	return nil
 }
 
-// storeFixtureImage opens assetPath from the embedded fixture, validates and
-// normalizes it, and stores it content-addressed below dataDirectory. It
-// returns the canonical image key or an embedded-file, validation, or I/O
-// error.
+// storeFixtureImage validates and content-addresses one embedded image.
 func storeFixtureImage(dataDirectory, assetPath string) (string, error) {
 	asset, err := fixtureAssets.Open(assetPath)
 	if err != nil {
@@ -452,14 +565,10 @@ func storeFixtureImage(dataDirectory, assetPath string) (string, error) {
 	}
 	defer asset.Close()
 	imageKey, _, err := media.NormalizeAndStoreImage(dataDirectory, asset)
-	if err != nil {
-		return "", err
-	}
-	return imageKey, nil
+	return imageKey, err
 }
 
-// onlyGroup resolves the single group owned by a freshly bootstrapped test
-// user. It returns an error when the fixture invariant is not satisfied.
+// onlyGroup resolves the single group owned by a freshly bootstrapped user.
 func onlyGroup(ctx context.Context, service groups.Service, userID string) (domain.Group, error) {
 	items, err := service.List(ctx, userID)
 	if err != nil {
@@ -471,49 +580,34 @@ func onlyGroup(ctx context.Context, service groups.Service, userID string) (doma
 	return items[0], nil
 }
 
-// createFixedProduct adds one fixed-price product to the seeded catalog. The
-// price is expressed in minor currency units. It returns the stored product or
-// a contextualized catalog-service error.
+// createFixedProduct adds one fixed-price product to the seeded catalog.
 func createFixedProduct(ctx context.Context, service catalog.Service, actor domain.Principal, membership domain.Membership, categoryID, idempotencyKey, name string, priceMinor int64, sortOrder int) (domain.Product, error) {
-	item, err := service.CreateProduct(ctx, actor, membership, idempotencyKey, categoryID, catalog.CreateProductInput{
-		Name: name, PriceMinor: &priceMinor, PricingMode: domain.ProductPricingFixed, SortOrder: sortOrder,
-	})
+	item, err := service.CreateProduct(ctx, actor, membership, idempotencyKey, categoryID, catalog.CreateProductInput{Name: name, PriceMinor: &priceMinor, PricingMode: domain.ProductPricingFixed, SortOrder: sortOrder})
 	if err != nil {
 		return domain.Product{}, fmt.Errorf("create product %q: %w", name, err)
 	}
 	return item, nil
 }
 
-// createMember creates and accepts one invitation with an explicit starter-role
-// selection, then assigns an optional dynamic permission role. A fixture may
-// replace the starter assignment to exercise an exact permission boundary.
-// Every seeded account receives the shared local-only password. It returns the
-// authenticated principal and active membership or a domain service error.
+// createMember invites an account using only built-in standard roles.
 func createMember(ctx context.Context, authService auth.Service, groupService groups.Service, actor domain.Principal, actorMembership domain.Membership, seed memberSeed) (seededMember, error) {
-	availableRoles, err := groupService.ListRoles(ctx, actorMembership)
-	if err != nil {
-		return seededMember{}, fmt.Errorf("list roles for %s: %w", seed.email, err)
+	wanted := make(map[string]struct{}, len(seed.roles)+1)
+	if len(seed.roles) == 0 {
+		wanted[authorization.TemplateRoleID(actorMembership.GroupID, domain.RoleTemplateMember)] = struct{}{}
 	}
-	wantedRoleIDs := make(map[string]struct{}, len(seed.roles)+1)
-	if len(seed.roles) == 0 || len(seed.permissions) > 0 {
-		wantedRoleIDs[authorization.TemplateRoleID(actorMembership.GroupID, domain.RoleTemplateMember)] = struct{}{}
-	}
-	for _, legacyRole := range seed.roles {
-		switch legacyRole {
+	for _, role := range seed.roles {
+		switch role {
 		case domain.RoleFinanceManager:
-			wantedRoleIDs[authorization.TemplateRoleID(actorMembership.GroupID, domain.RoleTemplateFinance)] = struct{}{}
+			wanted[authorization.TemplateRoleID(actorMembership.GroupID, domain.RoleTemplateFinance)] = struct{}{}
 		case domain.RoleCatalogManager:
-			wantedRoleIDs[authorization.TemplateRoleID(actorMembership.GroupID, domain.RoleTemplateCatalog)] = struct{}{}
+			wanted[authorization.TemplateRoleID(actorMembership.GroupID, domain.RoleTemplateCatalog)] = struct{}{}
+		default:
+			return seededMember{}, fmt.Errorf("unsupported non-standard role %q for %s", role, seed.email)
 		}
 	}
-	roleIDs := make([]string, 0, len(wantedRoleIDs))
-	for _, role := range availableRoles {
-		if _, selected := wantedRoleIDs[role.ID]; selected {
-			roleIDs = append(roleIDs, role.ID)
-		}
-	}
-	if len(roleIDs) == 0 {
-		return seededMember{}, fmt.Errorf("resolve starter roles for %s", seed.email)
+	roleIDs := make([]string, 0, len(wanted))
+	for roleID := range wanted {
+		roleIDs = append(roleIDs, roleID)
 	}
 	invitation, err := groupService.CreateInvitationWithRoles(ctx, actor, actorMembership, seed.email, seed.displayName, roleIDs)
 	if err != nil {
@@ -523,45 +617,14 @@ func createMember(ctx context.Context, authService auth.Service, groupService gr
 	if err != nil {
 		return seededMember{}, fmt.Errorf("preview invitation for %s: %w", seed.email, err)
 	}
-	session, membership, err := authService.AcceptInvitation(ctx, auth.InvitationAcceptance{
-		Token: invitation.Token, DisplayName: seed.displayName, Password: testPassword, ExpectedAccountState: preview.AccountState,
-	})
+	session, membership, err := authService.AcceptInvitation(ctx, auth.InvitationAcceptance{Token: invitation.Token, DisplayName: seed.displayName, Password: testPassword, ExpectedAccountState: preview.AccountState})
 	if err != nil {
 		return seededMember{}, fmt.Errorf("accept invitation for %s: %w", seed.email, err)
-	}
-	if len(seed.permissions) > 0 {
-		grants := make([]domain.PermissionGrant, 0, len(seed.permissions))
-		for _, permission := range seed.permissions {
-			grants = append(grants, domain.PermissionGrant{
-				Permission: permission,
-				Scope:      domain.PermissionScope{Type: domain.PermissionScopeGroup},
-			})
-		}
-		role, createErr := groupService.CreateRole(ctx, actor, actorMembership, groups.RoleCommand{
-			Name:        seed.displayName + " permissions",
-			Description: "Editable permissions for the disposable test-data account.",
-			Grants:      grants,
-		})
-		if createErr != nil {
-			return seededMember{}, fmt.Errorf("create dynamic role for %s: %w", seed.email, createErr)
-		}
-		roleIDs := []string{role.ID}
-		if !seed.replaceStarterWithGrant {
-			roleIDs = append(append([]string(nil), membership.RoleIDs...), role.ID)
-		}
-		if _, assignErr := groupService.ReplaceMemberRoles(ctx, actor, actorMembership, membership.ID, roleIDs, membership.RoleAssignmentsVersion); assignErr != nil {
-			return seededMember{}, fmt.Errorf("assign dynamic role for %s: %w", seed.email, assignErr)
-		}
-		membership, err = groupService.MembershipForUser(ctx, membership.GroupID, membership.UserID)
-		if err != nil {
-			return seededMember{}, fmt.Errorf("reload dynamic role for %s: %w", seed.email, err)
-		}
 	}
 	return seededMember{principal: session.Principal, membership: membership}, nil
 }
 
-// openPeriodID returns the only open accounting period for groupID. It returns
-// a contextualized SQL error when the fixture or database is inconsistent.
+// openPeriodID returns the only open accounting period for one group.
 func openPeriodID(ctx context.Context, db *sql.DB, groupID string) (string, error) {
 	var periodID string
 	if err := db.QueryRowContext(ctx, `SELECT id FROM periods WHERE group_id=? AND status='OPEN'`, groupID).Scan(&periodID); err != nil {

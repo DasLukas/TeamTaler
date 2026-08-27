@@ -14,3 +14,12 @@ func TestIsCurrencyCode(t *testing.T) {
 		}
 	}
 }
+
+func TestCurrencyExponent(t *testing.T) {
+	tests := map[string]uint8{"EUR": 2, "JPY": 0, "KWD": 3, "CLF": 4, "ZZZ": 2, "jpy": 0}
+	for currency, want := range tests {
+		if got := CurrencyExponent(currency); got != want {
+			t.Fatalf("CurrencyExponent(%q) = %d, want %d", currency, got, want)
+		}
+	}
+}

@@ -19,6 +19,7 @@ import { StatePanel } from '@/components/ui/StatePanel';
 import { DataTable, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange } from '@/features/shared/DataTable';
 import { formatGermanDate } from '@/features/shared/dateFormat';
 import { createMemberFilterOption } from '@/features/shared/memberFilterOption';
+import { MembershipStateIcon } from '@/features/shared/MembershipStateIcon';
 import tableStyles from '@/features/shared/Table.module.css';
 import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
@@ -136,6 +137,7 @@ export function PaymentsPanel() {
     queryKey: ['payments', activeGroupId, 'collection', collectionQuery],
   });
   const payments = useMemo(() => paymentsQuery.data?.pages.flatMap((page) => page.items) ?? [], [paymentsQuery.data]);
+  const accountAvatarUrls = useMemo(() => new Map((accountsQuery.data ?? []).map((account) => [account.membershipId, account.avatarUrl])), [accountsQuery.data]);
   const activeAccounts = accountsQuery.data?.filter((account) => account.status === 'ACTIVE') ?? [];
   const regularAccounts = activeAccounts.filter((account) => !account.isTemporaryGuest);
   const temporaryGuestAccounts = activeAccounts.filter((account) => account.isTemporaryGuest);
@@ -206,7 +208,7 @@ export function PaymentsPanel() {
     },
     {
       accessorKey: 'memberName',
-      cell: ({ row }) => <><strong>{row.original.memberName}</strong>{row.original.membershipStatus === 'DELETED' ? <span className={tableStyles.status}>{t('common.deleted')}</span> : null}</>,
+      cell: ({ row }) => <span className={styles.member}><Avatar name={row.original.memberName} size="small" src={accountAvatarUrls.get(row.original.membershipId)} /><strong>{row.original.memberName}</strong><MembershipStateIcon status={row.original.membershipStatus} /></span>,
       enableSorting: true,
       header: t('common.member'),
       id: 'memberName',
@@ -240,7 +242,7 @@ export function PaymentsPanel() {
       id: 'action',
       meta: { label: t('common.action') },
     },
-  ], [activeGroupId, t]);
+  ], [accountAvatarUrls, activeGroupId, t]);
 
   if (accountsQuery.isLoading || transactionSettingsQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
   if (!accountsQuery.data || !transactionSettingsQuery.data) return <div className={styles.state}><StatePanel kind="error" message={t('finance.error')} /></div>;
@@ -255,6 +257,13 @@ export function PaymentsPanel() {
         columns={columns}
         data={payments}
         emptyContent={paymentsQuery.isError ? t('finance.error') : t('finance.empty')}
+        exportConfig={{
+          disabled: deferredSearch !== tableState.searchValue.trim(),
+          groupId: activeGroupId,
+          query: { ...collectionQuery, limit: undefined },
+          table: 'PAYMENTS',
+          title: t('finance.title'),
+        }}
         filterDefinitions={filterDefinitions}
         getRowId={(payment) => payment.id}
         hasMore={paymentsQuery.hasNextPage}

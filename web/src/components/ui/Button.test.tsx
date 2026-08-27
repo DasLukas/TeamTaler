@@ -27,4 +27,12 @@ describe('Button', () => {
     expect(button.className).toContain('collapseLabelAtTablet');
     expect(screen.getByText('Save')).toBeInTheDocument();
   });
+
+  it('renders an accessible icon-only action at every viewport size', () => {
+    render(<Button aria-label="Save settings" iconOnly leadingIcon={<Save size={17} />}>Save</Button>);
+
+    const button = screen.getByRole('button', { name: 'Save settings' });
+    expect(button.className).toContain('iconOnly');
+    expect(screen.getByText('Save')).toBeInTheDocument();
+  });
 });

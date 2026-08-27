@@ -17,6 +17,7 @@ import { createMemberFilterOption } from '@/features/shared/memberFilterOption';
 import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
 import { deriveAccountOverview } from './accountOverview';
+import { MembershipStatusBadge } from './MembershipStatusBadge';
 import styles from './AccountBalancesPanel.module.css';
 
 function balanceState(account: AccountSummary): 'due' | 'settled' | 'credit' {
@@ -56,7 +57,7 @@ export function AccountBalancesPanel() {
       label: t('financeWorkspace.membershipStatus'),
       options: [
         { label: t('financeWorkspace.active'), value: 'ACTIVE', visual: <CircleCheck size={19} /> },
-        { label: t('financeWorkspace.archived'), value: 'ARCHIVED', visual: <Archive size={19} /> },
+        { label: t('common.archived'), value: 'ARCHIVED', visual: <Archive size={19} /> },
         { label: t('common.deleted'), value: 'DELETED', visual: <Trash2 size={19} /> },
       ],
     },
@@ -110,6 +111,21 @@ export function AccountBalancesPanel() {
       return sorting.desc ? -comparison : comparison;
     });
   }, [accountsQuery.data, activeGroup.currency, deferredSearch, tableState.filters, tableState.sorting]);
+  const exportQuery = useMemo(() => {
+    const amountRange = tableState.filters.amount as DataTableNumberRange | undefined;
+    const sorting = tableState.sorting[0];
+    const toMinorUnits = (value: number | undefined) => value === undefined ? undefined : Math.round(value * (10 ** currencyExponent(activeGroup.currency))).toString();
+    return {
+      amountMax: toMinorUnits(amountRange?.max),
+      amountMin: toMinorUnits(amountRange?.min),
+      balanceState: Array.isArray(tableState.filters.balanceState) ? tableState.filters.balanceState : undefined,
+      direction: sorting?.desc ? 'desc' : 'asc',
+      membershipId: tableState.filters.membershipId as string | undefined,
+      membershipStatus: Array.isArray(tableState.filters.membershipStatus) ? tableState.filters.membershipStatus : undefined,
+      q: deferredSearch || undefined,
+      sort: sorting?.id ?? 'memberName',
+    };
+  }, [activeGroup.currency, deferredSearch, tableState.filters, tableState.sorting]);
   const columns = useMemo<DataTableColumnDef<AccountSummary>[]>(() => [
     {
       accessorKey: 'displayName',
@@ -119,7 +135,7 @@ export function AccountBalancesPanel() {
       id: 'memberName',
       meta: { label: t('common.member') },
     },
-    { accessorKey: 'status', cell: ({ row }) => row.original.status === 'ACTIVE' ? t('financeWorkspace.active') : row.original.status === 'ARCHIVED' ? t('financeWorkspace.archived') : t('common.deleted'), enableSorting: true, header: t('financeWorkspace.membershipStatus'), id: 'membershipStatus', meta: { label: t('financeWorkspace.membershipStatus') } },
+    { accessorKey: 'status', cell: ({ row }) => <MembershipStatusBadge status={row.original.status} />, enableSorting: true, header: t('financeWorkspace.membershipStatus'), id: 'membershipStatus', meta: { label: t('financeWorkspace.membershipStatus') } },
     {
       accessorFn: balanceState,
       cell: ({ row }) => { const state = balanceState(row.original); return <span className={`${styles.state} ${styles[state]}`}>{t(`financeWorkspace.states.${state}`)}</span>; },
@@ -147,6 +163,7 @@ export function AccountBalancesPanel() {
         columns={columns}
         data={visibleAccounts}
         emptyContent={tableState.searchValue || Object.keys(tableState.filters).length > 0 ? t('financeWorkspace.noSearchResults') : t('financeWorkspace.noAccounts')}
+        exportConfig={{ disabled: deferredSearch !== tableState.searchValue.trim().toLocaleLowerCase('de-DE'), groupId: activeGroupId, query: exportQuery, table: 'ACCOUNT_BALANCES', title: t('financeWorkspace.overviewTitle') }}
         filterDefinitions={filterDefinitions}
         getRowId={(account) => account.membershipId}
         labels={{ ...labels, searchLabel: t('financeWorkspace.search'), searchPlaceholder: t('financeWorkspace.searchPlaceholder') }}

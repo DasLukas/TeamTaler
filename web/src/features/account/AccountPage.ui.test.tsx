@@ -10,6 +10,7 @@ vi.mock('./ProfileImagePanel', () => ({ ProfileImagePanel: () => <div>profile-im
 vi.mock('./AccountFinanceSection', () => ({ AccountFinanceSection: () => <div>account-finance</div> }));
 vi.mock('./NotificationPreferencesPanel', () => ({ NotificationPreferencesPanel: () => <div>notification-preferences</div> }));
 vi.mock('./AppearanceSettingsPanel', () => ({ AppearanceSettingsPanel: () => <div>appearance-settings</div> }));
+vi.mock('@/features/exports/DataExportPanel', () => ({ DataExportPanel: () => <div>data-export</div> }));
 
 describe('AccountPage group-independent shell', () => {
   beforeEach(() => mocks.activeGroup.mockReturnValue(null));
@@ -22,6 +23,7 @@ describe('AccountPage group-independent shell', () => {
     expect(screen.getByText('appearance-settings')).toBeVisible();
     expect(screen.queryByText('account-finance')).not.toBeInTheDocument();
     expect(screen.getByText('notification-preferences')).toBeVisible();
+    expect(screen.queryByText('data-export')).not.toBeInTheDocument();
     expect(screen.getByText('Verwalte dein persönliches Konto und deine Anmeldedaten.')).toBeVisible();
   });
 
@@ -31,5 +33,6 @@ describe('AccountPage group-independent shell', () => {
 
     expect(screen.getByText('account-finance')).toBeVisible();
     expect(screen.getByText('notification-preferences')).toBeVisible();
+    expect(screen.getByText('data-export')).toBeVisible();
   });
 });

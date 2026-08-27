@@ -88,6 +88,65 @@ describe('PaymentsPanel', () => {
     expect(within(listbox).queryByRole('option', { name: 'Deleted Credit' })).not.toBeInTheDocument();
   });
 
+  it('renders member avatars in the payments table', async () => {
+    apiMock.getPaymentsPage.mockResolvedValue({
+      hasMore: false,
+      items: [{
+        id: 'payment-active',
+        membershipId: 'member-active',
+        memberName: 'Active Account',
+        membershipStatus: 'ACTIVE',
+        amount: { minorUnits: '500', currency: 'EUR' },
+        receivedAt: '2026-08-30T10:00:00Z',
+        method: 'CASH',
+        methodLabel: 'Bar',
+        status: 'POSTED',
+      }],
+      limit: 50,
+    });
+    renderPayments();
+
+    const member = await screen.findByText('Active Account');
+    expect(member.closest('td')?.querySelector('img')).toHaveAttribute('src', '/avatars/active-account.png');
+  });
+
+  it('renders lifecycle icons for archived and deleted payment members', async () => {
+    apiMock.getPaymentsPage.mockResolvedValue({
+      hasMore: false,
+      items: [
+        {
+          id: 'payment-archived',
+          membershipId: 'member-archived',
+          memberName: 'Archived Account',
+          membershipStatus: 'ARCHIVED',
+          amount: { minorUnits: '500', currency: 'EUR' },
+          receivedAt: '2026-08-29T10:00:00Z',
+          method: 'CASH',
+          methodLabel: 'Bar',
+          status: 'POSTED',
+        },
+        {
+          id: 'payment-deleted',
+          membershipId: 'member-deleted',
+          memberName: 'Deleted Account',
+          membershipStatus: 'DELETED',
+          amount: { minorUnits: '250', currency: 'EUR' },
+          receivedAt: '2026-08-30T10:00:00Z',
+          method: 'CASH',
+          methodLabel: 'Bar',
+          status: 'POSTED',
+        },
+      ],
+      limit: 50,
+    });
+    renderPayments();
+
+    const archivedCell = (await screen.findByText('Archived Account')).closest('td');
+    const deletedCell = screen.getByText('Deleted Account').closest('td');
+    expect(within(archivedCell as HTMLElement).getByRole('img', { name: i18n.t('common.archived') }).querySelector('svg')).toBeInTheDocument();
+    expect(within(deletedCell as HTMLElement).getByRole('img', { name: i18n.t('common.deleted') }).querySelector('svg')).toBeInTheDocument();
+  });
+
   it('marks the amount as required while keeping the optional reference unmarked', async () => {
     const user = userEvent.setup();
     renderPayments();

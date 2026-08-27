@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/netip"
 	"path"
+	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -28,6 +29,8 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/catalog"
 	"github.com/DasLukas/TeamTaler/internal/config"
 	"github.com/DasLukas/TeamTaler/internal/domain"
+	"github.com/DasLukas/TeamTaler/internal/exporting"
+	"github.com/DasLukas/TeamTaler/internal/exportnotifications"
 	"github.com/DasLukas/TeamTaler/internal/finance"
 	"github.com/DasLukas/TeamTaler/internal/groups"
 	"github.com/DasLukas/TeamTaler/internal/notifications"
@@ -52,23 +55,26 @@ const systemSettingsKey contextKey = "system-settings"
 // Use New to construct it; fields intentionally remain private so middleware and
 // authorization cannot be bypassed by external packages.
 type Server struct {
-	config            config.Config
-	db                *sql.DB
-	activities        activities.Service
-	auth              auth.Service
-	groups            groups.Service
-	catalog           catalog.Service
-	bookings          bookings.Service
-	finance           finance.Service
-	periods           periods.Service
-	notifications     notifications.Service
-	systemAdmin       systemadmin.Service
-	pushSubscriptions *webpushservice.SubscriptionService
-	pushSender        *webpushservice.Sender
-	systemConfigured  bool
-	loginLimiter      *loginLimiter
-	passwordSlots     chan struct{}
-	logger            *slog.Logger
+	config             config.Config
+	db                 *sql.DB
+	activities         activities.Service
+	auth               auth.Service
+	groups             groups.Service
+	catalog            catalog.Service
+	bookings           bookings.Service
+	finance            finance.Service
+	exports            *exporting.Service
+	periods            periods.Service
+	notifications      notifications.Service
+	systemAdmin        systemadmin.Service
+	pushSubscriptions  *webpushservice.SubscriptionService
+	pushSender         *webpushservice.Sender
+	systemConfigured   bool
+	loginLimiter       *loginLimiter
+	passwordSlots      chan struct{}
+	tableExportLimiter *loginLimiter
+	tableExportSlots   chan struct{}
+	logger             *slog.Logger
 }
 
 // New builds a hardened same-origin handler from cfg, db, and an optional logger.
@@ -137,24 +143,37 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 		}
 		pushSender = webpushservice.NewSender(nil)
 	}
+	exportStore, err := exporting.NewFileArtifactStore(filepath.Join(cfg.DataDirectory, "exports"))
+	if err != nil {
+		panic(fmt.Sprintf("configure data export artifact store: %v", err))
+	}
+	exportService, err := exporting.NewService(db, exportStore, exporting.Options{
+		CompletionListener: exportnotifications.Listener{DB: db},
+	})
+	if err != nil {
+		panic(fmt.Sprintf("configure data export service: %v", err))
+	}
 	server := &Server{
-		config:            cfg,
-		db:                db,
-		activities:        activities.Service{DB: db},
-		auth:              auth.Service{DB: db, SessionLifetime: cfg.SessionLifetime, TokenSealer: tokenSealer, EmailDeliveryAvailable: emailInfrastructureAvailable},
-		groups:            groupService,
-		catalog:           catalog.Service{DB: db},
-		bookings:          bookings.Service{DB: db, Groups: groupService, Notifications: notificationService},
-		finance:           finance.Service{DB: db, Notifications: notificationService, Attachments: paymentattachments.Store{DataDirectory: cfg.DataDirectory}},
-		periods:           periods.Service{DB: db, Notifications: notificationService},
-		notifications:     notificationService,
-		systemAdmin:       systemService,
-		pushSubscriptions: pushSubscriptions,
-		pushSender:        pushSender,
-		systemConfigured:  true,
-		loginLimiter:      newLoginLimiter(),
-		passwordSlots:     make(chan struct{}, 2),
-		logger:            logger,
+		config:             cfg,
+		db:                 db,
+		activities:         activities.Service{DB: db},
+		auth:               auth.Service{DB: db, SessionLifetime: cfg.SessionLifetime, TokenSealer: tokenSealer, EmailDeliveryAvailable: emailInfrastructureAvailable},
+		groups:             groupService,
+		catalog:            catalog.Service{DB: db},
+		bookings:           bookings.Service{DB: db, Groups: groupService, Notifications: notificationService},
+		finance:            finance.Service{DB: db, Notifications: notificationService, Attachments: paymentattachments.Store{DataDirectory: cfg.DataDirectory}},
+		exports:            exportService,
+		periods:            periods.Service{DB: db, Notifications: notificationService},
+		notifications:      notificationService,
+		systemAdmin:        systemService,
+		pushSubscriptions:  pushSubscriptions,
+		pushSender:         pushSender,
+		systemConfigured:   true,
+		loginLimiter:       newLoginLimiter(),
+		passwordSlots:      make(chan struct{}, 2),
+		tableExportLimiter: newLoginLimiter(),
+		tableExportSlots:   make(chan struct{}, 2),
+		logger:             logger,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", server.handleLive)
@@ -214,6 +233,7 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /api/v1/system/groups/{groupID}/purge", server.handlePurgeSystemGroup)
 	mux.HandleFunc("GET /api/v1/system/audit", server.handleSystemAudit)
 	mux.HandleFunc("GET /api/v1/system/audit/filter-options", server.handleSystemAuditFilterOptions)
+	mux.HandleFunc("POST /api/v1/system/table-exports", server.handleSystemTableExport)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}", server.handleUpdateGroup)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/settings", server.handleGetGroupSettings)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/settings", server.handleUpdateGroupSettings)
@@ -289,6 +309,13 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/notifications/{notificationID}", server.handleUpdateNotification)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/audit", server.handleAudit)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/audit/filter-options", server.handleAuditFilterOptions)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/table-exports", server.handleGroupTableExport)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/exports", server.handleCreateGroupDataExport)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/me/exports", server.handleCreatePersonalDataExport)
+	mux.HandleFunc("GET /api/v1/exports", server.handleListDataExports)
+	mux.HandleFunc("GET /api/v1/exports/{exportID}", server.handleGetDataExport)
+	mux.HandleFunc("GET /api/v1/exports/{exportID}/download", server.handleDownloadDataExport)
+	mux.HandleFunc("DELETE /api/v1/exports/{exportID}", server.handleDeleteDataExport)
 	mux.HandleFunc("/api/", func(response http.ResponseWriter, request *http.Request) {
 		writeProblem(response, request, domain.ErrNotFound)
 	})

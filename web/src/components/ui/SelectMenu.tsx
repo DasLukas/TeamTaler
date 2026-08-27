@@ -105,13 +105,18 @@ export function SelectMenu<Value extends string>({ ariaDescribedBy, ariaLabel, c
       if (!triggerRef.current?.contains(target) && !panelRef.current?.contains(target)) close();
     };
     const closeForLayoutChange = () => close();
+    const closeForExternalScroll = (event: Event) => {
+      const target = event.target;
+      if (target instanceof Node && panelRef.current?.contains(target)) return;
+      close();
+    };
     document.addEventListener('pointerdown', dismiss);
     window.addEventListener('resize', closeForLayoutChange);
-    window.addEventListener('scroll', closeForLayoutChange, true);
+    window.addEventListener('scroll', closeForExternalScroll, true);
     return () => {
       document.removeEventListener('pointerdown', dismiss);
       window.removeEventListener('resize', closeForLayoutChange);
-      window.removeEventListener('scroll', closeForLayoutChange, true);
+      window.removeEventListener('scroll', closeForExternalScroll, true);
     };
   }, [open]);
 

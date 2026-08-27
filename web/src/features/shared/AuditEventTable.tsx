@@ -5,6 +5,7 @@ import type { AuditEventFilterId } from './auditFilters';
 import { useDataTableLabels } from './useDataTableLabels';
 import type { DataTableUrlState } from './useDataTableUrlState';
 import { formatGermanDateTime } from './dateFormat';
+import type { TableExportConfig } from './TableExportMenu';
 
 /** One normalized row rendered by the shared audit-event table. */
 export interface AuditEventTableEntry {
@@ -20,6 +21,7 @@ export interface AuditEventTableEntry {
 export interface AuditEventTableProps {
   emptyMessage: string;
   entries: AuditEventTableEntry[];
+  exportConfig?: TableExportConfig;
   filterDefinitions: readonly DataTableFilterDefinition<AuditEventFilterId>[];
   hasMore?: boolean;
   isLoading?: boolean;
@@ -38,7 +40,7 @@ export interface AuditEventTableProps {
  * @example
  * <AuditEventTable title="Audit" entries={events} emptyMessage="No events" filterDefinitions={filters} tableState={tableState} />
  */
-export function AuditEventTable({ emptyMessage, entries, filterDefinitions, hasMore, isLoading, isLoadingMore, onLoadMore, tableState, title }: AuditEventTableProps) {
+export function AuditEventTable({ emptyMessage, entries, exportConfig, filterDefinitions, hasMore, isLoading, isLoadingMore, onLoadMore, tableState, title }: AuditEventTableProps) {
   const { t } = useTranslation();
   const labels = useDataTableLabels();
   const columns = useMemo<DataTableColumnDef<AuditEventTableEntry>[]>(() => [
@@ -62,6 +64,7 @@ export function AuditEventTable({ emptyMessage, entries, filterDefinitions, hasM
       columns={columns}
       data={entries}
       emptyContent={emptyMessage}
+      exportConfig={exportConfig}
       filterDefinitions={filterDefinitions}
       getRowId={(entry) => entry.id}
       hasMore={hasMore}

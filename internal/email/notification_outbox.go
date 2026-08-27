@@ -321,15 +321,7 @@ func safeInline(value string) string {
 }
 
 func formatEmailMoney(amount int64, currency string) string {
-	digits := 2
-	switch strings.ToUpper(currency) {
-	case "BIF", "CLP", "DJF", "GNF", "ISK", "JPY", "KMF", "KRW", "PYG", "RWF", "UGX", "VND", "VUV", "XAF", "XOF", "XPF":
-		digits = 0
-	case "BHD", "IQD", "JOD", "KWD", "LYD", "OMR", "TND":
-		digits = 3
-	case "CLF":
-		digits = 4
-	}
+	digits := int(platform.CurrencyExponent(currency))
 	sign := ""
 	if amount < 0 {
 		sign = "−"

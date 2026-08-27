@@ -438,6 +438,7 @@ describe('API adapters', () => {
       id: 'statement-1',
       periodId: 'period-1',
       membershipId: 'member-1',
+      membershipStatus: 'ARCHIVED',
       displayName: 'Mara Becker',
       chargesMinor: '150',
       paymentsAllocatedMinor: '25',
@@ -452,5 +453,6 @@ describe('API adapters', () => {
     expect(settlement.paidAmount.minorUnits).toBe('100');
     expect(settlement.openAmount?.minorUnits).toBe('100');
     expect(settlement.email).toBeNull();
+    expect(settlement.membershipStatus).toBe('ARCHIVED');
   });
 });

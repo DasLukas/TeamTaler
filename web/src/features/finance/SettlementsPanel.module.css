@@ -13,6 +13,8 @@
 .actions { display: flex; justify-content: flex-end; gap: var(--space-3); }
 .error { color: var(--color-status-danger) !important; }
 .state { padding-top: var(--space-8); }
+.member { display: inline-flex; min-width: 0; align-items: center; gap: var(--space-3); }
+.member > span:last-child { overflow: hidden; text-overflow: ellipsis; }
 
 @media (max-width: 600px) {
   .header { align-items: stretch; flex-direction: column; }

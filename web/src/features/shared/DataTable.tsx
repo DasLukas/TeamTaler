@@ -29,6 +29,7 @@ import { Modal } from '@/components/ui/Modal';
 import { MultiSelectMenu } from '@/components/ui/MultiSelectMenu';
 import { SelectMenu } from '@/components/ui/SelectMenu';
 import { availableDataTableFilterOptions, isDataTableFilterActive, normalizeDataTableFilters } from './dataTableFilters';
+import { TableExportMenu, type TableExportConfig } from './TableExportMenu';
 import styles from './DataTable.module.css';
 import tableStyles from './Table.module.css';
 
@@ -154,12 +155,27 @@ export interface DataTableLabels {
 /** Column definition enriched with optional TeamTaler alignment metadata. */
 export type DataTableColumnDef<Data extends RowData, Value = unknown> = ColumnDef<typeof dataTableFeatures, Data, Value>;
 
+/** Feature-owned card renderer used as an alternative to the semantic table viewport. */
+export interface DataTableCardView<Data extends RowData> {
+  /** Accessible name applied to the scrollable card collection. */
+  ariaLabel: string;
+  /** Renders one feature-specific card from the same sorted row model as the table. */
+  renderItem: (row: Data) => ReactNode;
+}
+
+/** Available representations of one data-table collection. */
+export type DataTableViewMode = 'table' | 'cards';
+
 /** Properties accepted by the reusable data table. */
 export interface DataTableProps<Data extends RowData, FilterId extends string = string> {
   ariaLabel: string;
+  /** Optional feature-owned card presentation for compact collection views. */
+  cardView?: DataTableCardView<Data>;
   columns: DataTableColumnDef<Data>[];
   data: Data[];
   emptyContent: ReactNode;
+  /** Enables a server-rendered export of the complete current table query. */
+  exportConfig?: TableExportConfig;
   filterDefinitions?: readonly DataTableFilterDefinition<FilterId>[];
   filters?: DataTableFilterState<FilterId>;
   /** Fills the available block size while keeping only the table viewport scrollable. */
@@ -184,6 +200,8 @@ export interface DataTableProps<Data extends RowData, FilterId extends string = 
   showResultBar?: boolean;
   toolbarActions?: ReactNode;
   totalCount?: number;
+  /** Chooses the semantic table or the supplied card presentation. */
+  viewMode?: DataTableViewMode;
 }
 
 /** Properties accepted by the horizontal table viewport. */
@@ -196,12 +214,21 @@ export interface DataTableViewportProps {
 
 /** Properties accepted by the result and incremental-loading footer. */
 export interface DataTableResultBarProps {
+  /** Replaces the manual action with observer-driven loading and progress feedback. */
+  automaticLoading?: boolean;
   hasMore?: boolean;
   isLoadingMore?: boolean;
   labels: Pick<DataTableLabels, 'loadMore' | 'loadingMore' | 'results'>;
   loadedCount: number;
   onLoadMore?: () => void;
   totalCount?: number;
+}
+
+interface DataTableAutoLoadSentinelProps {
+  hasMore: boolean;
+  isLoadingMore: boolean;
+  loadedCount: number;
+  onLoadMore?: () => void;
 }
 
 type ScrollPosition = 'none' | 'start' | 'middle' | 'end';
@@ -296,16 +323,58 @@ export function DataTableViewport({ ariaLabel, children, minTableWidth = '720px'
 }
 
 /**
- * Renders loaded/total result feedback and an optional incremental-loading action.
+ * Requests the next page shortly before the end of a table or card collection becomes visible.
  *
- * @param props - Counts, loading state, localized labels, and load callback.
- * @returns A polite result status with an optional load-more button.
+ * @param props - Current pagination state, loaded row count, and stable load callback.
+ * @returns An inert intersection target while another page is available.
  */
-export function DataTableResultBar({ hasMore = false, isLoadingMore = false, labels, loadedCount, onLoadMore, totalCount }: DataTableResultBarProps) {
+function DataTableAutoLoadSentinel({ hasMore, isLoadingMore, loadedCount, onLoadMore }: DataTableAutoLoadSentinelProps) {
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const loadMoreRef = useRef(onLoadMore);
+  const canLoadMore = onLoadMore !== undefined;
+
+  useEffect(() => {
+    loadMoreRef.current = onLoadMore;
+  }, [onLoadMore]);
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel || !hasMore || isLoadingMore || !canLoadMore || typeof IntersectionObserver === 'undefined') return undefined;
+
+    const container = sentinel.parentElement;
+    const overflowY = container ? window.getComputedStyle(container).overflowY : 'visible';
+    const scrollsVertically = Boolean(container && container.scrollHeight > container.clientHeight + 1 && (overflowY === 'auto' || overflowY === 'scroll'));
+    let requested = false;
+    const observer = new IntersectionObserver((entries) => {
+      if (requested || !entries.some((entry) => entry.isIntersecting)) return;
+      requested = true;
+      observer.disconnect();
+      loadMoreRef.current?.();
+    }, {
+      root: scrollsVertically ? container : null,
+      rootMargin: '320px 0px',
+      threshold: 0,
+    });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [canLoadMore, hasMore, isLoadingMore, loadedCount]);
+
+  return hasMore && onLoadMore ? <div aria-hidden="true" className={styles.loadMoreSentinel} ref={sentinelRef} /> : null;
+}
+
+/**
+ * Renders loaded/total result feedback and progressive-loading state.
+ *
+ * @param props - Counts, loading state, localized labels, load callback, and browser capability.
+ * @returns A polite result status, loading feedback, or a compatibility fallback button.
+ */
+export function DataTableResultBar({ automaticLoading = false, hasMore = false, isLoadingMore = false, labels, loadedCount, onLoadMore, totalCount }: DataTableResultBarProps) {
   return (
     <footer className={styles.resultBar}>
       <span aria-live="polite" role="status">{labels.results(loadedCount, totalCount)}</span>
-      {hasMore && onLoadMore ? (
+      {automaticLoading && isLoadingMore ? (
+        <span aria-live="polite" className={styles.loadingMore} role="status"><span className={styles.loadingDot} />{labels.loadingMore}</span>
+      ) : !automaticLoading && hasMore && onLoadMore ? (
         <Button
           disabled={isLoadingMore}
           leadingIcon={isLoadingMore ? <span className={styles.loadingDot} /> : <ArrowDown size={17} />}
@@ -533,6 +602,7 @@ function DataTableControls<FilterId extends string>({ definitions, filters, labe
             <Button
               aria-expanded={filterDialogOpen}
               aria-haspopup="dialog"
+              className={styles.filterButton}
               leadingIcon={<Filter size={18} />}
               onClick={openFilterDialog}
               variant="secondary"
@@ -609,9 +679,11 @@ function DataTableControls<FilterId extends string>({ definitions, filters, labe
  */
 export function DataTable<Data extends RowData, FilterId extends string = string>({
   ariaLabel,
+  cardView,
   columns,
   data,
   emptyContent,
+  exportConfig,
   filterDefinitions,
   filters,
   fillAvailableHeight = false,
@@ -632,6 +704,7 @@ export function DataTable<Data extends RowData, FilterId extends string = string
   sorting,
   toolbarActions,
   totalCount,
+  viewMode = 'table',
 }: DataTableProps<Data, FilterId>) {
   const resolvedFilterDefinitions = filterDefinitions ?? EMPTY_FILTER_DEFINITIONS as readonly DataTableFilterDefinition<FilterId>[];
   const resolvedFilters = filters ?? EMPTY_FILTERS as DataTableFilterState<FilterId>;
@@ -645,6 +718,13 @@ export function DataTable<Data extends RowData, FilterId extends string = string
     onSortingChange,
     state: { sorting },
   });
+  const exportAction = exportConfig && data.length > 0 ? (
+    <TableExportMenu {...exportConfig} disabled={exportConfig.disabled || isLoading} />
+  ) : null;
+  const resolvedToolbarActions = toolbarActions || exportAction ? <>{toolbarActions}{exportAction}</> : undefined;
+  const cardRows = table.getRowModel().rows;
+  const showsCards = viewMode === 'cards' && cardView !== undefined;
+  const automaticLoading = typeof IntersectionObserver !== 'undefined';
 
   return (
     <div className={`${styles.root} ${fillAvailableHeight ? styles.fillAvailableHeight : ''}`}>
@@ -655,56 +735,67 @@ export function DataTable<Data extends RowData, FilterId extends string = string
         onFiltersChange={onFiltersChange ?? ignoreFilterChange}
         onSearchChange={onSearchChange}
         searchValue={searchValue}
-        toolbarActions={toolbarActions}
-      /> : null}
-      <DataTableViewport ariaLabel={ariaLabel} minTableWidth={minTableWidth} scrollHint={labels.scrollHint}>
-        <table aria-label={ariaLabel} className={`${tableStyles.table} ${styles.dataTable}`}>
-          <thead>
-            {table.getHeaderGroups().map((headerGroup) => (
-              <tr key={headerGroup.id}>
-                {headerGroup.headers.map((header) => {
-                  const sorted = header.column.getIsSorted();
-                  const sortable = header.column.getCanSort();
-                  const label = header.column.columnDef.meta?.label ?? header.column.id;
-                  const alignment = header.column.columnDef.meta?.align ?? 'start';
-                  const nextSortLabel = sorted === 'asc' ? labels.sortDescending(label) : labels.sortAscending(label);
-                  return (
-                    <th
-                      aria-sort={sorted === 'asc' ? 'ascending' : sorted === 'desc' ? 'descending' : undefined}
-                      className={styles[alignment]}
-                      key={header.id}
-                      scope="col"
-                    >
-                      {header.isPlaceholder ? null : sortable ? (
-                        <button aria-label={nextSortLabel} className={styles.sortButton} onClick={header.column.getToggleSortingHandler()} type="button">
-                          <span><table.FlexRender header={header} /></span>
-                          {sorted === 'asc' ? <ArrowUp aria-hidden="true" size={15} /> : sorted === 'desc' ? <ArrowDown aria-hidden="true" size={15} /> : <ChevronsUpDown aria-hidden="true" size={15} />}
-                        </button>
-                      ) : <table.FlexRender header={header} />}
-                    </th>
-                  );
-                })}
-              </tr>
-            ))}
-          </thead>
-          <tbody>
-            {isLoading && data.length === 0 ? (
-              <tr><td className={styles.tableState} colSpan={Math.max(1, columns.length)} role="status">{labels.loading}</td></tr>
-            ) : table.getRowModel().rows.length === 0 ? (
-              <tr><td className={styles.tableState} colSpan={Math.max(1, columns.length)}>{emptyContent}</td></tr>
-            ) : table.getRowModel().rows.map((row) => (
-              <tr key={row.id}>
-                {row.getAllCells().map((cell) => (
-                  <td className={styles[cell.column.columnDef.meta?.align ?? 'start']} key={cell.id}>
-                    <table.FlexRender cell={cell} />
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </DataTableViewport>
+        toolbarActions={resolvedToolbarActions}
+      /> : resolvedToolbarActions ? <div className={styles.actionToolbar}>{resolvedToolbarActions}</div> : null}
+      {showsCards ? (
+        <div aria-label={cardView.ariaLabel} className={styles.cardViewport} role="region">
+          {isLoading && data.length === 0 ? <div className={styles.collectionState} role="status">{labels.loading}</div>
+            : cardRows.length === 0 ? <div className={styles.collectionState}>{emptyContent}</div>
+              : <ul className={styles.cardList}>{cardRows.map((row) => <li key={row.id}>{cardView.renderItem(row.original)}</li>)}</ul>}
+          <DataTableAutoLoadSentinel hasMore={hasMore} isLoadingMore={isLoadingMore} loadedCount={data.length} onLoadMore={onLoadMore} />
+        </div>
+      ) : (
+        <DataTableViewport ariaLabel={ariaLabel} minTableWidth={minTableWidth} scrollHint={labels.scrollHint}>
+          <table aria-label={ariaLabel} className={`${tableStyles.table} ${styles.dataTable}`}>
+            <thead>
+              {table.getHeaderGroups().map((headerGroup) => (
+                <tr key={headerGroup.id}>
+                  {headerGroup.headers.map((header) => {
+                    const sorted = header.column.getIsSorted();
+                    const sortable = header.column.getCanSort();
+                    const label = header.column.columnDef.meta?.label ?? header.column.id;
+                    const alignment = header.column.columnDef.meta?.align ?? 'start';
+                    const nextSortLabel = sorted === 'asc' ? labels.sortDescending(label) : labels.sortAscending(label);
+                    return (
+                      <th
+                        aria-sort={sorted === 'asc' ? 'ascending' : sorted === 'desc' ? 'descending' : undefined}
+                        className={styles[alignment]}
+                        key={header.id}
+                        scope="col"
+                      >
+                        {header.isPlaceholder ? null : sortable ? (
+                          <button aria-label={nextSortLabel} className={styles.sortButton} onClick={header.column.getToggleSortingHandler()} type="button">
+                            <span><table.FlexRender header={header} /></span>
+                            {sorted === 'asc' ? <ArrowUp aria-hidden="true" size={15} /> : sorted === 'desc' ? <ArrowDown aria-hidden="true" size={15} /> : <ChevronsUpDown aria-hidden="true" size={15} />}
+                          </button>
+                        ) : <table.FlexRender header={header} />}
+                      </th>
+                    );
+                  })}
+                </tr>
+              ))}
+            </thead>
+            <tbody>
+              {isLoading && data.length === 0 ? (
+                <tr><td className={styles.tableState} colSpan={Math.max(1, columns.length)} role="status">{labels.loading}</td></tr>
+              ) : cardRows.length === 0 ? (
+                <tr><td className={styles.tableState} colSpan={Math.max(1, columns.length)}>{emptyContent}</td></tr>
+              ) : cardRows.map((row) => (
+                <tr key={row.id}>
+                  {row.getAllCells().map((cell) => (
+                    <td className={styles[cell.column.columnDef.meta?.align ?? 'start']} key={cell.id}>
+                      <table.FlexRender cell={cell} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <DataTableAutoLoadSentinel hasMore={hasMore} isLoadingMore={isLoadingMore} loadedCount={data.length} onLoadMore={onLoadMore} />
+        </DataTableViewport>
+      )}
       {showResultBar ? <DataTableResultBar
+        automaticLoading={automaticLoading}
         hasMore={hasMore}
         isLoadingMore={isLoadingMore}
         labels={labels}

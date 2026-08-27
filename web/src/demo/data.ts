@@ -347,8 +347,8 @@ export const demoPayments: Payment[] = [
 
 /** Demo settlements generated from closed periods. */
 export const demoSettlements: Settlement[] = [
-  { id: 'settlement-1', periodId: 'period-july', periodLabel: 'Juli 2026', membershipId: 'member-lukas', memberName: 'Lukas Waschul', email: 'lukas@example.test', amount: { minorUnits: '3200', currency: 'EUR' }, paidAmount: { minorUnits: '2000', currency: 'EUR' }, openAmount: { minorUnits: '1200', currency: 'EUR' }, dueAt: '2026-08-15', status: 'PARTIAL' },
-  { id: 'settlement-2', periodId: 'period-july', periodLabel: 'Juli 2026', membershipId: 'member-mara', memberName: 'Mara Becker', email: 'mara@example.test', amount: { minorUnits: '1500', currency: 'EUR' }, paidAmount: { minorUnits: '1500', currency: 'EUR' }, openAmount: { minorUnits: '0', currency: 'EUR' }, dueAt: '2026-08-15', status: 'PAID' },
+  { id: 'settlement-1', periodId: 'period-july', periodLabel: 'Juli 2026', membershipId: 'member-lukas', membershipStatus: 'ACTIVE', memberName: 'Lukas Waschul', email: 'lukas@example.test', amount: { minorUnits: '3200', currency: 'EUR' }, paidAmount: { minorUnits: '2000', currency: 'EUR' }, openAmount: { minorUnits: '1200', currency: 'EUR' }, dueAt: '2026-08-15', status: 'PARTIAL' },
+  { id: 'settlement-2', periodId: 'period-july', periodLabel: 'Juli 2026', membershipId: 'member-mara', membershipStatus: 'ACTIVE', memberName: 'Mara Becker', email: 'mara@example.test', amount: { minorUnits: '1500', currency: 'EUR' }, paidAmount: { minorUnits: '1500', currency: 'EUR' }, openAmount: { minorUnits: '0', currency: 'EUR' }, dueAt: '2026-08-15', status: 'PAID' },
 ];
 
 /** Demo in-app notifications. */

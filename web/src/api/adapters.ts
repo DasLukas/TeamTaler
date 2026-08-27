@@ -8,6 +8,7 @@ import type {
   BookingTarget,
   Category,
   ConfigurableItem,
+  ConfigurableNotificationEventType,
   Dashboard,
   EmailDeliveryStatus,
   Group,
@@ -21,7 +22,6 @@ import type {
   NotificationChannel,
   NotificationDestination,
   NotificationEventDefinition,
-  NotificationEventType,
   NotificationPreferences,
   PermissionDefinition,
   PermissionGrant,
@@ -76,8 +76,10 @@ const NOTIFICATION_EVENT_TYPES: Notification['eventType'][] = [
   'SETTLEMENT_CREATED',
   'SETTLEMENT_DUE_SOON',
   'SETTLEMENT_OVERDUE',
+  'DATA_EXPORT_READY',
+  'DATA_EXPORT_FAILED',
 ];
-const CONFIGURABLE_NOTIFICATION_EVENT_TYPES: Array<Exclude<NotificationEventType, 'SYSTEM'>> = [
+const CONFIGURABLE_NOTIFICATION_EVENT_TYPES: ConfigurableNotificationEventType[] = [
   'BOOKING_ASSIGNED',
   'BOOKING_REVERSED',
   'PAYMENT_RECORDED',
@@ -228,7 +230,7 @@ export function adaptSystemSettings(input: unknown): SystemSettings {
   };
 }
 
-function configurableNotificationEventType(value: unknown): Exclude<NotificationEventType, 'SYSTEM'> | undefined {
+function configurableNotificationEventType(value: unknown): ConfigurableNotificationEventType | undefined {
   return CONFIGURABLE_NOTIFICATION_EVENT_TYPES.find((eventType) => eventType === value);
 }
 
@@ -1180,9 +1182,11 @@ export function adaptPayment(input: unknown): Payment {
  */
 export function adaptSettlement(input: unknown, periods: Period[]): Settlement {
   const source = asRecord(input);
+  const membershipStatus = source.membershipStatus === 'ARCHIVED' || source.membershipStatus === 'DELETED' ? source.membershipStatus : 'ACTIVE';
   if ('periodLabel' in source) return {
     ...source as unknown as Settlement,
     email: typeof source.email === 'string' ? source.email : null,
+    membershipStatus,
   };
   const period = periods.find((entry) => entry.id === source.periodId);
   const obligationMinor = (BigInt(String(source.chargesMinor ?? 0)) + BigInt(String(source.adjustmentsProvidedMinor ?? 0))).toString();
@@ -1192,6 +1196,7 @@ export function adaptSettlement(input: unknown, periods: Period[]): Settlement {
     periodId: String(source.periodId),
     periodLabel: period?.label ?? i18n.t('common.settlementFallback'),
     membershipId: String(source.membershipId),
+    membershipStatus,
     memberName: String(source.displayName ?? i18n.t('common.member')),
     email: typeof source.email === 'string' ? source.email : null,
     amount: money(obligationMinor, source.currency),
@@ -1223,6 +1228,8 @@ export function adaptNotification(input: unknown): Notification {
     currency: typeof rawContext.currency === 'string' ? rawContext.currency : undefined,
     periodLabel: typeof rawContext.periodLabel === 'string' ? rawContext.periodLabel : undefined,
     dueAt: typeof rawContext.dueAt === 'string' ? rawContext.dueAt : undefined,
+    exportId: typeof rawContext.exportId === 'string' ? rawContext.exportId : undefined,
+    exportScope: rawContext.exportScope === 'GROUP' || rawContext.exportScope === 'PERSONAL' ? rawContext.exportScope : undefined,
   };
   const localizedCopy: Record<Notification['kind'], { title: string; message: string }> = {
     PAYMENT: { title: i18n.t('notifications.fallback.paymentTitle'), message: i18n.t('notifications.fallback.paymentMessage') },
@@ -1249,6 +1256,10 @@ export function adaptNotification(input: unknown): Notification {
         ? i18n.t('notifications.events.settlementCreditMessage', { period: context.periodLabel, amount: settlementAmount })
         : i18n.t('notifications.events.settlementPaidMessage', { period: context.periodLabel });
     copy = { title: i18n.t('notifications.events.settlementTitle'), message };
+  } else if (eventType === 'DATA_EXPORT_READY') {
+    copy = { title: i18n.t('notifications.events.dataExportReadyTitle'), message: i18n.t('notifications.events.dataExportReadyMessage') };
+  } else if (eventType === 'DATA_EXPORT_FAILED') {
+    copy = { title: i18n.t('notifications.events.dataExportFailedTitle'), message: i18n.t('notifications.events.dataExportFailedMessage') };
   } else if ('message' in source && typeof source.title === 'string' && typeof source.message === 'string') {
     copy = { title: source.title, message: source.message };
   }

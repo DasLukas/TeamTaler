@@ -1323,4 +1323,37 @@ describe('server-backed collection API contract', () => {
       '/api/v1/groups/group%2Fa/activities/filter-options',
     ]);
   });
+
+  it('posts a typed table export and returns the complete file body', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response('exported', { headers: { 'Content-Type': 'text/csv' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const blob = await api.exportGroupTable('group/a', {
+      format: 'CSV',
+      query: { q: 'Alex', sort: 'memberName', direction: 'asc' },
+      table: 'ACCOUNT_BALANCES',
+      timeZone: 'Europe/Berlin',
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group%2Fa/table-exports');
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({
+      format: 'CSV',
+      query: { q: 'Alex', sort: 'memberName', direction: 'asc' },
+      table: 'ACCOUNT_BALANCES',
+      timeZone: 'Europe/Berlin',
+    });
+    await expect(blobText(blob)).resolves.toBe('exported');
+  });
+
+  it('creates password-confirmed export jobs with a one-shot idempotency key', async () => {
+    const job = { id: 'export-a', scope: 'PERSONAL', status: 'QUEUED', requestedAt: '2026-08-25T12:00:00Z' };
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(job));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.createPersonalDataExport('group/a', 'current-password')).resolves.toEqual(job);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group%2Fa/me/exports');
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ currentPassword: 'current-password' });
+    expect(idempotencyKey(fetchMock.mock.calls[0])).toMatch(/^[0-9a-f-]{36}$/i);
+  });
 });

@@ -13,6 +13,8 @@
 .error { color: var(--color-status-danger); }
 .explanation { margin: 0; color: var(--color-text-muted); line-height: 1.55; }
 .state { padding-top: var(--space-8); }
+.member { display: inline-flex; min-width: 0; align-items: center; gap: var(--space-3); }
+.member > strong { overflow: hidden; text-overflow: ellipsis; }
 
 @media (max-width: 600px) {
   .header { align-items: stretch; flex-direction: column; }
