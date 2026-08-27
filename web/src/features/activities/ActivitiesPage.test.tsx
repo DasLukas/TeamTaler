@@ -209,7 +209,7 @@ describe('ActivitiesPage unified feed', () => {
     expect(reversalRow).not.toBeNull();
     expect(within(originalRow as HTMLElement).getByText(/\+5,00/)).toHaveClass(activityStyles.activityAmountReversed);
     expect(within(reversalRow as HTMLElement).getByText(/-5,00/)).not.toHaveClass(activityStyles.activityAmountReversed);
-    expect(within(reversalRow as HTMLElement).getByText(i18n.t('activities.reversalSource', { source: i18n.t('activities.bookingType') }))).toBeVisible();
+    expect(within(reversalRow as HTMLElement).queryByText(/Ursprung:/)).not.toBeInTheDocument();
     expect(within(reversalRow as HTMLElement).getByText('Entered twice')).toBeVisible();
     expect(within(reversalRow as HTMLElement).getByText('Reversing Manager')).toBeVisible();
     expect(within(reversalRow as HTMLElement).getByRole('img', { name: i18n.t('activities.reversalPosted') })).toBeVisible();
@@ -218,14 +218,14 @@ describe('ActivitiesPage unified feed', () => {
 
     await user.click(within(originalRow as HTMLElement).getByRole('button', { name: i18n.t('activities.linkToReversalAccessible') }));
     await waitFor(() => expect(new URL(window.location.href).searchParams.get('tt.activities.focus')).toBe(bookingReversal.id));
-    expect(reversalRow).toHaveAttribute('data-focused', 'true');
-    expect(within(reversalRow as HTMLElement).getByText(i18n.t('activities.marked'))).toBeVisible();
+    expect(reversalRow).toHaveAttribute('aria-current', 'true');
+    expect(reversalRow).toHaveAttribute('data-highlighted', 'true');
     expect(document.activeElement).toBe(reversalRow);
 
     await user.click(within(reversalRow as HTMLElement).getByRole('button', { name: i18n.t('activities.linkToOriginalAccessible') }));
     await waitFor(() => expect(new URL(window.location.href).searchParams.get('tt.activities.focus')).toBe(reversedBooking.id));
-    expect(originalRow).toHaveAttribute('data-focused', 'true');
-    expect(within(originalRow as HTMLElement).getByText(i18n.t('activities.marked'))).toBeVisible();
+    expect(originalRow).toHaveAttribute('aria-current', 'true');
+    expect(originalRow).toHaveAttribute('data-highlighted', 'true');
     expect(apiMock.getActivitiesPage).toHaveBeenCalledTimes(1);
     expect(scrollIntoViewMock).toHaveBeenLastCalledWith({ block: 'center', inline: 'nearest' });
 
@@ -234,12 +234,13 @@ describe('ActivitiesPage unified feed', () => {
       await new Promise((resolve) => window.setTimeout(resolve, 0));
     });
     await waitFor(() => expect(new URL(window.location.href).searchParams.get('tt.activities.focus')).toBe(bookingReversal.id));
-    expect(reversalRow).toHaveAttribute('data-focused', 'true');
+    expect(reversalRow).toHaveAttribute('data-highlighted', 'true');
   });
 
-  it('loads missing links through an unfiltered anchor context and exits focus on query changes', async () => {
+  it('loads missing links through an unfiltered anchor context and restores the prior query on Back', async () => {
     const user = userEvent.setup();
-    window.history.replaceState({}, '', `/activities?tt.activities.search=${encodeURIComponent('Late')}`);
+    const encodedFilters = encodeURIComponent(JSON.stringify({ status: 'POSTED' }));
+    window.history.replaceState({}, '', `/activities?tt.activities.search=${encodeURIComponent('Late')}&tt.activities.filters=${encodedFilters}`);
     apiMock.getActivitiesPage.mockImplementation((_groupId: string, query: { anchorId?: string }) => Promise.resolve(
       query.anchorId ? activityPage([bookingReversal, reversedBooking]) : activityPage([reversedBooking]),
     ));
@@ -255,14 +256,41 @@ describe('ActivitiesPage unified feed', () => {
       limit: 50,
       sort: 'occurredAt',
     }));
-    expect(screen.getByText(i18n.t('activities.focusFiltersPaused'))).toBeVisible();
-    expect(screen.getByRole('searchbox', { name: i18n.t('activities.searchLabel') })).toHaveValue('Late');
-    expect(screen.getByRole('button', { name: i18n.t('exports.table.action') })).toBeDisabled();
-    expect(await screen.findByText(i18n.t('activities.marked'))).toBeVisible();
+    const search = screen.getByRole('searchbox', { name: i18n.t('activities.searchLabel') });
+    await waitFor(() => expect(search).toHaveValue(''));
+    await waitFor(() => expect(new URL(window.location.href).searchParams.has('tt.activities.search')).toBe(false));
+    expect(new URL(window.location.href).searchParams.has('tt.activities.filters')).toBe(false);
+    const reversalRow = (await screen.findByRole('img', { name: i18n.t('activities.reversalType') })).closest('tr');
+    await waitFor(() => expect(screen.getByRole('button', { name: i18n.t('exports.table.action') })).toBeEnabled());
+    expect(reversalRow).toHaveAttribute('aria-current', 'true');
+    expect(reversalRow).toHaveAttribute('data-highlighted', 'true');
+    expect(document.activeElement).toBe(reversalRow);
 
-    await user.clear(screen.getByRole('searchbox', { name: i18n.t('activities.searchLabel') }));
+    await act(async () => {
+      window.history.back();
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
     await waitFor(() => expect(new URL(window.location.href).searchParams.has('tt.activities.focus')).toBe(false));
-    expect(screen.queryByText(i18n.t('activities.focusFiltersPaused'))).not.toBeInTheDocument();
+    await waitFor(() => expect(search).toHaveValue('Late'));
+    expect(new URL(window.location.href).searchParams.get('tt.activities.filters')).toBe(JSON.stringify({ status: 'POSTED' }));
+  });
+
+  it('offers inline recovery when a directly opened anchor cannot be loaded', async () => {
+    const user = userEvent.setup();
+    window.history.replaceState({}, '', '/activities?tt.activities.focus=missing-activity');
+    apiMock.getActivitiesPage.mockImplementation((_groupId: string, query: { anchorId?: string }) => Promise.resolve(
+      query.anchorId ? activityPage([]) : activityPage([booking]),
+    ));
+    renderActivities();
+
+    const returnAction = await screen.findByRole('button', { name: i18n.t('activities.focusReturnList') });
+    expect(apiMock.getActivitiesPage).toHaveBeenLastCalledWith('group-a', expect.objectContaining({ anchorId: 'missing-activity' }));
+
+    await user.click(returnAction);
+
+    await waitFor(() => expect(new URL(window.location.href).searchParams.has('tt.activities.focus')).toBe(false));
+    expect(await screen.findByRole('img', { name: i18n.t('activities.bookingType') })).toBeVisible();
+    expect(screen.queryByRole('button', { name: i18n.t('activities.focusReturnList') })).not.toBeInTheDocument();
   });
 
   it('restores the collection scroll position when browser Back leaves a linked focus', async () => {
@@ -286,10 +314,10 @@ describe('ActivitiesPage unified feed', () => {
 
     await waitFor(() => expect(new URL(window.location.href).searchParams.has('tt.activities.focus')).toBe(false));
     await waitFor(() => expect(viewport?.scrollTop).toBe(280));
-    expect(screen.queryByText(i18n.t('activities.marked'))).not.toBeInTheDocument();
+    expect(table.querySelector('[data-highlighted="true"]')).not.toBeInTheDocument();
   });
 
-  it('marks and centers linked activities in the compact card presentation', async () => {
+  it('briefly highlights and centers linked activities in the compact card presentation', async () => {
     const user = userEvent.setup();
     useCompactViewport();
     apiMock.getActivitiesPage.mockResolvedValue(activityPage([bookingReversal, reversedBooking]));
@@ -299,8 +327,8 @@ describe('ActivitiesPage unified feed', () => {
     await user.click(within(originalCard).getByRole('button', { name: i18n.t('activities.linkToReversalAccessible') }));
 
     const reversalCard = await screen.findByRole('article', { name: i18n.t('activities.cardLabel', { type: i18n.t('activities.reversalType'), detail: bookingReversal.detailName }) });
-    expect(reversalCard.closest('li')).toHaveAttribute('data-focused', 'true');
-    expect(within(reversalCard).getByText(i18n.t('activities.marked'))).toBeVisible();
+    expect(reversalCard.closest('li')).toHaveAttribute('aria-current', 'true');
+    expect(reversalCard.closest('li')).toHaveAttribute('data-highlighted', 'true');
     expect(document.activeElement).toBe(reversalCard.closest('li'));
     expect(apiMock.getActivitiesPage).toHaveBeenCalledTimes(1);
   });

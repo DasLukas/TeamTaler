@@ -35,13 +35,8 @@ interface ActivityActionsProps {
 
 interface ActivityCardProps extends ActivityActionsProps {
   actorAvatarUrl?: string;
-  marked?: boolean;
   productImageUrl?: string;
   targetAvatarUrl?: string;
-}
-
-interface ActivityTypeProps extends Pick<ActivityEntry, 'kind'> {
-  marked?: boolean;
 }
 
 /**
@@ -82,7 +77,7 @@ export function MembershipIdentity({ avatarUrl, name, status }: MembershipIdenti
  * @param props - Unified activity kind.
  * @returns An accessible booking, payment, reversal, or adjustment badge.
  */
-export function ActivityType({ kind, marked = false }: ActivityTypeProps) {
+export function ActivityType({ kind }: Pick<ActivityEntry, 'kind'>) {
   const { t } = useTranslation();
   const label = activityTypeLabel(kind, t);
   const TypeIcon = kind === 'BOOKING' ? BookOpenCheck : kind === 'PAYMENT' ? CircleDollarSign : kind === 'REVERSAL' ? RotateCcw : Scale;
@@ -91,12 +86,9 @@ export function ActivityType({ kind, marked = false }: ActivityTypeProps) {
     : kind === 'PAYMENT' ? styles.activityTypePayment : kind === 'REVERSAL' ? styles.activityTypeReversal : styles.activityTypeAdjustment;
 
   return (
-    <span className={styles.activityTypeGroup}>
-      <span aria-label={label} className={`${styles.activityType} ${tone}`} role="img" title={label}>
-        <TypeIcon aria-hidden="true" size={16} />
-        <span aria-hidden="true" className={styles.activityTypeText}>{label}</span>
-      </span>
-      {marked ? <span className={styles.markedBadge}>{t('activities.marked')}</span> : null}
+    <span aria-label={label} className={`${styles.activityType} ${tone}`} role="img" title={label}>
+      <TypeIcon aria-hidden="true" size={16} />
+      <span aria-hidden="true" className={styles.activityTypeText}>{label}</span>
     </span>
   );
 }
@@ -132,15 +124,12 @@ export function ActivityState({ kind, status }: Pick<ActivityEntry, 'kind' | 'st
  * @returns A compact detail identity shared by tables and cards.
  */
 export function ActivityDetails({ activity, productImageUrl }: ActivityDetailsProps) {
-  const { t } = useTranslation();
-  const reversalSource = activity.reversalSourceKind ? activityTypeLabel(activity.reversalSourceKind, t) : undefined;
   return (
     <span className={styles.activityDetails}>
       {productImageUrl ? <img alt="" decoding="async" loading="lazy" src={productImageUrl} /> : null}
       <span>
         <strong>{activity.detailName}</strong>
         {activity.quantity && activity.quantity > 1 ? ` × ${activity.quantity}` : ''}
-        {reversalSource ? <small>{t('activities.reversalSource', { source: reversalSource })}</small> : null}
         {activity.detailNote ? <small>{activity.detailNote}</small> : null}
       </span>
     </span>
@@ -198,13 +187,13 @@ export function ActivityActions({ activity, groupId, onNavigateRelated, onRevers
  * @param props - Activity, resolved media projections, group scope, and action callback.
  * @returns A semantic card containing every field exposed by the desktop table.
  */
-export function ActivityCard({ activity, actorAvatarUrl, groupId, marked = false, onNavigateRelated, onReverse, productImageUrl, targetAvatarUrl }: ActivityCardProps) {
+export function ActivityCard({ activity, actorAvatarUrl, groupId, onNavigateRelated, onReverse, productImageUrl, targetAvatarUrl }: ActivityCardProps) {
   const { t } = useTranslation();
   const typeLabel = activityTypeLabel(activity.kind, t);
   return (
     <article aria-label={t('activities.cardLabel', { type: typeLabel, detail: activity.detailName })} className={styles.activityCard}>
       <header className={styles.cardHeader}>
-        <ActivityType kind={activity.kind} marked={marked} />
+        <ActivityType kind={activity.kind} />
         <ActivityAmount amount={activity.amount} status={activity.status} />
       </header>
       <div className={styles.cardDetails}><span className={styles.cardLabel}>{t('common.details')}</span><ActivityDetails activity={activity} productImageUrl={productImageUrl} /></div>

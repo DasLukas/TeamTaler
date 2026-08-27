@@ -20,7 +20,7 @@ import { Field, TextInput } from '@/components/ui/FormField';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { SelectMenu, type SelectMenuOption } from '@/components/ui/SelectMenu';
 import { CategoryIcon } from '@/features/shared/CategoryIcon';
-import { DataTable, type DataTableCardRenderContext, type DataTableCardView, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange, type DataTableRowFocus } from '@/features/shared/DataTable';
+import { DataTable, type DataTableCardView, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange, type DataTableRowFocus } from '@/features/shared/DataTable';
 import { formatGermanDateTime } from '@/features/shared/dateFormat';
 import { createMemberFilterOption } from '@/features/shared/memberFilterOption';
 import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
@@ -190,6 +190,12 @@ export function ActivitiesPage() {
     sortableColumnIds: ['kind', 'targetName', 'actorName', 'detailName', 'categoryName', 'occurredAt', 'amount', 'status'],
   });
   const {
+    filters: visibleFilters,
+    onFiltersChange: setVisibleFilters,
+    onSearchChange: setVisibleSearch,
+    searchValue: visibleSearchValue,
+  } = tableState;
+  const {
     anchorId,
     clearFocusForQueryChange,
     focusedActivityId,
@@ -197,6 +203,11 @@ export function ActivitiesPage() {
     navigateToActivity,
     restorePendingScrollPosition,
   } = useActivityFocusNavigation({ loadedActivityIdsRef, viewportRef: activityViewportRef });
+  useLayoutEffect(() => {
+    if (!anchorId) return;
+    if (visibleSearchValue) setVisibleSearch('');
+    if (Object.keys(visibleFilters).length > 0) setVisibleFilters({});
+  }, [anchorId, setVisibleFilters, setVisibleSearch, visibleFilters, visibleSearchValue]);
   const cardsActive = compact && mobileView === 'cards';
   const selectReversal = useCallback((activity: ActivityEntry) => setReversal(activity), []);
   const changeMobileView = (view: MobileActivityView) => {
@@ -263,10 +274,9 @@ export function ActivitiesPage() {
     [activities, focusedActivityId],
   );
   const rowFocus = useMemo<DataTableRowFocus | undefined>(() => focusedActivityId ? {
-    announcement: t('activities.markedAnnouncement', { detail: focusedActivity?.detailName ?? t('activities.focusedEntry') }),
+    announcement: t('activities.focusAnnouncement', { detail: focusedActivity?.detailName ?? t('activities.focusedEntry') }),
     rowId: focusedActivityId,
   } : undefined, [focusedActivity?.detailName, focusedActivityId, t]);
-  const hasPausedQuery = Boolean(anchorId && (tableState.searchValue.trim() || Object.keys(tableState.filters).length > 0));
   const onFiltersChange = useCallback<typeof tableState.onFiltersChange>((filters) => {
     clearFocusForQueryChange();
     tableState.onFiltersChange(filters);
@@ -282,12 +292,11 @@ export function ActivitiesPage() {
   const productImages = useMemo(() => new Map(
     filterOptionsQuery.data?.products.map((product) => [product.productId, product.imageUrl] as const) ?? [],
   ), [filterOptionsQuery.data?.products]);
-  const renderActivityCard = useCallback((activity: ActivityEntry, { isFocused }: DataTableCardRenderContext) => (
+  const renderActivityCard = useCallback((activity: ActivityEntry) => (
     <ActivityCard
       activity={activity}
       actorAvatarUrl={activity.actorMembershipId === activeGroup.membership?.id ? session.user.avatarUrl : activity.actorAvatarUrl}
       groupId={activeGroupId}
-      marked={isFocused}
       onNavigateRelated={navigateToActivity}
       onReverse={selectReversal}
       productImageUrl={activity.productId ? productImages.get(activity.productId) : undefined}
@@ -329,7 +338,7 @@ export function ActivitiesPage() {
   const columns = useMemo<DataTableColumnDef<ActivityEntry>[]>(() => [
     {
       accessorKey: 'kind',
-      cell: ({ row }) => <ActivityType kind={row.original.kind} marked={row.original.id === focusedActivityId} />,
+      cell: ({ row }) => <ActivityType kind={row.original.kind} />,
       enableSorting: true,
       header: t('activities.transaction'),
       id: 'kind',
@@ -398,33 +407,28 @@ export function ActivitiesPage() {
       id: 'action',
       meta: { label: t('common.action') },
     },
-  ], [activeGroup.membership?.id, activeGroupId, focusedActivityId, navigateToActivity, productImages, selectReversal, session.user.avatarUrl, t]);
+  ], [activeGroup.membership?.id, activeGroupId, navigateToActivity, productImages, selectReversal, session.user.avatarUrl, t]);
 
   const reversingPayment = reversal?.kind === 'PAYMENT';
+  const emptyContent = focusedActivityId ? (
+    <div className={styles.focusRecovery}>
+      <span>{t('activities.focusError')}</span>
+      <Button leadingIcon={<ArrowLeft size={17} />} onClick={leaveFocus} size="small" variant="secondary">
+        {t('activities.focusReturnList')}
+      </Button>
+    </div>
+  ) : activitiesQuery.isError ? t('activities.error') : t('activities.noResults');
   return (
     <Page className={styles.page} title={t('activities.title')} wide>
       <div className={styles.activityList}>
-        {focusedActivityId ? (
-          <aside className={styles.focusBanner} role="status">
-            <div className={styles.focusBannerText}>
-              <strong>{t(focusedActivity ? 'activities.focusMarked' : 'activities.focusLoading')}</strong>
-              <span>{t(hasPausedQuery ? 'activities.focusFiltersPaused' : 'activities.focusContext')}</span>
-            </div>
-            <div className={styles.focusBannerActions}>
-              <Button leadingIcon={<ArrowLeft size={17} />} onClick={leaveFocus} size="small" variant="secondary">
-                {t(hasPausedQuery ? 'activities.focusReturnFiltered' : 'activities.focusClear')}
-              </Button>
-            </div>
-          </aside>
-        ) : null}
         <DataTable
           ariaLabel={t('activities.title')}
           cardView={cardView}
           columns={columns}
           data={activities}
-          emptyContent={activitiesQuery.isError ? t(focusedActivityId ? 'activities.focusError' : 'activities.error') : t('activities.noResults')}
+          emptyContent={emptyContent}
           exportConfig={{
-            disabled: Boolean(focusedActivityId) || deferredSearch !== tableState.searchValue.trim(),
+            disabled: deferredSearch !== tableState.searchValue.trim(),
             groupId: activeGroupId,
             query: { ...collectionQuery, limit: undefined },
             table: 'ACTIVITIES',

@@ -27,7 +27,7 @@ export interface ActivityFocusNavigation {
   anchorId?: string;
   /** Removes focus before a search, filter, or sorting change is applied. */
   clearFocusForQueryChange: () => void;
-  /** Stable activity ID currently marked in the rendered collection. */
+  /** Stable activity ID currently targeted in the rendered collection. */
   focusedActivityId?: string;
   /** Returns through browser history or clears a directly opened focus link. */
   leaveFocus: () => void;

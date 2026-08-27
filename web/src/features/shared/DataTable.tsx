@@ -161,17 +161,11 @@ export type DataTableColumnDef<Data extends RowData, Value = unknown> = ColumnDe
 export interface DataTableCardView<Data extends RowData> {
   /** Accessible name applied to the scrollable card collection. */
   ariaLabel: string;
-  /** Renders one feature-specific card and its current focus presentation state. */
-  renderItem: (row: Data, context: DataTableCardRenderContext) => ReactNode;
+  /** Renders one feature-specific card. */
+  renderItem: (row: Data) => ReactNode;
 }
 
-/** Presentation context supplied to each feature-owned card renderer. */
-export interface DataTableCardRenderContext {
-  /** Whether this card is the persistent navigation target. */
-  isFocused: boolean;
-}
-
-/** One row that should be centered, focused, marked, and announced. */
+/** One row that should be centered, focused, briefly highlighted, and announced. */
 export interface DataTableRowFocus {
   /** Polite assistive-technology announcement emitted after the row is rendered. */
   announcement: string;
@@ -208,7 +202,7 @@ export interface DataTableProps<Data extends RowData, FilterId extends string = 
   onLoadMore?: () => void;
   onSearchChange: (value: string) => void;
   onSortingChange: OnChangeFn<SortingState>;
-  /** Optional persistent row-navigation target shared by table and card representations. */
+  /** Optional row-navigation target shared by table and card representations. */
   rowFocus?: DataTableRowFocus;
   searchValue: string;
   sorting: SortingState;
@@ -788,7 +782,7 @@ export function DataTable<Data extends RowData, FilterId extends string = string
             : cardRows.length === 0 ? <div className={styles.collectionState}>{emptyContent}</div>
               : <ul className={styles.cardList}>{cardRows.map((row) => {
                 const isFocused = row.id === rowFocus?.rowId;
-                return <li data-data-table-row-id={row.id} data-focused={isFocused || undefined} key={row.id} tabIndex={isFocused ? -1 : undefined}>{cardView.renderItem(row.original, { isFocused })}</li>;
+                return <li aria-current={isFocused ? 'true' : undefined} data-data-table-row-id={row.id} data-highlighted={isFocused || undefined} key={row.id} tabIndex={isFocused ? -1 : undefined}>{cardView.renderItem(row.original)}</li>;
               })}</ul>}
           <DataTableAutoLoadSentinel hasMore={hasMore} isLoadingMore={isLoadingMore} loadedCount={data.length} onLoadMore={onLoadMore} />
         </div>
@@ -829,7 +823,7 @@ export function DataTable<Data extends RowData, FilterId extends string = string
               ) : cardRows.length === 0 ? (
                 <tr><td className={styles.tableState} colSpan={Math.max(1, columns.length)}>{emptyContent}</td></tr>
               ) : cardRows.map((row) => (
-                <tr data-data-table-row-id={row.id} data-focused={row.id === rowFocus?.rowId || undefined} key={row.id} tabIndex={row.id === rowFocus?.rowId ? -1 : undefined}>
+                <tr aria-current={row.id === rowFocus?.rowId ? 'true' : undefined} data-data-table-row-id={row.id} data-highlighted={row.id === rowFocus?.rowId || undefined} key={row.id} tabIndex={row.id === rowFocus?.rowId ? -1 : undefined}>
                   {row.getAllCells().map((cell) => (
                     <td className={styles[cell.column.columnDef.meta?.align ?? 'start']} key={cell.id}>
                       <table.FlexRender cell={cell} />
