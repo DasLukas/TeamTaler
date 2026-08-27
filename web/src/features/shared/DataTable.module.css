@@ -412,6 +412,7 @@
 }
 
 @media (max-width: 767px) {
+  .root { gap: var(--space-3); }
   .toolbar { align-items: stretch; flex-direction: column; }
   .searchField { width: 100%; }
   .toolbarButtons { justify-content: stretch; }
@@ -439,6 +440,7 @@
   }
   .filterChip { width: min(70vw, 150px); }
   .resetLink { white-space: nowrap; }
+  .resultBar { min-height: 32px; }
   .scrollHint { display: flex; }
   .filterForm { padding: var(--space-2) var(--space-5) var(--space-5); }
   .filterActions { display: grid; grid-template-columns: 1fr 1fr; }
