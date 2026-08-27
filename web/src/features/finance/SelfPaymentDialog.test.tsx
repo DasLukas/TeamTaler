@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -207,6 +207,28 @@ describe('SelfPaymentDialog', () => {
     await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.confirm', { amount: '12,50 €' }) }));
 
     await waitFor(() => expect(apiMock.createOwnPayment).toHaveBeenCalledWith('group-a', expect.objectContaining({ method: 'SHOPPING' }), receipt));
+  });
+
+  it('keeps the payment dialog open when the native attachment picker is cancelled', async () => {
+    const user = userEvent.setup();
+    apiMock.getTransactionSettings.mockResolvedValue({
+      ownPaymentReasonMode: 'OFF',
+      ownPaymentReasonRequired: false,
+      paymentMethods: [{ id: 'SHOPPING', label: 'Einkauf', attachmentMode: 'REQUIRED' }],
+      bookingReasons: [],
+      paymentReasons: [],
+    });
+    renderDialog();
+
+    await waitFor(() => expect(screen.getByRole('button', { name: i18n.t('selfPayment.action') })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.action') }));
+    const dialog = screen.getByRole('dialog', { name: i18n.t('selfPayment.entryTitle') });
+    const fileInput = document.querySelector<HTMLInputElement>('input[accept*="application/pdf"]');
+    expect(fileInput).not.toBeNull();
+
+    fireEvent(fileInput as HTMLInputElement, new Event('cancel', { bubbles: true }));
+
+    expect(dialog).toBeVisible();
   });
 
   it('keeps the payment dialog and its values open when a portaled scan is cancelled', async () => {

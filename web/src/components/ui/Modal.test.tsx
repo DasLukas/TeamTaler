@@ -87,6 +87,22 @@ describe('Modal lifecycle and focus restoration', () => {
     expect(trigger).toHaveFocus();
   });
 
+  it.each(['dialog', 'sheet'] as const)('keeps the %s open when a nested file picker is cancelled', (variant) => {
+    const onClose = vi.fn();
+    render(
+      <Modal onClose={onClose} open title="File upload" variant={variant}>
+        <label htmlFor="attachment">Attachment</label>
+        <input id="attachment" type="file" />
+      </Modal>,
+    );
+
+    const fileInput = screen.getByLabelText('Attachment');
+    fireEvent(fileInput, new Event('cancel', { bubbles: true }));
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: 'File upload' })).toBeVisible();
+  });
+
   it('closes a mounted controlled dialog and restores focus through its close button', async () => {
     const user = userEvent.setup();
     render(<ControlledModalHarness />);

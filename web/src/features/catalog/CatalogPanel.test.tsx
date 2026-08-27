@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Category, Product, Session } from '@/api/types';
 import { ActiveGroupContext } from '@/app/active-group-context';
+import modalStyles from '@/components/ui/Modal.module.css';
 import i18n from '@/i18n';
 import { CatalogPanel } from './CatalogPanel';
 
@@ -20,8 +21,10 @@ const apiMock = vi.hoisted(() => ({
   uploadProductImage: vi.fn(),
 }));
 const imageUploadMock = vi.hoisted(() => ({ prepareSquareImage: vi.fn() }));
+const responsiveMock = vi.hoisted(() => ({ useMediaQuery: vi.fn() }));
 
 vi.mock('@/api/client', () => ({ api: apiMock }));
+vi.mock('@/hooks/useMediaQuery', () => ({ useMediaQuery: (query: string) => responsiveMock.useMediaQuery(query) }));
 vi.mock('@/components/media/imageUpload', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/components/media/imageUpload')>(),
   prepareSquareImage: imageUploadMock.prepareSquareImage,
@@ -73,6 +76,7 @@ function renderCatalog(): void {
 describe('CatalogPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    responsiveMock.useMediaQuery.mockReturnValue(false);
     imageUploadMock.prepareSquareImage.mockImplementation(async (file: File) => file);
     apiMock.getCategories.mockResolvedValue([category]);
     apiMock.createCategory.mockResolvedValue(category);
@@ -236,6 +240,47 @@ describe('CatalogPanel', () => {
 
     expect(screen.getByRole('img', { name: i18n.t('catalog.imagePreviewAlt') })).toBeVisible();
     expect(screen.getByRole('button', { name: i18n.t('catalog.removeSelectedImage') })).toBeVisible();
+  });
+
+  it('keeps the product dialog open when the native image picker is cancelled', async () => {
+    const user = userEvent.setup();
+    renderCatalog();
+
+    await screen.findByRole('button', { name: i18n.t('catalog.categoryAction') });
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.productAction') }));
+    const dialog = screen.getByRole('dialog', { name: i18n.t('catalog.productDialog') });
+    const fileInput = screen.getByLabelText(i18n.t('catalog.imageFileInput'));
+
+    fireEvent(fileInput, new Event('cancel', { bubbles: true }));
+
+    expect(dialog).toBeVisible();
+  });
+
+  it('renders the product editor as a bottom sheet on compact viewports', async () => {
+    const user = userEvent.setup();
+    responsiveMock.useMediaQuery.mockReturnValue(true);
+    renderCatalog();
+
+    await screen.findByRole('button', { name: i18n.t('catalog.categoryAction') });
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.productAction') }));
+
+    const dialog = screen.getByRole('dialog', { name: i18n.t('catalog.productDialog') });
+    expect(responsiveMock.useMediaQuery).toHaveBeenCalledWith('(max-width: 767px)');
+    expect(dialog).toHaveClass(modalStyles.sheet);
+    expect(dialog.querySelector(`button[aria-label="${i18n.t('dialog.sheetHandle')}"]`)).toBeInTheDocument();
+  });
+
+  it('keeps the product editor as a dialog on wider viewports', async () => {
+    const user = userEvent.setup();
+    renderCatalog();
+
+    await screen.findByRole('button', { name: i18n.t('catalog.categoryAction') });
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.productAction') }));
+
+    const dialog = screen.getByRole('dialog', { name: i18n.t('catalog.productDialog') });
+    expect(dialog).toHaveClass(modalStyles.dialog);
+    expect(dialog).not.toHaveClass(modalStyles.sheet);
+    expect(dialog.querySelector(`button[aria-label="${i18n.t('dialog.sheetHandle')}"]`)).not.toBeInTheDocument();
   });
 
   it('clears the native file input before another product is created', async () => {

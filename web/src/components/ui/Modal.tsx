@@ -287,6 +287,7 @@ export function Modal({ open, title, onClose, children, footer, size = 'standard
       aria-labelledby={titleId}
       className={`${styles.dialog} ${styles[variant]} ${styles[size]} ${headerMode === 'accessible-only' ? styles.headerless : ''} ${className}`}
       onCancel={(event) => {
+        if (event.target !== event.currentTarget) return;
         event.preventDefault();
         onClose();
       }}

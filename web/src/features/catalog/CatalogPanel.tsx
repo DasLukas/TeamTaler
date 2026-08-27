@@ -28,6 +28,7 @@ import { ConfirmationDialog } from '@/components/ui/ConfirmationDialog';
 import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { StatePanel } from '@/components/ui/StatePanel';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { catalogOrderCommand } from './catalogOrder';
 import { CategoryIconPicker } from './CategoryIconPicker';
 import { CatalogSorter } from './CatalogSorter';
@@ -49,6 +50,7 @@ export function CatalogPanel() {
   const { t } = useTranslation();
   const { activeGroupId, activeGroup } = useActiveGroup();
   const { mediaUploadMaxBytes } = useInstanceCapabilities();
+  const compact = useMediaQuery('(max-width: 767px)');
   const uploadLimit = formatMediaUploadLimit(mediaUploadMaxBytes);
   const queryClient = useQueryClient();
   const categoryFormId = useId();
@@ -363,7 +365,7 @@ export function CatalogPanel() {
           </div></ModalFooter>
         </form>
       </Modal>
-      <Modal onClose={clearProductDialog} open={dialog === 'product'} title={editingProduct ? t('catalog.editProductDialog') : t('catalog.productDialog')}>
+      <Modal onClose={clearProductDialog} open={dialog === 'product'} title={editingProduct ? t('catalog.editProductDialog') : t('catalog.productDialog')} variant={compact ? 'sheet' : 'dialog'}>
         <form className={styles.form} id={productFormId} onSubmit={(event) => {
           event.preventDefault();
           if (persistedProduct && productImage) imageMutation.mutate({ productId: persistedProduct.id, image: productImage, transform: productImageTransform });

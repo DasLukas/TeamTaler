@@ -632,7 +632,11 @@ describe('MembersPanel invitations', () => {
     expect(screen.getByRole('dialog', { name: i18n.t('members.csvImport.title') })).toBeVisible();
     expect(screen.getByText(i18n.t('members.csvImport.membershipNotice'))).toBeVisible();
     expect(screen.getByText(i18n.t('members.csvImport.schema'))).toBeVisible();
-    expect(screen.getByLabelText(i18n.t('members.csvImport.fileLabel'))).toHaveAttribute('accept', '.csv,text/csv');
+    const fileInput = screen.getByLabelText(i18n.t('members.csvImport.fileLabel'));
+    expect(fileInput).toHaveAttribute('accept', '.csv,text/csv');
+
+    fireEvent(fileInput, new Event('cancel', { bubbles: true }));
+    expect(screen.getByRole('dialog', { name: i18n.t('members.csvImport.title') })).toBeVisible();
 
     await user.click(screen.getByRole('button', { name: i18n.t('members.csvImport.downloadTemplate') }));
 
