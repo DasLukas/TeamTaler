@@ -162,6 +162,62 @@ describe('PaymentsPanel', () => {
     expect(screen.getByLabelText(i18n.t('finance.paymentType'))).toHaveValue('CASH');
   });
 
+  it('reviews a managed payment before creation, preserves its draft on back, and submits only after confirmation', async () => {
+    const user = userEvent.setup();
+    apiMock.createPayment.mockResolvedValue({
+      amount: { minorUnits: '1250', currency: 'EUR' },
+      id: 'payment-reviewed',
+      memberName: 'Active Account',
+      membershipId: 'member-active',
+      membershipStatus: 'ACTIVE',
+      method: 'PAYPAL',
+      methodLabel: 'PayPal',
+      receivedAt: '2026-08-31',
+      reference: 'Monthly dues',
+      status: 'POSTED',
+    });
+    renderPayments();
+
+    await user.click((await screen.findAllByRole('button', { name: i18n.t('finance.record') }))[0]);
+    await user.type(screen.getByLabelText(`${i18n.t('finance.amountIn', { currency: 'EUR' })} *`), '12,50');
+    await user.clear(screen.getByLabelText(i18n.t('finance.receivedDate')));
+    await user.type(screen.getByLabelText(i18n.t('finance.receivedDate')), '2026-08-31');
+    await user.selectOptions(screen.getByLabelText(i18n.t('finance.paymentType')), 'PAYPAL');
+    await user.type(screen.getByLabelText(i18n.t('finance.reason')), 'Monthly dues');
+
+    await user.click(screen.getByRole('button', { name: i18n.t('finance.reviewPayment') }));
+
+    const reviewDialog = screen.getByRole('dialog', { name: i18n.t('finance.reviewTitle') });
+    expect(apiMock.createPayment).not.toHaveBeenCalled();
+    expect(within(reviewDialog).getByText('Active Account')).toBeVisible();
+    expect(within(reviewDialog).getByText(/12,50/, { selector: 'strong[data-financial-state="payment"]' })).toBeVisible();
+    expect(within(reviewDialog).getByText('31.08.2026')).toBeVisible();
+    expect(within(reviewDialog).getByText('PayPal')).toBeVisible();
+    expect(within(reviewDialog).getByText('Monthly dues')).toBeVisible();
+
+    await user.click(within(reviewDialog).getByRole('button', { name: i18n.t('common.back') }));
+
+    const entryDialog = screen.getByRole('dialog', { name: i18n.t('finance.record') });
+    expect(within(entryDialog).getByRole('combobox', { name: i18n.t('common.member') })).toHaveTextContent('Active Account');
+    expect(within(entryDialog).getByLabelText(`${i18n.t('finance.amountIn', { currency: 'EUR' })} *`)).toHaveValue('12,50');
+    expect(within(entryDialog).getByLabelText(i18n.t('finance.receivedDate'))).toHaveValue('2026-08-31');
+    expect(within(entryDialog).getByLabelText(i18n.t('finance.paymentType'))).toHaveValue('PAYPAL');
+    expect(within(entryDialog).getByLabelText(i18n.t('finance.reason'))).toHaveValue('Monthly dues');
+    expect(apiMock.createPayment).not.toHaveBeenCalled();
+
+    await user.click(within(entryDialog).getByRole('button', { name: i18n.t('finance.reviewPayment') }));
+    await user.click(screen.getByRole('button', { name: i18n.t('finance.confirmPayment', { amount: '12,50 €' }) }));
+
+    await waitFor(() => expect(apiMock.createPayment).toHaveBeenCalledTimes(1));
+    expect(apiMock.createPayment).toHaveBeenCalledWith('group-a', {
+      amount: { minorUnits: '1250', currency: 'EUR' },
+      membershipId: 'member-active',
+      method: 'PAYPAL',
+      receivedAt: '2026-08-31',
+      reference: 'Monthly dues',
+    });
+  });
+
   it('requires a reason for managed payments when configured', async () => {
     const user = userEvent.setup();
     apiMock.getTransactionSettings.mockResolvedValue({

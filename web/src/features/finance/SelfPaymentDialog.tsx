@@ -14,8 +14,8 @@ import { useInstanceCapabilities } from '@/app/useSession';
 import { Button } from '@/components/ui/Button';
 import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
-import { formatGermanDate } from '@/features/shared/dateFormat';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
+import { PaymentReviewSummary } from './PaymentReviewSummary';
 import styles from './SelfPaymentDialog.module.css';
 import { PaymentAttachmentField } from './PaymentAttachmentField';
 
@@ -173,15 +173,22 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
 
         {step === 'review' && command ? (
           <div className={styles.review}>
-            <p>{t('selfPayment.reviewIntro')}</p>
-            <dl>
-              <div><dt>{t('selfPayment.account')}</dt><dd>{session.user.displayName}</dd></div>
-              <div><dt>{t('common.amount')}</dt><dd><strong className={styles.paymentAmount} data-financial-state="payment">{formatMoney(command.amount)}</strong></dd></div>
-              <div><dt>{t('common.date')}</dt><dd>{formatGermanDate(receivedAt)}</dd></div>
-              <div><dt>{t('finance.paymentType')}</dt><dd>{paymentMethod}</dd></div>
-              {reasonEnabled ? <div><dt>{t('finance.reason')}</dt><dd>{command.reference || '–'}</dd></div> : null}
-              {attachment ? <div><dt>{t('paymentAttachment.label', { defaultValue: 'Receipt' })}</dt><dd>{attachment.name}</dd></div> : null}
-            </dl>
+            <PaymentReviewSummary
+              accountLabel={t('selfPayment.account')}
+              accountName={session.user.displayName}
+              amount={command.amount}
+              amountLabel={t('common.amount')}
+              attachmentLabel={t('paymentAttachment.label', { defaultValue: 'Receipt' })}
+              attachmentName={attachment?.name}
+              dateLabel={t('common.date')}
+              intro={t('selfPayment.reviewIntro')}
+              methodLabel={t('finance.paymentType')}
+              methodName={paymentMethod}
+              reason={command.reference}
+              reasonLabel={t('finance.reason')}
+              receivedAt={command.receivedAt}
+              showReason={reasonEnabled}
+            />
             {mutation.isError ? <p className={styles.error} role="alert">{mutation.error.message}</p> : null}
             <ModalFooter><div className={styles.actions}><Button disabled={mutation.isPending} leadingIcon={<ArrowLeft size={17} />} onClick={() => { mutation.reset(); setStep('entry'); }} variant="secondary">{t('common.back')}</Button><Button disabled={mutation.isPending} leadingIcon={<CircleDollarSign size={17} />} onClick={() => mutation.mutate({ input: command, file: attachment })}>{mutation.isPending ? t('selfPayment.pending') : t('selfPayment.confirm', { amount: formatMoney(command.amount) })}</Button></div></ModalFooter>
           </div>
