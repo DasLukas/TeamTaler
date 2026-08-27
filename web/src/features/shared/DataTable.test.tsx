@@ -1,8 +1,8 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import type { SortingState } from '@tanstack/react-table';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DataTable,
   type DataTableColumnDef,
@@ -66,11 +66,12 @@ const labels: DataTableLabels = {
 
 interface ControlledTableProps {
   hasMore?: boolean;
+  isLoadingMore?: boolean;
   onLoadMore?: () => void;
 }
 
 /** Supplies controlled query state so interactions can be asserted through the public API. */
-function ControlledTable({ hasMore = false, onLoadMore }: ControlledTableProps) {
+function ControlledTable({ hasMore = false, isLoadingMore = false, onLoadMore }: ControlledTableProps) {
   const [searchValue, setSearchValue] = useState('');
   const [filters, setFilters] = useState<DataTableFilterState<TestFilterId>>({});
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -84,6 +85,7 @@ function ControlledTable({ hasMore = false, onLoadMore }: ControlledTableProps) 
       filters={filters}
       getRowId={(row) => row.id}
       hasMore={hasMore}
+      isLoadingMore={isLoadingMore}
       labels={labels}
       onFiltersChange={setFilters}
       onLoadMore={onLoadMore}
@@ -94,6 +96,32 @@ function ControlledTable({ hasMore = false, onLoadMore }: ControlledTableProps) 
       totalCount={12}
     />
   );
+}
+
+class TestIntersectionObserver {
+  static instances: TestIntersectionObserver[] = [];
+  private readonly elements = new Set<Element>();
+  readonly root: Element | Document | null;
+  readonly rootMargin: string;
+  readonly thresholds: readonly number[];
+
+  constructor(private readonly callback: IntersectionObserverCallback, options: IntersectionObserverInit = {}) {
+    this.root = options.root ?? null;
+    this.rootMargin = options.rootMargin ?? '0px';
+    this.thresholds = Array.isArray(options.threshold) ? options.threshold : [options.threshold ?? 0];
+    TestIntersectionObserver.instances.push(this);
+  }
+
+  observe(element: Element) { this.elements.add(element); }
+  disconnect() { this.elements.clear(); }
+  unobserve(element: Element) { this.elements.delete(element); }
+  takeRecords(): IntersectionObserverEntry[] { return []; }
+
+  trigger() {
+    const element = this.elements.values().next().value;
+    if (!element) return;
+    this.callback([{ isIntersecting: true, target: element } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+  }
 }
 
 const dependentFilterDefinitions: readonly DataTableFilterDefinition<DependentFilterId>[] = [
@@ -194,6 +222,11 @@ function CardClientTable() {
 }
 
 describe('DataTable', () => {
+  afterEach(() => {
+    TestIntersectionObserver.instances = [];
+    vi.unstubAllGlobals();
+  });
+
   it('renders semantic rows, search, result feedback, and incremental loading', async () => {
     const user = userEvent.setup();
     const onLoadMore = vi.fn();
@@ -210,6 +243,22 @@ describe('DataTable', () => {
 
     await user.click(screen.getByRole('button', { name: 'Load more' }));
     expect(onLoadMore).toHaveBeenCalledOnce();
+  });
+
+  it('automatically loads the next page near the collection end without duplicate requests', () => {
+    vi.stubGlobal('IntersectionObserver', TestIntersectionObserver);
+    const onLoadMore = vi.fn();
+    const { rerender } = render(<ControlledTable hasMore onLoadMore={onLoadMore} />);
+
+    expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
+    const observer = TestIntersectionObserver.instances[0];
+    expect(observer?.rootMargin).toBe('320px 0px');
+    act(() => observer?.trigger());
+    act(() => observer?.trigger());
+    expect(onLoadMore).toHaveBeenCalledOnce();
+
+    rerender(<ControlledTable hasMore isLoadingMore onLoadMore={onLoadMore} />);
+    expect(screen.getByText('Loading more results')).toHaveAttribute('role', 'status');
   });
 
   it('stages typed filters, applies them together, and exposes removable chips', async () => {

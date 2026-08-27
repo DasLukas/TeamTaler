@@ -86,6 +86,8 @@ Group and instance audit feeds use the shared `AuditEventTable` component. Both 
 
 Feature-owned card views may replace a shared data table's viewport on phones when scanning complete records vertically is materially easier than horizontal column navigation. Cards and tables must consume the same sorted collection, query controls, export action, cursor loading, empty/error state, and item actions; they are representations of one result set rather than separate data flows. Only the active representation is rendered, avoiding duplicate media requests and hidden interactive controls.
 
+Cursor-backed collections load their next page automatically when an inert sentinel approaches the visible end of the active table or card viewport. Loading starts early enough to avoid an empty pause, permits only one request per intersection, announces progress politely, and retains the manual loading action only as a compatibility fallback when Intersection Observer is unavailable. Result counts remain visible after the explicit action is removed.
+
 The mobile activity feed defaults to cards below 768 pixels and safely stores the last card/table choice as a versioned device preference. Its icon-only view action always names the destination view, while cards retain a dedicated accessible sorting sheet because table-header sorting is unavailable. Tablet and desktop continue to use the semantic table. Every activity card exposes the transaction type, signed amount, detail, member and actor identities, lifecycle state, category, timestamp, posting state, receipt, and reversal action without relying on color or icons alone.
 
 ## Documentation ownership

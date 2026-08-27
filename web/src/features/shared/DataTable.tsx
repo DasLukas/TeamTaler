@@ -214,12 +214,21 @@ export interface DataTableViewportProps {
 
 /** Properties accepted by the result and incremental-loading footer. */
 export interface DataTableResultBarProps {
+  /** Replaces the manual action with observer-driven loading and progress feedback. */
+  automaticLoading?: boolean;
   hasMore?: boolean;
   isLoadingMore?: boolean;
   labels: Pick<DataTableLabels, 'loadMore' | 'loadingMore' | 'results'>;
   loadedCount: number;
   onLoadMore?: () => void;
   totalCount?: number;
+}
+
+interface DataTableAutoLoadSentinelProps {
+  hasMore: boolean;
+  isLoadingMore: boolean;
+  loadedCount: number;
+  onLoadMore?: () => void;
 }
 
 type ScrollPosition = 'none' | 'start' | 'middle' | 'end';
@@ -314,16 +323,58 @@ export function DataTableViewport({ ariaLabel, children, minTableWidth = '720px'
 }
 
 /**
- * Renders loaded/total result feedback and an optional incremental-loading action.
+ * Requests the next page shortly before the end of a table or card collection becomes visible.
  *
- * @param props - Counts, loading state, localized labels, and load callback.
- * @returns A polite result status with an optional load-more button.
+ * @param props - Current pagination state, loaded row count, and stable load callback.
+ * @returns An inert intersection target while another page is available.
  */
-export function DataTableResultBar({ hasMore = false, isLoadingMore = false, labels, loadedCount, onLoadMore, totalCount }: DataTableResultBarProps) {
+function DataTableAutoLoadSentinel({ hasMore, isLoadingMore, loadedCount, onLoadMore }: DataTableAutoLoadSentinelProps) {
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const loadMoreRef = useRef(onLoadMore);
+  const canLoadMore = onLoadMore !== undefined;
+
+  useEffect(() => {
+    loadMoreRef.current = onLoadMore;
+  }, [onLoadMore]);
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel || !hasMore || isLoadingMore || !canLoadMore || typeof IntersectionObserver === 'undefined') return undefined;
+
+    const container = sentinel.parentElement;
+    const overflowY = container ? window.getComputedStyle(container).overflowY : 'visible';
+    const scrollsVertically = Boolean(container && container.scrollHeight > container.clientHeight + 1 && (overflowY === 'auto' || overflowY === 'scroll'));
+    let requested = false;
+    const observer = new IntersectionObserver((entries) => {
+      if (requested || !entries.some((entry) => entry.isIntersecting)) return;
+      requested = true;
+      observer.disconnect();
+      loadMoreRef.current?.();
+    }, {
+      root: scrollsVertically ? container : null,
+      rootMargin: '320px 0px',
+      threshold: 0,
+    });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [canLoadMore, hasMore, isLoadingMore, loadedCount]);
+
+  return hasMore && onLoadMore ? <div aria-hidden="true" className={styles.loadMoreSentinel} ref={sentinelRef} /> : null;
+}
+
+/**
+ * Renders loaded/total result feedback and progressive-loading state.
+ *
+ * @param props - Counts, loading state, localized labels, load callback, and browser capability.
+ * @returns A polite result status, loading feedback, or a compatibility fallback button.
+ */
+export function DataTableResultBar({ automaticLoading = false, hasMore = false, isLoadingMore = false, labels, loadedCount, onLoadMore, totalCount }: DataTableResultBarProps) {
   return (
     <footer className={styles.resultBar}>
       <span aria-live="polite" role="status">{labels.results(loadedCount, totalCount)}</span>
-      {hasMore && onLoadMore ? (
+      {automaticLoading && isLoadingMore ? (
+        <span aria-live="polite" className={styles.loadingMore} role="status"><span className={styles.loadingDot} />{labels.loadingMore}</span>
+      ) : !automaticLoading && hasMore && onLoadMore ? (
         <Button
           disabled={isLoadingMore}
           leadingIcon={isLoadingMore ? <span className={styles.loadingDot} /> : <ArrowDown size={17} />}
@@ -673,6 +724,7 @@ export function DataTable<Data extends RowData, FilterId extends string = string
   const resolvedToolbarActions = toolbarActions || exportAction ? <>{toolbarActions}{exportAction}</> : undefined;
   const cardRows = table.getRowModel().rows;
   const showsCards = viewMode === 'cards' && cardView !== undefined;
+  const automaticLoading = typeof IntersectionObserver !== 'undefined';
 
   return (
     <div className={`${styles.root} ${fillAvailableHeight ? styles.fillAvailableHeight : ''}`}>
@@ -690,6 +742,7 @@ export function DataTable<Data extends RowData, FilterId extends string = string
           {isLoading && data.length === 0 ? <div className={styles.collectionState} role="status">{labels.loading}</div>
             : cardRows.length === 0 ? <div className={styles.collectionState}>{emptyContent}</div>
               : <ul className={styles.cardList}>{cardRows.map((row) => <li key={row.id}>{cardView.renderItem(row.original)}</li>)}</ul>}
+          <DataTableAutoLoadSentinel hasMore={hasMore} isLoadingMore={isLoadingMore} loadedCount={data.length} onLoadMore={onLoadMore} />
         </div>
       ) : (
         <DataTableViewport ariaLabel={ariaLabel} minTableWidth={minTableWidth} scrollHint={labels.scrollHint}>
@@ -738,9 +791,11 @@ export function DataTable<Data extends RowData, FilterId extends string = string
               ))}
             </tbody>
           </table>
+          <DataTableAutoLoadSentinel hasMore={hasMore} isLoadingMore={isLoadingMore} loadedCount={data.length} onLoadMore={onLoadMore} />
         </DataTableViewport>
       )}
       {showResultBar ? <DataTableResultBar
+        automaticLoading={automaticLoading}
         hasMore={hasMore}
         isLoadingMore={isLoadingMore}
         labels={labels}
