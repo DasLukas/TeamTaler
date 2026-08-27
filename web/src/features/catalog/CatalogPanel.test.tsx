@@ -283,6 +283,28 @@ describe('CatalogPanel', () => {
     expect(dialog.querySelector(`button[aria-label="${i18n.t('dialog.sheetHandle')}"]`)).not.toBeInTheDocument();
   });
 
+  it('selects product categories through the custom icon menu', async () => {
+    const user = userEvent.setup();
+    const snackCategory: Category = { ...category, id: 'category-snacks', name: 'Snacks', icon: 'food', sortOrder: 3 };
+    apiMock.getCategories.mockResolvedValue([category, snackCategory]);
+    renderCatalog();
+
+    await screen.findByRole('button', { name: i18n.t('catalog.categoryAction') });
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.productAction') }));
+    const categoryMenu = screen.getByRole('combobox', { name: i18n.t('common.category') });
+    expect(categoryMenu.querySelector('[data-category-icon="drink"]')).toBeInTheDocument();
+
+    await user.click(categoryMenu);
+    const listbox = screen.getByRole('listbox', { name: i18n.t('common.category') });
+    expect(within(listbox).getByRole('option', { name: category.name }).querySelector('[data-category-icon="drink"]')).toBeInTheDocument();
+    const snackOption = within(listbox).getByRole('option', { name: snackCategory.name });
+    expect(snackOption.querySelector('[data-category-icon="food"]')).toBeInTheDocument();
+    await user.click(snackOption);
+
+    expect(categoryMenu).toHaveTextContent(snackCategory.name);
+    expect(categoryMenu.querySelector('[data-category-icon="food"]')).toBeInTheDocument();
+  });
+
   it('clears the native file input before another product is created', async () => {
     const user = userEvent.setup();
     const image = new File(['first'], 'first.png', { type: 'image/png' });
@@ -362,7 +384,7 @@ describe('CatalogPanel', () => {
     expect(priceInput).toHaveValue('1,00');
     expect(priceInput).toHaveAttribute('inputmode', 'decimal');
     expect(priceInput).toHaveAttribute('type', 'text');
-    expect(screen.getByLabelText(i18n.t('common.category'))).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: i18n.t('common.category') })).toBeDisabled();
     const name = screen.getByLabelText(i18n.t('catalog.productName'));
     await user.clear(name);
     await user.type(name, 'Mineral water');
@@ -419,7 +441,9 @@ describe('CatalogPanel', () => {
     expect(addProductButton.parentElement?.parentElement).toBe(productCard?.parentElement);
     await user.click(addProductButton);
 
-    expect(screen.getByLabelText(i18n.t('common.category'))).toHaveValue(secondCategory.id);
+    const categoryMenu = screen.getByRole('combobox', { name: i18n.t('common.category') });
+    expect(categoryMenu).toHaveTextContent(secondCategory.name);
+    expect(categoryMenu.querySelector(`[data-category-icon="${secondCategory.icon}"]`)).toBeInTheDocument();
   });
 
   it('exposes localized keyboard drag handles for categories and products', async () => {
