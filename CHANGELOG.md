@@ -14,6 +14,7 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ### Changed
 
+- The compact activity toolbar now keeps filter, sort, view, and export actions in fixed positions across card and table views.
 - Cursor-backed data tables and card collections now load the next page automatically shortly before the user reaches the end, while retaining the manual action only for browsers without Intersection Observer support.
 - Shared frontend colors now use semantic appearance tokens with complete light and dark variants instead of component-level brand literals.
 - Dark themes now use theme-specific tonal surface, border, text, overlay, and shadow scales rather than sharing the TeamTaler navy foundation.

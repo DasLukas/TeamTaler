@@ -169,13 +169,16 @@ describe('ActivitiesPage unified feed', () => {
     expect(await within(cards).findAllByRole('article')).toHaveLength(3);
     expect(screen.queryByRole('table', { name: i18n.t('activities.title') })).not.toBeInTheDocument();
     expect(screen.queryByText(i18n.t('dataTable.scrollHint'))).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: i18n.t('activities.sort.open') })).toBeVisible();
 
     await user.click(screen.getByRole('button', { name: i18n.t('activities.showTable') }));
     expect(await screen.findByRole('table', { name: i18n.t('activities.title') })).toBeVisible();
+    expect(screen.getByRole('button', { name: i18n.t('activities.sort.open') })).toBeVisible();
     expect(window.localStorage.getItem('teamtaler:activities-view:v1')).toBe('table');
 
     await user.click(screen.getByRole('button', { name: i18n.t('activities.showCards') }));
     expect(await screen.findByRole('region', { name: i18n.t('activities.cardsAriaLabel') })).toBeVisible();
+    expect(screen.getByRole('button', { name: i18n.t('activities.sort.open') })).toBeVisible();
     expect(window.localStorage.getItem('teamtaler:activities-view:v1')).toBe('cards');
   });
 
@@ -186,14 +189,15 @@ describe('ActivitiesPage unified feed', () => {
 
     expect(await screen.findByRole('table', { name: i18n.t('activities.title') })).toBeVisible();
     expect(screen.getByRole('button', { name: i18n.t('activities.showCards') })).toBeVisible();
-    expect(screen.queryByRole('button', { name: i18n.t('activities.sort.open') })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: i18n.t('activities.sort.open') })).toBeVisible();
   });
 
-  it('sorts card collections through the compact sort sheet and keeps URL query state shareable', async () => {
+  it('sorts compact tables through the stable sort action and keeps URL query state shareable', async () => {
     const user = userEvent.setup();
+    window.localStorage.setItem('teamtaler:activities-view:v1', 'table');
     useCompactViewport();
     renderActivities();
-    await screen.findByRole('region', { name: i18n.t('activities.cardsAriaLabel') });
+    await screen.findByRole('table', { name: i18n.t('activities.title') });
 
     await user.click(screen.getByRole('button', { name: i18n.t('activities.sort.open') }));
     const sortDialog = screen.getByRole('dialog', { name: i18n.t('activities.sort.title') });

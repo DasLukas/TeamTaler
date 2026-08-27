@@ -369,20 +369,18 @@ export function ActivitiesPage() {
           minTableWidth="1480px"
           onLoadMore={() => void activitiesQuery.fetchNextPage()}
           toolbarActions={compact ? <>
-            {cardsActive ? (
-              <Button
-                aria-expanded={sortDialogOpen}
-                aria-haspopup="dialog"
-                aria-label={t('activities.sort.open')}
-                iconOnly
-                leadingIcon={<ArrowUpDown size={18} />}
-                onClick={openSortDialog}
-                title={t('activities.sort.open')}
-                variant="secondary"
-              >
-                {t('activities.sort.open')}
-              </Button>
-            ) : null}
+            <Button
+              aria-expanded={sortDialogOpen}
+              aria-haspopup="dialog"
+              aria-label={t('activities.sort.open')}
+              iconOnly
+              leadingIcon={<ArrowUpDown size={18} />}
+              onClick={openSortDialog}
+              title={t('activities.sort.open')}
+              variant="secondary"
+            >
+              {t('activities.sort.open')}
+            </Button>
             <Button
               aria-label={t(cardsActive ? 'activities.showTable' : 'activities.showCards')}
               iconOnly
