@@ -14,7 +14,7 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ### Changed
 
-- Active filters now stay in a single horizontally scrollable chip row on compact screens instead of reducing collection height as more filters are applied.
+- Active filters now stay in a single horizontally scrollable chip row aligned with the primary controls on compact screens instead of reducing collection height as more filters are applied.
 - The compact activity toolbar now keeps filter, sort, view, and export actions in fixed positions across card and table views.
 - Cursor-backed data tables and card collections now load the next page automatically shortly before the user reaches the end, while retaining the manual action only for browsers without Intersection Observer support.
 - Shared frontend colors now use semantic appearance tokens with complete light and dark variants instead of component-level brand literals.
