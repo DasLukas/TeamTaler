@@ -88,6 +88,8 @@ Feature-owned card views may replace a shared data table's viewport on phones wh
 
 Cursor-backed collections load their next page automatically when an inert sentinel approaches the visible end of the active table or card viewport. Loading starts early enough to avoid an empty pause, permits only one request per intersection, announces progress politely, and retains the manual loading action only as a compatibility fallback when Intersection Observer is unavailable. Result counts remain visible after the explicit action is removed.
 
+Active table filters remain individually visible and removable without consuming an unbounded amount of vertical space. Below 768 pixels their chips occupy one native horizontally scrollable row with proximity snapping and the complete reset action at its end; wider layouts may wrap chips to use available horizontal space. The filter count on the primary action remains the persistent compact summary.
+
 The mobile activity feed defaults to cards below 768 pixels and safely stores the last card/table choice as a versioned device preference. Its compact toolbar keeps filter, sort, view, and export actions in stable positions across both representations. The icon-only view action always names the destination view, while the dedicated accessible sorting sheet remains available in both representations so sorting does not depend on horizontally distant table headers. Tablet and desktop continue to use the semantic table. Every activity card exposes the transaction type, signed amount, detail, member and actor identities, lifecycle state, category, timestamp, posting state, receipt, and reversal action without relying on color or icons alone.
 
 ## Documentation ownership
