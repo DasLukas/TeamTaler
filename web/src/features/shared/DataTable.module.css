@@ -22,6 +22,11 @@
   min-height: 0;
 }
 
+.fillAvailableHeight > .cardViewport {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .controls {
   display: grid;
   min-width: 0;
@@ -287,6 +292,36 @@
 }
 
 .dataTable { min-width: var(--data-table-min-width, 720px); }
+
+.cardViewport {
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+
+.cardList {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  gap: var(--space-3);
+  list-style: none;
+}
+
+.cardList > li { min-width: 0; }
+
+.collectionState {
+  display: grid;
+  min-height: 160px;
+  place-items: center;
+  padding: var(--space-6);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+  text-align: center;
+}
 
 .sortButton {
   display: inline-flex;

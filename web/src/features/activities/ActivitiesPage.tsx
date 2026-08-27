@@ -1,99 +1,64 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import ArrowUpDown from 'lucide-react/dist/esm/icons/arrow-up-down';
 import BookOpenCheck from 'lucide-react/dist/esm/icons/book-open-check';
-import CircleCheck from 'lucide-react/dist/esm/icons/circle-check';
 import CircleDollarSign from 'lucide-react/dist/esm/icons/circle-dollar-sign';
+import LayoutList from 'lucide-react/dist/esm/icons/layout-list';
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
 import Scale from 'lucide-react/dist/esm/icons/scale';
+import Table2 from 'lucide-react/dist/esm/icons/table-2';
 import X from 'lucide-react/dist/esm/icons/x';
-import { useDeferredValue, useId, useMemo, useState } from 'react';
+import { useCallback, useDeferredValue, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
-import { currencyExponent, formatMoney } from '@/api/money';
-import type { ActivityCollectionQuery, ActivityEntry, ActivityKind, CollectionPage, MembershipStatus } from '@/api/types';
+import { currencyExponent } from '@/api/money';
+import type { ActivityCollectionQuery, ActivityEntry, ActivityKind, CollectionPage } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Page } from '@/components/layout/Page';
-import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
-import { PaymentAttachmentAction } from '@/features/finance/PaymentAttachmentAction';
+import { SelectMenu, type SelectMenuOption } from '@/components/ui/SelectMenu';
 import { CategoryIcon } from '@/features/shared/CategoryIcon';
-import { DataTable, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange } from '@/features/shared/DataTable';
+import { DataTable, type DataTableCardView, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange } from '@/features/shared/DataTable';
 import { formatGermanDateTime } from '@/features/shared/dateFormat';
 import { createMemberFilterOption } from '@/features/shared/memberFilterOption';
-import { MembershipStateIcon } from '@/features/shared/MembershipStateIcon';
-import tableStyles from '@/features/shared/Table.module.css';
 import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
+import { ActivityActions, ActivityAmount, ActivityCard, ActivityDetails, ActivityState, ActivityType, MembershipIdentity } from './ActivityEntryPresentation';
 import styles from './ActivitiesPage.module.css';
 
 const activityPageSize = 50;
+const activityViewStorageKey = 'teamtaler:activities-view:v1';
 type ActivityFilterId = 'kind' | 'targetMembershipId' | 'productId' | 'categoryId' | 'status' | 'occurredAt' | 'amount';
+type ActivitySortId = 'kind' | 'targetName' | 'actorName' | 'detailName' | 'categoryName' | 'occurredAt' | 'amount' | 'status';
+type MobileActivityView = 'cards' | 'table';
 
-interface MembershipIdentityProps {
-  avatarUrl?: string;
-  name?: string;
-  status?: MembershipStatus;
+/**
+ * Reads the versioned mobile activity-view preference with a card-first fallback.
+ *
+ * @returns The persisted table or card mode, defaulting to cards when storage is unavailable.
+ */
+function readMobileActivityView(): MobileActivityView {
+  try {
+    return window.localStorage.getItem(activityViewStorageKey) === 'table' ? 'table' : 'cards';
+  } catch {
+    return 'cards';
+  }
 }
 
 /**
- * Renders a compact historical member identity with lifecycle state.
+ * Persists the mobile activity-view preference without making storage availability a runtime requirement.
  *
- * @param props - Current name, avatar projection, and optional membership state.
- * @returns A table-safe identity or a neutral placeholder for system corrections.
+ * @param view - Card or table representation selected on this device.
+ * @returns Nothing.
  */
-function MembershipIdentity({ avatarUrl, name, status }: MembershipIdentityProps) {
-  const { t } = useTranslation();
-  if (!name) return <span aria-label={t('activities.actorUnavailable')} className={styles.missingActor}>–</span>;
-  return (
-    <span className={styles.member}>
-      <Avatar name={name} size="small" src={avatarUrl} />
-      <span className={styles.memberName} title={name}>{name}</span>
-      <MembershipStateIcon showLabelAtWide status={status} />
-    </span>
-  );
-}
-
-/**
- * Renders one transaction kind with an icon-only narrow-screen state.
- *
- * @param props - Unified activity kind.
- * @returns An accessible booking, payment, or adjustment badge.
- */
-function ActivityType({ kind }: Pick<ActivityEntry, 'kind'>) {
-  const { t } = useTranslation();
-  const label = kind === 'BOOKING' ? t('activities.bookingType') : kind === 'PAYMENT' ? t('activities.paymentType') : t('activities.adjustmentType');
-  const TypeIcon = kind === 'BOOKING' ? BookOpenCheck : kind === 'PAYMENT' ? CircleDollarSign : Scale;
-  const tone = kind === 'BOOKING' ? styles.activityTypeBooking : kind === 'PAYMENT' ? styles.activityTypePayment : styles.activityTypeAdjustment;
-
-  return (
-    <span aria-label={label} className={`${styles.activityType} ${tone}`} role="img" title={label}>
-      <TypeIcon aria-hidden="true" size={16} />
-      <span aria-hidden="true" className={styles.activityTypeText}>{label}</span>
-    </span>
-  );
-}
-
-/**
- * Renders the source-aware current lifecycle status of one transaction.
- *
- * @param props - Transaction kind and current status.
- * @returns A localized status badge.
- */
-function ActivityState({ kind, status }: Pick<ActivityEntry, 'kind' | 'status'>) {
-  const { t } = useTranslation();
-  const reversed = status === 'REVERSED';
-  const label = reversed
-    ? t('common.reversed')
-    : kind === 'BOOKING' ? t('common.booked') : kind === 'PAYMENT' ? t('activities.paymentReceived') : t('activities.adjustmentPosted');
-  const StatusIcon = reversed ? RotateCcw : CircleCheck;
-  const tone = reversed ? tableStyles.statusMuted : kind === 'BOOKING' ? tableStyles.statusWarning : '';
-  return (
-    <span aria-label={label} className={`${tableStyles.status} ${styles.activityState} ${tone}`} role="img" title={label}>
-      <StatusIcon aria-hidden="true" size={15} />
-      <span>{label}</span>
-    </span>
-  );
+function persistMobileActivityView(view: MobileActivityView): void {
+  try {
+    window.localStorage.setItem(activityViewStorageKey, view);
+  } catch {
+    // The current in-memory preference remains usable when browser storage is blocked.
+  }
 }
 
 /**
@@ -104,11 +69,17 @@ function ActivityState({ kind, status }: Pick<ActivityEntry, 'kind' | 'status'>)
 export function ActivitiesPage() {
   const { t } = useTranslation();
   const { activeGroup, activeGroupId, session } = useActiveGroup();
+  const compact = useMediaQuery('(max-width: 767px)');
   const queryClient = useQueryClient();
   const reversalFormId = useId();
+  const sortFormId = useId();
   const filterOptionsQuery = useQuery({ queryKey: ['activities', activeGroupId, 'filter-options'], queryFn: () => api.getActivityFilterOptions(activeGroupId) });
   const [reversal, setReversal] = useState<ActivityEntry | null>(null);
   const [reason, setReason] = useState('');
+  const [mobileView, setMobileView] = useState<MobileActivityView>(readMobileActivityView);
+  const [sortDialogOpen, setSortDialogOpen] = useState(false);
+  const [draftSortId, setDraftSortId] = useState<ActivitySortId>('occurredAt');
+  const [draftSortDescending, setDraftSortDescending] = useState(true);
   const labels = useDataTableLabels();
   const memberFilterOptions = useMemo(
     () => (filterOptionsQuery.data?.members ?? []).map(createMemberFilterOption),
@@ -192,12 +163,34 @@ export function ActivitiesPage() {
       step: 0.01,
     },
   ], [activeGroup.currency, categoryIcons, filterOptionsQuery.data?.categories, filterOptionsQuery.data?.kinds, filterOptionsQuery.data?.products, memberFilterOptions, t]);
+  const sortOptions = useMemo<readonly SelectMenuOption<ActivitySortId>[]>(() => [
+    { label: t('activities.transaction'), value: 'kind' },
+    { label: t('common.member'), value: 'targetName' },
+    { label: t('activities.recordedBy'), value: 'actorName' },
+    { label: t('common.details'), value: 'detailName' },
+    { label: t('common.category'), value: 'categoryName' },
+    { label: t('activities.time'), value: 'occurredAt' },
+    { label: t('common.amount'), value: 'amount' },
+    { label: t('common.status'), value: 'status' },
+  ], [t]);
   const tableState = useDataTableUrlState<ActivityFilterId>({
     filterDefinitions,
     initialSorting: [{ id: 'occurredAt', desc: true }],
     namespace: 'activities',
     sortableColumnIds: ['kind', 'targetName', 'actorName', 'detailName', 'categoryName', 'occurredAt', 'amount', 'status'],
   });
+  const cardsActive = compact && mobileView === 'cards';
+  const selectReversal = useCallback((activity: ActivityEntry) => setReversal(activity), []);
+  const changeMobileView = (view: MobileActivityView) => {
+    setMobileView(view);
+    persistMobileActivityView(view);
+  };
+  const openSortDialog = () => {
+    const sorting = tableState.sorting[0];
+    setDraftSortId((sorting?.id ?? 'occurredAt') as ActivitySortId);
+    setDraftSortDescending(sorting?.desc !== false);
+    setSortDialogOpen(true);
+  };
   const deferredSearch = useDeferredValue(tableState.searchValue.trim());
   const collectionQuery = useMemo<ActivityCollectionQuery>(() => {
     const dateRange = tableState.filters.occurredAt as DataTableDateRange | undefined;
@@ -233,6 +226,20 @@ export function ActivitiesPage() {
   const productImages = useMemo(() => new Map(
     filterOptionsQuery.data?.products.map((product) => [product.productId, product.imageUrl] as const) ?? [],
   ), [filterOptionsQuery.data?.products]);
+  const renderActivityCard = useCallback((activity: ActivityEntry) => (
+    <ActivityCard
+      activity={activity}
+      actorAvatarUrl={activity.actorMembershipId === activeGroup.membership?.id ? session.user.avatarUrl : activity.actorAvatarUrl}
+      groupId={activeGroupId}
+      onReverse={selectReversal}
+      productImageUrl={activity.productId ? productImages.get(activity.productId) : undefined}
+      targetAvatarUrl={activity.targetMembershipId === activeGroup.membership?.id ? session.user.avatarUrl : activity.targetAvatarUrl}
+    />
+  ), [activeGroup.membership?.id, activeGroupId, productImages, selectReversal, session.user.avatarUrl]);
+  const cardView = useMemo<DataTableCardView<ActivityEntry>>(() => ({
+    ariaLabel: t('activities.cardsAriaLabel'),
+    renderItem: renderActivityCard,
+  }), [renderActivityCard, t]);
   const invalidateActivityReads = async () => Promise.all([
     ['activities', activeGroupId],
     ['bookings', activeGroupId],
@@ -291,7 +298,7 @@ export function ActivitiesPage() {
       cell: ({ row }) => {
         const activity = row.original;
         const productImageUrl = activity.productId ? productImages.get(activity.productId) : undefined;
-        return <span className={styles.activityDetails}>{productImageUrl ? <img alt="" decoding="async" loading="lazy" src={productImageUrl} /> : null}<span><strong>{activity.detailName}</strong>{activity.quantity && activity.quantity > 1 ? ` × ${activity.quantity}` : ''}{activity.detailNote ? <small>{activity.detailNote}</small> : null}</span></span>;
+        return <ActivityDetails activity={activity} productImageUrl={productImageUrl} />;
       },
       enableSorting: true,
       header: t('common.details'),
@@ -309,15 +316,7 @@ export function ActivitiesPage() {
     },
     {
       accessorFn: (activity) => activity.amount.minorUnits,
-      cell: ({ row }) => {
-        const activity = row.original;
-        const amount = BigInt(activity.amount.minorUnits);
-        const formatted = formatMoney(activity.amount);
-        const tone = activity.status === 'REVERSED'
-          ? styles.activityAmountReversed
-          : amount > 0n ? styles.activityAmountBooking : amount < 0n ? styles.activityAmountPayment : '';
-        return <strong className={`${styles.activityAmount} ${tone}`}>{amount > 0n ? `+${formatted}` : formatted}</strong>;
-      },
+      cell: ({ row }) => <ActivityAmount amount={row.original.amount} status={row.original.status} />,
       enableSorting: true,
       header: t('common.amount'),
       id: 'amount',
@@ -334,15 +333,14 @@ export function ActivitiesPage() {
     {
       cell: ({ row }) => {
         const activity = row.original;
-        if (!activity.attachment && !activity.canReverse) return null;
-        return <div className={styles.rowActions}>{activity.attachment ? <PaymentAttachmentAction attachment={activity.attachment} groupId={activeGroupId} paymentId={activity.sourceId} /> : null}{activity.canReverse ? <Button leadingIcon={<RotateCcw size={16} />} onClick={() => setReversal(activity)} size="small" variant="ghost">{t('activities.reverse')}</Button> : null}</div>;
+        return <ActivityActions activity={activity} groupId={activeGroupId} onReverse={selectReversal} />;
       },
       enableSorting: false,
       header: () => <span className="sr-only">{t('common.action')}</span>,
       id: 'action',
       meta: { label: t('common.action') },
     },
-  ], [activeGroup.membership?.id, activeGroupId, productImages, session.user.avatarUrl, t]);
+  ], [activeGroup.membership?.id, activeGroupId, productImages, selectReversal, session.user.avatarUrl, t]);
 
   const reversingPayment = reversal?.kind === 'PAYMENT';
   return (
@@ -350,6 +348,7 @@ export function ActivitiesPage() {
       <div className={styles.activityList}>
         <DataTable
           ariaLabel={t('activities.title')}
+          cardView={cardView}
           columns={columns}
           data={activities}
           emptyContent={activitiesQuery.isError ? t('activities.error') : t('activities.noResults')}
@@ -369,9 +368,62 @@ export function ActivitiesPage() {
           labels={{ ...labels, searchLabel: t('activities.searchLabel'), searchPlaceholder: t('activities.searchPlaceholder') }}
           minTableWidth="1480px"
           onLoadMore={() => void activitiesQuery.fetchNextPage()}
+          toolbarActions={compact ? <>
+            {cardsActive ? (
+              <Button
+                aria-expanded={sortDialogOpen}
+                aria-haspopup="dialog"
+                aria-label={t('activities.sort.open')}
+                iconOnly
+                leadingIcon={<ArrowUpDown size={18} />}
+                onClick={openSortDialog}
+                title={t('activities.sort.open')}
+                variant="secondary"
+              >
+                {t('activities.sort.open')}
+              </Button>
+            ) : null}
+            <Button
+              aria-label={t(cardsActive ? 'activities.showTable' : 'activities.showCards')}
+              iconOnly
+              leadingIcon={cardsActive ? <Table2 size={18} /> : <LayoutList size={18} />}
+              onClick={() => changeMobileView(cardsActive ? 'table' : 'cards')}
+              title={t(cardsActive ? 'activities.showTable' : 'activities.showCards')}
+              variant="secondary"
+            >
+              {t(cardsActive ? 'activities.showTable' : 'activities.showCards')}
+            </Button>
+          </> : undefined}
+          viewMode={cardsActive ? 'cards' : 'table'}
           {...tableState}
         />
       </div>
+      <Modal
+        footer={<div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={() => setSortDialogOpen(false)} variant="secondary">{t('common.cancel')}</Button><Button form={sortFormId} leadingIcon={<ArrowUpDown size={17} />} type="submit">{t('activities.sort.apply')}</Button></div>}
+        onClose={() => setSortDialogOpen(false)}
+        open={sortDialogOpen}
+        title={t('activities.sort.title')}
+        variant="sheet"
+      >
+        <form
+          className={styles.sortForm}
+          id={sortFormId}
+          onSubmit={(event) => {
+            event.preventDefault();
+            tableState.onSortingChange([{ id: draftSortId, desc: draftSortDescending }]);
+            setSortDialogOpen(false);
+          }}
+        >
+          <Field htmlFor="activity-sort-field" label={t('activities.sort.field')}>
+            <SelectMenu ariaLabel={t('activities.sort.field')} id="activity-sort-field" onChange={setDraftSortId} options={sortOptions} value={draftSortId} />
+          </Field>
+          <fieldset className={styles.sortDirections}>
+            <legend>{t('activities.sort.direction')}</legend>
+            <label><input checked={!draftSortDescending} name={`${sortFormId}-direction`} onChange={() => setDraftSortDescending(false)} type="radio" /><span>{t('activities.sort.ascending')}</span></label>
+            <label><input checked={draftSortDescending} name={`${sortFormId}-direction`} onChange={() => setDraftSortDescending(true)} type="radio" /><span>{t('activities.sort.descending')}</span></label>
+          </fieldset>
+        </form>
+      </Modal>
       <Modal onClose={() => { setReversal(null); setReason(''); }} open={Boolean(reversal)} title={t(reversingPayment ? 'finance.reverseTitle' : 'activities.reverseTitle')} variant="sheet">
         <form className={styles.reversalForm} id={reversalFormId} onSubmit={(event) => { event.preventDefault(); reverseMutation.mutate(); }}>
           <p>{t(reversingPayment ? 'finance.reverseExplanation' : 'activities.reverseExplanation')}</p>

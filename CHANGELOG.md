@@ -10,6 +10,7 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Group-managed default themes with inheritable per-membership overrides that remain stable across sessions and group switches.
 - Password-confirmed asynchronous personal and group structured-data exports with actor-owned job history, in-app completion notices, integrity metadata, and automatic 24-hour expiry.
 - Authorization-preserving CSV and A4-landscape PDF downloads for activities, payments, account balances, group and personal settlements, active and archived members, and group and system audit tables. Downloads include every filtered and sorted matching row without interactive action columns.
+- A card-first mobile activity feed with a persistent table toggle and dedicated compact sorting sheet, while preserving the same search, filters, exports, cursor loading, and row actions in both views.
 
 ### Changed
 

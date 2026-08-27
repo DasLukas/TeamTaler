@@ -113,9 +113,29 @@ function renderActivities(): QueryClient {
   return queryClient;
 }
 
+/** Makes the shared compact breakpoint deterministic for responsive activity tests. */
+function useCompactViewport(compact = true) {
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: vi.fn((query: string) => ({
+      matches: query === '(max-width: 767px)' ? compact : false,
+      media: query,
+      onchange: null,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      dispatchEvent: () => false,
+    })),
+  });
+}
+
 describe('ActivitiesPage unified feed', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useCompactViewport(false);
+    window.localStorage.clear();
     window.history.replaceState({}, '', '/activities');
     apiMock.getActivityFilterOptions.mockResolvedValue(filterOptions);
     apiMock.getActivitiesPage.mockResolvedValue(activityPage([adjustment, payment, booking]));
@@ -138,6 +158,68 @@ describe('ActivitiesPage unified feed', () => {
     expect(within(table).getByText(/-20,00/)).toBeVisible();
     expect(within(table).getByLabelText(i18n.t('activities.actorUnavailable'))).toBeVisible();
     expect(apiMock.getActivitiesPage).toHaveBeenCalledWith('group-a', expect.objectContaining({ limit: 50, sort: 'occurredAt', direction: 'desc' }));
+  });
+
+  it('uses persistent cards by default on compact screens and toggles to the horizontal table', async () => {
+    const user = userEvent.setup();
+    useCompactViewport();
+    renderActivities();
+
+    const cards = await screen.findByRole('region', { name: i18n.t('activities.cardsAriaLabel') });
+    expect(await within(cards).findAllByRole('article')).toHaveLength(3);
+    expect(screen.queryByRole('table', { name: i18n.t('activities.title') })).not.toBeInTheDocument();
+    expect(screen.queryByText(i18n.t('dataTable.scrollHint'))).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: i18n.t('activities.showTable') }));
+    expect(await screen.findByRole('table', { name: i18n.t('activities.title') })).toBeVisible();
+    expect(window.localStorage.getItem('teamtaler:activities-view:v1')).toBe('table');
+
+    await user.click(screen.getByRole('button', { name: i18n.t('activities.showCards') }));
+    expect(await screen.findByRole('region', { name: i18n.t('activities.cardsAriaLabel') })).toBeVisible();
+    expect(window.localStorage.getItem('teamtaler:activities-view:v1')).toBe('cards');
+  });
+
+  it('restores a persisted mobile table preference while leaving desktop behavior unchanged', async () => {
+    window.localStorage.setItem('teamtaler:activities-view:v1', 'table');
+    useCompactViewport();
+    renderActivities();
+
+    expect(await screen.findByRole('table', { name: i18n.t('activities.title') })).toBeVisible();
+    expect(screen.getByRole('button', { name: i18n.t('activities.showCards') })).toBeVisible();
+    expect(screen.queryByRole('button', { name: i18n.t('activities.sort.open') })).not.toBeInTheDocument();
+  });
+
+  it('sorts card collections through the compact sort sheet and keeps URL query state shareable', async () => {
+    const user = userEvent.setup();
+    useCompactViewport();
+    renderActivities();
+    await screen.findByRole('region', { name: i18n.t('activities.cardsAriaLabel') });
+
+    await user.click(screen.getByRole('button', { name: i18n.t('activities.sort.open') }));
+    const sortDialog = screen.getByRole('dialog', { name: i18n.t('activities.sort.title') });
+    await user.click(within(sortDialog).getByRole('combobox', { name: i18n.t('activities.sort.field') }));
+    await user.click(within(screen.getByRole('listbox', { name: i18n.t('activities.sort.field') })).getByRole('option', { name: i18n.t('common.amount') }));
+    await user.click(within(sortDialog).getByRole('radio', { name: i18n.t('activities.sort.ascending') }));
+    await user.click(within(sortDialog).getByRole('button', { name: i18n.t('activities.sort.apply') }));
+
+    await waitFor(() => expect(apiMock.getActivitiesPage).toHaveBeenLastCalledWith('group-a', expect.objectContaining({ direction: 'asc', sort: 'amount' })));
+    const sorting = new URL(window.location.href).searchParams.get('tt.activities.sorting');
+    expect(sorting ? JSON.parse(sorting) : null).toEqual([{ desc: false, id: 'amount' }]);
+  });
+
+  it('keeps complete activity content and available row actions in mobile cards', async () => {
+    const user = userEvent.setup();
+    useCompactViewport();
+    renderActivities();
+
+    const paymentCard = await screen.findByRole('article', { name: i18n.t('activities.cardLabel', { type: i18n.t('activities.paymentType'), detail: payment.detailName }) });
+    expect(within(paymentCard).getByText(payment.detailNote ?? '')).toBeVisible();
+    expect(within(paymentCard).getByText(/-20,00/)).toBeVisible();
+    expect(within(paymentCard).getByRole('img', { name: i18n.t('activities.paymentType') })).toBeVisible();
+    expect(within(paymentCard).getByRole('button', { name: i18n.t('paymentAttachment.action') })).toBeVisible();
+
+    await user.click(within(paymentCard).getByRole('button', { name: i18n.t('activities.reverse') }));
+    expect(screen.getByRole('dialog', { name: i18n.t('finance.reverseTitle') })).toBeVisible();
   });
 
   it('refetches feed-derived filter options through the shared activity cache prefix', async () => {

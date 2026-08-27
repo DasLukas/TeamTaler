@@ -171,6 +171,28 @@ function CompactClientTable() {
   );
 }
 
+/** Supplies a locally sorted card presentation through the shared collection shell. */
+function CardClientTable() {
+  const [sorting, setSorting] = useState<SortingState>([{ id: 'name', desc: false }]);
+  return (
+    <DataTable
+      ariaLabel="Members table"
+      cardView={{ ariaLabel: 'Members cards', renderItem: (row) => <article>{row.name}</article> }}
+      columns={columns}
+      data={[rows[1], rows[0]]}
+      emptyContent="No members"
+      labels={labels}
+      manualSorting={false}
+      onSearchChange={() => undefined}
+      onSortingChange={setSorting}
+      searchValue=""
+      showControls={false}
+      sorting={sorting}
+      viewMode="cards"
+    />
+  );
+}
+
 describe('DataTable', () => {
   it('renders semantic rows, search, result feedback, and incremental loading', async () => {
     const user = userEvent.setup();
@@ -244,6 +266,17 @@ describe('DataTable', () => {
     await user.click(screen.getByRole('button', { name: 'Sort Name ascending' }));
     expect(within(table).getAllByRole('row')[1]).toHaveTextContent('Ada');
     expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveAttribute('aria-sort', 'ascending');
+  });
+
+  it('renders optional cards from the same sorted row model while preserving result feedback', () => {
+    render(<CardClientTable />);
+
+    expect(screen.queryByRole('table', { name: 'Members table' })).not.toBeInTheDocument();
+    const cardRegion = screen.getByRole('region', { name: 'Members cards' });
+    const cards = within(cardRegion).getAllByRole('article');
+    expect(cards).toHaveLength(2);
+    expect(cards[0]).toHaveTextContent('Ada');
+    expect(screen.getByRole('status')).toHaveTextContent('2 results');
   });
 
   it('renders visual custom multi-selects and removes products outside selected categories', async () => {
