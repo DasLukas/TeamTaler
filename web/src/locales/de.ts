@@ -1307,6 +1307,10 @@ export const de = {
     paymentDue: 'Zahlungsziel',
     confirmClose: 'Verbindlich abschließen',
     defaultOpenLabel: 'Aktueller Zeitraum',
+    printFor: 'Abrechnung {{period}} für {{member}} als PDF öffnen',
+    preparingPdf: 'PDF wird erstellt …',
+    statementExportTitle: 'Abrechnung {{period}} {{member}}',
+    statementPreviewError: 'Die Abrechnung konnte nicht als PDF erstellt werden.',
   },
   rights: {
     noSelection: 'Kein Mitglied gewählt.',

@@ -87,6 +87,24 @@ func TestWritePDFAcceptsNormalizedGroupLogo(t *testing.T) {
 	}
 }
 
+func TestWritePDFRendersDetailedStatementHeader(t *testing.T) {
+	document := basicFixtureDocument()
+	document.Title = "Abgeschlossene Abrechnung"
+	document.Subtitle = "August 2026"
+	document.SubjectName = "Marie Mitglied"
+	document.SubjectImagePNG = fixtureImagePNG()
+	output := renderPDFForTest(t, document)
+	if !bytes.Contains(output, []byte("/Subtype /Image")) {
+		t.Fatal("WritePDF() did not embed the statement member image")
+	}
+	if dividerY, tableY := documentHeaderPositions(document); dividerY != detailHeaderDividerY || tableY != detailTableHeaderY {
+		t.Fatalf("detailed header positions = %.1f/%.1f, want %.1f/%.1f", dividerY, tableY, detailHeaderDividerY, detailTableHeaderY)
+	}
+	if got := subjectInitials("Marie Mitglied"); got != "MM" {
+		t.Fatalf("subjectInitials() = %q, want MM", got)
+	}
+}
+
 func TestPDFExportTitleUsesISODatePrefix(t *testing.T) {
 	document := basicFixtureDocument()
 	if got, want := pdfExportTitle(document), "2026-08-25_Aktivitäten"; got != want {
@@ -202,20 +220,23 @@ func TestWritePDFSettlementVisualFixture(t *testing.T) {
 		t.Skip("set TEAMTALER_SETTLEMENT_PDF_FIXTURE to write the settlement visual QA fixture")
 	}
 	document := basicFixtureDocument()
-	document.Title = "Abgeschlossene Abrechnungen"
+	document.Title = "Abgeschlossene Abrechnung"
+	document.Subtitle = "August 2026"
+	document.SubjectName = "Marie Mitglied"
+	document.SubjectImagePNG = fixtureImagePNG()
 	document.Columns = []Column{
-		{ID: "period", Header: "Zeitraum", Kind: TextColumn, WidthMM: 42},
-		{ID: "member", Header: "Mitglied", Kind: TextColumn, WidthMM: 50, Identity: true},
-		{ID: "membership", Header: "Mitgliedschaft", Kind: TextColumn, WidthMM: 36},
-		{ID: "due_at", Header: "Fällig", Kind: TextColumn, WidthMM: 28},
-		{ID: "amount", Header: "Forderung", Kind: MoneyColumn, Alignment: AlignRight, WidthMM: 32},
-		{ID: "paid", Header: "Bezahlt", Kind: MoneyColumn, Alignment: AlignRight, WidthMM: 32},
-		{ID: "status", Header: "Status", Kind: TextColumn, WidthMM: 28},
+		{ID: "kind", Header: "Vorgang", Kind: TextColumn, WidthMM: 25, Identity: true},
+		{ID: "actor", Header: "Erfasst von", Kind: TextColumn, WidthMM: 42, Identity: true},
+		{ID: "details", Header: "Details", Kind: TextColumn, WidthMM: 72},
+		{ID: "category", Header: "Kategorie", Kind: TextColumn, WidthMM: 36},
+		{ID: "occurred_at", Header: "Zeitpunkt", Kind: TextColumn, WidthMM: 36},
+		{ID: "amount", Header: "Betrag", Kind: MoneyColumn, Alignment: AlignRight, WidthMM: 32},
+		{ID: "status", Header: "Status", Kind: TextColumn, WidthMM: 30},
 	}
 	document.Rows = []Row{
-		{Cells: []Cell{{Text: "August 2026"}, {Text: "Anna Offen", ImagePNG: fixtureImagePNG(), ImageSlot: true}, {Text: "Aktiv", Tone: ToneSuccess}, {Text: "10.09.2026"}, {Money: &Money{MinorUnits: "1250", Currency: "EUR", DecimalPlaces: 2}, Tone: ToneDanger}, {Money: &Money{MinorUnits: "0", Currency: "EUR", DecimalPlaces: 2}, Tone: ToneSuccess}, {Text: "Offen", Tone: ToneDanger}}},
-		{Cells: []Cell{{Text: "September 2026"}, {Text: "Ben Nullsaldo", ImageSlot: true}, {Text: "Ehemalig", Tone: ToneWarning}, {Text: "10.10.2026"}, {Money: &Money{MinorUnits: "0", Currency: "EUR", DecimalPlaces: 2}, Tone: ToneSuccess}, {Money: &Money{MinorUnits: "0", Currency: "EUR", DecimalPlaces: 2}, Tone: ToneSuccess}, {Text: "Bezahlt", Tone: ToneSuccess}}},
-		{Cells: []Cell{{Text: "Oktober 2026"}, {Text: "Carla Bezahlt", ImagePNG: fixtureImagePNG(), ImageSlot: true}, {Text: "Aktiv", Tone: ToneSuccess}, {Text: "10.11.2026"}, {Money: &Money{MinorUnits: "2000", Currency: "EUR", DecimalPlaces: 2}, Tone: ToneDanger}, {Money: &Money{MinorUnits: "2000", Currency: "EUR", DecimalPlaces: 2}, Tone: ToneSuccess}, {Text: "Bezahlt", Tone: ToneSuccess}}},
+		{Cells: []Cell{{Text: "Buchung", Tone: ToneWarning}, {Text: "Ada Administratorin", ImagePNG: fixtureImagePNG(), ImageSlot: true}, {Text: "Mineralwasser × 2\nMannschaftsabend", ImagePNG: fixtureImagePNG(), ImageSlot: true}, {Text: "Getränke"}, {Text: "25.08.2026, 18:45"}, {Money: &Money{MinorUnits: "500", Currency: "EUR", DecimalPlaces: 2}, Tone: ToneWarning}, {Text: "Gebucht", Tone: ToneWarning}}},
+		{Cells: []Cell{{Text: "Buchung", Tone: ToneWarning}, {Text: "Jonas Kassenwart", ImageSlot: true}, {Text: "Laugenbrezel", ImageSlot: true}, {Text: "Snacks"}, {Text: "26.08.2026, 20:10"}, {Money: &Money{MinorUnits: "250", Currency: "EUR", DecimalPlaces: 2}, Tone: ToneWarning}, {Text: "Gebucht", Tone: ToneWarning}}},
+		{Cells: []Cell{{Text: "Buchung", Tone: ToneWarning}, {Text: "Ada Administratorin", ImagePNG: fixtureImagePNG(), ImageSlot: true}, {Text: "Trainingsstrafe\nStornogrund: Doppelt erfasst", ImageSlot: true}, {Text: "Strafen"}, {Text: "27.08.2026, 09:15"}, {Money: &Money{MinorUnits: "1000", Currency: "EUR", DecimalPlaces: 2}, Tone: ToneWarning}, {Text: "Storniert", Tone: ToneDanger}}},
 	}
 	file, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {

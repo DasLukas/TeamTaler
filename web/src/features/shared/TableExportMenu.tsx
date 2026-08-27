@@ -8,7 +8,7 @@ import { api } from '@/api/client';
 import type { TableExportCommand, TableExportFormat, TableExportId } from '@/api/types';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
-import { downloadExportBlob, openPdfPreviewWindow, showPdfInPreviewWindow } from './exportDownload';
+import { downloadExportBlob, openPdfPreviewWindow, showPdfInPreviewWindow, tableExportFileName } from './exportDownload';
 import styles from './TableExportMenu.module.css';
 
 /** Server-owned configuration for one complete filtered and sorted table export. */
@@ -24,21 +24,6 @@ export interface TableExportConfig {
 /** Properties accepted by the reusable table-export action. */
 export interface TableExportMenuProps extends TableExportConfig {
   disabled?: boolean;
-}
-
-function safeFileStem(value: string): string {
-  return value
-    .normalize('NFC')
-    .trim()
-    .replace(/[^\p{L}\p{N}]+/gu, '_')
-    .replace(/^_+|_+$/g, '') || 'Export';
-}
-
-function localISODate(value: Date): string {
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, '0');
-  const day = String(value.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
 }
 
 /**
@@ -66,10 +51,7 @@ export function TableExportMenu({ disabled = false, groupId, query, system = fal
         blob = await api.exportGroupTable(groupId, command);
       }
       const extension = format.toLocaleLowerCase('en-US');
-      const exportDate = localISODate(new Date());
-      const fileName = format === 'PDF'
-        ? `${exportDate}_${safeFileStem(title)}.${extension}`
-        : `${safeFileStem(title)}-${exportDate}.${extension}`;
+      const fileName = tableExportFileName(title, extension, new Date(), format === 'PDF');
       if (format === 'PDF') {
         if (!showPdfInPreviewWindow(previewWindow!, blob, fileName)) throw new Error(t('exports.table.previewClosed'));
       } else {

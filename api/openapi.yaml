@@ -3799,6 +3799,7 @@ components:
         - PAYMENTS
         - ACCOUNT_BALANCES
         - GROUP_SETTLEMENTS
+        - SETTLEMENT_STATEMENT
         - PERSONAL_SETTLEMENTS
         - ACTIVE_MEMBERS
         - ARCHIVED_MEMBERS
@@ -3826,6 +3827,7 @@ components:
             - $ref: '#/components/schemas/PaymentTableExportQuery'
             - $ref: '#/components/schemas/AccountBalanceTableExportQuery'
             - $ref: '#/components/schemas/GroupSettlementTableExportQuery'
+            - $ref: '#/components/schemas/SettlementStatementTableExportQuery'
             - $ref: '#/components/schemas/PersonalSettlementTableExportQuery'
             - $ref: '#/components/schemas/MemberTableExportQuery'
             - $ref: '#/components/schemas/GroupAuditTableExportQuery'
@@ -3934,6 +3936,19 @@ components:
           type: array
           uniqueItems: true
           items: { type: string, enum: [OPEN, PARTIAL, PAID, CREDIT] }
+    SettlementStatementTableExportQuery:
+      type: object
+      additionalProperties: false
+      required: [membershipId, periodId]
+      properties:
+        membershipId:
+          type: string
+          minLength: 1
+          description: Exact statement membership identifier in the active group.
+        periodId:
+          type: string
+          minLength: 1
+          description: Exact closed accounting-period identifier in the active group.
     PersonalSettlementTableExportQuery:
       type: object
       additionalProperties: false

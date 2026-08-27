@@ -58,6 +58,7 @@ var tableExportDefinitions = map[string]tableExportDefinition{
 	"PAYMENTS":             {Title: "Zahlungen"},
 	"ACCOUNT_BALANCES":     {Title: "Kontostände"},
 	"GROUP_SETTLEMENTS":    {Title: "Abgeschlossene Abrechnungen"},
+	"SETTLEMENT_STATEMENT": {Title: "Abgeschlossene Abrechnung"},
 	"PERSONAL_SETTLEMENTS": {Title: "Eigene Abrechnungen"},
 	"ACTIVE_MEMBERS":       {Title: "Aktive Mitglieder"},
 	"ARCHIVED_MEMBERS":     {Title: "Archivierte Mitglieder"},
@@ -272,15 +273,35 @@ func decodeTableQuery(raw json.RawMessage, destination any) error {
 }
 
 func (s *Server) buildGroupTableDocument(ctx context.Context, membership domain.Membership, command tableExportCommand, definition tableExportDefinition, location *time.Location, rowLimit int) (tabular.Document, error) {
-	columns, rows, err := s.groupTableRows(ctx, membership, command, location, rowLimit)
-	if err != nil {
-		return tabular.Document{}, err
+	var columns []tabular.Column
+	var rows []tabular.Row
+	var subtitle, subjectName string
+	var subjectImage []byte
+	var err error
+	if command.Table == "SETTLEMENT_STATEMENT" {
+		if err := authorization.Require(ctx, s.db, membership.GroupID, membership.ID, domain.PermissionFinanceManagement, authorization.GroupResource(membership.GroupID)); err != nil {
+			return tabular.Document{}, err
+		}
+		content, contentErr := s.settlementStatementExportContent(ctx, membership, command.Query, location, rowLimit, command.Format == "PDF")
+		if contentErr != nil {
+			return tabular.Document{}, contentErr
+		}
+		columns, rows = content.Columns, content.Rows
+		subtitle, subjectName, subjectImage = content.PeriodLabel, content.MemberName, content.MemberImagePNG
+	} else {
+		columns, rows, err = s.groupTableRows(ctx, membership, command, location, rowLimit)
+		if err != nil {
+			return tabular.Document{}, err
+		}
 	}
 	groupName, logo, err := s.groupExportBrand(ctx, membership.GroupID)
 	if err != nil {
 		return tabular.Document{}, err
 	}
-	return tabular.Document{Title: definition.Title, GroupName: groupName, ExportedAt: platform.Now().In(location), LogoPNG: logo, Columns: columns, Rows: rows}, nil
+	return tabular.Document{
+		Title: definition.Title, Subtitle: subtitle, GroupName: groupName, SubjectName: subjectName,
+		ExportedAt: platform.Now().In(location), LogoPNG: logo, SubjectImagePNG: subjectImage, Columns: columns, Rows: rows,
+	}, nil
 }
 
 func (s *Server) buildSystemTableDocument(ctx context.Context, command tableExportCommand, definition tableExportDefinition, location *time.Location, rowLimit int) (tabular.Document, error) {
@@ -612,6 +633,149 @@ type settlementExportQuery struct {
 	AmountMin        *string  `json:"amountMin"`
 	AmountMax        *string  `json:"amountMax"`
 	Status           []string `json:"status"`
+}
+
+type settlementStatementExportQuery struct {
+	MembershipID string `json:"membershipId"`
+	PeriodID     string `json:"periodId"`
+}
+
+type settlementStatementBooking struct {
+	ID, ProductID, ActorName, ActorImageKey, ProductName, CategoryName, Reason, CreatedAt, Currency, VoidReason string
+	Quantity, TotalMinor                                                                                        int64
+	VoidedAt                                                                                                    sql.NullString
+}
+
+type settlementStatementContent struct {
+	PeriodLabel, MemberName string
+	MemberImagePNG          []byte
+	Columns                 []tabular.Column
+	Rows                    []tabular.Row
+}
+
+func (s *Server) settlementStatementExportContent(ctx context.Context, membership domain.Membership, raw json.RawMessage, location *time.Location, limit int, includeMedia bool) (settlementStatementContent, error) {
+	var query settlementStatementExportQuery
+	if err := decodeTableQuery(raw, &query); err != nil {
+		return settlementStatementContent{}, err
+	}
+	var err error
+	query.MembershipID, err = normalizeExportIdentifier("membershipId", query.MembershipID)
+	if err != nil {
+		return settlementStatementContent{}, err
+	}
+	query.PeriodID, err = normalizeExportIdentifier("periodId", query.PeriodID)
+	if err != nil {
+		return settlementStatementContent{}, err
+	}
+	if query.MembershipID == "" {
+		return settlementStatementContent{}, domain.ValidationError{Field: "membershipId", Message: "must not be empty"}
+	}
+	if query.PeriodID == "" {
+		return settlementStatementContent{}, domain.ValidationError{Field: "periodId", Message: "must not be empty"}
+	}
+
+	content := settlementStatementContent{}
+	var memberImageKey string
+	if err := s.db.QueryRowContext(ctx, `SELECT period.label,statement.display_name,coalesce(user.avatar_key,'')
+		FROM period_statements statement
+		JOIN periods period ON period.group_id=statement.group_id AND period.id=statement.period_id
+		JOIN memberships membership ON membership.group_id=statement.group_id AND membership.id=statement.membership_id
+		JOIN users user ON user.id=membership.user_id
+		WHERE statement.group_id=? AND statement.period_id=? AND statement.membership_id=?`, membership.GroupID, query.PeriodID, query.MembershipID).
+		Scan(&content.PeriodLabel, &content.MemberName, &memberImageKey); errors.Is(err, sql.ErrNoRows) {
+		return settlementStatementContent{}, domain.ErrNotFound
+	} else if err != nil {
+		return settlementStatementContent{}, err
+	}
+
+	bookingRows, err := s.db.QueryContext(ctx, `SELECT booking.id,booking.product_id,actor.display_name,coalesce(actor.avatar_key,''),
+		booking.quantity,booking.total_minor,team.currency,booking.product_name,booking.category_name,coalesce(booking.reason,''),
+		booking.created_at,booking.voided_at,coalesce(booking.void_reason,'')
+		FROM bookings booking
+		JOIN groups team ON team.id=booking.group_id
+		JOIN memberships actor_membership ON actor_membership.group_id=booking.group_id AND actor_membership.id=booking.actor_membership_id
+		JOIN users actor ON actor.id=actor_membership.user_id
+		WHERE booking.group_id=? AND booking.period_id=? AND booking.target_membership_id=?
+		ORDER BY booking.created_at,booking.id LIMIT ?`, membership.GroupID, query.PeriodID, query.MembershipID, limit+1)
+	if err != nil {
+		return settlementStatementContent{}, err
+	}
+	defer bookingRows.Close()
+	items := make([]settlementStatementBooking, 0)
+	for bookingRows.Next() {
+		var item settlementStatementBooking
+		if err := bookingRows.Scan(&item.ID, &item.ProductID, &item.ActorName, &item.ActorImageKey, &item.Quantity, &item.TotalMinor, &item.Currency,
+			&item.ProductName, &item.CategoryName, &item.Reason, &item.CreatedAt, &item.VoidedAt, &item.VoidReason); err != nil {
+			return settlementStatementContent{}, err
+		}
+		items = append(items, item)
+	}
+	if err := bookingRows.Err(); err != nil {
+		return settlementStatementContent{}, err
+	}
+	if err := enforceTableRowLimit(len(items), limit); err != nil {
+		return settlementStatementContent{}, err
+	}
+
+	content.Columns = []tabular.Column{
+		{ID: "kind", Header: "Vorgang", Identity: true, WidthMM: 25},
+		{ID: "actor", Header: "Erfasst von", Identity: true, WidthMM: 42},
+		{ID: "details", Header: "Details", WidthMM: 72},
+		{ID: "category", Header: "Kategorie", WidthMM: 36},
+		{ID: "occurred_at", Header: "Zeitpunkt", WidthMM: 36},
+		moneyColumn("amount", "Betrag", 32),
+		{ID: "status", Header: "Status", WidthMM: 30},
+	}
+	imageLoader := newTableExportImageLoader(s.config.DataDirectory)
+	productImages := map[string]string{}
+	if includeMedia {
+		productIDs := make([]string, 0, len(items))
+		for _, item := range items {
+			productIDs = append(productIDs, item.ProductID)
+		}
+		productImages, err = loadProductImageKeys(ctx, s.db, membership.GroupID, productIDs)
+		if err != nil {
+			return settlementStatementContent{}, err
+		}
+		content.MemberImagePNG, err = imageLoader.loadKey(memberImageKey)
+		if err != nil {
+			return settlementStatementContent{}, err
+		}
+	}
+	content.Rows = make([]tabular.Row, 0, len(items))
+	for _, item := range items {
+		var actorImage, productImage []byte
+		if includeMedia {
+			actorImage, err = imageLoader.loadKey(item.ActorImageKey)
+			if err != nil {
+				return settlementStatementContent{}, err
+			}
+			productImage, err = imageLoader.loadKey(productImages[item.ProductID])
+			if err != nil {
+				return settlementStatementContent{}, err
+			}
+		}
+		details := item.ProductName
+		if item.Quantity > 1 {
+			details += " × " + strconv.FormatInt(item.Quantity, 10)
+		}
+		if item.Reason != "" {
+			details += "\n" + item.Reason
+		}
+		status := "POSTED"
+		if item.VoidedAt.Valid {
+			status = "REVERSED"
+			if item.VoidReason != "" {
+				details += "\nStornogrund: " + item.VoidReason
+			}
+		}
+		content.Rows = append(content.Rows, tabular.Row{Cells: []tabular.Cell{
+			activityKindCell(activities.KindBooking, includeMedia), imageTextCell(item.ActorName, actorImage), imageTextCell(details, productImage),
+			textCell(fallbackText(item.CategoryName, "–")), textCell(formatGermanDateTime(item.CreatedAt, location)),
+			activityMoneyCell(item.TotalMinor, item.Currency, activities.KindBooking, includeMedia), activityStatusCell(activities.KindBooking, status, includeMedia),
+		}})
+	}
+	return content, nil
 }
 
 type settlementExportItem struct {
@@ -1250,7 +1414,7 @@ func (s *Server) recordGroupTableExport(ctx context.Context, principal domain.Pr
 
 func tableExportPermission(table string) domain.PermissionKey {
 	switch table {
-	case "PAYMENTS", "ACCOUNT_BALANCES", "GROUP_SETTLEMENTS":
+	case "PAYMENTS", "ACCOUNT_BALANCES", "GROUP_SETTLEMENTS", "SETTLEMENT_STATEMENT":
 		return domain.PermissionFinanceManagement
 	case "GROUP_AUDIT":
 		return domain.PermissionGroupAdministration

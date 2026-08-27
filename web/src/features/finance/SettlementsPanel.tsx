@@ -5,7 +5,6 @@ import CircleCheck from 'lucide-react/dist/esm/icons/circle-check';
 import CircleDashed from 'lucide-react/dist/esm/icons/circle-dashed';
 import CircleDollarSign from 'lucide-react/dist/esm/icons/circle-dollar-sign';
 import LockKeyhole from 'lucide-react/dist/esm/icons/lock-keyhole';
-import Printer from 'lucide-react/dist/esm/icons/printer';
 import WalletCards from 'lucide-react/dist/esm/icons/wallet-cards';
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
 import X from 'lucide-react/dist/esm/icons/x';
@@ -29,6 +28,7 @@ import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import styles from './SettlementsPanel.module.css';
 import { MembershipStatusBadge } from './MembershipStatusBadge';
+import { SettlementPdfPreviewAction } from './SettlementPdfPreviewAction';
 
 type SettlementFilterId = 'periodId' | 'membershipId' | 'membershipStatus' | 'dueAt' | 'amount' | 'status';
 const settlementCollator = new Intl.Collator('de-DE', { numeric: true, sensitivity: 'base' });
@@ -208,8 +208,8 @@ export function SettlementsPanel({ settlements, settlementsEnabled }: Settlement
       id: 'status',
       meta: { label: t('financeWorkspace.balanceState') },
     },
-    { cell: () => <Button leadingIcon={<Printer size={16} />} onClick={() => window.print()} size="small" variant="ghost">{t('common.print')}</Button>, enableSorting: false, header: () => <span className="sr-only">{t('common.action')}</span>, id: 'action', meta: { label: t('common.action') } },
-  ], [accountAvatarUrls, t]);
+    { cell: ({ row }) => <SettlementPdfPreviewAction groupId={activeGroupId} settlement={row.original} />, enableSorting: false, header: () => <span className="sr-only">{t('common.action')}</span>, id: 'action', meta: { label: t('common.action') } },
+  ], [accountAvatarUrls, activeGroupId, t]);
 
   if (settlementsEnabled && periodsQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
   if (settlementsEnabled && !periodsQuery.data) return <div className={styles.state}><StatePanel kind="error" message={t('periods.error')} /></div>;

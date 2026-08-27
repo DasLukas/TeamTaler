@@ -1,5 +1,35 @@
 const PDF_PREVIEW_URL_LIFETIME_MS = 5 * 60 * 1_000;
 
+function safeFileStem(value: string): string {
+  return value
+    .normalize('NFC')
+    .trim()
+    .replace(/[^\p{L}\p{N}]+/gu, '_')
+    .replace(/^_+|_+$/g, '') || 'Export';
+}
+
+function localISODate(value: Date): string {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Builds the browser-facing filename for a localized table export.
+ *
+ * @param title - Localized export title.
+ * @param extension - Lowercase file extension without a leading dot.
+ * @param exportedAt - Local export timestamp used for the date prefix.
+ * @param dateFirst - Whether the local date precedes the title, as required for PDF previews.
+ * @returns A filesystem-safe filename with the canonical local date placement.
+ */
+export function tableExportFileName(title: string, extension: string, exportedAt = new Date(), dateFirst = true): string {
+  const date = localISODate(exportedAt);
+  const stem = safeFileStem(title);
+  return dateFirst ? `${date}_${stem}.${extension}` : `${stem}-${date}.${extension}`;
+}
+
 /**
  * Starts a browser download for export formats that have no native preview.
  *

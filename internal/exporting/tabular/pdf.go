@@ -18,27 +18,29 @@ import (
 )
 
 const (
-	pageWidthMM      = 297.0
-	pageHeightMM     = 210.0
-	pageMarginMM     = 10.0
-	pageContentWidth = pageWidthMM - 2*pageMarginMM
-	headerDividerY   = 28.0
-	tableHeaderY     = 31.0
-	pageBottomY      = pageHeightMM - pageMarginMM
-	bodyFontSize     = 8.0
-	bodyLineHeight   = 4.1
-	cellPadding      = 1.3
-	cellImageSizeMM  = 7.0
-	cellImageGapMM   = 1.2
-	decoratedRowMM   = 9.6
-	minimumColumnMM  = 20.0
-	maximumColumnMM  = 75.0
-	brandRed         = 0
-	brandGreen       = 124
-	brandBlue        = 115
-	brandDarkRed     = 6
-	brandDarkGreen   = 21
-	brandDarkBlue    = 45
+	pageWidthMM           = 297.0
+	pageHeightMM          = 210.0
+	pageMarginMM          = 10.0
+	pageContentWidth      = pageWidthMM - 2*pageMarginMM
+	compactHeaderDividerY = 28.0
+	compactTableHeaderY   = 31.0
+	detailHeaderDividerY  = 36.0
+	detailTableHeaderY    = 39.0
+	pageBottomY           = pageHeightMM - pageMarginMM
+	bodyFontSize          = 8.0
+	bodyLineHeight        = 4.1
+	cellPadding           = 1.3
+	cellImageSizeMM       = 7.0
+	cellImageGapMM        = 1.2
+	decoratedRowMM        = 9.6
+	minimumColumnMM       = 20.0
+	maximumColumnMM       = 75.0
+	brandRed              = 0
+	brandGreen            = 124
+	brandBlue             = 115
+	brandDarkRed          = 6
+	brandDarkGreen        = 21
+	brandDarkBlue         = 45
 
 	regularFontFamily = "NotoSans"
 )
@@ -136,6 +138,7 @@ func pdfExportTitle(document Document) string {
 // page count. A zero totalPages value is used only by the counting pass.
 func renderPDFPages(ctx context.Context, pdf *fpdf.Fpdf, document Document, totalPages int) (int, error) {
 	logoRegistered := registerLogo(pdf, document.LogoPNG)
+	subjectRegistered := registerHeaderImage(pdf, "teamtaler-export-subject", document.SubjectImagePNG)
 	cellImages, err := registerCellImages(ctx, pdf, document)
 	if err != nil {
 		return 0, err
@@ -147,10 +150,11 @@ func renderPDFPages(ctx context.Context, pdf *fpdf.Fpdf, document Document, tota
 	}
 
 	currentBand := bands[0]
-	bodyStartY := tableHeaderY
+	dividerY, tableY := documentHeaderPositions(document)
+	bodyStartY := tableY
 	pdf.SetHeaderFuncMode(func() {
-		drawDocumentHeader(pdf, document, logoRegistered, totalPages)
-		bodyStartY = drawTableHeader(pdf, document, currentBand)
+		drawDocumentHeader(pdf, document, logoRegistered, subjectRegistered, totalPages, dividerY)
+		bodyStartY = drawTableHeader(pdf, document, currentBand, tableY)
 		pdf.SetXY(pageMarginMM, bodyStartY)
 	}, false)
 
@@ -213,11 +217,15 @@ func registerCellImages(ctx context.Context, pdf *fpdf.Fpdf, document Document) 
 }
 
 func registerLogo(pdf *fpdf.Fpdf, source []byte) bool {
+	return registerHeaderImage(pdf, "teamtaler-export-logo", source)
+}
+
+func registerHeaderImage(pdf *fpdf.Fpdf, name string, source []byte) bool {
 	logo, ok := normalizePDFImage(source)
 	if !ok {
 		return false
 	}
-	pdf.RegisterImageOptionsReader("teamtaler-export-logo", fpdf.ImageOptions{ImageType: "PNG"}, bytes.NewReader(logo))
+	pdf.RegisterImageOptionsReader(name, fpdf.ImageOptions{ImageType: "PNG"}, bytes.NewReader(logo))
 	return pdf.Error() == nil
 }
 
@@ -240,9 +248,10 @@ func normalizePDFImage(source []byte) ([]byte, bool) {
 	return normalized.Bytes(), true
 }
 
-func drawDocumentHeader(pdf *fpdf.Fpdf, document Document, logoRegistered bool, totalPages int) {
+func drawDocumentHeader(pdf *fpdf.Fpdf, document Document, logoRegistered, subjectRegistered bool, totalPages int, dividerY float64) {
 	regionWidth := pageContentWidth / 3
 	brandNameX := pageMarginMM + 15
+	brandImageCenterX := pageMarginMM + 6
 	if logoRegistered {
 		info := pdf.GetImageInfo("teamtaler-export-logo")
 		if info != nil {
@@ -259,14 +268,22 @@ func drawDocumentHeader(pdf *fpdf.Fpdf, document Document, logoRegistered bool, 
 				"",
 			)
 			brandNameX = pageMarginMM + width + 3
+			brandImageCenterX = pageMarginMM + width/2
 		}
 	} else {
 		drawFallbackMark(pdf, pageMarginMM, pageMarginMM)
 	}
 	drawGroupName(pdf, document.GroupName, brandNameX, pageMarginMM, pageMarginMM+regionWidth-brandNameX)
+	if strings.TrimSpace(document.SubjectName) != "" {
+		drawSubjectIdentity(pdf, document.SubjectName, subjectRegistered, brandImageCenterX, brandNameX, pageMarginMM+14, pageMarginMM+regionWidth-brandNameX)
+	}
 
 	pdf.SetTextColor(brandDarkRed, brandDarkGreen, brandDarkBlue)
-	drawCenteredTitle(pdf, document.Title, pageMarginMM+regionWidth, pageMarginMM, regionWidth)
+	if strings.TrimSpace(document.Subtitle) == "" {
+		drawCenteredTitle(pdf, document.Title, pageMarginMM+regionWidth, pageMarginMM, regionWidth)
+	} else {
+		drawCenteredStatementTitle(pdf, document.Title, document.Subtitle, pageMarginMM+regionWidth, pageMarginMM, regionWidth)
+	}
 
 	pdf.SetFont(regularFontFamily, "", 7.5)
 	drawRightHeaderLine(pdf, pageMarginMM+2*regionWidth, pageMarginMM+1, regionWidth, document.ExportedAt.Format("02.01.2006 15:04"))
@@ -274,7 +291,14 @@ func drawDocumentHeader(pdf *fpdf.Fpdf, document Document, logoRegistered bool, 
 
 	pdf.SetDrawColor(185, 195, 207)
 	pdf.SetLineWidth(0.25)
-	pdf.Line(pageMarginMM, headerDividerY, pageWidthMM-pageMarginMM, headerDividerY)
+	pdf.Line(pageMarginMM, dividerY, pageWidthMM-pageMarginMM, dividerY)
+}
+
+func documentHeaderPositions(document Document) (float64, float64) {
+	if strings.TrimSpace(document.Subtitle) != "" || strings.TrimSpace(document.SubjectName) != "" {
+		return detailHeaderDividerY, detailTableHeaderY
+	}
+	return compactHeaderDividerY, compactTableHeaderY
 }
 
 func drawRightHeaderLine(pdf *fpdf.Fpdf, x, y, width float64, value string) {
@@ -332,6 +356,54 @@ func drawFallbackMark(pdf *fpdf.Fpdf, x, y float64) {
 	pdf.CellFormat(diameter, 4.5, "TT", "", 0, "C", false, 0, "")
 }
 
+func drawSubjectIdentity(pdf *fpdf.Fpdf, name string, imageRegistered bool, avatarCenterX, nameX, y, nameWidth float64) {
+	name = strings.TrimSpace(cleanText(name))
+	if name == "" || nameWidth < 8 {
+		return
+	}
+	const avatarSize = 7.0
+	avatarX := avatarCenterX - avatarSize/2
+	if imageRegistered {
+		info := pdf.GetImageInfo("teamtaler-export-subject")
+		if info != nil {
+			imageWidth, imageHeight := fitRectangle(info.Width(), info.Height(), avatarSize, avatarSize)
+			pdf.ImageOptions("teamtaler-export-subject", avatarX+(avatarSize-imageWidth)/2, y+(avatarSize-imageHeight)/2, imageWidth, imageHeight, false, fpdf.ImageOptions{ImageType: "PNG"}, 0, "")
+		}
+	} else {
+		drawSubjectFallback(pdf, subjectInitials(name), avatarX, y, avatarSize)
+	}
+	pdf.SetTextColor(brandDarkRed, brandDarkGreen, brandDarkBlue)
+	pdf.SetFont(regularFontFamily, "", 7.5)
+	pdf.SetXY(nameX, y+1.4)
+	pdf.CellFormat(nameWidth, 4.2, truncatePDFText(pdf, name, nameWidth), "", 0, "L", false, 0, "")
+}
+
+func drawSubjectFallback(pdf *fpdf.Fpdf, initials string, x, y, size float64) {
+	pdf.SetFillColor(230, 244, 242)
+	pdf.SetDrawColor(brandRed, brandGreen, brandBlue)
+	pdf.SetLineWidth(0.25)
+	pdf.Circle(x+size/2, y+size/2, size/2, "FD")
+	pdf.SetTextColor(brandRed, brandGreen, brandBlue)
+	pdf.SetFont(regularFontFamily, "B", 6.2)
+	pdf.SetXY(x, y+1.4)
+	pdf.CellFormat(size, 4.2, initials, "", 0, "C", false, 0, "")
+}
+
+func subjectInitials(name string) string {
+	words := strings.Fields(name)
+	if len(words) == 0 {
+		return "?"
+	}
+	initials := []rune(words[0])[:1]
+	if len(words) > 1 {
+		last := []rune(words[len(words)-1])
+		if len(last) > 0 {
+			initials = append(initials, last[0])
+		}
+	}
+	return strings.ToUpper(string(initials))
+}
+
 func drawCenteredTitle(pdf *fpdf.Fpdf, title string, x, y, width float64) {
 	fontSize := 12.0
 	var lines []string
@@ -354,7 +426,19 @@ func drawCenteredTitle(pdf *fpdf.Fpdf, title string, x, y, width float64) {
 	}
 }
 
-func drawTableHeader(pdf *fpdf.Fpdf, document Document, band columnBand) float64 {
+func drawCenteredStatementTitle(pdf *fpdf.Fpdf, title, subtitle string, x, y, width float64) {
+	pdf.SetTextColor(brandDarkRed, brandDarkGreen, brandDarkBlue)
+	pdf.SetFont(regularFontFamily, "B", 11.5)
+	title = truncatePDFText(pdf, strings.TrimSpace(cleanText(title)), width-4)
+	pdf.SetXY(x, y+2)
+	pdf.CellFormat(width, 5, title, "", 0, "C", false, 0, "")
+	pdf.SetFont(regularFontFamily, "", 8.5)
+	subtitle = truncatePDFText(pdf, strings.TrimSpace(cleanText(subtitle)), width-4)
+	pdf.SetXY(x, y+8.2)
+	pdf.CellFormat(width, 4.5, subtitle, "", 0, "C", false, 0, "")
+}
+
+func drawTableHeader(pdf *fpdf.Fpdf, document Document, band columnBand, tableY float64) float64 {
 	pdf.SetFont(regularFontFamily, "B", 8.2)
 	lineSets := make([][]string, len(band.indexes))
 	maximumLines := 1
@@ -370,16 +454,16 @@ func drawTableHeader(pdf *fpdf.Fpdf, document Document, band columnBand) float64
 		width := band.widths[position]
 		pdf.SetFillColor(brandRed, brandGreen, brandBlue)
 		pdf.SetDrawColor(255, 255, 255)
-		pdf.Rect(x, tableHeaderY, width, height, "FD")
+		pdf.Rect(x, tableY, width, height, "FD")
 		pdf.SetTextColor(255, 255, 255)
 		alignment := pdfAlignment(document.Columns[columnIndex])
 		for lineIndex, line := range lineSets[position] {
-			pdf.SetXY(x+cellPadding, tableHeaderY+1+float64(lineIndex)*3.8)
+			pdf.SetXY(x+cellPadding, tableY+1+float64(lineIndex)*3.8)
 			pdf.CellFormat(width-2*cellPadding, 3.8, line, "", 0, alignment, false, 0, "")
 		}
 		x += width
 	}
-	return tableHeaderY + height + 1.2
+	return tableY + height + 1.2
 }
 
 func renderWrappedRow(pdf *fpdf.Fpdf, document Document, band columnBand, row Row, rowIndex int, bodyStartY *float64, cellImages cellImageRegistry) {

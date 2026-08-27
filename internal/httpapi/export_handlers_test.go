@@ -137,20 +137,7 @@ func TestGroupTableExportCSVUsesCanonicalServerColumnsAndRecordsAudit(t *testing
 func TestPDFTableRowsEmbedManagedMemberImagesAndActivityTones(t *testing.T) {
 	server, _, membership := invitationImportServer(t, false)
 	server.config = config.Config{DataDirectory: t.TempDir()}
-	canvas := image.NewRGBA(image.Rect(0, 0, 24, 24))
-	for y := 0; y < 24; y++ {
-		for x := 0; x < 24; x++ {
-			canvas.SetRGBA(x, y, color.RGBA{R: 16, G: 142, B: 124, A: 255})
-		}
-	}
-	var encoded bytes.Buffer
-	if err := png.Encode(&encoded, canvas); err != nil {
-		t.Fatalf("encode member fixture: %v", err)
-	}
-	imageKey, _, err := media.NormalizeAndStoreImage(server.config.DataDirectory, bytes.NewReader(encoded.Bytes()))
-	if err != nil {
-		t.Fatalf("store member fixture: %v", err)
-	}
+	imageKey := storeTableExportFixtureImage(t, server.config.DataDirectory)
 	if _, err := server.db.Exec(`UPDATE users SET avatar_key=? WHERE id=?`, imageKey, membership.UserID); err != nil {
 		t.Fatalf("attach member fixture: %v", err)
 	}
@@ -273,6 +260,13 @@ func TestSettlementAndMemberExportsMatchVisibleColumnAndPrivacyBoundaries(t *tes
 	if len(archivedRows) != 1 || archivedRows[0].Cells[1].Text != "Guest Export" {
 		t.Fatalf("archived settlement rows = %#v, want Guest Export", archivedRows)
 	}
+	_, exactRows, err := server.settlementExportRows(context.Background(), membership, json.RawMessage(`{"periodId":"`+periodID+`","membershipId":"`+guestMembershipID+`"}`), false, 100, false)
+	if err != nil {
+		t.Fatalf("exact settlement row export: %v", err)
+	}
+	if len(exactRows) != 1 || exactRows[0].Cells[1].Text != "Guest Export" {
+		t.Fatalf("exact settlement rows = %#v, want only Guest Export", exactRows)
+	}
 
 	archivedColumns, _, err := server.memberExportRows(context.Background(), membership, json.RawMessage(`{}`), false, 100, false)
 	if err != nil {
@@ -280,6 +274,73 @@ func TestSettlementAndMemberExportsMatchVisibleColumnAndPrivacyBoundaries(t *tes
 	}
 	if got := columnIDs(archivedColumns); !slicesEqual(got, []string{"member", "email"}) {
 		t.Fatalf("archived member columns = %v", got)
+	}
+}
+
+func TestSettlementStatementExportContainsExactBookingLinesAndDetailedHeader(t *testing.T) {
+	server, _, membership := invitationImportServer(t, false)
+	server.config = config.Config{DataDirectory: t.TempDir()}
+	imageKey := storeTableExportFixtureImage(t, server.config.DataDirectory)
+	const (
+		guestUserID       = "usr_statement_guest"
+		guestMembershipID = "mem_statement_guest"
+		periodID          = "per_statement_closed"
+		categoryID        = "cat_statement"
+		productID         = "prd_statement"
+		timestamp         = "2026-08-25T10:00:00Z"
+	)
+	statements := []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO users(id,email,display_name,password_hash,avatar_key,created_at,updated_at) VALUES(?,NULL,'Marie Mitglied',NULL,?,?,?)`, []any{guestUserID, imageKey, timestamp, timestamp}},
+		{`INSERT INTO memberships(id,group_id,user_id,status,joined_at) VALUES(?,?,?,'ARCHIVED',?)`, []any{guestMembershipID, membership.GroupID, guestUserID, timestamp}},
+		{`INSERT INTO periods(id,group_id,label,status,starts_at,closed_at,due_at,created_at) VALUES(?,?,'August 2026','CLOSED',?,?,?,?)`, []any{periodID, membership.GroupID, timestamp, timestamp, "2026-09-10", timestamp}},
+		{`INSERT INTO period_statements(id,group_id,period_id,membership_id,display_name,email,charges_minor,payments_allocated_minor,amount_due_minor,status,created_at) VALUES('stmt_booking_detail',?,?,?,'Marie Mitglied',NULL,500,0,500,'OPEN',?)`, []any{membership.GroupID, periodID, guestMembershipID, timestamp}},
+		{`INSERT INTO categories(id,group_id,name,active,sort_order,created_at,updated_at) VALUES(?,?,'Getränke',1,0,?,?)`, []any{categoryID, membership.GroupID, timestamp, timestamp}},
+		{`INSERT INTO products(id,group_id,category_id,name,price_minor,image_key,active,sort_order,version,created_at,updated_at) VALUES(?,?,?,'Mineralwasser',250,?,1,0,1,?,?)`, []any{productID, membership.GroupID, categoryID, imageKey, timestamp, timestamp}},
+		{`INSERT INTO bookings(id,group_id,period_id,category_id,product_id,actor_membership_id,target_membership_id,quantity,unit_price_minor,total_minor,product_name,category_name,reason,created_at) VALUES('bok_statement_exact',?,?,?,?,?,?,2,250,500,'Mineralwasser','Getränke','Mannschaftsabend',?)`, []any{membership.GroupID, periodID, categoryID, productID, membership.ID, guestMembershipID, timestamp}},
+		{`INSERT INTO bookings(id,group_id,period_id,category_id,product_id,actor_membership_id,target_membership_id,quantity,unit_price_minor,total_minor,product_name,category_name,reason,created_at) VALUES('bok_statement_other_member',?,?,?,?,?,?,1,250,250,'Mineralwasser','Getränke','Andere Person',?)`, []any{membership.GroupID, periodID, categoryID, productID, membership.ID, membership.ID, timestamp}},
+	}
+	for _, statement := range statements {
+		if _, err := server.db.Exec(statement.query, statement.args...); err != nil {
+			t.Fatalf("prepare statement detail fixture: %v", err)
+		}
+	}
+	if _, err := server.db.Exec(`UPDATE users SET avatar_key=? WHERE id=?`, imageKey, membership.UserID); err != nil {
+		t.Fatalf("attach actor fixture: %v", err)
+	}
+	if _, err := server.db.Exec(`INSERT OR IGNORE INTO membership_role_assignments(group_id,membership_id,role_id,assigned_at,assigned_by) VALUES(?,?,?,?,?)`, membership.GroupID, membership.ID, authorization.TemplateRoleID(membership.GroupID, domain.RoleTemplateFinance), timestamp, membership.ID); err != nil {
+		t.Fatalf("grant finance role for statement detail export: %v", err)
+	}
+
+	document, err := server.buildGroupTableDocument(context.Background(), membership,
+		tableExportCommand{Table: "SETTLEMENT_STATEMENT", Format: "PDF", TimeZone: "Europe/Berlin", Query: json.RawMessage(`{"periodId":"` + periodID + `","membershipId":"` + guestMembershipID + `"}`)},
+		tableExportDefinitions["SETTLEMENT_STATEMENT"], time.FixedZone("CEST", 2*60*60), tableExportPDFRowLimit)
+	if err != nil {
+		t.Fatalf("build statement detail export: %v", err)
+	}
+	if document.Title != "Abgeschlossene Abrechnung" || document.Subtitle != "August 2026" || document.SubjectName != "Marie Mitglied" {
+		t.Fatalf("statement header = %q / %q / %q", document.Title, document.Subtitle, document.SubjectName)
+	}
+	if len(document.SubjectImagePNG) == 0 {
+		t.Fatal("statement header did not include the member avatar")
+	}
+	if got := columnIDs(document.Columns); !slicesEqual(got, []string{"kind", "actor", "details", "category", "occurred_at", "amount", "status"}) {
+		t.Fatalf("statement detail columns = %v", got)
+	}
+	if len(document.Rows) != 1 {
+		t.Fatalf("statement booking rows = %d, want only the exact member and period", len(document.Rows))
+	}
+	row := document.Rows[0]
+	if row.Cells[2].Text != "Mineralwasser × 2\nMannschaftsabend" || len(row.Cells[1].ImagePNG) == 0 || len(row.Cells[2].ImagePNG) == 0 {
+		t.Fatalf("statement booking detail row = %#v", row)
+	}
+	if row.Cells[0].Tone != exportingtabular.ToneWarning || row.Cells[5].Tone != exportingtabular.ToneWarning {
+		t.Fatalf("statement booking tones = %v / %v, want warning", row.Cells[0].Tone, row.Cells[5].Tone)
+	}
+	if _, err := server.settlementStatementExportContent(context.Background(), membership, json.RawMessage(`{"periodId":"`+periodID+`","membershipId":"`+guestMembershipID+`","unexpected":true}`), time.UTC, 100, false); err == nil {
+		t.Fatal("statement detail export accepted an unsupported query field")
 	}
 }
 
@@ -369,4 +430,23 @@ func columnIDs(columns []exportingtabular.Column) []string {
 		result[index] = column.ID
 	}
 	return result
+}
+
+func storeTableExportFixtureImage(t *testing.T, dataDirectory string) string {
+	t.Helper()
+	canvas := image.NewRGBA(image.Rect(0, 0, 24, 24))
+	for y := 0; y < 24; y++ {
+		for x := 0; x < 24; x++ {
+			canvas.SetRGBA(x, y, color.RGBA{R: 16, G: 142, B: 124, A: 255})
+		}
+	}
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, canvas); err != nil {
+		t.Fatalf("encode table export fixture image: %v", err)
+	}
+	imageKey, _, err := media.NormalizeAndStoreImage(dataDirectory, bytes.NewReader(encoded.Bytes()))
+	if err != nil {
+		t.Fatalf("store table export fixture image: %v", err)
+	}
+	return imageKey
 }

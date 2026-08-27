@@ -16,7 +16,9 @@ import (
 const (
 	maxColumns        = 64
 	maxTitleRunes     = 200
+	maxSubtitleRunes  = 200
 	maxGroupNameRunes = 120
+	maxSubjectRunes   = 120
 	maxHeaderRunes    = 120
 	maxLogoBytes      = 10 << 20
 	maxCellImageBytes = 10 << 20
@@ -74,7 +76,10 @@ const (
 // Document is the canonical, transport-independent representation of one table
 // export. ExportedAt must already carry the validated display timezone. GroupName
 // is rendered beside LogoPNG in group exports; missing or invalid logo bytes use
-// the built-in TeamTaler mark instead. System exports leave GroupName empty.
+// the built-in TeamTaler mark instead. Optional Subtitle and SubjectName metadata
+// create a second header row for statement-like exports. SubjectImagePNG uses an
+// initials fallback when it is missing or invalid. System exports leave GroupName
+// empty.
 //
 // Example:
 //
@@ -85,12 +90,15 @@ const (
 //		Rows: []tabular.Row{{Cells: []tabular.Cell{{Text: "Alex"}}}},
 //	}
 type Document struct {
-	Title      string
-	GroupName  string
-	ExportedAt time.Time
-	LogoPNG    []byte
-	Columns    []Column
-	Rows       []Row
+	Title           string
+	Subtitle        string
+	GroupName       string
+	SubjectName     string
+	ExportedAt      time.Time
+	LogoPNG         []byte
+	SubjectImagePNG []byte
+	Columns         []Column
+	Rows            []Row
 }
 
 // Column defines one stable table column. WidthMM is a preferred PDF width in
@@ -150,8 +158,17 @@ func (document Document) Validate() error {
 	if utf8.RuneCountInString(title) > maxTitleRunes {
 		return fmt.Errorf("table title exceeds %d characters", maxTitleRunes)
 	}
+	if utf8.RuneCountInString(strings.TrimSpace(document.Subtitle)) > maxSubtitleRunes {
+		return fmt.Errorf("table subtitle exceeds %d characters", maxSubtitleRunes)
+	}
 	if utf8.RuneCountInString(strings.TrimSpace(document.GroupName)) > maxGroupNameRunes {
 		return fmt.Errorf("group name exceeds %d characters", maxGroupNameRunes)
+	}
+	if utf8.RuneCountInString(strings.TrimSpace(document.SubjectName)) > maxSubjectRunes {
+		return fmt.Errorf("subject name exceeds %d characters", maxSubjectRunes)
+	}
+	if len(document.SubjectImagePNG) > maxLogoBytes {
+		return fmt.Errorf("subject image exceeds %d bytes", maxLogoBytes)
 	}
 	if document.ExportedAt.IsZero() {
 		return errors.New("export timestamp must not be zero")

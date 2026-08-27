@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AccountSummary, Settlement } from '@/api/types';
@@ -10,6 +10,7 @@ import { SettlementsPanel } from './SettlementsPanel';
 
 const mocks = vi.hoisted(() => ({
   closePeriod: vi.fn(),
+  exportGroupTable: vi.fn(),
   getAccountSummaries: vi.fn(),
   getPeriods: vi.fn(),
 }));
@@ -128,5 +129,75 @@ describe('SettlementsPanel feature modes', () => {
     expect(chips).toHaveTextContent(`${i18n.t('financeWorkspace.balanceState')}:`);
     expect(chips).toHaveTextContent(`${i18n.t('common.open')}, ${i18n.t('common.paid')}`);
     expect(screen.getByRole('columnheader', { name: i18n.t('financeWorkspace.balanceState') })).toBeVisible();
+  });
+
+  it('opens an exact settlement PDF in a synchronously prepared preview tab', async () => {
+    const previewDocument = document.implementation.createHTMLDocument('');
+    const replacePreviewLocation = vi.fn();
+    const closePreview = vi.fn();
+    const previewWindow = {
+      closed: false,
+      close: closePreview,
+      document: previewDocument,
+      location: { replace: replacePreviewLocation },
+      opener: window,
+    } as unknown as Window;
+    let resolveExport!: (blob: Blob) => void;
+    mocks.exportGroupTable.mockReturnValue(new Promise<Blob>((resolve) => { resolveExport = resolve; }));
+    vi.spyOn(window, 'open').mockReturnValue(previewWindow);
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:settlement-pdf') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    renderPanel(false);
+
+    const previewButton = screen.getByRole('button', { name: i18n.t('periods.printFor', { member: 'Alex Example', period: 'Juli 2026' }) });
+    expect(previewButton).toBeEnabled();
+    fireEvent.click(previewButton);
+
+    expect(window.open).toHaveBeenCalledWith('about:blank', '_blank');
+    expect(previewDocument.body.textContent).toContain(i18n.t('exports.table.previewLoading'));
+    await waitFor(() => expect(screen.getByRole('button', { name: i18n.t('periods.printFor', { member: 'Alex Example', period: 'Juli 2026' }) })).toHaveTextContent(i18n.t('periods.preparingPdf')));
+    expect(mocks.exportGroupTable).toHaveBeenCalledWith('group-a', {
+      format: 'PDF',
+      query: { membershipId: 'member-a', periodId: 'period-a' },
+      table: 'SETTLEMENT_STATEMENT',
+      timeZone: expect.any(String),
+    });
+
+    resolveExport(new Blob(['%PDF-settlement'], { type: 'application/pdf' }));
+    await waitFor(() => expect(replacePreviewLocation).toHaveBeenCalledWith('blob:settlement-pdf'));
+    expect(URL.createObjectURL).toHaveBeenCalledWith(expect.objectContaining({
+      name: expect.stringMatching(/^\d{4}-\d{2}-\d{2}_Abrechnung_Juli_2026_Alex_Example\.pdf$/),
+      type: 'application/pdf',
+    }));
+    expect(closePreview).not.toHaveBeenCalled();
+  });
+
+  it('reports a blocked settlement preview without requesting the PDF', async () => {
+    vi.spyOn(window, 'open').mockReturnValue(null);
+    renderPanel(false);
+
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('periods.printFor', { member: 'Alex Example', period: 'Juli 2026' }) }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(i18n.t('exports.table.previewBlocked'));
+    expect(mocks.exportGroupTable).not.toHaveBeenCalled();
+  });
+
+  it('closes the placeholder tab and reports settlement PDF failures', async () => {
+    const closePreview = vi.fn();
+    const previewWindow = {
+      closed: false,
+      close: closePreview,
+      document: document.implementation.createHTMLDocument(''),
+      location: { replace: vi.fn() },
+      opener: window,
+    } as unknown as Window;
+    mocks.exportGroupTable.mockRejectedValueOnce(new Error('network unavailable'));
+    vi.spyOn(window, 'open').mockReturnValue(previewWindow);
+    renderPanel(false);
+
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('periods.printFor', { member: 'Alex Example', period: 'Juli 2026' }) }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(i18n.t('periods.statementPreviewError'));
+    expect(closePreview).toHaveBeenCalledTimes(1);
   });
 });
