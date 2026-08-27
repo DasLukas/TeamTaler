@@ -255,6 +255,34 @@ describe('BookingPage multi-product workspace', () => {
     expect(screen.getByRole('button', { name: /Spezi.*Anzahl erhöhen/i })).toHaveAccessibleName(/Aktuell 1 im Warenkorb/);
   });
 
+  it('collapses the expanded compact cart when another category is selected', async () => {
+    const user = userEvent.setup();
+    mocks.useMediaQuery.mockReturnValue(true);
+    renderBookingPage();
+
+    await user.click(await screen.findByRole('button', { name: /Wasser.*1,00.*hinzufügen/i }));
+    expect(screen.getByRole('button', { name: i18n.t('booking.cartCollapse') })).toHaveAttribute('aria-expanded', 'true');
+
+    const penaltiesTab = screen.getByRole('tab', { name: 'Strafen' });
+    await user.click(penaltiesTab);
+
+    expect(penaltiesTab).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByRole('button', { name: i18n.t('booking.cartCollapse') })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Warenkorb öffnen/ })).toBeVisible();
+    expect(screen.getByRole('button', { name: /Zu spät zum Training.*5,00.*hinzufügen/i })).toBeVisible();
+  });
+
+  it('keeps the desktop cart expanded when another category is selected', async () => {
+    const user = userEvent.setup();
+    renderBookingPage();
+
+    await user.click(await screen.findByRole('button', { name: /Wasser.*1,00.*hinzufügen/i }));
+    await user.click(screen.getByRole('tab', { name: 'Strafen' }));
+
+    expect(screen.getByRole('button', { name: i18n.t('booking.submit') })).toBeVisible();
+    expect(screen.queryByRole('button', { name: /Warenkorb öffnen/ })).not.toBeInTheDocument();
+  });
+
   it('keeps the compact cart open when a product requires price input', async () => {
     const user = userEvent.setup();
     mocks.useMediaQuery.mockReturnValue(true);

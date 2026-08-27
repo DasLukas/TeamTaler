@@ -144,6 +144,11 @@ function BookingWorkspace({ groupId, categories, context, compact }: BookingWork
     if (line) changeLineQuantity(product.id, line.quantity - 1);
   };
 
+  const changeCategory = (nextCategoryId: string) => {
+    setCategoryId(nextCategoryId);
+    if (compact && lines.length > 0 && cartView === 'details') setCartView('peek');
+  };
+
   const changeTargets = (membershipIds: string[]) => {
     targetSelectionTouchedRef.current = true;
 	const nextHasForeignBooking = membershipIds.some((membershipId) => membershipId !== context.currentMembership.id && !targetsById.get(membershipId)?.isTemporaryGuest);
@@ -198,7 +203,7 @@ function BookingWorkspace({ groupId, categories, context, compact }: BookingWork
         <ProductPicker
           categories={bookableCategories}
           layout="rows"
-          onCategoryChange={setCategoryId}
+          onCategoryChange={changeCategory}
           onProductDecrease={decreaseProduct}
           onProductSelect={addProduct}
           productQuantities={Object.fromEntries(lines.map((line) => [line.product.id, line.quantity]))}

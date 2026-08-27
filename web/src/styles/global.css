@@ -11,6 +11,7 @@ html {
   min-height: 100%;
   background: var(--color-canvas);
   font-family: var(--font-sans);
+  scrollbar-gutter: stable;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
 }
@@ -21,6 +22,19 @@ body {
   margin: 0;
   color: var(--color-text);
   background: var(--color-canvas);
+}
+
+html[data-modal-scroll-lock='true'],
+html[data-modal-scroll-lock='true'] body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+html[data-modal-scroll-lock='true'] body {
+  position: fixed;
+  top: var(--modal-scroll-lock-top, 0);
+  left: var(--modal-scroll-lock-left, 0);
+  width: 100%;
 }
 
 button,
