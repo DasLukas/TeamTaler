@@ -28,6 +28,7 @@ import type {
   Payment,
   PaymentAttachmentSummary,
   PaymentMethod,
+  PaymentTarget,
   Period,
   Product,
   PushSubscriptionDevice,
@@ -56,6 +57,7 @@ import { DEFAULT_ATTACHMENT_UPLOAD_MAX_BYTES, DEFAULT_MEDIA_UPLOAD_MAX_BYTES, is
 import { formatMoney } from './money';
 import i18n from '@/i18n';
 import { defaultPaymentMethods, historicalPaymentMethodLabel, localizedPaymentMethodLabel } from '@/features/finance/paymentMethods';
+import { isPaymentTargetValid, isPaypalMeHandle, normalizeBic, normalizeIban } from '@/features/finance/paymentTargets';
 import { formatGermanDate } from '@/features/shared/dateFormat';
 
 type JsonRecord = Record<string, unknown>;
@@ -513,18 +515,44 @@ export function adaptConfigurableItems(input: unknown, localizePaymentMethods = 
   });
 }
 
-/** Adapts payment methods while defaulting legacy receipt policies to disabled. */
+/**
+ * Adapts a nullable external payment destination from an untrusted wire value.
+ *
+ * @param input - Candidate nested payment-target object.
+ * @returns A canonical safe target, or `null` for legacy and malformed values.
+ */
+export function adaptPaymentTarget(input: unknown): PaymentTarget | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const source = asRecord(input);
+  if (source.type === 'PAYPAL_ME' && typeof source.paypalMeHandle === 'string') {
+    if (!Object.keys(source).every((key) => key === 'type' || key === 'paypalMeHandle')) return null;
+    const paypalMeHandle = source.paypalMeHandle.trim();
+    return isPaypalMeHandle(paypalMeHandle) ? { type: 'PAYPAL_ME', paypalMeHandle } : null;
+  }
+  if (source.type === 'SEPA_TRANSFER' && typeof source.recipientName === 'string' && typeof source.iban === 'string') {
+    if (!Object.keys(source).every((key) => key === 'type' || key === 'recipientName' || key === 'iban' || key === 'bic')) return null;
+    if ('bic' in source && typeof source.bic !== 'string') return null;
+    const recipientName = source.recipientName.trim();
+    const iban = normalizeIban(source.iban);
+    const bic = typeof source.bic === 'string' ? normalizeBic(source.bic) : '';
+    const target: PaymentTarget = { type: 'SEPA_TRANSFER', recipientName, iban, ...(bic ? { bic } : {}) };
+    return isPaymentTargetValid(target, 'EUR') ? target : null;
+  }
+  return null;
+}
+
+/** Adapts payment methods while defaulting legacy receipt policies and targets safely. */
 export function adaptPaymentMethods(input: unknown): PaymentMethod[] {
   if (!Array.isArray(input)) return [];
   return input.flatMap((entry) => {
     const source = asRecord(entry);
     if (typeof source.id !== 'string' || typeof source.label !== 'string' || !source.id || !source.label) return [];
     const attachmentMode = source.attachmentMode === 'OPTIONAL' || source.attachmentMode === 'REQUIRED' ? source.attachmentMode : 'OFF';
-    return [{ id: source.id, label: localizedPaymentMethodLabel(source.id, source.label), attachmentMode }];
+    return [{ id: source.id, label: localizedPaymentMethodLabel(source.id, source.label), attachmentMode, paymentTarget: adaptPaymentTarget(source.paymentTarget) }];
   });
 }
 
-/** Adapts non-sensitive feature state and transaction settings for operational surfaces. */
+/** Adapts member-visible feature state and payment destinations for transaction surfaces. */
 export function adaptTransactionSettings(input: unknown): TransactionSettings {
   const source = asRecord(input);
   const paymentMethods = adaptPaymentMethods(source.paymentMethods);

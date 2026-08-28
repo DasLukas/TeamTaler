@@ -510,6 +510,30 @@ describe('DemoTransport group settings', () => {
     await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings')).resolves.toMatchObject({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-finance' });
   });
 
+  it('roundtrips nullable PayPal.Me and SEPA payment targets through member settings', async () => {
+    const transport = new DemoTransport();
+    const paymentMethods = [
+      { id: 'PAYPAL', label: 'PayPal', attachmentMode: 'OFF' as const, paymentTarget: { type: 'PAYPAL_ME' as const, paypalMeHandle: 'TeamTaler42' } },
+      { id: 'BANK_TRANSFER', label: 'Bank transfer', attachmentMode: 'OFF' as const, paymentTarget: { type: 'SEPA_TRANSFER' as const, recipientName: 'TeamTaler Club', iban: 'DE89370400440532013000', bic: 'COBADEFFXXX' } },
+      { id: 'CASH', label: 'Cash', attachmentMode: 'OFF' as const, paymentTarget: null },
+    ];
+
+    await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings', jsonRequest('PATCH', { paymentMethods }))).resolves.toMatchObject({ paymentMethods });
+    await expect(transport.request('/groups/group-sv-adler/transaction-settings')).resolves.toMatchObject({ paymentMethods });
+
+    const legacyPaymentMethods = paymentMethods.map((method) => ({ id: method.id, label: method.label, attachmentMode: method.attachmentMode }));
+    await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings', jsonRequest('PATCH', { paymentMethods: legacyPaymentMethods }))).resolves.toMatchObject({ paymentMethods });
+
+    const withPaypalCleared = legacyPaymentMethods.map((method) => method.id === 'PAYPAL' ? { ...method, paymentTarget: null } : method);
+    await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings', jsonRequest('PATCH', { paymentMethods: withPaypalCleared }))).resolves.toMatchObject({
+      paymentMethods: [
+        expect.objectContaining({ id: 'PAYPAL', paymentTarget: null }),
+        expect.objectContaining({ id: 'BANK_TRANSFER', paymentTarget: paymentMethods[1]?.paymentTarget }),
+        expect.objectContaining({ id: 'CASH', paymentTarget: null }),
+      ],
+    });
+  });
+
   it('accepts either role or group management for the default role', async () => {
     const groupTransport = new DemoTransport();
     const groupOnly = await groupTransport.request<Role>('/groups/group-sv-adler/roles', jsonRequest('POST', {

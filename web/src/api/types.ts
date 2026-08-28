@@ -429,15 +429,39 @@ export interface ConfigurableItem {
 /** Controls whether one payment method accepts or requires a receipt. */
 export type AttachmentMode = 'OFF' | 'OPTIONAL' | 'REQUIRED';
 
-/** One stable, ordered payment method and its receipt policy. */
+/** A PayPal.Me account configured as the external destination of a payment method. */
+export interface PaypalMePaymentTarget {
+  type: 'PAYPAL_ME';
+  paypalMeHandle: string;
+}
+
+/** A SEPA credit-transfer account configured as the external destination of a payment method. */
+export interface SepaTransferPaymentTarget {
+  type: 'SEPA_TRANSFER';
+  recipientName: string;
+  iban: string;
+  bic?: string;
+}
+
+/** Supported external payment destinations associated with one payment method. */
+export type PaymentTarget = PaypalMePaymentTarget | SepaTransferPaymentTarget;
+
+/** One stable, ordered payment method, receipt policy, and optional external destination. */
 export interface PaymentMethod extends ConfigurableItem {
   attachmentMode: AttachmentMode;
+  paymentTarget: PaymentTarget | null;
+}
+
+/** One payment-method update with tri-state external-destination semantics. */
+export interface PaymentMethodUpdate extends ConfigurableItem {
+  attachmentMode: AttachmentMode;
+  paymentTarget?: PaymentTarget | null;
 }
 
 /** Visibility and validation policy for one transaction-reason context. */
 export type ReasonMode = 'OFF' | 'OPTIONAL' | 'REQUIRED';
 
-/** Non-sensitive operational behavior used by finance, booking, and payment surfaces. */
+/** Member-visible operational behavior and payment destinations used by transaction surfaces. */
 export interface TransactionSettings {
   settlementsEnabled: boolean;
   ownBookingReasonMode: ReasonMode;
@@ -472,7 +496,7 @@ export interface GroupSettings {
 }
 
 /**
- * Group notification-settings update accepted by the API.
+ * Partial group-settings update accepted by the API.
  */
 export interface GroupSettingsUpdateInput {
   defaultTheme?: ThemeId;
@@ -486,7 +510,7 @@ export interface GroupSettingsUpdateInput {
   foreignBookingReasonRequired?: boolean;
   ownPaymentReasonRequired?: boolean;
   otherPaymentReasonRequired?: boolean;
-  paymentMethods?: PaymentMethod[];
+  paymentMethods?: PaymentMethodUpdate[];
   bookingReasons?: ConfigurableItem[];
   paymentReasons?: ConfigurableItem[];
 }

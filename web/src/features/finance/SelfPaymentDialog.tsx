@@ -18,6 +18,7 @@ import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { PaymentReviewSummary } from './PaymentReviewSummary';
 import styles from './SelfPaymentDialog.module.css';
 import { PaymentAttachmentField } from './PaymentAttachmentField';
+import { PaymentInstructionPanel } from './PaymentInstructionPanel';
 
 type SelfPaymentStep = 'entry' | 'review' | 'success';
 
@@ -75,6 +76,8 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
   const reasonRequired = reasonMode === 'REQUIRED';
   const selectedPaymentMethod = transactionSettingsQuery.data?.paymentMethods.find((item) => item.id === method);
   const attachmentMode = selectedPaymentMethod?.attachmentMode ?? 'OFF';
+  const instructionAmountMinor = validatePositiveMajorUnits(amount, activeGroup.currency).minorUnits;
+  const instructionAmount = instructionAmountMinor ? { minorUnits: instructionAmountMinor, currency: activeGroup.currency } : null;
 
   const reset = () => {
     setStep('entry');
@@ -166,6 +169,7 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
               <Field htmlFor="self-payment-method" label={t('finance.paymentType')}><SelectInput id="self-payment-method" onChange={(event) => { const nextMethod = event.target.value; setMethod(nextMethod); if (transactionSettingsQuery.data?.paymentMethods.find((item) => item.id === nextMethod)?.attachmentMode === 'OFF') setAttachment(null); }} required value={method}>{transactionSettingsQuery.data?.paymentMethods.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</SelectInput></Field>
             </div>
             {reasonEnabled ? <Field error={referenceError || undefined} htmlFor="self-payment-reference" label={`${t('finance.reason')}${reasonRequired ? ' *' : ''}`}><TextInput id="self-payment-reference" list="self-payment-reason-suggestions" maxLength={120} onChange={(event) => { setReference(event.target.value); setReferenceError(''); }} required={reasonRequired} value={reference} /><datalist id="self-payment-reason-suggestions">{transactionSettingsQuery.data?.paymentReasons.map((item) => <option key={item.id} value={item.label} />)}</datalist></Field> : null}
+            <PaymentInstructionPanel amount={instructionAmount} paymentTarget={selectedPaymentMethod?.paymentTarget} reference={reasonEnabled ? reference : ''} />
             <PaymentAttachmentField attachmentMode={attachmentMode} file={attachment} maxBytes={attachmentUploadMaxBytes} onChange={setAttachment} />
             <ModalFooter><div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={attachmentMode === 'REQUIRED' && !attachment} form={entryFormId} leadingIcon={<CircleCheck size={17} />} type="submit">{t('selfPayment.review')}</Button></div></ModalFooter>
           </form>

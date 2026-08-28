@@ -397,16 +397,54 @@ type ConfigurableItem struct {
 	Label string `json:"label"`
 }
 
+// PaymentTargetType identifies one supported external payment instruction.
+// The empty value and NONE are never exposed as configured targets; callers use
+// a nil PaymentTarget instead.
+type PaymentTargetType string
+
+const (
+	// PaymentTargetPayPalMe identifies a PayPal.Me recipient handle.
+	PaymentTargetPayPalMe PaymentTargetType = "PAYPAL_ME"
+	// PaymentTargetSEPATransfer identifies an EUR SEPA credit-transfer recipient.
+	PaymentTargetSEPATransfer PaymentTargetType = "SEPA_TRANSFER"
+)
+
+// Valid reports whether targetType is one of the externally configurable
+// payment-target variants. It takes no additional parameters, returns false for
+// empty or unknown values, and cannot fail.
+func (targetType PaymentTargetType) Valid() bool {
+	switch targetType {
+	case PaymentTargetPayPalMe, PaymentTargetSEPATransfer:
+		return true
+	default:
+		return false
+	}
+}
+
+// PaymentTarget contains the normalized external recipient data associated
+// with one payment method. Type selects the valid field subset: PayPal.Me uses
+// PayPalMeHandle, while SEPA uses RecipientName, IBAN, and optional BIC.
+type PaymentTarget struct {
+	Type           PaymentTargetType `json:"type"`
+	PayPalMeHandle string            `json:"paypalMeHandle,omitempty"`
+	RecipientName  string            `json:"recipientName,omitempty"`
+	IBAN           string            `json:"iban,omitempty"`
+	BIC            string            `json:"bic,omitempty"`
+}
+
 // PaymentMethod is one administrator-managed payment option. AttachmentMode
-// determines whether callers may or must include a receipt when posting it.
+// determines whether callers may or must include a receipt when posting it;
+// PaymentTarget optionally supplies member-visible external payment details.
 type PaymentMethod struct {
 	ID             string         `json:"id"`
 	Label          string         `json:"label"`
 	AttachmentMode AttachmentMode `json:"attachmentMode"`
+	PaymentTarget  *PaymentTarget `json:"paymentTarget"`
 }
 
-// TransactionSettings contains the non-sensitive operational behavior that
-// active members need to render finance, booking, and payment surfaces.
+// TransactionSettings contains operational behavior and explicitly
+// member-visible external payment instructions that active members need to
+// render finance, booking, and payment surfaces.
 type TransactionSettings struct {
 	SettlementsEnabled           bool               `json:"settlementsEnabled"`
 	OwnBookingReasonMode         ReasonMode         `json:"ownBookingReasonMode"`

@@ -11,6 +11,7 @@ import { Field, SelectInput } from '@/components/ui/FormField';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { Toggle } from '@/components/ui/Toggle';
 import { ThemePicker } from '@/features/appearance/ThemePicker';
+import { isPaymentTargetValid } from '@/features/finance/paymentTargets';
 import { ConfigurableListEditor } from './ConfigurableListEditor';
 import { PaymentMethodEditor } from './PaymentMethodEditor';
 import { GroupSettingsPanel } from './GroupSettingsPanel';
@@ -23,6 +24,7 @@ interface SettingsFormProps {
   canManageDefaultRole: boolean;
   canManageFinancialSettings: boolean;
   canManageGroup: boolean;
+  currency: string;
   groupId: string;
   roles?: Role[];
   settings: GroupSettings;
@@ -164,7 +166,7 @@ function DefaultThemeSetting({ groupId, settings }: DefaultThemeSettingProps) {
  * @param props - Group identifier and persisted settings.
  * @returns An accessible settings form with explicit save feedback.
  */
-function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canManageGroup, groupId, roles, settings }: SettingsFormProps) {
+function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canManageGroup, currency, groupId, roles, settings }: SettingsFormProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [settlementsEnabled, setSettlementsEnabled] = useState(settings.settlementsEnabled);
@@ -179,7 +181,7 @@ function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canMan
   const configurationInvalid = paymentMethods.length === 0 || configurableCollections.some((items) => {
     const labels = items.map((item) => item.label.trim().toLocaleLowerCase());
     return labels.some((label) => !label) || new Set(labels).size !== labels.length;
-  });
+  }) || paymentMethods.some((method) => !isPaymentTargetValid(method.paymentTarget, currency));
   const changed = settlementsEnabled !== settings.settlementsEnabled
     || ownBookingReasonMode !== settings.ownBookingReasonMode
     || foreignBookingReasonMode !== settings.foreignBookingReasonMode
@@ -257,7 +259,7 @@ function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canMan
           </div>
         </section>
         <section className={styles.card}>
-          <PaymentMethodEditor addLabel={t('behaviorSettings.addPaymentMethod')} emptyLabel={t('behaviorSettings.paymentMethodRequired')} items={paymentMethods} label={t('behaviorSettings.paymentMethods')} onChange={(items) => { setPaymentMethods(items); mutation.reset(); }} />
+          <PaymentMethodEditor addLabel={t('behaviorSettings.addPaymentMethod')} currency={currency} emptyLabel={t('behaviorSettings.paymentMethodRequired')} items={paymentMethods} label={t('behaviorSettings.paymentMethods')} onChange={(items) => { setPaymentMethods(items); mutation.reset(); }} />
         </section>
         <section className={styles.card}>
           <ConfigurableListEditor addLabel={t('behaviorSettings.addBookingReason')} emptyLabel={t('behaviorSettings.noReasonSuggestions')} items={bookingReasons} label={t('behaviorSettings.bookingReasons')} onChange={(items) => { setBookingReasons(items); mutation.reset(); }} />
@@ -267,7 +269,7 @@ function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canMan
         </section>
       </section> : null}
 
-      {canManageGroup ? <div className={styles.formFooter}>
+      {canManageFinancialSettings ? <div className={styles.formFooter}>
         <div className={styles.feedback}>
           {mutation.isError ? <p className={styles.error} role="alert">{t('behaviorSettings.saveError')} {mutation.error.message}</p> : null}
           {mutation.isSuccess ? <p className={styles.success} role="status">{t('behaviorSettings.saved')}</p> : null}
@@ -296,6 +298,6 @@ export function BehaviorSettingsPanel() {
   if (settingsQuery.isError || !settingsQuery.data || canManageDefaultRole && (rolesQuery.isError || !rolesQuery.data)) return <div className={styles.state}><StatePanel kind="error" message={t('behaviorSettings.loadError')} /></div>;
 
   return <div className={styles.content}>
-    <SettingsForm canManageDefaultRole={canManageDefaultRole} canManageFinancialSettings={canManageFinancialSettings} canManageGroup={canManageGroup} groupId={activeGroupId} key={`${activeGroupId}:${JSON.stringify(settingsQuery.data)}`} roles={rolesQuery.data} settings={settingsQuery.data} />
+    <SettingsForm canManageDefaultRole={canManageDefaultRole} canManageFinancialSettings={canManageFinancialSettings} canManageGroup={canManageGroup} currency={activeGroup.currency} groupId={activeGroupId} key={`${activeGroupId}:${JSON.stringify(settingsQuery.data)}`} roles={rolesQuery.data} settings={settingsQuery.data} />
   </div>;
 }

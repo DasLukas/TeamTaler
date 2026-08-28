@@ -52,6 +52,10 @@ func TestGroupExportProducesSafeCompleteArchive(t *testing.T) {
 		`{"password":"`+auditPassword+`","safe":"retained"}`, now); err != nil {
 		t.Fatalf("insert audit fixture: %v", err)
 	}
+	if _, err := db.ExecContext(ctx, `UPDATE group_payment_methods SET payment_target_type='PAYPAL_ME',paypal_me_handle='Club123'
+		WHERE group_id=? AND id='PAYPAL'`, groupID); err != nil {
+		t.Fatalf("configure export payment target: %v", err)
+	}
 
 	recorder := &completionRecorder{}
 	service := newExportTestService(t, db, recorder)
@@ -105,6 +109,12 @@ func TestGroupExportProducesSafeCompleteArchive(t *testing.T) {
 	if !strings.Contains(string(entries["data/bookings.csv"]), "currency") || !strings.Contains(string(entries["data/payments.csv"]), "currency") {
 		t.Fatal("money datasets do not identify their currency")
 	}
+	paymentMethodsCSV := string(entries["data/payment_methods.csv"])
+	for _, value := range []string{"payment_target_type", "paypal_me_handle", "sepa_recipient_name", "sepa_iban", "sepa_bic", "PAYPAL_ME", "Club123", "NONE"} {
+		if !strings.Contains(paymentMethodsCSV, value) {
+			t.Fatalf("payment-method export lacks %q: %s", value, paymentMethodsCSV)
+		}
+	}
 	if len(recorder.completions) != 1 || recorder.completions[0].Status != StatusReady {
 		t.Fatalf("completion callbacks = %#v", recorder.completions)
 	}
@@ -155,6 +165,9 @@ func TestPersonalExportAuthorizationPasswordAndIdempotency(t *testing.T) {
 		if _, found := entries[required]; !found {
 			t.Fatalf("personal archive is missing %s", required)
 		}
+	}
+	if _, found := entries["data/payment_methods.csv"]; found {
+		t.Fatal("personal archive contains group payment targets")
 	}
 }
 

@@ -7,7 +7,7 @@ import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
 import ShieldAlert from 'lucide-react/dist/esm/icons/shield-alert';
 import Link2 from 'lucide-react/dist/esm/icons/link-2';
 import X from 'lucide-react/dist/esm/icons/x';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import type { PublicJoinLink } from '@/api/types';
@@ -16,8 +16,10 @@ import { Field, TextInput } from '@/components/ui/FormField';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { SelectMenu, type SelectMenuOption } from '@/components/ui/SelectMenu';
 import { StatePanel } from '@/components/ui/StatePanel';
+import { downloadDataUrl } from '@/features/shared/browserDownload';
 import { formatGermanDateTime } from '@/features/shared/dateFormat';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
+import { useQrCodeDataUrl } from '@/hooks/useQrCodeDataUrl';
 import styles from './PublicJoinLinkDialog.module.css';
 
 type LifetimeChoice = '1h' | '6h' | '24h' | '7d' | '30d' | 'custom' | 'unlimited';
@@ -48,13 +50,6 @@ function expiryFor(choice: LifetimeChoice, customExpiry: string): string | null 
   return new Date(Date.now() + (LIFETIME_MILLISECONDS[choice] ?? 0)).toISOString();
 }
 
-function downloadDataURL(dataURL: string, filename: string): void {
-  const anchor = document.createElement('a');
-  anchor.href = dataURL;
-  anchor.download = filename;
-  anchor.click();
-}
-
 /**
  * Renders lifecycle controls, local QR generation, and secure sharing actions
  * for the group's single public join link.
@@ -72,7 +67,6 @@ export function PublicJoinLinkDialog({ groupId, onClose }: PublicJoinLinkDialogP
 	const [lifetimeTouched, setLifetimeTouched] = useState(false);
   const [customExpiry, setCustomExpiry] = useState(() => localDateTimeValue(new Date(Date.now() + 24 * 60 * 60 * 1_000)));
 	const [customExpiryTouched, setCustomExpiryTouched] = useState(false);
-	const [qrImage, setQrImage] = useState({ url: '', dataURL: '' });
   const [copied, setCopied] = useState(false);
   const [confirmation, setConfirmation] = useState<Confirmation>(null);
   const linkQuery = useQuery({ queryKey, queryFn: () => api.getPublicJoinLink(groupId), staleTime: 15_000 });
@@ -81,16 +75,8 @@ export function PublicJoinLinkDialog({ groupId, onClose }: PublicJoinLinkDialogP
 	const storedLifetime: LifetimeChoice = active ? (link?.expiresAt ? 'custom' : 'unlimited') : '24h';
 	const selectedLifetime = lifetimeTouched ? lifetime : storedLifetime;
 	const selectedCustomExpiry = customExpiryTouched || !link?.expiresAt ? customExpiry : localDateTimeValue(new Date(link.expiresAt));
-	const qrDataURL = link?.acceptUrl && qrImage.url === link.acceptUrl ? qrImage.dataURL : '';
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!active || !link?.acceptUrl) return undefined;
-    void import('qrcode').then(({ toDataURL }) => toDataURL(link.acceptUrl!, { errorCorrectionLevel: 'M', margin: 2, width: 320 }))
-		.then((dataURL) => { if (!cancelled) setQrImage({ url: link.acceptUrl!, dataURL }); })
-		.catch(() => { if (!cancelled) setQrImage({ url: link.acceptUrl!, dataURL: '' }); });
-    return () => { cancelled = true; };
-  }, [active, link?.acceptUrl]);
+  const qrPayload = active ? link?.acceptUrl ?? '' : '';
+  const qrCode = useQrCodeDataUrl(qrPayload);
 
   const updateMutation = useMutation({
     mutationFn: (update: { enabled: boolean; expiresAt: string | null }) => api.updatePublicJoinLink(groupId, update, link?.version ?? 0),
@@ -153,9 +139,9 @@ export function PublicJoinLinkDialog({ groupId, onClose }: PublicJoinLinkDialogP
           <>
             <section className={styles.sharePanel}>
               <div className={styles.statusRow}><span className={styles.activeBadge}><Check size={16} />{t('publicJoin.active')}</span><span>{link.expiresAt ? t('publicJoin.validUntil', { date: formatGermanDateTime(link.expiresAt) }) : t('publicJoin.unlimited')}</span></div>
-              <div className={styles.qrFrame}>{qrDataURL ? <img alt={t('publicJoin.qrAlt')} height={240} src={qrDataURL} width={240} /> : <span>{t('publicJoin.qrLoading')}</span>}</div>
+              <div className={styles.qrFrame}>{qrCode.dataUrl ? <img alt={t('publicJoin.qrAlt')} height={240} src={qrCode.dataUrl} width={240} /> : qrCode.error ? <span role="alert">{t('publicJoin.qrError')}</span> : <span role="status">{t('publicJoin.qrLoading')}</span>}</div>
               <div className={styles.linkRow}><TextInput aria-label={t('publicJoin.linkLabel')} readOnly value={link.acceptUrl} /><Button leadingIcon={copied ? <Check size={17} /> : <Copy size={17} />} onClick={() => void copyLink()} variant="secondary">{copied ? t('common.copied') : t('common.copy')}</Button></div>
-              <Button disabled={!qrDataURL} leadingIcon={<Download size={17} />} onClick={() => downloadDataURL(qrDataURL, 'teamtaler-join-qr.png')} size="small" variant="ghost">{t('publicJoin.downloadQr')}</Button>
+              <Button disabled={!qrCode.dataUrl} leadingIcon={<Download size={17} />} onClick={() => downloadDataUrl(qrCode.dataUrl, 'teamtaler-join-qr.png')} size="small" variant="ghost">{t('publicJoin.downloadQr')}</Button>
             </section>
           </>
         ) : null}

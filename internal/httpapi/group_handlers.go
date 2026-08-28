@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -14,6 +15,66 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/finance"
 	"github.com/DasLukas/TeamTaler/internal/groups"
 )
+
+type paymentMethodUpdateRequest struct {
+	ID             string                `json:"id"`
+	Label          string                `json:"label"`
+	AttachmentMode domain.AttachmentMode `json:"attachmentMode"`
+	PaymentTarget  json.RawMessage       `json:"paymentTarget"`
+}
+
+type paymentTargetTypeRequest struct {
+	Type domain.PaymentTargetType `json:"type"`
+}
+
+type payPalMePaymentTargetRequest struct {
+	Type           domain.PaymentTargetType `json:"type"`
+	PayPalMeHandle string                   `json:"paypalMeHandle"`
+}
+
+type sepaTransferPaymentTargetRequest struct {
+	Type          domain.PaymentTargetType `json:"type"`
+	RecipientName string                   `json:"recipientName"`
+	IBAN          string                   `json:"iban"`
+	BIC           string                   `json:"bic"`
+}
+
+// paymentMethod converts one strict PATCH item into the domain representation
+// and reports whether paymentTarget was present. A missing value is preserved
+// later inside the settings transaction, null clears it, and an object replaces
+// it. Malformed or unknown nested fields return a validation error.
+func (input paymentMethodUpdateRequest) paymentMethod() (domain.PaymentMethod, bool, error) {
+	method := domain.PaymentMethod{ID: input.ID, Label: input.Label, AttachmentMode: input.AttachmentMode}
+	if len(input.PaymentTarget) == 0 {
+		return method, false, nil
+	}
+	if bytes.Equal(bytes.TrimSpace(input.PaymentTarget), []byte("null")) {
+		return method, true, nil
+	}
+	var discriminator paymentTargetTypeRequest
+	if err := json.Unmarshal(input.PaymentTarget, &discriminator); err != nil {
+		return domain.PaymentMethod{}, false, domain.ValidationError{Field: "paymentMethods", Message: "contains an invalid paymentTarget: " + err.Error()}
+	}
+	decoder := json.NewDecoder(bytes.NewReader(input.PaymentTarget))
+	decoder.DisallowUnknownFields()
+	switch discriminator.Type {
+	case domain.PaymentTargetPayPalMe:
+		var target payPalMePaymentTargetRequest
+		if err := decoder.Decode(&target); err != nil {
+			return domain.PaymentMethod{}, false, domain.ValidationError{Field: "paymentMethods", Message: "contains an invalid PayPal.Me paymentTarget: " + err.Error()}
+		}
+		method.PaymentTarget = &domain.PaymentTarget{Type: target.Type, PayPalMeHandle: target.PayPalMeHandle}
+	case domain.PaymentTargetSEPATransfer:
+		var target sepaTransferPaymentTargetRequest
+		if err := decoder.Decode(&target); err != nil {
+			return domain.PaymentMethod{}, false, domain.ValidationError{Field: "paymentMethods", Message: "contains an invalid SEPA paymentTarget: " + err.Error()}
+		}
+		method.PaymentTarget = &domain.PaymentTarget{Type: target.Type, RecipientName: target.RecipientName, IBAN: target.IBAN, BIC: target.BIC}
+	default:
+		return domain.PaymentMethod{}, false, domain.ValidationError{Field: "paymentMethods", Message: "contains a paymentTarget with an unsupported type"}
+	}
+	return method, true, nil
+}
 
 func (s *Server) handleListGroups(response http.ResponseWriter, request *http.Request) {
 	principal, err := s.principal(request)
@@ -95,8 +156,8 @@ func (s *Server) handleGetGroupSettings(response http.ResponseWriter, request *h
 	})
 }
 
-// handleGetTransactionSettings returns non-sensitive feature state and ordered
-// form options for the current active group member.
+// handleGetTransactionSettings returns member-visible feature state, payment
+// destinations, and ordered form options for the current active group member.
 func (s *Server) handleGetTransactionSettings(response http.ResponseWriter, request *http.Request) {
 	_, membership, err := s.membership(request)
 	if err != nil {
@@ -122,20 +183,20 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		return
 	}
 	var input struct {
-		DefaultTheme                 *domain.ThemeID            `json:"defaultTheme"`
-		NotificationEmailsEnabled    *bool                      `json:"notificationEmailsEnabled"`
-		SettlementsEnabled           *bool                      `json:"settlementsEnabled"`
-		DefaultRoleID                *string                    `json:"defaultRoleId"`
-		OwnBookingReasonMode         *domain.ReasonMode         `json:"ownBookingReasonMode"`
-		ForeignBookingReasonMode     *domain.ReasonMode         `json:"foreignBookingReasonMode"`
-		OwnPaymentReasonMode         *domain.ReasonMode         `json:"ownPaymentReasonMode"`
-		OtherPaymentReasonMode       *domain.ReasonMode         `json:"otherPaymentReasonMode"`
-		ForeignBookingReasonRequired *bool                      `json:"foreignBookingReasonRequired"`
-		OwnPaymentReasonRequired     *bool                      `json:"ownPaymentReasonRequired"`
-		OtherPaymentReasonRequired   *bool                      `json:"otherPaymentReasonRequired"`
-		PaymentMethods               *[]domain.PaymentMethod    `json:"paymentMethods"`
-		BookingReasons               *[]domain.ConfigurableItem `json:"bookingReasons"`
-		PaymentReasons               *[]domain.ConfigurableItem `json:"paymentReasons"`
+		DefaultTheme                 *domain.ThemeID               `json:"defaultTheme"`
+		NotificationEmailsEnabled    *bool                         `json:"notificationEmailsEnabled"`
+		SettlementsEnabled           *bool                         `json:"settlementsEnabled"`
+		DefaultRoleID                *string                       `json:"defaultRoleId"`
+		OwnBookingReasonMode         *domain.ReasonMode            `json:"ownBookingReasonMode"`
+		ForeignBookingReasonMode     *domain.ReasonMode            `json:"foreignBookingReasonMode"`
+		OwnPaymentReasonMode         *domain.ReasonMode            `json:"ownPaymentReasonMode"`
+		OtherPaymentReasonMode       *domain.ReasonMode            `json:"otherPaymentReasonMode"`
+		ForeignBookingReasonRequired *bool                         `json:"foreignBookingReasonRequired"`
+		OwnPaymentReasonRequired     *bool                         `json:"ownPaymentReasonRequired"`
+		OtherPaymentReasonRequired   *bool                         `json:"otherPaymentReasonRequired"`
+		PaymentMethods               *[]paymentMethodUpdateRequest `json:"paymentMethods"`
+		BookingReasons               *[]domain.ConfigurableItem    `json:"bookingReasons"`
+		PaymentReasons               *[]domain.ConfigurableItem    `json:"paymentReasons"`
 	}
 	if err := decodeJSON(response, request, &input); err != nil {
 		writeProblem(response, request, err)
@@ -154,6 +215,22 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		writeProblem(response, request, domain.ValidationError{Field: "notificationEmailsEnabled", Message: "requires configured SMTP delivery"})
 		return
 	}
+	var paymentMethods *[]domain.PaymentMethod
+	var paymentTargetsSpecified []bool
+	if input.PaymentMethods != nil {
+		methods := make([]domain.PaymentMethod, len(*input.PaymentMethods))
+		paymentTargetsSpecified = make([]bool, len(*input.PaymentMethods))
+		for index, item := range *input.PaymentMethods {
+			method, targetSpecified, err := item.paymentMethod()
+			if err != nil {
+				writeProblem(response, request, err)
+				return
+			}
+			methods[index] = method
+			paymentTargetsSpecified[index] = targetSpecified
+		}
+		paymentMethods = &methods
+	}
 	settings, err := s.groups.UpdateSettings(request.Context(), principal, membership, groups.SettingsUpdate{
 		DefaultTheme:                 input.DefaultTheme,
 		NotificationEmailsEnabled:    input.NotificationEmailsEnabled,
@@ -166,7 +243,8 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		ForeignBookingReasonRequired: input.ForeignBookingReasonRequired,
 		OwnPaymentReasonRequired:     input.OwnPaymentReasonRequired,
 		OtherPaymentReasonRequired:   input.OtherPaymentReasonRequired,
-		PaymentMethods:               input.PaymentMethods,
+		PaymentMethods:               paymentMethods,
+		PaymentTargetsSpecified:      paymentTargetsSpecified,
 		BookingReasons:               input.BookingReasons,
 		PaymentReasons:               input.PaymentReasons,
 	})

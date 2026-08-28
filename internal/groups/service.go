@@ -200,8 +200,13 @@ type SettingsUpdate struct {
 	OwnPaymentReasonRequired     *bool
 	OtherPaymentReasonRequired   *bool
 	PaymentMethods               *[]domain.PaymentMethod
-	BookingReasons               *[]domain.ConfigurableItem
-	PaymentReasons               *[]domain.ConfigurableItem
+	// PaymentTargetsSpecified mirrors PaymentMethods by index for HTTP PATCH
+	// compatibility. Nil means every target value is authoritative. When set,
+	// false preserves the existing target of the same stable method ID, while
+	// true applies the supplied object or explicit nil.
+	PaymentTargetsSpecified []bool
+	BookingReasons          *[]domain.ConfigurableItem
+	PaymentReasons          *[]domain.ConfigurableItem
 }
 
 // UpdateSettings atomically applies the supplied group-wide behavior changes.
@@ -292,7 +297,13 @@ func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, mem
 		next.OtherPaymentReasonRequired = next.OtherPaymentReasonMode.Required()
 		var err error
 		if update.PaymentMethods != nil {
-			next.PaymentMethods, err = normalizePaymentMethods(*update.PaymentMethods)
+			var currency string
+			if err := tx.QueryRowContext(ctx, `SELECT currency FROM groups WHERE id=?`, membership.GroupID).Scan(&currency); errors.Is(err, sql.ErrNoRows) {
+				return domain.ErrNotFound
+			} else if err != nil {
+				return err
+			}
+			next.PaymentMethods, err = normalizePaymentMethods(*update.PaymentMethods, previous.PaymentMethods, update.PaymentTargetsSpecified, currency)
 			if err != nil {
 				return err
 			}
@@ -350,7 +361,8 @@ func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, mem
 				"foreignBookingReasonRequired": next.ForeignBookingReasonRequired,
 				"ownPaymentReasonRequired":     next.OwnPaymentReasonRequired,
 				"otherPaymentReasonRequired":   next.OtherPaymentReasonRequired,
-				"paymentMethodCount":           len(next.PaymentMethods), "bookingReasonCount": len(next.BookingReasons), "paymentReasonCount": len(next.PaymentReasons),
+				"paymentMethodCount":           len(next.PaymentMethods), "paymentTargetCount": paymentTargetCount(next.PaymentMethods),
+				"paymentTargetTypes": paymentTargetTypeCounts(next.PaymentMethods), "bookingReasonCount": len(next.BookingReasons), "paymentReasonCount": len(next.PaymentReasons),
 			},
 		}); err != nil {
 			return err
@@ -430,8 +442,8 @@ func querySettings(ctx context.Context, queryer settingsQueryer, groupID string,
 	return nil
 }
 
-// TransactionSettings returns non-sensitive feature state plus booking and
-// payment form options for an active group member.
+// TransactionSettings returns member-visible feature state, payment destinations,
+// and form options for an active group member.
 func (s Service) TransactionSettings(ctx context.Context, membership domain.Membership) (domain.TransactionSettings, error) {
 	var active bool
 	if err := s.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM memberships WHERE group_id=? AND id=? AND status='ACTIVE' AND deleted_at IS NULL)`, membership.GroupID, membership.ID).Scan(&active); err != nil {
@@ -483,7 +495,8 @@ func queryConfiguredItems(ctx context.Context, queryer settingsQueryer, groupID,
 }
 
 func queryPaymentMethods(ctx context.Context, queryer settingsQueryer, groupID string) ([]domain.PaymentMethod, error) {
-	rows, err := queryer.QueryContext(ctx, `SELECT id,label,attachment_mode FROM group_payment_methods WHERE group_id=? ORDER BY sort_order,id`, groupID)
+	rows, err := queryer.QueryContext(ctx, `SELECT id,label,attachment_mode,payment_target_type,paypal_me_handle,sepa_recipient_name,sepa_iban,sepa_bic
+		FROM group_payment_methods WHERE group_id=? ORDER BY sort_order,id`, groupID)
 	if err != nil {
 		return nil, err
 	}
@@ -491,21 +504,46 @@ func queryPaymentMethods(ctx context.Context, queryer settingsQueryer, groupID s
 	items := make([]domain.PaymentMethod, 0)
 	for rows.Next() {
 		var item domain.PaymentMethod
-		if err := rows.Scan(&item.ID, &item.Label, &item.AttachmentMode); err != nil {
+		var targetType string
+		var payPalMeHandle, recipientName, iban, bic sql.NullString
+		if err := rows.Scan(&item.ID, &item.Label, &item.AttachmentMode, &targetType, &payPalMeHandle, &recipientName, &iban, &bic); err != nil {
 			return nil, err
+		}
+		switch targetType {
+		case "NONE":
+			item.PaymentTarget = nil
+		case string(domain.PaymentTargetPayPalMe):
+			if !payPalMeHandle.Valid {
+				return nil, fmt.Errorf("payment method %s has incomplete PayPal.Me target", item.ID)
+			}
+			item.PaymentTarget = &domain.PaymentTarget{Type: domain.PaymentTargetPayPalMe, PayPalMeHandle: payPalMeHandle.String}
+		case string(domain.PaymentTargetSEPATransfer):
+			if !recipientName.Valid || !iban.Valid {
+				return nil, fmt.Errorf("payment method %s has incomplete SEPA target", item.ID)
+			}
+			item.PaymentTarget = &domain.PaymentTarget{Type: domain.PaymentTargetSEPATransfer, RecipientName: recipientName.String, IBAN: iban.String, BIC: bic.String}
+		default:
+			return nil, fmt.Errorf("payment method %s has unsupported target type %q", item.ID, targetType)
 		}
 		items = append(items, item)
 	}
 	return items, rows.Err()
 }
 
-func normalizePaymentMethods(items []domain.PaymentMethod) ([]domain.PaymentMethod, error) {
+func normalizePaymentMethods(items, previous []domain.PaymentMethod, targetsSpecified []bool, currency string) ([]domain.PaymentMethod, error) {
 	if len(items) < 1 || len(items) > 20 {
 		return nil, domain.ValidationError{Field: "paymentMethods", Message: "must contain between 1 and 20 items"}
 	}
+	if targetsSpecified != nil && len(targetsSpecified) != len(items) {
+		return nil, domain.ValidationError{Field: "paymentMethods", Message: "has inconsistent paymentTarget presence metadata"}
+	}
+	previousByID := make(map[string]*domain.PaymentTarget, len(previous))
+	for _, item := range previous {
+		previousByID[item.ID] = item.PaymentTarget
+	}
 	normalized := make([]domain.PaymentMethod, 0, len(items))
 	ids, labels := map[string]struct{}{}, map[string]struct{}{}
-	for _, item := range items {
+	for index, item := range items {
 		item.ID, item.Label = strings.TrimSpace(item.ID), strings.TrimSpace(item.Label)
 		if item.ID == "" {
 			item.ID, _ = platform.NewID("opt")
@@ -524,6 +562,14 @@ func normalizePaymentMethods(items []domain.PaymentMethod) ([]domain.PaymentMeth
 			return nil, domain.ValidationError{Field: "paymentMethods", Message: "contains duplicate labels ignoring letter case"}
 		}
 		ids[item.ID], labels[labelKey] = struct{}{}, struct{}{}
+		if targetsSpecified != nil && !targetsSpecified[index] {
+			item.PaymentTarget = previousByID[item.ID]
+		}
+		var err error
+		item.PaymentTarget, err = normalizePaymentTarget(item.PaymentTarget, currency)
+		if err != nil {
+			return nil, err
+		}
 		normalized = append(normalized, item)
 	}
 	for index := range normalized {
@@ -589,7 +635,11 @@ func replacePaymentMethods(ctx context.Context, queryer settingsExecutor, groupI
 		return err
 	}
 	for index, item := range items {
-		if _, err := queryer.ExecContext(ctx, `INSERT INTO group_payment_methods(group_id,id,label,attachment_mode,sort_order,created_at) VALUES(?,?,?,?,?,?)`, groupID, item.ID, item.Label, item.AttachmentMode, index, now); err != nil {
+		targetType, payPalMeHandle, recipientName, iban, bic := paymentTargetStorageValues(item.PaymentTarget)
+		if _, err := queryer.ExecContext(ctx, `INSERT INTO group_payment_methods(
+			group_id,id,label,attachment_mode,sort_order,created_at,payment_target_type,paypal_me_handle,sepa_recipient_name,sepa_iban,sepa_bic
+		) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, groupID, item.ID, item.Label, item.AttachmentMode, index, now, targetType,
+			nullable(payPalMeHandle), nullable(recipientName), nullable(iban), nullable(bic)); err != nil {
 			return err
 		}
 	}

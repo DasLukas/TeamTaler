@@ -1706,7 +1706,7 @@ paths:
     get:
       tags: [Groups]
       summary: Read settlement availability and ordered transaction behavior
-      description: Returns only the non-sensitive feature and form configuration needed by an active group member.
+      description: Returns the feature, form, and member-visible external payment instructions needed by an active group member.
       parameters:
         - $ref: '#/components/parameters/GroupId'
       responses:
@@ -4952,7 +4952,7 @@ components:
           type: array
           minItems: 1
           maxItems: 20
-          items: { $ref: '#/components/schemas/PaymentMethod' }
+          items: { $ref: '#/components/schemas/PaymentMethodUpdate' }
         bookingReasons:
           type: array
           maxItems: 50
@@ -5072,7 +5072,107 @@ components:
       type: string
       enum: [OFF, OPTIONAL, REQUIRED]
       description: Controls whether a receipt is rejected, accepted, or mandatory for the payment method.
+    PayPalMePaymentTarget:
+      type: object
+      additionalProperties: false
+      required: [type, paypalMeHandle]
+      properties:
+        type:
+          type: string
+          const: PAYPAL_ME
+        paypalMeHandle:
+          type: string
+          minLength: 1
+          maxLength: 20
+          pattern: '^[A-Za-z0-9]+$'
+          description: Normalized PayPal.Me handle.
+    SepaTransferPaymentTarget:
+      type: object
+      additionalProperties: false
+      required: [type, recipientName, iban]
+      properties:
+        type:
+          type: string
+          const: SEPA_TRANSFER
+        recipientName:
+          type: string
+          minLength: 1
+          maxLength: 70
+        iban:
+          type: string
+          minLength: 15
+          maxLength: 34
+          description: Whitespace-free uppercase IBAN with a valid MOD-97 checksum.
+        bic:
+          type: string
+          pattern: '^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$'
+          description: Normalized 8- or 11-character BIC. Optional only when the IBAN country belongs to the EEA; required otherwise.
+    PaymentTarget:
+      oneOf:
+        - $ref: '#/components/schemas/PayPalMePaymentTarget'
+        - $ref: '#/components/schemas/SepaTransferPaymentTarget'
+      discriminator:
+        propertyName: type
+        mapping:
+          PAYPAL_ME: '#/components/schemas/PayPalMePaymentTarget'
+          SEPA_TRANSFER: '#/components/schemas/SepaTransferPaymentTarget'
+    PayPalMePaymentTargetUpdate:
+      type: object
+      additionalProperties: false
+      required: [type, paypalMeHandle]
+      properties:
+        type:
+          type: string
+          const: PAYPAL_ME
+        paypalMeHandle:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: A 1-20 character ASCII-alphanumeric handle or a canonical paypal.me HTTPS URL containing only that handle.
+    SepaTransferPaymentTargetUpdate:
+      type: object
+      additionalProperties: false
+      required: [type, recipientName, iban]
+      properties:
+        type:
+          type: string
+          const: SEPA_TRANSFER
+        recipientName:
+          type: string
+          minLength: 1
+          maxLength: 70
+        iban:
+          type: string
+          minLength: 15
+          maxLength: 42
+          description: IBAN input; non-control Unicode whitespace is removed and letters are uppercased before MOD-97 validation. Control characters are rejected.
+        bic:
+          type: string
+          maxLength: 14
+          description: BIC input, required for IBAN countries outside the EEA. Surrounding whitespace is removed and letters are uppercased before validation.
+    PaymentTargetUpdate:
+      oneOf:
+        - $ref: '#/components/schemas/PayPalMePaymentTargetUpdate'
+        - $ref: '#/components/schemas/SepaTransferPaymentTargetUpdate'
+      discriminator:
+        propertyName: type
+        mapping:
+          PAYPAL_ME: '#/components/schemas/PayPalMePaymentTargetUpdate'
+          SEPA_TRANSFER: '#/components/schemas/SepaTransferPaymentTargetUpdate'
     PaymentMethod:
+      type: object
+      additionalProperties: false
+      required: [id, label, attachmentMode, paymentTarget]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 120 }
+        label: { type: string, minLength: 1, maxLength: 120 }
+        attachmentMode: { $ref: '#/components/schemas/AttachmentMode' }
+        paymentTarget:
+          oneOf:
+            - $ref: '#/components/schemas/PaymentTarget'
+            - type: 'null'
+          description: Member-visible external payment instruction, or null when this method has none.
+    PaymentMethodUpdate:
       type: object
       additionalProperties: false
       required: [id, label, attachmentMode]
@@ -5080,6 +5180,11 @@ components:
         id: { type: string, minLength: 1, maxLength: 120 }
         label: { type: string, minLength: 1, maxLength: 120 }
         attachmentMode: { $ref: '#/components/schemas/AttachmentMode' }
+        paymentTarget:
+          oneOf:
+            - $ref: '#/components/schemas/PaymentTargetUpdate'
+            - type: 'null'
+          description: Omission preserves the target of the same stable method id, null clears it, and an object sets or replaces it. A new id with omission starts without a target.
     ReasonMode:
       type: string
       enum: [OFF, OPTIONAL, REQUIRED]
