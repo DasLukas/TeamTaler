@@ -1,4 +1,4 @@
-import type { PermissionGrant, Session } from '@/api/types';
+import type { Group, PermissionGrant, Session } from '@/api/types';
 import { can } from './permissions';
 import { memberPaths } from './paths';
 
@@ -31,6 +31,32 @@ export function canRecordOwnPayment(grants: readonly PermissionGrant[] | undefin
 /** Determines whether a membership may create at least one kind of booking. */
 export function canOpenBooking(grants: readonly PermissionGrant[] | undefined): boolean {
   return can(grants, 'CREATE_OWN_BOOKING') || can(grants, 'BOOK_FOR_OTHERS') || can(grants, 'BOOK_FOR_GUESTS');
+}
+
+/** Statistics views that may be exposed by one active group membership. */
+export type StatisticsView = 'members' | 'finance';
+
+/**
+ * Resolves the independently authorized statistics views for one group.
+ *
+ * The group-level feature switch is evaluated before grants so navigation and
+ * route guards cannot advertise a disabled statistics workspace.
+ *
+ * @param group - Active group and its server-projected membership grants.
+ * @returns Ordered member and finance views available to the current membership.
+ */
+export function availableStatisticsViews(group: Pick<Group, 'statisticsEnabled' | 'membership'>): StatisticsView[] {
+  if (!group.statisticsEnabled) return [];
+  const grants = group.membership?.effectiveGrants;
+  const views: StatisticsView[] = [];
+  if (can(grants, 'VIEW_MEMBER_STATISTICS')) views.push('members');
+  if (can(grants, 'VIEW_GROUP_STATISTICS')) views.push('finance');
+  return views;
+}
+
+/** Determines whether the active group may open the statistics workspace. */
+export function canOpenStatistics(group: Pick<Group, 'statisticsEnabled' | 'membership'>): boolean {
+  return availableStatisticsViews(group).length > 0;
 }
 
 /**

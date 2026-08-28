@@ -94,6 +94,25 @@ Collection result feedback is horizontally centered across every shared table an
 
 The mobile activity feed defaults to cards below 768 pixels and safely stores the last card/table choice as a versioned device preference. Its compact toolbar keeps filter, sort, view, and export actions in stable positions across both representations. The icon-only view action always names the destination view, while the dedicated accessible sorting sheet remains available in both representations so sorting does not depend on horizontally distant table headers. The compact activity workspace uses a tighter heading-to-controls gap, compact collection-section spacing, and no redundant page padding above the shell-owned bottom navigation; touch targets and safe-area separation remain unchanged. Tablet and desktop continue to use the semantic table. Every activity card exposes the transaction type, signed amount, detail, member and actor identities, lifecycle state, category, timestamp, posting state, receipt, and reversal action without relying on color or icons alone.
 
+## Analytical dashboards and charts
+
+The statistics workspace is a responsive decision surface rather than a decorative report. Its hierarchy is range controls, the independently authorized member or finance view, a compact KPI summary, then explanatory charts. The active range, authoritative group time zone, generation time, and explicit refresh action remain visible so a chart is never detached from its measurement context. The URL owns the selected view and range; a custom interval uses two clearly labelled calendar-date inputs and remains usable with keyboard, touch, and browser Back/Forward navigation.
+
+Use the smallest chart family that matches the question:
+
+- KPI cards state exact counts, rates, or money and may add a short definition or reconciliation cue.
+- A line shows the cumulative closing receivable through ordered time buckets.
+- Grouped bars compare discrete posting and reversal units or financial flow components. Ranked bars compare categories or products. Every series retains a visible legend or direct label plus its exact table column; signed finance contributions additionally retain a visible zero line and direction instead of encoding sign by color alone.
+- A compact stacked composition bar supports the regular-member versus temporary-guest snapshot only when both exact counts remain adjacent.
+
+Charts consume the root appearance contract through semantic `--chart-*` tokens. Every theme supplies chart colors for both resolved light and dark schemes with WCAG AA text, grid, tooltip, and focus contrast. Financial outstanding, credit, payment, adjustment, success, warning, and danger meanings are stable across themes; brand accents cannot reverse those meanings. Component CSS must not embed palette-specific hexadecimal values.
+
+Recharts renders non-animated responsive SVG inside a labelled chart frame. Each frame exposes a persistent sentence-level summary before the graphic and an expandable semantic data table containing every exact plotted value. The table is the complete non-visual alternative, not a sampled caption. Essential values, scale information, signs, and series names must not exist only in a tooltip. Legends, labels, dash patterns, signs, and zero references provide redundant encoding; charts never require pointer hover or color perception to distinguish data. Empty, single-bucket, privacy-suppressed, loading, and error states use explicit text rather than an empty coordinate plane.
+
+Money remains an exact decimal string through transport, KPI cards, tooltips, summaries, and data tables. When an integer exceeds JavaScript's safe coordinate range, visualization code may scale a derived plotting coordinate, but every displayed axis and tooltip value must restore the declared divisor and currency. The chart layer never calculates ledger totals or becomes the source for a KPI.
+
+On narrow screens, controls and view tabs may scroll only within their own bounded strip, KPI cards collapse to one column, and each chart remains within the page width. A chart may reduce ticks or increase its internal scroll-free height, but it must not remove the exact table, truncate an essential label without an accessible equivalent, or create page-level horizontal overflow.
+
 ## Documentation ownership
 
 - This file owns enduring visual and interaction-system rules.

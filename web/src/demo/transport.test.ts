@@ -20,6 +20,54 @@ describe('DemoTransport account security', () => {
   });
 });
 
+describe('DemoTransport statistics projections', () => {
+  it('returns complete exact default projections with server-selected range metadata', async () => {
+    const transport = new DemoTransport();
+    const members = await transport.request<{
+      meta: { preset: string; bucket: string; generatedAt: string; toExclusive: string; currentPeriodAvailable: boolean };
+      activity: Array<{ periodStart: string }>;
+    }>('/groups/group-sv-adler/statistics/members');
+    const finance = await transport.request<{
+      flows: { openingNetReceivableMinor: string; netBookingChargesMinor: string; netPaymentsMinor: string; netAdjustmentsMinor: string; closingNetReceivableMinor: string };
+      series: Array<{ periodStart: string }>;
+    }>('/groups/group-sv-adler/statistics/finance');
+
+    expect(members.meta).toMatchObject({ preset: 'LAST_30_DAYS', bucket: 'DAY', currentPeriodAvailable: false });
+    expect(members.meta.toExclusive).toBe(members.meta.generatedAt);
+    expect(members.activity).toHaveLength(30);
+    expect(members.activity[0].periodStart).toContain('2026-07-30');
+    expect(members.activity.at(-1)?.periodStart).toContain('2026-08-28');
+    expect(finance.series).toHaveLength(30);
+    expect(
+      BigInt(finance.flows.openingNetReceivableMinor)
+      + BigInt(finance.flows.netBookingChargesMinor)
+      - BigInt(finance.flows.netPaymentsMinor)
+      + BigInt(finance.flows.netAdjustmentsMinor),
+    ).toBe(BigInt(finance.flows.closingNetReceivableMinor));
+  });
+
+  it('accepts inclusive custom dates, caps today at generation time, and rejects unavailable current period', async () => {
+    const transport = new DemoTransport();
+    const historical = await transport.request<{ meta: { preset: string; bucket: string; toExclusive: string } }>('/groups/group-sv-adler/statistics/members?range=CUSTOM&from=2026-08-01&to=2026-08-05');
+    const currentDay = await transport.request<{ meta: { generatedAt: string; toExclusive: string } }>('/groups/group-sv-adler/statistics/members?range=CUSTOM&from=2026-08-28&to=2026-08-28');
+
+    expect(historical.meta).toMatchObject({ preset: 'CUSTOM', bucket: 'DAY', toExclusive: '2026-08-06T00:00:00+02:00' });
+    expect(currentDay.meta.toExclusive).toBe(currentDay.meta.generatedAt);
+    await expect(transport.request('/groups/group-sv-adler/statistics/members?range=CURRENT_PERIOD')).rejects.toThrow(/not available/i);
+  });
+
+  it('follows the statistics master switch and enables the current period with settlements', async () => {
+    const transport = new DemoTransport();
+    await transport.request('/groups/group-sv-adler/settings', jsonRequest('PATCH', { settlementsEnabled: true }));
+    await expect(transport.request<{ meta: { preset: string; currentPeriodAvailable: boolean } }>('/groups/group-sv-adler/statistics/members')).resolves.toMatchObject({
+      meta: { preset: 'CURRENT_PERIOD', currentPeriodAvailable: true },
+    });
+
+    await transport.request('/groups/group-sv-adler/settings', jsonRequest('PATCH', { statisticsEnabled: false }));
+    await expect(transport.request('/groups/group-sv-adler/statistics/members')).rejects.toThrow(/disabled/i);
+  });
+});
+
 describe('DemoTransport appearance preferences', () => {
   it('persists account mode, membership overrides, and administrator-managed defaults', async () => {
     const transport = new DemoTransport();

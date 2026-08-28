@@ -80,7 +80,7 @@ func TestRunSeedsDiverseGermanEnvironment(t *testing.T) {
 		'role:CATALOG_MANAGER:' || group_id,
 		'role:GUEST:' || group_id
 	)`, nil, 0)
-	assertCount(t, ctx, db, `SELECT count(*) FROM role_permission_grants`, nil, 28)
+	assertCount(t, ctx, db, `SELECT count(*) FROM role_permission_grants`, nil, 30)
 	assertCount(t, ctx, db, `SELECT count(*) FROM role_permission_grants WHERE permission_key IN ('BOOK_FOR_OTHERS','BOOK_FOR_GUESTS')`, nil, 0)
 	assertCount(t, ctx, db, `SELECT count(*) FROM bookings WHERE voided_at IS NULL`, nil, 28)
 	assertCount(t, ctx, db, `SELECT count(*) FROM bookings WHERE voided_at IS NOT NULL AND void_reason=? AND voided_by IS NOT NULL`, []any{"Doppelte Testbuchung"}, 1)

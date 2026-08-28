@@ -23,7 +23,7 @@ import waterImageUrl from './assets/water.webp';
 const grants = (...permissions: PermissionKey[]): PermissionGrant[] => permissions.map((permission) => ({ permission, scope: { type: 'GROUP' } }));
 
 const demoAdministratorRoleIds = ['role-admin', 'role-member', 'role-finance', 'role-catalog'];
-const demoAdministratorGrants = grants('GROUP_ADMINISTRATION', 'MEMBER_MANAGEMENT', 'ROLE_MANAGEMENT', 'FINANCE_MANAGEMENT', 'CATALOG_MANAGEMENT', 'VIEW_MEMBER_DIRECTORY', 'VIEW_GROUP_STATISTICS', 'VIEW_ALL_BOOKING_ACTIVITY', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING', 'VOID_ANY_BOOKING', 'BOOK_FOR_OTHERS', 'BOOK_FOR_GUESTS');
+const demoAdministratorGrants = grants('GROUP_ADMINISTRATION', 'MEMBER_MANAGEMENT', 'ROLE_MANAGEMENT', 'FINANCE_MANAGEMENT', 'CATALOG_MANAGEMENT', 'VIEW_MEMBER_DIRECTORY', 'VIEW_MEMBER_STATISTICS', 'VIEW_GROUP_STATISTICS', 'VIEW_ALL_BOOKING_ACTIVITY', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING', 'VOID_ANY_BOOKING', 'BOOK_FOR_OTHERS', 'BOOK_FOR_GUESTS');
 
 /** Stable permission registry returned by the development transport. */
 export const demoPermissionDefinitions: PermissionDefinition[] = [
@@ -33,8 +33,9 @@ export const demoPermissionDefinitions: PermissionDefinition[] = [
   { key: 'FINANCE_MANAGEMENT' },
   { key: 'CATALOG_MANAGEMENT' },
   { key: 'VIEW_MEMBER_DIRECTORY' },
+  { key: 'VIEW_MEMBER_STATISTICS' },
   { key: 'VIEW_GROUP_STATISTICS' },
-  { key: 'VIEW_ALL_BOOKING_ACTIVITY' },
+  { key: 'VIEW_ALL_BOOKING_ACTIVITY', impliedPermissions: ['VIEW_MEMBER_STATISTICS'] },
   { key: 'RECORD_OWN_PAYMENT' },
   { key: 'CREATE_OWN_BOOKING' },
   { key: 'VOID_OWN_BOOKING' },
@@ -73,8 +74,8 @@ export const demoSession: Session = {
     email: 'lukas@example.test',
   },
   groups: [
-    { id: 'group-sv-adler', name: 'SV Adler', currency: 'EUR', defaultTheme: 'TEAMTALER', membership: { id: 'member-lukas', roleIds: demoAdministratorRoleIds, effectiveGrants: demoAdministratorGrants, roles: ['ADMIN', 'MEMBER', 'FINANCE_MANAGER', 'CATALOG_MANAGER'], groupPermissions: ['SELF_RECORD_PAYMENT'], themeOverride: null } },
-    { id: 'group-freunde', name: 'Kegelclub', currency: 'EUR', defaultTheme: 'NRW', membership: { id: 'member-lukas-kegelclub', roleIds: ['role-member-kegel'], effectiveGrants: grants('CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING'), roles: ['MEMBER'], groupPermissions: [], themeOverride: 'TIEF_IM_WESTEN' } },
+    { id: 'group-sv-adler', name: 'SV Adler', currency: 'EUR', defaultTheme: 'TEAMTALER', statisticsEnabled: true, membership: { id: 'member-lukas', roleIds: demoAdministratorRoleIds, effectiveGrants: demoAdministratorGrants, roles: ['ADMIN', 'MEMBER', 'FINANCE_MANAGER', 'CATALOG_MANAGER'], groupPermissions: ['SELF_RECORD_PAYMENT'], themeOverride: null } },
+    { id: 'group-freunde', name: 'Kegelclub', currency: 'EUR', defaultTheme: 'NRW', statisticsEnabled: false, membership: { id: 'member-lukas-kegelclub', roleIds: ['role-member-kegel'], effectiveGrants: grants('CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING'), roles: ['MEMBER'], groupPermissions: [], themeOverride: 'TIEF_IM_WESTEN' } },
   ],
   activeGroupId: 'group-sv-adler',
   defaultGroupId: null,
@@ -321,6 +322,90 @@ export const demoDashboard: Dashboard = {
     { categoryId: 'category-penalties', categoryName: 'Strafen', icon: 'penalty', quantity: 6, total: { minorUnits: '2500', currency: 'EUR' } },
   ],
   recentBookings: demoBookings,
+};
+
+/** Anonymous member-statistics wire projection used by the development API. */
+export const demoMemberStatisticsWire = {
+  meta: {
+    generatedAt: '2026-08-28T12:30:00+02:00',
+    timezone: 'Europe/Berlin',
+    preset: 'LAST_30_DAYS',
+    fromInclusive: '2026-07-30T00:00:00+02:00',
+    toExclusive: '2026-08-28T12:30:00+02:00',
+    bucket: 'DAY',
+    privacyThresholdApplied: false,
+    currentPeriodAvailable: false,
+  },
+  memberSnapshot: { regularMembers: 3, temporaryGuests: 0, asOf: '2026-08-28T12:30:00+02:00' },
+  summary: { activeParticipants: 3, bookingCount: 47, validBookedUnits: 61, cancellationRate: 4 / 47 },
+  activity: Array.from({ length: 30 }, (_, index) => ({
+    periodStart: `${new Date(Date.UTC(2026, 6, 30 + index)).toISOString().slice(0, 10)}T00:00:00+02:00`,
+    postedUnits: 2 + (index < 6 ? 1 : 0),
+    reversedUnits: index < 5 ? 1 : 0,
+  })),
+  topCategories: {
+    suppressed: false,
+    items: [
+      { categoryId: 'category-drinks', categoryName: 'Getränke', icon: 'drink', validBookedUnits: 51, isOther: false },
+      { categoryId: 'category-penalties', categoryName: 'Strafen', icon: 'penalty', validBookedUnits: 8, isOther: false },
+      { categoryId: '', categoryName: 'Other', icon: 'other', validBookedUnits: 2, isOther: true },
+    ],
+  },
+  topProducts: {
+    suppressed: false,
+    items: [
+      { productId: 'product-beer', productName: 'Bier', categoryId: 'category-drinks', categoryName: 'Getränke', validBookedUnits: 27, isOther: false },
+      { productId: 'product-water', productName: 'Wasser', categoryId: 'category-drinks', categoryName: 'Getränke', validBookedUnits: 15, isOther: false },
+      { productId: 'product-spezi', productName: 'Spezi', categoryId: 'category-drinks', categoryName: 'Getränke', validBookedUnits: 9, isOther: false },
+      { productId: '', productName: 'Other', categoryId: '', categoryName: 'Other', validBookedUnits: 10, isOther: true },
+    ],
+  },
+};
+
+/** Exact-money finance-statistics wire projection used by the development API. */
+export const demoFinanceStatisticsWire = {
+  meta: {
+    ...demoMemberStatisticsWire.meta,
+  },
+  currency: 'EUR',
+  receivableSnapshot: {
+    asOf: '2026-08-28T12:30:00+02:00',
+    grossReceivableMinor: '3340',
+    memberCreditMinor: '750',
+    netReceivableMinor: '2590',
+    openAccountCount: 2,
+    balancedAccountCount: 1,
+    creditAccountCount: 1,
+  },
+  flows: {
+    openingNetReceivableMinor: '1800',
+    netBookingChargesMinor: '8240',
+    netPaymentsMinor: '6900',
+    netAdjustmentsMinor: '-550',
+    closingNetReceivableMinor: '2590',
+  },
+  series: (() => {
+    let closing = 1800;
+    return Array.from({ length: 30 }, (_, index) => {
+      const charges = 274 + (index < 20 ? 1 : 0);
+      const payments = 230;
+      const adjustments = index < 11 ? -50 : 0;
+      closing += charges - payments + adjustments;
+      return {
+        periodStart: `${new Date(Date.UTC(2026, 6, 30 + index)).toISOString().slice(0, 10)}T00:00:00+02:00`,
+        netBookingChargesMinor: String(charges),
+        netPaymentsMinor: String(payments),
+        netAdjustmentsMinor: String(adjustments),
+        closingNetReceivableMinor: String(closing),
+      };
+    });
+  })(),
+  categories: [
+    { categoryId: 'category-drinks', categoryName: 'Getränke', icon: 'drink', netBookingChargesMinor: '6240', isOther: false },
+    { categoryId: 'category-penalties', categoryName: 'Strafen', icon: 'penalty', netBookingChargesMinor: '2500', isOther: false },
+    { categoryId: '', categoryName: 'Other', icon: 'other', netBookingChargesMinor: '-500', isOther: true },
+  ],
+  overdue: null,
 };
 
 /** Demo account ledger. */

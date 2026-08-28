@@ -81,7 +81,7 @@ var groupDatasets = []dataset{
 		CASE WHEN logo_key IS NULL THEN 0 ELSE 1 END AS logo_present FROM groups WHERE id=?`, args: groupArg},
 	{name: "group_settings", query: `SELECT group_id,members_can_view_all_bookings,notification_emails_enabled,default_role_id,
 		foreign_booking_reason_required,own_payment_reason_required,other_payment_reason_required,settlements_enabled,
-		own_booking_reason_mode,foreign_booking_reason_mode,own_payment_reason_mode,other_payment_reason_mode,default_theme,updated_at
+		own_booking_reason_mode,foreign_booking_reason_mode,own_payment_reason_mode,other_payment_reason_mode,default_theme,statistics_enabled,updated_at
 		FROM group_settings WHERE group_id=?`, args: groupArg},
 	{name: "notification_settings", query: `SELECT group_id,timezone,settlement_due_soon_days,settlement_overdue_repeat_days,version,updated_at
 		FROM group_notification_settings WHERE group_id=?`, args: groupArg},

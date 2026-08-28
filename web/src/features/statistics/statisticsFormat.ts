@@ -1,0 +1,82 @@
+import type { Money, StatisticsBucket, StatisticsMeta } from '@/api/types';
+import { formatMoney } from '@/api/money';
+
+const integerFormatter = new Intl.NumberFormat('de-DE');
+const percentFormatter = new Intl.NumberFormat('de-DE', { style: 'percent', maximumFractionDigits: 1 });
+
+/** Formats an integer count using the application locale. */
+export function formatStatisticsInteger(value: number): string {
+  return integerFormatter.format(value);
+}
+
+/** Formats a nullable ratio without inventing a value for an empty denominator. */
+export function formatStatisticsRate(value: number | null): string {
+  return value === null ? '–' : percentFormatter.format(value);
+}
+
+/** BigInt-safe coordinate scale shared by all values in one money chart. */
+export interface MoneyChartScale {
+  divisor: bigint;
+  coordinate: (value: Money) => number;
+  formatTick: (coordinate: number, currency: string) => string;
+}
+
+/**
+ * Creates a common integer divisor that keeps every SVG coordinate safe.
+ * Exact values are never reconstructed from coordinates; labels and tables
+ * retain their original minor-unit strings.
+ *
+ * @param values - Exact values plotted together in one chart.
+ * @returns A scale whose quotient is always a safe JavaScript number.
+ */
+export function createMoneyChartScale(values: readonly Money[]): MoneyChartScale {
+  const safeMaximum = BigInt(Number.MAX_SAFE_INTEGER);
+  let maximum = 0n;
+  values.forEach((value) => {
+    const raw = BigInt(value.minorUnits);
+    const absolute = raw < 0n ? -raw : raw;
+    if (absolute > maximum) maximum = absolute;
+  });
+  const divisor = maximum > safeMaximum ? ((maximum - 1n) / safeMaximum) + 1n : 1n;
+  return {
+    divisor,
+    coordinate: (value) => {
+      const raw = BigInt(value.minorUnits);
+      const quotient = raw / divisor;
+      const remainder = raw % divisor;
+      return Number(quotient) + (Number(remainder) / Number(divisor));
+    },
+    formatTick: (coordinate, currency) => {
+      const raw = BigInt(Math.round(coordinate)) * divisor;
+      return formatMoney({ minorUnits: raw.toString(), currency });
+    },
+  };
+}
+
+/** Formats one server-selected bucket start in the projection timezone. */
+export function formatStatisticsPeriod(periodStart: string, bucket: StatisticsBucket, timezone: string): string {
+  const options: Intl.DateTimeFormatOptions = bucket === 'YEAR'
+    ? { year: 'numeric', timeZone: timezone }
+    : bucket === 'MONTH'
+    ? { month: 'short', year: '2-digit', timeZone: timezone }
+    : { day: '2-digit', month: '2-digit', timeZone: timezone };
+  return new Intl.DateTimeFormat('de-DE', options).format(new Date(periodStart));
+}
+
+/** Formats the inclusive human-readable range represented by server metadata. */
+export function formatStatisticsMetaRange(meta: StatisticsMeta): string {
+  const start = new Date(meta.fromInclusive);
+  const inclusiveEnd = new Date(new Date(meta.toExclusive).getTime() - 1);
+  const formatter = new Intl.DateTimeFormat('de-DE', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    timeZone: meta.timezone,
+  });
+  return `${formatter.format(start)}–${formatter.format(inclusiveEnd)}`;
+}
+
+/** Formats exact money while retaining the supplied canonical currency. */
+export function formatStatisticsMoney(value: Money): string {
+  return formatMoney(value);
+}

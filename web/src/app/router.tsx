@@ -17,7 +17,7 @@ import { MorePage } from '@/features/more/MorePage';
 import { NotificationsPage } from '@/features/notifications/NotificationsPage';
 import { NotFoundPage } from './NotFoundPage';
 import { memberPaths } from './paths';
-import { BookingPermissionRoute, GroupRequiredRoute, PreferredWorkspaceRedirect } from './PermissionRoutes';
+import { BookingPermissionRoute, GroupRequiredRoute, PreferredWorkspaceRedirect, StatisticsPermissionRoute } from './PermissionRoutes';
 
 const rootRoute = createRootRoute({
   component: Outlet,
@@ -38,6 +38,7 @@ const groupRequiredRoute = createRoute({
 
 const landingRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: memberPaths.landing, component: PreferredWorkspaceRedirect });
 const dashboardRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: memberPaths.overview, component: DashboardPage });
+const statisticsRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: memberPaths.statistics, component: StatisticsPermissionRoute });
 const bookingRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: memberPaths.booking, component: BookingPermissionRoute });
 const legacyReportsRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: memberPaths.legacyReports, component: () => <Navigate replace to={memberPaths.overview} /> });
 const activitiesRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: '/activities', component: ActivitiesPage });
@@ -57,7 +58,7 @@ const publicJoinVerificationRoute = createRoute({ getParentRoute: () => rootRout
 
 const routeTree = rootRoute.addChildren([
   authenticatedRoute.addChildren([
-    groupRequiredRoute.addChildren([landingRoute, dashboardRoute, bookingRoute, legacyReportsRoute, activitiesRoute, catalogRoute, financeRoute, notificationsRoute, moreRoute]),
+    groupRequiredRoute.addChildren([landingRoute, dashboardRoute, statisticsRoute, bookingRoute, legacyReportsRoute, activitiesRoute, catalogRoute, financeRoute, notificationsRoute, moreRoute]),
     adminRoute,
     accountRoute,
   ]),

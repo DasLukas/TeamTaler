@@ -16,8 +16,8 @@ import (
 
 func TestDefinitionsAndPermissionImplications(t *testing.T) {
 	definitions := authorization.Definitions()
-	if len(definitions) != 14 {
-		t.Fatalf("definition count = %d, want 14", len(definitions))
+	if len(definitions) != 15 {
+		t.Fatalf("definition count = %d, want 15", len(definitions))
 	}
 	if definitions[0].ImpliedPermissions == nil {
 		t.Fatal("permission implications are nil, want an empty API array")
@@ -37,14 +37,15 @@ func TestDefinitionsAndPermissionImplications(t *testing.T) {
 		domain.PermissionVoidAnyBooking,
 		domain.PermissionVoidOwnBooking,
 		domain.PermissionViewAllBookingActivity,
+		domain.PermissionViewMemberStatistics,
 		domain.PermissionViewMemberDirectory,
 	} {
 		if !containsPermission(effective, permission) {
 			t.Fatalf("expanded permissions %#v do not contain %s", effective, permission)
 		}
 	}
-	if len(effective) != 5 {
-		t.Fatalf("expanded permissions = %#v, want five unique keys", effective)
+	if len(effective) != 6 {
+		t.Fatalf("expanded permissions = %#v, want six unique keys", effective)
 	}
 	if containsPermission(effective, domain.PermissionBookForGuests) {
 		t.Fatal("BOOK_FOR_OTHERS must not imply BOOK_FOR_GUESTS")
@@ -284,7 +285,7 @@ func TestSeedGroupRolesIsIdempotentAndAssignsProtectedAdministratorRole(t *testi
 	}
 	wantGrantCounts := map[string]int{
 		authorization.PresetRoleID("group-seed", domain.RolePresetGroupAdministrator): 4,
-		authorization.TemplateRoleID("group-seed", domain.RoleTemplateMember):         2,
+		authorization.TemplateRoleID("group-seed", domain.RoleTemplateMember):         3,
 		authorization.TemplateRoleID("group-seed", domain.RoleTemplateFinance):        5,
 		authorization.TemplateRoleID("group-seed", domain.RoleTemplateCatalog):        2,
 		authorization.GuestRoleID("group-seed"):                                       1,

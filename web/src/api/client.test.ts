@@ -42,7 +42,7 @@ const importResult: InvitationImportResult = {
 function session(userId: string): Session {
   return {
     user: { id: userId, displayName: userId, email: `${userId}@example.test` },
-    groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', defaultTheme: 'TEAMTALER', membership: { id: `member-${userId}`, roles: ['MEMBER'], groupPermissions: [], themeOverride: null } }],
+    groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', defaultTheme: 'TEAMTALER', statisticsEnabled: false, membership: { id: `member-${userId}`, roles: ['MEMBER'], groupPermissions: [], themeOverride: null } }],
     activeGroupId: 'group-a',
     defaultGroupId: null,
     colorMode: 'SYSTEM',

@@ -31,6 +31,7 @@ tags:
   - name: Activities
   - name: Bookings
   - name: Finance
+  - name: Statistics
   - name: Periods
   - name: Exports
   - name: Operations
@@ -1583,7 +1584,7 @@ paths:
       tags: [Groups]
       summary: Partially update group or membership settings
       description: |
-        `defaultTheme` requires `GROUP_ADMINISTRATION`. `defaultRoleId` requires `ROLE_MANAGEMENT` or
+        `defaultTheme` and `statisticsEnabled` require `GROUP_ADMINISTRATION`. `defaultRoleId` requires `ROLE_MANAGEMENT` or
         `GROUP_ADMINISTRATION`. The deprecated `notificationEmailsEnabled`
         compatibility field requires `GROUP_ADMINISTRATION`. Finance and booking fields require
         `GROUP_ADMINISTRATION` or `FINANCE_MANAGEMENT`.
@@ -1734,6 +1735,84 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Dashboard' }
         '403': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/statistics/members:
+    get:
+      tags: [Statistics]
+      summary: Read anonymous member activity statistics
+      description: |
+        Requires an enabled group statistics feature and effective
+        `VIEW_MEMBER_STATISTICS`. `VIEW_ALL_BOOKING_ACTIVITY` implies that
+        permission and bypasses small-cohort suppression. Otherwise category
+        and product breakdowns are suppressed when only one or two distinct
+        memberships contribute valid booked units to the ranking cohort; a
+        zero-contributor cohort returns empty breakdowns. At most 60
+        server-selected calendar buckets are returned.
+        When `range` is omitted, the server selects `CURRENT_PERIOD` if it is
+        available and `LAST_30_DAYS` otherwise; the canonical selection is in
+        response metadata.
+        For `CUSTOM`, `from` and `to` are local `YYYY-MM-DD` dates in the group
+        timezone and `to` is inclusive at the wire. The effective exclusive end
+        is capped at `generatedAt`, so current or future end dates never expose
+        a future snapshot. A range that starts in the future is rejected.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - name: range
+          in: query
+          schema: { $ref: '#/components/schemas/StatisticsRangePreset' }
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Anonymous member statistics
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MemberStatisticsDashboard' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/statistics/finance:
+    get:
+      tags: [Statistics]
+      summary: Read aggregate group finance statistics
+      description: |
+        Requires an enabled group statistics feature and effective
+        `VIEW_GROUP_STATISTICS`. Flows use ledger creation timestamps and
+        reconcile as closing = opening + booking charges - payments +
+        adjustments. Reversal ledger entries retain their booking or payment
+        flow classification and appear in the bucket of the reversal entry's
+        own creation timestamp. Overdue exposure is null while settlements are
+        disabled; otherwise it is a current `generatedAt` snapshot and does not
+        rewind with a historical chart range. At most 60 server-selected
+        calendar buckets are returned.
+        When `range` is omitted, the server selects `CURRENT_PERIOD` if it is
+        available and `LAST_30_DAYS` otherwise; the canonical selection is in
+        response metadata.
+        For `CUSTOM`, `from` and `to` are local `YYYY-MM-DD` dates in the group
+        timezone and `to` is inclusive at the wire. The effective exclusive end
+        is capped at `generatedAt`, so current or future end dates never expose
+        a future snapshot. A range that starts in the future is rejected.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - name: range
+          in: query
+          schema: { $ref: '#/components/schemas/StatisticsRangePreset' }
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Aggregate finance statistics
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceStatisticsDashboard' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/logo:
     post:
       tags: [Groups]
@@ -4857,18 +4936,21 @@ components:
         avatarUrl: { type: string }
     Group:
       type: object
-      required: [id, name, currency, defaultTheme, membership]
+      required: [id, name, currency, defaultTheme, statisticsEnabled, membership]
       properties:
         id: { type: string }
         name: { type: string }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         logoUrl: { type: string }
         defaultTheme: { $ref: '#/components/schemas/ThemeId' }
+        statisticsEnabled:
+          type: boolean
+          description: Whether the separate statistics dashboard endpoints are enabled for this group.
         membership: { $ref: '#/components/schemas/Membership' }
     GroupSettings:
       type: object
       additionalProperties: false
-      required: [defaultTheme, notificationEmailsEnabled, notificationEmailDeliveryAvailable, settlementsEnabled, defaultRoleId, ownBookingReasonMode, foreignBookingReasonMode, ownPaymentReasonMode, otherPaymentReasonMode, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
+      required: [defaultTheme, notificationEmailsEnabled, notificationEmailDeliveryAvailable, statisticsEnabled, settlementsEnabled, defaultRoleId, ownBookingReasonMode, foreignBookingReasonMode, ownPaymentReasonMode, otherPaymentReasonMode, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
       properties:
         defaultTheme: { $ref: '#/components/schemas/ThemeId' }
         notificationEmailsEnabled:
@@ -4879,6 +4961,9 @@ components:
           type: boolean
           readOnly: true
           description: Whether the running server has complete SMTP delivery configuration.
+        statisticsEnabled:
+          type: boolean
+          description: Master switch for the separate statistics dashboard endpoints.
         settlementsEnabled:
           type: boolean
           description: Whether administrators may close the unchanged technical open period and create settlement statements.
@@ -4928,6 +5013,9 @@ components:
           type: boolean
           deprecated: true
           description: Legacy compatibility field; new clients must use the dedicated notification policy endpoints.
+        statisticsEnabled:
+          type: boolean
+          description: Enables or disables the statistics endpoints; requires GROUP_ADMINISTRATION.
         settlementsEnabled:
           type: boolean
           description: Enables or disables period closing without changing periods, ledger entries, balances, or settlement history.
@@ -5287,6 +5375,7 @@ components:
         - FINANCE_MANAGEMENT
         - CATALOG_MANAGEMENT
         - VIEW_MEMBER_DIRECTORY
+        - VIEW_MEMBER_STATISTICS
         - VIEW_GROUP_STATISTICS
         - VIEW_ALL_BOOKING_ACTIVITY
         - RECORD_OWN_PAYMENT
@@ -6107,6 +6196,189 @@ components:
           type: array
           maxItems: 50
           items: { $ref: '#/components/schemas/LedgerEntry' }
+    StatisticsRangePreset:
+      type: string
+      enum: [CURRENT_PERIOD, LAST_30_DAYS, LAST_90_DAYS, LAST_12_MONTHS, ALL_TIME, CUSTOM]
+    StatisticsBucket:
+      type: string
+      enum: [DAY, WEEK, MONTH, YEAR]
+    StatisticsMeta:
+      type: object
+      additionalProperties: false
+      required: [generatedAt, timezone, preset, fromInclusive, toExclusive, bucket, currentPeriodAvailable, privacyThresholdApplied]
+      properties:
+        generatedAt: { type: string, format: date-time }
+        timezone: { type: string }
+        preset: { $ref: '#/components/schemas/StatisticsRangePreset' }
+        fromInclusive: { type: string, format: date-time }
+        toExclusive: { type: string, format: date-time }
+        bucket: { $ref: '#/components/schemas/StatisticsBucket' }
+        currentPeriodAvailable:
+          type: boolean
+          description: Whether settlements are enabled and the group currently has an open period.
+        privacyThresholdApplied:
+          type: boolean
+          description: True only when small-cohort suppression removed breakdown items.
+    MemberStatisticsSnapshot:
+      type: object
+      additionalProperties: false
+      description: Current anonymous membership composition at generatedAt; it is independent of the selected range.
+      required: [regularMembers, temporaryGuests, asOf]
+      properties:
+        regularMembers: { type: integer, format: int64, minimum: 0 }
+        temporaryGuests: { type: integer, format: int64, minimum: 0 }
+        asOf: { type: string, format: date-time }
+    MemberStatisticsSummary:
+      type: object
+      additionalProperties: false
+      required: [activeParticipants, bookingCount, validBookedUnits, cancellationRate]
+      properties:
+        activeParticipants: { type: integer, format: int64, minimum: 0 }
+        bookingCount: { type: integer, format: int64, minimum: 0 }
+        validBookedUnits: { type: integer, format: int64, minimum: 0 }
+        cancellationRate:
+          type: [number, 'null']
+          format: double
+          minimum: 0
+          maximum: 1
+          description: Null when bookingCount is zero.
+    MemberStatisticsActivityPoint:
+      type: object
+      additionalProperties: false
+      required: [periodStart, postedUnits, reversedUnits]
+      properties:
+        periodStart: { type: string, format: date-time }
+        postedUnits: { type: integer, format: int64, minimum: 0 }
+        reversedUnits: { type: integer, format: int64, minimum: 0 }
+    MemberStatisticsCategoryItem:
+      type: object
+      additionalProperties: false
+      required: [categoryId, categoryName, icon, validBookedUnits, isOther]
+      properties:
+        categoryId: { type: string }
+        categoryName: { type: string }
+        icon: { $ref: '#/components/schemas/CategoryIcon' }
+        validBookedUnits: { type: integer, format: int64, minimum: 0 }
+        isOther: { type: boolean }
+    MemberStatisticsProductItem:
+      type: object
+      additionalProperties: false
+      required: [productId, productName, categoryId, categoryName, validBookedUnits, isOther]
+      properties:
+        productId: { type: string }
+        productName: { type: string }
+        categoryId: { type: string }
+        categoryName: { type: string }
+        validBookedUnits: { type: integer, format: int64, minimum: 0 }
+        isOther: { type: boolean }
+    MemberStatisticsCategoryBreakdown:
+      type: object
+      additionalProperties: false
+      required: [suppressed, items]
+      properties:
+        suppressed: { type: boolean }
+        items:
+          type: array
+          maxItems: 7
+          items: { $ref: '#/components/schemas/MemberStatisticsCategoryItem' }
+    MemberStatisticsProductBreakdown:
+      type: object
+      additionalProperties: false
+      required: [suppressed, items]
+      properties:
+        suppressed: { type: boolean }
+        items:
+          type: array
+          maxItems: 7
+          items: { $ref: '#/components/schemas/MemberStatisticsProductItem' }
+    MemberStatisticsDashboard:
+      type: object
+      additionalProperties: false
+      required: [meta, memberSnapshot, summary, activity, topCategories, topProducts]
+      properties:
+        meta: { $ref: '#/components/schemas/StatisticsMeta' }
+        memberSnapshot: { $ref: '#/components/schemas/MemberStatisticsSnapshot' }
+        summary: { $ref: '#/components/schemas/MemberStatisticsSummary' }
+        activity:
+          type: array
+          maxItems: 60
+          items: { $ref: '#/components/schemas/MemberStatisticsActivityPoint' }
+        topCategories: { $ref: '#/components/schemas/MemberStatisticsCategoryBreakdown' }
+        topProducts: { $ref: '#/components/schemas/MemberStatisticsProductBreakdown' }
+    ReceivableStatisticsSnapshot:
+      type: object
+      additionalProperties: false
+      description: Complete-ledger account-state distribution as of meta.toExclusive.
+      required: [grossReceivableMinor, memberCreditMinor, netReceivableMinor, openAccountCount, balancedAccountCount, creditAccountCount, asOf]
+      properties:
+        grossReceivableMinor: { $ref: '#/components/schemas/MinorUnits' }
+        memberCreditMinor: { $ref: '#/components/schemas/MinorUnits' }
+        netReceivableMinor: { $ref: '#/components/schemas/MinorUnits' }
+        openAccountCount: { type: integer, format: int64, minimum: 0 }
+        balancedAccountCount: { type: integer, format: int64, minimum: 0 }
+        creditAccountCount: { type: integer, format: int64, minimum: 0 }
+        asOf: { type: string, format: date-time }
+    FinancialStatisticsFlows:
+      type: object
+      additionalProperties: false
+      required: [openingNetReceivableMinor, netBookingChargesMinor, netPaymentsMinor, netAdjustmentsMinor, closingNetReceivableMinor]
+      properties:
+        openingNetReceivableMinor: { $ref: '#/components/schemas/MinorUnits' }
+        netBookingChargesMinor: { $ref: '#/components/schemas/MinorUnits' }
+        netPaymentsMinor: { $ref: '#/components/schemas/MinorUnits' }
+        netAdjustmentsMinor: { $ref: '#/components/schemas/MinorUnits' }
+        closingNetReceivableMinor: { $ref: '#/components/schemas/MinorUnits' }
+    FinanceStatisticsActivityPoint:
+      type: object
+      additionalProperties: false
+      required: [periodStart, netBookingChargesMinor, netPaymentsMinor, netAdjustmentsMinor, closingNetReceivableMinor]
+      properties:
+        periodStart: { type: string, format: date-time }
+        netBookingChargesMinor: { $ref: '#/components/schemas/MinorUnits' }
+        netPaymentsMinor: { $ref: '#/components/schemas/MinorUnits' }
+        netAdjustmentsMinor: { $ref: '#/components/schemas/MinorUnits' }
+        closingNetReceivableMinor: { $ref: '#/components/schemas/MinorUnits' }
+    FinanceStatisticsCategoryItem:
+      type: object
+      additionalProperties: false
+      required: [categoryId, categoryName, icon, netBookingChargesMinor, isOther]
+      properties:
+        categoryId: { type: string }
+        categoryName: { type: string }
+        icon: { $ref: '#/components/schemas/CategoryIcon' }
+        netBookingChargesMinor: { $ref: '#/components/schemas/MinorUnits' }
+        isOther: { type: boolean }
+    OverdueStatisticsSnapshot:
+      type: object
+      additionalProperties: false
+      description: Current settlement debt already due before the group-local date at generatedAt; this is not a historical range-end projection.
+      required: [amountMinor, accountCount, periodCount, asOf]
+      properties:
+        amountMinor: { $ref: '#/components/schemas/MinorUnits' }
+        accountCount: { type: integer, format: int64, minimum: 0 }
+        periodCount: { type: integer, format: int64, minimum: 0 }
+        asOf: { type: string, format: date-time }
+    FinanceStatisticsDashboard:
+      type: object
+      additionalProperties: false
+      required: [meta, currency, receivableSnapshot, flows, series, categories, overdue]
+      properties:
+        meta: { $ref: '#/components/schemas/StatisticsMeta' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        receivableSnapshot: { $ref: '#/components/schemas/ReceivableStatisticsSnapshot' }
+        flows: { $ref: '#/components/schemas/FinancialStatisticsFlows' }
+        series:
+          type: array
+          maxItems: 60
+          items: { $ref: '#/components/schemas/FinanceStatisticsActivityPoint' }
+        categories:
+          type: array
+          maxItems: 7
+          items: { $ref: '#/components/schemas/FinanceStatisticsCategoryItem' }
+        overdue:
+          oneOf:
+            - $ref: '#/components/schemas/OverdueStatisticsSnapshot'
+            - type: 'null'
     Dashboard:
       type: object
       required: [account, openPeriod, recentBookings, unreadNotificationCount]

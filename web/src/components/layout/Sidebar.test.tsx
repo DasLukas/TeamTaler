@@ -16,8 +16,8 @@ vi.mock('@tanstack/react-router', () => ({
 vi.mock('@/components/brand/Brand', () => ({ Brand: () => <div>brand</div> }));
 vi.mock('@/components/auth/LogoutButton', () => ({ LogoutButton: () => <button type="button">logout</button> }));
 
-function usePermissions(permissions: PermissionKey[], systemRoles: string[] = []): void {
-  const group = { id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', effectiveGrants: permissions.map((permission) => ({ permission, scope: { type: 'GROUP' as const } })) } };
+function usePermissions(permissions: PermissionKey[], systemRoles: string[] = [], statisticsEnabled = false): void {
+  const group = { id: 'group-a', name: 'Group A', currency: 'EUR', statisticsEnabled, membership: { id: 'member-a', effectiveGrants: permissions.map((permission) => ({ permission, scope: { type: 'GROUP' as const } })) } };
   mocks.useActiveGroup.mockReturnValue({ session: { groups: [group], systemRoles }, activeGroupId: group.id, setActiveGroupId: vi.fn() });
 }
 
@@ -45,6 +45,16 @@ describe('Sidebar role navigation', () => {
     const links = screen.getAllByRole('link').map((link) => link.textContent);
     expect(links.indexOf('Katalog')).toBeLessThan(links.indexOf('Finanzen'));
     expect(links.indexOf('Finanzen')).toBeLessThan(links.indexOf('Einstellungen'));
+  });
+
+  it('shows statistics only when the group switch and one view permission are both effective', () => {
+    usePermissions(['VIEW_MEMBER_STATISTICS'], [], true);
+    const rendered = render(<Sidebar collapsed={false} onCollapsedChange={vi.fn()} />);
+    expect(screen.getByRole('link', { name: 'Statistiken' })).toHaveAttribute('href', '/statistics');
+
+    usePermissions(['VIEW_MEMBER_STATISTICS'], [], false);
+    rendered.rerender(<Sidebar collapsed={false} onCollapsedChange={vi.fn()} />);
+    expect(screen.queryByRole('link', { name: 'Statistiken' })).not.toBeInTheDocument();
   });
 
   it('shows settings to a system administrator without group administration rights', () => {

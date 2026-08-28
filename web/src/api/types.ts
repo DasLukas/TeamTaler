@@ -200,6 +200,7 @@ export type PermissionKey =
   | 'FINANCE_MANAGEMENT'
   | 'CATALOG_MANAGEMENT'
   | 'VIEW_MEMBER_DIRECTORY'
+  | 'VIEW_MEMBER_STATISTICS'
   | 'VIEW_GROUP_STATISTICS'
   | 'VIEW_ALL_BOOKING_ACTIVITY'
   | 'RECORD_OWN_PAYMENT'
@@ -217,6 +218,7 @@ export const PERMISSION_KEYS = [
   'FINANCE_MANAGEMENT',
   'CATALOG_MANAGEMENT',
   'VIEW_MEMBER_DIRECTORY',
+  'VIEW_MEMBER_STATISTICS',
   'VIEW_GROUP_STATISTICS',
   'VIEW_ALL_BOOKING_ACTIVITY',
   'RECORD_OWN_PAYMENT',
@@ -417,6 +419,7 @@ export interface Group {
   currency: string;
   logoUrl?: string;
   defaultTheme: ThemeId;
+  statisticsEnabled: boolean;
   membership?: SessionMembership;
 }
 
@@ -479,6 +482,7 @@ export interface TransactionSettings {
 /** Administrator-managed group behavior shared by one group. */
 export interface GroupSettings {
   defaultTheme: ThemeId;
+  statisticsEnabled: boolean;
   settlementsEnabled: boolean;
   notificationEmailsEnabled: boolean;
   notificationEmailDeliveryAvailable: boolean;
@@ -500,6 +504,7 @@ export interface GroupSettings {
  */
 export interface GroupSettingsUpdateInput {
   defaultTheme?: ThemeId;
+  statisticsEnabled?: boolean;
   settlementsEnabled?: boolean;
   notificationEmailsEnabled?: boolean;
   defaultRoleId?: string;
@@ -927,6 +932,153 @@ export interface CategoryTotal {
   icon: Category['icon'];
   total: Money;
   quantity?: number;
+}
+
+/** Supported server-defined statistics ranges. */
+export const STATISTICS_RANGE_VALUES = ['CURRENT_PERIOD', 'LAST_30_DAYS', 'LAST_90_DAYS', 'LAST_12_MONTHS', 'ALL_TIME', 'CUSTOM'] as const;
+
+/** One predefined or custom statistics range. */
+export type StatisticsRange = typeof STATISTICS_RANGE_VALUES[number];
+
+/** Determines whether an untrusted value is a supported statistics range. */
+export function isStatisticsRange(value: unknown): value is StatisticsRange {
+  return typeof value === 'string' && STATISTICS_RANGE_VALUES.some((range) => range === value);
+}
+
+/** Aggregation grain selected by the server for the resolved range. */
+export type StatisticsBucket = 'DAY' | 'WEEK' | 'MONTH' | 'YEAR';
+
+/** Query accepted by both statistics endpoints. */
+export interface StatisticsQuery {
+  range?: StatisticsRange;
+  from?: string;
+  to?: string;
+}
+
+/** Common provenance returned with every statistics projection. */
+export interface StatisticsMeta {
+  generatedAt: string;
+  timezone: string;
+  preset: StatisticsRange;
+  fromInclusive: string;
+  toExclusive: string;
+  bucket: StatisticsBucket;
+  privacyThresholdApplied: boolean;
+  currentPeriodAvailable: boolean;
+}
+
+/** Member population snapshot used as dashboard context. */
+export interface MemberStatisticsSnapshot {
+  regularMembers: number;
+  temporaryGuests: number;
+  asOf: string;
+}
+
+/** Headline member-activity metrics for the selected range. */
+export interface MemberStatisticsSummary {
+  activeParticipants: number;
+  bookingCount: number;
+  validBookedUnits: number;
+  cancellationRate: number | null;
+}
+
+/** One member-activity bucket. */
+export interface MemberStatisticsActivityPoint {
+  periodStart: string;
+  postedUnits: number;
+  reversedUnits: number;
+}
+
+/** One ranked category in the member statistics projection. */
+export interface MemberStatisticsCategory {
+  categoryId: string;
+  categoryName: string;
+  icon: Category['icon'];
+  validBookedUnits: number;
+  isOther: boolean;
+}
+
+/** One ranked product in the member statistics projection. */
+export interface MemberStatisticsProduct {
+  productId: string;
+  productName: string;
+  categoryId: string;
+  categoryName: string;
+  validBookedUnits: number;
+  isOther: boolean;
+}
+
+/** Privacy-aware ranked result that may suppress its item details. */
+export interface StatisticsRankedResult<Item> {
+  suppressed: boolean;
+  items: Item[];
+}
+
+/** Anonymous member-oriented statistics projection. */
+export interface MemberStatistics {
+  meta: StatisticsMeta;
+  memberSnapshot: MemberStatisticsSnapshot;
+  summary: MemberStatisticsSummary;
+  activity: MemberStatisticsActivityPoint[];
+  topCategories: StatisticsRankedResult<MemberStatisticsCategory>;
+  topProducts: StatisticsRankedResult<MemberStatisticsProduct>;
+}
+
+/** Exact consolidated receivable state at the end of a finance range. */
+export interface FinanceStatisticsReceivableSnapshot {
+  asOf: string;
+  grossReceivable: Money;
+  memberCredit: Money;
+  netReceivable: Money;
+  openAccountCount: number;
+  balancedAccountCount: number;
+  creditAccountCount: number;
+}
+
+/** Exact reconciled financial movement totals for a range. */
+export interface FinanceStatisticsFlows {
+  openingNetReceivable: Money;
+  netBookingCharges: Money;
+  netPayments: Money;
+  netAdjustments: Money;
+  closingNetReceivable: Money;
+}
+
+/** One exact finance trend bucket. */
+export interface FinanceStatisticsSeriesPoint {
+  periodStart: string;
+  netBookingCharges: Money;
+  netPayments: Money;
+  netAdjustments: Money;
+  closingNetReceivable: Money;
+}
+
+/** One category contribution to net booking charges. */
+export interface FinanceStatisticsCategory {
+  categoryId: string;
+  categoryName: string;
+  icon: Category['icon'];
+  netBookingCharges: Money;
+  isOther: boolean;
+}
+
+/** Settlement-derived overdue exposure when settlement tracking is enabled. */
+export interface FinanceStatisticsOverdue {
+  amount: Money;
+  accountCount: number;
+  periodCount: number;
+  asOf: string;
+}
+
+/** Complete administrator-oriented aggregate finance projection. */
+export interface FinanceStatistics {
+  meta: StatisticsMeta;
+  currency: string;
+  receivableSnapshot: FinanceStatisticsReceivableSnapshot;
+  flows: FinanceStatisticsFlows;
+  series: FinanceStatisticsSeriesPoint[];
+  categories: FinanceStatisticsCategory[];
+  overdue: FinanceStatisticsOverdue | null;
 }
 
 /** Dashboard data for the active group and member. */

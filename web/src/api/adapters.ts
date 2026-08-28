@@ -18,6 +18,7 @@ import type {
   InstanceCapabilities,
   LedgerEntry,
   Membership,
+  MemberStatistics,
   Notification,
   NotificationChannel,
   NotificationDestination,
@@ -37,6 +38,8 @@ import type {
   ReasonMode,
   Session,
   Settlement,
+  StatisticsBucket,
+  StatisticsMeta,
   SmtpTlsMode,
   SystemAccount,
   SystemAuditEntry,
@@ -53,7 +56,7 @@ import type {
   ThemePreference,
   User,
 } from './types';
-import { DEFAULT_ATTACHMENT_UPLOAD_MAX_BYTES, DEFAULT_MEDIA_UPLOAD_MAX_BYTES, isCategoryIcon, isColorMode, isPermissionKey, isThemeId } from './types';
+import { DEFAULT_ATTACHMENT_UPLOAD_MAX_BYTES, DEFAULT_MEDIA_UPLOAD_MAX_BYTES, isCategoryIcon, isColorMode, isPermissionKey, isStatisticsRange, isThemeId, type FinanceStatistics } from './types';
 import { formatMoney } from './money';
 import i18n from '@/i18n';
 import { defaultPaymentMethods, historicalPaymentMethodLabel, localizedPaymentMethodLabel } from '@/features/finance/paymentMethods';
@@ -487,6 +490,7 @@ export function adaptGroupSettings(input: unknown): GroupSettings {
   const otherPaymentReasonMode = reasonMode(source.otherPaymentReasonMode, source.otherPaymentReasonRequired, 'OPTIONAL');
   return {
     defaultTheme: isThemeId(source.defaultTheme) ? source.defaultTheme : 'TEAMTALER',
+    statisticsEnabled: source.statisticsEnabled === true,
     settlementsEnabled: source.settlementsEnabled === true,
     notificationEmailsEnabled: source.notificationEmailsEnabled === true,
     notificationEmailDeliveryAvailable: source.notificationEmailDeliveryAvailable === true,
@@ -730,6 +734,7 @@ export function adaptSession(input: unknown): Session {
       currency: String(group.currency || 'EUR'),
       logoUrl: typeof group.logoUrl === 'string' ? group.logoUrl : undefined,
       defaultTheme: isThemeId(group.defaultTheme) ? group.defaultTheme : 'TEAMTALER',
+      statisticsEnabled: group.statisticsEnabled === true,
       membership: membership ? {
         id: String(membership.id),
         roles: [...(membership.roles as GroupRole[] ?? []), 'MEMBER'],
@@ -1094,6 +1099,146 @@ export function adaptDashboard(input: unknown): Dashboard {
       return { categoryId: String(statistic.categoryId), categoryName: name, icon: categoryIcon(statistic.icon), quantity: Number(statistic.quantity ?? 0), total: money(statistic.netMinor, account.currency) };
     }),
     recentBookings: (source.recentBookings as unknown[] ?? []).map((entry) => adaptBooking(entry)),
+  };
+}
+
+/** Adapts statistics provenance shared by member and finance projections. */
+function adaptStatisticsMeta(input: unknown): StatisticsMeta {
+  const source = asRecord(input);
+  const bucket: StatisticsBucket = source.bucket === 'WEEK' || source.bucket === 'MONTH' || source.bucket === 'YEAR' ? source.bucket : 'DAY';
+  return {
+    generatedAt: String(source.generatedAt ?? ''),
+    timezone: String(source.timezone ?? 'UTC'),
+    preset: isStatisticsRange(source.preset) ? source.preset : 'LAST_30_DAYS',
+    fromInclusive: String(source.fromInclusive ?? ''),
+    toExclusive: String(source.toExclusive ?? ''),
+    bucket,
+    privacyThresholdApplied: source.privacyThresholdApplied === true,
+    currentPeriodAvailable: source.currentPeriodAvailable === true,
+  };
+}
+
+/**
+ * Adapts the exact member statistics wire contract.
+ *
+ * @param input - Member statistics response from the group endpoint.
+ * @returns Canonical anonymous member activity statistics.
+ */
+export function adaptMemberStatistics(input: unknown): MemberStatistics {
+  const source = asRecord(input);
+  const memberSnapshot = asRecord(source.memberSnapshot);
+  const summary = asRecord(source.summary);
+  const topCategories = asRecord(source.topCategories);
+  const topProducts = asRecord(source.topProducts);
+  return {
+    meta: adaptStatisticsMeta(source.meta),
+    memberSnapshot: {
+      regularMembers: Number(memberSnapshot.regularMembers ?? 0),
+      temporaryGuests: Number(memberSnapshot.temporaryGuests ?? 0),
+      asOf: String(memberSnapshot.asOf ?? ''),
+    },
+    summary: {
+      activeParticipants: Number(summary.activeParticipants ?? 0),
+      bookingCount: Number(summary.bookingCount ?? 0),
+      validBookedUnits: Number(summary.validBookedUnits ?? 0),
+      cancellationRate: typeof summary.cancellationRate === 'number' ? summary.cancellationRate : null,
+    },
+    activity: (Array.isArray(source.activity) ? source.activity : []).map((entry) => {
+      const point = asRecord(entry);
+      return {
+        periodStart: String(point.periodStart ?? ''),
+        postedUnits: Number(point.postedUnits ?? 0),
+        reversedUnits: Number(point.reversedUnits ?? 0),
+      };
+    }),
+    topCategories: {
+      suppressed: topCategories.suppressed === true,
+      items: (Array.isArray(topCategories.items) ? topCategories.items : []).map((entry) => {
+        const item = asRecord(entry);
+        return {
+          categoryId: String(item.categoryId ?? ''),
+          categoryName: String(item.categoryName ?? ''),
+          icon: categoryIcon(item.icon),
+          validBookedUnits: Number(item.validBookedUnits ?? 0),
+          isOther: item.isOther === true,
+        };
+      }),
+    },
+    topProducts: {
+      suppressed: topProducts.suppressed === true,
+      items: (Array.isArray(topProducts.items) ? topProducts.items : []).map((entry) => {
+        const item = asRecord(entry);
+        return {
+          productId: String(item.productId ?? ''),
+          productName: String(item.productName ?? ''),
+          categoryId: String(item.categoryId ?? ''),
+          categoryName: String(item.categoryName ?? ''),
+          validBookedUnits: Number(item.validBookedUnits ?? 0),
+          isOther: item.isOther === true,
+        };
+      }),
+    },
+  };
+}
+
+/**
+ * Adapts the exact finance statistics wire contract without converting money
+ * to floating-point values.
+ *
+ * @param input - Finance statistics response from the group endpoint.
+ * @returns Canonical aggregate finance statistics with exact money values.
+ */
+export function adaptFinanceStatistics(input: unknown): FinanceStatistics {
+  const source = asRecord(input);
+  const currency = String(source.currency || 'EUR');
+  const snapshot = asRecord(source.receivableSnapshot);
+  const flows = asRecord(source.flows);
+  const overdue = source.overdue && typeof source.overdue === 'object' ? asRecord(source.overdue) : null;
+  return {
+    meta: adaptStatisticsMeta(source.meta),
+    currency,
+    receivableSnapshot: {
+      asOf: String(snapshot.asOf ?? ''),
+      grossReceivable: money(snapshot.grossReceivableMinor, currency),
+      memberCredit: money(snapshot.memberCreditMinor, currency),
+      netReceivable: money(snapshot.netReceivableMinor, currency),
+      openAccountCount: Number(snapshot.openAccountCount ?? 0),
+      balancedAccountCount: Number(snapshot.balancedAccountCount ?? 0),
+      creditAccountCount: Number(snapshot.creditAccountCount ?? 0),
+    },
+    flows: {
+      openingNetReceivable: money(flows.openingNetReceivableMinor, currency),
+      netBookingCharges: money(flows.netBookingChargesMinor, currency),
+      netPayments: money(flows.netPaymentsMinor, currency),
+      netAdjustments: money(flows.netAdjustmentsMinor, currency),
+      closingNetReceivable: money(flows.closingNetReceivableMinor, currency),
+    },
+    series: (Array.isArray(source.series) ? source.series : []).map((entry) => {
+      const point = asRecord(entry);
+      return {
+        periodStart: String(point.periodStart ?? ''),
+        netBookingCharges: money(point.netBookingChargesMinor, currency),
+        netPayments: money(point.netPaymentsMinor, currency),
+        netAdjustments: money(point.netAdjustmentsMinor, currency),
+        closingNetReceivable: money(point.closingNetReceivableMinor, currency),
+      };
+    }),
+    categories: (Array.isArray(source.categories) ? source.categories : []).map((entry) => {
+      const item = asRecord(entry);
+      return {
+        categoryId: String(item.categoryId ?? ''),
+        categoryName: String(item.categoryName ?? ''),
+        icon: categoryIcon(item.icon),
+        netBookingCharges: money(item.netBookingChargesMinor, currency),
+        isOther: item.isOther === true,
+      };
+    }),
+    overdue: overdue ? {
+      amount: money(overdue.amountMinor, currency),
+      accountCount: Number(overdue.accountCount ?? 0),
+      periodCount: Number(overdue.periodCount ?? 0),
+      asOf: String(overdue.asOf ?? ''),
+    } : null,
   };
 }
 

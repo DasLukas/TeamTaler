@@ -4,6 +4,24 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+### Added
+
+- An optional group statistics workspace with independently authorized member-activity and aggregate financial views, shareable date-range state, server-selected calendar granularity, and responsive Recharts visualizations with exact-data table alternatives.
+- Anonymous member KPIs for current regular-member and temporary-guest composition, active participants, booking and reversal activity, valid booked units, cancellation rate, and ranked category and product demand.
+- Reconciled financial KPIs for receivable composition, opening and closing receivables, booking charges, payments, adjustments, category contributions, and current overdue settlement exposure.
+
+### Changed
+
+- `VIEW_MEMBER_STATISTICS` now controls the member-oriented statistics view. The stronger `VIEW_ALL_BOOKING_ACTIVITY` permission implies it, while `VIEW_GROUP_STATISTICS` independently controls the financial view and continues to protect the overview's aggregate group receivable.
+- Custom statistics ranges use inclusive group-local `YYYY-MM-DD` bounds at the API boundary and half-open instants internally; an upper bound covering today or the future is capped at the response generation instant. Preset ranges and a maximum of 60 day, week, month, or year buckets are resolved by the server in the group's configured time zone.
+- New groups grant member statistics to the editable `Mitglied` starter role. Upgraded groups retain their direct role grants; when the disabled-by-default feature is enabled, existing `VIEW_ALL_BOOKING_ACTIVITY` holders receive the member view by implication and other roles require a direct grant.
+
+### Security
+
+- Statistics are disabled by default per group and every statistics endpoint independently enforces both the group-wide switch and its current view permission.
+- Member statistics contain no member identifiers or money. Category and product breakdowns are suppressed when only one or two memberships contribute valid bookings, except for callers already authorized to read all identified booking activity.
+- Financial amounts remain exact signed 64-bit minor units serialized as decimal strings; frontend route and tab visibility remain presentation controls rather than authorization boundaries.
+
 ## [1.2.0] - 2026-08-28
 
 ### Added

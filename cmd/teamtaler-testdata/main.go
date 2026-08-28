@@ -508,7 +508,7 @@ func configureGroup(ctx context.Context, service groups.Service, actor domain.Pr
 	}
 	bookingReasons := append([]domain.ConfigurableItem(nil), bookingReasonSeeds...)
 	paymentReasons := append([]domain.ConfigurableItem(nil), paymentReasonSeeds...)
-	if _, err := service.UpdateSettings(ctx, actor, membership, groups.SettingsUpdate{NotificationEmailsEnabled: &enabled, SettlementsEnabled: &enabled, OwnBookingReasonMode: &optional, ForeignBookingReasonMode: &required, OwnPaymentReasonMode: &required, OtherPaymentReasonMode: &required, PaymentMethods: &methods, BookingReasons: &bookingReasons, PaymentReasons: &paymentReasons}); err != nil {
+	if _, err := service.UpdateSettings(ctx, actor, membership, groups.SettingsUpdate{NotificationEmailsEnabled: &enabled, StatisticsEnabled: &enabled, SettlementsEnabled: &enabled, OwnBookingReasonMode: &optional, ForeignBookingReasonMode: &required, OwnPaymentReasonMode: &required, OtherPaymentReasonMode: &required, PaymentMethods: &methods, BookingReasons: &bookingReasons, PaymentReasons: &paymentReasons}); err != nil {
 		return fmt.Errorf("configure features for group %q: %w", membership.GroupID, err)
 	}
 	return nil

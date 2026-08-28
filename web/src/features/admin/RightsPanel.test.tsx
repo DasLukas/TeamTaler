@@ -103,8 +103,8 @@ describe('RightsPanel role definitions', () => {
     ]);
     renderPanel();
 
-    expect(await screen.findByText('Zeigt den aktuellen offenen Nettosaldo der Gruppe.')).toBeVisible();
-    expect(screen.getByText('Gruppensaldo')).toBeVisible();
+    expect(await screen.findByText('Zeigt aggregierte Finanzkennzahlen und den offenen Nettosaldo der Gruppe.')).toBeVisible();
+    expect(screen.getByText('Finanzstatistiken')).toBeVisible();
     expect(screen.getByText('Erlaubt Einzahlungen auf das eigene Konto.')).toBeVisible();
     expect(screen.getByText('Erlaubt Buchungen auf das eigene Konto.')).toBeVisible();
     expect(screen.getByText('Erlaubt Stornos von selbst erstellten oder dem eigenen Konto zugewiesenen Buchungen.')).toBeVisible();
@@ -118,18 +118,21 @@ describe('RightsPanel role definitions', () => {
 
     const administration = await screen.findByRole('region', { name: 'Verwaltung & Mitglieder' });
     const bookings = screen.getByRole('region', { name: 'Buchungen & Aktivitäten' });
+    const statistics = screen.getByRole('region', { name: 'Statistiken & Auswertungen' });
     const finance = screen.getByRole('region', { name: 'Finanzen & Auswertungen' });
     const catalog = screen.getByRole('region', { name: 'Katalog' });
 
     expect(screen.getAllByRole('heading', { level: 4 }).map((heading) => heading.textContent)).toEqual([
       'Verwaltung & Mitglieder',
       'Buchungen & Aktivitäten',
+      'Statistiken & Auswertungen',
       'Finanzen & Auswertungen',
       'Katalog',
     ]);
     expect(within(administration).getAllByRole('switch')).toHaveLength(3);
     expect(within(bookings).getAllByRole('switch')).toHaveLength(6);
-    expect(within(finance).getAllByRole('switch')).toHaveLength(3);
+    expect(within(statistics).getAllByRole('switch')).toHaveLength(2);
+    expect(within(finance).getAllByRole('switch')).toHaveLength(2);
     expect(within(catalog).getAllByRole('switch')).toHaveLength(1);
     expect(screen.getAllByRole('switch')).toHaveLength(PERMISSION_KEYS.length - 1);
   });

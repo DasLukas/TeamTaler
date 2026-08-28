@@ -315,6 +315,7 @@ export function ActivitiesPage() {
     ['ledger', activeGroupId],
     ['settlements', activeGroupId],
     ['account-summaries', activeGroupId],
+    ['statistics', activeGroupId],
   ].map((queryKey) => queryClient.invalidateQueries({ queryKey })));
   const reverseMutation = useMutation({
     mutationFn: async () => {

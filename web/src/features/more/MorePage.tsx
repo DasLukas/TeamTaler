@@ -3,10 +3,11 @@ import Boxes from 'lucide-react/dist/esm/icons/boxes';
 import Bell from 'lucide-react/dist/esm/icons/bell';
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
 import CircleUserRound from 'lucide-react/dist/esm/icons/circle-user-round';
+import ChartNoAxesCombined from 'lucide-react/dist/esm/icons/chart-no-axes-combined';
 import Settings from 'lucide-react/dist/esm/icons/settings';
 import WalletCards from 'lucide-react/dist/esm/icons/wallet-cards';
 import { useTranslation } from 'react-i18next';
-import { hasGroupCapability } from '@/app/groupCapabilities';
+import { canOpenStatistics, hasGroupCapability } from '@/app/groupCapabilities';
 import { memberPaths } from '@/app/paths';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { isSystemAdministrator } from '@/app/useSession';
@@ -18,10 +19,11 @@ import { NotificationBadge } from '@/features/notifications/NotificationBadge';
 import { useUnreadNotificationCount } from '@/features/notifications/NotificationSummaryContext';
 
 const links = [
-  { to: memberPaths.finance, labelKey: 'nav.finance', icon: WalletCards, capability: 'finance' },
-  { to: memberPaths.catalog, labelKey: 'nav.catalog', icon: Boxes, capability: 'catalog' },
-  { to: '/admin', labelKey: 'nav.administration', icon: Settings, capability: 'administration' },
-  { to: '/account', labelKey: 'nav.account', icon: CircleUserRound, capability: null },
+  { to: memberPaths.statistics, labelKey: 'nav.statistics', icon: ChartNoAxesCombined, capability: null, statistics: true },
+  { to: memberPaths.finance, labelKey: 'nav.finance', icon: WalletCards, capability: 'finance', statistics: false },
+  { to: memberPaths.catalog, labelKey: 'nav.catalog', icon: Boxes, capability: 'catalog', statistics: false },
+  { to: '/admin', labelKey: 'nav.administration', icon: Settings, capability: 'administration', statistics: false },
+  { to: '/account', labelKey: 'nav.account', icon: CircleUserRound, capability: null, statistics: false },
 ] as const;
 
 /**
@@ -42,7 +44,7 @@ export function MorePage() {
       </section>
       <nav aria-label={t('nav.additional')} className={styles.links}>
         <Link to={memberPaths.notifications}><Bell aria-hidden="true" size={23} /><span>{t('nav.notifications')}</span><span className={styles.end}><NotificationBadge count={unreadCount} /><ChevronRight aria-hidden="true" size={20} /></span></Link>
-        {links.filter((item) => item.capability === null || hasGroupCapability(grants, item.capability) || item.to === '/admin' && isSystemAdministrator(session)).map(({ to, labelKey, icon: Icon }) => <Link key={to} to={to}><Icon aria-hidden="true" size={23} /><span>{t(labelKey)}</span><ChevronRight aria-hidden="true" size={20} /></Link>)}
+        {links.filter((item) => item.statistics ? canOpenStatistics(activeGroup) : item.capability === null || hasGroupCapability(grants, item.capability) || item.to === '/admin' && isSystemAdministrator(session)).map(({ to, labelKey, icon: Icon }) => <Link key={to} to={to}><Icon aria-hidden="true" size={23} /><span>{t(labelKey)}</span><ChevronRight aria-hidden="true" size={20} /></Link>)}
         <LogoutButton className={styles.logout} showChevron />
       </nav>
     </Page>

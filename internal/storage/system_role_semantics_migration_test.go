@@ -67,7 +67,7 @@ func TestSystemRoleSemanticsMigrationNormalizesPresetMetadataAndSeedsNewGroups(t
 		{id: "role:FINANCE_MANAGER:group-new", name: "Finanzverwaltung", description: "Standardrolle für Finanzverwaltung", grants: "FINANCE_MANAGEMENT,RECORD_OWN_PAYMENT,VIEW_ALL_BOOKING_ACTIVITY,VIEW_GROUP_STATISTICS,VIEW_MEMBER_DIRECTORY"},
 		{id: "role:GROUP_ADMINISTRATOR:group-new", presetKey: sql.NullString{String: "GROUP_ADMINISTRATOR", Valid: true}, name: "Group administrator", description: "Standardrolle für Administratorrolle mit vollständigem Zugriff auf die Gruppe", grants: "GROUP_ADMINISTRATION,MEMBER_MANAGEMENT,ROLE_MANAGEMENT,VIEW_MEMBER_DIRECTORY"},
 		{id: "role:GUEST:group-new", name: "Gast", description: "Standardrolle für Gäste", grants: "CREATE_OWN_BOOKING"},
-		{id: "role:MEMBER:group-new", name: "Mitglied", description: "Standardrolle für reguläre Gruppenmitglieder", grants: "CREATE_OWN_BOOKING,VIEW_MEMBER_DIRECTORY"},
+		{id: "role:MEMBER:group-new", name: "Mitglied", description: "Standardrolle für reguläre Gruppenmitglieder", grants: "CREATE_OWN_BOOKING,VIEW_MEMBER_DIRECTORY,VIEW_MEMBER_STATISTICS"},
 	}
 	rows, err := db.QueryContext(ctx, `SELECT id,preset_key,name,description FROM roles WHERE group_id='group-new' ORDER BY id`)
 	if err != nil {

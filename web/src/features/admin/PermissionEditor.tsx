@@ -6,7 +6,7 @@ import { effectivePermissionKeys } from '@/app/permissions';
 import { Toggle } from '@/components/ui/Toggle';
 import styles from './RightsPanel.module.css';
 
-type PermissionGroupKey = 'administration' | 'bookings' | 'finance' | 'catalog';
+type PermissionGroupKey = 'administration' | 'bookings' | 'statistics' | 'finance' | 'catalog';
 
 const PERMISSION_GROUPS: ReadonlyArray<{ key: PermissionGroupKey; permissions: readonly PermissionKey[] }> = [
   {
@@ -18,8 +18,12 @@ const PERMISSION_GROUPS: ReadonlyArray<{ key: PermissionGroupKey; permissions: r
     permissions: ['CREATE_OWN_BOOKING', 'BOOK_FOR_OTHERS', 'BOOK_FOR_GUESTS', 'VOID_OWN_BOOKING', 'VOID_ANY_BOOKING', 'VIEW_ALL_BOOKING_ACTIVITY'],
   },
   {
+    key: 'statistics',
+    permissions: ['VIEW_MEMBER_STATISTICS', 'VIEW_GROUP_STATISTICS'],
+  },
+  {
     key: 'finance',
-    permissions: ['FINANCE_MANAGEMENT', 'RECORD_OWN_PAYMENT', 'VIEW_GROUP_STATISTICS'],
+    permissions: ['FINANCE_MANAGEMENT', 'RECORD_OWN_PAYMENT'],
   },
   {
     key: 'catalog',

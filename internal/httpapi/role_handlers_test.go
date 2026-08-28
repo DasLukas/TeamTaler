@@ -32,8 +32,8 @@ func TestHandlePermissionDefinitionsReturnsStableArrayMetadata(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &definitions); err != nil {
 		t.Fatalf("decode permission definitions: %v", err)
 	}
-	if len(definitions) != 14 {
-		t.Fatalf("permission definition count = %d, want 14", len(definitions))
+	if len(definitions) != 15 {
+		t.Fatalf("permission definition count = %d, want 15", len(definitions))
 	}
 	for _, definition := range definitions {
 		if definition.Implies == nil || len(definition.AllowedScopes) != 1 || definition.AllowedScopes[0] != domain.PermissionScopeGroup {

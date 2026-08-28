@@ -6,12 +6,13 @@ import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left';
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
 import CircleUserRound from 'lucide-react/dist/esm/icons/circle-user-round';
 import Clock3 from 'lucide-react/dist/esm/icons/clock-3';
+import ChartNoAxesCombined from 'lucide-react/dist/esm/icons/chart-no-axes-combined';
 import Home from 'lucide-react/dist/esm/icons/home';
 import Settings from 'lucide-react/dist/esm/icons/settings';
 import WalletCards from 'lucide-react/dist/esm/icons/wallet-cards';
 import { useTranslation } from 'react-i18next';
 import { memberPaths } from '@/app/paths';
-import { canOpenBooking, hasGroupCapability } from '@/app/groupCapabilities';
+import { canOpenBooking, canOpenStatistics, hasGroupCapability } from '@/app/groupCapabilities';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { isSystemAdministrator, useInstanceCapabilities } from '@/app/useSession';
 import { Brand } from '@/components/brand/Brand';
@@ -25,6 +26,7 @@ const primaryNavigation = [
   { to: memberPaths.overview, key: 'overview', icon: Home },
   { to: memberPaths.booking, key: 'book', icon: BookOpenCheck },
   { to: '/activities', key: 'activities', icon: Clock3 },
+  { to: memberPaths.statistics, key: 'statistics', icon: ChartNoAxesCombined },
   { to: memberPaths.catalog, key: 'catalog', icon: Boxes },
   { to: memberPaths.finance, key: 'finance', icon: WalletCards },
   { to: '/admin', key: 'administration', icon: Settings },
@@ -53,6 +55,7 @@ export function Sidebar({ collapsed, onCollapsedChange, onNavigate }: SidebarPro
   const canManageFinance = hasGroupCapability(grants, 'finance');
   const canManageAdministration = hasGroupCapability(grants, 'administration') || isSystemAdministrator(session);
   const canBook = canOpenBooking(grants);
+  const canViewStatistics = activeGroup ? canOpenStatistics(activeGroup) : false;
   const unreadCount = useUnreadNotificationCount();
 
   return (
@@ -77,6 +80,7 @@ export function Sidebar({ collapsed, onCollapsedChange, onNavigate }: SidebarPro
       <nav aria-label={t('nav.primary')} className={styles.nav}>
         {primaryNavigation
           .filter((item) => item.key !== 'book' || canBook)
+          .filter((item) => item.key !== 'statistics' || canViewStatistics)
           .filter((item) => item.key !== 'catalog' || canManageCatalog)
           .filter((item) => item.key !== 'finance' || canManageFinance)
           .filter((item) => item.key !== 'administration' || canManageAdministration)

@@ -41,7 +41,7 @@ import type {
   ReasonMode,
   Session,
 } from '@/api/types';
-import { isCategoryIcon, isColorMode, isThemeId } from '@/api/types';
+import { isCategoryIcon, isColorMode, isStatisticsRange, isThemeId } from '@/api/types';
 import { can } from '@/app/permissions';
 import { MAX_PRODUCT_PRICE_MINOR } from '@/api/money';
 import {
@@ -50,7 +50,9 @@ import {
   demoBookings,
   demoCategories,
   demoDashboard,
+  demoFinanceStatisticsWire,
   demoLedger,
+  demoMemberStatisticsWire,
   demoMembers,
   demoNotifications,
   demoPayments,
@@ -84,6 +86,8 @@ interface DemoActivityReversal {
 
 const DEMO_ROUTE_POLICIES: readonly DemoRoutePolicy[] = [
   { methods: ['GET', 'PATCH'], resource: /^settings$/, anyOf: ['GROUP_ADMINISTRATION', 'MEMBER_MANAGEMENT', 'ROLE_MANAGEMENT', 'FINANCE_MANAGEMENT'] },
+  { methods: ['GET'], resource: /^statistics\/members$/, anyOf: ['VIEW_MEMBER_STATISTICS'] },
+  { methods: ['GET'], resource: /^statistics\/finance$/, anyOf: ['VIEW_GROUP_STATISTICS'] },
   { methods: ['POST', 'DELETE'], resource: /^logo$/, anyOf: ['GROUP_ADMINISTRATION'] },
   { methods: ['GET'], resource: /^members$/, anyOf: ['VIEW_MEMBER_DIRECTORY'] },
   { methods: ['PATCH', 'DELETE'], resource: /^members\/[^/]+$/, anyOf: ['MEMBER_MANAGEMENT'] },
@@ -263,6 +267,7 @@ export class DemoTransport {
   private invitationTokens = new Map<string, string>();
   private groupSettings: GroupSettings = {
     defaultTheme: 'TEAMTALER',
+    statisticsEnabled: true,
     settlementsEnabled: false,
     notificationEmailsEnabled: false,
     notificationEmailDeliveryAvailable: true,
@@ -399,10 +404,67 @@ export class DemoTransport {
     const [, groupId, resource] = groupMatch;
     this.authorizeGroupRoute(groupId, resource, method);
 
+    if ((resource === 'statistics/members' || resource === 'statistics/finance') && !this.groupSettings.statisticsEnabled) {
+      throw new Error('Statistics are disabled for this group.');
+    }
+
+    if ((resource === 'statistics/members' || resource === 'statistics/finance') && method === 'GET') {
+      const currentPeriodAvailable = this.groupSettings.settlementsEnabled && this.periods.some((period) => period.status === 'OPEN');
+      const requestedRange = requestUrl.searchParams.get('range');
+      if (requestedRange !== null && !isStatisticsRange(requestedRange)) throw new Error('The statistics range is not supported.');
+      const preset = isStatisticsRange(requestedRange)
+        ? requestedRange
+        : currentPeriodAvailable ? 'CURRENT_PERIOD' : 'LAST_30_DAYS';
+      if (preset === 'CURRENT_PERIOD' && !currentPeriodAvailable) throw new Error('The current settlement period is not available.');
+      const customFrom = requestUrl.searchParams.get('from');
+      const customTo = requestUrl.searchParams.get('to');
+      if (preset === 'CUSTOM' && (!/^\d{4}-\d{2}-\d{2}$/.test(customFrom ?? '') || !/^\d{4}-\d{2}-\d{2}$/.test(customTo ?? '') || String(customFrom) > String(customTo))) {
+        throw new Error('A valid inclusive custom date range is required.');
+      }
+      if (preset !== 'CUSTOM' && (customFrom !== null || customTo !== null)) throw new Error('Custom dates require the CUSTOM range.');
+      if (preset === 'CUSTOM' && String(customFrom) > '2026-08-28') throw new Error('The custom range must start before the generated time.');
+      const endDate = new Date(`${customTo ?? '2026-08-28'}T12:00:00Z`);
+      endDate.setUTCDate(endDate.getUTCDate() + 1);
+      const presetStart: Record<string, string> = {
+        CURRENT_PERIOD: '2026-08-01',
+        LAST_30_DAYS: '2026-07-30',
+        LAST_90_DAYS: '2026-05-31',
+        LAST_12_MONTHS: '2025-09-01',
+        ALL_TIME: '2024-01-01',
+      };
+      const fromDate = preset === 'CUSTOM' ? String(customFrom) : presetStart[preset];
+      const customEndsBeforeToday = preset === 'CUSTOM' && String(customTo) < '2026-08-28';
+      const toExclusiveDate = customEndsBeforeToday ? endDate.toISOString().slice(0, 10) : '2026-08-28';
+      const endsAtGeneratedTime = !customEndsBeforeToday;
+      const daySpan = Math.ceil((Date.parse(`${toExclusiveDate}T12:00:00Z`) - Date.parse(`${fromDate}T12:00:00Z`)) / 86_400_000) + (endsAtGeneratedTime ? 1 : 0);
+      const fromCalendar = new Date(`${fromDate}T12:00:00Z`);
+      const toCalendar = new Date(`${toExclusiveDate}T12:00:00Z`);
+      const calendarMonths = (toCalendar.getUTCFullYear() - fromCalendar.getUTCFullYear()) * 12 + toCalendar.getUTCMonth() - fromCalendar.getUTCMonth() + 1;
+      const bucket = preset === 'LAST_30_DAYS' ? 'DAY'
+        : preset === 'LAST_90_DAYS' ? 'WEEK'
+        : preset === 'LAST_12_MONTHS' ? 'MONTH'
+        : daySpan <= 45 ? 'DAY'
+        : daySpan <= 400 ? 'WEEK'
+        : calendarMonths <= 60 ? 'MONTH'
+        : 'YEAR';
+      const meta = {
+        ...demoMemberStatisticsWire.meta,
+        generatedAt: demoMemberStatisticsWire.meta.generatedAt,
+        preset,
+        fromInclusive: `${fromDate}T00:00:00${preset === 'ALL_TIME' ? '+01:00' : '+02:00'}`,
+        toExclusive: endsAtGeneratedTime ? demoMemberStatisticsWire.meta.generatedAt : `${toExclusiveDate}T00:00:00+02:00`,
+        bucket,
+        currentPeriodAvailable,
+      };
+      const projection = resource === 'statistics/members' ? demoMemberStatisticsWire : demoFinanceStatisticsWire;
+      return clone({ ...projection, meta }) as T;
+    }
+
     if (resource === 'settings' && method === 'GET') return clone(this.groupSettings) as T;
     if (resource === 'settings' && method === 'PATCH') {
       const update = body as GroupSettingsUpdateInput;
       const updatesDefaultTheme = update.defaultTheme !== undefined;
+      const updatesStatistics = update.statisticsEnabled !== undefined;
       const updatesSettlements = update.settlementsEnabled !== undefined;
       const updatesNotificationEmails = update.notificationEmailsEnabled !== undefined;
       const updatesDefaultRole = update.defaultRoleId !== undefined;
@@ -416,7 +478,7 @@ export class DemoTransport {
         || update.paymentMethods !== undefined
         || update.bookingReasons !== undefined
         || update.paymentReasons !== undefined;
-      if (!updatesDefaultTheme && !updatesSettlements && !updatesNotificationEmails && !updatesDefaultRole && !updatesTransactionSettings) throw new Error('At least one group setting is required.');
+      if (!updatesDefaultTheme && !updatesStatistics && !updatesSettlements && !updatesNotificationEmails && !updatesDefaultRole && !updatesTransactionSettings) throw new Error('At least one group setting is required.');
       if (updatesDefaultTheme) {
         this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
         if (!isThemeId(update.defaultTheme)) throw new Error('The default theme is not supported.');
@@ -425,8 +487,10 @@ export class DemoTransport {
         this.requireAnyPermission(groupId, ['ROLE_MANAGEMENT', 'GROUP_ADMINISTRATION']);
       }
       if (updatesNotificationEmails) this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
+      if (updatesStatistics) this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
       if (updatesSettlements || updatesTransactionSettings) this.requireAnyPermission(groupId, ['GROUP_ADMINISTRATION', 'FINANCE_MANAGEMENT']);
       if (updatesSettlements && typeof update.settlementsEnabled !== 'boolean') throw new Error('Settlement availability must be a boolean.');
+      if (updatesStatistics && typeof update.statisticsEnabled !== 'boolean') throw new Error('Statistics availability must be a boolean.');
       if (updatesNotificationEmails && typeof update.notificationEmailsEnabled !== 'boolean') throw new Error('Notification email delivery must be a boolean.');
       const submittedReasonModes = [update.ownBookingReasonMode, update.foreignBookingReasonMode, update.ownPaymentReasonMode, update.otherPaymentReasonMode].filter((value) => value !== undefined);
       if (submittedReasonModes.some((value) => value !== 'OFF' && value !== 'OPTIONAL' && value !== 'REQUIRED')) throw new Error('Reason modes must be OFF, OPTIONAL, or REQUIRED.');
@@ -454,6 +518,7 @@ export class DemoTransport {
       this.groupSettings = {
         ...this.groupSettings,
         ...(updatesDefaultTheme ? { defaultTheme: update.defaultTheme as GroupSettings['defaultTheme'] } : {}),
+        ...(updatesStatistics ? { statisticsEnabled: update.statisticsEnabled as boolean } : {}),
         ...(updatesSettlements ? { settlementsEnabled: update.settlementsEnabled as boolean } : {}),
         ...(updatesNotificationEmails ? { notificationEmailsEnabled: update.notificationEmailsEnabled as boolean } : {}),
         ...(updatesDefaultRole ? { defaultRoleId: update.defaultRoleId as string } : {}),
@@ -471,6 +536,10 @@ export class DemoTransport {
       if (updatesDefaultTheme) {
         const group = this.session.groups.find((candidate) => candidate.id === groupId);
         if (group) group.defaultTheme = this.groupSettings.defaultTheme;
+      }
+      if (updatesStatistics) {
+        const group = this.session.groups.find((candidate) => candidate.id === groupId);
+        if (group) group.statisticsEnabled = this.groupSettings.statisticsEnabled;
       }
       return clone(this.groupSettings) as T;
     }

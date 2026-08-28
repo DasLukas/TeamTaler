@@ -21,6 +21,7 @@ const items = [
 const overflowPaths = new Set<string>([
   memberPaths.more,
   memberPaths.notifications,
+  memberPaths.statistics,
   memberPaths.finance,
   memberPaths.catalog,
   '/admin',

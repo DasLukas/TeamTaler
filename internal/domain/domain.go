@@ -91,7 +91,9 @@ const (
 	PermissionCatalogManagement PermissionKey = "CATALOG_MANAGEMENT"
 	// PermissionViewMemberDirectory permits reading the group's member directory.
 	PermissionViewMemberDirectory PermissionKey = "VIEW_MEMBER_DIRECTORY"
-	// PermissionViewGroupStatistics permits reading the consolidated group balance.
+	// PermissionViewMemberStatistics permits reading anonymized member activity aggregates.
+	PermissionViewMemberStatistics PermissionKey = "VIEW_MEMBER_STATISTICS"
+	// PermissionViewGroupStatistics permits reading aggregate group financial statistics.
 	PermissionViewGroupStatistics PermissionKey = "VIEW_GROUP_STATISTICS"
 	// PermissionViewAllBookingActivity permits viewing every identified group booking in the activity feed.
 	PermissionViewAllBookingActivity PermissionKey = "VIEW_ALL_BOOKING_ACTIVITY"
@@ -304,12 +306,13 @@ const (
 
 // Group is the top-level isolation and accounting boundary.
 type Group struct {
-	ID           string     `json:"id"`
-	Name         string     `json:"name"`
-	Currency     string     `json:"currency"`
-	LogoURL      string     `json:"logoUrl,omitempty"`
-	DefaultTheme ThemeID    `json:"defaultTheme"`
-	Membership   Membership `json:"membership"`
+	ID                string     `json:"id"`
+	Name              string     `json:"name"`
+	Currency          string     `json:"currency"`
+	LogoURL           string     `json:"logoUrl,omitempty"`
+	DefaultTheme      ThemeID    `json:"defaultTheme"`
+	StatisticsEnabled bool       `json:"statisticsEnabled"`
+	Membership        Membership `json:"membership"`
 }
 
 // ReasonMode controls whether a transaction reason is hidden, optional, or
@@ -376,6 +379,7 @@ func (mode AttachmentMode) Required() bool { return mode == AttachmentModeRequir
 type GroupSettings struct {
 	DefaultTheme                 ThemeID            `json:"defaultTheme"`
 	NotificationEmailsEnabled    bool               `json:"notificationEmailsEnabled"`
+	StatisticsEnabled            bool               `json:"statisticsEnabled"`
 	SettlementsEnabled           bool               `json:"settlementsEnabled"`
 	DefaultRoleID                *string            `json:"defaultRoleId"`
 	OwnBookingReasonMode         ReasonMode         `json:"ownBookingReasonMode"`

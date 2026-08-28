@@ -12,10 +12,10 @@ vi.mock('@tanstack/react-router', () => ({ Link: ({ children, to }: { children: 
 vi.mock('@/components/ui/Avatar', () => ({ Avatar: () => <div>avatar</div> }));
 vi.mock('@/components/auth/LogoutButton', () => ({ LogoutButton: () => <button type="button">Abmelden</button> }));
 
-function usePermissions(permissions: PermissionKey[], systemRoles: string[] = []): void {
+function usePermissions(permissions: PermissionKey[], systemRoles: string[] = [], statisticsEnabled = false): void {
   mocks.useActiveGroup.mockReturnValue({
     session: { user: { displayName: 'Alex', email: 'alex@example.test' }, systemRoles },
-    activeGroup: { name: 'Group A', membership: { effectiveGrants: permissions.map((permission) => ({ permission, scope: { type: 'GROUP' as const } })) } },
+    activeGroup: { name: 'Group A', statisticsEnabled, membership: { effectiveGrants: permissions.map((permission) => ({ permission, scope: { type: 'GROUP' as const } })) } },
   });
 }
 
@@ -44,6 +44,14 @@ describe('MorePage role navigation', () => {
     render(<MorePage />);
 
     expect(menuItems()).toEqual(expected);
+  });
+
+  it('places an authorized statistics workspace first in the mobile overflow list', () => {
+    usePermissions(['VIEW_GROUP_STATISTICS'], [], true);
+    render(<MorePage />);
+
+    expect(menuItems()).toEqual(['Benachrichtigungen', 'Statistiken', 'Mein Konto', 'Abmelden']);
+    expect(screen.getByRole('link', { name: 'Statistiken' })).toHaveAttribute('href', '/statistics');
   });
 
   it('shows the exact unread count on the notification menu item', () => {
