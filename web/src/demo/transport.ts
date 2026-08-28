@@ -20,11 +20,13 @@ import type {
   InvitationPreview,
   LoginCommand,
   GroupSettings,
+  GroupSettingsUpdateInput,
   MemberReactivationCommand,
   Membership,
   Notification,
   Payment,
   PaymentCommand,
+  PaymentMethod,
   PermissionGrant,
   PermissionKey,
   SelfPaymentCommand,
@@ -273,11 +275,11 @@ export class DemoTransport {
     ownPaymentReasonRequired: true,
     otherPaymentReasonRequired: false,
     paymentMethods: [
-      { id: 'BANK_TRANSFER', label: 'Bank transfer', attachmentMode: 'OFF' },
-      { id: 'SHOPPING', label: 'Shopping', attachmentMode: 'REQUIRED' },
-      { id: 'CASH', label: 'Cash', attachmentMode: 'OFF' },
-      { id: 'PAYPAL', label: 'PayPal', attachmentMode: 'OFF' },
-      { id: 'OTHER', label: 'Other', attachmentMode: 'OPTIONAL' },
+      { id: 'BANK_TRANSFER', label: 'Bank transfer', attachmentMode: 'OFF', paymentTarget: null },
+      { id: 'SHOPPING', label: 'Shopping', attachmentMode: 'REQUIRED', paymentTarget: null },
+      { id: 'CASH', label: 'Cash', attachmentMode: 'OFF', paymentTarget: null },
+      { id: 'PAYPAL', label: 'PayPal', attachmentMode: 'OFF', paymentTarget: null },
+      { id: 'OTHER', label: 'Other', attachmentMode: 'OPTIONAL', paymentTarget: null },
     ],
     bookingReasons: [],
     paymentReasons: [],
@@ -399,7 +401,7 @@ export class DemoTransport {
 
     if (resource === 'settings' && method === 'GET') return clone(this.groupSettings) as T;
     if (resource === 'settings' && method === 'PATCH') {
-      const update = body as Partial<GroupSettings>;
+      const update = body as GroupSettingsUpdateInput;
       const updatesDefaultTheme = update.defaultTheme !== undefined;
       const updatesSettlements = update.settlementsEnabled !== undefined;
       const updatesNotificationEmails = update.notificationEmailsEnabled !== undefined;
@@ -439,6 +441,16 @@ export class DemoTransport {
         ?? (update.ownPaymentReasonRequired === undefined ? this.groupSettings.ownPaymentReasonMode : update.ownPaymentReasonRequired ? 'REQUIRED' : 'OPTIONAL');
       const otherPaymentReasonMode = update.otherPaymentReasonMode
         ?? (update.otherPaymentReasonRequired === undefined ? this.groupSettings.otherPaymentReasonMode : update.otherPaymentReasonRequired ? 'REQUIRED' : 'OPTIONAL');
+      const paymentMethods = update.paymentMethods?.map<PaymentMethod>((method) => {
+        const existingMethod = this.groupSettings.paymentMethods.find((candidate) => candidate.id === method.id);
+        const targetWasSubmitted = Object.prototype.hasOwnProperty.call(method, 'paymentTarget');
+        return {
+          id: method.id,
+          label: method.label,
+          attachmentMode: method.attachmentMode,
+          paymentTarget: targetWasSubmitted ? method.paymentTarget ?? null : existingMethod?.paymentTarget ?? null,
+        };
+      });
       this.groupSettings = {
         ...this.groupSettings,
         ...(updatesDefaultTheme ? { defaultTheme: update.defaultTheme as GroupSettings['defaultTheme'] } : {}),
@@ -452,7 +464,7 @@ export class DemoTransport {
         foreignBookingReasonRequired: foreignBookingReasonMode === 'REQUIRED',
         ownPaymentReasonRequired: ownPaymentReasonMode === 'REQUIRED',
         otherPaymentReasonRequired: otherPaymentReasonMode === 'REQUIRED',
-        ...(update.paymentMethods !== undefined ? { paymentMethods: clone(update.paymentMethods) } : {}),
+        ...(paymentMethods !== undefined ? { paymentMethods: clone(paymentMethods) } : {}),
         ...(update.bookingReasons !== undefined ? { bookingReasons: clone(update.bookingReasons) } : {}),
         ...(update.paymentReasons !== undefined ? { paymentReasons: clone(update.paymentReasons) } : {}),
       };

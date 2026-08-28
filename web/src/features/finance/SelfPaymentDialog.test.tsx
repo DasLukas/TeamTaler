@@ -48,14 +48,33 @@ function renderDialog(): QueryClient {
 describe('SelfPaymentDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } });
     apiMock.getTransactionSettings.mockResolvedValue({
       foreignBookingReasonRequired: true,
       ownPaymentReasonRequired: true,
       otherPaymentReasonRequired: false,
-      paymentMethods: [{ id: 'PAYPAL', label: 'PayPal' }, { id: 'CASH', label: 'Bar' }],
+      paymentMethods: [{ id: 'PAYPAL', label: 'PayPal', attachmentMode: 'OFF', paymentTarget: { type: 'PAYPAL_ME', paypalMeHandle: 'TeamTaler42' } }, { id: 'CASH', label: 'Bar', attachmentMode: 'OFF', paymentTarget: null }],
       bookingReasons: [],
       paymentReasons: [{ id: 'MEMBERSHIP', label: 'Membership fee August' }],
     });
+  });
+
+  it('activates the configured PayPal.Me link from the amount without booking', async () => {
+    const user = userEvent.setup();
+    renderDialog();
+
+    await user.click(await screen.findByRole('button', { name: i18n.t('selfPayment.action') }));
+    const externalLink = screen.getByText(i18n.t('paymentInstructions.openPaypal')).closest('a');
+    expect(externalLink).not.toHaveAttribute('href');
+    await user.type(screen.getByLabelText(i18n.t('finance.amountIn', { currency: 'EUR' })), '12,50');
+    expect(externalLink).toHaveAttribute('href', 'https://paypal.me/TeamTaler42/12.50EUR');
+
+    await user.click(screen.getByRole('button', { name: i18n.t('paymentInstructions.copyField', { field: i18n.t('paymentInstructions.paypalLink') }) }));
+    expect(await navigator.clipboard.readText()).toBe('https://paypal.me/TeamTaler42/12.50EUR');
+    expect(apiMock.createOwnPayment).not.toHaveBeenCalled();
+
+    await user.selectOptions(screen.getByLabelText(i18n.t('finance.paymentType')), 'CASH');
+    expect(screen.queryByText(i18n.t('paymentInstructions.openPaypal'))).not.toBeInTheDocument();
   });
 
   it('reviews and records the open balance without a membership identifier', async () => {

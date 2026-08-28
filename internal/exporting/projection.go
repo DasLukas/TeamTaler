@@ -86,7 +86,8 @@ var groupDatasets = []dataset{
 	{name: "notification_settings", query: `SELECT group_id,timezone,settlement_due_soon_days,settlement_overdue_repeat_days,version,updated_at
 		FROM group_notification_settings WHERE group_id=?`, args: groupArg},
 	{name: "notification_events", query: `SELECT group_id,event_type,enabled_at FROM group_notification_events WHERE group_id=? ORDER BY event_type`, args: groupArg},
-	{name: "payment_methods", query: `SELECT group_id,id,label,sort_order,attachment_mode,created_at FROM group_payment_methods
+	{name: "payment_methods", query: `SELECT group_id,id,label,sort_order,attachment_mode,payment_target_type,paypal_me_handle,
+		sepa_recipient_name,sepa_iban,sepa_bic,created_at FROM group_payment_methods
 		WHERE group_id=? ORDER BY sort_order,id`, args: groupArg},
 	{name: "reason_suggestions", query: `SELECT group_id,id,kind,label,sort_order,created_at FROM group_reason_suggestions
 		WHERE group_id=? ORDER BY kind,sort_order,id`, args: groupArg},
