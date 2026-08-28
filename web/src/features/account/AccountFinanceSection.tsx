@@ -1,11 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
-import Download from 'lucide-react/dist/esm/icons/download';
 import Printer from 'lucide-react/dist/esm/icons/printer';
 import { useDeferredValue, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { formatMoney, isCreditBalance } from '@/api/money';
-import type { LedgerEntry, Settlement } from '@/api/types';
+import type { Settlement } from '@/api/types';
 import { canRecordOwnPayment } from '@/app/groupCapabilities';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Button } from '@/components/ui/Button';
@@ -16,23 +15,10 @@ import { formatGermanDate } from '@/features/shared/dateFormat';
 import tableStyles from '@/features/shared/Table.module.css';
 import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
-import i18n from '@/i18n';
-import { safeCsvCell } from './csv';
 import styles from './AccountPage.module.css';
 
 type PersonalSettlementFilterId = 'periodId' | 'dueAt' | 'status';
 const personalFinanceCollator = new Intl.Collator('de-DE', { numeric: true, sensitivity: 'base' });
-
-function downloadLedger(entries: LedgerEntry[]): void {
-  const rows = [[i18n.t('account.csv.date'), i18n.t('account.csv.kind'), i18n.t('account.csv.description'), i18n.t('account.csv.amount'), i18n.t('account.csv.balance')], ...entries.map((entry) => [entry.occurredAt, entry.kind, entry.description, entry.amount.minorUnits, entry.balance.minorUnits])];
-  const csv = rows.map((row) => row.map(safeCsvCell).join(';')).join('\n');
-  const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' }));
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = i18n.t('account.csvFileName');
-  anchor.click();
-  URL.revokeObjectURL(url);
-}
 
 /**
  * Loads and renders personal financial data independently from account settings.
@@ -43,7 +29,6 @@ export function AccountFinanceSection() {
   const { t } = useTranslation();
   const { activeGroupId, activeGroup } = useActiveGroup();
   const labels = useDataTableLabels();
-  const ledgerQuery = useQuery({ queryKey: ['ledger', activeGroupId], queryFn: () => api.getLedger(activeGroupId) });
   const dashboardQuery = useQuery({ queryKey: ['dashboard', activeGroupId], queryFn: () => api.getDashboard(activeGroupId) });
   const settlementsQuery = useQuery({ queryKey: ['settlements', activeGroupId], queryFn: () => api.getSettlements(activeGroupId) });
   const transactionSettingsQuery = useQuery({ queryKey: ['transaction-settings', activeGroupId], queryFn: () => api.getTransactionSettings(activeGroupId) });
@@ -101,6 +86,19 @@ export function AccountFinanceSection() {
       return sorting.desc ? -comparison : comparison;
     });
   }, [deferredSettlementSearch, ownSettlements, settlementTableState.filters, settlementTableState.sorting]);
+  const settlementExportQuery = useMemo(() => {
+    const dueRange = settlementTableState.filters.dueAt as DataTableDateRange | undefined;
+    const sorting = settlementTableState.sorting[0];
+    return {
+      direction: sorting?.desc ? 'desc' : 'asc',
+      dueFrom: dueRange?.from,
+      dueTo: dueRange?.to,
+      periodId: settlementTableState.filters.periodId as string | undefined,
+      q: deferredSettlementSearch || undefined,
+      sort: sorting?.id ?? 'dueAt',
+      status: Array.isArray(settlementTableState.filters.status) ? settlementTableState.filters.status : undefined,
+    };
+  }, [deferredSettlementSearch, settlementTableState.filters, settlementTableState.sorting]);
   const settlementColumns = useMemo<DataTableColumnDef<Settlement>[]>(() => [
     { accessorKey: 'periodLabel', cell: ({ row }) => <strong>{row.original.periodLabel}</strong>, enableSorting: true, header: t('account.period'), id: 'periodLabel', meta: { label: t('account.period') } },
     { accessorKey: 'dueAt', cell: ({ row }) => row.original.dueAt ? <time dateTime={row.original.dueAt}>{formatGermanDate(row.original.dueAt)}</time> : '–', enableSorting: true, header: t('account.due'), id: 'dueAt', meta: { label: t('account.due') } },
@@ -110,8 +108,8 @@ export function AccountFinanceSection() {
     { accessorKey: 'status', cell: ({ row }) => <span className={`${tableStyles.status} ${row.original.status === 'OPEN' || row.original.status === 'PARTIAL' ? tableStyles.statusWarning : ''}`}>{row.original.status === 'PAID' ? t('common.paid') : row.original.status === 'PARTIAL' ? t('common.partiallyPaid') : row.original.status === 'CREDIT' ? t('common.credit') : t('common.open')}</span>, enableSorting: true, header: t('common.status'), id: 'status', meta: { label: t('common.status') } },
     { cell: () => <Button leadingIcon={<Printer size={16} />} onClick={() => window.print()} size="small" variant="ghost">{t('account.printPdf')}</Button>, enableSorting: false, header: () => <span className="sr-only">{t('common.action')}</span>, id: 'action', meta: { label: t('common.action') } },
   ], [t]);
-  if (ledgerQuery.isLoading || dashboardQuery.isLoading || settlementsQuery.isLoading || transactionSettingsQuery.isLoading) return <StatePanel kind="loading" />;
-  if (ledgerQuery.isError || dashboardQuery.isError || settlementsQuery.isError || transactionSettingsQuery.isError || !ledgerQuery.data || !dashboardQuery.data || !settlementsQuery.data || !transactionSettingsQuery.data) return <StatePanel kind="error" message={t('account.error')} />;
+  if (dashboardQuery.isLoading || settlementsQuery.isLoading || transactionSettingsQuery.isLoading) return <StatePanel kind="loading" />;
+  if (dashboardQuery.isError || settlementsQuery.isError || transactionSettingsQuery.isError || !dashboardQuery.data || !settlementsQuery.data || !transactionSettingsQuery.data) return <StatePanel kind="error" message={t('account.error')} />;
 
   const balance = dashboardQuery.data.openBalance;
   const hasCreditBalance = isCreditBalance(balance);
@@ -120,17 +118,13 @@ export function AccountFinanceSection() {
   const showSettlements = settlementsEnabled || ownSettlements.length > 0;
   return (
     <section aria-label={t('account.financeTitle')} className={styles.finance}>
-      <div className={styles.financeActions}>
-        <Button leadingIcon={<Download size={18} />} onClick={() => downloadLedger(ledgerQuery.data)} variant="secondary">{t('account.csvExport')}</Button>
-        <Button leadingIcon={<Printer size={18} />} onClick={() => window.print()}>{t('common.print')}</Button>
-      </div>
       <section className={styles.balance}>
         <div className={styles.balanceValue}><span>{t('account.currentOpenAmount')}</span><strong className={hasCreditBalance ? styles.creditBalance : undefined} data-financial-state={hasCreditBalance ? 'credit' : 'due'}>{formatMoney(balance)}</strong></div>
         {canRecordPayment ? <SelfPaymentDialog className={styles.paymentAction} openBalance={balance} /> : null}
       </section>
       {showSettlements ? <section className={styles.settlements}>
         <h2>{t(settlementsEnabled ? 'account.closedSettlements' : 'account.settlementHistory')}</h2>
-        <DataTable ariaLabel={t('account.closedSettlements')} columns={settlementColumns} data={visibleSettlements} emptyContent={t('account.noSettlements')} filterDefinitions={settlementFilters} getRowId={(settlement) => settlement.id} labels={{ ...labels, searchLabel: t('account.settlementSearchLabel'), searchPlaceholder: t('account.settlementSearchPlaceholder') }} minTableWidth="980px" {...settlementTableState} />
+        <DataTable ariaLabel={t('account.closedSettlements')} columns={settlementColumns} data={visibleSettlements} emptyContent={t('account.noSettlements')} exportConfig={{ disabled: deferredSettlementSearch !== settlementTableState.searchValue.trim().toLocaleLowerCase('de-DE'), groupId: activeGroupId, query: settlementExportQuery, table: 'PERSONAL_SETTLEMENTS', title: t('account.closedSettlements') }} filterDefinitions={settlementFilters} getRowId={(settlement) => settlement.id} labels={{ ...labels, searchLabel: t('account.settlementSearchLabel'), searchPlaceholder: t('account.settlementSearchPlaceholder') }} minTableWidth="980px" {...settlementTableState} />
       </section> : null}
     </section>
   );

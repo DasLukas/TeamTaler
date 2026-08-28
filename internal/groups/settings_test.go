@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -195,5 +196,115 @@ func TestTransactionSettingsAreOrderedEditableAndRequireOnePaymentMethod(t *test
 	invalidMode := domain.ReasonMode("MAYBE")
 	if _, err := service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{OwnBookingReasonMode: &invalidMode}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("invalid reason mode error=%v, want validation", err)
+	}
+}
+
+func TestPaymentTargetsPersistAndPatchPresencePreservesByStableMethodID(t *testing.T) {
+	ctx := context.Background()
+	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), "teamtaler.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+	authService := auth.Service{DB: db, SessionLifetime: 24 * time.Hour}
+	if err := authService.Bootstrap(ctx, "targets-admin@example.test", "Targets Admin", "targets-password-long", "Targets Group", "EUR"); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	session, err := authService.Login(ctx, "targets-admin@example.test", "targets-password-long")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	service := Service{DB: db}
+	groups, err := service.List(ctx, session.Principal.UserID)
+	if err != nil || len(groups) != 1 {
+		t.Fatalf("list groups: groups=%d err=%v", len(groups), err)
+	}
+	admin := groups[0].Membership
+	settings, err := service.Settings(ctx, admin)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	for index := range settings.PaymentMethods {
+		switch settings.PaymentMethods[index].ID {
+		case "PAYPAL":
+			settings.PaymentMethods[index].PaymentTarget = &domain.PaymentTarget{Type: domain.PaymentTargetPayPalMe, PayPalMeHandle: "https://paypal.me/Club123"}
+		case "BANK_TRANSFER":
+			settings.PaymentMethods[index].PaymentTarget = &domain.PaymentTarget{Type: domain.PaymentTargetSEPATransfer,
+				RecipientName: " Team Club ", IBAN: "de89 3704 0044 0532 0130 00", BIC: "cobadeffxxx"}
+		}
+	}
+	configured, err := service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{PaymentMethods: &settings.PaymentMethods})
+	if err != nil {
+		t.Fatalf("configure payment targets: %v", err)
+	}
+	if configured.PaymentMethods[0].PaymentTarget == nil || configured.PaymentMethods[0].PaymentTarget.IBAN != "DE89370400440532013000" {
+		t.Fatalf("normalized bank target = %#v", configured.PaymentMethods[0].PaymentTarget)
+	}
+
+	legacyMethods := make([]domain.PaymentMethod, 0, len(configured.PaymentMethods)+1)
+	legacyMethods = append(legacyMethods, domain.PaymentMethod{ID: "PAYPAL", Label: "PayPal private", AttachmentMode: domain.AttachmentModeOff})
+	for _, method := range configured.PaymentMethods {
+		if method.ID != "PAYPAL" {
+			legacyMethods = append(legacyMethods, domain.PaymentMethod{ID: method.ID, Label: method.Label, AttachmentMode: method.AttachmentMode})
+		}
+	}
+	legacyMethods = append(legacyMethods, domain.PaymentMethod{ID: "CARD", Label: "Card", AttachmentMode: domain.AttachmentModeOff})
+	missingTargets := make([]bool, len(legacyMethods))
+	preserved, err := service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{PaymentMethods: &legacyMethods, PaymentTargetsSpecified: missingTargets})
+	if err != nil {
+		t.Fatalf("legacy payment-method patch: %v", err)
+	}
+	if preserved.PaymentMethods[0].PaymentTarget == nil || preserved.PaymentMethods[0].PaymentTarget.PayPalMeHandle != "Club123" {
+		t.Fatalf("preserved PayPal target = %#v", preserved.PaymentMethods[0].PaymentTarget)
+	}
+	if preserved.PaymentMethods[len(preserved.PaymentMethods)-1].PaymentTarget != nil {
+		t.Fatalf("new omitted target = %#v, want nil", preserved.PaymentMethods[len(preserved.PaymentMethods)-1].PaymentTarget)
+	}
+
+	clearPayPal := make([]domain.PaymentMethod, len(preserved.PaymentMethods))
+	clearPresence := make([]bool, len(preserved.PaymentMethods))
+	for index, method := range preserved.PaymentMethods {
+		clearPayPal[index] = domain.PaymentMethod{ID: method.ID, Label: method.Label, AttachmentMode: method.AttachmentMode}
+		if method.ID == "PAYPAL" {
+			clearPresence[index] = true
+		}
+	}
+	cleared, err := service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{PaymentMethods: &clearPayPal, PaymentTargetsSpecified: clearPresence})
+	if err != nil {
+		t.Fatalf("clear PayPal target: %v", err)
+	}
+	var bankTarget, payPalTarget *domain.PaymentTarget
+	for _, method := range cleared.PaymentMethods {
+		switch method.ID {
+		case "BANK_TRANSFER":
+			bankTarget = method.PaymentTarget
+		case "PAYPAL":
+			payPalTarget = method.PaymentTarget
+		}
+	}
+	if payPalTarget != nil || bankTarget == nil || bankTarget.IBAN != "DE89370400440532013000" {
+		t.Fatalf("cleared/preserved targets = PayPal %#v, bank %#v", payPalTarget, bankTarget)
+	}
+	operational, err := service.TransactionSettings(ctx, admin)
+	if err != nil || len(operational.PaymentMethods) != len(cleared.PaymentMethods) {
+		t.Fatalf("transaction settings = %#v, %v", operational, err)
+	}
+
+	var auditMetadata string
+	if err := db.QueryRowContext(ctx, `SELECT group_concat(metadata_json,'') FROM audit_events WHERE group_id=? AND action='group.settings.updated'`, admin.GroupID).Scan(&auditMetadata); err != nil {
+		t.Fatalf("read settings audit: %v", err)
+	}
+	for _, secret := range []string{"Club123", "Team Club", "DE89370400440532013000", "COBADEFFXXX"} {
+		if strings.Contains(auditMetadata, secret) {
+			t.Fatalf("settings audit leaked payment target data %q: %s", secret, auditMetadata)
+		}
+	}
+	if !strings.Contains(auditMetadata, "paymentTargetCount") || !strings.Contains(auditMetadata, "SEPA_TRANSFER") {
+		t.Fatalf("settings audit lacks redacted target summary: %s", auditMetadata)
+	}
+
+	badPresence := []bool{true}
+	if _, err := service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{PaymentMethods: &clearPayPal, PaymentTargetsSpecified: badPresence}); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("inconsistent target presence error = %v, want validation", err)
 	}
 }

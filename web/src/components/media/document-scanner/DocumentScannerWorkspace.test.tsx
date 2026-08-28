@@ -10,6 +10,9 @@ const cameraState = vi.hoisted(() => ({ file: null as File | null }));
 
 vi.mock('./createDocumentPdf', () => ({ createDocumentPdf: vi.fn() }));
 vi.mock('./imageProcessing', () => ({ renderDocumentFilterPreview: vi.fn() }));
+vi.mock('./DocumentPageThumbnail', () => ({
+  DocumentPageThumbnail: ({ alt, page }: { alt: string; page: { previewUrl: string } }) => <img alt={alt} src={page.previewUrl} />,
+}));
 vi.mock('./DocumentCamera', () => ({
   DocumentCamera: ({ active, onCapture }: { active: boolean; onCapture: (file: File, corners: Array<{ x: number; y: number }>) => void }) => (
     <section aria-label={i18n.t('documentScanner.cameraTitle')}>

@@ -1,4 +1,6 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import ArrowLeft from 'lucide-react/dist/esm/icons/arrow-left';
+import CircleCheck from 'lucide-react/dist/esm/icons/circle-check';
 import CircleDollarSign from 'lucide-react/dist/esm/icons/circle-dollar-sign';
 import Plus from 'lucide-react/dist/esm/icons/plus';
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
@@ -6,8 +8,8 @@ import X from 'lucide-react/dist/esm/icons/x';
 import { useDeferredValue, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
-import { currencyExponent, formatMoney, majorUnitsInputPattern, majorUnitsPlaceholder, parseMajorUnits } from '@/api/money';
-import type { AccountSummary, CollectionPage, Payment, PaymentCollectionQuery } from '@/api/types';
+import { currencyExponent, formatMoney, majorUnitsInputPattern, majorUnitsPlaceholder, validatePositiveMajorUnits } from '@/api/money';
+import type { AccountSummary, CollectionPage, Payment, PaymentCollectionQuery, PaymentCommand } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { useInstanceCapabilities } from '@/app/useSession';
 import { Avatar } from '@/components/ui/Avatar';
@@ -19,6 +21,7 @@ import { StatePanel } from '@/components/ui/StatePanel';
 import { DataTable, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange } from '@/features/shared/DataTable';
 import { formatGermanDate } from '@/features/shared/dateFormat';
 import { createMemberFilterOption } from '@/features/shared/memberFilterOption';
+import { MembershipStateIcon } from '@/features/shared/MembershipStateIcon';
 import tableStyles from '@/features/shared/Table.module.css';
 import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
@@ -26,9 +29,11 @@ import { useMediaQuery } from '@/hooks/useMediaQuery';
 import styles from './PaymentsPanel.module.css';
 import { PaymentAttachmentAction } from './PaymentAttachmentAction';
 import { PaymentAttachmentField } from './PaymentAttachmentField';
+import { PaymentReviewSummary } from './PaymentReviewSummary';
 
 const paymentPageSize = 50;
 type PaymentFilterId = 'membershipId' | 'method' | 'status' | 'receivedAt' | 'amount';
+type PaymentDialogStep = 'entry' | 'review';
 
 /**
  * Converts one account summary into an avatar-backed member choice.
@@ -63,12 +68,16 @@ export function PaymentsPanel() {
   const transactionSettingsQuery = useQuery({ queryKey: ['transaction-settings', activeGroupId], queryFn: () => api.getTransactionSettings(activeGroupId) });
   const labels = useDataTableLabels();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [paymentStep, setPaymentStep] = useState<PaymentDialogStep>('entry');
   const [membershipId, setMembershipId] = useState('');
   const [amount, setAmount] = useState('');
+  const [amountError, setAmountError] = useState('');
   const [receivedAt, setReceivedAt] = useState(new Date().toISOString().slice(0, 10));
   const [method, setMethod] = useState<Payment['method']>('');
   const [reference, setReference] = useState('');
+  const [referenceError, setReferenceError] = useState('');
   const [attachment, setAttachment] = useState<File | null>(null);
+  const [paymentCommand, setPaymentCommand] = useState<PaymentCommand | null>(null);
   const [paymentToReverse, setPaymentToReverse] = useState<Payment | null>(null);
   const [reversalReason, setReversalReason] = useState('');
   const filterDefinitions = useMemo<readonly DataTableFilterDefinition<PaymentFilterId>[]>(() => [
@@ -136,6 +145,7 @@ export function PaymentsPanel() {
     queryKey: ['payments', activeGroupId, 'collection', collectionQuery],
   });
   const payments = useMemo(() => paymentsQuery.data?.pages.flatMap((page) => page.items) ?? [], [paymentsQuery.data]);
+  const accountAvatarUrls = useMemo(() => new Map((accountsQuery.data ?? []).map((account) => [account.membershipId, account.avatarUrl])), [accountsQuery.data]);
   const activeAccounts = accountsQuery.data?.filter((account) => account.status === 'ACTIVE') ?? [];
   const regularAccounts = activeAccounts.filter((account) => !account.isTemporaryGuest);
   const temporaryGuestAccounts = activeAccounts.filter((account) => account.isTemporaryGuest);
@@ -155,16 +165,6 @@ export function PaymentsPanel() {
   const reasonRequired = reasonMode === 'REQUIRED';
   const selectedPaymentMethod = transactionSettingsQuery.data?.paymentMethods.find((item) => item.id === method);
   const attachmentMode = selectedPaymentMethod?.attachmentMode ?? 'OFF';
-  const openRecordDialog = () => {
-    setMethod(transactionSettingsQuery.data?.paymentMethods[0]?.id ?? '');
-    setAttachment(null);
-    setDialogOpen(true);
-  };
-  const closeRecordDialog = () => {
-    setDialogOpen(false);
-    setAttachment(null);
-    paymentMutation.reset();
-  };
   const invalidateFinancialReads = async () => Promise.all([
     queryClient.invalidateQueries({ queryKey: ['activities', activeGroupId] }),
     queryClient.invalidateQueries({ queryKey: ['payments', activeGroupId] }),
@@ -173,19 +173,61 @@ export function PaymentsPanel() {
     queryClient.invalidateQueries({ queryKey: ['settlements', activeGroupId] }),
     queryClient.invalidateQueries({ queryKey: ['dashboard', activeGroupId] }),
   ]);
+  const resetPaymentDraft = () => {
+    setPaymentStep('entry');
+    setMembershipId('');
+    setAmount('');
+    setAmountError('');
+    setReceivedAt(new Date().toISOString().slice(0, 10));
+    setMethod(transactionSettingsQuery.data?.paymentMethods[0]?.id ?? '');
+    setReference('');
+    setReferenceError('');
+    setAttachment(null);
+    setPaymentCommand(null);
+  };
   const paymentMutation = useMutation({
-    mutationFn: () => {
-      const command = { membershipId: selectedMembershipId, amount: { minorUnits: parseMajorUnits(amount, activeGroup.currency), currency: activeGroup.currency }, receivedAt, method, reference: reasonEnabled ? reference.trim() || undefined : undefined };
-      return attachment ? api.createPayment(activeGroupId, command, attachment) : api.createPayment(activeGroupId, command);
-    },
+    mutationFn: ({ input, file }: { input: PaymentCommand; file: File | null }) => file
+      ? api.createPayment(activeGroupId, input, file)
+      : api.createPayment(activeGroupId, input),
     onSuccess: async () => {
       setDialogOpen(false);
-      setAmount('');
-      setReference('');
-      setAttachment(null);
+      resetPaymentDraft();
       await invalidateFinancialReads();
     },
   });
+  const openRecordDialog = () => {
+    paymentMutation.reset();
+    resetPaymentDraft();
+    setDialogOpen(true);
+  };
+  const closeRecordDialog = () => {
+    setDialogOpen(false);
+    paymentMutation.reset();
+    resetPaymentDraft();
+  };
+  const preparePaymentReview = () => {
+    const validation = validatePositiveMajorUnits(amount, activeGroup.currency);
+    if (!validation.minorUnits) {
+      setAmountError(validation.error ?? t('errors.amountFormat'));
+      return;
+    }
+    const trimmedReference = reference.trim();
+    if (reasonRequired && !trimmedReference) {
+      setReferenceError(t('finance.referenceRequired'));
+      return;
+    }
+    if (!selectedMembershipId || !method || (attachmentMode === 'REQUIRED' && !attachment)) return;
+    setAmountError('');
+    setReferenceError('');
+    setPaymentCommand({
+      amount: { minorUnits: validation.minorUnits, currency: activeGroup.currency },
+      membershipId: selectedMembershipId,
+      method,
+      receivedAt,
+      reference: reasonEnabled ? trimmedReference || undefined : undefined,
+    });
+    setPaymentStep('review');
+  };
   const reversalMutation = useMutation({
     mutationFn: () => paymentToReverse ? api.reversePayment(activeGroupId, paymentToReverse.id, reversalReason.trim()) : Promise.reject(new Error(t('finance.noPaymentSelected'))),
     onSuccess: async () => {
@@ -194,6 +236,13 @@ export function PaymentsPanel() {
       await invalidateFinancialReads();
     },
   });
+
+  const reviewPaymentMember = paymentCommand
+    ? accountsQuery.data?.find((account) => account.membershipId === paymentCommand.membershipId)?.displayName ?? paymentCommand.membershipId
+    : '';
+  const reviewPaymentMethod = paymentCommand
+    ? transactionSettingsQuery.data?.paymentMethods.find((item) => item.id === paymentCommand.method)?.label ?? paymentCommand.method
+    : '';
 
   const columns = useMemo<DataTableColumnDef<Payment>[]>(() => [
     {
@@ -206,7 +255,7 @@ export function PaymentsPanel() {
     },
     {
       accessorKey: 'memberName',
-      cell: ({ row }) => <><strong>{row.original.memberName}</strong>{row.original.membershipStatus === 'DELETED' ? <span className={tableStyles.status}>{t('common.deleted')}</span> : null}</>,
+      cell: ({ row }) => <span className={styles.member}><Avatar name={row.original.memberName} size="small" src={accountAvatarUrls.get(row.original.membershipId)} /><strong>{row.original.memberName}</strong><MembershipStateIcon status={row.original.membershipStatus} /></span>,
       enableSorting: true,
       header: t('common.member'),
       id: 'memberName',
@@ -240,7 +289,7 @@ export function PaymentsPanel() {
       id: 'action',
       meta: { label: t('common.action') },
     },
-  ], [activeGroupId, t]);
+  ], [accountAvatarUrls, activeGroupId, t]);
 
   if (accountsQuery.isLoading || transactionSettingsQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
   if (!accountsQuery.data || !transactionSettingsQuery.data) return <div className={styles.state}><StatePanel kind="error" message={t('finance.error')} /></div>;
@@ -255,6 +304,13 @@ export function PaymentsPanel() {
         columns={columns}
         data={payments}
         emptyContent={paymentsQuery.isError ? t('finance.error') : t('finance.empty')}
+        exportConfig={{
+          disabled: deferredSearch !== tableState.searchValue.trim(),
+          groupId: activeGroupId,
+          query: { ...collectionQuery, limit: undefined },
+          table: 'PAYMENTS',
+          title: t('finance.title'),
+        }}
         filterDefinitions={filterDefinitions}
         getRowId={(payment) => payment.id}
         hasMore={paymentsQuery.hasNextPage}
@@ -265,18 +321,41 @@ export function PaymentsPanel() {
         onLoadMore={() => void paymentsQuery.fetchNextPage()}
         {...tableState}
       />
-      <Modal onClose={closeRecordDialog} open={dialogOpen} title={t('finance.record')} variant={compact ? 'sheet' : 'dialog'}>
-        <form className={styles.form} id={paymentFormId} onSubmit={(event) => { event.preventDefault(); paymentMutation.mutate(); }}>
-          <Field htmlFor="payment-member" label={t('common.member')}>
-            <SelectMenu ariaLabel={t('common.member')} id="payment-member" onChange={setMembershipId} options={paymentMemberOptions} value={selectedMembershipId} />
-          </Field>
-          <div className={styles.formRow}><Field htmlFor="payment-amount" label={`${t('finance.amountIn', { currency: activeGroup.currency })} *`}><TextInput id="payment-amount" inputMode="decimal" onChange={(event) => setAmount(event.target.value)} pattern={majorUnitsInputPattern(activeGroup.currency)} placeholder={majorUnitsPlaceholder(activeGroup.currency)} required type="text" value={amount} /></Field><Field htmlFor="payment-date" label={t('finance.receivedDate')}><TextInput id="payment-date" onChange={(event) => setReceivedAt(event.target.value)} required type="date" value={receivedAt} /></Field></div>
-          <Field htmlFor="payment-method" label={t('finance.paymentType')}><SelectInput id="payment-method" onChange={(event) => { const nextMethod = event.target.value; setMethod(nextMethod); if (transactionSettingsQuery.data.paymentMethods.find((item) => item.id === nextMethod)?.attachmentMode === 'OFF') setAttachment(null); }} required value={method}>{transactionSettingsQuery.data.paymentMethods.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</SelectInput></Field>
-          {reasonEnabled ? <Field htmlFor="payment-reference" label={`${t('finance.reason')}${reasonRequired ? ' *' : ''}`}><TextInput id="payment-reference" list="payment-reason-suggestions" maxLength={120} onChange={(event) => setReference(event.target.value)} required={reasonRequired} value={reference} /><datalist id="payment-reason-suggestions">{transactionSettingsQuery.data.paymentReasons.map((item) => <option key={item.id} value={item.label} />)}</datalist></Field> : null}
-          <PaymentAttachmentField attachmentMode={attachmentMode} file={attachment} maxBytes={attachmentUploadMaxBytes} onChange={setAttachment} />
-          {paymentMutation.isError ? <p className={styles.error} role="alert">{paymentMutation.error.message}</p> : null}
-          <ModalFooter><div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeRecordDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!amount || !method || (reasonRequired && !reference.trim()) || (attachmentMode === 'REQUIRED' && !attachment) || paymentMutation.isPending} form={paymentFormId} leadingIcon={<CircleDollarSign size={17} />} type="submit">{t('finance.bookPayment')}</Button></div></ModalFooter>
-        </form>
+      <Modal onClose={closeRecordDialog} open={dialogOpen} title={t(paymentStep === 'entry' ? 'finance.record' : 'finance.reviewTitle')} variant={compact ? 'sheet' : 'dialog'}>
+        {paymentStep === 'entry' ? (
+          <form className={styles.form} id={paymentFormId} onSubmit={(event) => { event.preventDefault(); preparePaymentReview(); }}>
+            <Field htmlFor="payment-member" label={t('common.member')}>
+              <SelectMenu ariaLabel={t('common.member')} id="payment-member" onChange={setMembershipId} options={paymentMemberOptions} value={selectedMembershipId} />
+            </Field>
+            <div className={styles.formRow}><Field error={amountError || undefined} htmlFor="payment-amount" label={`${t('finance.amountIn', { currency: activeGroup.currency })} *`}><TextInput id="payment-amount" inputMode="decimal" onChange={(event) => { setAmount(event.target.value); setAmountError(''); }} pattern={majorUnitsInputPattern(activeGroup.currency)} placeholder={majorUnitsPlaceholder(activeGroup.currency)} required type="text" value={amount} /></Field><Field htmlFor="payment-date" label={t('finance.receivedDate')}><TextInput id="payment-date" onChange={(event) => setReceivedAt(event.target.value)} required type="date" value={receivedAt} /></Field></div>
+            <Field htmlFor="payment-method" label={t('finance.paymentType')}><SelectInput id="payment-method" onChange={(event) => { const nextMethod = event.target.value; setMethod(nextMethod); if (transactionSettingsQuery.data.paymentMethods.find((item) => item.id === nextMethod)?.attachmentMode === 'OFF') setAttachment(null); }} required value={method}>{transactionSettingsQuery.data.paymentMethods.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</SelectInput></Field>
+            {reasonEnabled ? <Field error={referenceError || undefined} htmlFor="payment-reference" label={`${t('finance.reason')}${reasonRequired ? ' *' : ''}`}><TextInput id="payment-reference" list="payment-reason-suggestions" maxLength={120} onChange={(event) => { setReference(event.target.value); setReferenceError(''); }} required={reasonRequired} value={reference} /><datalist id="payment-reason-suggestions">{transactionSettingsQuery.data.paymentReasons.map((item) => <option key={item.id} value={item.label} />)}</datalist></Field> : null}
+            <PaymentAttachmentField attachmentMode={attachmentMode} file={attachment} maxBytes={attachmentUploadMaxBytes} onChange={setAttachment} />
+            <ModalFooter><div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeRecordDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!amount || !selectedMembershipId || !method || (reasonRequired && !reference.trim()) || (attachmentMode === 'REQUIRED' && !attachment)} form={paymentFormId} leadingIcon={<CircleCheck size={17} />} type="submit">{t('finance.reviewPayment')}</Button></div></ModalFooter>
+          </form>
+        ) : null}
+        {paymentStep === 'review' && paymentCommand ? (
+          <div className={styles.review}>
+            <PaymentReviewSummary
+              accountLabel={t('common.member')}
+              accountName={reviewPaymentMember}
+              amount={paymentCommand.amount}
+              amountLabel={t('common.amount')}
+              attachmentLabel={t('paymentAttachment.label', { defaultValue: 'Receipt' })}
+              attachmentName={attachment?.name}
+              dateLabel={t('common.date')}
+              intro={t('finance.reviewIntro')}
+              methodLabel={t('finance.paymentType')}
+              methodName={reviewPaymentMethod}
+              reason={paymentCommand.reference}
+              reasonLabel={t('finance.reason')}
+              receivedAt={paymentCommand.receivedAt}
+              showReason={reasonEnabled}
+            />
+            {paymentMutation.isError ? <p className={styles.error} role="alert">{paymentMutation.error.message}</p> : null}
+            <ModalFooter><div className={styles.actions}><Button disabled={paymentMutation.isPending} leadingIcon={<ArrowLeft size={17} />} onClick={() => { paymentMutation.reset(); setPaymentStep('entry'); }} variant="secondary">{t('common.back')}</Button><Button disabled={paymentMutation.isPending} leadingIcon={<CircleDollarSign size={17} />} onClick={() => paymentMutation.mutate({ input: paymentCommand, file: attachment })}>{paymentMutation.isPending ? t('finance.paymentPending') : t('finance.confirmPayment', { amount: formatMoney(paymentCommand.amount) })}</Button></div></ModalFooter>
+          </div>
+        ) : null}
       </Modal>
       <Modal onClose={() => setPaymentToReverse(null)} open={Boolean(paymentToReverse)} title={t('finance.reverseTitle')}>
         <form className={styles.form} id={reversalFormId} onSubmit={(event) => { event.preventDefault(); reversalMutation.mutate(); }}>

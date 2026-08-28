@@ -7,7 +7,7 @@ info:
     response fields are exact decimal strings, while command inputs are bounded
     JSON integers.
     State-changing authenticated requests require the `X-CSRF-Token` header.
-    Product creation, invitation CSV imports, and financial mutations that
+    Product creation, invitation CSV imports, raw-data export creation, and financial mutations that
     create or reverse bookings, payments, or periods additionally require an
     `Idempotency-Key`. A batch-booking idempotency scope includes every managed
     guest created by that command. Versioned role and assignment replacement
@@ -32,6 +32,7 @@ tags:
   - name: Bookings
   - name: Finance
   - name: Periods
+  - name: Exports
   - name: Operations
 paths:
   /auth/login:
@@ -1256,6 +1257,45 @@ paths:
               schema: { $ref: '#/components/schemas/AuditFilterOptions' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+  /system/table-exports:
+    post:
+      tags: [Exports]
+      summary: Export the authorized system-audit table
+      description: |
+        Requires a current `SYSTEM_ADMINISTRATOR` assignment and accepts only
+        the `SYSTEM_AUDIT` table identifier. The server replays the table's
+        validated filters and deterministic ordering across every matching row;
+        UI pagination, action columns, client-supplied rows, titles, and columns
+        are never part of the command. This endpoint is not a system-wide raw
+        data export.
+
+        CSV is bounded to 100,000 rows, 100 MiB, and 120 seconds. PDF is bounded
+        to 10,000 rows, 50 MiB, and 60 seconds. A bound returns Problem Details
+        without a truncated document.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SystemTableExportCommand' }
+      responses:
+        '200':
+          description: Complete localized table download
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+            Content-Length:
+              schema: { type: integer, format: int64, minimum: 0 }
+          content:
+            text/csv:
+              schema: { type: string, format: binary }
+            application/pdf:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /groups:
     get:
       tags: [Groups]
@@ -1320,6 +1360,211 @@ paths:
                   name: { type: string }
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/table-exports:
+    post:
+      tags: [Exports]
+      summary: Export one authorized group or personal table
+      description: |
+        Accepts Activities, Payments, Account balances, Group settlements,
+        Personal settlements, Active members, Archived members, or Group audit.
+        The server applies the selected table's existing live authorization and
+        replays its validated filters and deterministic ordering across every
+        matching row. The export never widens access, follows UI pagination, or
+        accepts client-supplied rows, titles, columns, or action controls.
+
+        CSV is bounded to 100,000 rows, 100 MiB, and 120 seconds. PDF is bounded
+        to 10,000 rows, 50 MiB, and 60 seconds. A bound returns Problem Details
+        without a truncated document. PDFs use A4 landscape and repeat the
+        validated local group logo or TeamTaler fallback, canonical title,
+        localized export time, page `n/m`, and table headings on every page.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GroupTableExportCommand' }
+      responses:
+        '200':
+          description: Complete localized table download
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+            Content-Length:
+              schema: { type: integer, format: int64, minimum: 0 }
+          content:
+            text/csv:
+              schema: { type: string, format: binary }
+            application/pdf:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/exports:
+    post:
+      tags: [Exports]
+      summary: Queue a complete structured group-data archive
+      description: |
+        Requires a live active membership with `GROUP_ADMINISTRATION` and
+        reauthentication with the current account password. The resulting
+        group archive intentionally includes every structured group-owned
+        dataset, including finance data, regardless of narrower operational
+        permissions. It contains UTF-8 CSV datasets with stable English
+        technical headers, `manifest.json`, and `schema.json`, but no image,
+        receipt, attachment, session, credential, secret, token, or other media
+        bytes. TeamTaler exposes no system-wide raw-data archive.
+
+        The idempotent asynchronous job is owned by the requesting actor. At
+        most one group-scope job may be queued or running per actor and group,
+        and no more than five group-scope starts per actor are accepted per
+        hour. A ready artifact expires after 24 hours.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DataExportCreateCommand' }
+      responses:
+        '202':
+          description: New or idempotently replayed actor-owned export job
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DataExportJob' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/me/exports:
+    post:
+      tags: [Exports]
+      summary: Queue the current actor's structured group-data archive
+      description: |
+        Requires an active membership in the selected current group and
+        reauthentication with the current account password. The archive
+        contains the actor's profile-related data plus only the actor's own
+        structured records in that group. It does not include records from any
+        other group or image, receipt, attachment, session, credential, secret,
+        token, or other media bytes.
+
+        The idempotent asynchronous job is owned by the requesting actor. At
+        most one personal-scope job may be queued or running per actor and
+        group, and no more than five personal-scope starts per actor are
+        accepted per hour. A ready artifact expires after 24 hours.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DataExportCreateCommand' }
+      responses:
+        '202':
+          description: New or idempotently replayed actor-owned export job
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DataExportJob' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+  /exports:
+    get:
+      tags: [Exports]
+      summary: List the current actor's export jobs in one group
+      description: |
+        Returns up to 100 newest jobs requested by the authenticated account in
+        the selected group. Group administrators cannot inspect another actor's
+        jobs through this endpoint.
+      parameters:
+        - name: groupId
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
+      responses:
+        '200':
+          description: Actor-owned job history
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 100
+                items: { $ref: '#/components/schemas/DataExportJob' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /exports/{exportId}:
+    get:
+      tags: [Exports]
+      summary: Read one actor-owned export job
+      parameters:
+        - $ref: '#/components/parameters/ExportId'
+      responses:
+        '200':
+          description: Current durable lifecycle state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DataExportJob' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [Exports]
+      summary: Cancel or delete one actor-owned export artifact
+      description: |
+        Cancels a queued, running, or ready actor-owned export. Any published
+        artifact is removed. A failed export cannot be cancelled.
+      parameters:
+        - $ref: '#/components/parameters/ExportId'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204': { description: Job cancelled and any artifact removed }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+  /exports/{exportId}/download:
+    get:
+      tags: [Exports]
+      summary: Download one ready actor-owned raw-data archive
+      description: |
+        Rechecks the current active membership and scope permission before
+        opening the complete artifact. Only `READY`, unexpired jobs owned by the
+        authenticated actor are downloadable.
+      parameters:
+        - $ref: '#/components/parameters/ExportId'
+      responses:
+        '200':
+          description: Complete structured CSV ZIP archive
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+            Content-Length:
+              schema: { type: integer, format: int64, minimum: 0 }
+            Last-Modified:
+              schema: { type: string }
+            X-Content-SHA256:
+              description: Lowercase hexadecimal SHA-256 digest of the complete ZIP artifact.
+              schema: { type: string, pattern: '^[a-f0-9]{64}$' }
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/settings:
     get:
       tags: [Groups]
@@ -1461,7 +1706,7 @@ paths:
     get:
       tags: [Groups]
       summary: Read settlement availability and ordered transaction behavior
-      description: Returns only the non-sensitive feature and form configuration needed by an active group member.
+      description: Returns the feature, form, and member-visible external payment instructions needed by an active group member.
       parameters:
         - $ref: '#/components/parameters/GroupId'
       responses:
@@ -2453,23 +2698,35 @@ paths:
       tags: [Activities]
       summary: List the unified account activity feed visible to the current member
       description: |
-        Combines bookings, payments, and direct receivable adjustments before
-        filtering, sorting, and cursor pagination. Members always see their own
+        Combines bookings, payments, their audited reversals, and direct
+        receivable adjustments before filtering, sorting, and cursor pagination.
+        Every reversed booking or payment remains in the feed with status
+        `REVERSED` and receives one separate `REVERSAL` row at the audited
+        reversal time. The original and reversal expose symmetric stable links.
+        Members always see their own
         account movements and bookings they recorded for somebody else.
         `VIEW_ALL_BOOKING_ACTIVITY` adds all group bookings, while
         `FINANCE_MANAGEMENT` independently adds all group payments and
-        adjustments. Reversals update the original transaction status and do
-        not create a second feed row.
+        adjustments. A reversal always inherits the visibility of its original.
 
         Amounts use their visible receivable sign: bookings are positive,
-        payments are negative, and adjustments retain their ledger sign.
+        payments are negative, reversals contain the opposite effect of their
+        original, and adjustments retain their ledger sign.
         Repeated `kind`, `categoryId`, and `productId` values use OR semantics
         within each field and AND semantics across fields. Authorization scope
         and the complete filter set are bound to the opaque cursor fingerprint.
+        `anchorId` pauses all filters except sorting and returns an authorized
+        context window with the requested entry as close to the center as list
+        boundaries permit. It cannot be combined with `cursor`; any continuation
+        uses the returned cursor without `anchorId` or paused filters.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/TableSearch'
         - $ref: '#/components/parameters/TableCursor'
+        - name: anchorId
+          in: query
+          description: Stable activity identity to center in an unfiltered, permission-scoped context window. Cannot be combined with cursor.
+          schema: { type: string, maxLength: 500 }
         - $ref: '#/components/parameters/SortDirection'
         - name: kind
           in: query
@@ -2551,6 +2808,7 @@ paths:
                 items: { $ref: '#/components/schemas/ActivityEntry' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: Anchor activity does not exist or is not visible to the current member }
         '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/activities/filter-options:
     get:
@@ -3479,6 +3737,11 @@ components:
       in: path
       required: true
       schema: { type: string }
+    ExportId:
+      name: exportId
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
     CSRFToken:
       name: X-CSRF-Token
       in: header
@@ -3539,6 +3802,298 @@ components:
       pattern: '^-?[0-9]+$'
       description: Exact signed integer amount in the currency's minor unit, encoded as a decimal string to preserve 64-bit precision in browsers.
       examples: ['1250']
+    TableExportFormat:
+      type: string
+      enum: [CSV, PDF]
+    GroupTableExportId:
+      type: string
+      enum:
+        - ACTIVITIES
+        - PAYMENTS
+        - ACCOUNT_BALANCES
+        - GROUP_SETTLEMENTS
+        - SETTLEMENT_STATEMENT
+        - PERSONAL_SETTLEMENTS
+        - ACTIVE_MEMBERS
+        - ARCHIVED_MEMBERS
+        - GROUP_AUDIT
+    SystemTableExportId:
+      type: string
+      enum: [SYSTEM_AUDIT]
+    GroupTableExportCommand:
+      type: object
+      additionalProperties: false
+      required: [table, format, timeZone, query]
+      properties:
+        table: { $ref: '#/components/schemas/GroupTableExportId' }
+        format: { $ref: '#/components/schemas/TableExportFormat' }
+        timeZone:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: IANA time-zone name used only for localized visible timestamps.
+          examples: [Europe/Berlin]
+        query:
+          description: The selected table's existing typed filter and sort object, without cursor or limit.
+          anyOf:
+            - $ref: '#/components/schemas/ActivityTableExportQuery'
+            - $ref: '#/components/schemas/PaymentTableExportQuery'
+            - $ref: '#/components/schemas/AccountBalanceTableExportQuery'
+            - $ref: '#/components/schemas/GroupSettlementTableExportQuery'
+            - $ref: '#/components/schemas/SettlementStatementTableExportQuery'
+            - $ref: '#/components/schemas/PersonalSettlementTableExportQuery'
+            - $ref: '#/components/schemas/MemberTableExportQuery'
+            - $ref: '#/components/schemas/GroupAuditTableExportQuery'
+    SystemTableExportCommand:
+      type: object
+      additionalProperties: false
+      required: [table, format, timeZone, query]
+      properties:
+        table: { $ref: '#/components/schemas/SystemTableExportId' }
+        format: { $ref: '#/components/schemas/TableExportFormat' }
+        timeZone:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: IANA time-zone name used only for localized visible timestamps.
+          examples: [Europe/Berlin]
+        query:
+          description: The system-audit table's existing typed filter and sort object, without cursor or limit.
+          $ref: '#/components/schemas/SystemAuditTableExportQuery'
+    ActivityTableExportQuery:
+      type: object
+      additionalProperties: false
+      properties:
+        q: { type: string, maxLength: 200 }
+        sort: { type: string, enum: [kind, targetName, actorName, detailName, categoryName, occurredAt, amount, status] }
+        direction: { type: string, enum: [asc, desc] }
+        kind:
+          type: array
+          maxItems: 200
+          uniqueItems: true
+          items: { type: string, enum: [BOOKING, PAYMENT, ADJUSTMENT] }
+        targetMembershipId: { type: string }
+        categoryId:
+          type: array
+          maxItems: 200
+          uniqueItems: true
+          items: { type: string }
+        productId:
+          type: array
+          maxItems: 200
+          uniqueItems: true
+          items: { type: string }
+        status: { type: string, enum: [POSTED, REVERSED] }
+        occurredFrom:
+          oneOf:
+            - { type: string, format: date }
+            - { type: string, format: date-time }
+        occurredTo:
+          oneOf:
+            - { type: string, format: date }
+            - { type: string, format: date-time }
+        amountMin: { $ref: '#/components/schemas/MinorUnits' }
+        amountMax: { $ref: '#/components/schemas/MinorUnits' }
+    PaymentTableExportQuery:
+      type: object
+      additionalProperties: false
+      properties:
+        q: { type: string, maxLength: 200 }
+        sort: { type: string, enum: [receivedAt, amount, memberName, actorName, method, status] }
+        direction: { type: string, enum: [asc, desc] }
+        membershipId: { type: string }
+        method: { type: string }
+        status: { type: string, enum: [POSTED, REVERSED] }
+        receivedFrom:
+          oneOf:
+            - { type: string, format: date }
+            - { type: string, format: date-time }
+        receivedTo:
+          oneOf:
+            - { type: string, format: date }
+            - { type: string, format: date-time }
+        amountMin: { $ref: '#/components/schemas/MinorUnits' }
+        amountMax: { $ref: '#/components/schemas/MinorUnits' }
+    AccountBalanceTableExportQuery:
+      type: object
+      additionalProperties: false
+      properties:
+        q: { type: string, maxLength: 200 }
+        sort: { type: string, enum: [memberName, membershipStatus, balanceState, amount] }
+        direction: { type: string, enum: [asc, desc] }
+        membershipId: { type: string }
+        membershipStatus:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [ACTIVE, ARCHIVED, DELETED] }
+        balanceState:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [due, settled, credit] }
+        amountMin: { $ref: '#/components/schemas/MinorUnits' }
+        amountMax: { $ref: '#/components/schemas/MinorUnits' }
+    GroupSettlementTableExportQuery:
+      type: object
+      additionalProperties: false
+      properties:
+        q: { type: string, maxLength: 200 }
+        sort: { type: string, enum: [periodLabel, dueAt, memberName, amount, paidAmount, status] }
+        direction: { type: string, enum: [asc, desc] }
+        membershipId: { type: string }
+        periodId: { type: string }
+        dueFrom: { type: string, format: date }
+        dueTo: { type: string, format: date }
+        amountMin: { $ref: '#/components/schemas/MinorUnits' }
+        amountMax: { $ref: '#/components/schemas/MinorUnits' }
+        status:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [OPEN, PARTIAL, PAID, CREDIT] }
+    SettlementStatementTableExportQuery:
+      type: object
+      additionalProperties: false
+      required: [membershipId, periodId]
+      properties:
+        membershipId:
+          type: string
+          minLength: 1
+          description: Exact statement membership identifier in the active group.
+        periodId:
+          type: string
+          minLength: 1
+          description: Exact closed accounting-period identifier in the active group.
+    PersonalSettlementTableExportQuery:
+      type: object
+      additionalProperties: false
+      properties:
+        q: { type: string, maxLength: 200 }
+        sort: { type: string, enum: [periodLabel, dueAt, amount, paidAmount, openAmount, status] }
+        direction: { type: string, enum: [asc, desc] }
+        periodId: { type: string }
+        dueFrom: { type: string, format: date }
+        dueTo: { type: string, format: date }
+        status:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [OPEN, PARTIAL, PAID, CREDIT] }
+    MemberTableExportQuery:
+      type: object
+      additionalProperties: false
+      properties:
+        sort: { type: string, enum: [displayName, email, roles] }
+        direction: { type: string, enum: [asc, desc] }
+    GroupAuditTableExportQuery:
+      type: object
+      additionalProperties: false
+      properties:
+        q: { type: string, maxLength: 200 }
+        actorUserId: { type: string }
+        actorMembershipId: { type: string }
+        action:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items: { type: string, maxLength: 200 }
+        resourceType:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items: { type: string, maxLength: 200 }
+        occurredFrom:
+          oneOf:
+            - { type: string, format: date }
+            - { type: string, format: date-time }
+        occurredTo:
+          oneOf:
+            - { type: string, format: date }
+            - { type: string, format: date-time }
+        sort: { type: string, enum: [occurredAt, actorName, action, resourceType] }
+        direction: { type: string, enum: [asc, desc] }
+    SystemAuditTableExportQuery:
+      type: object
+      additionalProperties: false
+      properties:
+        q: { type: string, maxLength: 200 }
+        actorUserId: { type: string }
+        action:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items: { type: string, maxLength: 200 }
+        resourceType:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items: { type: string, maxLength: 200 }
+        occurredFrom:
+          oneOf:
+            - { type: string, format: date }
+            - { type: string, format: date-time }
+        occurredTo:
+          oneOf:
+            - { type: string, format: date }
+            - { type: string, format: date-time }
+        sort: { type: string, enum: [occurredAt, actorName, action, resourceType] }
+        direction: { type: string, enum: [asc, desc] }
+    DataExportCreateCommand:
+      type: object
+      additionalProperties: false
+      required: [currentPassword]
+      properties:
+        currentPassword:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 1024
+          description: Consumed for this reauthentication only; never persisted or included in an idempotency fingerprint.
+    DataExportScope:
+      type: string
+      enum: [GROUP, PERSONAL]
+    DataExportStatus:
+      type: string
+      enum: [QUEUED, RUNNING, READY, FAILED, CANCELLED, EXPIRED]
+    DataExportProgress:
+      type: object
+      additionalProperties: false
+      required: [completed, total]
+      properties:
+        completed: { type: integer, minimum: 0 }
+        total: { type: integer, minimum: 0 }
+    DataExportJob:
+      type: object
+      description: |
+        Actor-owned asynchronous archive state. One generation attempt is
+        bounded to 10 minutes and a complete artifact is bounded to 512 MiB.
+        `READY` artifacts expire 24 hours after completion.
+      additionalProperties: false
+      required: [id, scope, status, requestedAt]
+      properties:
+        id: { type: string }
+        scope: { $ref: '#/components/schemas/DataExportScope' }
+        status: { $ref: '#/components/schemas/DataExportStatus' }
+        requestedAt: { type: string, format: date-time }
+        startedAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time }
+        expiresAt:
+          type: string
+          format: date-time
+          description: Present for a ready artifact and fixed at 24 hours after completion.
+        sizeBytes:
+          type: string
+          pattern: '^[0-9]+$'
+          description: Exact complete ZIP size as a decimal string.
+        sha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: Lowercase hexadecimal SHA-256 digest of the complete ZIP artifact.
+        progress: { $ref: '#/components/schemas/DataExportProgress' }
+        downloadUrl:
+          type: string
+          format: uri-reference
+          description: Actor-bound relative URL, present only while the job is ready and unexpired.
+        errorCode:
+          type: string
+          description: Safe machine-readable failure code with no provider, SQL, path, or secret detail.
     LoginCommand:
       type: object
       additionalProperties: false
@@ -4397,7 +4952,7 @@ components:
           type: array
           minItems: 1
           maxItems: 20
-          items: { $ref: '#/components/schemas/PaymentMethod' }
+          items: { $ref: '#/components/schemas/PaymentMethodUpdate' }
         bookingReasons:
           type: array
           maxItems: 50
@@ -4517,7 +5072,107 @@ components:
       type: string
       enum: [OFF, OPTIONAL, REQUIRED]
       description: Controls whether a receipt is rejected, accepted, or mandatory for the payment method.
+    PayPalMePaymentTarget:
+      type: object
+      additionalProperties: false
+      required: [type, paypalMeHandle]
+      properties:
+        type:
+          type: string
+          const: PAYPAL_ME
+        paypalMeHandle:
+          type: string
+          minLength: 1
+          maxLength: 20
+          pattern: '^[A-Za-z0-9]+$'
+          description: Normalized PayPal.Me handle.
+    SepaTransferPaymentTarget:
+      type: object
+      additionalProperties: false
+      required: [type, recipientName, iban]
+      properties:
+        type:
+          type: string
+          const: SEPA_TRANSFER
+        recipientName:
+          type: string
+          minLength: 1
+          maxLength: 70
+        iban:
+          type: string
+          minLength: 15
+          maxLength: 34
+          description: Whitespace-free uppercase IBAN with a valid MOD-97 checksum.
+        bic:
+          type: string
+          pattern: '^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$'
+          description: Normalized 8- or 11-character BIC. Optional only when the IBAN country belongs to the EEA; required otherwise.
+    PaymentTarget:
+      oneOf:
+        - $ref: '#/components/schemas/PayPalMePaymentTarget'
+        - $ref: '#/components/schemas/SepaTransferPaymentTarget'
+      discriminator:
+        propertyName: type
+        mapping:
+          PAYPAL_ME: '#/components/schemas/PayPalMePaymentTarget'
+          SEPA_TRANSFER: '#/components/schemas/SepaTransferPaymentTarget'
+    PayPalMePaymentTargetUpdate:
+      type: object
+      additionalProperties: false
+      required: [type, paypalMeHandle]
+      properties:
+        type:
+          type: string
+          const: PAYPAL_ME
+        paypalMeHandle:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: A 1-20 character ASCII-alphanumeric handle or a canonical paypal.me HTTPS URL containing only that handle.
+    SepaTransferPaymentTargetUpdate:
+      type: object
+      additionalProperties: false
+      required: [type, recipientName, iban]
+      properties:
+        type:
+          type: string
+          const: SEPA_TRANSFER
+        recipientName:
+          type: string
+          minLength: 1
+          maxLength: 70
+        iban:
+          type: string
+          minLength: 15
+          maxLength: 42
+          description: IBAN input; non-control Unicode whitespace is removed and letters are uppercased before MOD-97 validation. Control characters are rejected.
+        bic:
+          type: string
+          maxLength: 14
+          description: BIC input, required for IBAN countries outside the EEA. Surrounding whitespace is removed and letters are uppercased before validation.
+    PaymentTargetUpdate:
+      oneOf:
+        - $ref: '#/components/schemas/PayPalMePaymentTargetUpdate'
+        - $ref: '#/components/schemas/SepaTransferPaymentTargetUpdate'
+      discriminator:
+        propertyName: type
+        mapping:
+          PAYPAL_ME: '#/components/schemas/PayPalMePaymentTargetUpdate'
+          SEPA_TRANSFER: '#/components/schemas/SepaTransferPaymentTargetUpdate'
     PaymentMethod:
+      type: object
+      additionalProperties: false
+      required: [id, label, attachmentMode, paymentTarget]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 120 }
+        label: { type: string, minLength: 1, maxLength: 120 }
+        attachmentMode: { $ref: '#/components/schemas/AttachmentMode' }
+        paymentTarget:
+          oneOf:
+            - $ref: '#/components/schemas/PaymentTarget'
+            - type: 'null'
+          description: Member-visible external payment instruction, or null when this method has none.
+    PaymentMethodUpdate:
       type: object
       additionalProperties: false
       required: [id, label, attachmentMode]
@@ -4525,6 +5180,11 @@ components:
         id: { type: string, minLength: 1, maxLength: 120 }
         label: { type: string, minLength: 1, maxLength: 120 }
         attachmentMode: { $ref: '#/components/schemas/AttachmentMode' }
+        paymentTarget:
+          oneOf:
+            - $ref: '#/components/schemas/PaymentTargetUpdate'
+            - type: 'null'
+          description: Omission preserves the target of the same stable method id, null clears it, and an object sets or replaces it. A new id with omission starts without a target.
     ReasonMode:
       type: string
       enum: [OFF, OPTIONAL, REQUIRED]
@@ -5254,7 +5914,7 @@ components:
       description: At least one target array must be non-empty. The target arrays may contain at most 100 entries combined, and items multiplied by targets may create at most 500 bookings.
     ActivityKind:
       type: string
-      enum: [BOOKING, PAYMENT, ADJUSTMENT]
+      enum: [BOOKING, PAYMENT, REVERSAL, ADJUSTMENT]
     ActivityEntry:
       type: object
       additionalProperties: false
@@ -5278,7 +5938,7 @@ components:
           description: Stable feed identity namespaced by transaction kind.
         sourceId:
           type: string
-          description: Identifier accepted by the source-specific action endpoint.
+          description: Underlying booking, payment, or ledger identifier. Reversal rows intentionally expose no action.
         periodId: { type: string }
         kind: { $ref: '#/components/schemas/ActivityKind' }
         targetMembershipId: { type: string }
@@ -5304,14 +5964,21 @@ components:
         quantity: { type: integer, minimum: 1 }
         amountMinor:
           allOf: [{ $ref: '#/components/schemas/MinorUnits' }]
-          description: Signed visible receivable effect; bookings are positive and payments negative.
+          description: Signed visible receivable effect; reversal rows contain the exact opposite amount of their original.
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         occurredAt:
           type: string
           format: date-time
-          description: Audited creation time of the activity; payment value dates remain available on the finance payment resource.
+          description: Audited creation or reversal time; payment value dates remain available on the finance payment resource.
         status: { type: string, enum: [POSTED, REVERSED] }
         attachment: { $ref: '#/components/schemas/PaymentAttachmentSummary' }
+        relatedActivityId:
+          type: string
+          description: Stable identity of the paired original or reversal. Present symmetrically on reversed originals and reversal rows.
+        reversalSourceKind:
+          type: string
+          enum: [BOOKING, PAYMENT]
+          description: Original transaction kind. Present on every REVERSAL row and omitted otherwise.
         canReverse:
           type: boolean
           description: Whether the current caller may invoke the source-specific reversal action.
@@ -5319,6 +5986,12 @@ components:
           type: boolean
           description: Whether the currently available reversal requires a non-empty reason.
         reversalWithoutReasonUntil: { type: string, format: date-time }
+      oneOf:
+        - required: [relatedActivityId, reversalSourceKind]
+          properties:
+            kind: { type: string, enum: [REVERSAL] }
+        - properties:
+            kind: { type: string, enum: [BOOKING, PAYMENT, ADJUSTMENT] }
     Booking:
       type: object
       required: [id, groupId, periodId, categoryId, productId, actorMembershipId, actorDisplayName, actorMembershipStatus, targetMembershipId, targetDisplayName, targetMembershipStatus, quantity, unitPriceMinor, totalMinor, currency, productName, categoryName, createdAt, canVoid, voidReasonRequired]
@@ -5582,7 +6255,7 @@ components:
         groupId: { type: string }
         type:
           type: string
-          enum: [BOOKING_ASSIGNED, BOOKING_REVERSED, PAYMENT_RECORDED, PAYMENT_REVERSED, SETTLEMENT_CREATED, SETTLEMENT_DUE_SOON, SETTLEMENT_OVERDUE]
+          enum: [BOOKING_ASSIGNED, BOOKING_REVERSED, PAYMENT_RECORDED, PAYMENT_REVERSED, SETTLEMENT_CREATED, SETTLEMENT_DUE_SOON, SETTLEMENT_OVERDUE, DATA_EXPORT_READY, DATA_EXPORT_FAILED]
         title: { type: string }
         body: { type: string }
         resourceType: { type: string }
@@ -5601,6 +6274,8 @@ components:
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         periodLabel: { type: string }
         dueAt: { type: string, format: date }
+        exportId: { type: string }
+        exportScope: { $ref: '#/components/schemas/DataExportScope' }
     NotificationSummary:
       type: object
       additionalProperties: false

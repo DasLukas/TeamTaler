@@ -12,6 +12,7 @@ vi.mock('./BehaviorSettingsPanel', () => ({ BehaviorSettingsPanel: () => <div>se
 vi.mock('./MembersPanel', () => ({ MembersPanel: () => <div>members-panel</div> }));
 vi.mock('./RightsPanel', () => ({ RightsPanel: () => <div>rights-panel</div> }));
 vi.mock('./SystemSettingsPanel', () => ({ SystemSettingsPanel: () => <div>system-panel</div> }));
+vi.mock('@/features/exports/DataExportPanel', () => ({ DataExportPanel: () => <div>export-panel</div> }));
 
 describe('AdminPage workspace separation', () => {
   beforeEach(() => {
@@ -23,7 +24,7 @@ describe('AdminPage workspace separation', () => {
   it('contains neither catalog nor finance tabs', () => {
     render(<AdminPage />);
     expect(screen.getByRole('heading', { level: 1, name: 'Einstellungen' })).toBeVisible();
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Allgemein', 'Mitglieder', 'Rollen & Rechte', 'Audit']);
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Allgemein', 'Mitglieder', 'Rollen & Rechte', 'Audit', 'Datenexport']);
     expect(screen.queryByRole('tab', { name: 'Katalog' })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Finanzen' })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Abrechnungen' })).not.toBeInTheDocument();
@@ -34,7 +35,7 @@ describe('AdminPage workspace separation', () => {
     render(<AdminPage />);
     const settingsTab = screen.getByRole('tab', { name: 'Allgemein' });
     const membersTab = screen.getByRole('tab', { name: 'Mitglieder' });
-    const auditTab = screen.getByRole('tab', { name: 'Audit' });
+    const exportTab = screen.getByRole('tab', { name: 'Datenexport' });
 
     expect(settingsTab).toHaveAttribute('tabindex', '0');
     expect(membersTab).toHaveAttribute('tabindex', '-1');
@@ -49,13 +50,13 @@ describe('AdminPage workspace separation', () => {
     expect(screen.getByText('members-panel')).toBeVisible();
 
     await user.keyboard('{End}');
-    expect(auditTab).toHaveFocus();
-    expect(screen.getByText('audit-panel')).toBeVisible();
+    expect(exportTab).toHaveFocus();
+    expect(screen.getByText('export-panel')).toBeVisible();
     await user.keyboard('{Home}');
     expect(settingsTab).toHaveFocus();
     expect(screen.getByText('settings-panel')).toBeVisible();
     await user.keyboard('{ArrowLeft}');
-    expect(auditTab).toHaveFocus();
+    expect(exportTab).toHaveFocus();
   });
 
   it('denies the administration workspace to a pure catalog manager', () => {
@@ -101,7 +102,7 @@ describe('AdminPage workspace separation', () => {
 
     render(<AdminPage />);
 
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Allgemein', 'Audit']);
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Allgemein', 'Audit', 'Datenexport']);
     expect(screen.queryByRole('tab', { name: 'Mitglieder' })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Rollen & Rechte' })).not.toBeInTheDocument();
   });
@@ -121,7 +122,7 @@ describe('AdminPage workspace separation', () => {
 
     render(<AdminPage />);
 
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['System', 'Allgemein', 'Mitglieder', 'Rollen & Rechte', 'Audit']);
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['System', 'Allgemein', 'Mitglieder', 'Rollen & Rechte', 'Audit', 'Datenexport']);
     expect(await screen.findByText('system-panel')).toBeVisible();
     expect(screen.queryByText('settings-panel')).not.toBeInTheDocument();
   });

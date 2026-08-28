@@ -10,10 +10,11 @@ This README is the primary entry point for the person who installs and operates 
 - Account-synchronized light, dark, and system color modes with group defaults and optional per-member theme choices.
 - Group-owned roles and granular permissions for administration, bookings, finance, catalogue management, and reporting.
 - Fixed-price and user-defined-price products with category, file or camera image capture, archive, and ordering support.
-- Account balances, incoming payments with optional or required image/PDF receipts, immutable corrections, optional accounting periods, and settlement history.
-- One server-paginated chronological activity history for authorized bookings, incoming payments, and account corrections, including member identity, signed amounts, receipts, status badges, and transaction-type filtering.
+- Account balances, incoming payments with optional or required image/PDF receipts, configurable PayPal.Me and EUR SEPA payment instructions, immutable corrections, optional accounting periods, and settlement history.
+- One server-paginated chronological activity history for authorized bookings, incoming payments, their timestamped reversals, and account corrections, including linked original/reversal navigation, member identity, signed amounts, receipts, status badges, transaction-type filtering, and a persistent card/table choice on phones.
 - A focused personal account view for balance, payments, settlement history, printing, and CSV export without duplicating the unified activity table.
-- Searchable, column-filterable, sortable operational tables with shareable filter state, cursor-backed loading, and complete horizontally scrollable mobile columns.
+- Searchable, column-filterable, sortable operational collections with shareable query state, cursor-backed automatic infinite loading, complete horizontally scrollable mobile tables, and feature-owned card views where they improve phone usability.
+- Authorization-preserving CSV and A4-landscape PDF exports for operational tables, plus password-confirmed, asynchronous structured-data archives for a member or an administered group.
 - Individual invitations, CSV invitation imports, public join links, and temporary guest accounts.
 - Local accounts with profile images, password recovery, verified email changes, and server-side sessions.
 - In-app notifications plus independently configurable SMTP and standards-based Web Push delivery.
@@ -63,7 +64,7 @@ At minimum, edit these values:
 
 ```dotenv
 TEAMTALER_PUBLIC_URL=https://teamtaler.example.com
-TEAMTALER_VERSION=1.1.0
+TEAMTALER_VERSION=1.2.0
 TEAMTALER_HOST_PORT=8080
 TEAMTALER_TRUSTED_PROXY_CIDRS=
 ```
@@ -182,9 +183,13 @@ The standard container also uses fixed runtime paths from `.env.example`. Detail
 
 The media and receipt limits are editable without a restart through the System tab or `teamtaler admin system settings set`. Media must be a whole MiB value from 1 through 25 MiB; receipts must be a whole MiB value from 1 through 50 MiB. The server applies each live value plus a 1-MiB multipart reserve to the matching routes, independently of `TEAMTALER_MAX_REQUEST_BYTES`. Receipt images are decoded, dimension-checked, metadata-stripped, and normalized; bounded PDFs are validated and stored as opaque documents. Configure a reverse proxy for at least 51 MiB so it does not override the maximum receipt setting.
 
-Group administrators configure receipt handling independently for every payment method as disabled, optional, or required. New groups start with Bank transfer without a receipt, Shopping with a required receipt, Cash and PayPal without receipts, and Other with an optional receipt. Members may select a JPEG, PNG, WebP, or PDF from the device, use a photo-library source, or create a locally processed multi-page PDF through the camera-only document scanner. Imported files remain separate from camera scan sessions. A payment keeps exactly one immutable receipt, including after reversal. The affected member and current holders of `FINANCE_MANAGEMENT` may retrieve it; storage identifiers are never exposed through the API.
+Group administrators configure receipt handling independently for every payment method as disabled, optional, or required. New groups start with Bank transfer without a receipt, Shopping with a required receipt, Cash and PayPal without receipts, and Other with an optional receipt. Members may select a JPEG, PNG, WebP, or PDF from the device, use a photo-library source, or create a locally processed multi-page PDF through the camera-only document scanner. Imported files remain separate from camera scan sessions. A payment keeps exactly one immutable receipt, including after reversal. The affected member and current holders of `FINANCE_MANAGEMENT` may retrieve it; storage identifiers are never exposed through the API. Retrieved images open in the in-app receipt dialog, while PDFs open in a new native browser preview tab through the same protected blob flow used by table PDF exports.
 
-The scanner prepares OpenCV locally before exposing automatic contours, rejects low-confidence and frame-edge candidates, smooths accepted corners, and keeps the overlay aligned with the actual contained camera image. Manual capture remains available when automatic detection cannot initialize and uses default editable corners unless a recent validated contour exists. The editor provides Original, optimized Color, and Grayscale modes. Color performs bounded white balancing, tonal normalization, restrained saturation, and sharpening; Grayscale performs luminance-based contrast normalization and sharpening. The editor preview and generated PDF use the same deterministic pixel implementation, so the selected mode is visible before applying it and does not depend on browser canvas-filter support.
+Authorized group or finance administrators may additionally attach one external payment destination to each payment method: either a normalized PayPal.Me handle or a SEPA recipient name, validated IBAN, and optional BIC. SEPA destinations are available only to groups whose immutable accounting currency is EUR. The destination is operational member data, not a secret: every active group member receives it through transaction settings. TeamTaler stores these values as clear text in SQLite, so they are also present in database backups and the complete group raw-data export. Obtain the recipient's consent and apply the same access and retention policy as for other personal financial data.
+
+In the self-payment dialog, an external payment action becomes available only after a valid positive amount has been entered. A PayPal.Me destination opens an exact HTTPS amount link. A SEPA destination produces a browser-local EPC QR code and exposes the recipient data for copying; the QR code can be downloaded as a PNG. TeamTaler does not offer a direct banking-app link because no cross-platform scheme is reliably supported by banking apps. It does not call PayPal or a bank API, receive webhooks, verify the recipient account, initiate a transfer itself, or reconcile payment status. Leaving TeamTaler is separate from posting a payment: the member must return, review the values, and explicitly confirm the TeamTaler entry.
+
+The scanner initializes OpenCV through an explicit worker-readiness handshake before scheduling bounded RGBA camera frames, rejects low-confidence and frame-edge candidates, smooths accepted corners, and keeps the overlay aligned with the actual contained camera image. This frame protocol avoids relying on `ImageBitmap` or worker-side `OffscreenCanvas`, including on mobile Safari. Initialization and repeated frame-transfer failures stop with a visible manual-capture fallback instead of leaving automatic detection in an indefinite preparing state. Manual capture uses default editable corners unless a recent validated contour exists. The editor provides Original, optimized Color, and Grayscale modes. Color performs bounded white balancing, tonal normalization, restrained saturation, and sharpening; Grayscale performs luminance-based contrast normalization and sharpening. The editor enhancement preview, committed page thumbnail, and generated PDF share the deterministic pixel implementation. Committed thumbnails show the perspective-corrected crop, rotation, and selected filter, while inverse-homography rasterization samples every output pixel once and cannot expose triangle-mesh seams in a reopened PDF.
 
 ### SMTP and email delivery
 
@@ -210,7 +215,7 @@ A complete environment SMTP configuration is active after startup. A configurati
 
 The System tab and local CLI can send a test message through either effective configuration source. Testing an environment configuration performs delivery without creating database revision state; testing a stored configuration also verifies its exact unchanged revision.
 
-The disposable `make test-server` fixture always keeps the stable `admin@example.test` administrator login. When complete SMTP credentials are loaded from `.env.test-server.local`, the script routes operator-triggered SMTP test messages to `TEAMTALER_SMTP_FROM_ADDRESS` through `TEAMTALER_SMTP_TEST_RECIPIENT`; other application email flows retain their actual fixture recipients. The shared development password printed by the script remains unchanged.
+The disposable `make test-server` fixture creates two German-language groups with regular and temporary guest bookings, payments across several accounting periods, closed settlements, fully enabled notification preferences, and mixed group, product, and user image states. It assigns only the five built-in group roles and keeps the stable `admin@example.test` administrator login. The startup output prints every credentialed group membership and the group-less system administrator as a table with the shared development password. When complete SMTP credentials are loaded from `.env.test-server.local`, the script routes operator-triggered SMTP test messages to `TEAMTALER_SMTP_FROM_ADDRESS` through `TEAMTALER_SMTP_TEST_RECIPIENT`; other application email flows retain their actual fixture recipients.
 
 Runtime SMTP targets are restricted to public network addresses by default. The exact host and port supplied by the immutable environment SMTP block remain allowed for an existing private relay. Set `TEAMTALER_SMTP_ALLOW_PRIVATE_NETWORK=true` only when system administrators must configure additional private targets and are trusted with that network access.
 
@@ -390,6 +395,20 @@ teamtaler backup create --output FILE.tar.gz
 teamtaler restore --input FILE.tar.gz [--force]
 ```
 
+## Data and table exports
+
+Every member may request a structured archive of their own profile and data in the currently active group. A member with `GROUP_ADMINISTRATION` may instead request the complete structured data of that group. The group archive intentionally includes finance and other group-owned records even when the administrator does not hold the corresponding narrower operational permission; `GROUP_ADMINISTRATION` is therefore the explicit data-disclosure boundary for this operation. TeamTaler does not provide a system-wide raw-data export.
+
+Starting either raw-data export requires the current account password and a unique `Idempotency-Key`. The request creates an actor-owned background job instead of holding the HTTP connection open. Its persistent status is `QUEUED`, `RUNNING`, `READY`, `FAILED`, `CANCELLED`, or `EXPIRED`; ready and failed results also appear in the in-app inbox. A ready archive remains downloadable for 24 hours, is cancelled when its authorization is revoked, and is visible, downloadable, or permanently deletable only by the account that requested it. Deleting a terminal export removes both its private artifact and durable job record; cancelling an active job retains its terminal cancellation status. ZIP downloads stream directly through the browser and are not buffered in the application's JavaScript memory.
+
+Raw exports are ZIP archives containing UTF-8 CSV datasets, `manifest.json`, and `schema.json`. They use stable English technical headers, RFC 3339 UTC timestamps, and exact minor-unit integer strings. They contain structured database fields and attachment metadata only. The complete group archive's payment-method dataset includes the configured target type and clear-text PayPal.Me or SEPA recipient fields; the personal archive does not add payment-method configuration. Group logos, profile and product images, payment-receipt bytes, secrets, password hashes, sessions, and other media are never copied into either archive. Archives are derived sensitive data. Keep the application data volume private, download them only over HTTPS, remove local copies when no longer needed, and do not treat the 24-hour application retention as a policy for browser downloads or backups.
+
+The visible Activities, Payments, Account balances, Group settlements, Personal settlements, Active members, Archived members, Group audit, and System audit tables offer CSV and PDF exports to users who can already read the corresponding table. The backend replays the current validated filters and deterministic ordering across all matching rows; client pagination and interactive action columns are not exported. Activity exports include each authorized reversal as its own timestamped row with the inverse signed amount while retaining the reversed original row; the interactive link between those rows is intentionally omitted. CSV output uses localized visible values and downloads directly. PDF output opens in a new tab through the browser's native PDF viewer, where it can be reviewed, printed, or downloaded. Its PDF metadata title and suggested filename use `YYYY-MM-DD_Export_title`, while the page heading remains the concise canonical table title. It uses A4 landscape, repeats column headings, wraps content instead of clipping it, embeds available authorized member and product images beside their text fallback, reserves the same image space when media is missing so names remain vertically aligned, and colors activity names and corresponding amounts by transaction kind without decorative badges or symbols. Group settlement views and exports include the current active, archived, or deleted membership lifecycle alongside each immutable statement identity. Financial states use the same restrained semantic text system: open or reversed values are red, partial values amber, and paid, settled, or credit values green; active memberships are green, archived memberships amber, and deleted memberships red. Every page repeats a three-part header: group logo or TeamTaler fallback with the group name, canonical table title, and localized export time with page `n/m`. The system-audit export uses the TeamTaler mark without a group name and remains the only system-level export.
+
+Each completed-settlement row also offers an exact PDF statement preview scoped to its immutable `periodId` and `membershipId`. The dedicated `SETTLEMENT_STATEMENT` renderer includes every booking assigned to that member in the accounting period, ordered chronologically and decorated with available actor, member, and product images. Its extended page header keeps the canonical title `Abgeschlossene Abrechnung`, shows the period label as a centered subtitle, and places the statement member with a smaller profile image or initials fallback below the group identity. The action prepares the browser tab synchronously and reports popup, rendering, or prematurely closed preview failures in the originating row.
+
+Table exports are generated synchronously and fail without a partial download when a bound is exceeded. CSV exports allow at most 100,000 rows, 100 MiB, and 120 seconds; PDF exports allow at most 10,000 rows, 50 MiB, and 60 seconds. Apply filters before exporting unusually large tables.
+
 ## Backup, restore, and upgrades
 
 Create an online application-consistent backup from the Compose deployment:
@@ -398,7 +417,7 @@ Create an online application-consistent backup from the Compose deployment:
 ./scripts/backup.sh
 ```
 
-The resulting archive contains a consistent SQLite snapshot, referenced images and payment receipts, a format manifest, and SHA-256 checksums. Copy completed archives away from the Docker host and encrypt them with an external backup system. TeamTaler does not schedule backups or enforce retention.
+The resulting archive contains a consistent SQLite snapshot, referenced images and payment receipts, a format manifest, and SHA-256 checksums. Configured PayPal.Me handles, SEPA recipient names, IBANs, and BICs remain clear text inside the SQLite snapshot. Copy completed archives away from the Docker host and encrypt them with an external backup system. TeamTaler does not schedule backups or enforce retention.
 
 Restore only while the application is stopped. A restore validates archive paths, sizes, checksums, image and receipt content addresses, SQLite integrity, foreign keys, exact reference inventories, and migration compatibility before replacing data. The exact procedure, including the one-off Compose command and recovery directory, is documented in [deploy/README.md](deploy/README.md#restore).
 
@@ -419,6 +438,8 @@ Before every upgrade:
 
 Migrations are forward-only. Rollback requires the previous image together with a compatible pre-upgrade backup. Do not run an older binary against a database already migrated by a newer release. Automatic unreviewed container updates are not recommended for financial data.
 
+Migration `0044` adds the normalized optional payment-destination fields to existing payment methods and leaves every existing method unconfigured. Deploy the matching API and SPA together; review newly configured destinations after the upgrade because every active member and complete group raw-data export can read them.
+
 ## Monitoring and logs
 
 ```sh
@@ -431,6 +452,8 @@ docker compose exec app teamtaler healthcheck \
 - `GET /health/live` confirms that the HTTP process responds.
 - `GET /health/ready` confirms that startup and a database ping succeed.
 - Compose rotates application logs at 10 MiB and retains three files by default.
+
+Application request logs do not include request or response bodies, and payment-method audit metadata records only destination counts and types. Recipient names, PayPal.Me handles, IBANs, and BICs remain present in persisted settings, database backups, and complete group raw-data exports even though they are excluded from those logging and audit fields.
 
 Monitor container restarts, readiness, reverse-proxy TLS expiry, data-volume disk usage, backup results, and the host backup directory with external tooling. TeamTaler does not expose Prometheus metrics or built-in alert delivery.
 

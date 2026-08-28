@@ -64,10 +64,10 @@ describe('BehaviorSettingsPanel', () => {
     ownPaymentReasonRequired: true,
     otherPaymentReasonRequired: false,
     paymentMethods: [
-      { id: 'BANK_TRANSFER', label: 'Banküberweisung', attachmentMode: 'OFF' },
-      { id: 'CASH', label: 'Bar', attachmentMode: 'OFF' },
-      { id: 'PAYPAL', label: 'PayPal', attachmentMode: 'OFF' },
-      { id: 'OTHER', label: 'Sonstige', attachmentMode: 'OFF' },
+      { id: 'BANK_TRANSFER', label: 'Banküberweisung', attachmentMode: 'OFF', paymentTarget: null },
+      { id: 'CASH', label: 'Bar', attachmentMode: 'OFF', paymentTarget: null },
+      { id: 'PAYPAL', label: 'PayPal', attachmentMode: 'OFF', paymentTarget: null },
+      { id: 'OTHER', label: 'Sonstige', attachmentMode: 'OFF', paymentTarget: null },
     ],
     bookingReasons: [],
     paymentReasons: [],
@@ -90,6 +90,7 @@ describe('BehaviorSettingsPanel', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    session.groups[0]!.currency = 'EUR';
     session.groups[0]!.membership!.effectiveGrants = [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } }];
     apiMock.getGroupSettings.mockResolvedValue(settings);
     apiMock.getGroupNotificationSettings.mockResolvedValue(notificationSettings);
@@ -240,6 +241,7 @@ describe('BehaviorSettingsPanel', () => {
     expect(screen.queryByRole('region', { name: i18n.t('behaviorSettings.defaultRoleTitle') })).not.toBeInTheDocument();
     expect(screen.queryByRole('switch', { name: i18n.t('behaviorSettings.notificationEmailToggle') })).not.toBeInTheDocument();
     expect(apiMock.getRoles).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') })).toBeVisible();
   });
 
   it('shows only the membership default to a pure role manager', async () => {
@@ -278,10 +280,10 @@ describe('BehaviorSettingsPanel', () => {
 
     await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', {
       paymentMethods: [
-        { id: 'BANK_TRANSFER', label: 'Banküberweisung', attachmentMode: 'OFF' },
-        { id: 'PAYPAL', label: 'PayPal', attachmentMode: 'OFF' },
-        { id: 'CASH', label: 'Kasse', attachmentMode: 'OFF' },
-        expect.objectContaining({ label: 'Karte', attachmentMode: 'OFF' }),
+        { id: 'BANK_TRANSFER', label: 'Banküberweisung', attachmentMode: 'OFF', paymentTarget: null },
+        { id: 'PAYPAL', label: 'PayPal', attachmentMode: 'OFF', paymentTarget: null },
+        { id: 'CASH', label: 'Kasse', attachmentMode: 'OFF', paymentTarget: null },
+        expect.objectContaining({ label: 'Karte', attachmentMode: 'OFF', paymentTarget: null }),
       ],
     }));
   });
@@ -303,7 +305,72 @@ describe('BehaviorSettingsPanel', () => {
     await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
 
     await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', {
-      paymentMethods: expect.arrayContaining([{ id: 'CASH', label: 'Bar', attachmentMode: 'REQUIRED' }]),
+      paymentMethods: expect.arrayContaining([{ id: 'CASH', label: 'Bar', attachmentMode: 'REQUIRED', paymentTarget: null }]),
+    }));
+  });
+
+  it('normalizes and persists a complete PayPal.Me link as a handle', async () => {
+    const user = userEvent.setup();
+    apiMock.updateGroupSettings.mockImplementation(async (_groupId: string, update: Partial<GroupSettings>) => ({ ...settings, ...update }));
+    renderPanel();
+
+    const targets = await screen.findAllByLabelText(i18n.t('behaviorSettings.paymentTargetLabel'));
+    await user.selectOptions(targets[2], 'PAYPAL_ME');
+    const handle = screen.getByLabelText(i18n.t('behaviorSettings.paypalMeHandle'));
+    await user.type(handle, 'https://paypal.me/TeamTaler42');
+    expect(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') })).toBeEnabled();
+    await user.tab();
+    expect(handle).toHaveValue('TeamTaler42');
+    expect(screen.getByRole('link', { name: 'https://paypal.me/TeamTaler42' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
+
+    await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', {
+      paymentMethods: expect.arrayContaining([
+        expect.objectContaining({ id: 'PAYPAL', paymentTarget: { type: 'PAYPAL_ME', paypalMeHandle: 'TeamTaler42' } }),
+      ]),
+    }));
+  });
+
+  it('validates and persists normalized SEPA account data for EUR groups', async () => {
+    const user = userEvent.setup();
+    apiMock.updateGroupSettings.mockImplementation(async (_groupId: string, update: Partial<GroupSettings>) => ({ ...settings, ...update }));
+    renderPanel();
+
+    const targets = await screen.findAllByLabelText(i18n.t('behaviorSettings.paymentTargetLabel'));
+    await user.selectOptions(targets[0], 'SEPA_TRANSFER');
+    const save = screen.getByRole('button', { name: i18n.t('behaviorSettings.save') });
+    expect(save).toBeDisabled();
+    await user.type(screen.getByLabelText(i18n.t('behaviorSettings.sepaRecipient')), 'TeamTaler Club');
+    await user.type(screen.getByLabelText(i18n.t('behaviorSettings.sepaIban')), 'de89 3704 0044 0532 0130 00');
+    await user.type(screen.getByLabelText(i18n.t('behaviorSettings.sepaBic')), 'cobadeffxxx');
+    await user.tab();
+    expect(screen.getByLabelText(i18n.t('behaviorSettings.sepaIban'))).toHaveValue('DE89370400440532013000');
+    expect(screen.getByLabelText(i18n.t('behaviorSettings.sepaBic'))).toHaveValue('COBADEFFXXX');
+    expect(save).toBeEnabled();
+    await user.click(save);
+
+    await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', {
+      paymentMethods: expect.arrayContaining([
+        expect.objectContaining({ id: 'BANK_TRANSFER', paymentTarget: { type: 'SEPA_TRANSFER', recipientName: 'TeamTaler Club', iban: 'DE89370400440532013000', bic: 'COBADEFFXXX' } }),
+      ]),
+    }));
+  });
+
+  it('omits SEPA configuration outside EUR groups and lets finance managers save', async () => {
+    const user = userEvent.setup();
+    session.groups[0]!.currency = 'USD';
+    session.groups[0]!.membership!.effectiveGrants = [{ permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } }];
+    apiMock.updateGroupSettings.mockImplementation(async (_groupId: string, update: Partial<GroupSettings>) => ({ ...settings, ...update }));
+    renderPanel();
+
+    await screen.findByRole('region', { name: i18n.t('behaviorSettings.bookingTitle') });
+    expect(screen.queryByRole('option', { name: i18n.t('behaviorSettings.paymentTargetSepa') })).not.toBeInTheDocument();
+    const cash = screen.getByDisplayValue('Bar');
+    await user.clear(cash);
+    await user.type(cash, 'Kasse');
+    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
+    await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', {
+      paymentMethods: expect.arrayContaining([expect.objectContaining({ id: 'CASH', label: 'Kasse' })]),
     }));
   });
 });

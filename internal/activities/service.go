@@ -26,6 +26,8 @@ const (
 	KindBooking Kind = "BOOKING"
 	// KindPayment represents money received for a member account.
 	KindPayment Kind = "PAYMENT"
+	// KindReversal represents the audited counter-effect of a reversed booking or payment.
+	KindReversal Kind = "REVERSAL"
 	// KindAdjustment represents a receivable correction without a booking or payment.
 	KindAdjustment Kind = "ADJUSTMENT"
 )
@@ -34,33 +36,37 @@ const (
 // uses the member-receivable sign: positive values increase debt and negative
 // values reduce debt or create credit.
 type Entry struct {
-	ID                         string                           `json:"id"`
-	SourceID                   string                           `json:"sourceId"`
-	PeriodID                   string                           `json:"periodId,omitempty"`
-	Kind                       Kind                             `json:"kind"`
-	TargetMembershipID         string                           `json:"targetMembershipId"`
-	TargetDisplayName          string                           `json:"targetDisplayName"`
-	TargetMembershipStatus     string                           `json:"targetMembershipStatus"`
-	TargetAvatarURL            string                           `json:"targetAvatarUrl,omitempty"`
-	ActorMembershipID          string                           `json:"actorMembershipId,omitempty"`
-	ActorDisplayName           string                           `json:"actorDisplayName,omitempty"`
-	ActorMembershipStatus      string                           `json:"actorMembershipStatus,omitempty"`
-	ActorAvatarURL             string                           `json:"actorAvatarUrl,omitempty"`
-	DetailName                 string                           `json:"detailName"`
-	DetailNote                 string                           `json:"detailNote,omitempty"`
-	PaymentMethod              string                           `json:"paymentMethod,omitempty"`
-	CategoryID                 string                           `json:"categoryId,omitempty"`
-	CategoryName               string                           `json:"categoryName,omitempty"`
-	ProductID                  string                           `json:"productId,omitempty"`
-	Quantity                   int                              `json:"quantity,omitempty"`
-	AmountMinor                int64                            `json:"amountMinor,string"`
-	Currency                   string                           `json:"currency"`
-	OccurredAt                 string                           `json:"occurredAt"`
-	Status                     string                           `json:"status"`
-	Attachment                 *domain.PaymentAttachmentSummary `json:"attachment,omitempty"`
-	CanReverse                 bool                             `json:"canReverse"`
-	ReversalReasonRequired     bool                             `json:"reversalReasonRequired"`
-	ReversalWithoutReasonUntil *string                          `json:"reversalWithoutReasonUntil,omitempty"`
+	ID                     string                           `json:"id"`
+	SourceID               string                           `json:"sourceId"`
+	PeriodID               string                           `json:"periodId,omitempty"`
+	Kind                   Kind                             `json:"kind"`
+	TargetMembershipID     string                           `json:"targetMembershipId"`
+	TargetDisplayName      string                           `json:"targetDisplayName"`
+	TargetMembershipStatus string                           `json:"targetMembershipStatus"`
+	TargetAvatarURL        string                           `json:"targetAvatarUrl,omitempty"`
+	ActorMembershipID      string                           `json:"actorMembershipId,omitempty"`
+	ActorDisplayName       string                           `json:"actorDisplayName,omitempty"`
+	ActorMembershipStatus  string                           `json:"actorMembershipStatus,omitempty"`
+	ActorAvatarURL         string                           `json:"actorAvatarUrl,omitempty"`
+	DetailName             string                           `json:"detailName"`
+	DetailNote             string                           `json:"detailNote,omitempty"`
+	PaymentMethod          string                           `json:"paymentMethod,omitempty"`
+	CategoryID             string                           `json:"categoryId,omitempty"`
+	CategoryName           string                           `json:"categoryName,omitempty"`
+	ProductID              string                           `json:"productId,omitempty"`
+	Quantity               int                              `json:"quantity,omitempty"`
+	AmountMinor            int64                            `json:"amountMinor,string"`
+	Currency               string                           `json:"currency"`
+	OccurredAt             string                           `json:"occurredAt"`
+	Status                 string                           `json:"status"`
+	Attachment             *domain.PaymentAttachmentSummary `json:"attachment,omitempty"`
+	// RelatedActivityID links a reversed original to its reversal row and vice versa.
+	RelatedActivityID string `json:"relatedActivityId,omitempty"`
+	// ReversalSourceKind identifies whether a reversal cancels a booking or payment.
+	ReversalSourceKind         Kind    `json:"reversalSourceKind,omitempty"`
+	CanReverse                 bool    `json:"canReverse"`
+	ReversalReasonRequired     bool    `json:"reversalReasonRequired"`
+	ReversalWithoutReasonUntil *string `json:"reversalWithoutReasonUntil,omitempty"`
 }
 
 // Query describes the unified activity collection request. Date bounds accept
@@ -79,7 +85,9 @@ type Query struct {
 	Sort               string
 	Direction          string
 	Cursor             string
-	Limit              int
+	// AnchorID requests a centered, permission-scoped context window and pauses filters.
+	AnchorID string
+	Limit    int
 }
 
 // Page is one globally sorted, stable keyset-paginated activity slice.
@@ -138,7 +146,7 @@ func (s Service) listKindFilterOptions(ctx context.Context, membership domain.Me
 			return nil, err
 		}
 		switch kind {
-		case KindBooking, KindPayment, KindAdjustment:
+		case KindBooking, KindPayment, KindReversal, KindAdjustment:
 			present[kind] = struct{}{}
 		}
 	}
@@ -146,7 +154,7 @@ func (s Service) listKindFilterOptions(ctx context.Context, membership domain.Me
 		return nil, err
 	}
 	options := make([]Kind, 0, len(present))
-	for _, kind := range []Kind{KindBooking, KindPayment, KindAdjustment} {
+	for _, kind := range []Kind{KindBooking, KindPayment, KindReversal, KindAdjustment} {
 		if _, exists := present[kind]; exists {
 			options = append(options, kind)
 		}
@@ -173,8 +181,9 @@ var activitySorts = map[string]struct{}{
 }
 
 const (
-	maxFilterValues            = 200
-	activityOccurredExpression = `strftime('%Y-%m-%dT%H:%M:%fZ',activity.occurred_at)`
+	maxFilterValues               = 200
+	activityFeedProjectionVersion = 2
+	activityOccurredExpression    = `strftime('%Y-%m-%dT%H:%M:%fZ',activity.occurred_at)`
 )
 
 func activitySortExpression(sortKey string) string {
@@ -184,11 +193,11 @@ func activitySortExpression(sortKey string) string {
 	case "targetName":
 		return "lower(activity.target_name)"
 	case "actorName":
-		return "lower(activity.actor_name)"
+		return "lower(coalesce(nullif(activity.actor_name,''),char(1)))"
 	case "detailName":
-		return "lower(activity.detail_name)"
+		return "lower(coalesce(nullif(activity.detail_name,''),char(1)))"
 	case "categoryName":
-		return "lower(activity.category_name)"
+		return "lower(coalesce(nullif(activity.category_name,''),char(1)))"
 	case "amount":
 		return "activity.amount_minor"
 	case "status":
@@ -284,7 +293,8 @@ func visibleActivityCTE(membership domain.Membership, access permissions) (strin
 			b.product_name AS detail_name,coalesce(b.reason,'') AS detail_note,NULL AS payment_method,b.category_id,b.category_name,b.product_id,b.quantity,
 			b.total_minor AS amount_minor,g.currency,b.created_at AS occurred_at,
 			CASE WHEN b.voided_at IS NULL THEN 'POSTED' ELSE 'REVERSED' END AS status,
-			NULL AS attachment_name,NULL AS attachment_type,NULL AS attachment_size
+			NULL AS attachment_name,NULL AS attachment_type,NULL AS attachment_size,
+			CASE WHEN b.voided_at IS NOT NULL THEN 'reversal:booking:' || b.id END AS related_activity_id,NULL AS reversal_source_kind
 		FROM bookings b JOIN groups g ON g.id=b.group_id
 		JOIN memberships target_member ON target_member.group_id=b.group_id AND target_member.id=b.target_membership_id
 		JOIN users target_user ON target_user.id=target_member.user_id
@@ -302,7 +312,8 @@ func visibleActivityCTE(membership domain.Membership, access permissions) (strin
 			coalesce(nullif(p.method_label,''),''),coalesce(nullif(p.reference,''),nullif(p.note,''),''),p.method,NULL,'',NULL,NULL,
 			-p.amount_minor,g.currency,p.created_at,
 			CASE WHEN p.reversed_at IS NULL THEN 'POSTED' ELSE 'REVERSED' END,
-			attachment.original_filename,attachment.media_type,attachment.size_bytes
+			attachment.original_filename,attachment.media_type,attachment.size_bytes,
+			CASE WHEN p.reversed_at IS NOT NULL THEN 'reversal:payment:' || p.id END,NULL
 		FROM payments p JOIN groups g ON g.id=p.group_id
 		JOIN memberships target_member ON target_member.group_id=p.group_id AND target_member.id=p.membership_id
 		JOIN users target_user ON target_user.id=target_member.user_id
@@ -311,12 +322,44 @@ func visibleActivityCTE(membership domain.Membership, access permissions) (strin
 		LEFT JOIN payment_attachments attachment ON attachment.group_id=p.group_id AND attachment.payment_id=p.id
 		WHERE p.group_id=?` + paymentScope + `
 		UNION ALL
+		SELECT 'reversal:booking:' || b.id,b.id,b.period_id,'REVERSAL',
+			target_member.id,target_user.display_name,
+			CASE WHEN target_member.deleted_at IS NOT NULL THEN 'DELETED' ELSE target_member.status END,
+			target_user.id,coalesce(target_user.avatar_key,''),
+			actor_member.id,actor_user.display_name,
+			CASE WHEN actor_member.deleted_at IS NOT NULL THEN 'DELETED' ELSE actor_member.status END,
+			actor_user.id,actor_user.avatar_key,
+			b.product_name,coalesce(b.void_reason,''),NULL,b.category_id,b.category_name,b.product_id,b.quantity,
+			-b.total_minor,g.currency,b.voided_at,'POSTED',NULL,NULL,NULL,'booking:' || b.id,'BOOKING'
+		FROM bookings b JOIN groups g ON g.id=b.group_id
+		JOIN memberships target_member ON target_member.group_id=b.group_id AND target_member.id=b.target_membership_id
+		JOIN users target_user ON target_user.id=target_member.user_id
+		LEFT JOIN memberships actor_member ON actor_member.group_id=b.group_id AND actor_member.id=b.voided_by
+		LEFT JOIN users actor_user ON actor_user.id=actor_member.user_id
+		WHERE b.group_id=? AND b.voided_at IS NOT NULL` + bookingScope + `
+		UNION ALL
+		SELECT 'reversal:payment:' || p.id,p.id,NULL,'REVERSAL',
+			target_member.id,target_user.display_name,
+			CASE WHEN target_member.deleted_at IS NOT NULL THEN 'DELETED' ELSE target_member.status END,
+			target_user.id,coalesce(target_user.avatar_key,''),
+			actor_member.id,actor_user.display_name,
+			CASE WHEN actor_member.deleted_at IS NOT NULL THEN 'DELETED' ELSE actor_member.status END,
+			actor_user.id,actor_user.avatar_key,
+			coalesce(nullif(p.method_label,''),''),coalesce(p.reversal_reason,''),p.method,NULL,'',NULL,NULL,
+			p.amount_minor,g.currency,p.reversed_at,'POSTED',NULL,NULL,NULL,'payment:' || p.id,'PAYMENT'
+		FROM payments p JOIN groups g ON g.id=p.group_id
+		JOIN memberships target_member ON target_member.group_id=p.group_id AND target_member.id=p.membership_id
+		JOIN users target_user ON target_user.id=target_member.user_id
+		LEFT JOIN memberships actor_member ON actor_member.group_id=p.group_id AND actor_member.id=p.reversed_by
+		LEFT JOIN users actor_user ON actor_user.id=actor_member.user_id
+		WHERE p.group_id=? AND p.reversed_at IS NOT NULL` + paymentScope + `
+		UNION ALL
 		SELECT 'adjustment:' || entry.id,entry.id,entry.period_id,'ADJUSTMENT',
 			target_member.id,target_user.display_name,
 			CASE WHEN target_member.deleted_at IS NOT NULL THEN 'DELETED' ELSE target_member.status END,
 			target_user.id,coalesce(target_user.avatar_key,''),
 			NULL,'','',NULL,'',entry.description,'',NULL,NULL,'',NULL,NULL,
-			entry.amount_minor,g.currency,entry.created_at,'POSTED',NULL,NULL,NULL
+			entry.amount_minor,g.currency,entry.created_at,'POSTED',NULL,NULL,NULL,NULL,NULL
 		FROM ledger_entries entry JOIN groups g ON g.id=entry.group_id
 		JOIN memberships target_member ON target_member.group_id=entry.group_id AND target_member.id=entry.membership_id
 		JOIN users target_user ON target_user.id=target_member.user_id
@@ -324,6 +367,8 @@ func visibleActivityCTE(membership domain.Membership, access permissions) (strin
 			AND entry.booking_id IS NULL AND entry.payment_id IS NULL AND entry.reversal_of IS NULL` + adjustmentScope + `
 	)`
 	args := append(bookingArgs, paymentArgs...)
+	args = append(args, bookingArgs...)
+	args = append(args, paymentArgs...)
 	args = append(args, adjustmentArgs...)
 	return query, args
 }
@@ -331,6 +376,8 @@ func visibleActivityCTE(membership domain.Membership, access permissions) (strin
 // QueryEntries returns one authorized, globally filtered and sorted activity
 // page. Authorization is evaluated before user filters and included in the
 // cursor fingerprint, so cursors cannot be replayed across permission scopes.
+// An anchor query pauses filters and returns a centered, unfiltered context
+// window in the requested sort order.
 //
 // Parameters:
 //   - ctx: Request lifetime and cancellation context.
@@ -374,8 +421,8 @@ func (s Service) QueryEntries(ctx context.Context, membership domain.Membership,
 		return Page{}, err
 	}
 	for _, kind := range input.Kinds {
-		if kind != string(KindBooking) && kind != string(KindPayment) && kind != string(KindAdjustment) {
-			return Page{}, domain.ValidationError{Field: "kind", Message: "must contain BOOKING, PAYMENT, or ADJUSTMENT"}
+		if kind != string(KindBooking) && kind != string(KindPayment) && kind != string(KindReversal) && kind != string(KindAdjustment) {
+			return Page{}, domain.ValidationError{Field: "kind", Message: "must contain BOOKING, PAYMENT, REVERSAL, or ADJUSTMENT"}
 		}
 	}
 	input.CategoryIDs, err = normalizeFilterValues("categoryId", input.CategoryIDs, false)
@@ -391,17 +438,38 @@ func (s Service) QueryEntries(ctx context.Context, membership domain.Membership,
 		return Page{}, domain.ValidationError{Field: "status", Message: "must be POSTED or REVERSED"}
 	}
 	input.TargetMembershipID = strings.TrimSpace(input.TargetMembershipID)
+	input.AnchorID = strings.TrimSpace(input.AnchorID)
+	if len(input.AnchorID) > 500 {
+		return Page{}, domain.ValidationError{Field: "anchorId", Message: "must contain at most 500 characters"}
+	}
+	if input.AnchorID != "" && input.Cursor != "" {
+		return Page{}, domain.ValidationError{Field: "anchorId", Message: "cannot be combined with cursor"}
+	}
 	if input.Limit < 1 || input.Limit > 200 {
 		input.Limit = 100
 	}
+	if input.AnchorID != "" {
+		input.Search = ""
+		input.Kinds = []string{}
+		input.TargetMembershipID = ""
+		input.CategoryIDs = []string{}
+		input.ProductIDs = []string{}
+		input.Status = ""
+		input.OccurredFrom = ""
+		input.OccurredTo = ""
+		input.AmountMin = nil
+		input.AmountMax = nil
+	}
 
 	fingerprint, err := tablequery.Fingerprint(struct {
+		ProjectionVersion                                              int
 		GroupID, ViewerMembershipID, Search, TargetMembershipID        string
 		Kinds, CategoryIDs, ProductIDs                                 []string
 		Status, OccurredFrom, OccurredTo, Sort, Direction              string
 		AmountMin, AmountMax                                           *int64
 		ViewAllBookings, ManageFinance, VoidOwnBooking, VoidAnyBooking bool
 	}{
+		activityFeedProjectionVersion,
 		membership.GroupID, membership.ID, input.Search, input.TargetMembershipID,
 		input.Kinds, input.CategoryIDs, input.ProductIDs,
 		input.Status, input.OccurredFrom, input.OccurredTo, input.Sort, input.Direction,
@@ -419,52 +487,69 @@ func (s Service) QueryEntries(ctx context.Context, membership domain.Membership,
 	query, args := visibleActivityCTE(membership, access)
 	sortExpression := activitySortExpression(input.Sort)
 	orderKeyword, comparison := tablequery.SQLOrderFragments(input.Direction)
-	query += ` SELECT activity.*,CAST(` + sortExpression + ` AS TEXT) FROM activity WHERE 1=1`
-	if len(input.Kinds) > 0 {
-		query += ` AND activity.kind IN (` + placeholders(len(input.Kinds)) + `)`
-		for _, kind := range input.Kinds {
-			args = append(args, kind)
+	anchorQuery := input.AnchorID != ""
+	if anchorQuery {
+		query += `, ranked_activity AS (
+			SELECT activity.*,CAST(` + sortExpression + ` AS TEXT) AS sort_key,
+				row_number() OVER (ORDER BY ` + sortExpression + ` ` + orderKeyword + `,activity.id ` + orderKeyword + `) AS row_position,
+				count(*) OVER () AS total_rows
+			FROM activity
+		), anchor_activity AS (
+			SELECT row_position,total_rows FROM ranked_activity WHERE id=?
+		), window_bounds AS (
+			SELECT max(1,min(row_position-?,max(total_rows-?+1,1))) AS start_position FROM anchor_activity
+		)
+		SELECT ranked_activity.* FROM ranked_activity,window_bounds
+		WHERE ranked_activity.row_position>=window_bounds.start_position
+		ORDER BY ranked_activity.row_position LIMIT ?`
+		args = append(args, input.AnchorID, input.Limit/2, input.Limit, input.Limit+1)
+	} else {
+		query += ` SELECT activity.*,CAST(` + sortExpression + ` AS TEXT) FROM activity WHERE 1=1`
+		if len(input.Kinds) > 0 {
+			query += ` AND activity.kind IN (` + placeholders(len(input.Kinds)) + `)`
+			for _, kind := range input.Kinds {
+				args = append(args, kind)
+			}
 		}
-	}
-	if input.TargetMembershipID != "" {
-		query += ` AND activity.target_membership_id=?`
-		args = append(args, input.TargetMembershipID)
-	}
-	if len(input.CategoryIDs) > 0 {
-		query += ` AND activity.category_id IN (` + placeholders(len(input.CategoryIDs)) + `)`
-		for _, categoryID := range input.CategoryIDs {
-			args = append(args, categoryID)
+		if input.TargetMembershipID != "" {
+			query += ` AND activity.target_membership_id=?`
+			args = append(args, input.TargetMembershipID)
 		}
-	}
-	if len(input.ProductIDs) > 0 {
-		query += ` AND activity.product_id IN (` + placeholders(len(input.ProductIDs)) + `)`
-		for _, productID := range input.ProductIDs {
-			args = append(args, productID)
+		if len(input.CategoryIDs) > 0 {
+			query += ` AND activity.category_id IN (` + placeholders(len(input.CategoryIDs)) + `)`
+			for _, categoryID := range input.CategoryIDs {
+				args = append(args, categoryID)
+			}
 		}
-	}
-	if input.Status != "" {
-		query += ` AND activity.status=?`
-		args = append(args, input.Status)
-	}
-	if input.OccurredFrom != "" {
-		query += ` AND ` + activityOccurredExpression + `>=?`
-		args = append(args, input.OccurredFrom)
-	}
-	if input.OccurredTo != "" {
-		query += ` AND ` + activityOccurredExpression + `<?`
-		args = append(args, input.OccurredTo)
-	}
-	if input.AmountMin != nil {
-		query += ` AND activity.amount_minor>=?`
-		args = append(args, *input.AmountMin)
-	}
-	if input.AmountMax != nil {
-		query += ` AND activity.amount_minor<=?`
-		args = append(args, *input.AmountMax)
-	}
-	if input.Search != "" {
-		pattern := tablequery.LikePattern(input.Search)
-		query += ` AND (activity.target_name LIKE ? ESCAPE '\' COLLATE NOCASE
+		if len(input.ProductIDs) > 0 {
+			query += ` AND activity.product_id IN (` + placeholders(len(input.ProductIDs)) + `)`
+			for _, productID := range input.ProductIDs {
+				args = append(args, productID)
+			}
+		}
+		if input.Status != "" {
+			query += ` AND activity.status=?`
+			args = append(args, input.Status)
+		}
+		if input.OccurredFrom != "" {
+			query += ` AND ` + activityOccurredExpression + `>=?`
+			args = append(args, input.OccurredFrom)
+		}
+		if input.OccurredTo != "" {
+			query += ` AND ` + activityOccurredExpression + `<?`
+			args = append(args, input.OccurredTo)
+		}
+		if input.AmountMin != nil {
+			query += ` AND activity.amount_minor>=?`
+			args = append(args, *input.AmountMin)
+		}
+		if input.AmountMax != nil {
+			query += ` AND activity.amount_minor<=?`
+			args = append(args, *input.AmountMax)
+		}
+		if input.Search != "" {
+			pattern := tablequery.LikePattern(input.Search)
+			query += ` AND (activity.target_name LIKE ? ESCAPE '\' COLLATE NOCASE
 			OR activity.actor_name LIKE ? ESCAPE '\' COLLATE NOCASE
 			OR activity.detail_name LIKE ? ESCAPE '\' COLLATE NOCASE
 			OR activity.detail_note LIKE ? ESCAPE '\' COLLATE NOCASE
@@ -473,21 +558,22 @@ func (s Service) QueryEntries(ctx context.Context, membership domain.Membership,
 			OR CAST(activity.amount_minor AS TEXT) LIKE ? ESCAPE '\'
 			OR activity.kind LIKE ? ESCAPE '\' COLLATE NOCASE
 			OR activity.status LIKE ? ESCAPE '\' COLLATE NOCASE)`
-		args = append(args, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
-	}
-	if cursorID != "" {
-		var boundKey any = cursorKey
-		if input.Sort == "amount" {
-			boundKey, err = strconv.ParseInt(cursorKey, 10, 64)
-			if err != nil {
-				return Page{}, domain.ValidationError{Field: "cursor", Message: "is invalid or does not match the current query"}
-			}
+			args = append(args, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
 		}
-		query += ` AND (` + sortExpression + ` ` + comparison + ` ? OR (` + sortExpression + ` = ? AND activity.id ` + comparison + ` ?))`
-		args = append(args, boundKey, boundKey, cursorID)
+		if cursorID != "" {
+			var boundKey any = cursorKey
+			if input.Sort == "amount" {
+				boundKey, err = strconv.ParseInt(cursorKey, 10, 64)
+				if err != nil {
+					return Page{}, domain.ValidationError{Field: "cursor", Message: "is invalid or does not match the current query"}
+				}
+			}
+			query += ` AND (` + sortExpression + ` ` + comparison + ` ? OR (` + sortExpression + ` = ? AND activity.id ` + comparison + ` ?))`
+			args = append(args, boundKey, boundKey, cursorID)
+		}
+		query += ` ORDER BY ` + sortExpression + ` ` + orderKeyword + `,activity.id ` + orderKeyword + ` LIMIT ?`
+		args = append(args, input.Limit+1)
 	}
-	query += ` ORDER BY ` + sortExpression + ` ` + orderKeyword + `,activity.id ` + orderKeyword + ` LIMIT ?`
-	args = append(args, input.Limit+1)
 
 	rows, err := s.DB.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -504,15 +590,21 @@ func (s Service) QueryEntries(ctx context.Context, membership domain.Membership,
 		var quantity sql.NullInt64
 		var attachmentName, attachmentType sql.NullString
 		var attachmentSize sql.NullInt64
+		var relatedActivityID, reversalSourceKind sql.NullString
 		var targetUserID, targetAvatarKey, sortKey string
-		if err := rows.Scan(
+		destinations := []any{
 			&item.ID, &item.SourceID, &periodID, &item.Kind,
 			&item.TargetMembershipID, &item.TargetDisplayName, &item.TargetMembershipStatus, &targetUserID, &targetAvatarKey,
 			&actorMembershipID, &actorName, &actorStatus, &actorUserID, &actorAvatarKey,
 			&item.DetailName, &item.DetailNote, &paymentMethod, &categoryID, &categoryName, &productID, &quantity,
 			&item.AmountMinor, &item.Currency, &item.OccurredAt, &item.Status,
-			&attachmentName, &attachmentType, &attachmentSize, &sortKey,
-		); err != nil {
+			&attachmentName, &attachmentType, &attachmentSize, &relatedActivityID, &reversalSourceKind, &sortKey,
+		}
+		if anchorQuery {
+			var rowPosition, totalRows int
+			destinations = append(destinations, &rowPosition, &totalRows)
+		}
+		if err := rows.Scan(destinations...); err != nil {
 			return Page{}, err
 		}
 		item.PeriodID = periodID.String
@@ -528,6 +620,8 @@ func (s Service) QueryEntries(ctx context.Context, membership domain.Membership,
 		item.CategoryName = categoryName.String
 		item.ProductID = productID.String
 		item.Quantity = int(quantity.Int64)
+		item.RelatedActivityID = relatedActivityID.String
+		item.ReversalSourceKind = Kind(reversalSourceKind.String)
 		if attachmentName.Valid && attachmentType.Valid && attachmentSize.Valid && item.Kind == KindPayment {
 			item.Attachment = &domain.PaymentAttachmentSummary{
 				FileName: attachmentName.String, MediaType: attachmentType.String, SizeBytes: attachmentSize.Int64,
@@ -556,6 +650,9 @@ func (s Service) QueryEntries(ctx context.Context, membership domain.Membership,
 	}
 	if err := rows.Err(); err != nil {
 		return Page{}, err
+	}
+	if anchorQuery && len(items) == 0 {
+		return Page{}, domain.ErrNotFound
 	}
 	page := Page{Items: items}
 	if len(items) > input.Limit {

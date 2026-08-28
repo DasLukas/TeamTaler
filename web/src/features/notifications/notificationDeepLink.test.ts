@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   consumePendingNotificationPath,
+  dataExportPath,
   notificationIdFromHref,
   notificationPath,
   preservePendingNotificationFromHref,
@@ -19,6 +20,12 @@ describe('notification deep-link retention', () => {
     expect(notificationIdFromHref('/account?notification=ntf_target')).toBeNull();
     expect(notificationIdFromHref('/notifications?notification=invalid%2Fid')).toBeNull();
     expect(notificationPath('invalid/id')).toBeNull();
+  });
+
+  it('routes export notifications only to their authorized status panel', () => {
+    expect(dataExportPath('export_123', 'GROUP')).toBe('/admin?export=export_123&tab=exports');
+    expect(dataExportPath('export_123', 'PERSONAL')).toBe('/account?export=export_123');
+    expect(dataExportPath('../foreign', 'GROUP')).toBeNull();
   });
 
   it('preserves a valid identifier as a one-shot relative path', () => {

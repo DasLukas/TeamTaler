@@ -1,0 +1,14 @@
+.action {
+  display: grid;
+  min-width: 0;
+  justify-items: start;
+  gap: 4px;
+}
+
+.error {
+  max-width: 220px;
+  margin: 0;
+  color: var(--color-status-danger);
+  font-size: var(--font-size-xs);
+  line-height: 1.35;
+}

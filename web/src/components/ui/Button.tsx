@@ -11,20 +11,22 @@ interface CommonButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>
 
 /** Properties accepted by the shared action button. */
 export type ButtonProps = CommonButtonProps & (
-  | { collapseLabelAt?: undefined }
-  | { collapseLabelAt: 'narrow' | 'tablet'; 'aria-label': string }
+  | { collapseLabelAt?: undefined; iconOnly?: false | undefined }
+  | { collapseLabelAt: 'narrow' | 'tablet'; iconOnly?: false | undefined; 'aria-label': string }
+  | { collapseLabelAt?: undefined; iconOnly: true; 'aria-label': string }
 );
 
 /**
  * Renders an accessible action button with TeamTaler visual variants.
  *
- * @param props - Native button attributes plus a required semantic icon and visible label.
+ * @param props - Native button attributes plus a required semantic icon and accessible label.
  * @returns A styled native button.
  */
 export function Button({
   children,
   className = '',
   collapseLabelAt,
+  iconOnly = false,
   variant = 'primary',
   size = 'medium',
   leadingIcon,
@@ -34,7 +36,7 @@ export function Button({
 }: ButtonProps) {
   return (
     <button
-      className={`${styles.button} ${styles[variant]} ${styles[size]} ${fullWidth ? styles.fullWidth : ''} ${collapseLabelAt ? styles[`collapseLabelAt${collapseLabelAt === 'tablet' ? 'Tablet' : 'Narrow'}`] : ''} ${className}`}
+      className={`${styles.button} ${styles[variant]} ${styles[size]} ${fullWidth ? styles.fullWidth : ''} ${iconOnly ? styles.iconOnly : ''} ${collapseLabelAt ? styles[`collapseLabelAt${collapseLabelAt === 'tablet' ? 'Tablet' : 'Narrow'}`] : ''} ${className}`}
       type={type}
       {...props}
     >

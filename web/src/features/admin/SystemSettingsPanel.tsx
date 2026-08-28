@@ -569,6 +569,7 @@ function SystemAuditSection() {
       <AuditEventTable
         emptyMessage={audit.isError ? t('systemSettings.audit.error') : t('systemSettings.audit.empty')}
         entries={entries}
+        exportConfig={{ disabled: deferredSearch !== tableState.searchValue.trim(), query: { ...collectionQuery, limit: undefined }, system: true, table: 'SYSTEM_AUDIT', title: t('systemSettings.audit.title') }}
         filterDefinitions={filterDefinitions}
         hasMore={audit.hasNextPage}
         isLoading={audit.isLoading}

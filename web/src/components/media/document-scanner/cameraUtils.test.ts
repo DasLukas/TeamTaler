@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { captureDocumentFrame, createDetectionBitmap, stopDocumentCamera, supportsDocumentCamera } from './cameraUtils';
+import { captureDocumentFrame, createDetectionFrame, stopDocumentCamera, supportsDocumentCamera } from './cameraUtils';
 
 describe('document scanner camera utilities', () => {
   afterEach(() => {
@@ -42,19 +42,22 @@ describe('document scanner camera utilities', () => {
     expect(toBlob).toHaveBeenCalledWith(expect.any(Function), 'image/jpeg', 0.9);
   });
 
-  it('bounds portrait detection bitmaps by their longest edge', async () => {
+  it('bounds portrait detection frames by their longest edge without requiring ImageBitmap support', () => {
     const video = document.createElement('video');
     Object.defineProperties(video, {
       videoHeight: { configurable: true, value: 1920 },
       videoWidth: { configurable: true, value: 1080 },
     });
-    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => ({ drawImage: vi.fn() }) as unknown as CanvasRenderingContext2D);
-    const createBitmap = vi.fn(async (canvas: HTMLCanvasElement) => ({ close: vi.fn(), height: canvas.height, width: canvas.width }) as unknown as ImageBitmap);
+    const imageData = { data: new Uint8ClampedArray(720 * 405 * 4), height: 720, width: 405 } as ImageData;
+    const getImageData = vi.fn(() => imageData);
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => ({ drawImage: vi.fn(), getImageData }) as unknown as CanvasRenderingContext2D);
+    const createBitmap = vi.fn();
     vi.stubGlobal('createImageBitmap', createBitmap);
 
-    const bitmap = await createDetectionBitmap(video);
+    const frame = createDetectionFrame(video);
 
-    expect(bitmap).toEqual(expect.objectContaining({ height: 720, width: 405 }));
-    expect(createBitmap).toHaveBeenCalledWith(expect.objectContaining({ height: 720, width: 405 }));
+    expect(frame).toBe(imageData);
+    expect(getImageData).toHaveBeenCalledWith(0, 0, 405, 720);
+    expect(createBitmap).not.toHaveBeenCalled();
   });
 });

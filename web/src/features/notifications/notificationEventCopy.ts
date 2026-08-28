@@ -1,7 +1,7 @@
 import type { TFunction } from 'i18next';
-import type { NotificationEventType } from '@/api/types';
+import type { ConfigurableNotificationEventType } from '@/api/types';
 
-const EVENT_COPY_KEYS: Record<Exclude<NotificationEventType, 'SYSTEM'>, { description: string; label: string }> = {
+const EVENT_COPY_KEYS: Record<ConfigurableNotificationEventType, { description: string; label: string }> = {
   BOOKING_ASSIGNED: { label: 'notifications.preferences.events.bookingAssigned.label', description: 'notifications.preferences.events.bookingAssigned.description' },
   BOOKING_REVERSED: { label: 'notifications.preferences.events.bookingReversed.label', description: 'notifications.preferences.events.bookingReversed.description' },
   PAYMENT_RECORDED: { label: 'notifications.preferences.events.paymentRecorded.label', description: 'notifications.preferences.events.paymentRecorded.description' },
@@ -18,8 +18,7 @@ const EVENT_COPY_KEYS: Record<Exclude<NotificationEventType, 'SYSTEM'>, { descri
  * @param t - Active i18next translation function.
  * @returns Localized label and description used consistently across policy screens.
  */
-export function notificationEventCopy(eventType: Exclude<NotificationEventType, 'SYSTEM'>, t: TFunction) {
+export function notificationEventCopy(eventType: ConfigurableNotificationEventType, t: TFunction) {
   const keys = EVENT_COPY_KEYS[eventType];
   return { label: t(keys.label), description: t(keys.description) };
 }
-

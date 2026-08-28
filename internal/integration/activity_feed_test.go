@@ -162,21 +162,56 @@ func TestUnifiedActivityFeedAppliesIndependentVisibilityGrants(t *testing.T) {
 	if err := f.finance.ReversePayment(f.ctx, f.admin, f.membership, "reverse-feed-payment", alicePayment.ID, "Duplicate payment"); err != nil {
 		t.Fatalf("reverse payment: %v", err)
 	}
+	assertActivityKinds(t, f.ctx, service, alice, map[activities.Kind]int{
+		activities.KindBooking: 2, activities.KindPayment: 1, activities.KindReversal: 2, activities.KindAdjustment: 1,
+	})
+	assertActivityKinds(t, f.ctx, service, bob, map[activities.Kind]int{
+		activities.KindBooking: 2, activities.KindPayment: 1, activities.KindAdjustment: 1,
+	})
+	assertActivityKinds(t, f.ctx, service, bookingViewer, map[activities.Kind]int{
+		activities.KindBooking: 3, activities.KindReversal: 1,
+	})
+	assertActivityKinds(t, f.ctx, service, financeViewer, map[activities.Kind]int{
+		activities.KindPayment: 2, activities.KindReversal: 1, activities.KindAdjustment: 2,
+	})
 	page, err := service.QueryEntries(f.ctx, f.membership, activities.Query{Limit: 20})
-	if err != nil || len(page.Items) != 7 {
+	if err != nil || len(page.Items) != 9 {
 		t.Fatalf("activities after reversals=%#v err=%v", page.Items, err)
 	}
-	reversed := 0
+	reversedOriginals, reversalEntries := 0, 0
 	for _, entry := range page.Items {
 		if entry.Status == "REVERSED" {
-			reversed++
+			reversedOriginals++
+		}
+		if entry.Kind == activities.KindReversal {
+			reversalEntries++
 		}
 		if entry.Kind == activities.KindAdjustment && entry.SourceID != "alice-feed-adjustment" && entry.SourceID != "bob-feed-adjustment" {
 			t.Fatalf("reversal ledger entry leaked into feed: %#v", entry)
 		}
 	}
-	if reversed != 2 {
-		t.Fatalf("reversed originals=%d, want 2", reversed)
+	if reversedOriginals != 2 || reversalEntries != 2 {
+		t.Fatalf("reversed originals=%d reversals=%d, want 2 each", reversedOriginals, reversalEntries)
+	}
+	bookingOriginal := activityByID(t, page.Items, "booking:"+aliceBooking.ID)
+	bookingReversal := activityByID(t, page.Items, "reversal:booking:"+aliceBooking.ID)
+	if bookingOriginal.RelatedActivityID != bookingReversal.ID || bookingReversal.RelatedActivityID != bookingOriginal.ID ||
+		bookingReversal.ReversalSourceKind != activities.KindBooking || bookingReversal.Status != "POSTED" ||
+		bookingReversal.AmountMinor != -bookingOriginal.AmountMinor || bookingReversal.DetailNote != "Incorrect booking" ||
+		bookingReversal.ActorMembershipID != f.membership.ID || bookingReversal.CanReverse || bookingReversal.Attachment != nil {
+		t.Fatalf("linked booking reversal original=%#v reversal=%#v", bookingOriginal, bookingReversal)
+	}
+	paymentOriginal := activityByID(t, page.Items, "payment:"+alicePayment.ID)
+	paymentReversal := activityByID(t, page.Items, "reversal:payment:"+alicePayment.ID)
+	if paymentOriginal.RelatedActivityID != paymentReversal.ID || paymentReversal.RelatedActivityID != paymentOriginal.ID ||
+		paymentReversal.ReversalSourceKind != activities.KindPayment || paymentReversal.Status != "POSTED" ||
+		paymentReversal.AmountMinor != -paymentOriginal.AmountMinor || paymentReversal.DetailNote != "Duplicate payment" ||
+		paymentReversal.ActorMembershipID != f.membership.ID || paymentReversal.CanReverse || paymentReversal.Attachment != nil {
+		t.Fatalf("linked payment reversal original=%#v reversal=%#v", paymentOriginal, paymentReversal)
+	}
+	options, err := service.ListFilterOptions(f.ctx, f.membership)
+	if err != nil || !slices.Contains(options.Kinds, activities.KindReversal) {
+		t.Fatalf("reversal filter option=%#v err=%v", options.Kinds, err)
 	}
 }
 
@@ -258,16 +293,18 @@ func TestUnifiedActivityFeedFiltersSortsAndBindsCursorsToEveryQueryDimension(t *
 		want  []string
 	}{
 		{name: "multiple kinds", query: activities.Query{Kinds: []string{"BOOKING", "PAYMENT"}}, want: []string{aliceBooking.ID, bobBooking.ID, alicePayment.ID, bobPayment.ID}},
-		{name: "target member", query: activities.Query{TargetMembershipID: alice.ID}, want: []string{aliceBooking.ID, alicePayment.ID, "filter-alice-adjustment"}},
+		{name: "reversal kind", query: activities.Query{Kinds: []string{"REVERSAL"}}, want: []string{bobBooking.ID, alicePayment.ID}},
+		{name: "target member", query: activities.Query{TargetMembershipID: alice.ID}, want: []string{aliceBooking.ID, alicePayment.ID, alicePayment.ID, "filter-alice-adjustment"}},
 		{name: "category", query: activities.Query{CategoryIDs: []string{alphaCategory.ID}}, want: []string{aliceBooking.ID}},
-		{name: "product", query: activities.Query{ProductIDs: []string{betaProduct.ID}}, want: []string{bobBooking.ID}},
+		{name: "product", query: activities.Query{ProductIDs: []string{betaProduct.ID}}, want: []string{bobBooking.ID, bobBooking.ID}},
 		{name: "reversed status", query: activities.Query{Status: "REVERSED"}, want: []string{bobBooking.ID, alicePayment.ID}},
 		{name: "creation time", query: activities.Query{OccurredFrom: "2026-08-20T09:30:00Z", OccurredTo: "2026-08-20T12:30:00Z"}, want: []string{alicePayment.ID, bobPayment.ID, "filter-alice-adjustment"}},
-		{name: "signed amount window", query: activities.Query{AmountMin: activityAmount(-300), AmountMax: activityAmount(75)}, want: []string{alicePayment.ID, "filter-alice-adjustment", "filter-bob-adjustment"}},
-		{name: "positive receivable effects", query: activities.Query{AmountMin: activityAmount(1)}, want: []string{aliceBooking.ID, bobBooking.ID, "filter-alice-adjustment"}},
-		{name: "negative receivable effects", query: activities.Query{AmountMax: activityAmount(-1)}, want: []string{alicePayment.ID, bobPayment.ID, "filter-bob-adjustment"}},
+		{name: "signed amount window", query: activities.Query{AmountMin: activityAmount(-300), AmountMax: activityAmount(75)}, want: []string{alicePayment.ID, bobBooking.ID, "filter-alice-adjustment", "filter-bob-adjustment"}},
+		{name: "positive receivable effects", query: activities.Query{AmountMin: activityAmount(1)}, want: []string{aliceBooking.ID, bobBooking.ID, alicePayment.ID, "filter-alice-adjustment"}},
+		{name: "negative receivable effects", query: activities.Query{AmountMax: activityAmount(-1)}, want: []string{alicePayment.ID, bobPayment.ID, bobBooking.ID, "filter-bob-adjustment"}},
 		{name: "booking detail search", query: activities.Query{Search: "First practice"}, want: []string{aliceBooking.ID}},
 		{name: "payment reference search", query: activities.Query{Search: "Monthly dues"}, want: []string{alicePayment.ID}},
+		{name: "reversal reason search", query: activities.Query{Search: "Duplicate payment"}, want: []string{alicePayment.ID}},
 		{name: "adjustment search", query: activities.Query{Search: "Manual debit"}, want: []string{"filter-bob-adjustment"}},
 	}
 	for _, testCase := range queries {
@@ -288,7 +325,7 @@ func TestUnifiedActivityFeedFiltersSortsAndBindsCursorsToEveryQueryDimension(t *
 	if err != nil {
 		t.Fatalf("sort signed activity amounts descending: %v", err)
 	}
-	wantAscending := []int64{-400, -300, -25, 75, 200, 500}
+	wantAscending := []int64{-400, -300, -200, -25, 75, 200, 300, 500}
 	for index, want := range wantAscending {
 		if ascending.Items[index].AmountMinor != want || descending.Items[len(descending.Items)-1-index].AmountMinor != want {
 			t.Fatalf("signed amount order asc=%v desc=%v", activityAmounts(ascending.Items), activityAmounts(descending.Items))
@@ -298,9 +335,15 @@ func TestUnifiedActivityFeedFiltersSortsAndBindsCursorsToEveryQueryDimension(t *
 	if err != nil {
 		t.Fatalf("sort unified chronology: %v", err)
 	}
-	assertActivitySources(t, chronological.Items, []string{aliceBooking.ID, bobBooking.ID, alicePayment.ID, bobPayment.ID, "filter-alice-adjustment", "filter-bob-adjustment"})
+	assertActivitySources(t, chronological.Items, []string{aliceBooking.ID, bobBooking.ID, alicePayment.ID, bobPayment.ID, "filter-alice-adjustment", "filter-bob-adjustment", bobBooking.ID, alicePayment.ID})
 	if chronological.Items[1].Status != "REVERSED" || chronological.Items[2].Status != "REVERSED" || chronological.Items[1].AmountMinor != 200 || chronological.Items[2].AmountMinor != -300 {
 		t.Fatalf("reversed originals changed chronology or amount: %#v", chronological.Items)
+	}
+	if reversal := activityByID(t, chronological.Items, "reversal:booking:"+bobBooking.ID); reversal.OccurredAt != "2026-08-20T14:00:00Z" {
+		t.Fatalf("booking reversal occurredAt=%q, want controlled audit time", reversal.OccurredAt)
+	}
+	if reversal := activityByID(t, chronological.Items, "reversal:payment:"+alicePayment.ID); reversal.OccurredAt != "2026-08-20T15:00:00Z" {
+		t.Fatalf("payment reversal occurredAt=%q, want controlled audit time", reversal.OccurredAt)
 	}
 	for _, sortKey := range []string{"kind", "targetName", "actorName", "detailName", "categoryName", "occurredAt", "amount", "status"} {
 		ascendingPage, err := service.QueryEntries(f.ctx, f.membership, activities.Query{Sort: sortKey, Direction: "asc"})
@@ -311,7 +354,7 @@ func TestUnifiedActivityFeedFiltersSortsAndBindsCursorsToEveryQueryDimension(t *
 		if err != nil {
 			t.Fatalf("sort %s descending: %v", sortKey, err)
 		}
-		if len(ascendingPage.Items) != 6 || len(descendingPage.Items) != 6 {
+		if len(ascendingPage.Items) != 8 || len(descendingPage.Items) != 8 {
 			t.Fatalf("sort %s counts asc=%d desc=%d", sortKey, len(ascendingPage.Items), len(descendingPage.Items))
 		}
 		for index := range ascendingPage.Items {
@@ -381,8 +424,8 @@ func TestUnifiedActivityFeedReadsPaymentsCreatedBeforeMethodLabelSnapshots(t *te
 	f := newFixture(t)
 	service := activities.Service{DB: f.db}
 	if _, err := f.db.ExecContext(f.ctx, `INSERT INTO payments(
-		id,group_id,membership_id,amount_minor,received_at,method,method_label,reference,note,created_by,created_at
-	) VALUES('legacy-payment',?,?,?,?,?,NULL,'Imported payment','Before configurable methods',?,'2026-08-20T10:00:00Z')`,
+		id,group_id,membership_id,amount_minor,received_at,method,method_label,reference,note,created_by,created_at,reversed_at,reversal_reason
+	) VALUES('legacy-payment',?,?,?,?,?,NULL,'Imported payment','Before configurable methods',?,'2026-08-20T10:00:00Z','2026-08-21T10:00:00Z','Legacy reversal')`,
 		f.group.ID, f.membership.ID, 875, "2026-07-01T00:00:00Z", "CASH", f.membership.ID); err != nil {
 		t.Fatalf("insert payment without historical method label: %v", err)
 	}
@@ -394,9 +437,80 @@ func TestUnifiedActivityFeedReadsPaymentsCreatedBeforeMethodLabelSnapshots(t *te
 	if entry.SourceID != "legacy-payment" || entry.PaymentMethod != "CASH" || entry.DetailName != "" || entry.DetailNote != "Imported payment" || entry.AmountMinor != -875 || entry.OccurredAt != "2026-08-20T10:00:00Z" {
 		t.Fatalf("legacy payment activity=%#v", entry)
 	}
-	searchPage, err := service.QueryEntries(f.ctx, f.membership, activities.Query{Search: "CASH"})
+	reversalPage, err := service.QueryEntries(f.ctx, f.membership, activities.Query{Kinds: []string{"REVERSAL"}})
+	if err != nil || len(reversalPage.Items) != 1 || reversalPage.Items[0].ActorMembershipID != "" || reversalPage.Items[0].ActorDisplayName != "" ||
+		reversalPage.Items[0].DetailNote != "Legacy reversal" || reversalPage.Items[0].RelatedActivityID != "payment:legacy-payment" {
+		t.Fatalf("legacy payment reversal=%#v err=%v", reversalPage.Items, err)
+	}
+	searchPage, err := service.QueryEntries(f.ctx, f.membership, activities.Query{Search: "CASH", Kinds: []string{"PAYMENT"}})
 	if err != nil || len(searchPage.Items) != 1 || searchPage.Items[0].SourceID != "legacy-payment" {
 		t.Fatalf("search legacy payment method: items=%#v err=%v", searchPage.Items, err)
+	}
+	legacyActorFirst, err := service.QueryEntries(f.ctx, f.membership, activities.Query{Sort: "actorName", Direction: "asc", Limit: 1})
+	if err != nil || len(legacyActorFirst.Items) != 1 || legacyActorFirst.Items[0].Kind != activities.KindReversal || legacyActorFirst.NextCursor == "" {
+		t.Fatalf("legacy actor first page=%#v err=%v", legacyActorFirst, err)
+	}
+	legacyActorNext, err := service.QueryEntries(f.ctx, f.membership, activities.Query{Sort: "actorName", Direction: "asc", Limit: 1, Cursor: legacyActorFirst.NextCursor})
+	if err != nil || len(legacyActorNext.Items) != 1 || legacyActorNext.Items[0].Kind != activities.KindPayment {
+		t.Fatalf("legacy actor continuation=%#v err=%v", legacyActorNext, err)
+	}
+}
+
+func TestUnifiedActivityFeedReturnsAuthorizedCenteredAnchorWindows(t *testing.T) {
+	f := newFixture(t)
+	service := activities.Service{DB: f.db}
+	_, hiddenMember, _ := f.inviteMember("anchor-hidden@example.test", "Hidden Member", nil)
+	periodID := f.openPeriodID()
+	for index := 0; index < 7; index++ {
+		id := "anchor-adjustment-" + twoDigit(index)
+		occurredAt := time.Date(2026, 8, 20, 8+index, 0, 0, 0, time.UTC).Format(time.RFC3339)
+		if _, err := f.db.ExecContext(f.ctx, `INSERT INTO ledger_entries(id,group_id,period_id,membership_id,account,amount_minor,description,created_at)
+			VALUES(?,?,?,?,?,?,?,?)`, id, f.group.ID, periodID, f.membership.ID, "MEMBER_RECEIVABLE", index+1, "Anchor activity", occurredAt); err != nil {
+			t.Fatalf("seed anchor activity %d: %v", index, err)
+		}
+	}
+
+	middle, err := service.QueryEntries(f.ctx, f.membership, activities.Query{
+		AnchorID: "adjustment:anchor-adjustment-03", Limit: 3, Sort: "occurredAt", Direction: "asc",
+		Search: "does-not-match", Kinds: []string{"BOOKING"}, Status: "REVERSED",
+	})
+	if err != nil || len(middle.Items) != 3 || middle.Items[1].ID != "adjustment:anchor-adjustment-03" || middle.NextCursor == "" {
+		t.Fatalf("middle anchor page=%#v err=%v", middle, err)
+	}
+	next, err := service.QueryEntries(f.ctx, f.membership, activities.Query{
+		Cursor: middle.NextCursor, Limit: 3, Sort: "occurredAt", Direction: "asc",
+	})
+	if err != nil || len(next.Items) == 0 || next.Items[0].ID != "adjustment:anchor-adjustment-05" {
+		t.Fatalf("anchor continuation page=%#v err=%v", next, err)
+	}
+	start, err := service.QueryEntries(f.ctx, f.membership, activities.Query{
+		AnchorID: "adjustment:anchor-adjustment-00", Limit: 3, Sort: "occurredAt", Direction: "asc",
+	})
+	if err != nil || len(start.Items) != 3 || start.Items[0].ID != "adjustment:anchor-adjustment-00" {
+		t.Fatalf("start anchor page=%#v err=%v", start, err)
+	}
+	end, err := service.QueryEntries(f.ctx, f.membership, activities.Query{
+		AnchorID: "adjustment:anchor-adjustment-06", Limit: 3, Sort: "occurredAt", Direction: "asc",
+	})
+	if err != nil || len(end.Items) != 3 || end.Items[2].ID != "adjustment:anchor-adjustment-06" || end.NextCursor != "" {
+		t.Fatalf("end anchor page=%#v err=%v", end, err)
+	}
+	for name, query := range map[string]activities.Query{
+		"missing":         {AnchorID: "adjustment:missing", Limit: 3},
+		"not visible":     {AnchorID: "adjustment:anchor-adjustment-03", Limit: 3},
+		"cursor conflict": {AnchorID: "adjustment:anchor-adjustment-03", Cursor: middle.NextCursor, Limit: 3},
+	} {
+		membership := f.membership
+		want := domain.ErrNotFound
+		if name == "not visible" {
+			membership = hiddenMember
+		}
+		if name == "cursor conflict" {
+			want = domain.ErrValidation
+		}
+		if _, err := service.QueryEntries(f.ctx, membership, query); !errors.Is(err, want) {
+			t.Fatalf("%s anchor error=%v, want %v", name, err, want)
+		}
 	}
 }
 
@@ -525,11 +639,15 @@ func assertActivitySources(t *testing.T, entries []activities.Entry, want []stri
 		t.Fatalf("activity sources=%v, want %v", activitySourceIDs(entries), want)
 	}
 	got := make(map[string]int, len(entries))
+	wantCounts := make(map[string]int, len(want))
 	for _, entry := range entries {
 		got[entry.SourceID]++
 	}
 	for _, sourceID := range want {
-		if got[sourceID] != 1 {
+		wantCounts[sourceID]++
+	}
+	for sourceID, count := range wantCounts {
+		if got[sourceID] != count {
 			t.Fatalf("activity sources=%v, want %v", activitySourceIDs(entries), want)
 		}
 	}
@@ -551,6 +669,17 @@ func activityBySource(t *testing.T, entries []activities.Entry, sourceID string)
 		}
 	}
 	t.Fatalf("activity source %s missing from %v", sourceID, activitySourceIDs(entries))
+	return activities.Entry{}
+}
+
+func activityByID(t *testing.T, entries []activities.Entry, activityID string) activities.Entry {
+	t.Helper()
+	for _, entry := range entries {
+		if entry.ID == activityID {
+			return entry
+		}
+	}
+	t.Fatalf("activity %s missing from %v", activityID, activitySourceIDs(entries))
 	return activities.Entry{}
 }
 

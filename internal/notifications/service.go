@@ -52,6 +52,8 @@ type EventContext struct {
 	Currency    string `json:"currency,omitempty"`
 	PeriodLabel string `json:"periodLabel,omitempty"`
 	DueAt       string `json:"dueAt,omitempty"`
+	ExportID    string `json:"exportId,omitempty"`
+	ExportScope string `json:"exportScope,omitempty"`
 }
 
 // CreateInput describes one member-visible event created inside an existing

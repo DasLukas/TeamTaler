@@ -2,14 +2,14 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '@/i18n';
-import { captureDocumentFrame, createDetectionBitmap } from './cameraUtils';
+import { captureDocumentFrame, createDetectionFrame } from './cameraUtils';
 import { DocumentCamera } from './DocumentCamera';
 import { DEFAULT_DOCUMENT_CORNERS } from './geometry';
 import type { DetectionResult } from './types';
 
 vi.mock('./cameraUtils', () => ({
   captureDocumentFrame: vi.fn(),
-  createDetectionBitmap: vi.fn(),
+  createDetectionFrame: vi.fn(),
   stopDocumentCamera: (stream?: MediaStream) => stream?.getTracks().forEach((track) => track.stop()),
   supportsDocumentCamera: () => true,
 }));
@@ -32,6 +32,14 @@ function mediaStream() {
   };
 }
 
+function initializeWorker(worker: MockWorker): void {
+  act(() => worker.onmessage?.(new MessageEvent<DetectionResult>('message', { data: {
+    confidence: 0,
+    requestId: 0,
+    status: 'ready',
+  } })));
+}
+
 describe('DocumentCamera', () => {
   beforeEach(() => {
     workers.length = 0;
@@ -41,8 +49,8 @@ describe('DocumentCamera', () => {
         workers.push(this);
       }
     });
-    vi.mocked(createDetectionBitmap).mockReset();
-    vi.mocked(createDetectionBitmap).mockResolvedValue(undefined);
+    vi.mocked(createDetectionFrame).mockReset();
+    vi.mocked(createDetectionFrame).mockReturnValue(undefined);
     vi.mocked(captureDocumentFrame).mockReset();
   });
 
@@ -66,6 +74,8 @@ describe('DocumentCamera', () => {
     fireEvent.loadedMetadata(video);
     await waitFor(() => expect(workers).toHaveLength(1));
     const worker = workers[0];
+    expect(worker.postMessage).toHaveBeenCalledWith({ type: 'initialize' });
+    initializeWorker(worker);
     act(() => worker.onmessage?.(new MessageEvent<DetectionResult>('message', { data: {
       confidence: 0.8,
       corners: [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.1 }, { x: 0.9, y: 0.9 }, { x: 0.1, y: 0.9 }],
@@ -84,9 +94,9 @@ describe('DocumentCamera', () => {
     expect(worker.terminate).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('button', { name: i18n.t('documentScanner.capturePage') })).toBeEnabled();
     expect(screen.getByRole('checkbox', { name: i18n.t('documentScanner.autoCapture') })).toBeDisabled();
-    const callsAfterFailure = vi.mocked(createDetectionBitmap).mock.calls.length;
+    const callsAfterFailure = vi.mocked(createDetectionFrame).mock.calls.length;
     await new Promise((resolve) => window.setTimeout(resolve, 500));
-    expect(createDetectionBitmap).toHaveBeenCalledTimes(callsAfterFailure);
+    expect(createDetectionFrame).toHaveBeenCalledTimes(callsAfterFailure);
   });
 
   it('invalidates the previous stream before waiting for switched-camera metadata', async () => {
@@ -111,6 +121,7 @@ describe('DocumentCamera', () => {
     const switchButton = await screen.findByRole('button', { name: i18n.t('documentScanner.switchCamera') });
     expect(switchButton).toHaveTextContent('');
     await waitFor(() => expect(workers).toHaveLength(1));
+    initializeWorker(workers[0]);
 
     await user.click(switchButton);
 
@@ -126,6 +137,7 @@ describe('DocumentCamera', () => {
     expect(workers).toHaveLength(1);
     fireEvent.loadedMetadata(video);
     await waitFor(() => expect(workers).toHaveLength(2));
+    expect(workers[1].postMessage).toHaveBeenCalledWith({ type: 'initialize' });
     expect(screen.getByRole('button', { name: i18n.t('documentScanner.capturePage') })).toBeEnabled();
     expect(screen.getByRole('button', { name: i18n.t('documentScanner.capturePage') })).toHaveTextContent('');
   });
@@ -148,6 +160,7 @@ describe('DocumentCamera', () => {
     await waitFor(() => expect(video).toHaveProperty('srcObject', owned.stream));
     fireEvent.loadedMetadata(video);
     await waitFor(() => expect(workers).toHaveLength(1));
+    initializeWorker(workers[0]);
 
     act(() => workers[0].onmessage?.(new MessageEvent<DetectionResult>('message', { data: {
       confidence: 0.4,
@@ -202,5 +215,56 @@ describe('DocumentCamera', () => {
     window.dispatchEvent(new Event('resize'));
 
     await waitFor(() => expect(video.parentElement).toHaveStyle({ height: '168.75px', width: '300px' }));
+  });
+
+  it('transfers bounded RGBA frames only after the detector reports ready', async () => {
+    const owned = mediaStream();
+    const frame = { data: new Uint8ClampedArray(8 * 8 * 4), height: 8, width: 8 } as ImageData;
+    vi.mocked(createDetectionFrame).mockReturnValue(frame);
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        enumerateDevices: vi.fn().mockResolvedValue([{ kind: 'videoinput' }]),
+        getUserMedia: vi.fn().mockResolvedValue(owned.stream),
+      },
+    });
+    render(<DocumentCamera active onCapture={vi.fn()} />);
+    const video = screen.getByLabelText(i18n.t('documentScanner.cameraPreview'));
+    await waitFor(() => expect(video).toHaveProperty('srcObject', owned.stream));
+    fireEvent.loadedMetadata(video);
+    await waitFor(() => expect(workers).toHaveLength(1));
+    await new Promise((resolve) => window.setTimeout(resolve, 400));
+    expect(createDetectionFrame).not.toHaveBeenCalled();
+
+    initializeWorker(workers[0]);
+
+    await waitFor(() => expect(createDetectionFrame).toHaveBeenCalled(), { timeout: 1_000 });
+    expect(workers[0].postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ imageData: frame, requestId: 1, type: 'detect' }),
+      [frame.data.buffer],
+    );
+  });
+
+  it('falls back to manual capture after repeated RGBA frame failures', async () => {
+    const owned = mediaStream();
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        enumerateDevices: vi.fn().mockResolvedValue([{ kind: 'videoinput' }]),
+        getUserMedia: vi.fn().mockResolvedValue(owned.stream),
+      },
+    });
+    render(<DocumentCamera active onCapture={vi.fn()} />);
+    const video = screen.getByLabelText(i18n.t('documentScanner.cameraPreview'));
+    await waitFor(() => expect(video).toHaveProperty('srcObject', owned.stream));
+    fireEvent.loadedMetadata(video);
+    await waitFor(() => expect(workers).toHaveLength(1));
+
+    initializeWorker(workers[0]);
+
+    await waitFor(() => expect(screen.getByText(i18n.t('documentScanner.detectionUnavailable'))).toBeInTheDocument(), { timeout: 1_600 });
+    expect(createDetectionFrame).toHaveBeenCalledTimes(3);
+    expect(workers[0].terminate).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: i18n.t('documentScanner.capturePage') })).toBeEnabled();
   });
 });

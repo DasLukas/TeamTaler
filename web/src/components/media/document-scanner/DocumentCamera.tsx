@@ -3,7 +3,7 @@ import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconButton } from '@/components/ui/IconButton';
-import { captureDocumentFrame, createDetectionBitmap, stopDocumentCamera, supportsDocumentCamera } from './cameraUtils';
+import { captureDocumentFrame, createDetectionFrame, stopDocumentCamera, supportsDocumentCamera } from './cameraUtils';
 import {
   DOCUMENT_CAPTURE_CONFIDENCE,
   DOCUMENT_DETECTION_MAX_AGE_MS,
@@ -35,6 +35,8 @@ interface FrameSize {
 
 const AUTO_CAPTURE_STABLE_FRAMES = 4;
 const DETECTION_MISSES_BEFORE_CLEAR = 3;
+const DETECTION_INITIALIZATION_TIMEOUT_MS = 20_000;
+const DETECTION_FRAME_FAILURE_LIMIT = 3;
 
 /**
  * Renders the scanner-owned camera preview and background document detection.
@@ -193,10 +195,13 @@ export function DocumentCamera({ active, onCapture }: DocumentCameraProps) {
       return () => window.clearTimeout(fallbackTimer);
     }
     let disposed = false;
+    let initialized = false;
+    let frameFailures = 0;
     workerRef.current = worker;
     const stopDetection = (showFallback: boolean) => {
       if (disposed) return;
       disposed = true;
+      window.clearTimeout(initializationTimer);
       window.clearInterval(interval);
       worker.onerror = null;
       worker.onmessage = null;
@@ -212,15 +217,26 @@ export function DocumentCamera({ active, onCapture }: DocumentCameraProps) {
         setDetectionStatus('unavailable');
       }
     };
+    const initializationTimer = window.setTimeout(() => stopDetection(true), DETECTION_INITIALIZATION_TIMEOUT_MS);
     worker.onmessage = (event: MessageEvent<DetectionResult>) => {
       if (disposed) return;
-      detectionPendingRef.current = false;
       const result = event.data;
+      if (result.requestId === 0) {
+        if (result.status === 'unavailable') {
+          stopDetection(true);
+          return;
+        }
+        initialized = true;
+        window.clearTimeout(initializationTimer);
+        setDetectionStatus('ready');
+        return;
+      }
+      detectionPendingRef.current = false;
       if (result.status === 'unavailable') {
         stopDetection(true);
         return;
       }
-      setDetectionStatus('ready');
+      frameFailures = 0;
       if (!result.corners || result.confidence < DOCUMENT_DISPLAY_CONFIDENCE) {
         missedDetectionsRef.current += 1;
         stableDetectionRef.current = undefined;
@@ -267,23 +283,43 @@ export function DocumentCamera({ active, onCapture }: DocumentCameraProps) {
     worker.onmessageerror = () => stopDetection(true);
     const interval = window.setInterval(() => {
       const video = videoRef.current;
-      if (disposed || !video || detectionPendingRef.current) return;
+      if (disposed || !initialized || !video || detectionPendingRef.current) return;
       detectionPendingRef.current = true;
-      void createDetectionBitmap(video).then((bitmap) => {
-        if (!bitmap || disposed || workerRef.current !== worker) {
-          bitmap?.close();
+      try {
+        const imageData = createDetectionFrame(video);
+        if (disposed || workerRef.current !== worker) {
           detectionPendingRef.current = false;
           return;
         }
-        const request: DetectionRequest = { bitmap, requestId: ++requestIdRef.current, type: 'detect' };
-        try {
-          worker.postMessage(request, [bitmap]);
-        } catch {
-          bitmap.close();
+        if (!imageData) {
           detectionPendingRef.current = false;
+          frameFailures += 1;
+          if (frameFailures >= DETECTION_FRAME_FAILURE_LIMIT) stopDetection(true);
+          return;
         }
-      }, () => { detectionPendingRef.current = false; });
+        const request: DetectionRequest = { imageData, requestId: ++requestIdRef.current, type: 'detect' };
+        try {
+          worker.postMessage(request, [imageData.data.buffer as ArrayBuffer]);
+        } catch {
+          try {
+            worker.postMessage(request);
+          } catch {
+            detectionPendingRef.current = false;
+            frameFailures += 1;
+            if (frameFailures >= DETECTION_FRAME_FAILURE_LIMIT) stopDetection(true);
+          }
+        }
+      } catch {
+        detectionPendingRef.current = false;
+        frameFailures += 1;
+        if (frameFailures >= DETECTION_FRAME_FAILURE_LIMIT) stopDetection(true);
+      }
     }, 360);
+    try {
+      worker.postMessage({ type: 'initialize' });
+    } catch {
+      stopDetection(true);
+    }
     return () => {
       stopDetection(false);
     };

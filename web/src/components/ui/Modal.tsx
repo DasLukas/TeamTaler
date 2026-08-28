@@ -1,11 +1,51 @@
 import X from 'lucide-react/dist/esm/icons/x';
-import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject, type TouchEvent as ReactTouchEvent } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject, type TouchEvent as ReactTouchEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { IconButton } from './IconButton';
 import styles from './Modal.module.css';
 
 const ModalFooterContext = createContext<HTMLElement | null>(null);
+let documentScrollLockCount = 0;
+let documentScrollLockPosition: { x: number; y: number } | null = null;
+
+/**
+ * Locks the document scroll container while at least one modal is open.
+ *
+ * The reference count keeps nested workflows locked until their final dialog
+ * closes, while the modal body remains independently scrollable.
+ *
+ * @returns A cleanup function that releases this modal's lock.
+ */
+function acquireDocumentScrollLock(): () => void {
+  if (documentScrollLockCount === 0) {
+    documentScrollLockPosition = { x: window.scrollX, y: window.scrollY };
+    document.documentElement.style.setProperty('--modal-scroll-lock-left', `${-window.scrollX}px`);
+    document.documentElement.style.setProperty('--modal-scroll-lock-top', `${-window.scrollY}px`);
+  }
+  documentScrollLockCount += 1;
+  document.documentElement.dataset.modalScrollLock = 'true';
+
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    documentScrollLockCount = Math.max(0, documentScrollLockCount - 1);
+    if (documentScrollLockCount !== 0) return;
+
+    const lockedPosition = documentScrollLockPosition;
+    const shouldRestorePosition = lockedPosition
+      ? window.scrollX !== lockedPosition.x || window.scrollY !== lockedPosition.y
+      : false;
+    documentScrollLockPosition = null;
+    delete document.documentElement.dataset.modalScrollLock;
+    document.documentElement.style.removeProperty('--modal-scroll-lock-left');
+    document.documentElement.style.removeProperty('--modal-scroll-lock-top');
+    if (lockedPosition && shouldRestorePosition) {
+      window.scrollTo(lockedPosition.x, lockedPosition.y);
+    }
+  };
+}
 
 /**
  * Restores focus to the element that opened a modal when it remains available.
@@ -185,6 +225,11 @@ export function Modal({ open, title, onClose, children, footer, size = 'standard
     finishSheetDragAt(drag.pointerId, touch?.clientY ?? drag.startY, cancelled);
   };
 
+  useLayoutEffect(() => {
+    if (!open) return undefined;
+    return acquireDocumentScrollLock();
+  }, [open]);
+
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
@@ -242,6 +287,7 @@ export function Modal({ open, title, onClose, children, footer, size = 'standard
       aria-labelledby={titleId}
       className={`${styles.dialog} ${styles[variant]} ${styles[size]} ${headerMode === 'accessible-only' ? styles.headerless : ''} ${className}`}
       onCancel={(event) => {
+        if (event.target !== event.currentTarget) return;
         event.preventDefault();
         onClose();
       }}

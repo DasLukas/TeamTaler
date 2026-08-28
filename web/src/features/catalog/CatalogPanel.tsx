@@ -27,7 +27,10 @@ import { Button } from '@/components/ui/Button';
 import { ConfirmationDialog } from '@/components/ui/ConfirmationDialog';
 import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
+import { SelectMenu } from '@/components/ui/SelectMenu';
 import { StatePanel } from '@/components/ui/StatePanel';
+import { CategoryIcon } from '@/features/shared/CategoryIcon';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { catalogOrderCommand } from './catalogOrder';
 import { CategoryIconPicker } from './CategoryIconPicker';
 import { CatalogSorter } from './CatalogSorter';
@@ -49,6 +52,7 @@ export function CatalogPanel() {
   const { t } = useTranslation();
   const { activeGroupId, activeGroup } = useActiveGroup();
   const { mediaUploadMaxBytes } = useInstanceCapabilities();
+  const compact = useMediaQuery('(max-width: 767px)');
   const uploadLimit = formatMediaUploadLimit(mediaUploadMaxBytes);
   const queryClient = useQueryClient();
   const categoryFormId = useId();
@@ -351,7 +355,7 @@ export function CatalogPanel() {
           onReorder={(categories) => reorderMutation.mutate(categories)}
         />
       )}
-      <Modal onClose={clearCategoryDialog} open={dialog === 'category'} title={editingCategory ? t('catalog.editCategoryDialog') : t('catalog.categoryDialog')}>
+      <Modal onClose={clearCategoryDialog} open={dialog === 'category'} title={editingCategory ? t('catalog.editCategoryDialog') : t('catalog.categoryDialog')} variant={compact ? 'sheet' : 'dialog'}>
         <form className={styles.form} id={categoryFormId} onSubmit={(event) => { event.preventDefault(); categoryMutation.mutate(); }}>
           <Field htmlFor="category-name" label={t('common.name')}><TextInput id="category-name" onChange={(event) => setCategoryName(event.target.value)} required value={categoryName} /></Field>
           <CategoryIconPicker onChange={setCategoryIcon} value={categoryIcon} />
@@ -363,14 +367,27 @@ export function CatalogPanel() {
           </div></ModalFooter>
         </form>
       </Modal>
-      <Modal onClose={clearProductDialog} open={dialog === 'product'} title={editingProduct ? t('catalog.editProductDialog') : t('catalog.productDialog')}>
+      <Modal onClose={clearProductDialog} open={dialog === 'product'} title={editingProduct ? t('catalog.editProductDialog') : t('catalog.productDialog')} variant={compact ? 'sheet' : 'dialog'}>
         <form className={styles.form} id={productFormId} onSubmit={(event) => {
           event.preventDefault();
           if (persistedProduct && productImage) imageMutation.mutate({ productId: persistedProduct.id, image: productImage, transform: productImageTransform });
           else if (!persistedProduct) productMutation.mutate();
         }}>
           {persistedProduct ? <div className={styles.hint} role="status"><strong>{editingProduct ? t('catalog.updatePartialSuccessTitle') : t('catalog.partialSuccessTitle')}</strong><p>{editingProduct ? t('catalog.updatePartialSuccessMessage', { name: persistedProduct.name }) : t('catalog.partialSuccessMessage', { name: persistedProduct.name })}</p></div> : null}
-          <Field htmlFor="product-category" label={t('common.category')}><SelectInput disabled={metadataLocked || Boolean(editingProduct)} id="product-category" onChange={(event) => setProductCategoryId(event.target.value)} value={productCategoryId || categoriesQuery.data[0]?.id}>{categoriesQuery.data.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</SelectInput></Field>
+          <Field htmlFor="product-category" label={t('common.category')}>
+            <SelectMenu
+              ariaLabel={t('common.category')}
+              disabled={metadataLocked || Boolean(editingProduct)}
+              id="product-category"
+              onChange={setProductCategoryId}
+              options={categoriesQuery.data.map((category) => ({
+                label: category.name,
+                value: category.id,
+                visual: <CategoryIcon icon={category.icon} size={22} />,
+              }))}
+              value={productCategoryId || categoriesQuery.data[0]?.id || ''}
+            />
+          </Field>
           <Field htmlFor="product-name" label={t('catalog.productName')}><TextInput disabled={metadataLocked} id="product-name" onChange={(event) => setProductName(event.target.value)} required value={productName} /></Field>
           <Field htmlFor="product-pricing-mode" label={t('catalog.pricingMode')}><SelectInput disabled={metadataLocked} id="product-pricing-mode" onChange={(event) => { setProductPricingMode(event.target.value as ProductPricingMode); setProductPrice(''); setProductPriceTouched(false); }} value={productPricingMode}><option value="FIXED">{t('catalog.fixedPrice')}</option><option value="USER_DEFINED">{t('catalog.userDefinedPrice')}</option></SelectInput></Field>
           {productPricingMode === 'FIXED' ? <Field error={productPriceTouched ? productPriceValidation.error : undefined} htmlFor="product-price" label={t('catalog.price', { currency: activeGroup.currency })}><TextInput disabled={metadataLocked} id="product-price" inputMode="decimal" onBlur={() => setProductPriceTouched(true)} onChange={(event) => setProductPrice(event.target.value)} pattern={majorUnitsInputPattern(activeGroup.currency)} placeholder={majorUnitsPlaceholder(activeGroup.currency)} required type="text" value={productPrice} /></Field> : null}

@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import CalendarCheck from 'lucide-react/dist/esm/icons/calendar-check';
+import Archive from 'lucide-react/dist/esm/icons/archive';
 import CircleCheck from 'lucide-react/dist/esm/icons/circle-check';
 import CircleDashed from 'lucide-react/dist/esm/icons/circle-dashed';
 import CircleDollarSign from 'lucide-react/dist/esm/icons/circle-dollar-sign';
 import LockKeyhole from 'lucide-react/dist/esm/icons/lock-keyhole';
-import Printer from 'lucide-react/dist/esm/icons/printer';
 import WalletCards from 'lucide-react/dist/esm/icons/wallet-cards';
+import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
 import X from 'lucide-react/dist/esm/icons/x';
 import { useDeferredValue, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -13,6 +14,7 @@ import { api } from '@/api/client';
 import { currencyExponent, formatMoney } from '@/api/money';
 import type { Period, Settlement } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
+import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
@@ -25,8 +27,10 @@ import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import styles from './SettlementsPanel.module.css';
+import { MembershipStatusBadge } from './MembershipStatusBadge';
+import { SettlementPdfPreviewAction } from './SettlementPdfPreviewAction';
 
-type SettlementFilterId = 'periodId' | 'membershipId' | 'dueAt' | 'amount' | 'status';
+type SettlementFilterId = 'periodId' | 'membershipId' | 'membershipStatus' | 'dueAt' | 'amount' | 'status';
 const settlementCollator = new Intl.Collator('de-DE', { numeric: true, sensitivity: 'base' });
 
 /** Properties for the settlement workflow and immutable history. */
@@ -73,6 +77,19 @@ export function SettlementsPanel({ settlements, settlementsEnabled }: Settlement
       label: t('periods.period'),
       options: [...new Map(settlements.map((settlement) => [settlement.periodId, { label: settlement.periodLabel, value: settlement.periodId }])).values()],
     },
+    {
+      allLabel: t('dataTable.allValues'),
+      dropdown: true,
+      emptyLabel: t('dataTable.noOptions'),
+      id: 'membershipStatus',
+      kind: 'multi-select',
+      label: t('financeWorkspace.membershipStatus'),
+      options: [
+        { label: t('financeWorkspace.active'), value: 'ACTIVE', visual: <CircleCheck size={19} /> },
+        { label: t('common.archived'), value: 'ARCHIVED', visual: <Archive size={19} /> },
+        { label: t('common.deleted'), value: 'DELETED', visual: <Trash2 size={19} /> },
+      ],
+    },
     { fromLabel: t('dataTable.from'), id: 'dueAt', kind: 'date-range', label: t('periods.due'), toLabel: t('dataTable.to') },
     { id: 'amount', kind: 'number-range', label: t('periods.claim'), maximumLabel: t('dataTable.maximum'), minimumLabel: t('dataTable.minimum'), step: 0.01 },
     {
@@ -94,18 +111,20 @@ export function SettlementsPanel({ settlements, settlementsEnabled }: Settlement
     filterDefinitions,
     initialSorting: [{ id: 'dueAt', desc: true }],
     namespace: 'settlements',
-    sortableColumnIds: ['periodLabel', 'memberName', 'dueAt', 'amount', 'paidAmount', 'status'],
+    sortableColumnIds: ['periodLabel', 'memberName', 'membershipStatus', 'dueAt', 'amount', 'paidAmount', 'status'],
   });
   const deferredSearch = useDeferredValue(tableState.searchValue.trim().toLocaleLowerCase('de-DE'));
   const visibleSettlements = useMemo(() => {
     const dueRange = tableState.filters.dueAt as DataTableDateRange | undefined;
     const amountRange = tableState.filters.amount as DataTableNumberRange | undefined;
     const statuses = Array.isArray(tableState.filters.status) ? tableState.filters.status : [];
+    const membershipStatuses = Array.isArray(tableState.filters.membershipStatus) ? tableState.filters.membershipStatus : [];
     const filtered = settlements.filter((settlement) => {
       const amount = Number(settlement.amount.minorUnits) / (10 ** currencyExponent(settlement.amount.currency));
       return (!deferredSearch || `${settlement.periodLabel} ${settlement.memberName} ${settlement.email ?? ''}`.toLocaleLowerCase('de-DE').includes(deferredSearch))
         && (!tableState.filters.periodId || settlement.periodId === tableState.filters.periodId)
         && (!tableState.filters.membershipId || settlement.membershipId === tableState.filters.membershipId)
+        && (membershipStatuses.length === 0 || membershipStatuses.includes(settlement.membershipStatus))
         && (!dueRange?.from || settlement.dueAt.slice(0, 10) >= dueRange.from)
         && (!dueRange?.to || settlement.dueAt.slice(0, 10) <= dueRange.to)
         && (amountRange?.min === undefined || amount >= amountRange.min)
@@ -118,12 +137,33 @@ export function SettlementsPanel({ settlements, settlementsEnabled }: Settlement
       let comparison = 0;
       if (sorting.id === 'periodLabel') comparison = settlementCollator.compare(left.periodLabel, right.periodLabel);
       else if (sorting.id === 'memberName') comparison = settlementCollator.compare(left.memberName, right.memberName);
+      else if (sorting.id === 'membershipStatus') comparison = settlementCollator.compare(left.membershipStatus, right.membershipStatus);
       else if (sorting.id === 'dueAt') comparison = left.dueAt.localeCompare(right.dueAt);
       else if (sorting.id === 'amount') comparison = BigInt(left.amount.minorUnits) < BigInt(right.amount.minorUnits) ? -1 : BigInt(left.amount.minorUnits) > BigInt(right.amount.minorUnits) ? 1 : 0;
       else if (sorting.id === 'paidAmount') comparison = BigInt(left.paidAmount.minorUnits) < BigInt(right.paidAmount.minorUnits) ? -1 : BigInt(left.paidAmount.minorUnits) > BigInt(right.paidAmount.minorUnits) ? 1 : 0;
       else if (sorting.id === 'status') comparison = settlementCollator.compare(left.status, right.status);
       return sorting.desc ? -comparison : comparison;
     });
+  }, [deferredSearch, settlements, tableState.filters, tableState.sorting]);
+  const exportQuery = useMemo(() => {
+    const dueRange = tableState.filters.dueAt as DataTableDateRange | undefined;
+    const amountRange = tableState.filters.amount as DataTableNumberRange | undefined;
+    const sorting = tableState.sorting[0];
+    const currency = settlements[0]?.amount.currency ?? 'EUR';
+    const toMinorUnits = (value: number | undefined) => value === undefined ? undefined : Math.round(value * (10 ** currencyExponent(currency))).toString();
+    return {
+      amountMax: toMinorUnits(amountRange?.max),
+      amountMin: toMinorUnits(amountRange?.min),
+      direction: sorting?.desc ? 'desc' : 'asc',
+      dueFrom: dueRange?.from,
+      dueTo: dueRange?.to,
+      membershipId: tableState.filters.membershipId as string | undefined,
+      membershipStatus: Array.isArray(tableState.filters.membershipStatus) ? tableState.filters.membershipStatus : undefined,
+      periodId: tableState.filters.periodId as string | undefined,
+      q: deferredSearch || undefined,
+      sort: sorting?.id ?? 'dueAt',
+      status: Array.isArray(tableState.filters.status) ? tableState.filters.status : undefined,
+    };
   }, [deferredSearch, settlements, tableState.filters, tableState.sorting]);
   const closeMutation = useMutation({
     mutationFn: () => periodToClose ? api.closePeriod(activeGroupId, periodToClose.id, { label: label.trim(), dueAt }) : Promise.reject(new Error(t('periods.noSelection'))),
@@ -148,7 +188,15 @@ export function SettlementsPanel({ settlements, settlementsEnabled }: Settlement
   };
   const columns = useMemo<DataTableColumnDef<Settlement>[]>(() => [
     { accessorKey: 'periodLabel', cell: ({ row }) => <strong>{row.original.periodLabel}</strong>, enableSorting: true, header: t('periods.period'), id: 'periodLabel', meta: { label: t('periods.period') } },
-    { accessorKey: 'memberName', enableSorting: true, header: t('common.member'), id: 'memberName', meta: { label: t('common.member') } },
+    {
+      accessorKey: 'memberName',
+      cell: ({ row }) => <span className={styles.member}><Avatar name={row.original.memberName} size="small" src={accountAvatarUrls.get(row.original.membershipId)} /><span>{row.original.memberName}</span></span>,
+      enableSorting: true,
+      header: t('common.member'),
+      id: 'memberName',
+      meta: { label: t('common.member') },
+    },
+    { accessorKey: 'membershipStatus', cell: ({ row }) => <MembershipStatusBadge status={row.original.membershipStatus} />, enableSorting: true, header: t('financeWorkspace.membershipStatus'), id: 'membershipStatus', meta: { label: t('financeWorkspace.membershipStatus') } },
     { accessorKey: 'dueAt', cell: ({ row }) => <time dateTime={row.original.dueAt}>{formatGermanDate(row.original.dueAt)}</time>, enableSorting: true, header: t('periods.due'), id: 'dueAt', meta: { label: t('periods.due') } },
     { accessorFn: (settlement) => settlement.amount.minorUnits, cell: ({ row }) => formatMoney(row.original.amount), enableSorting: true, header: t('periods.claim'), id: 'amount', meta: { align: 'end', label: t('periods.claim') } },
     { accessorFn: (settlement) => settlement.paidAmount.minorUnits, cell: ({ row }) => formatMoney(row.original.paidAmount), enableSorting: true, header: t('periods.paid'), id: 'paidAmount', meta: { align: 'end', label: t('periods.paid') } },
@@ -160,8 +208,8 @@ export function SettlementsPanel({ settlements, settlementsEnabled }: Settlement
       id: 'status',
       meta: { label: t('financeWorkspace.balanceState') },
     },
-    { cell: () => <Button leadingIcon={<Printer size={16} />} onClick={() => window.print()} size="small" variant="ghost">{t('common.print')}</Button>, enableSorting: false, header: () => <span className="sr-only">{t('common.action')}</span>, id: 'action', meta: { label: t('common.action') } },
-  ], [t]);
+    { cell: ({ row }) => <SettlementPdfPreviewAction groupId={activeGroupId} settlement={row.original} />, enableSorting: false, header: () => <span className="sr-only">{t('common.action')}</span>, id: 'action', meta: { label: t('common.action') } },
+  ], [accountAvatarUrls, activeGroupId, t]);
 
   if (settlementsEnabled && periodsQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
   if (settlementsEnabled && !periodsQuery.data) return <div className={styles.state}><StatePanel kind="error" message={t('periods.error')} /></div>;
@@ -176,10 +224,11 @@ export function SettlementsPanel({ settlements, settlementsEnabled }: Settlement
         columns={columns}
         data={visibleSettlements}
         emptyContent={t('periods.empty')}
+        exportConfig={{ disabled: deferredSearch !== tableState.searchValue.trim().toLocaleLowerCase('de-DE'), groupId: activeGroupId, query: exportQuery, table: 'GROUP_SETTLEMENTS', title: t('periods.closedSettlements') }}
         filterDefinitions={filterDefinitions}
         getRowId={(settlement) => settlement.id}
         labels={{ ...labels, searchLabel: t('periods.searchLabel'), searchPlaceholder: t('periods.searchPlaceholder') }}
-        minTableWidth="980px"
+        minTableWidth="1080px"
         {...tableState}
       />
       <Modal onClose={() => setPeriodToClose(null)} open={Boolean(periodToClose)} title={t('periods.closeDialog')} variant={compact ? 'sheet' : 'dialog'}>

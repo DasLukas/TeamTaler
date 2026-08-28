@@ -64,6 +64,7 @@ export function AuditPanel() {
       <AuditEventTable
         emptyMessage={auditQuery.isError ? t('audit.error') : t('audit.empty')}
         entries={entries}
+        exportConfig={{ disabled: deferredSearch !== tableState.searchValue.trim(), groupId: activeGroupId, query: { ...collectionQuery, limit: undefined }, table: 'GROUP_AUDIT', title: t('audit.title') }}
         filterDefinitions={filterDefinitions}
         hasMore={auditQuery.hasNextPage}
         isLoading={auditQuery.isLoading}

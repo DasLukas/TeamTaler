@@ -25,6 +25,9 @@ func TestTableQueryIndexesMigration(t *testing.T) {
 		"payments_group_member_received_page_idx", "payments_group_method_received_page_idx",
 		"payments_group_reversed_received_page_idx", "ledger_member_movements_page_idx",
 		"payments_group_created_page_idx", "payments_group_member_created_page_idx",
+		"bookings_group_voided_activity_idx", "bookings_group_target_voided_activity_idx",
+		"bookings_group_actor_voided_activity_idx", "payments_group_reversed_activity_idx",
+		"payments_group_member_reversed_activity_idx",
 		"audit_group_time_page_idx", "audit_group_actor_time_page_idx",
 		"audit_group_action_time_page_idx", "audit_group_resource_time_page_idx",
 		"system_audit_time_page_idx", "system_audit_actor_time_page_idx", "system_audit_action_time_page_idx",
@@ -52,16 +55,27 @@ func TestTableQueryIndexesMigration(t *testing.T) {
 	if migrationCount != 1 {
 		t.Fatalf("activity payment index migration ledger count = %d, want 1", migrationCount)
 	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version='0043_activity_reversal_feed_indexes.sql'`).Scan(&migrationCount); err != nil {
+		t.Fatalf("read activity reversal index migration ledger: %v", err)
+	}
+	if migrationCount != 1 {
+		t.Fatalf("activity reversal index migration ledger count = %d, want 1", migrationCount)
+	}
 
 	assertQueryPlanUsesIndex(t, db, `SELECT id FROM bookings WHERE group_id=? ORDER BY strftime('%Y-%m-%dT%H:%M:%fZ',created_at) DESC,id DESC LIMIT 101`, "bookings_group_created_page_idx", "grp")
 	assertQueryPlanUsesIndex(t, db, `SELECT id FROM payments WHERE group_id=? ORDER BY strftime('%Y-%m-%dT%H:%M:%fZ',received_at) DESC,id DESC LIMIT 101`, "payments_group_received_page_idx", "grp")
 	assertQueryPlanUsesIndex(t, db, `SELECT id FROM payments WHERE group_id=? ORDER BY strftime('%Y-%m-%dT%H:%M:%fZ',created_at) DESC,id DESC LIMIT 101`, "payments_group_created_page_idx", "grp")
+	assertQueryPlanUsesIndex(t, db, `SELECT id FROM bookings WHERE group_id=? AND voided_at IS NOT NULL ORDER BY strftime('%Y-%m-%dT%H:%M:%fZ',voided_at) DESC,id DESC LIMIT 101`, "bookings_group_voided_activity_idx", "grp")
+	assertQueryPlanUsesIndex(t, db, `SELECT id FROM bookings WHERE group_id=? AND target_membership_id=? AND voided_at IS NOT NULL ORDER BY strftime('%Y-%m-%dT%H:%M:%fZ',voided_at) DESC,id DESC LIMIT 101`, "bookings_group_target_voided_activity_idx", "grp", "target")
+	assertQueryPlanUsesIndex(t, db, `SELECT id FROM bookings WHERE group_id=? AND actor_membership_id=? AND voided_at IS NOT NULL ORDER BY strftime('%Y-%m-%dT%H:%M:%fZ',voided_at) DESC,id DESC LIMIT 101`, "bookings_group_actor_voided_activity_idx", "grp", "actor")
+	assertQueryPlanUsesIndex(t, db, `SELECT id FROM payments WHERE group_id=? AND reversed_at IS NOT NULL ORDER BY strftime('%Y-%m-%dT%H:%M:%fZ',reversed_at) DESC,id DESC LIMIT 101`, "payments_group_reversed_activity_idx", "grp")
+	assertQueryPlanUsesIndex(t, db, `SELECT id FROM payments WHERE group_id=? AND membership_id=? AND reversed_at IS NOT NULL ORDER BY strftime('%Y-%m-%dT%H:%M:%fZ',reversed_at) DESC,id DESC LIMIT 101`, "payments_group_member_reversed_activity_idx", "grp", "member")
 	assertQueryPlanUsesIndex(t, db, `SELECT id FROM ledger_entries WHERE group_id=? AND membership_id=? AND account='MEMBER_RECEIVABLE' ORDER BY strftime('%Y-%m-%dT%H:%M:%fZ',created_at) DESC,id DESC LIMIT 101`, "ledger_member_movements_page_idx", "grp", "mem")
 	assertQueryPlanUsesIndex(t, db, `SELECT id FROM audit_events WHERE group_id=? ORDER BY strftime('%Y-%m-%dT%H:%M:%fZ',occurred_at) DESC,id DESC LIMIT 101`, "audit_group_time_page_idx", "grp")
 	assertQueryPlanUsesIndex(t, db, `SELECT id FROM system_audit_events ORDER BY strftime('%Y-%m-%dT%H:%M:%fZ',occurred_at) DESC,id DESC LIMIT 101`, "system_audit_time_page_idx")
 }
 
-func TestActivityPaymentCreatedIndexesMigrationPreservesExistingFinancialData(t *testing.T) {
+func TestActivityFeedIndexesMigrationsPreserveExistingFinancialData(t *testing.T) {
 	ctx := context.Background()
 	db := openDatabaseThroughMigration(t, "0038_payment_attachments.sql")
 	defer db.Close()
@@ -116,7 +130,12 @@ func TestActivityPaymentCreatedIndexesMigrationPreservesExistingFinancialData(t 
 	if !reflect.DeepEqual(after, before) {
 		t.Fatalf("financial data changed during index-only migration:\nbefore=%#v\nafter=%#v", before, after)
 	}
-	for _, index := range []string{"payments_group_created_page_idx", "payments_group_member_created_page_idx"} {
+	for _, index := range []string{
+		"payments_group_created_page_idx", "payments_group_member_created_page_idx",
+		"bookings_group_voided_activity_idx", "bookings_group_target_voided_activity_idx",
+		"bookings_group_actor_voided_activity_idx", "payments_group_reversed_activity_idx",
+		"payments_group_member_reversed_activity_idx",
+	} {
 		var count int
 		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_schema WHERE type='index' AND name=?`, index).Scan(&count); err != nil || count != 1 {
 			t.Fatalf("activity index %s count=%d err=%v, want 1", index, count, err)
@@ -131,6 +150,9 @@ func TestActivityPaymentCreatedIndexesMigrationPreservesExistingFinancialData(t 
 	var migrationCount int
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version='0039_activity_payment_created_indexes.sql'`).Scan(&migrationCount); err != nil || migrationCount != 1 {
 		t.Fatalf("activity migration ledger count=%d err=%v, want 1", migrationCount, err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version='0043_activity_reversal_feed_indexes.sql'`).Scan(&migrationCount); err != nil || migrationCount != 1 {
+		t.Fatalf("activity reversal migration ledger count=%d err=%v, want 1", migrationCount, err)
 	}
 	var integrity string
 	if err := db.QueryRowContext(ctx, `PRAGMA integrity_check`).Scan(&integrity); err != nil || integrity != "ok" {

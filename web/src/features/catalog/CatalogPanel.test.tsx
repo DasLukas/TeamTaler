@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Category, Product, Session } from '@/api/types';
 import { ActiveGroupContext } from '@/app/active-group-context';
+import modalStyles from '@/components/ui/Modal.module.css';
 import i18n from '@/i18n';
 import { CatalogPanel } from './CatalogPanel';
 
@@ -20,8 +21,10 @@ const apiMock = vi.hoisted(() => ({
   uploadProductImage: vi.fn(),
 }));
 const imageUploadMock = vi.hoisted(() => ({ prepareSquareImage: vi.fn() }));
+const responsiveMock = vi.hoisted(() => ({ useMediaQuery: vi.fn() }));
 
 vi.mock('@/api/client', () => ({ api: apiMock }));
+vi.mock('@/hooks/useMediaQuery', () => ({ useMediaQuery: (query: string) => responsiveMock.useMediaQuery(query) }));
 vi.mock('@/components/media/imageUpload', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/components/media/imageUpload')>(),
   prepareSquareImage: imageUploadMock.prepareSquareImage,
@@ -73,6 +76,7 @@ function renderCatalog(): void {
 describe('CatalogPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    responsiveMock.useMediaQuery.mockReturnValue(false);
     imageUploadMock.prepareSquareImage.mockImplementation(async (file: File) => file);
     apiMock.getCategories.mockResolvedValue([category]);
     apiMock.createCategory.mockResolvedValue(category);
@@ -238,6 +242,96 @@ describe('CatalogPanel', () => {
     expect(screen.getByRole('button', { name: i18n.t('catalog.removeSelectedImage') })).toBeVisible();
   });
 
+  it('keeps the product dialog open when the native image picker is cancelled', async () => {
+    const user = userEvent.setup();
+    renderCatalog();
+
+    await screen.findByRole('button', { name: i18n.t('catalog.categoryAction') });
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.productAction') }));
+    const dialog = screen.getByRole('dialog', { name: i18n.t('catalog.productDialog') });
+    const fileInput = screen.getByLabelText(i18n.t('catalog.imageFileInput'));
+
+    fireEvent(fileInput, new Event('cancel', { bubbles: true }));
+
+    expect(dialog).toBeVisible();
+  });
+
+  it('renders category creation and editing as bottom sheets on compact viewports', async () => {
+    const user = userEvent.setup();
+    responsiveMock.useMediaQuery.mockReturnValue(true);
+    renderCatalog();
+
+    await user.click(await screen.findByRole('button', { name: i18n.t('catalog.categoryAction') }));
+    const createDialog = screen.getByRole('dialog', { name: i18n.t('catalog.categoryDialog') });
+    expect(createDialog).toHaveClass(modalStyles.sheet);
+    expect(createDialog.querySelector(`button[aria-label="${i18n.t('dialog.sheetHandle')}"]`)).toBeInTheDocument();
+    await user.click(within(createDialog).getByRole('button', { name: i18n.t('common.cancel') }));
+
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.editCategory', { name: category.name }) }));
+    const editDialog = screen.getByRole('dialog', { name: i18n.t('catalog.editCategoryDialog') });
+    expect(editDialog).toHaveClass(modalStyles.sheet);
+    expect(editDialog.querySelector(`button[aria-label="${i18n.t('dialog.sheetHandle')}"]`)).toBeInTheDocument();
+  });
+
+  it('keeps category creation as a dialog on wider viewports', async () => {
+    const user = userEvent.setup();
+    renderCatalog();
+
+    await user.click(await screen.findByRole('button', { name: i18n.t('catalog.categoryAction') }));
+    const dialog = screen.getByRole('dialog', { name: i18n.t('catalog.categoryDialog') });
+    expect(dialog).not.toHaveClass(modalStyles.sheet);
+    expect(dialog.querySelector(`button[aria-label="${i18n.t('dialog.sheetHandle')}"]`)).not.toBeInTheDocument();
+  });
+
+  it('renders the product editor as a bottom sheet on compact viewports', async () => {
+    const user = userEvent.setup();
+    responsiveMock.useMediaQuery.mockReturnValue(true);
+    renderCatalog();
+
+    await screen.findByRole('button', { name: i18n.t('catalog.categoryAction') });
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.productAction') }));
+
+    const dialog = screen.getByRole('dialog', { name: i18n.t('catalog.productDialog') });
+    expect(responsiveMock.useMediaQuery).toHaveBeenCalledWith('(max-width: 767px)');
+    expect(dialog).toHaveClass(modalStyles.sheet);
+    expect(dialog.querySelector(`button[aria-label="${i18n.t('dialog.sheetHandle')}"]`)).toBeInTheDocument();
+  });
+
+  it('keeps the product editor as a dialog on wider viewports', async () => {
+    const user = userEvent.setup();
+    renderCatalog();
+
+    await screen.findByRole('button', { name: i18n.t('catalog.categoryAction') });
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.productAction') }));
+
+    const dialog = screen.getByRole('dialog', { name: i18n.t('catalog.productDialog') });
+    expect(dialog).toHaveClass(modalStyles.dialog);
+    expect(dialog).not.toHaveClass(modalStyles.sheet);
+    expect(dialog.querySelector(`button[aria-label="${i18n.t('dialog.sheetHandle')}"]`)).not.toBeInTheDocument();
+  });
+
+  it('selects product categories through the custom icon menu', async () => {
+    const user = userEvent.setup();
+    const snackCategory: Category = { ...category, id: 'category-snacks', name: 'Snacks', icon: 'food', sortOrder: 3 };
+    apiMock.getCategories.mockResolvedValue([category, snackCategory]);
+    renderCatalog();
+
+    await screen.findByRole('button', { name: i18n.t('catalog.categoryAction') });
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.productAction') }));
+    const categoryMenu = screen.getByRole('combobox', { name: i18n.t('common.category') });
+    expect(categoryMenu.querySelector('[data-category-icon="drink"]')).toBeInTheDocument();
+
+    await user.click(categoryMenu);
+    const listbox = screen.getByRole('listbox', { name: i18n.t('common.category') });
+    expect(within(listbox).getByRole('option', { name: category.name }).querySelector('[data-category-icon="drink"]')).toBeInTheDocument();
+    const snackOption = within(listbox).getByRole('option', { name: snackCategory.name });
+    expect(snackOption.querySelector('[data-category-icon="food"]')).toBeInTheDocument();
+    await user.click(snackOption);
+
+    expect(categoryMenu).toHaveTextContent(snackCategory.name);
+    expect(categoryMenu.querySelector('[data-category-icon="food"]')).toBeInTheDocument();
+  });
+
   it('clears the native file input before another product is created', async () => {
     const user = userEvent.setup();
     const image = new File(['first'], 'first.png', { type: 'image/png' });
@@ -317,7 +411,7 @@ describe('CatalogPanel', () => {
     expect(priceInput).toHaveValue('1,00');
     expect(priceInput).toHaveAttribute('inputmode', 'decimal');
     expect(priceInput).toHaveAttribute('type', 'text');
-    expect(screen.getByLabelText(i18n.t('common.category'))).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: i18n.t('common.category') })).toBeDisabled();
     const name = screen.getByLabelText(i18n.t('catalog.productName'));
     await user.clear(name);
     await user.type(name, 'Mineral water');
@@ -374,7 +468,9 @@ describe('CatalogPanel', () => {
     expect(addProductButton.parentElement?.parentElement).toBe(productCard?.parentElement);
     await user.click(addProductButton);
 
-    expect(screen.getByLabelText(i18n.t('common.category'))).toHaveValue(secondCategory.id);
+    const categoryMenu = screen.getByRole('combobox', { name: i18n.t('common.category') });
+    expect(categoryMenu).toHaveTextContent(secondCategory.name);
+    expect(categoryMenu.querySelector(`[data-category-icon="${secondCategory.icon}"]`)).toBeInTheDocument();
   });
 
   it('exposes localized keyboard drag handles for categories and products', async () => {

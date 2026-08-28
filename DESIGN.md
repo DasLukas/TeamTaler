@@ -82,6 +82,18 @@ Primary tab navigation remains a semantic, keyboard-operable tab list. On narrow
 
 Group and instance audit feeds use the shared `AuditEventTable` component. Both contexts preserve the same chronological columns, typography, row behavior, and responsive overflow treatment; feature code only normalizes its API records into the shared entry shape. On narrow viewports the table scrolls within its own bordered region and never expands the page.
 
+## Responsive collection views
+
+Feature-owned card views may replace a shared data table's viewport on phones when scanning complete records vertically is materially easier than horizontal column navigation. Cards and tables must consume the same sorted collection, query controls, export action, cursor loading, empty/error state, and item actions; they are representations of one result set rather than separate data flows. Only the active representation is rendered, avoiding duplicate media requests and hidden interactive controls.
+
+Cursor-backed collections load their next page automatically when an inert sentinel approaches the visible end of the active table or card viewport. Loading starts early enough to avoid an empty pause, permits only one request per intersection, announces progress politely, and retains the manual loading action only as a compatibility fallback when Intersection Observer is unavailable. Result counts remain visible after the explicit action is removed.
+
+Active table filters remain individually visible and removable without consuming an unbounded amount of vertical space. Below 768 pixels their chips occupy one native horizontally scrollable row with proximity snapping and the complete reset action at its end; its first chip aligns with the leading edge of the primary controls, while its trailing fade exposes horizontal continuation. Wider layouts may wrap chips to use available horizontal space. The filter count on the primary action remains the persistent compact summary.
+
+Collection result feedback is horizontally centered across every shared table and card representation on every viewport. Optional progressive-loading feedback retains a separate trailing position above 480 pixels and stacks below the centered result count on narrower phones, so asynchronous state never displaces the count from its primary reading position.
+
+The mobile activity feed defaults to cards below 768 pixels and safely stores the last card/table choice as a versioned device preference. Its compact toolbar keeps filter, sort, view, and export actions in stable positions across both representations. The icon-only view action always names the destination view, while the dedicated accessible sorting sheet remains available in both representations so sorting does not depend on horizontally distant table headers. The compact activity workspace uses a tighter heading-to-controls gap, compact collection-section spacing, and no redundant page padding above the shell-owned bottom navigation; touch targets and safe-area separation remain unchanged. Tablet and desktop continue to use the semantic table. Every activity card exposes the transaction type, signed amount, detail, member and actor identities, lifecycle state, category, timestamp, posting state, receipt, and reversal action without relying on color or icons alone.
+
 ## Documentation ownership
 
 - This file owns enduring visual and interaction-system rules.

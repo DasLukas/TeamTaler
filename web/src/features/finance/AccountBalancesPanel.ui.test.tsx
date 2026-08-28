@@ -3,6 +3,7 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { demoAccountSummaries, demoSession } from '@/demo/data';
+import tableStyles from '@/features/shared/Table.module.css';
 import i18n from '@/i18n';
 import { AccountBalancesPanel } from './AccountBalancesPanel';
 
@@ -31,7 +32,7 @@ describe('AccountBalancesPanel', () => {
     expect(within(net as HTMLElement).getByText(/25,90/)).toBeVisible();
     const table = screen.getByRole('table', { name: i18n.t('financeWorkspace.overviewTitle') });
     expect(within(table).getAllByText(i18n.t('financeWorkspace.active')).length).toBeGreaterThan(0);
-    expect(within(table).getByText(i18n.t('financeWorkspace.archived'))).toBeVisible();
+    expect(within(table).getByText(i18n.t('common.archived'))).toHaveClass(tableStyles.statusWarning);
     expect(screen.getAllByText('Pia Lehmann').length).toBeGreaterThan(0);
   });
 
@@ -70,7 +71,7 @@ describe('AccountBalancesPanel', () => {
     await user.click(membershipTrigger);
     const membershipMenu = screen.getByRole('dialog', { name: i18n.t('financeWorkspace.membershipStatus') });
     expect(membershipMenu.querySelectorAll('svg')).toHaveLength(3);
-    await user.click(within(membershipMenu).getByRole('checkbox', { name: i18n.t('financeWorkspace.archived') }));
+    await user.click(within(membershipMenu).getByRole('checkbox', { name: i18n.t('common.archived') }));
 
     await user.click(balanceStateTrigger);
     const balanceStateMenu = screen.getByRole('dialog', { name: i18n.t('financeWorkspace.balanceState') });
@@ -95,5 +96,6 @@ describe('AccountBalancesPanel', () => {
     const table = await screen.findByRole('table', { name: i18n.t('financeWorkspace.overviewTitle') });
     const deletedRow = within(table).getByRole('row', { name: /Deleted Account.*Gelöscht/ });
     expect(deletedRow).toBeVisible();
+    expect(within(deletedRow).getByText(i18n.t('common.deleted'))).toHaveClass(tableStyles.statusDanger);
   });
 });

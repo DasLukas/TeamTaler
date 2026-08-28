@@ -1,4 +1,3 @@
-import Download from 'lucide-react/dist/esm/icons/download';
 import Eye from 'lucide-react/dist/esm/icons/eye';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -6,16 +5,17 @@ import { api } from '@/api/client';
 import type { PaymentAttachmentSummary } from '@/api/types';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
+import { openPdfPreviewWindow, showPdfInPreviewWindow } from '@/features/shared/exportDownload';
 import styles from './PaymentAttachmentAction.module.css';
 
-/** Properties for one protected receipt preview or download action. */
+/** Properties for one protected receipt preview action. */
 interface PaymentAttachmentActionProps {
   attachment: PaymentAttachmentSummary;
   groupId: string;
   paymentId: string;
 }
 
-/** Fetches a protected payment receipt only after an explicit user action. */
+/** Fetches and previews a protected payment receipt only after an explicit user action. */
 export function PaymentAttachmentAction({ attachment, groupId, paymentId }: PaymentAttachmentActionProps) {
   const { t } = useTranslation();
   const [pending, setPending] = useState(false);
@@ -25,34 +25,43 @@ export function PaymentAttachmentAction({ attachment, groupId, paymentId }: Paym
 
   useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
 
-  const open = async () => {
+  const loadPreview = async (previewWindow?: Window) => {
     setPending(true);
-    setError('');
     try {
       const blob = await api.getPaymentAttachment(groupId, paymentId);
-      const url = URL.createObjectURL(blob);
       if (isImage) {
-        setPreviewUrl(url);
-      } else {
-        const anchor = document.createElement('a');
-        anchor.href = url;
-        anchor.download = attachment.fileName;
-        anchor.hidden = true;
-        document.body.append(anchor);
-        anchor.click();
-        anchor.remove();
-        window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+        setPreviewUrl(URL.createObjectURL(blob));
+      } else if (!previewWindow || !showPdfInPreviewWindow(previewWindow, blob, attachment.fileName)) {
+        throw new Error(t('exports.table.previewClosed'));
       }
     } catch (requestError) {
+      if (previewWindow && !previewWindow.closed) previewWindow.close();
       setError(requestError instanceof Error ? requestError.message : t('errors.requestFailed'));
     } finally {
       setPending(false);
     }
   };
 
+  const open = () => {
+    setError('');
+    if (isImage) {
+      void loadPreview();
+      return;
+    }
+    const previewWindow = openPdfPreviewWindow(
+      t('exports.table.previewTitle', { title: attachment.fileName }),
+      t('exports.table.previewLoading'),
+    );
+    if (!previewWindow) {
+      setError(t('exports.table.previewBlocked'));
+      return;
+    }
+    void loadPreview(previewWindow);
+  };
+
   return <>
     <span className={styles.action}>
-      <Button disabled={pending} leadingIcon={isImage ? <Eye size={16} /> : <Download size={16} />} onClick={() => void open()} size="small" variant="ghost">{t('paymentAttachment.action', { defaultValue: 'Receipt' })}</Button>
+      <Button disabled={pending} leadingIcon={<Eye size={16} />} onClick={open} size="small" variant="ghost">{t('paymentAttachment.action', { defaultValue: 'Receipt' })}</Button>
       {error ? <small role="alert">{error}</small> : null}
     </span>
     <Modal onClose={() => setPreviewUrl('')} open={Boolean(previewUrl)} size="workspace" title={attachment.fileName}>

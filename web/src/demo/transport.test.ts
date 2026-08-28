@@ -510,6 +510,30 @@ describe('DemoTransport group settings', () => {
     await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings')).resolves.toMatchObject({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-finance' });
   });
 
+  it('roundtrips nullable PayPal.Me and SEPA payment targets through member settings', async () => {
+    const transport = new DemoTransport();
+    const paymentMethods = [
+      { id: 'PAYPAL', label: 'PayPal', attachmentMode: 'OFF' as const, paymentTarget: { type: 'PAYPAL_ME' as const, paypalMeHandle: 'TeamTaler42' } },
+      { id: 'BANK_TRANSFER', label: 'Bank transfer', attachmentMode: 'OFF' as const, paymentTarget: { type: 'SEPA_TRANSFER' as const, recipientName: 'TeamTaler Club', iban: 'DE89370400440532013000', bic: 'COBADEFFXXX' } },
+      { id: 'CASH', label: 'Cash', attachmentMode: 'OFF' as const, paymentTarget: null },
+    ];
+
+    await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings', jsonRequest('PATCH', { paymentMethods }))).resolves.toMatchObject({ paymentMethods });
+    await expect(transport.request('/groups/group-sv-adler/transaction-settings')).resolves.toMatchObject({ paymentMethods });
+
+    const legacyPaymentMethods = paymentMethods.map((method) => ({ id: method.id, label: method.label, attachmentMode: method.attachmentMode }));
+    await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings', jsonRequest('PATCH', { paymentMethods: legacyPaymentMethods }))).resolves.toMatchObject({ paymentMethods });
+
+    const withPaypalCleared = legacyPaymentMethods.map((method) => method.id === 'PAYPAL' ? { ...method, paymentTarget: null } : method);
+    await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings', jsonRequest('PATCH', { paymentMethods: withPaypalCleared }))).resolves.toMatchObject({
+      paymentMethods: [
+        expect.objectContaining({ id: 'PAYPAL', paymentTarget: null }),
+        expect.objectContaining({ id: 'BANK_TRANSFER', paymentTarget: paymentMethods[1]?.paymentTarget }),
+        expect.objectContaining({ id: 'CASH', paymentTarget: null }),
+      ],
+    });
+  });
+
   it('accepts either role or group management for the default role', async () => {
     const groupTransport = new DemoTransport();
     const groupOnly = await groupTransport.request<Role>('/groups/group-sv-adler/roles', jsonRequest('POST', {
@@ -614,6 +638,47 @@ describe('DemoTransport finance accounts', () => {
     expect(options.members.some((member) => member.membershipId === 'member-lukas')).toBe(true);
     expect(options.categories.some((category) => category.categoryId === 'category-drinks')).toBe(true);
     expect(options.products.some((product) => product.productId === 'product-beer' && product.categoryId === 'category-drinks')).toBe(true);
+  });
+
+  it('projects linked booking and payment reversals and resolves anchored context', async () => {
+    const transport = new DemoTransport();
+    await transport.request<Booking>('/groups/group-sv-adler/bookings/booking-1/void', jsonRequest('POST', { reason: 'Duplicate booking' }));
+    await transport.request<void>('/groups/group-sv-adler/payments/payment-1/reverse', jsonRequest('POST', { reason: 'Duplicate payment' }));
+
+    const activities = await transport.request<ActivityEntry[]>('/groups/group-sv-adler/activities?sort=occurredAt&direction=desc');
+    const booking = activities.find((entry) => entry.id === 'booking:booking-1');
+    const bookingReversal = activities.find((entry) => entry.id === 'reversal:booking:booking-1');
+    const payment = activities.find((entry) => entry.id === 'payment:payment-1');
+    const paymentReversal = activities.find((entry) => entry.id === 'reversal:payment:payment-1');
+
+    expect(booking).toMatchObject({ status: 'REVERSED', relatedActivityId: 'reversal:booking:booking-1', amount: { minorUnits: '200' } });
+    expect(bookingReversal).toMatchObject({
+      kind: 'REVERSAL',
+      reversalSourceKind: 'BOOKING',
+      relatedActivityId: 'booking:booking-1',
+      detailNote: 'Duplicate booking',
+      status: 'POSTED',
+      amount: { minorUnits: '-200' },
+      canReverse: false,
+    });
+    expect(payment).toMatchObject({ status: 'REVERSED', relatedActivityId: 'reversal:payment:payment-1', amount: { minorUnits: '-2000' } });
+    expect(paymentReversal).toMatchObject({
+      kind: 'REVERSAL',
+      reversalSourceKind: 'PAYMENT',
+      relatedActivityId: 'payment:payment-1',
+      detailNote: 'Duplicate payment',
+      status: 'POSTED',
+      amount: { minorUnits: '2000' },
+      canReverse: false,
+    });
+
+    const reversals = await transport.request<ActivityEntry[]>('/groups/group-sv-adler/activities?kind=REVERSAL');
+    const anchored = await transport.request<ActivityEntry[]>('/groups/group-sv-adler/activities?kind=BOOKING&anchorId=reversal%3Apayment%3Apayment-1&limit=3');
+    const options = await transport.request<ActivityFilterOptions>('/groups/group-sv-adler/activities/filter-options');
+    expect(reversals.map((entry) => entry.id)).toEqual(expect.arrayContaining(['reversal:booking:booking-1', 'reversal:payment:payment-1']));
+    expect(anchored.some((entry) => entry.id === 'reversal:payment:payment-1')).toBe(true);
+    expect(options.kinds).toContain('REVERSAL');
+    await expect(transport.request('/groups/group-sv-adler/activities?anchorId=booking%3Abooking-1&cursor=cursor-a')).rejects.toThrow(/anchor/i);
   });
 
   it('lists active and archived summaries and applies booking movements', async () => {

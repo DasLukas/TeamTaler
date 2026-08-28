@@ -1257,6 +1257,27 @@ describe('server-backed collection API contract', () => {
     expect(page).toMatchObject({ items: [{ kind: 'PAYMENT', amount: { minorUnits: '-1250', currency: 'EUR' } }], nextCursor: 'activity-cursor', hasMore: true, limit: 50 });
   });
 
+  it('serializes an activity anchor for a server-side focus context', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse([]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.getActivitiesPage('group-a', {
+      anchorId: 'reversal:booking:booking-a',
+      direction: 'desc',
+      limit: 50,
+      sort: 'occurredAt',
+    });
+
+    const requestUrl = new URL(String(fetchMock.mock.calls[0][0]), 'https://teamtaler.example');
+    expect(requestUrl.pathname).toBe('/api/v1/groups/group-a/activities');
+    expect(Object.fromEntries(requestUrl.searchParams)).toEqual({
+      anchorId: 'reversal:booking:booking-a',
+      direction: 'desc',
+      limit: '50',
+      sort: 'occurredAt',
+    });
+  });
+
   it('loads group-audit pages and member identities in parallel', async () => {
     const auditEntry = {
       id: 'audit-a',
@@ -1322,5 +1343,38 @@ describe('server-backed collection API contract', () => {
       '/api/v1/groups/group%2Fa/bookings/filter-options',
       '/api/v1/groups/group%2Fa/activities/filter-options',
     ]);
+  });
+
+  it('posts a typed table export and returns the complete file body', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response('exported', { headers: { 'Content-Type': 'text/csv' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const blob = await api.exportGroupTable('group/a', {
+      format: 'CSV',
+      query: { q: 'Alex', sort: 'memberName', direction: 'asc' },
+      table: 'ACCOUNT_BALANCES',
+      timeZone: 'Europe/Berlin',
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group%2Fa/table-exports');
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({
+      format: 'CSV',
+      query: { q: 'Alex', sort: 'memberName', direction: 'asc' },
+      table: 'ACCOUNT_BALANCES',
+      timeZone: 'Europe/Berlin',
+    });
+    await expect(blobText(blob)).resolves.toBe('exported');
+  });
+
+  it('creates password-confirmed export jobs with a one-shot idempotency key', async () => {
+    const job = { id: 'export-a', scope: 'PERSONAL', status: 'QUEUED', requestedAt: '2026-08-25T12:00:00Z' };
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(job));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.createPersonalDataExport('group/a', 'current-password')).resolves.toEqual(job);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group%2Fa/me/exports');
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ currentPassword: 'current-password' });
+    expect(idempotencyKey(fetchMock.mock.calls[0])).toMatch(/^[0-9a-f-]{36}$/i);
   });
 });

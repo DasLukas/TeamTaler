@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -21,6 +22,8 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/backup"
 	"github.com/DasLukas/TeamTaler/internal/config"
 	"github.com/DasLukas/TeamTaler/internal/email"
+	"github.com/DasLukas/TeamTaler/internal/exporting"
+	"github.com/DasLukas/TeamTaler/internal/exportnotifications"
 	"github.com/DasLukas/TeamTaler/internal/httpapi"
 	"github.com/DasLukas/TeamTaler/internal/notifications"
 	"github.com/DasLukas/TeamTaler/internal/platform"
@@ -128,6 +131,20 @@ func serve(arguments []string) error {
 		return fmt.Errorf("configure settlement reminder worker: %w", err)
 	}
 	backgroundRunners := []backgroundRunner{{name: "settlement reminders", run: reminderWorker.Run}}
+	exportStore, err := exporting.NewFileArtifactStore(filepath.Join(cfg.DataDirectory, "exports"))
+	if err != nil {
+		return fmt.Errorf("configure data export artifact store: %w", err)
+	}
+	exportService, err := exporting.NewService(db, exportStore, exporting.Options{
+		CompletionListener: exportnotifications.Listener{DB: db},
+	})
+	if err != nil {
+		return fmt.Errorf("configure data export service: %w", err)
+	}
+	backgroundRunners = append(backgroundRunners,
+		backgroundRunner{name: "data export generation", run: func(ctx context.Context) error { return runDataExportWorker(ctx, exportService) }},
+		backgroundRunner{name: "data export cleanup", run: func(ctx context.Context) error { return runDataExportCleanup(ctx, exportService, slog.Default()) }},
+	)
 
 	if len(cfg.EmailTokenKey) == 32 {
 		sender, err := email.NewDynamicSender(func(ctx context.Context) (config.SMTPConfig, bool, error) {
@@ -299,6 +316,38 @@ func superviseBackgroundRunners(parent context.Context, runners []backgroundRunn
 		completed <- errors.Join(errorsByRunner...)
 	}()
 	return completed
+}
+
+// runDataExportWorker processes durable raw-data export jobs and treats parent
+// cancellation as a clean shutdown.
+func runDataExportWorker(ctx context.Context, service *exporting.Service) error {
+	err := service.Run(ctx, time.Second)
+	if ctx.Err() != nil && errors.Is(err, context.Canceled) {
+		return nil
+	}
+	return err
+}
+
+// runDataExportCleanup removes expired or newly unauthorized export artifacts
+// at startup and every fifteen minutes. Individual cleanup failures are logged
+// and retried without stopping the HTTP server.
+func runDataExportCleanup(ctx context.Context, service *exporting.Service, logger *slog.Logger) error {
+	process := func() {
+		if _, err := service.Cleanup(ctx, 100); err != nil && ctx.Err() == nil {
+			logger.Error("data export cleanup failed", "error", err)
+		}
+	}
+	process()
+	ticker := time.NewTicker(15 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			process()
+		}
+	}
 }
 
 // runMediaGarbageCollector retries durable content-addressed image deletions at

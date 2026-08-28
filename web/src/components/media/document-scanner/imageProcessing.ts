@@ -1,9 +1,8 @@
-import { applyPerspectiveTransform, createPerspectiveTransform, estimateWarpSize, isValidDocumentCorners } from './geometry';
+import { createPerspectiveTransform, estimateWarpSize, isValidDocumentCorners } from './geometry';
 import { applyDocumentFilter } from './documentFilters';
-import type { DocumentCorners, NormalizedPoint, PageRotation, ScannerPage } from './types';
+import type { DocumentCorners, PageRotation, ScannerPage } from './types';
 
 const MAX_SOURCE_EDGE = 3000;
-const WARP_MESH_SIZE = 18;
 
 interface RenderedDocumentPage {
   blob: Blob;
@@ -45,72 +44,88 @@ function applyCanvasFilter(canvas: HTMLCanvasElement, page: Pick<ScannerPage, 'f
   context.putImageData(image, 0, 0);
 }
 
-function interpolateQuad(corners: readonly NormalizedPoint[], horizontal: number, vertical: number): NormalizedPoint {
-  const top = {
-    x: corners[0].x + (corners[1].x - corners[0].x) * horizontal,
-    y: corners[0].y + (corners[1].y - corners[0].y) * horizontal,
-  };
-  const bottom = {
-    x: corners[3].x + (corners[2].x - corners[3].x) * horizontal,
-    y: corners[3].y + (corners[2].y - corners[3].y) * horizontal,
-  };
-  return {
-    x: top.x + (bottom.x - top.x) * vertical,
-    y: top.y + (bottom.y - top.y) * vertical,
-  };
-}
-
-interface AffineTransform {
-  a: number;
-  b: number;
-  c: number;
-  d: number;
-  e: number;
-  f: number;
-}
-
-function affineFromTriangles(source: readonly NormalizedPoint[], destination: readonly NormalizedPoint[]): AffineTransform | undefined {
-  const denominator = source[0].x * (source[1].y - source[2].y)
-    + source[1].x * (source[2].y - source[0].y)
-    + source[2].x * (source[0].y - source[1].y);
-  if (Math.abs(denominator) < 1e-6) return undefined;
-  const solve = (first: number, second: number, third: number) => ({
-    x: (first * (source[1].y - source[2].y) + second * (source[2].y - source[0].y) + third * (source[0].y - source[1].y)) / denominator,
-    y: (first * (source[2].x - source[1].x) + second * (source[0].x - source[2].x) + third * (source[1].x - source[0].x)) / denominator,
-    offset: (first * (source[1].x * source[2].y - source[2].x * source[1].y)
-      + second * (source[2].x * source[0].y - source[0].x * source[2].y)
-      + third * (source[0].x * source[1].y - source[1].x * source[0].y)) / denominator,
-  });
-  const horizontal = solve(destination[0].x, destination[1].x, destination[2].x);
-  const vertical = solve(destination[0].y, destination[1].y, destination[2].y);
-  return {
-    a: horizontal.x,
-    b: vertical.x,
-    c: horizontal.y,
-    d: vertical.y,
-    e: horizontal.offset,
-    f: vertical.offset,
-  };
-}
-
-function renderTriangle(
-  context: CanvasRenderingContext2D,
+function renderPerspectiveBitmap(
   bitmap: ImageBitmap,
-  source: readonly [NormalizedPoint, NormalizedPoint, NormalizedPoint],
-  destination: readonly [NormalizedPoint, NormalizedPoint, NormalizedPoint],
-): void {
-  const affine = affineFromTriangles(source, destination);
-  if (!affine) return;
-  context.save();
-  context.beginPath();
-  context.moveTo(destination[0].x, destination[0].y);
-  context.lineTo(destination[1].x, destination[1].y);
-  context.lineTo(destination[2].x, destination[2].y);
-  context.closePath();
-  context.clip();
-  context.setTransform(affine.a, affine.b, affine.c, affine.d, affine.e, affine.f);
-  context.drawImage(bitmap, 0, 0);
-  context.restore();
+  corners: DocumentCorners,
+  size: { height: number; width: number },
+  filter: ScannerPage['filter'],
+): HTMLCanvasElement {
+  const sourceCanvas = document.createElement('canvas');
+  sourceCanvas.width = bitmap.width;
+  sourceCanvas.height = bitmap.height;
+  const sourceContext = sourceCanvas.getContext('2d', { willReadFrequently: true });
+  if (!sourceContext) throw new Error('Canvas pixel processing is unavailable.');
+  sourceContext.drawImage(bitmap, 0, 0);
+  const source = sourceContext.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
+
+  const output = document.createElement('canvas');
+  output.width = size.width;
+  output.height = size.height;
+  const outputContext = output.getContext('2d');
+  if (!outputContext) throw new Error('Canvas rendering is unavailable.');
+  const rendered = outputContext.createImageData(size.width, size.height);
+  const maximumSourceX = Math.max(0, source.width - 1);
+  const maximumSourceY = Math.max(0, source.height - 1);
+  const sourcePixels = corners.map((point) => ({
+    x: point.x * maximumSourceX,
+    y: point.y * maximumSourceY,
+  })) as unknown as DocumentCorners;
+  const maximumOutputX = Math.max(1, size.width - 1);
+  const maximumOutputY = Math.max(1, size.height - 1);
+  const outputPixels: DocumentCorners = [
+    { x: 0, y: 0 },
+    { x: maximumOutputX, y: 0 },
+    { x: maximumOutputX, y: maximumOutputY },
+    { x: 0, y: maximumOutputY },
+  ];
+  const inverseTransform = createPerspectiveTransform(outputPixels, sourcePixels);
+  const sourceData = source.data;
+  const renderedData = rendered.data;
+
+  for (let y = 0; y < size.height; y += 1) {
+    let horizontalNumerator = inverseTransform[1] * y + inverseTransform[2];
+    let verticalNumerator = inverseTransform[4] * y + inverseTransform[5];
+    let denominator = inverseTransform[7] * y + inverseTransform[8];
+    for (let x = 0; x < size.width; x += 1) {
+      const sourceX = Math.max(0, Math.min(maximumSourceX, horizontalNumerator / denominator));
+      const sourceY = Math.max(0, Math.min(maximumSourceY, verticalNumerator / denominator));
+      const firstX = Math.floor(sourceX);
+      const firstY = Math.floor(sourceY);
+      const secondX = Math.min(maximumSourceX, firstX + 1);
+      const secondY = Math.min(maximumSourceY, firstY + 1);
+      const horizontalWeight = sourceX - firstX;
+      const verticalWeight = sourceY - firstY;
+      const topLeftWeight = (1 - horizontalWeight) * (1 - verticalWeight);
+      const topRightWeight = horizontalWeight * (1 - verticalWeight);
+      const bottomLeftWeight = (1 - horizontalWeight) * verticalWeight;
+      const bottomRightWeight = horizontalWeight * verticalWeight;
+      const topLeftOffset = (firstY * source.width + firstX) * 4;
+      const topRightOffset = (firstY * source.width + secondX) * 4;
+      const bottomLeftOffset = (secondY * source.width + firstX) * 4;
+      const bottomRightOffset = (secondY * source.width + secondX) * 4;
+      const outputOffset = (y * size.width + x) * 4;
+      const alpha = (
+        sourceData[topLeftOffset + 3] * topLeftWeight
+        + sourceData[topRightOffset + 3] * topRightWeight
+        + sourceData[bottomLeftOffset + 3] * bottomLeftWeight
+        + sourceData[bottomRightOffset + 3] * bottomRightWeight
+      ) / 255;
+      for (let channel = 0; channel < 3; channel += 1) {
+        const value = sourceData[topLeftOffset + channel] * topLeftWeight
+          + sourceData[topRightOffset + channel] * topRightWeight
+          + sourceData[bottomLeftOffset + channel] * bottomLeftWeight
+          + sourceData[bottomRightOffset + channel] * bottomRightWeight;
+        renderedData[outputOffset + channel] = Math.round(value * alpha + 255 * (1 - alpha));
+      }
+      renderedData[outputOffset + 3] = 255;
+      horizontalNumerator += inverseTransform[0];
+      verticalNumerator += inverseTransform[3];
+      denominator += inverseTransform[6];
+    }
+  }
+  if (filter !== 'original') applyDocumentFilter(rendered, filter);
+  outputContext.putImageData(rendered, 0, 0);
+  return output;
 }
 
 function rotateCanvas(source: HTMLCanvasElement, rotation: PageRotation): HTMLCanvasElement {
@@ -161,56 +176,21 @@ export async function renderDocumentFilterPreview(page: DocumentFilterPreviewSou
 /**
  * Perspective-corrects one source image and strips its original metadata.
  *
- * The fallback renderer uses a small projective triangle mesh. OpenCV is kept
- * out of the initial application bundle and is used independently by the edge
- * detection worker when its lazy chunk is available.
+ * An inverse homography samples every output pixel exactly once, preventing
+ * browser-dependent seams between independently clipped mesh triangles.
+ * OpenCV remains isolated to the document-detection worker.
  *
  * @param page - Local source page and its non-destructive edit state.
+ * @param maximumEdge - Maximum decoded source edge; defaults to 3000 pixels.
  * @returns Metadata-free JPEG data and its final pixel dimensions.
  * @throws {Error} When the crop is invalid, decoding fails, or canvas APIs are unavailable.
  */
-export async function renderDocumentPage(page: ScannerPage): Promise<RenderedDocumentPage> {
+export async function renderDocumentPage(page: ScannerPage, maximumEdge = MAX_SOURCE_EDGE): Promise<RenderedDocumentPage> {
   if (!isValidDocumentCorners(page.corners)) throw new Error('The selected document corners do not form a valid page.');
-  const bitmap = await decodeBoundedBitmap(page);
+  const bitmap = await decodeBoundedBitmap(page, maximumEdge);
   try {
     const size = estimateWarpSize(page.corners, bitmap.width, bitmap.height);
-    const canvas = document.createElement('canvas');
-    canvas.width = size.width;
-    canvas.height = size.height;
-    const context = canvas.getContext('2d');
-    if (!context) throw new Error('Canvas rendering is unavailable.');
-    context.imageSmoothingEnabled = true;
-    context.imageSmoothingQuality = 'high';
-
-    const sourcePixels = page.corners.map((point) => ({ x: point.x * bitmap.width, y: point.y * bitmap.height })) as unknown as DocumentCorners;
-    const destination: DocumentCorners = [
-      { x: 0, y: 0 },
-      { x: size.width, y: 0 },
-      { x: size.width, y: size.height },
-      { x: 0, y: size.height },
-    ];
-    const transform = createPerspectiveTransform(sourcePixels, destination);
-
-    for (let row = 0; row < WARP_MESH_SIZE; row += 1) {
-      for (let column = 0; column < WARP_MESH_SIZE; column += 1) {
-        const left = column / WARP_MESH_SIZE;
-        const right = (column + 1) / WARP_MESH_SIZE;
-        const top = row / WARP_MESH_SIZE;
-        const bottom = (row + 1) / WARP_MESH_SIZE;
-        const sourceTopLeft = interpolateQuad(sourcePixels, left, top);
-        const sourceTopRight = interpolateQuad(sourcePixels, right, top);
-        const sourceBottomRight = interpolateQuad(sourcePixels, right, bottom);
-        const sourceBottomLeft = interpolateQuad(sourcePixels, left, bottom);
-        const destinationTopLeft = applyPerspectiveTransform(transform, sourceTopLeft);
-        const destinationTopRight = applyPerspectiveTransform(transform, sourceTopRight);
-        const destinationBottomRight = applyPerspectiveTransform(transform, sourceBottomRight);
-        const destinationBottomLeft = applyPerspectiveTransform(transform, sourceBottomLeft);
-        renderTriangle(context, bitmap, [sourceTopLeft, sourceTopRight, sourceBottomRight], [destinationTopLeft, destinationTopRight, destinationBottomRight]);
-        renderTriangle(context, bitmap, [sourceTopLeft, sourceBottomRight, sourceBottomLeft], [destinationTopLeft, destinationBottomRight, destinationBottomLeft]);
-      }
-    }
-
-    applyCanvasFilter(canvas, page);
+    const canvas = renderPerspectiveBitmap(bitmap, page.corners, size, page.filter);
     const rotated = rotateCanvas(canvas, page.rotation);
     return {
       blob: await canvasToBlob(rotated, 'image/jpeg', 0.9),

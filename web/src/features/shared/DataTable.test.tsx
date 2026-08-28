@@ -1,8 +1,8 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import type { SortingState } from '@tanstack/react-table';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DataTable,
   type DataTableColumnDef,
@@ -66,11 +66,12 @@ const labels: DataTableLabels = {
 
 interface ControlledTableProps {
   hasMore?: boolean;
+  isLoadingMore?: boolean;
   onLoadMore?: () => void;
 }
 
 /** Supplies controlled query state so interactions can be asserted through the public API. */
-function ControlledTable({ hasMore = false, onLoadMore }: ControlledTableProps) {
+function ControlledTable({ hasMore = false, isLoadingMore = false, onLoadMore }: ControlledTableProps) {
   const [searchValue, setSearchValue] = useState('');
   const [filters, setFilters] = useState<DataTableFilterState<TestFilterId>>({});
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -84,6 +85,7 @@ function ControlledTable({ hasMore = false, onLoadMore }: ControlledTableProps) 
       filters={filters}
       getRowId={(row) => row.id}
       hasMore={hasMore}
+      isLoadingMore={isLoadingMore}
       labels={labels}
       onFiltersChange={setFilters}
       onLoadMore={onLoadMore}
@@ -94,6 +96,32 @@ function ControlledTable({ hasMore = false, onLoadMore }: ControlledTableProps) 
       totalCount={12}
     />
   );
+}
+
+class TestIntersectionObserver {
+  static instances: TestIntersectionObserver[] = [];
+  private readonly elements = new Set<Element>();
+  readonly root: Element | Document | null;
+  readonly rootMargin: string;
+  readonly thresholds: readonly number[];
+
+  constructor(private readonly callback: IntersectionObserverCallback, options: IntersectionObserverInit = {}) {
+    this.root = options.root ?? null;
+    this.rootMargin = options.rootMargin ?? '0px';
+    this.thresholds = Array.isArray(options.threshold) ? options.threshold : [options.threshold ?? 0];
+    TestIntersectionObserver.instances.push(this);
+  }
+
+  observe(element: Element) { this.elements.add(element); }
+  disconnect() { this.elements.clear(); }
+  unobserve(element: Element) { this.elements.delete(element); }
+  takeRecords(): IntersectionObserverEntry[] { return []; }
+
+  trigger() {
+    const element = this.elements.values().next().value;
+    if (!element) return;
+    this.callback([{ isIntersecting: true, target: element } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+  }
 }
 
 const dependentFilterDefinitions: readonly DataTableFilterDefinition<DependentFilterId>[] = [
@@ -171,7 +199,34 @@ function CompactClientTable() {
   );
 }
 
+/** Supplies a locally sorted card presentation through the shared collection shell. */
+function CardClientTable() {
+  const [sorting, setSorting] = useState<SortingState>([{ id: 'name', desc: false }]);
+  return (
+    <DataTable
+      ariaLabel="Members table"
+      cardView={{ ariaLabel: 'Members cards', renderItem: (row) => <article>{row.name}</article> }}
+      columns={columns}
+      data={[rows[1], rows[0]]}
+      emptyContent="No members"
+      labels={labels}
+      manualSorting={false}
+      onSearchChange={() => undefined}
+      onSortingChange={setSorting}
+      searchValue=""
+      showControls={false}
+      sorting={sorting}
+      viewMode="cards"
+    />
+  );
+}
+
 describe('DataTable', () => {
+  afterEach(() => {
+    TestIntersectionObserver.instances = [];
+    vi.unstubAllGlobals();
+  });
+
   it('renders semantic rows, search, result feedback, and incremental loading', async () => {
     const user = userEvent.setup();
     const onLoadMore = vi.fn();
@@ -188,6 +243,22 @@ describe('DataTable', () => {
 
     await user.click(screen.getByRole('button', { name: 'Load more' }));
     expect(onLoadMore).toHaveBeenCalledOnce();
+  });
+
+  it('automatically loads the next page near the collection end without duplicate requests', () => {
+    vi.stubGlobal('IntersectionObserver', TestIntersectionObserver);
+    const onLoadMore = vi.fn();
+    const { rerender } = render(<ControlledTable hasMore onLoadMore={onLoadMore} />);
+
+    expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
+    const observer = TestIntersectionObserver.instances[0];
+    expect(observer?.rootMargin).toBe('320px 0px');
+    act(() => observer?.trigger());
+    act(() => observer?.trigger());
+    expect(onLoadMore).toHaveBeenCalledOnce();
+
+    rerender(<ControlledTable hasMore isLoadingMore onLoadMore={onLoadMore} />);
+    expect(screen.getByText('Loading more results')).toHaveAttribute('role', 'status');
   });
 
   it('stages typed filters, applies them together, and exposes removable chips', async () => {
@@ -244,6 +315,64 @@ describe('DataTable', () => {
     await user.click(screen.getByRole('button', { name: 'Sort Name ascending' }));
     expect(within(table).getAllByRole('row')[1]).toHaveTextContent('Ada');
     expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveAttribute('aria-sort', 'ascending');
+  });
+
+  it('renders optional cards from the same sorted row model while preserving result feedback', () => {
+    render(<CardClientTable />);
+
+    expect(screen.queryByRole('table', { name: 'Members table' })).not.toBeInTheDocument();
+    const cardRegion = screen.getByRole('region', { name: 'Members cards' });
+    const cards = within(cardRegion).getAllByRole('article');
+    expect(cards).toHaveLength(2);
+    expect(cards[0]).toHaveTextContent('Ada');
+    expect(screen.getByRole('status')).toHaveTextContent('2 results');
+  });
+
+  it('centers, focuses, briefly highlights, and announces a row in tables and cards', () => {
+    const scrollIntoView = vi.fn();
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus');
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+    const viewportRef = vi.fn();
+    const commonProps = {
+      ariaLabel: 'Members table',
+      columns,
+      data: rows,
+      emptyContent: 'No members',
+      getRowId: (row: TestRow) => row.id,
+      labels,
+      onSearchChange: () => undefined,
+      onSortingChange: () => undefined,
+      rowFocus: { announcement: 'Grace was focused', rowId: 'row-2' },
+      searchValue: '',
+      sorting: [] as SortingState,
+      viewportRef,
+    };
+    const { rerender } = render(<DataTable {...commonProps} />);
+
+    const focusedRow = screen.getByRole('row', { name: /Grace/ });
+    expect(focusedRow).toHaveAttribute('aria-current', 'true');
+    expect(focusedRow).toHaveAttribute('data-highlighted', 'true');
+    expect(focusedRow).toHaveAttribute('tabindex', '-1');
+    expect(screen.getByText('Grace was focused')).toHaveAttribute('role', 'status');
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center', inline: 'nearest' });
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+    expect(viewportRef).toHaveBeenLastCalledWith(focusedRow.closest('[role="region"]'));
+
+    scrollIntoView.mockClear();
+    focus.mockClear();
+    rerender(<DataTable
+      {...commonProps}
+      cardView={{ ariaLabel: 'Members cards', renderItem: (row) => <article>{row.name}</article> }}
+      viewMode="cards"
+    />);
+
+    const focusedCard = screen.getByText('Grace').closest('li');
+    expect(focusedCard).toHaveAttribute('aria-current', 'true');
+    expect(focusedCard).toHaveAttribute('data-highlighted', 'true');
+    expect(focusedCard).toHaveAttribute('tabindex', '-1');
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center', inline: 'nearest' });
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+    expect(viewportRef).toHaveBeenLastCalledWith(screen.getByRole('region', { name: 'Members cards' }));
   });
 
   it('renders visual custom multi-selects and removes products outside selected categories', async () => {

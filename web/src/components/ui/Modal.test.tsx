@@ -34,6 +34,24 @@ function ControlledModalHarness() {
   );
 }
 
+/** Renders sibling modal layers to verify nested workflow scroll locking. */
+function NestedModalHarness() {
+  const [primaryOpen, setPrimaryOpen] = useState(false);
+  const [nestedOpen, setNestedOpen] = useState(false);
+  return (
+    <>
+      <button onClick={() => setPrimaryOpen(true)} type="button">Open primary dialog</button>
+      <Modal onClose={() => setPrimaryOpen(false)} open={primaryOpen} title="Primary dialog">
+        <button onClick={() => setNestedOpen(true)} type="button">Open nested dialog</button>
+        <button onClick={() => setPrimaryOpen(false)} type="button">Close primary dialog</button>
+      </Modal>
+      <Modal onClose={() => setNestedOpen(false)} open={nestedOpen} title="Nested dialog">
+        <button onClick={() => setNestedOpen(false)} type="button">Close nested dialog</button>
+      </Modal>
+    </>
+  );
+}
+
 describe('Modal lifecycle and focus restoration', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -69,6 +87,22 @@ describe('Modal lifecycle and focus restoration', () => {
     expect(trigger).toHaveFocus();
   });
 
+  it.each(['dialog', 'sheet'] as const)('keeps the %s open when a nested file picker is cancelled', (variant) => {
+    const onClose = vi.fn();
+    render(
+      <Modal onClose={onClose} open title="File upload" variant={variant}>
+        <label htmlFor="attachment">Attachment</label>
+        <input id="attachment" type="file" />
+      </Modal>,
+    );
+
+    const fileInput = screen.getByLabelText('Attachment');
+    fireEvent(fileInput, new Event('cancel', { bubbles: true }));
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: 'File upload' })).toBeVisible();
+  });
+
   it('closes a mounted controlled dialog and restores focus through its close button', async () => {
     const user = userEvent.setup();
     render(<ControlledModalHarness />);
@@ -79,6 +113,47 @@ describe('Modal lifecycle and focus restoration', () => {
 
     expect(screen.queryByRole('dialog', { name: 'Controlled dialog' })).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
+  });
+
+  it('locks document scrolling until the last open modal layer closes', async () => {
+    const user = userEvent.setup();
+    render(<NestedModalHarness />);
+
+    expect(document.documentElement).not.toHaveAttribute('data-modal-scroll-lock');
+    await user.click(screen.getByRole('button', { name: 'Open primary dialog' }));
+    expect(document.documentElement).toHaveAttribute('data-modal-scroll-lock', 'true');
+
+    await user.click(screen.getByRole('button', { name: 'Open nested dialog' }));
+    expect(document.documentElement).toHaveAttribute('data-modal-scroll-lock', 'true');
+    await user.click(screen.getByRole('button', { name: 'Close nested dialog' }));
+    expect(document.documentElement).toHaveAttribute('data-modal-scroll-lock', 'true');
+
+    await user.click(screen.getByRole('button', { name: 'Close primary dialog' }));
+    expect(document.documentElement).not.toHaveAttribute('data-modal-scroll-lock');
+  });
+
+  it('preserves and restores the page position without a visible background jump', () => {
+    const originalScrollX = Object.getOwnPropertyDescriptor(window, 'scrollX');
+    const originalScrollY = Object.getOwnPropertyDescriptor(window, 'scrollY');
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
+    Object.defineProperty(window, 'scrollX', { configurable: true, value: 12 });
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 240 });
+    const rendered = render(<Modal onClose={vi.fn()} open title="Position-safe dialog"><span>Content</span></Modal>);
+
+    try {
+      expect(document.documentElement).toHaveStyle({ '--modal-scroll-lock-left': '-12px', '--modal-scroll-lock-top': '-240px' });
+      Object.defineProperty(window, 'scrollX', { configurable: true, value: 0 });
+      Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 });
+      rendered.rerender(<Modal onClose={vi.fn()} open={false} title="Position-safe dialog"><span>Content</span></Modal>);
+      expect(scrollTo).toHaveBeenCalledWith(12, 240);
+      expect(document.documentElement).not.toHaveAttribute('data-modal-scroll-lock');
+    } finally {
+      rendered.unmount();
+      if (originalScrollX) Object.defineProperty(window, 'scrollX', originalScrollX);
+      else Reflect.deleteProperty(window, 'scrollX');
+      if (originalScrollY) Object.defineProperty(window, 'scrollY', originalScrollY);
+      else Reflect.deleteProperty(window, 'scrollY');
+    }
   });
 
   it('keeps shared footer actions outside the scrollable body for every modal size', () => {

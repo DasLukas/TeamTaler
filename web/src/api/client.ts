@@ -59,6 +59,7 @@ import type {
   CollectionPage,
   CreatedInvitation,
   Dashboard,
+  DataExportJob,
   EmailDeliveryStatus,
   EmailChangeRequestResult,
   InvitationEmailRetryResult,
@@ -123,6 +124,7 @@ import type {
   SystemSettingsUpdate,
   SystemSmtpSettingsUpdate,
   SystemWebPushSettingsUpdate,
+  TableExportCommand,
   ThemeId,
   ThemePreference,
   ColorMode,
@@ -196,14 +198,16 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await requestWithMetadata<T>(path, init)).data;
 }
 
-async function requestBlob(path: string): Promise<Blob> {
-  const headers = new Headers({ Accept: 'image/jpeg, image/png, image/webp, application/pdf' });
+async function requestBlob(path: string, init: RequestInit = {}): Promise<Blob> {
+  const headers = new Headers(init.headers);
+  headers.set('Accept', 'image/jpeg, image/png, image/webp, application/pdf, text/csv, application/zip, application/octet-stream');
+  if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   const csrf = csrfToken();
   if (csrf) headers.set('X-CSRF-Token', csrf);
   try {
-    const response = await fetch(`${API_BASE}${path}`, { credentials: 'include', headers });
+    const response = await fetch(`${API_BASE}${path}`, { ...init, credentials: 'include', headers });
     if (!response.ok) {
-      if (DEMO_ENABLED && (response.status === 404 || response.status >= 500)) return requestDevelopmentDemo<Blob>(path, {});
+      if (DEMO_ENABLED && (response.status === 404 || response.status >= 500)) return requestDevelopmentDemo<Blob>(path, init);
       throw new ApiError(await parseProblem(response));
     }
     return response.blob();
@@ -499,6 +503,7 @@ export const api = {
     const response = await requestWithMetadata<unknown>(collectionPath('/system/audit', query));
     return collectionPage(adaptSystemAudit(response.data), response.headers, query.limit);
   },
+  exportSystemTable: (command: TableExportCommand): Promise<Blob> => requestBlob('/system/table-exports', { method: 'POST', body: json(command) }),
   requestPasswordReset: async (email: string): Promise<void> => request<void>('/auth/password-reset/request', { method: 'POST', body: json({ email }) }),
   confirmPasswordReset: async (token: string, newPassword: string): Promise<void> => {
     await request<void>('/auth/password-reset/confirm', { method: 'POST', body: json({ token, newPassword }) });
@@ -661,6 +666,24 @@ export const api = {
   },
   removeGroupLogo: async (groupId: string): Promise<void> => request<void>(groupPath(groupId, 'logo'), { method: 'DELETE' }),
   getDashboard: async (groupId: string): Promise<Dashboard> => adaptDashboard(await request<unknown>(groupPath(groupId, 'dashboard'))),
+  exportGroupTable: (groupId: string, command: TableExportCommand): Promise<Blob> => requestBlob(groupPath(groupId, 'table-exports'), { method: 'POST', body: json(command) }),
+  createGroupDataExport: (groupId: string, currentPassword: string, idempotencyKey: string = crypto.randomUUID()): Promise<DataExportJob> => request<DataExportJob>(groupPath(groupId, 'exports'), {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    body: json({ currentPassword }),
+  }),
+  createPersonalDataExport: (groupId: string, currentPassword: string, idempotencyKey: string = crypto.randomUUID()): Promise<DataExportJob> => request<DataExportJob>(groupPath(groupId, 'me/exports'), {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    body: json({ currentPassword }),
+  }),
+  getDataExports: async (groupId: string): Promise<DataExportJob[]> => {
+    const response = await request<DataExportJob[] | { items: DataExportJob[] }>(`/exports?${new URLSearchParams({ groupId }).toString()}`);
+    return Array.isArray(response) ? response : response.items;
+  },
+  getDataExport: (exportId: string): Promise<DataExportJob> => request<DataExportJob>(`/exports/${encodeURIComponent(exportId)}`),
+  getDataExportDownloadURL: (exportId: string): string => `${API_BASE}/exports/${encodeURIComponent(exportId)}/download`,
+  deleteDataExport: (exportId: string): Promise<void> => request<void>(`/exports/${encodeURIComponent(exportId)}`, { method: 'DELETE' }),
   getBookingContext: async (groupId: string, currency: string): Promise<BookingContext> => adaptBookingContext(await request<unknown>(groupPath(groupId, 'booking-context')), currency),
   getCategories: async (groupId: string): Promise<Category[]> => adaptCategories(await request<unknown>(groupPath(groupId, 'categories'))),
   getMembers: async (groupId: string): Promise<Membership[]> => adaptMemberships(await request<unknown>(groupPath(groupId, 'members'))),

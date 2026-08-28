@@ -6,17 +6,23 @@
 .summary div { display: grid; gap: 4px; }
 .summary span, .summary small { color: var(--color-text-muted); }
 .summary strong { color: var(--color-text-strong); font-size: 2rem; }
-.form { display: grid; gap: var(--space-5); padding: var(--space-4) var(--space-6) var(--space-6); }
+.form,
+.review { display: grid; gap: var(--space-5); padding: var(--space-4) var(--space-6) var(--space-6); }
 .formRow { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
 .actions { display: flex; justify-content: flex-end; gap: var(--space-3); }
 .rowActions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-1); }
 .error { color: var(--color-status-danger); }
 .explanation { margin: 0; color: var(--color-text-muted); line-height: 1.55; }
 .state { padding-top: var(--space-8); }
+.member { display: inline-flex; min-width: 0; align-items: center; gap: var(--space-3); }
+.member > strong { overflow: hidden; text-overflow: ellipsis; }
 
 @media (max-width: 600px) {
   .header { align-items: stretch; flex-direction: column; }
+  .form,
+  .review { padding: var(--space-3) var(--space-5) calc(var(--space-5) + env(safe-area-inset-bottom)); }
   .formRow { grid-template-columns: 1fr; }
+  .actions { align-items: stretch; flex-direction: column-reverse; }
   .summary { grid-template-columns: 40px 1fr; }
   .summary small { grid-column: 2; }
 }

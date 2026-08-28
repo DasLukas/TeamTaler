@@ -60,6 +60,26 @@ func IsCurrencyCode(value string) bool {
 	return true
 }
 
+// CurrencyExponent returns the conventional number of decimal places used by
+// an ISO 4217 currency. Syntactically valid private or unknown codes use two
+// places, matching the web client's Intl fallback. It never performs network
+// access and is safe for exact integer-money formatting.
+//
+// Example: CurrencyExponent("JPY") returns 0 and CurrencyExponent("KWD")
+// returns 3.
+func CurrencyExponent(currency string) uint8 {
+	switch strings.ToUpper(currency) {
+	case "BIF", "CLP", "DJF", "GNF", "ISK", "JPY", "KMF", "KRW", "PYG", "RWF", "UGX", "VND", "VUV", "XAF", "XOF", "XPF":
+		return 0
+	case "BHD", "IQD", "JOD", "KWD", "LYD", "OMR", "TND":
+		return 3
+	case "CLF":
+		return 4
+	default:
+		return 2
+	}
+}
+
 // Now returns the current UTC time. Tests may replace it temporarily; production
 // code must treat it as read-only. It takes no parameters and cannot fail.
 var Now = func() time.Time { return time.Now().UTC() }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import i18n from '@/i18n';
-import { adaptAccountSummaries, adaptActivity, adaptAppearancePreference, adaptBooking, adaptCategories, adaptDashboard, adaptGroupNotificationSettings, adaptGroupSettings, adaptInstanceCapabilities, adaptLedger, adaptMembership, adaptNotification, adaptNotificationDestination, adaptNotificationPreferences, adaptPayment, adaptPermissionDefinition, adaptPermissionGrants, adaptProduct, adaptPushSubscriptions, adaptRole, adaptSession, adaptSettlement, adaptSystemAudit, adaptSystemGroupDeletionImpact, adaptSystemGroups, adaptSystemSettings, adaptThemePreference, adaptTransactionSettings } from './adapters';
+import { adaptAccountSummaries, adaptActivity, adaptAppearancePreference, adaptBooking, adaptCategories, adaptDashboard, adaptGroupNotificationSettings, adaptGroupSettings, adaptInstanceCapabilities, adaptLedger, adaptMembership, adaptNotification, adaptNotificationDestination, adaptNotificationPreferences, adaptPayment, adaptPaymentTarget, adaptPermissionDefinition, adaptPermissionGrants, adaptProduct, adaptPushSubscriptions, adaptRole, adaptSession, adaptSettlement, adaptSystemAudit, adaptSystemGroupDeletionImpact, adaptSystemGroups, adaptSystemSettings, adaptThemePreference, adaptTransactionSettings } from './adapters';
 
 describe('API adapters', () => {
   it('adapts signed unified activities and source action metadata', () => {
@@ -22,6 +22,26 @@ describe('API adapters', () => {
       detailName: '', paymentMethod: 'CASH', amountMinor: '-500', currency: 'EUR',
       occurredAt: '2026-08-20T10:00:00Z', status: 'POSTED', canReverse: false, reversalReasonRequired: false,
     })).toMatchObject({ detailName: 'Bar', paymentMethod: 'CASH' });
+  });
+
+  it('enforces reversal linkage metadata and strips inapplicable actions', () => {
+    expect(adaptActivity({
+      id: 'reversal:payment:pay-a', sourceId: 'pay-a', kind: 'REVERSAL', reversalSourceKind: 'PAYMENT',
+      relatedActivityId: 'payment:pay-a', targetMembershipId: 'member-a', targetDisplayName: 'Alex', targetMembershipStatus: 'ACTIVE',
+      actorMembershipId: 'member-manager', actorDisplayName: 'Manager', actorMembershipStatus: 'ACTIVE',
+      detailName: 'Cash', detailNote: 'Duplicate payment', paymentMethod: 'CASH', amountMinor: '1250', currency: 'EUR',
+      occurredAt: '2026-08-20T11:00:00Z', status: 'REVERSED', canReverse: true, reversalReasonRequired: true,
+      attachment: { fileName: 'receipt.pdf', mediaType: 'application/pdf', sizeBytes: 42, url: '/receipt' },
+    })).toMatchObject({
+      id: 'reversal:payment:pay-a', kind: 'REVERSAL', relatedActivityId: 'payment:pay-a', reversalSourceKind: 'PAYMENT',
+      detailName: 'Bar', amount: { minorUnits: '1250', currency: 'EUR' }, status: 'POSTED', canReverse: false, reversalReasonRequired: false,
+    });
+    expect(adaptActivity({
+      id: 'reversal:payment:pay-a', sourceId: 'pay-a', kind: 'REVERSAL', reversalSourceKind: 'PAYMENT',
+      relatedActivityId: 'payment:pay-a', targetMembershipId: 'member-a', targetDisplayName: 'Alex', targetMembershipStatus: 'ACTIVE',
+      detailName: 'Cash', amountMinor: '1250', currency: 'EUR', occurredAt: '2026-08-20T11:00:00Z',
+    })).not.toHaveProperty('attachment');
+    expect(() => adaptActivity({ kind: 'REVERSAL' })).toThrow('Reversal activities require a BOOKING or PAYMENT reversalSourceKind.');
   });
 
   it('validates appearance enums while preserving safe inheritance defaults', () => {
@@ -160,13 +180,30 @@ describe('API adapters', () => {
       { id: 'CASH', label: 'Cash' },
       { id: 'SHOPPING', label: 'Shopping', attachmentMode: 'REQUIRED' },
     ] }).paymentMethods).toEqual([
-      { id: 'CASH', label: 'Bar', attachmentMode: 'OFF' },
-      { id: 'SHOPPING', label: 'Einkauf', attachmentMode: 'REQUIRED' },
+      { id: 'CASH', label: 'Bar', attachmentMode: 'OFF', paymentTarget: null },
+      { id: 'SHOPPING', label: 'Einkauf', attachmentMode: 'REQUIRED', paymentTarget: null },
     ]);
     expect(adaptPayment({
       id: 'payment-a', membershipId: 'member-a', memberName: 'Alex', amountMinor: 1234, currency: 'EUR', receivedAt: '2026-08-20', method: 'SHOPPING', status: 'POSTED',
       attachment: { fileName: 'receipt.pdf', mediaType: 'application/pdf', sizeBytes: 1024, url: '/api/v1/groups/group-a/payments/payment-a/attachment', storageKey: 'secret' },
     }).attachment).toEqual({ fileName: 'receipt.pdf', mediaType: 'application/pdf', sizeBytes: 1024, url: '/api/v1/groups/group-a/payments/payment-a/attachment' });
+  });
+
+  it('adapts canonical payment targets and drops unsafe nested values', () => {
+    expect(adaptPaymentTarget({ type: 'PAYPAL_ME', paypalMeHandle: ' TeamTaler42 ' })).toEqual({ type: 'PAYPAL_ME', paypalMeHandle: 'TeamTaler42' });
+    expect(adaptPaymentTarget({ type: 'PAYPAL_ME', paypalMeHandle: 'https://paypal.me/TeamTaler42' })).toBeNull();
+    expect(adaptPaymentTarget({ type: 'SEPA_TRANSFER', recipientName: ' TeamTaler Club ', iban: 'de89 3704 0044 0532 0130 00', bic: 'cobadeffxxx' })).toEqual({
+      type: 'SEPA_TRANSFER', recipientName: 'TeamTaler Club', iban: 'DE89370400440532013000', bic: 'COBADEFFXXX',
+    });
+    expect(adaptPaymentTarget({ type: 'SEPA_TRANSFER', recipientName: 'TeamTaler Club', iban: 'DE89370400440532013001' })).toBeNull();
+    expect(adaptPaymentTarget({ type: 'SEPA_TRANSFER', recipientName: 'TeamTaler Club', iban: 'CH9300762011623852957' })).toBeNull();
+    expect(adaptPaymentTarget({ type: 'SEPA_TRANSFER', recipientName: 'TeamTaler Club', iban: 'CH9300762011623852957', bic: 'POFICHBEXXX' })).toEqual({
+      type: 'SEPA_TRANSFER', recipientName: 'TeamTaler Club', iban: 'CH9300762011623852957', bic: 'POFICHBEXXX',
+    });
+    expect(adaptPaymentTarget({ type: 'SEPA_TRANSFER', recipientName: 'TeamTaler Club', iban: 'DE89370400440532013000', bic: 42 })).toBeNull();
+    expect(adaptPaymentTarget({ type: 'SEPA_TRANSFER', recipientName: 'TeamTaler Club', iban: 'DE89370400440532013000', paypalMeHandle: 'TeamTaler42' })).toBeNull();
+    expect(adaptPaymentTarget({ type: 'PAYPAL_ME', paypalMeHandle: 'TeamTaler42', iban: 'DE89370400440532013000' })).toBeNull();
+    expect(adaptPaymentTarget({ type: 'UNKNOWN' })).toBeNull();
   });
 
   it('accepts stable group grants and rejects unknown keys or disabled scopes', () => {
@@ -438,6 +475,7 @@ describe('API adapters', () => {
       id: 'statement-1',
       periodId: 'period-1',
       membershipId: 'member-1',
+      membershipStatus: 'ARCHIVED',
       displayName: 'Mara Becker',
       chargesMinor: '150',
       paymentsAllocatedMinor: '25',
@@ -452,5 +490,6 @@ describe('API adapters', () => {
     expect(settlement.paidAmount.minorUnits).toBe('100');
     expect(settlement.openAmount?.minorUnits).toBe('100');
     expect(settlement.email).toBeNull();
+    expect(settlement.membershipStatus).toBe('ARCHIVED');
   });
 });

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -48,14 +48,33 @@ function renderDialog(): QueryClient {
 describe('SelfPaymentDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } });
     apiMock.getTransactionSettings.mockResolvedValue({
       foreignBookingReasonRequired: true,
       ownPaymentReasonRequired: true,
       otherPaymentReasonRequired: false,
-      paymentMethods: [{ id: 'PAYPAL', label: 'PayPal' }, { id: 'CASH', label: 'Bar' }],
+      paymentMethods: [{ id: 'PAYPAL', label: 'PayPal', attachmentMode: 'OFF', paymentTarget: { type: 'PAYPAL_ME', paypalMeHandle: 'TeamTaler42' } }, { id: 'CASH', label: 'Bar', attachmentMode: 'OFF', paymentTarget: null }],
       bookingReasons: [],
       paymentReasons: [{ id: 'MEMBERSHIP', label: 'Membership fee August' }],
     });
+  });
+
+  it('activates the configured PayPal.Me link from the amount without booking', async () => {
+    const user = userEvent.setup();
+    renderDialog();
+
+    await user.click(await screen.findByRole('button', { name: i18n.t('selfPayment.action') }));
+    const externalLink = screen.getByText(i18n.t('paymentInstructions.openPaypal')).closest('a');
+    expect(externalLink).not.toHaveAttribute('href');
+    await user.type(screen.getByLabelText(i18n.t('finance.amountIn', { currency: 'EUR' })), '12,50');
+    expect(externalLink).toHaveAttribute('href', 'https://paypal.me/TeamTaler42/12.50EUR');
+
+    await user.click(screen.getByRole('button', { name: i18n.t('paymentInstructions.copyField', { field: i18n.t('paymentInstructions.paypalLink') }) }));
+    expect(await navigator.clipboard.readText()).toBe('https://paypal.me/TeamTaler42/12.50EUR');
+    expect(apiMock.createOwnPayment).not.toHaveBeenCalled();
+
+    await user.selectOptions(screen.getByLabelText(i18n.t('finance.paymentType')), 'CASH');
+    expect(screen.queryByText(i18n.t('paymentInstructions.openPaypal'))).not.toBeInTheDocument();
   });
 
   it('reviews and records the open balance without a membership identifier', async () => {
@@ -207,6 +226,28 @@ describe('SelfPaymentDialog', () => {
     await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.confirm', { amount: '12,50 €' }) }));
 
     await waitFor(() => expect(apiMock.createOwnPayment).toHaveBeenCalledWith('group-a', expect.objectContaining({ method: 'SHOPPING' }), receipt));
+  });
+
+  it('keeps the payment dialog open when the native attachment picker is cancelled', async () => {
+    const user = userEvent.setup();
+    apiMock.getTransactionSettings.mockResolvedValue({
+      ownPaymentReasonMode: 'OFF',
+      ownPaymentReasonRequired: false,
+      paymentMethods: [{ id: 'SHOPPING', label: 'Einkauf', attachmentMode: 'REQUIRED' }],
+      bookingReasons: [],
+      paymentReasons: [],
+    });
+    renderDialog();
+
+    await waitFor(() => expect(screen.getByRole('button', { name: i18n.t('selfPayment.action') })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.action') }));
+    const dialog = screen.getByRole('dialog', { name: i18n.t('selfPayment.entryTitle') });
+    const fileInput = document.querySelector<HTMLInputElement>('input[accept*="application/pdf"]');
+    expect(fileInput).not.toBeNull();
+
+    fireEvent(fileInput as HTMLInputElement, new Event('cancel', { bubbles: true }));
+
+    expect(dialog).toBeVisible();
   });
 
   it('keeps the payment dialog and its values open when a portaled scan is cancelled', async () => {

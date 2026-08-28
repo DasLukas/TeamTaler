@@ -1,6 +1,21 @@
 const PENDING_NOTIFICATION_KEY = 'teamtaler:pending-notification:v1';
 const PENDING_NOTIFICATION_TTL_MS = 30 * 60 * 1000;
 const NOTIFICATION_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+const EXPORT_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+
+/**
+ * Resolves a safe in-app destination for a structured-data export notification.
+ *
+ * @param exportId - Actor-owned opaque export identifier.
+ * @param scope - Group-administrator or personal export scope.
+ * @returns The matching status-panel route, or `null` for malformed input.
+ */
+export function dataExportPath(exportId: string, scope: 'GROUP' | 'PERSONAL'): string | null {
+  if (!EXPORT_ID_PATTERN.test(exportId)) return null;
+  const query = new URLSearchParams({ export: exportId });
+  if (scope === 'GROUP') query.set('tab', 'exports');
+  return `${scope === 'GROUP' ? '/admin' : '/account'}?${query.toString()}`;
+}
 
 /**
  * Extracts a bounded opaque notification identifier from a same-origin inbox URL.

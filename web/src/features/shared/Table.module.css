@@ -66,6 +66,7 @@
 }
 
 .statusWarning { color: var(--color-status-warning); background: var(--color-status-warning-subtle); }
+.statusDanger { color: var(--color-status-danger); background: var(--color-status-danger-subtle); }
 .statusMuted { color: var(--color-text-muted); background: var(--color-surface-muted); }
 
 @media (max-width: 767px) {

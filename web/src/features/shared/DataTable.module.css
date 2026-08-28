@@ -22,6 +22,11 @@
   min-height: 0;
 }
 
+.fillAvailableHeight > .cardViewport {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .controls {
   display: grid;
   min-width: 0;
@@ -89,6 +94,13 @@
 .toolbarButtons {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.actionToolbar {
+  display: flex;
+  min-width: 0;
   justify-content: flex-end;
   gap: var(--space-2);
 }
@@ -281,6 +293,60 @@
 
 .dataTable { min-width: var(--data-table-min-width, 720px); }
 
+.dataTable tbody tr[data-highlighted='true'] { animation: data-table-row-highlight 1800ms ease-out; }
+.dataTable tbody tr:focus-visible { outline: 3px solid var(--color-brand); outline-offset: -3px; }
+
+.cardViewport {
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+
+.cardList {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  gap: var(--space-3);
+  list-style: none;
+}
+
+.cardList > li { min-width: 0; }
+
+.cardList > li[data-highlighted='true'] {
+  border-radius: var(--radius-lg);
+  animation: data-table-card-highlight 1800ms ease-out;
+}
+
+.cardList > li:focus-visible {
+  border-radius: var(--radius-lg);
+  outline: 3px solid var(--color-brand);
+  outline-offset: 2px;
+}
+
+@keyframes data-table-row-highlight {
+  0%, 28% { background: color-mix(in srgb, var(--color-brand) 12%, var(--color-surface)); }
+  100% { background: transparent; }
+}
+
+@keyframes data-table-card-highlight {
+  0%, 28% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-brand) 36%, transparent); }
+  100% { box-shadow: 0 0 0 3px transparent; }
+}
+
+.collectionState {
+  display: grid;
+  min-height: 160px;
+  place-items: center;
+  padding: var(--space-6);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+  text-align: center;
+}
+
 .sortButton {
   display: inline-flex;
   min-height: 36px;
@@ -327,13 +393,30 @@
 .scrollHint[hidden] { display: none; }
 
 .resultBar {
-  display: flex;
+  display: grid;
   min-height: 40px;
   align-items: center;
-  justify-content: space-between;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  justify-content: normal;
   gap: var(--space-3);
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
+  text-align: center;
+}
+
+.resultBar > span:first-child { grid-column: 2; }
+.resultBar > :last-child:not(:first-child) { grid-column: 3; justify-self: end; }
+
+.loadMoreSentinel {
+  width: 100%;
+  height: 1px;
+  pointer-events: none;
+}
+
+.loadingMore {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .loadingDot {
@@ -358,10 +441,35 @@
 }
 
 @media (max-width: 767px) {
+  .root { gap: var(--space-3); }
   .toolbar { align-items: stretch; flex-direction: column; }
   .searchField { width: 100%; }
   .toolbarButtons { justify-content: stretch; }
-  .toolbarButtons > * { flex: 1 1 auto; }
+  .toolbarButtons > * { flex: 0 0 auto; }
+  .toolbarButtons > .filterButton { flex: 1 1 auto; }
+  .filterChips {
+    width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 2px 18px var(--space-1) 1px;
+    overscroll-behavior-inline: contain;
+    scroll-padding-inline: 1px 18px;
+    scroll-snap-type: inline proximity;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    -webkit-mask-image: linear-gradient(90deg, #000, #000 calc(100% - 18px), transparent);
+    mask-image: linear-gradient(90deg, #000, #000 calc(100% - 18px), transparent);
+  }
+  .filterChips::-webkit-scrollbar { display: none; }
+  .filterChip,
+  .resetLink {
+    flex: 0 0 auto;
+    scroll-snap-align: start;
+  }
+  .filterChip { width: min(70vw, 150px); }
+  .resetLink { white-space: nowrap; }
+  .resultBar { min-height: 32px; }
   .scrollHint { display: flex; }
   .filterForm { padding: var(--space-2) var(--space-5) var(--space-5); }
   .filterActions { display: grid; grid-template-columns: 1fr 1fr; }
@@ -370,11 +478,13 @@
 @media (max-width: 480px) {
   .rangeGroup { grid-template-columns: 1fr; }
   .rangeGroup legend { grid-column: auto; }
-  .resultBar { align-items: stretch; flex-direction: column; }
+  .resultBar { display: flex; align-items: stretch; flex-direction: column; justify-content: center; }
   .resultBar button { width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .dataTable tbody tr[data-highlighted='true'],
+  .cardList > li[data-highlighted='true'] { animation-timing-function: step-end; }
   .loadingDot { animation: none; }
 }
 

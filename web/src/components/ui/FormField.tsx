@@ -7,6 +7,7 @@ export interface FieldProps {
   htmlFor: string;
   hint?: string;
   error?: string;
+  messageId?: string;
   children: ReactNode;
 }
 
@@ -16,12 +17,12 @@ export interface FieldProps {
  * @param props - Label association, supporting copy, validation, and control.
  * @returns A complete form-field region.
  */
-export function Field({ label, htmlFor, hint, error, children }: FieldProps) {
+export function Field({ label, htmlFor, hint, error, messageId, children }: FieldProps) {
   return (
     <div className={styles.field}>
       <label htmlFor={htmlFor}>{label}</label>
       {children}
-      {error ? <span className={styles.error} role="alert">{error}</span> : hint ? <span className={styles.hint}>{hint}</span> : null}
+      {error ? <span className={styles.error} id={messageId} role="alert">{error}</span> : hint ? <span className={styles.hint} id={messageId}>{hint}</span> : null}
     </div>
   );
 }

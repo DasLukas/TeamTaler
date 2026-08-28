@@ -27,6 +27,7 @@ import type {
   InvitationMetadata,
   Membership,
   Role,
+  TableExportId,
 } from '@/api/types';
 import { can } from '@/app/permissions';
 import { useActiveGroup } from '@/app/useActiveGroup';
@@ -66,6 +67,8 @@ interface MemberCollectionTableProps {
   ariaLabel: string;
   emptyContent: ReactNode;
   members: Membership[];
+  exportTable: Extract<TableExportId, 'ACTIVE_MEMBERS' | 'ARCHIVED_MEMBERS'>;
+  groupId: string;
   minTableWidth: string;
   renderActions?: (member: Membership) => ReactNode;
   renderRoles?: (member: Membership) => ReactNode;
@@ -94,10 +97,10 @@ const sortMemberText = (rowA: { getValue: (columnId: string) => unknown }, rowB:
  * @param props - Members, optional role/action cells, accessible copy, and the desktop table width.
  * @returns A compact TanStack table without search, filters, or duplicate result feedback.
  */
-function MemberCollectionTable({ ariaLabel, emptyContent, members, minTableWidth, renderActions, renderRoles, roleNamesById }: MemberCollectionTableProps) {
+function MemberCollectionTable({ ariaLabel, emptyContent, exportTable, groupId, members, minTableWidth, renderActions, renderRoles, roleNamesById }: MemberCollectionTableProps) {
   const { t } = useTranslation();
   const labels = useDataTableLabels();
-  const [sorting, setSorting] = useState<SortingState>([]);
+  const [sorting, setSorting] = useState<SortingState>([{ id: 'displayName', desc: false }]);
   const columns = useMemo<DataTableColumnDef<Membership>[]>(() => {
     const definitions: DataTableColumnDef<Membership>[] = [
       {
@@ -140,6 +143,7 @@ function MemberCollectionTable({ ariaLabel, emptyContent, members, minTableWidth
     });
     return definitions;
   }, [renderActions, renderRoles, roleNamesById, t]);
+  const primarySorting = sorting[0];
 
   return (
     <DataTable
@@ -147,6 +151,12 @@ function MemberCollectionTable({ ariaLabel, emptyContent, members, minTableWidth
       columns={columns}
       data={members}
       emptyContent={emptyContent}
+      exportConfig={{
+        groupId,
+        query: { direction: primarySorting?.desc ? 'desc' : 'asc', sort: primarySorting?.id ?? 'displayName' },
+        table: exportTable,
+        title: ariaLabel,
+      }}
       getRowId={(member) => member.id}
       labels={labels}
       manualSorting={false}
@@ -790,6 +800,8 @@ export function MembersPanel() {
         <MemberCollectionTable
           ariaLabel={t('members.activeMembers')}
           emptyContent={t('members.noActiveMembers')}
+          exportTable="ACTIVE_MEMBERS"
+          groupId={activeGroupId}
           members={activeMembers}
           minTableWidth={canManageMembers ? '920px' : '680px'}
           renderActions={canManageMembers ? (member) => {
@@ -812,6 +824,8 @@ export function MembersPanel() {
           <MemberCollectionTable
             ariaLabel={t('members.archivedMembers')}
             emptyContent={t('members.noArchivedMembers')}
+            exportTable="ARCHIVED_MEMBERS"
+            groupId={activeGroupId}
             members={formerMembers}
             minTableWidth="680px"
             renderActions={(member) => <>

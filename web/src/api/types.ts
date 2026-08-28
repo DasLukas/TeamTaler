@@ -24,8 +24,62 @@ export interface CollectionPage<Item> {
   limit: number;
 }
 
+/** Stable identifiers for server-rendered table exports. */
+export type TableExportId =
+  | 'ACTIVITIES'
+  | 'PAYMENTS'
+  | 'ACCOUNT_BALANCES'
+  | 'GROUP_SETTLEMENTS'
+  | 'SETTLEMENT_STATEMENT'
+  | 'PERSONAL_SETTLEMENTS'
+  | 'ACTIVE_MEMBERS'
+  | 'ARCHIVED_MEMBERS'
+  | 'GROUP_AUDIT'
+  | 'SYSTEM_AUDIT';
+
+/** File formats supported by the synchronous table-export endpoint. */
+export type TableExportFormat = 'CSV' | 'PDF';
+
+/** Normalized request for exporting the complete filtered and sorted table. */
+export interface TableExportCommand {
+  table: TableExportId;
+  format: TableExportFormat;
+  timeZone: string;
+  query: Record<string, unknown>;
+}
+
+/** Scope of an asynchronous structured-data export. */
+export type DataExportScope = 'GROUP' | 'PERSONAL';
+
+/** Lifecycle states exposed by structured-data export jobs. */
+export type DataExportStatus = 'QUEUED' | 'RUNNING' | 'READY' | 'FAILED' | 'CANCELLED' | 'EXPIRED';
+
+/** Optional determinate progress reported by a structured-data export worker. */
+export interface DataExportProgress {
+  completed: number;
+  total: number;
+}
+
+/** Sensitive structured-data export owned by the current actor. */
+export interface DataExportJob {
+  id: string;
+  scope: DataExportScope;
+  status: DataExportStatus;
+  requestedAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  expiresAt?: string;
+  sizeBytes?: string;
+  sha256?: string;
+  progress?: DataExportProgress;
+  downloadUrl?: string;
+  errorCode?: string;
+}
+
 /** Server-backed unified account-activity search, filter, and sort options. */
 export interface ActivityCollectionQuery extends CollectionQuery<'kind' | 'targetName' | 'actorName' | 'detailName' | 'categoryName' | 'occurredAt' | 'amount' | 'status'> {
+  /** Stable activity ID used to request a permission-scoped context window around one row. */
+  anchorId?: string;
   /** One or more repeated transaction kinds combined with OR semantics. */
   kind?: ActivityKind | readonly ActivityKind[];
   targetMembershipId?: string;
@@ -375,15 +429,39 @@ export interface ConfigurableItem {
 /** Controls whether one payment method accepts or requires a receipt. */
 export type AttachmentMode = 'OFF' | 'OPTIONAL' | 'REQUIRED';
 
-/** One stable, ordered payment method and its receipt policy. */
+/** A PayPal.Me account configured as the external destination of a payment method. */
+export interface PaypalMePaymentTarget {
+  type: 'PAYPAL_ME';
+  paypalMeHandle: string;
+}
+
+/** A SEPA credit-transfer account configured as the external destination of a payment method. */
+export interface SepaTransferPaymentTarget {
+  type: 'SEPA_TRANSFER';
+  recipientName: string;
+  iban: string;
+  bic?: string;
+}
+
+/** Supported external payment destinations associated with one payment method. */
+export type PaymentTarget = PaypalMePaymentTarget | SepaTransferPaymentTarget;
+
+/** One stable, ordered payment method, receipt policy, and optional external destination. */
 export interface PaymentMethod extends ConfigurableItem {
   attachmentMode: AttachmentMode;
+  paymentTarget: PaymentTarget | null;
+}
+
+/** One payment-method update with tri-state external-destination semantics. */
+export interface PaymentMethodUpdate extends ConfigurableItem {
+  attachmentMode: AttachmentMode;
+  paymentTarget?: PaymentTarget | null;
 }
 
 /** Visibility and validation policy for one transaction-reason context. */
 export type ReasonMode = 'OFF' | 'OPTIONAL' | 'REQUIRED';
 
-/** Non-sensitive operational behavior used by finance, booking, and payment surfaces. */
+/** Member-visible operational behavior and payment destinations used by transaction surfaces. */
 export interface TransactionSettings {
   settlementsEnabled: boolean;
   ownBookingReasonMode: ReasonMode;
@@ -418,7 +496,7 @@ export interface GroupSettings {
 }
 
 /**
- * Group notification-settings update accepted by the API.
+ * Partial group-settings update accepted by the API.
  */
 export interface GroupSettingsUpdateInput {
   defaultTheme?: ThemeId;
@@ -432,7 +510,7 @@ export interface GroupSettingsUpdateInput {
   foreignBookingReasonRequired?: boolean;
   ownPaymentReasonRequired?: boolean;
   otherPaymentReasonRequired?: boolean;
-  paymentMethods?: PaymentMethod[];
+  paymentMethods?: PaymentMethodUpdate[];
   bookingReasons?: ConfigurableItem[];
   paymentReasons?: ConfigurableItem[];
 }
@@ -803,7 +881,10 @@ export interface Booking {
 }
 
 /** Transaction source represented by the unified account activity feed. */
-export type ActivityKind = 'BOOKING' | 'PAYMENT' | 'ADJUSTMENT';
+export type ActivityKind = 'BOOKING' | 'PAYMENT' | 'REVERSAL' | 'ADJUSTMENT';
+
+/** Original transaction kind whose financial effect is cancelled by a reversal activity. */
+export type ActivityReversalSourceKind = 'BOOKING' | 'PAYMENT';
 
 /** One permission-scoped transaction in the unified account activity feed. */
 export interface ActivityEntry {
@@ -829,6 +910,10 @@ export interface ActivityEntry {
   amount: Money;
   occurredAt: string;
   status: 'POSTED' | 'REVERSED';
+  /** Stable feed ID of the corresponding original or reversal entry. */
+  relatedActivityId?: string;
+  /** Original transaction kind; present for every `REVERSAL` activity. */
+  reversalSourceKind?: ActivityReversalSourceKind;
   attachment?: PaymentAttachmentSummary;
   canReverse: boolean;
   reversalReasonRequired: boolean;
@@ -1008,6 +1093,7 @@ export interface Settlement {
   periodId: string;
   periodLabel: string;
   membershipId: string;
+  membershipStatus: MembershipStatus;
   memberName: string;
   email: string | null;
   amount: Money;
@@ -1026,14 +1112,19 @@ export type NotificationEventType =
   | 'SETTLEMENT_CREATED'
   | 'SETTLEMENT_DUE_SOON'
   | 'SETTLEMENT_OVERDUE'
+  | 'DATA_EXPORT_READY'
+  | 'DATA_EXPORT_FAILED'
   | 'SYSTEM';
+
+/** Notification events whose optional external channels are user-configurable. */
+export type ConfigurableNotificationEventType = Exclude<NotificationEventType, 'DATA_EXPORT_READY' | 'DATA_EXPORT_FAILED' | 'SYSTEM'>;
 
 /** Optional external delivery channels controlled by system, group, and member policy. */
 export type NotificationChannel = 'EMAIL' | 'PUSH';
 
 /** User-facing metadata for one event from the server-owned notification catalog. */
 export interface NotificationEventDefinition {
-  eventType: Exclude<NotificationEventType, 'SYSTEM'>;
+  eventType: ConfigurableNotificationEventType;
   category: string;
   name: string;
   description: string;
@@ -1067,7 +1158,7 @@ export interface GroupNotificationSettingsUpdate {
   timezone: string;
   dueSoonLeadDays: number;
   overdueRepeatDays: number;
-  events: Array<{ eventType: Exclude<NotificationEventType, 'SYSTEM'>; enabled: boolean }>;
+  events: Array<{ eventType: ConfigurableNotificationEventType; enabled: boolean }>;
 }
 
 /** One member's effective preferences for a group event. */
@@ -1089,7 +1180,7 @@ export interface NotificationPreferences {
 export interface NotificationPreferencesUpdate {
   version: number;
   events: Array<{
-    eventType: Exclude<NotificationEventType, 'SYSTEM'>;
+    eventType: ConfigurableNotificationEventType;
     email?: boolean;
     push?: boolean;
   }>;
@@ -1131,6 +1222,8 @@ export interface NotificationContext {
   currency?: string;
   periodLabel?: string;
   dueAt?: string;
+  exportId?: string;
+  exportScope?: DataExportScope;
 }
 
 /** An in-app notification addressed to the signed-in user. */
