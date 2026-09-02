@@ -7,7 +7,7 @@ This README is the primary entry point for the person who installs and operates 
 ## What TeamTaler provides
 
 - Multiple isolated groups in one installation.
-- Optional group planning with Day, Week, Month, and Agenda calendars; atomically published timed and all-day single or recurring appointments, appointment polls, appointment registration, series exceptions, and capacity-aware waitlists.
+- Optional group planning with Day, Week, Month, and Agenda calendars; atomically published timed and all-day single or recurring appointments, appointment polls, appointment registration, series exceptions, capacity-aware waitlists, response-preserving edits, and audience update notifications.
 - Account-synchronized light, dark, and system color modes with group defaults and optional per-member theme choices.
 - Group-owned roles and granular permissions for administration, bookings, finance, catalogue management, and reporting.
 - Fixed-price and user-defined-price products with category, file or camera image capture, archive, and ordering support.

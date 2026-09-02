@@ -171,7 +171,7 @@ func TestEventOwnerCannotMutateAfterCreatePermissionRevocation(t *testing.T) {
 	}
 }
 
-func TestManualCloseReconcilesRegistrationAndEarlyCompletionIsRejected(t *testing.T) {
+func TestManualClosePreservesRegistrationAndEarlyCompletionIsRejected(t *testing.T) {
 	fixture := openPlanningServiceFixture(t)
 	ctx := context.Background()
 	firstPrincipal, firstMember := fixture.addMember(t, "registered", "Registered member")
@@ -200,16 +200,16 @@ func TestManualCloseReconcilesRegistrationAndEarlyCompletionIsRejected(t *testin
 	}
 	var firstStatus, secondStatus string
 	if err := fixture.DB.QueryRowContext(ctx, `SELECT status FROM planning_participations WHERE event_id=? AND membership_id=?`, event.ID, firstMember.ID).Scan(&firstStatus); err != nil {
-		t.Fatalf("read stale registration: %v", err)
+		t.Fatalf("read preserved registration: %v", err)
 	}
 	if err := fixture.DB.QueryRowContext(ctx, `SELECT status FROM planning_participations WHERE event_id=? AND membership_id=?`, event.ID, secondMember.ID).Scan(&secondStatus); err != nil {
-		t.Fatalf("read promoted registration: %v", err)
+		t.Fatalf("read waiting registration: %v", err)
 	}
 	var promotionTaskCount int
 	if err := fixture.DB.QueryRowContext(ctx, `SELECT count(*) FROM planning_notification_tasks WHERE event_id=? AND target_membership_id=? AND event_type='PLANNING_WAITLIST_PROMOTED' AND event_revision=?`, event.ID, secondMember.ID, event.Version).Scan(&promotionTaskCount); err != nil {
 		t.Fatalf("read promotion task: %v", err)
 	}
-	if event.Status != "CLOSED" || firstStatus != "WITHDRAWN" || secondStatus != "REGISTERED" || promotionTaskCount != 1 {
+	if event.Status != "CLOSED" || firstStatus != "REGISTERED" || secondStatus != "WAITLISTED" || promotionTaskCount != 0 {
 		t.Fatalf("manual close status=%s first=%s second=%s promotions=%d", event.Status, firstStatus, secondStatus, promotionTaskCount)
 	}
 

@@ -58,8 +58,7 @@ type Counts struct {
 }
 
 // Participation is one membership's stored and effective event response.
-// EffectiveStatus accounts for a response that requires reconfirmation after
-// a material event change.
+// EffectiveStatus is the stored response, or PENDING when no response exists.
 type Participation struct {
 	MembershipID      string `json:"membershipId,omitempty"`
 	DisplayName       string `json:"displayName,omitempty"`
@@ -786,8 +785,8 @@ func stringsFor(rows *sql.Rows, err error) ([]string, error) {
 }
 
 // UpdateEvent replaces editable fields on one event under optimistic
-// concurrency. Moving an event increments its confirmation revision; editing a
-// series occurrence marks that occurrence as a manual exception.
+// concurrency. Existing participation remains effective after every edit;
+// editing a series occurrence marks that occurrence as a manual exception.
 //
 // a and m identify the actor and tenant, id selects the event, in is the full
 // replacement input, and version must match the stored event version. The
@@ -849,9 +848,9 @@ func (s Service) UpdateEvent(ctx context.Context, a domain.Principal, m domain.M
 		if err != nil {
 			return err
 		}
-		bump := oldStart != in.StartsAt || nullableStringChanged(oldEndsAt, in.EndsAt) || oldAllDay != in.AllDay || nullableTextChanged(oldTimeZone, in.TimeZone) || nullableTextChanged(oldStartDate, in.StartDate) || nullableTextChanged(oldEndDateExclusive, in.EndDateExclusive)
+		timingChanged := oldStart != in.StartsAt || nullableStringChanged(oldEndsAt, in.EndsAt) || oldAllDay != in.AllDay || nullableTextChanged(oldTimeZone, in.TimeZone) || nullableTextChanged(oldStartDate, in.StartDate) || nullableTextChanged(oldEndDateExclusive, in.EndDateExclusive)
 		deadline := responseDeadline(in.StartsAt, in.ResponseDeadlineMinutesBefore)
-		if bump && deadline != nil && !mustTime(*deadline).After(platform.Now()) {
+		if timingChanged && deadline != nil && !mustTime(*deadline).After(platform.Now()) {
 			return domain.ValidationError{Field: "responseDeadlineMinutesBefore", Message: "must produce a future deadline when the start changes"}
 		}
 		if err := validateRegistrationStateChange(ctx, tx, id, in.Capacity, in.WaitlistEnabled); err != nil {
@@ -869,7 +868,7 @@ func (s Service) UpdateEvent(ctx context.Context, a domain.Principal, m domain.M
 			}
 			originalStartDate = value
 		}
-		r, err := tx.ExecContext(ctx, `UPDATE planning_events SET title=?,description=?,location=?,event_type=?,audience_type=?,all_day=?,timezone=?,start_date=?,end_date_exclusive=?,original_start_date=?,starts_at=?,ends_at=?,response_deadline=?,response_deadline_minutes_before=?,capacity=?,waitlist_enabled=?,is_series_exception=CASE WHEN series_id IS NULL THEN 0 ELSE 1 END,confirmation_revision=confirmation_revision+?,version=version+1,updated_by_membership_id=?,updated_at=? WHERE group_id=? AND id=? AND version=?`, in.Title, in.Description, in.Location, in.EventType, in.AudienceType, in.AllDay, nullableText(in.TimeZone), nullableText(in.StartDate), nullableText(in.EndDateExclusive), originalStartDate, in.StartsAt, in.EndsAt, deadline, in.ResponseDeadlineMinutesBefore, in.Capacity, in.WaitlistEnabled, boolInt(bump), m.ID, platform.Timestamp(platform.Now()), m.GroupID, id, version)
+		r, err := tx.ExecContext(ctx, `UPDATE planning_events SET title=?,description=?,location=?,event_type=?,audience_type=?,all_day=?,timezone=?,start_date=?,end_date_exclusive=?,original_start_date=?,starts_at=?,ends_at=?,response_deadline=?,response_deadline_minutes_before=?,capacity=?,waitlist_enabled=?,is_series_exception=CASE WHEN series_id IS NULL THEN 0 ELSE 1 END,version=version+1,updated_by_membership_id=?,updated_at=? WHERE group_id=? AND id=? AND version=?`, in.Title, in.Description, in.Location, in.EventType, in.AudienceType, in.AllDay, nullableText(in.TimeZone), nullableText(in.StartDate), nullableText(in.EndDateExclusive), originalStartDate, in.StartsAt, in.EndsAt, deadline, in.ResponseDeadlineMinutesBefore, in.Capacity, in.WaitlistEnabled, m.ID, platform.Timestamp(platform.Now()), m.GroupID, id, version)
 		if err != nil {
 			return err
 		}
@@ -891,7 +890,7 @@ func (s Service) UpdateEvent(ctx context.Context, a domain.Principal, m domain.M
 				return err
 			}
 		}
-		return audit.Record(ctx, tx, m.GroupID, a.UserID, m.ID, "planning.event.updated", "planning_event", id, map[string]any{"confirmationRevisionChanged": bump})
+		return audit.Record(ctx, tx, m.GroupID, a.UserID, m.ID, "planning.event.updated", "planning_event", id, map[string]any{"timingChanged": timingChanged})
 	})
 	if err != nil {
 		return Event{}, err
@@ -1204,7 +1203,8 @@ func (s Service) Transition(ctx context.Context, a domain.Principal, m domain.Me
 
 // SetParticipation records the requesting membership's poll response or
 // registration for a published event. Registration capacity, waitlist order,
-// optional deadlines and reconfirmation revisions are enforced atomically.
+// optional deadlines and the current event revision snapshot are enforced
+// atomically.
 //
 // a and m identify the respondent and tenant, id selects the event, and status
 // is an event-type-specific response value. The method returns the effective
@@ -1344,8 +1344,6 @@ func (s Service) Participants(ctx context.Context, m domain.Membership, id, curs
 			return nil, "", err
 		}
 	}
-	var rev int64
-	_ = s.DB.QueryRowContext(ctx, `SELECT confirmation_revision FROM planning_events WHERE id=?`, id).Scan(&rev)
 	query := `SELECT a.membership_id,a.display_name_snapshot,coalesce(p.status,''),coalesce(p.confirmed_revision,0),coalesce(p.version,0),coalesce(p.responded_at,''),coalesce(p.updated_at,'') FROM planning_event_audience a LEFT JOIN planning_participations p ON p.event_id=a.event_id AND p.membership_id=a.membership_id WHERE a.group_id=? AND a.event_id=?`
 	args := []any{m.GroupID, id}
 	if cursor != "" {
@@ -1374,8 +1372,6 @@ func (s Service) Participants(ctx context.Context, m domain.Membership, id, curs
 		p.EffectiveStatus = p.Status
 		if p.Status == "" {
 			p.EffectiveStatus = "PENDING"
-		} else if p.ConfirmedRevision < rev && p.Status != "WITHDRAWN" {
-			p.EffectiveStatus = "RECONFIRMATION_REQUIRED"
 		}
 		out = append(out, p)
 	}

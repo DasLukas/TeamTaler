@@ -164,6 +164,33 @@ describe('BehaviorSettingsPanel', () => {
     expect(removeQueries).toHaveBeenCalledWith({ queryKey: ['notification-preferences', 'group-a'] });
   });
 
+  it('confirms before staging settlement deactivation', async () => {
+    const user = userEvent.setup();
+    apiMock.getGroupSettings.mockResolvedValue({ ...settings, settlementsEnabled: true });
+    apiMock.updateGroupSettings.mockResolvedValue({ ...settings, settlementsEnabled: false });
+    renderPanel();
+
+    const toggle = await screen.findByRole('switch', { name: i18n.t('behaviorSettings.settlementsToggle') });
+    expect(toggle).toBeChecked();
+    await user.click(toggle);
+
+    const dialog = screen.getByRole('dialog', { name: i18n.t('behaviorSettings.settlementsDisableTitle') });
+    expect(dialog).toBeVisible();
+    expect(toggle).toBeChecked();
+    expect(apiMock.updateGroupSettings).not.toHaveBeenCalled();
+
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('common.cancel') }));
+    expect(screen.queryByRole('dialog', { name: i18n.t('behaviorSettings.settlementsDisableTitle') })).not.toBeInTheDocument();
+    expect(toggle).toBeChecked();
+
+    await user.click(toggle);
+    await user.click(within(screen.getByRole('dialog', { name: i18n.t('behaviorSettings.settlementsDisableTitle') })).getByRole('button', { name: i18n.t('behaviorSettings.settlementsDisable') }));
+    expect(toggle).not.toBeChecked();
+
+    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
+    await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { settlementsEnabled: false }));
+  });
+
   it('persists each reason context through an accessible three-state control', async () => {
     const user = userEvent.setup();
     apiMock.updateGroupSettings.mockResolvedValue({ ...settings, ownBookingReasonMode: 'OPTIONAL' });

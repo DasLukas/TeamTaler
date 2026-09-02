@@ -1931,7 +1931,7 @@ paths:
     put:
       tags: [Planning]
       summary: Replace one planning occurrence
-      description: Owners may edit their own event; `MANAGE_PLANNING_EVENTS` may edit every event. For a recurring event this always creates or updates an exception for only this occurrence. Published audiences are add-only and material time changes require reconfirmation.
+      description: Owners may edit their own event; `MANAGE_PLANNING_EVENTS` may edit every event. For a recurring event this always creates or updates an exception for only this occurrence. Published audiences are add-only. Existing responses and registrations remain effective, and affected members receive an update notification.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/PlanningEventId'
@@ -4216,7 +4216,12 @@ components:
         pending: { type: integer, minimum: 0 }
         registered: { type: integer, minimum: 0 }
         waitlisted: { type: integer, minimum: 0 }
-        reconfirmationRequired: { type: integer, minimum: 0 }
+        reconfirmationRequired:
+          type: integer
+          minimum: 0
+          maximum: 0
+          deprecated: true
+          description: Compatibility field retained for older clients; always zero.
     PlanningParticipation:
       type: object
       additionalProperties: false
@@ -4225,7 +4230,7 @@ components:
         membershipId: { type: string }
         displayName: { type: string }
         status: { type: string, enum: [YES, MAYBE, NO, REGISTERED, WAITLISTED, WITHDRAWN] }
-        effectiveStatus: { type: string, enum: [YES, MAYBE, NO, REGISTERED, WAITLISTED, WITHDRAWN, PENDING, RECONFIRMATION_REQUIRED] }
+        effectiveStatus: { type: string, enum: [YES, MAYBE, NO, REGISTERED, WAITLISTED, WITHDRAWN, PENDING] }
         confirmedRevision: { type: integer, minimum: 0 }
         version: { type: integer, minimum: 0 }
         respondedAt: { type: string, format: date-time }
@@ -4268,7 +4273,11 @@ components:
               format: date-time
               description: Optional absolute occurrence deadline derived by the server from responseDeadlineMinutesBefore.
             status: { $ref: '#/components/schemas/PlanningEventStatus' }
-            confirmationRevision: { type: integer, minimum: 1 }
+            confirmationRevision:
+              type: integer
+              minimum: 1
+              deprecated: true
+              description: Legacy compatibility marker that no longer changes when an event is edited.
             version: { type: integer, minimum: 1 }
             counts: { $ref: '#/components/schemas/PlanningParticipationCounts' }
             myParticipation: { $ref: '#/components/schemas/PlanningParticipation' }
@@ -4323,7 +4332,7 @@ components:
         counts: { $ref: '#/components/schemas/PlanningParticipationCounts' }
         myEffectiveStatus:
           type: string
-          enum: [YES, MAYBE, NO, REGISTERED, WAITLISTED, WITHDRAWN, PENDING, RECONFIRMATION_REQUIRED]
+          enum: [YES, MAYBE, NO, REGISTERED, WAITLISTED, WITHDRAWN, PENDING]
         myParticipationStatus:
           type: string
           enum: [YES, MAYBE, NO, REGISTERED, WAITLISTED, WITHDRAWN]
@@ -6803,7 +6812,7 @@ components:
         openPlanningActionCount:
           type: integer
           minimum: 0
-          description: Visible attendance or reconfirmation actions currently required from the authenticated membership.
+          description: Visible unanswered attendance-poll actions currently required from the authenticated membership.
         nextPlanningEvent:
           $ref: '#/components/schemas/DashboardPlanningEventSummary'
           description: Next visible event for the authenticated membership; omitted when no future event is available.

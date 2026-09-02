@@ -152,9 +152,8 @@ func hydrateEventProjections(ctx context.Context, db authorization.Queryer, memb
 		coalesce(sum(participation.status='YES'),0),coalesce(sum(participation.status='MAYBE'),0),
 		coalesce(sum(participation.status='NO'),0),coalesce(sum(participation.status='REGISTERED'),0),
 		coalesce(sum(participation.status='WAITLISTED'),0),
-		coalesce(sum(participation.confirmed_revision<event.confirmation_revision AND participation.status!='WITHDRAWN'),0)
+		0
 		FROM planning_event_audience audience
-		JOIN planning_events event ON event.id=audience.event_id
 		JOIN memberships member ON member.id=audience.membership_id AND member.status='ACTIVE' AND member.deleted_at IS NULL
 		JOIN users recipient ON recipient.id=member.user_id AND recipient.active=1 AND recipient.email IS NOT NULL AND recipient.password_hash IS NOT NULL
 		LEFT JOIN planning_participations participation ON participation.event_id=audience.event_id AND participation.membership_id=audience.membership_id
@@ -189,9 +188,6 @@ func hydrateEventProjections(ctx context.Context, db authorization.Queryer, memb
 		}
 		projection := &projections[indices[eventID]]
 		participation.EffectiveStatus = participation.Status
-		if participation.ConfirmedRevision < projection.ConfirmationRevision && participation.Status != "WITHDRAWN" {
-			participation.EffectiveStatus = "RECONFIRMATION_REQUIRED"
-		}
 		projection.MyParticipation = &participation
 	}
 	if err := closeRows(rows); err != nil {

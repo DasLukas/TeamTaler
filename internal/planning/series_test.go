@@ -136,7 +136,7 @@ func TestSeriesTimeUpdatePreservesOccurrenceAndParticipation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read shifted occurrence: %v", err)
 	}
-	if updated.StartsAt != platform.Timestamp(shiftedStart) || updated.MyParticipation == nil || updated.MyParticipation.Status != "YES" || updated.MyParticipation.EffectiveStatus != "RECONFIRMATION_REQUIRED" {
+	if updated.StartsAt != platform.Timestamp(shiftedStart) || updated.ConfirmationRevision != 1 || updated.MyParticipation == nil || updated.MyParticipation.Status != "YES" || updated.MyParticipation.EffectiveStatus != "YES" {
 		t.Fatalf("updated occurrence=%#v", updated)
 	}
 	var rowCount, participationCount int

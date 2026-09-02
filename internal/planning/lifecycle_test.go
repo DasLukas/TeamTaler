@@ -7,18 +7,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DasLukas/TeamTaler/internal/notifications"
 	"github.com/DasLukas/TeamTaler/internal/storage"
 )
 
-func TestLifecycleWorkerClosesRegistrationWithdrawsStaleSeatAndPromotesFIFO(t *testing.T) {
+func TestLifecycleWorkerClosesRegistrationWithoutInvalidatingExistingSeat(t *testing.T) {
 	ctx := context.Background()
 	db := openLifecycleFixture(t)
 	defer db.Close()
-	const (
-		groupID = "group-lifecycle"
-		eventID = "event-registration"
-	)
+	const eventID = "event-registration"
 	now := time.Date(2026, time.August, 30, 12, 0, 0, 0, time.UTC)
 	for _, statement := range []string{
 		`INSERT INTO planning_events(id,group_id,title,event_type,status,audience_type,timezone,starts_at,response_deadline,response_deadline_minutes_before,
@@ -52,41 +48,30 @@ func TestLifecycleWorkerClosesRegistrationWithdrawsStaleSeatAndPromotesFIFO(t *t
 		t.Fatalf("repeat registration deadline: changed=%d err=%v", changed, err)
 	}
 	var eventStatus, ownerStatus, guestStatus, waitingStatus string
-	var eventVersion, taskRevision int64
+	var eventVersion int64
 	if err := db.QueryRowContext(ctx, `SELECT status,version FROM planning_events WHERE id=?`, eventID).Scan(&eventStatus, &eventVersion); err != nil {
 		t.Fatalf("read closed event: %v", err)
 	}
 	if err := db.QueryRowContext(ctx, `SELECT status FROM planning_participations WHERE event_id=? AND membership_id='member-owner'`, eventID).Scan(&ownerStatus); err != nil {
-		t.Fatalf("read withdrawn registration: %v", err)
+		t.Fatalf("read preserved registration: %v", err)
 	}
 	if err := db.QueryRowContext(ctx, `SELECT status FROM planning_participations WHERE event_id=? AND membership_id='member-guest'`, eventID).Scan(&guestStatus); err != nil {
 		t.Fatalf("read invalid waitlist registration: %v", err)
 	}
 	if err := db.QueryRowContext(ctx, `SELECT status FROM planning_participations WHERE event_id=? AND membership_id='member-waiting'`, eventID).Scan(&waitingStatus); err != nil {
-		t.Fatalf("read promoted registration: %v", err)
+		t.Fatalf("read waiting registration: %v", err)
 	}
-	if err := db.QueryRowContext(ctx, `SELECT event_revision FROM planning_notification_tasks
-		WHERE event_id=? AND target_membership_id='member-waiting' AND event_type='PLANNING_WAITLIST_PROMOTED'`, eventID).Scan(&taskRevision); err != nil {
-		t.Fatalf("read promotion notification task: %v", err)
-	}
-	if eventStatus != "CLOSED" || eventVersion != 4 || ownerStatus != "WITHDRAWN" || guestStatus != "WITHDRAWN" || waitingStatus != "REGISTERED" || taskRevision != eventVersion {
-		t.Fatalf("lifecycle status=%s version=%d owner=%s guest=%s waiting=%s taskRevision=%d", eventStatus, eventVersion, ownerStatus, guestStatus, waitingStatus, taskRevision)
+	if eventStatus != "CLOSED" || eventVersion != 4 || ownerStatus != "REGISTERED" || guestStatus != "WITHDRAWN" || waitingStatus != "WAITLISTED" {
+		t.Fatalf("lifecycle status=%s version=%d owner=%s guest=%s waiting=%s", eventStatus, eventVersion, ownerStatus, guestStatus, waitingStatus)
 	}
 	var auditCount int
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM audit_events WHERE action='planning.event.closed.automatic' AND resource_id=?`, eventID).Scan(&auditCount); err != nil || auditCount != 1 {
 		t.Fatalf("automatic close audits=%d err=%v", auditCount, err)
 	}
-	notificationWorker, err := notifications.NewPlanningWorker(db, notifications.Service{DB: db}, nil)
-	if err != nil {
-		t.Fatalf("create planning notification worker: %v", err)
-	}
-	created, err := notificationWorker.ProcessDue(ctx, now)
-	if err != nil || created != 1 {
-		t.Fatalf("deliver waitlist promotion: created=%d err=%v", created, err)
-	}
-	var notificationType string
-	if err := db.QueryRowContext(ctx, `SELECT type FROM notifications WHERE group_id=? AND membership_id='member-waiting' AND resource_id=?`, groupID, eventID).Scan(&notificationType); err != nil || notificationType != string(notifications.TypePlanningWaitlistPromoted) {
-		t.Fatalf("promotion notification type=%s err=%v", notificationType, err)
+	var promotionTasks int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM planning_notification_tasks
+		WHERE event_id=? AND event_type='PLANNING_WAITLIST_PROMOTED'`, eventID).Scan(&promotionTasks); err != nil || promotionTasks != 0 {
+		t.Fatalf("promotion tasks=%d err=%v, want 0", promotionTasks, err)
 	}
 }
 

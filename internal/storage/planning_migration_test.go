@@ -124,6 +124,42 @@ func TestPlanningCalendarRangeMigrationBackfillsFractionalTimestamps(t *testing.
 	}
 }
 
+func TestPlanningReconfirmationRemovalMigrationPreservesResponses(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "planning-reconfirmation-upgrade.db")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, statement := range []string{
+		`CREATE TABLE planning_events(id TEXT PRIMARY KEY,confirmation_revision INTEGER NOT NULL) STRICT`,
+		`CREATE TABLE planning_participations(event_id TEXT NOT NULL,confirmed_revision INTEGER NOT NULL) STRICT`,
+		`INSERT INTO planning_events(id,confirmation_revision) VALUES('changed-event',3),('current-event',1)`,
+		`INSERT INTO planning_participations(event_id,confirmed_revision) VALUES('changed-event',1),('current-event',1)`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	migration, err := migrations.Files.ReadFile("0049_remove_planning_reconfirmation.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, string(migration)); err != nil {
+		t.Fatalf("apply reconfirmation removal migration: %v", err)
+	}
+	var changedRevision, currentRevision int64
+	if err := db.QueryRowContext(ctx, `SELECT confirmed_revision FROM planning_participations WHERE event_id='changed-event'`).Scan(&changedRevision); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT confirmed_revision FROM planning_participations WHERE event_id='current-event'`).Scan(&currentRevision); err != nil {
+		t.Fatal(err)
+	}
+	if changedRevision != 3 || currentRevision != 1 {
+		t.Fatalf("confirmed revisions=%d/%d, want 3/1", changedRevision, currentRevision)
+	}
+}
+
 func assertPlanningAllDayConstraints(t *testing.T, ctx context.Context, db *sql.DB, now string) {
 	t.Helper()
 	base := `INSERT INTO planning_events(id,group_id,title,event_type,status,audience_type,timezone,starts_at,created_by_membership_id,updated_by_membership_id,created_at,updated_at)`

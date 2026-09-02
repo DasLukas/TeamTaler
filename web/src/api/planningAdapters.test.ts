@@ -9,14 +9,13 @@ const baseEvent = {
 };
 
 describe('planning adapters', () => {
-  it('preserves an optional end and exposes reconfirmation separately', () => {
+  it('preserves an optional end and keeps a legacy response effective', () => {
     const event = adaptPlanningEvent(baseEvent);
     expect(event).toMatchObject({ allDay: false, timeZone: 'UTC' });
     expect(event.endsAt).toBeUndefined();
     expect(event.audience).toEqual({ type: 'SELECTED_MEMBERS', roleIds: [], memberIds: ['member-1'] });
-    expect(event.participation).toMatchObject({ attending: 1, unanswered: 1, reconfirmationRequired: 1 });
-    expect(event.viewerParticipation?.status).toBe('RECONFIRMATION_REQUIRED');
-    expect(event.viewerParticipation?.previousStatus).toBe('ATTENDING');
+    expect(event.participation).toMatchObject({ attending: 1, unanswered: 1, reconfirmationRequired: 0 });
+    expect(event.viewerParticipation?.status).toBe('ATTENDING');
     expect(event.viewerParticipation?.wireStatus).toBe('YES');
   });
 

@@ -36,13 +36,11 @@ export function ParticipationAction({ event, compact = false }: { event: Plannin
     </Button>
   );
   return <div className={styles.participation}>
-    {selected === 'RECONFIRMATION_REQUIRED' ? <strong>{t('planning.participation.reconfirmation_required')}</strong> : null}
     {event.eventType === 'APPOINTMENT_POLL' ? <>
       {action('ATTENDING', <Check size={16} />)}
       {action('MAYBE', <CircleHelp size={16} />)}
       {action('DECLINED', <X size={16} />)}
-    </> : selected === 'RECONFIRMATION_REQUIRED' ? <>{action('ATTENDING', <Check size={16} />)}<Button disabled={mutation.isPending} leadingIcon={<LogOut size={16} />} onClick={() => mutation.mutate('WITHDRAWN')} size={compact ? 'small' : 'medium'} variant="secondary">{t('planning.participation.withdraw')}</Button></>
-      : selected ? <Button disabled={mutation.isPending} leadingIcon={<LogOut size={16} />} onClick={() => mutation.mutate('WITHDRAWN')} size={compact ? 'small' : 'medium'} variant="secondary">{t('planning.participation.withdraw')}</Button>
+    </> : selected ? <Button disabled={mutation.isPending} leadingIcon={<LogOut size={16} />} onClick={() => mutation.mutate('WITHDRAWN')} size={compact ? 'small' : 'medium'} variant="secondary">{t('planning.participation.withdraw')}</Button>
         : action('ATTENDING', <Check size={16} />)}
     {mutation.isError ? <span className={styles.error} role="alert">{t('planning.participation.error')}</span> : null}
     {mutation.isSuccess ? <span className={styles.srOnly} role="status">{t('planning.participation.saved')}</span> : null}

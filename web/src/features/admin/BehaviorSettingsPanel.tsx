@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import ReceiptText from 'lucide-react/dist/esm/icons/receipt-text';
 import Save from 'lucide-react/dist/esm/icons/save';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -7,6 +8,7 @@ import type { GroupSettings, GroupSettingsUpdateInput, ReasonMode, Role, Session
 import { can } from '@/app/permissions';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Button } from '@/components/ui/Button';
+import { ConfirmationDialog } from '@/components/ui/ConfirmationDialog';
 import { Field, SelectInput } from '@/components/ui/FormField';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { Toggle } from '@/components/ui/Toggle';
@@ -172,6 +174,7 @@ function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canMan
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [settlementsEnabled, setSettlementsEnabled] = useState(settings.settlementsEnabled);
+  const [confirmDisableSettlements, setConfirmDisableSettlements] = useState(false);
   const [ownBookingReasonMode, setOwnBookingReasonMode] = useState(settings.ownBookingReasonMode);
   const [foreignBookingReasonMode, setForeignBookingReasonMode] = useState(settings.foreignBookingReasonMode);
   const [ownPaymentReasonMode, setOwnPaymentReasonMode] = useState(settings.ownPaymentReasonMode);
@@ -244,9 +247,27 @@ function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canMan
               <h4 id="settlements-setting-title">{t('behaviorSettings.settlementsTitle')}</h4>
               <p>{t('behaviorSettings.settlementsDescription')}</p>
             </div>
-            <Toggle checked={settlementsEnabled} disabled={mutation.isPending} label={t('behaviorSettings.settlementsToggle')} onChange={(checked) => { setSettlementsEnabled(checked); mutation.reset(); }} />
+            <Toggle checked={settlementsEnabled} disabled={mutation.isPending} label={t('behaviorSettings.settlementsToggle')} onChange={(checked) => {
+              mutation.reset();
+              if (checked) setSettlementsEnabled(true);
+              else setConfirmDisableSettlements(true);
+            }} />
           </div>
           <p className={styles.notice}>{t(settlementsEnabled ? 'behaviorSettings.settlementsEnabledNotice' : 'behaviorSettings.settlementsDisabledNotice')}</p>
+          <ConfirmationDialog
+            confirmIcon={<ReceiptText size={17} />}
+            confirmLabel={t('behaviorSettings.settlementsDisable')}
+            message={t('behaviorSettings.settlementsDisableImpact')}
+            onClose={() => setConfirmDisableSettlements(false)}
+            onConfirm={() => {
+              setSettlementsEnabled(false);
+              setConfirmDisableSettlements(false);
+            }}
+            open={confirmDisableSettlements}
+            pending={mutation.isPending}
+            title={t('behaviorSettings.settlementsDisableTitle')}
+            tone="danger"
+          />
         </section>
       </section> : null}
 

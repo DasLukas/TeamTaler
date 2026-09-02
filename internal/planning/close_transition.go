@@ -55,18 +55,10 @@ func closePublishedEventTx(ctx context.Context, tx *sql.Tx, eventID string, opti
 	}
 
 	now := platform.Timestamp(options.Now)
-	withdrawn := int64(0)
 	invalidWaiters := int64(0)
 	promotedIDs := []string{}
 	if eventType == EventAppointmentRegistration {
-		result, err := tx.ExecContext(ctx, `UPDATE planning_participations
-			SET status='WITHDRAWN',waitlist_position=NULL,version=version+1,updated_at=?
-			WHERE event_id=? AND status='REGISTERED' AND confirmed_revision<?`, now, eventID, confirmationRevision)
-		if err != nil {
-			return false, err
-		}
-		withdrawn, _ = result.RowsAffected()
-		result, err = tx.ExecContext(ctx, `UPDATE planning_participations AS participation
+		result, err := tx.ExecContext(ctx, `UPDATE planning_participations AS participation
 			SET status='WITHDRAWN',waitlist_position=NULL,version=version+1,updated_at=?
 			WHERE participation.group_id=? AND participation.event_id=? AND participation.status='WAITLISTED'
 			  AND NOT EXISTS(SELECT 1 FROM memberships membership
@@ -129,7 +121,7 @@ func closePublishedEventTx(ctx context.Context, tx *sql.Tx, eventID string, opti
 		}
 	}
 	if err := audit.Record(ctx, tx, groupID, options.ActorUserID, options.ActorMembershipID, options.AuditAction, "planning_event", eventID, map[string]any{
-		"withdrawnRegistrations": withdrawn, "withdrawnInvalidWaitlistEntries": invalidWaiters, "promotedWaitlistEntries": len(promotedIDs),
+		"withdrawnInvalidWaitlistEntries": invalidWaiters, "promotedWaitlistEntries": len(promotedIDs),
 	}); err != nil {
 		return false, err
 	}

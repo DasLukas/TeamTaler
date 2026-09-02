@@ -11,6 +11,11 @@ function RecurrenceHarness() {
   return <div><label htmlFor="planning-recurrence">{i18n.t('planning.recurrence.label')}</label><PlanningRecurrenceField onChange={setValue} startsAt="2026-08-31T12:00" value={value} /></div>;
 }
 
+function PublishedSeriesHarness() {
+  const [value, setValue] = useState<PlanningRecurrenceInput | null>({ frequency: 'WEEKLY', interval: 1, weekdays: ['MO'], range: { type: 'NEVER' } });
+  return <div><label htmlFor="planning-recurrence">{i18n.t('planning.recurrence.label')}</label><PlanningRecurrenceField allowNone={false} onChange={setValue} startsAt="2026-08-31T12:00" value={value} /></div>;
+}
+
 describe('PlanningRecurrenceField', () => {
   it('offers accessible presets and stores a structured recurrence', async () => {
     const user = userEvent.setup();
@@ -44,6 +49,16 @@ describe('PlanningRecurrenceField', () => {
     await user.click(within(dialog).getByRole('button', { name: i18n.t('planning.recurrence.apply') }));
 
     expect(screen.getByText(/endet nach 6 Terminen/)).toBeVisible();
+  });
+
+  it('does not offer an invalid no-recurrence state for a published series', async () => {
+    const user = userEvent.setup();
+    render(<PublishedSeriesHarness />);
+
+    await user.click(screen.getByRole('combobox', { name: i18n.t('planning.recurrence.label') }));
+
+    expect(screen.queryByRole('option', { name: i18n.t('planning.recurrence.presets.NONE') })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: i18n.t('planning.recurrence.presets.WEEKLY') })).toBeVisible();
   });
 
   it('uses the shared bottom-sheet pattern on mobile viewports', async () => {

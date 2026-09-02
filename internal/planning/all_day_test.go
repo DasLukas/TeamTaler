@@ -72,7 +72,7 @@ func TestAllDayEventRejectsMixedOrInvalidSchedules(t *testing.T) {
 	}
 }
 
-func TestAllDayUpdatePreservesPinnedTimeZoneAndRequiresReconfirmation(t *testing.T) {
+func TestAllDayUpdatePreservesPinnedTimeZoneAndParticipation(t *testing.T) {
 	fixture := openPlanningServiceFixture(t)
 	ctx := context.Background()
 	setPlanningTimeZone(t, fixture, "Europe/Berlin")
@@ -96,10 +96,10 @@ func TestAllDayUpdatePreservesPinnedTimeZoneAndRequiresReconfirmation(t *testing
 	if err != nil {
 		t.Fatalf("extend all-day event: %v", err)
 	}
-	if event.TimeZone != "Europe/Berlin" || event.ConfirmationRevision != 2 {
+	if event.TimeZone != "Europe/Berlin" || event.ConfirmationRevision != 1 {
 		t.Fatalf("updated event zone=%q confirmationRevision=%d", event.TimeZone, event.ConfirmationRevision)
 	}
-	if event.MyParticipation == nil || event.MyParticipation.EffectiveStatus != "RECONFIRMATION_REQUIRED" {
+	if event.MyParticipation == nil || event.MyParticipation.Status != "YES" || event.MyParticipation.EffectiveStatus != "YES" {
 		t.Fatalf("updated participation=%#v", event.MyParticipation)
 	}
 }

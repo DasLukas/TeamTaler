@@ -486,8 +486,7 @@ export interface PlanningAudience {
 
 /** Current-user participation projection. */
 export interface PlanningViewerParticipation {
-  status: PlanningParticipationStatus | 'RECONFIRMATION_REQUIRED' | 'WITHDRAWN';
-  previousStatus?: PlanningParticipationStatus;
+  status: PlanningParticipationStatus | 'WITHDRAWN';
   wireStatus?: PlanningParticipationWireStatus;
   updatedAt?: string;
 }
@@ -501,6 +500,7 @@ export interface PlanningParticipationSummary {
   unanswered: number;
   waitlisted: number;
   capacity?: number;
+  /** Deprecated compatibility field. New servers always return zero. */
   reconfirmationRequired: number;
 }
 
@@ -660,7 +660,7 @@ export interface PlanningParticipant {
   displayName: string;
   avatarUrl?: string;
   status?: PlanningParticipationStatus | 'WITHDRAWN';
-  effectiveStatus?: PlanningParticipationStatus | 'RECONFIRMATION_REQUIRED' | 'WITHDRAWN';
+  effectiveStatus?: PlanningParticipationStatus | 'WITHDRAWN';
   confirmedRevision: number;
   version: number;
   updatedAt?: string;

@@ -55,6 +55,7 @@ function recurrencePreset(recurrence: PlanningRecurrenceInput | null, startsAt: 
 }
 
 interface PlanningRecurrenceFieldProps {
+  allowNone?: boolean;
   disabled?: boolean;
   onChange: (recurrence: PlanningRecurrenceInput | null) => void;
   startsAt: string;
@@ -62,7 +63,7 @@ interface PlanningRecurrenceFieldProps {
 }
 
 /** Renders the recurrence preset selector and its accessible advanced editor. */
-export function PlanningRecurrenceField({ disabled = false, onChange, startsAt, value }: PlanningRecurrenceFieldProps) {
+export function PlanningRecurrenceField({ allowNone = true, disabled = false, onChange, startsAt, value }: PlanningRecurrenceFieldProps) {
   const { t } = useTranslation();
   const compact = useMediaQuery('(max-width: 767px)');
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -70,14 +71,14 @@ export function PlanningRecurrenceField({ disabled = false, onChange, startsAt, 
   const preset = recurrencePreset(value, startsAt);
   const anchorWeekday = planningWeekdayForDate(startsAt);
   const options = useMemo<SelectMenuOption<RecurrencePreset>[]>(() => [
-    { value: 'NONE', label: t('planning.recurrence.presets.NONE'), visual: <X size={17} /> },
+    ...(allowNone ? [{ value: 'NONE' as const, label: t('planning.recurrence.presets.NONE'), visual: <X size={17} /> }] : []),
     { value: 'DAILY', label: t('planning.recurrence.presets.DAILY'), visual: <Repeat2 size={17} /> },
     { value: 'WEEKDAYS', label: t('planning.recurrence.presets.WEEKDAYS'), visual: <CalendarRange size={17} /> },
     { value: 'WEEKLY', label: t('planning.recurrence.presets.WEEKLY'), visual: <CalendarRange size={17} /> },
     { value: 'MONTHLY', label: t('planning.recurrence.presets.MONTHLY'), visual: <CalendarRange size={17} /> },
     { value: 'YEARLY', label: t('planning.recurrence.presets.YEARLY'), visual: <CalendarRange size={17} /> },
     { value: 'CUSTOM', label: t('planning.recurrence.presets.CUSTOM'), visual: <Settings2 size={17} /> },
-  ], [t]);
+  ], [allowNone, t]);
   const frequencyOptions = useMemo<SelectMenuOption<PlanningRecurrenceFrequency>[]>(() => ['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'].map((frequency) => ({ value: frequency as PlanningRecurrenceFrequency, label: t(`planning.recurrence.frequencies.${frequency}`) })), [t]);
   const monthlyModeOptions = useMemo<SelectMenuOption<PlanningMonthlyMode>[]>(() => ['DAY_OF_MONTH', 'NTH_WEEKDAY', 'LAST_DAY'].map((mode) => ({ value: mode as PlanningMonthlyMode, label: t(`planning.recurrence.monthlyModes.${mode}`) })), [t]);
   const rangeOptions = useMemo<SelectMenuOption<RecurrenceRangeType>[]>(() => ['NEVER', 'COUNT', 'UNTIL'].map((type) => ({ value: type as RecurrenceRangeType, label: t(`planning.recurrence.ranges.${type}`) })), [t]);

@@ -856,10 +856,9 @@ export function adaptPlanningEvent(input: unknown): PlanningEvent {
   const eventType = source.eventType === 'APPOINTMENT_POLL' || source.eventType === 'APPOINTMENT_REGISTRATION' ? source.eventType : 'APPOINTMENT';
   const status = source.status === 'CLOSED' || source.status === 'COMPLETED' || source.status === 'CANCELLED' ? source.status : 'PUBLISHED';
   const effectiveViewerStatus = myParticipation?.effectiveStatus;
-  const viewerStatus = effectiveViewerStatus === 'RECONFIRMATION_REQUIRED' || effectiveViewerStatus === 'WITHDRAWN'
-    ? effectiveViewerStatus
-    : participationStatus(effectiveViewerStatus ?? myParticipation?.status);
-  const previousViewerStatus = participationStatus(myParticipation?.status);
+  const viewerStatus = myParticipation?.status === 'WITHDRAWN' || effectiveViewerStatus === 'WITHDRAWN'
+    ? 'WITHDRAWN'
+    : participationStatus(myParticipation?.status ?? effectiveViewerStatus);
   const startsAt = String(source.startsAt ?? '');
   const endsAt = typeof source.endsAt === 'string' ? source.endsAt : undefined;
   const allDay = source.allDay === true;
@@ -888,10 +887,10 @@ export function adaptPlanningEvent(input: unknown): PlanningEvent {
       declined: Number(counts.no ?? 0),
       unanswered: Number(counts.pending ?? 0),
       waitlisted: Number(counts.waitlisted ?? 0),
-      reconfirmationRequired: Number(counts.reconfirmationRequired ?? 0),
+      reconfirmationRequired: 0,
       ...(Number.isInteger(Number(source.capacity)) && Number(source.capacity) > 0 ? { capacity: Number(source.capacity) } : {}),
     },
-    viewerParticipation: viewerStatus ? { status: viewerStatus, previousStatus: viewerStatus === 'RECONFIRMATION_REQUIRED' ? previousViewerStatus : undefined, wireStatus: participationWireStatus(myParticipation?.status), updatedAt: typeof myParticipation?.updatedAt === 'string' ? myParticipation.updatedAt : undefined } : undefined,
+    viewerParticipation: viewerStatus ? { status: viewerStatus, wireStatus: participationWireStatus(myParticipation?.status), updatedAt: typeof myParticipation?.updatedAt === 'string' ? myParticipation.updatedAt : undefined } : undefined,
     createdByName: typeof source.createdByName === 'string' ? source.createdByName : undefined,
     canEdit: source.canEdit === true,
     canCancel: source.canCancel === true,
@@ -957,7 +956,7 @@ export function adaptPlanningSeriesResult(input: unknown): PlanningSeriesResult 
 /** Adapts a participant without broadening server-projected identity visibility. */
 export function adaptPlanningParticipant(input: unknown): PlanningParticipant {
   const source = asRecord(input);
-  const effectiveStatus = source.effectiveStatus === 'RECONFIRMATION_REQUIRED' || source.effectiveStatus === 'WITHDRAWN' ? source.effectiveStatus : participationStatus(source.effectiveStatus);
+  const effectiveStatus = source.status === 'WITHDRAWN' || source.effectiveStatus === 'WITHDRAWN' ? 'WITHDRAWN' : participationStatus(source.status ?? source.effectiveStatus);
   return {
     membershipId: String(source.membershipId ?? ''),
     displayName: String(source.displayName ?? i18n.t('common.member')),
