@@ -20,7 +20,7 @@ func TestNotificationSettingsHandlersEnforceETagsAndExposeCanonicalContract(t *t
 		t.Fatalf("get notification settings status=%d ETag=%q body=%s", settingsResponse.Code, settingsResponse.Header().Get("ETag"), settingsResponse.Body.String())
 	}
 	var settings notifications.GroupSettings
-	if err := json.Unmarshal(settingsResponse.Body.Bytes(), &settings); err != nil || len(settings.Events) != 7 || settings.Timezone != "Europe/Berlin" {
+	if err := json.Unmarshal(settingsResponse.Body.Bytes(), &settings); err != nil || len(settings.Events) != 14 || settings.Timezone != "Europe/Berlin" {
 		t.Fatalf("notification settings=%#v err=%v", settings, err)
 	}
 	updates := make([]notifications.GroupEventUpdate, 0, len(settings.Events))

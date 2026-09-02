@@ -18,6 +18,7 @@ import { GroupSettingsPanel } from './GroupSettingsPanel';
 import { roleDisplayName } from './roleDisplayName';
 import styles from './BehaviorSettingsPanel.module.css';
 import { GroupNotificationSettingsSection } from './GroupNotificationSettingsSection';
+import { PlanningSettingsSection } from './PlanningSettingsSection';
 
 /** Properties for the editable group behavior settings form. */
 interface SettingsFormProps {
@@ -229,6 +230,7 @@ function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canMan
         {canManageGroup ? <GroupSettingsPanel embedded /> : null}
         {canManageGroup ? <DefaultThemeSetting groupId={groupId} key={`${groupId}:${settings.defaultTheme}`} settings={settings} /> : null}
         {canManageGroup ? <GroupNotificationSettingsSection groupId={groupId} /> : null}
+        {canManageGroup ? <PlanningSettingsSection groupId={groupId} /> : null}
         {canManageDefaultRole && roles ? <DefaultRoleSetting groupId={groupId} key={`${groupId}:${settings.defaultRoleId ?? ''}`} roles={roles} settings={settings} /> : null}
       </section>
 

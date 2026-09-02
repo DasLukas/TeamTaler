@@ -264,6 +264,10 @@ func TestRemoveCategoryTypeMigrationPreservesExistingRows(t *testing.T) {
 		`INSERT INTO schema_migrations(version) VALUES('0040_appearance_preferences.sql')`,
 		`INSERT INTO schema_migrations(version) VALUES('0043_activity_reversal_feed_indexes.sql')`,
 		`INSERT INTO schema_migrations(version) VALUES('0044_payment_targets.sql')`,
+		`INSERT INTO schema_migrations(version) VALUES('0045_planning.sql')`,
+		`INSERT INTO schema_migrations(version) VALUES('0046_planning_all_day.sql')`,
+		`INSERT INTO schema_migrations(version) VALUES('0047_remove_planning_drafts.sql')`,
+		`INSERT INTO schema_migrations(version) VALUES('0048_planning_calendar_ranges.sql')`,
 		`CREATE TABLE users(id TEXT PRIMARY KEY) STRICT`,
 		`CREATE TABLE groups(id TEXT PRIMARY KEY) STRICT`,
 		`CREATE TABLE invitations(id TEXT PRIMARY KEY, group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE) STRICT`,
@@ -451,16 +455,16 @@ func TestDynamicRoleMigrationBackfillsLegacyAccessAndDropsCategoryGrants(t *test
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM roles WHERE group_id='group-second'`).Scan(&secondRoleCount); err != nil {
 		t.Fatalf("count second roles: %v", err)
 	}
-	if permissionCount != 14 || mainRoleCount != 5 || secondRoleCount != 4 {
-		t.Fatalf("definitions/main roles/second roles = %d/%d/%d, want 14/5/4", permissionCount, mainRoleCount, secondRoleCount)
+	if permissionCount != 18 || mainRoleCount != 5 || secondRoleCount != 4 {
+		t.Fatalf("definitions/main roles/second roles = %d/%d/%d, want 18/5/4", permissionCount, mainRoleCount, secondRoleCount)
 	}
 	wantPresetGrantCounts := map[string]int{
-		"role:GROUP_ADMINISTRATOR:group-main": 14,
-		"role:MEMBER:group-main":              5,
-		"role:FINANCE_MANAGER:group-main":     5,
-		"role:CATALOG_MANAGER:group-main":     3,
+		"role:GROUP_ADMINISTRATOR:group-main": 18,
+		"role:MEMBER:group-main":              6,
+		"role:FINANCE_MANAGER:group-main":     6,
+		"role:CATALOG_MANAGER:group-main":     4,
 		"role:LEGACY_SELF_PAYMENT:group-main": 3,
-		"role:MEMBER:group-second":            4,
+		"role:MEMBER:group-second":            5,
 	}
 	for roleID, want := range wantPresetGrantCounts {
 		var got int

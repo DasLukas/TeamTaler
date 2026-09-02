@@ -212,7 +212,11 @@ func (s Service) GetPreferences(ctx context.Context, membership domain.Membershi
 			FROM (
 				SELECT 'BOOKING_ASSIGNED' event_type UNION ALL SELECT 'BOOKING_REVERSED' UNION ALL
 				SELECT 'PAYMENT_RECORDED' UNION ALL SELECT 'PAYMENT_REVERSED' UNION ALL
-				SELECT 'SETTLEMENT_CREATED' UNION ALL SELECT 'SETTLEMENT_DUE_SOON' UNION ALL SELECT 'SETTLEMENT_OVERDUE'
+				SELECT 'SETTLEMENT_CREATED' UNION ALL SELECT 'SETTLEMENT_DUE_SOON' UNION ALL SELECT 'SETTLEMENT_OVERDUE' UNION ALL
+				SELECT 'PLANNING_EVENT_PUBLISHED' UNION ALL
+				SELECT 'PLANNING_EVENT_UPDATED' UNION ALL SELECT 'PLANNING_EVENT_CANCELLED' UNION ALL
+				SELECT 'PLANNING_WAITLIST_PROMOTED' UNION ALL SELECT 'PLANNING_SERIES_PUBLISHED' UNION ALL
+				SELECT 'PLANNING_SERIES_UPDATED' UNION ALL SELECT 'PLANNING_SERIES_CANCELLED'
 			) catalog ORDER BY catalog.event_type`, membership.GroupID, membership.GroupID, membership.ID, membership.GroupID, membership.ID)
 		if err != nil {
 			return err
@@ -243,7 +247,7 @@ func (s Service) UpdatePreferences(ctx context.Context, membership domain.Member
 		return Preferences{}, fmt.Errorf("%w: a current notification preferences version is required", domain.ErrPrecondition)
 	}
 	if len(input.Events) == 0 || len(input.Events) > len(eventCatalog) {
-		return Preferences{}, domain.ValidationError{Field: "events", Message: "must contain 1 to 7 event updates"}
+		return Preferences{}, domain.ValidationError{Field: "events", Message: fmt.Sprintf("must contain 1 to %d event updates", len(eventCatalog))}
 	}
 	seen := make(map[EventType]struct{}, len(input.Events))
 	for _, update := range input.Events {

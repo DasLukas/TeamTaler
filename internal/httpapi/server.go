@@ -36,6 +36,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/notifications"
 	"github.com/DasLukas/TeamTaler/internal/paymentattachments"
 	"github.com/DasLukas/TeamTaler/internal/periods"
+	"github.com/DasLukas/TeamTaler/internal/planning"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	systemadmin "github.com/DasLukas/TeamTaler/internal/system"
 	webpushservice "github.com/DasLukas/TeamTaler/internal/webpush"
@@ -65,6 +66,7 @@ type Server struct {
 	finance            finance.Service
 	exports            *exporting.Service
 	periods            periods.Service
+	planning           planning.Service
 	notifications      notifications.Service
 	systemAdmin        systemadmin.Service
 	pushSubscriptions  *webpushservice.SubscriptionService
@@ -164,6 +166,7 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 		finance:            finance.Service{DB: db, Notifications: notificationService, Attachments: paymentattachments.Store{DataDirectory: cfg.DataDirectory}},
 		exports:            exportService,
 		periods:            periods.Service{DB: db, Notifications: notificationService},
+		planning:           planning.Service{DB: db},
 		notifications:      notificationService,
 		systemAdmin:        systemService,
 		pushSubscriptions:  pushSubscriptions,
@@ -246,6 +249,21 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/logo", server.handleGroupLogo)
 	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/logo", server.handleRemoveGroupLogo)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/dashboard", server.handleDashboard)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/planning/settings", server.handleGetPlanningSettings)
+	mux.HandleFunc("PUT /api/v1/groups/{groupID}/planning/settings", server.handleUpdatePlanningSettings)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/planning/series", server.handleCreatePlanningSeries)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/planning/series/{seriesID}", server.handleGetPlanningSeries)
+	mux.HandleFunc("PUT /api/v1/groups/{groupID}/planning/series/{seriesID}", server.handleUpdatePlanningSeries)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/planning/series/{seriesID}/cancel", server.handleCancelPlanningSeries)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/planning/events", server.handleListPlanningEvents)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/planning/events", server.handleCreatePlanningEvent)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/planning/events/{eventID}", server.handleGetPlanningEvent)
+	mux.HandleFunc("PUT /api/v1/groups/{groupID}/planning/events/{eventID}", server.handleUpdatePlanningEvent)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/planning/events/{eventID}/close", server.handleClosePlanningEvent)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/planning/events/{eventID}/complete", server.handleCompletePlanningEvent)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/planning/events/{eventID}/cancel", server.handleCancelPlanningEvent)
+	mux.HandleFunc("PUT /api/v1/groups/{groupID}/planning/events/{eventID}/participation", server.handleSetPlanningParticipation)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/planning/events/{eventID}/participants", server.handleListPlanningParticipants)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/members", server.handleListMembers)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/members/{membershipID}", server.handleRenameTemporaryGuest)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/members/{membershipID}/claim-invitation", server.handleCreateTemporaryGuestClaimInvitation)
@@ -566,6 +584,7 @@ func writeJSON(response http.ResponseWriter, status int, value any) {
 
 type problem struct {
 	Type                   string `json:"type"`
+	Code                   string `json:"code,omitempty"`
 	Title                  string `json:"title"`
 	Status                 int    `json:"status"`
 	Detail                 string `json:"detail"`
@@ -590,6 +609,8 @@ func writeProblem(response http.ResponseWriter, request *http.Request, err error
 		status, title, problemType = http.StatusUnprocessableEntity, "Validation Failed", "https://teamtaler.dev/problems/validation"
 	case errors.Is(err, domain.ErrPrecondition):
 		status, title, problemType = http.StatusPreconditionFailed, "Precondition Failed", "https://teamtaler.dev/problems/precondition"
+	case errors.Is(err, domain.ErrPlanningDisabled):
+		status, title, problemType = http.StatusConflict, "Planning Disabled", "https://teamtaler.dev/problems/planning-disabled"
 	case errors.Is(err, domain.ErrConflict), errors.Is(err, domain.ErrIdempotencyReuse):
 		status, title, problemType = http.StatusConflict, "Conflict", "https://teamtaler.dev/problems/conflict"
 	case errors.Is(err, domain.ErrRateLimited):
@@ -608,6 +629,9 @@ func writeProblem(response http.ResponseWriter, request *http.Request, err error
 	response.Header().Set("Content-Type", "application/problem+json; charset=utf-8")
 	response.WriteHeader(status)
 	item := problem{Type: problemType, Title: title, Status: status, Detail: detail, Instance: request.URL.Path}
+	if errors.Is(err, domain.ErrPlanningDisabled) {
+		item.Code = "PLANNING_DISABLED"
+	}
 	if memberCount, invitationCount, ok := roleConflictCounts(err); ok {
 		item.MemberCount = &memberCount
 		item.PendingInvitationCount = &invitationCount

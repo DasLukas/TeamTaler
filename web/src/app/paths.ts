@@ -2,7 +2,10 @@
 export const memberPaths = {
   landing: '/',
   overview: '/overview',
+  planning: '/planning',
+  planningNew: '/planning/new',
   booking: '/book',
+  activities: '/activities',
   catalog: '/catalog',
   finance: '/finance',
   notifications: '/notifications',

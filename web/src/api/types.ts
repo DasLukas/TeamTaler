@@ -207,7 +207,11 @@ export type PermissionKey =
   | 'VOID_OWN_BOOKING'
   | 'VOID_ANY_BOOKING'
   | 'BOOK_FOR_OTHERS'
-  | 'BOOK_FOR_GUESTS';
+  | 'BOOK_FOR_GUESTS'
+  | 'USE_PLANNING'
+  | 'CREATE_PLANNING_EVENTS'
+  | 'VIEW_PLANNING_PARTICIPANTS'
+  | 'MANAGE_PLANNING_EVENTS';
 
 /** Complete permission-key registry in stable display order. */
 export const PERMISSION_KEYS = [
@@ -225,6 +229,10 @@ export const PERMISSION_KEYS = [
   'VOID_ANY_BOOKING',
   'BOOK_FOR_OTHERS',
   'BOOK_FOR_GUESTS',
+  'USE_PLANNING',
+  'CREATE_PLANNING_EVENTS',
+  'VIEW_PLANNING_PARTICIPANTS',
+  'MANAGE_PLANNING_EVENTS',
 ] as const satisfies readonly PermissionKey[];
 
 /**
@@ -417,7 +425,257 @@ export interface Group {
   currency: string;
   logoUrl?: string;
   defaultTheme: ThemeId;
+  planningEnabled?: boolean;
   membership?: SessionMembership;
+}
+
+/** Supported behavioral models for a planning event. */
+export type PlanningEventType = 'APPOINTMENT' | 'APPOINTMENT_POLL' | 'APPOINTMENT_REGISTRATION';
+
+/** Lifecycle state of a planning event. */
+export type PlanningEventStatus = 'PUBLISHED' | 'CLOSED' | 'COMPLETED' | 'CANCELLED';
+
+/** Audience selector persisted for an event or event series. */
+export type PlanningAudienceType = 'ALL_ACTIVE_MEMBERS' | 'SELECTED_ROLES' | 'SELECTED_MEMBERS' | 'SELECTED_TARGETS';
+
+/** RFC 5545 weekday identifiers accepted by planning recurrence rules. */
+export type PlanningWeekday = 'MO' | 'TU' | 'WE' | 'TH' | 'FR' | 'SA' | 'SU';
+
+/** Supported recurrence frequencies for a planning series. */
+export type PlanningRecurrenceFrequency = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
+
+/** Supported monthly recurrence strategies. */
+export type PlanningMonthlyMode = 'DAY_OF_MONTH' | 'NTH_WEEKDAY' | 'LAST_DAY';
+
+/** End condition for a recurrence rule. */
+export type PlanningRecurrenceRange =
+  | { type: 'NEVER' }
+  | { type: 'COUNT'; count: number }
+  | { type: 'UNTIL'; until: string };
+
+/** Structured, validated recurrence rule used instead of accepting raw RRULE text. */
+export interface PlanningRecurrenceInput {
+  frequency: PlanningRecurrenceFrequency;
+  interval: number;
+  weekdays?: PlanningWeekday[];
+  monthlyMode?: PlanningMonthlyMode;
+  range: PlanningRecurrenceRange;
+}
+
+/** Mutation scope offered when changing one occurrence in an event series. */
+export type PlanningSeriesScope = 'THIS' | 'THIS_AND_FOLLOWING' | 'ALL';
+
+/** Response states shared by appointment polls and appointment registrations. */
+export type PlanningParticipationStatus = 'ATTENDING' | 'MAYBE' | 'DECLINED' | 'WAITLISTED';
+export type PlanningParticipationWireStatus = 'YES' | 'MAYBE' | 'NO' | 'REGISTERED' | 'WAITLISTED' | 'WITHDRAWN';
+
+/** Group-owned planning module state. */
+export interface PlanningSettings {
+  enabled: boolean;
+  version: number;
+  timeZone: string;
+  updatedAt?: string;
+}
+
+/** One audience definition used by events and recurring series. */
+export interface PlanningAudience {
+  type: PlanningAudienceType;
+  roleIds: string[];
+  memberIds: string[];
+}
+
+/** Current-user participation projection. */
+export interface PlanningViewerParticipation {
+  status: PlanningParticipationStatus | 'RECONFIRMATION_REQUIRED' | 'WITHDRAWN';
+  previousStatus?: PlanningParticipationStatus;
+  wireStatus?: PlanningParticipationWireStatus;
+  updatedAt?: string;
+}
+
+/** Aggregated response counts that never reveal participant identities. */
+export interface PlanningParticipationSummary {
+  invited: number;
+  attending: number;
+  maybe: number;
+  declined: number;
+  unanswered: number;
+  waitlisted: number;
+  capacity?: number;
+  reconfirmationRequired: number;
+}
+
+/** Shared planning-event fields returned independently of its timing model. */
+export interface PlanningEventBase {
+  id: string;
+  version: number;
+  eventType: PlanningEventType;
+  status: PlanningEventStatus;
+  title: string;
+  description: string;
+  location: string;
+  /** Legacy instant used for sorting and compatibility, including all-day events. */
+  startsAt: string;
+  /** Legacy end instant used for sorting and compatibility, including all-day events. */
+  endsAt?: string;
+  responseDeadline?: string;
+  responseDeadlineMinutesBefore?: number;
+  capacity?: number;
+  waitlistEnabled: boolean;
+  confirmationRevision: number;
+  audience: PlanningAudience;
+  participation: PlanningParticipationSummary;
+  viewerParticipation?: PlanningViewerParticipation;
+  createdByName?: string;
+  canEdit: boolean;
+  canCancel: boolean;
+  canRespond: boolean;
+  canViewParticipants: boolean;
+  seriesId?: string;
+  originalStartAt?: string;
+  originalStartDate?: string;
+  isSeriesException?: boolean;
+}
+
+/** Timed event values interpreted in the group's pinned time zone. */
+export interface PlanningTimedEventTiming {
+  allDay: false;
+  startsAt: string;
+  endsAt?: string;
+  startDate?: never;
+  endDateExclusive?: never;
+  timeZone: string;
+}
+
+/** All-day event values whose exclusive end avoids ambiguous midnight instants. */
+export interface PlanningAllDayEventTiming {
+  allDay: true;
+  startDate: string;
+  endDateExclusive: string;
+  timeZone: string;
+  startsAt: string;
+  endsAt?: string;
+}
+
+/** Planning event returned by list and detail endpoints. */
+export type PlanningEvent = PlanningEventBase & (PlanningTimedEventTiming | PlanningAllDayEventTiming);
+
+/** Shared editable planning-event fields accepted by create and update endpoints. */
+export interface PlanningEventInputBase {
+  eventType: PlanningEventType;
+  title: string;
+  description?: string;
+  location?: string;
+  responseDeadlineMinutesBefore?: number;
+  capacity?: number;
+  waitlistEnabled?: boolean;
+  audience: PlanningAudience;
+}
+
+/** Timed input sent without date-only fields. */
+export interface PlanningTimedEventInput {
+  allDay?: false;
+  startsAt: string;
+  endsAt?: string;
+  startDate?: never;
+  endDateExclusive?: never;
+}
+
+/** All-day input sent without timestamp fields. */
+export interface PlanningAllDayEventInput {
+  allDay: true;
+  startDate: string;
+  endDateExclusive: string;
+  startsAt?: never;
+  endsAt?: never;
+}
+
+/** Editable planning-event command with a discriminated timing model. */
+export type PlanningEventInput = PlanningEventInputBase & (PlanningTimedEventInput | PlanningAllDayEventInput);
+
+/** Cursor-backed page of planning events. */
+export interface PlanningEventPage {
+  items: PlanningEvent[];
+  nextCursor?: string;
+}
+
+/** Shared recurrence definition fields independent of its timing model. */
+export interface PlanningSeriesBase {
+  id: string;
+  version: number;
+  status: 'PUBLISHED' | 'CANCELLED';
+  timeZone: string;
+  eventType: PlanningEventType;
+  title: string;
+  description: string;
+  location: string;
+  responseDeadlineMinutesBefore?: number;
+  capacity?: number;
+  waitlistEnabled: boolean;
+  audience: PlanningAudience;
+  recurrence: PlanningRecurrenceInput;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/** Timed recurrence duration measured in wall-clock minutes. */
+export interface PlanningTimedSeriesTiming {
+  allDay: false;
+  durationMinutes: number;
+  startDate?: never;
+  durationDays?: never;
+}
+
+/** All-day recurrence duration measured in complete calendar days. */
+export interface PlanningAllDaySeriesTiming {
+  allDay: true;
+  startDate: string;
+  durationDays: number;
+  durationMinutes?: never;
+}
+
+/** Group-owned recurrence definition shared by materialized event occurrences. */
+export type PlanningSeries = PlanningSeriesBase & (PlanningTimedSeriesTiming | PlanningAllDaySeriesTiming);
+
+/** Response returned by series creation and mutations that materialize an occurrence. */
+export interface PlanningSeriesResult {
+  series: PlanningSeries;
+  firstOccurrence?: PlanningEvent;
+}
+
+/** Flat command for creating a recurring planning event. */
+export type PlanningSeriesCreateInput = PlanningEventInput & {
+  recurrence: PlanningRecurrenceInput;
+};
+
+/** Flat command for changing an entire series or its future segment. */
+export type PlanningSeriesUpdateInput = PlanningEventInput & {
+  recurrence: PlanningRecurrenceInput;
+  scope: Exclude<PlanningSeriesScope, 'THIS'>;
+  fromOriginalStartAt: string;
+};
+
+/** One named participant visible only to authorized viewers. */
+export interface PlanningParticipant {
+  membershipId: string;
+  displayName: string;
+  avatarUrl?: string;
+  status?: PlanningParticipationStatus | 'WITHDRAWN';
+  effectiveStatus?: PlanningParticipationStatus | 'RECONFIRMATION_REQUIRED' | 'WITHDRAWN';
+  confirmedRevision: number;
+  version: number;
+  updatedAt?: string;
+}
+
+/** Cursor-backed participant page. */
+export interface PlanningParticipantPage {
+  items: PlanningParticipant[];
+  nextCursor?: string;
+}
+
+/** Compact planning item embedded in the dashboard response. */
+export interface DashboardPlanningItem {
+  event: PlanningEvent;
+  actionRequired: boolean;
 }
 
 /** One stable, ordered, administrator-managed transaction form option. */
@@ -937,6 +1195,9 @@ export interface Dashboard {
   categoryTotals: CategoryTotal[];
   groupCategoryTotals: CategoryTotal[];
   recentBookings: Booking[];
+  planning?: DashboardPlanningItem;
+  planningEnabled?: boolean;
+  openPlanningActionCount?: number;
 }
 
 /** Command used to create an immutable booking. */
@@ -1112,6 +1373,10 @@ export type NotificationEventType =
   | 'SETTLEMENT_CREATED'
   | 'SETTLEMENT_DUE_SOON'
   | 'SETTLEMENT_OVERDUE'
+  | 'PLANNING_EVENT_PUBLISHED'
+  | 'PLANNING_EVENT_UPDATED'
+  | 'PLANNING_EVENT_CANCELLED'
+  | 'PLANNING_WAITLIST_PROMOTED'
   | 'DATA_EXPORT_READY'
   | 'DATA_EXPORT_FAILED'
   | 'SYSTEM';
@@ -1224,6 +1489,7 @@ export interface NotificationContext {
   dueAt?: string;
   exportId?: string;
   exportScope?: DataExportScope;
+  planningEventId?: string;
 }
 
 /** An in-app notification addressed to the signed-in user. */
@@ -1233,7 +1499,7 @@ export interface Notification {
   message: string;
   createdAt: string;
   readAt?: string;
-  kind: 'BOOKING' | 'PAYMENT' | 'SETTLEMENT' | 'SYSTEM';
+  kind: 'BOOKING' | 'PAYMENT' | 'SETTLEMENT' | 'PLANNING' | 'SYSTEM';
   eventType: NotificationEventType;
   context: NotificationContext;
 }

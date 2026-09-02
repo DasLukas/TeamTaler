@@ -42,18 +42,35 @@ type ChannelAvailability struct {
 // event policy and job creation can share one consistent transaction.
 type ChannelAvailabilityResolver func(context.Context, *sql.Tx) (ChannelAvailability, error)
 
+const (
+	// DeliveryCodeRecipientUnavailable identifies an inactive or inaccessible recipient.
+	DeliveryCodeRecipientUnavailable = "recipient_unavailable"
+	// DeliveryCodeEventDisabled identifies a group-disabled notification event.
+	DeliveryCodeEventDisabled = "event_disabled"
+	// DeliveryCodePreferenceDisabled identifies a channel disabled by the recipient.
+	DeliveryCodePreferenceDisabled = "preference_disabled"
+	// DeliveryCodePlanningDisabled identifies a disabled group planning module.
+	DeliveryCodePlanningDisabled = "planning_disabled"
+)
+
 // EventContext contains safe, structured presentation data for one notification.
 // Fields are optional because each event type requires only a relevant subset.
 type EventContext struct {
-	ActorName   string `json:"actorName,omitempty"`
-	ItemName    string `json:"itemName,omitempty"`
-	Quantity    int    `json:"quantity,omitempty"`
-	AmountMinor int64  `json:"amountMinor,string"`
-	Currency    string `json:"currency,omitempty"`
-	PeriodLabel string `json:"periodLabel,omitempty"`
-	DueAt       string `json:"dueAt,omitempty"`
-	ExportID    string `json:"exportId,omitempty"`
-	ExportScope string `json:"exportScope,omitempty"`
+	ActorName           string `json:"actorName,omitempty"`
+	ItemName            string `json:"itemName,omitempty"`
+	Quantity            int    `json:"quantity,omitempty"`
+	AmountMinor         int64  `json:"amountMinor,string"`
+	Currency            string `json:"currency,omitempty"`
+	PeriodLabel         string `json:"periodLabel,omitempty"`
+	DueAt               string `json:"dueAt,omitempty"`
+	ExportID            string `json:"exportId,omitempty"`
+	ExportScope         string `json:"exportScope,omitempty"`
+	PlanningEventID     string `json:"planningEventId,omitempty"`
+	PlanningEventTitle  string `json:"planningEventTitle,omitempty"`
+	PlanningSeriesID    string `json:"planningSeriesId,omitempty"`
+	PlanningSeriesTitle string `json:"planningSeriesTitle,omitempty"`
+	PlanningStartsAt    string `json:"planningStartsAt,omitempty"`
+	PlanningStatus      string `json:"planningStatus,omitempty"`
 }
 
 // CreateInput describes one member-visible event created inside an existing
@@ -140,6 +157,15 @@ func (s Service) CreateTx(ctx context.Context, tx *sql.Tx, input CreateInput) (N
 	if !groupEnabled {
 		return Notification{}, nil
 	}
+	if IsPlanningEvent(input.Type) {
+		var planningEnabled bool
+		if err := tx.QueryRowContext(ctx, `SELECT enabled FROM group_planning_settings WHERE group_id=?`, input.GroupID).Scan(&planningEnabled); err != nil {
+			return Notification{}, err
+		}
+		if !planningEnabled {
+			return Notification{}, nil
+		}
+	}
 	contextJSON, err := json.Marshal(input.Context)
 	if err != nil {
 		return Notification{}, fmt.Errorf("encode notification context: %w", err)
@@ -205,6 +231,64 @@ func (s Service) CreateTx(ctx context.Context, tx *sql.Tx, input CreateInput) (N
 		item.ResourceID = &input.ResourceID
 	}
 	return item, nil
+}
+
+// CheckDeliveryPolicy re-evaluates mutable group and member gates for one
+// already queued external delivery. An empty code permits delivery; a non-empty
+// safe code requires the dispatcher to terminate the job without external I/O.
+func CheckDeliveryPolicy(ctx context.Context, db *sql.DB, jobID string, channel Channel) (string, error) {
+	if db == nil || strings.TrimSpace(jobID) == "" {
+		return "", errors.New("check notification delivery policy: database and job identifier are required")
+	}
+	if channel != ChannelEmail && channel != ChannelPush {
+		return "", domain.ValidationError{Field: "channel", Message: "must be EMAIL or PUSH"}
+	}
+	var eventType EventType
+	var recipientActive, groupActive, eventEnabled, preferenceEnabled bool
+	err := db.QueryRowContext(ctx, `SELECT notification.type,
+		membership.status='ACTIVE' AND membership.deleted_at IS NULL AND recipient.active=1
+			AND (?!='EMAIL' OR recipient.email IS NOT NULL),
+		group_row.status='ACTIVE',
+		EXISTS(SELECT 1 FROM group_notification_events event WHERE event.group_id=job.group_id AND event.event_type=notification.type),
+		EXISTS(SELECT 1 FROM membership_notification_channels preference
+			WHERE preference.group_id=job.group_id AND preference.membership_id=notification.membership_id
+			  AND preference.event_type=notification.type AND preference.channel=?)
+		FROM notification_delivery_jobs job
+		JOIN notifications notification ON notification.id=job.notification_id AND notification.group_id=job.group_id
+		JOIN memberships membership ON membership.id=notification.membership_id AND membership.group_id=job.group_id
+		JOIN users recipient ON recipient.id=membership.user_id
+		JOIN groups group_row ON group_row.id=job.group_id
+		WHERE job.id=? AND job.channel=?`, channel, channel, jobID, channel).
+		Scan(&eventType, &recipientActive, &groupActive, &eventEnabled, &preferenceEnabled)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DeliveryCodeRecipientUnavailable, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if !recipientActive || !groupActive {
+		return DeliveryCodeRecipientUnavailable, nil
+	}
+	if !eventEnabled {
+		return DeliveryCodeEventDisabled, nil
+	}
+	if !preferenceEnabled {
+		return DeliveryCodePreferenceDisabled, nil
+	}
+	if IsPlanningEvent(eventType) {
+		var enabled bool
+		if err := db.QueryRowContext(ctx, `SELECT enabled FROM group_planning_settings settings
+			JOIN notification_delivery_jobs job ON job.group_id=settings.group_id
+			WHERE job.id=?`, jobID).Scan(&enabled); errors.Is(err, sql.ErrNoRows) {
+			return DeliveryCodePlanningDisabled, nil
+		} else if err != nil {
+			return "", err
+		}
+		if !enabled {
+			return DeliveryCodePlanningDisabled, nil
+		}
+	}
+	return "", nil
 }
 
 // List returns at most limit notifications newest first for membership only.

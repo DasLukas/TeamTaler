@@ -23,7 +23,7 @@ import waterImageUrl from './assets/water.webp';
 const grants = (...permissions: PermissionKey[]): PermissionGrant[] => permissions.map((permission) => ({ permission, scope: { type: 'GROUP' } }));
 
 const demoAdministratorRoleIds = ['role-admin', 'role-member', 'role-finance', 'role-catalog'];
-const demoAdministratorGrants = grants('GROUP_ADMINISTRATION', 'MEMBER_MANAGEMENT', 'ROLE_MANAGEMENT', 'FINANCE_MANAGEMENT', 'CATALOG_MANAGEMENT', 'VIEW_MEMBER_DIRECTORY', 'VIEW_GROUP_STATISTICS', 'VIEW_ALL_BOOKING_ACTIVITY', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING', 'VOID_ANY_BOOKING', 'BOOK_FOR_OTHERS', 'BOOK_FOR_GUESTS');
+const demoAdministratorGrants = grants('GROUP_ADMINISTRATION', 'MEMBER_MANAGEMENT', 'ROLE_MANAGEMENT', 'FINANCE_MANAGEMENT', 'CATALOG_MANAGEMENT', 'VIEW_MEMBER_DIRECTORY', 'VIEW_GROUP_STATISTICS', 'VIEW_ALL_BOOKING_ACTIVITY', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING', 'VOID_ANY_BOOKING', 'BOOK_FOR_OTHERS', 'BOOK_FOR_GUESTS', 'USE_PLANNING', 'CREATE_PLANNING_EVENTS', 'VIEW_PLANNING_PARTICIPANTS', 'MANAGE_PLANNING_EVENTS');
 
 /** Stable permission registry returned by the development transport. */
 export const demoPermissionDefinitions: PermissionDefinition[] = [
@@ -41,6 +41,10 @@ export const demoPermissionDefinitions: PermissionDefinition[] = [
   { key: 'VOID_ANY_BOOKING', impliedPermissions: ['VOID_OWN_BOOKING', 'VIEW_ALL_BOOKING_ACTIVITY'] },
   { key: 'BOOK_FOR_OTHERS' },
   { key: 'BOOK_FOR_GUESTS' },
+  { key: 'USE_PLANNING' },
+  { key: 'CREATE_PLANNING_EVENTS', impliedPermissions: ['USE_PLANNING'] },
+  { key: 'VIEW_PLANNING_PARTICIPANTS', impliedPermissions: ['USE_PLANNING'] },
+  { key: 'MANAGE_PLANNING_EVENTS', impliedPermissions: ['USE_PLANNING', 'CREATE_PLANNING_EVENTS', 'VIEW_PLANNING_PARTICIPANTS'] },
 ];
 
 /** Group-owned demo roles including one migrated direct-permission role. */
@@ -73,7 +77,7 @@ export const demoSession: Session = {
     email: 'lukas@example.test',
   },
   groups: [
-    { id: 'group-sv-adler', name: 'SV Adler', currency: 'EUR', defaultTheme: 'TEAMTALER', membership: { id: 'member-lukas', roleIds: demoAdministratorRoleIds, effectiveGrants: demoAdministratorGrants, roles: ['ADMIN', 'MEMBER', 'FINANCE_MANAGER', 'CATALOG_MANAGER'], groupPermissions: ['SELF_RECORD_PAYMENT'], themeOverride: null } },
+    { id: 'group-sv-adler', name: 'SV Adler', currency: 'EUR', defaultTheme: 'TEAMTALER', planningEnabled: true, membership: { id: 'member-lukas', roleIds: demoAdministratorRoleIds, effectiveGrants: demoAdministratorGrants, roles: ['ADMIN', 'MEMBER', 'FINANCE_MANAGER', 'CATALOG_MANAGER'], groupPermissions: ['SELF_RECORD_PAYMENT'], themeOverride: null } },
     { id: 'group-freunde', name: 'Kegelclub', currency: 'EUR', defaultTheme: 'NRW', membership: { id: 'member-lukas-kegelclub', roleIds: ['role-member-kegel'], effectiveGrants: grants('CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING'), roles: ['MEMBER'], groupPermissions: [], themeOverride: 'TIEF_IM_WESTEN' } },
   ],
   activeGroupId: 'group-sv-adler',
@@ -82,6 +86,19 @@ export const demoSession: Session = {
   systemRoles: [],
   demo: true,
 };
+
+/** Development-only planning events that exercise poll and registration UI. */
+export const demoPlanningEvents = [
+  {
+    id: 'planning-shift-meal', title: 'Essen in der nächsten Schicht', description: 'Bitte bis zum Rückmeldeschluss angeben, ob du mitisst.', location: 'Aufenthaltsraum', eventType: 'APPOINTMENT_POLL', status: 'PUBLISHED', audienceType: 'ALL_ACTIVE_MEMBERS', targetRoleIds: [], targetMembershipIds: [], allDay: false, timeZone: 'Europe/Berlin', startsAt: '2026-08-31T18:00:00+02:00', endsAt: '2026-08-31T19:00:00+02:00', responseDeadline: '2026-08-31T15:00:00+02:00', waitlistEnabled: false, confirmationRevision: 1, version: 1, counts: { invited: 4, yes: 2, maybe: 0, no: 1, pending: 1, registered: 0, waitlisted: 0, reconfirmationRequired: 0 }, canEdit: true, canCancel: true, canRespond: true, canViewParticipants: true,
+  },
+  {
+    id: 'planning-training', title: 'Erste-Hilfe-Fortbildung', description: 'Termin mit Anmeldung und begrenzten Plätzen.', location: 'Schulungsraum', eventType: 'APPOINTMENT_REGISTRATION', status: 'PUBLISHED', audienceType: 'ALL_ACTIVE_MEMBERS', targetRoleIds: [], targetMembershipIds: [], allDay: false, timeZone: 'Europe/Berlin', startsAt: '2026-09-04T09:00:00+02:00', endsAt: '2026-09-04T13:00:00+02:00', responseDeadline: '2026-09-02T18:00:00+02:00', capacity: 8, waitlistEnabled: true, confirmationRevision: 1, version: 1, counts: { invited: 4, yes: 0, maybe: 0, no: 0, pending: 0, registered: 6, waitlisted: 1, reconfirmationRequired: 0 }, canEdit: true, canCancel: true, canRespond: true, canViewParticipants: true,
+  },
+  {
+    id: 'planning-volunteer-weekend', title: 'Vereinswochenende', description: 'Gemeinsames Wochenende ohne feste Uhrzeiten.', location: 'Vereinsheim', eventType: 'APPOINTMENT', status: 'PUBLISHED', audienceType: 'ALL_ACTIVE_MEMBERS', targetRoleIds: [], targetMembershipIds: [], allDay: true, startDate: '2026-09-05', endDateExclusive: '2026-09-08', timeZone: 'Europe/Berlin', startsAt: '2026-09-04T22:00:00.000Z', endsAt: '2026-09-07T22:00:00.000Z', waitlistEnabled: false, confirmationRevision: 1, version: 1, counts: { invited: 4, yes: 0, maybe: 0, no: 0, pending: 0, registered: 0, waitlisted: 0, reconfirmationRequired: 0 }, canEdit: true, canCancel: true, canRespond: false, canViewParticipants: true,
+  },
+];
 
 /** Demo accounting periods used for visual and interaction testing. */
 export const demoPeriods: Period[] = [
@@ -321,6 +338,7 @@ export const demoDashboard: Dashboard = {
     { categoryId: 'category-penalties', categoryName: 'Strafen', icon: 'penalty', quantity: 6, total: { minorUnits: '2500', currency: 'EUR' } },
   ],
   recentBookings: demoBookings,
+  planningEnabled: true,
 };
 
 /** Demo account ledger. */

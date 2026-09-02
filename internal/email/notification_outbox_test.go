@@ -150,3 +150,22 @@ func TestRenderNotificationCopyFormatsSettlementDueDateInGerman(t *testing.T) {
 		t.Fatalf("notification body=%q", body)
 	}
 }
+
+func TestRenderNotificationCopyUsesBundledSeriesContext(t *testing.T) {
+	for _, test := range []struct {
+		eventType appnotifications.EventType
+		wantTitle string
+		wantBody  string
+	}{
+		{eventType: appnotifications.TypePlanningSeriesPublished, wantTitle: "Neue Terminserie", wantBody: "„Mittagessen Team“ wurde als Terminserie veröffentlicht."},
+		{eventType: appnotifications.TypePlanningSeriesUpdated, wantTitle: "Terminserie geändert", wantBody: "„Mittagessen Team“ wurde als Terminserie geändert."},
+		{eventType: appnotifications.TypePlanningSeriesCancelled, wantTitle: "Terminserie abgesagt", wantBody: "„Mittagessen Team“ wurde als Terminserie abgesagt."},
+	} {
+		t.Run(string(test.eventType), func(t *testing.T) {
+			title, body := renderNotificationCopy(test.eventType, appnotifications.EventContext{PlanningSeriesTitle: "Mittagessen\n Team"})
+			if title != test.wantTitle || body != test.wantBody {
+				t.Fatalf("series email copy=%q/%q", title, body)
+			}
+		})
+	}
+}

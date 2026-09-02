@@ -120,17 +120,20 @@ describe('RightsPanel role definitions', () => {
     const bookings = screen.getByRole('region', { name: 'Buchungen & Aktivitäten' });
     const finance = screen.getByRole('region', { name: 'Finanzen & Auswertungen' });
     const catalog = screen.getByRole('region', { name: 'Katalog' });
+    const planning = screen.getByRole('region', { name: 'Kalender & Planung' });
 
     expect(screen.getAllByRole('heading', { level: 4 }).map((heading) => heading.textContent)).toEqual([
       'Verwaltung & Mitglieder',
       'Buchungen & Aktivitäten',
       'Finanzen & Auswertungen',
       'Katalog',
+      'Kalender & Planung',
     ]);
     expect(within(administration).getAllByRole('switch')).toHaveLength(3);
     expect(within(bookings).getAllByRole('switch')).toHaveLength(6);
     expect(within(finance).getAllByRole('switch')).toHaveLength(3);
     expect(within(catalog).getAllByRole('switch')).toHaveLength(1);
+    expect(within(planning).getAllByRole('switch')).toHaveLength(4);
     expect(screen.getAllByRole('switch')).toHaveLength(PERMISSION_KEYS.length - 1);
   });
 

@@ -44,6 +44,7 @@ import type {
 import { isCategoryIcon, isColorMode, isThemeId } from '@/api/types';
 import { can } from '@/app/permissions';
 import { MAX_PRODUCT_PRICE_MINOR } from '@/api/money';
+import { zonedDateTimeInputToIso } from '@/features/planning/planningDate';
 import {
   demoAccountSummaries,
   demoAudit,
@@ -56,6 +57,7 @@ import {
   demoPayments,
   demoPermissionDefinitions,
   demoPeriods,
+  demoPlanningEvents,
   demoRoles,
   demoSession,
   demoSettlements,
@@ -122,6 +124,25 @@ const DEMO_ROUTE_POLICIES: readonly DemoRoutePolicy[] = [
 
 const clone = <T,>(value: T): T => structuredClone(value);
 const identifier = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
+
+function normalizeDemoPlanningTiming(input: Record<string, unknown>, timeZone = 'Europe/Berlin'): Record<string, unknown> {
+  const fields = { ...input };
+  if (input.allDay === true) {
+    delete fields.startsAt;
+    delete fields.endsAt;
+    const startDate = String(fields.startDate ?? '');
+    const endDateExclusive = String(fields.endDateExclusive ?? '');
+    return { ...fields, allDay: true, timeZone, startsAt: zonedDateTimeInputToIso(`${startDate}T00:00`, timeZone), endsAt: zonedDateTimeInputToIso(`${endDateExclusive}T00:00`, timeZone) };
+  }
+  delete fields.startDate;
+  delete fields.endDateExclusive;
+  return { ...fields, allDay: false, timeZone };
+}
+
+function demoPageLimit(value: string | null, fallback = 100): number {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 200 ? parsed : fallback;
+}
 
 async function blobText(blob: Blob): Promise<string> {
   if (typeof blob.text === 'function') return blob.text();
@@ -258,6 +279,8 @@ export class DemoTransport {
   private notifications = clone(demoNotifications);
   private audit = clone(demoAudit);
   private roles = clone(demoRoles);
+  private planningEvents = clone(demoPlanningEvents) as Array<Record<string, unknown>>;
+  private planningSettings = { enabled: true, timeZone: 'Europe/Berlin', version: 1, updatedAt: new Date().toISOString() };
   private assignmentVersions = new Map<string, number>();
   private invitations: InvitationMetadata[] = [];
   private invitationTokens = new Map<string, string>();
@@ -484,6 +507,81 @@ export class DemoTransport {
       currentMember.themeOverride = themeOverride;
       return { themeOverride } as T;
     }
+    if (resource === 'planning/settings' && method === 'GET') return clone(this.planningSettings) as T;
+    if (resource === 'planning/settings' && method === 'PUT') {
+      this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
+      const enabled = (body as { enabled?: unknown }).enabled;
+      if (typeof enabled !== 'boolean') throw new Error('Planning enabled must be boolean.');
+      this.planningSettings = { ...this.planningSettings, enabled, version: this.planningSettings.version + 1, updatedAt: new Date().toISOString() };
+      const group = this.session.groups.find((entry) => entry.id === groupId);
+      if (group) group.planningEnabled = enabled;
+      return clone(this.planningSettings) as T;
+    }
+    if (resource === 'planning/events' && method === 'GET') {
+      const from = requestUrl.searchParams.get('from');
+      const to = requestUrl.searchParams.get('to');
+      const status = requestUrl.searchParams.get('status');
+      const cursor = requestUrl.searchParams.get('cursor');
+      const limit = demoPageLimit(requestUrl.searchParams.get('limit'));
+      const items = this.planningEvents
+        .filter((entry) => (!from || String(entry.endsAt ?? entry.startsAt) > from) && (!to || String(entry.startsAt) < to) && (!status || entry.status === status));
+      items.sort((left, right) => String(left.startsAt).localeCompare(String(right.startsAt)) || String(left.id).localeCompare(String(right.id)));
+      const cursorIndex = cursor ? items.findIndex((entry) => entry.id === cursor) : -1;
+      if (cursor && cursorIndex < 0) throw new Error('Planning event cursor is invalid.');
+      const page = items.slice(cursorIndex + 1, cursorIndex + 1 + limit + 1);
+      const nextCursor = page.length > limit ? String(page[limit - 1].id) : undefined;
+      return { items: clone(page.slice(0, limit)), ...(nextCursor ? { nextCursor } : {}) } as T;
+    }
+    if (resource === 'planning/events' && method === 'POST') {
+      const eventInput = body as Record<string, unknown>;
+      const now = new Date().toISOString();
+      const invited = this.members.filter((member) => member.status === 'ACTIVE').length;
+      const event = { ...normalizeDemoPlanningTiming(eventInput), id: identifier('planning-event'), status: 'PUBLISHED', confirmationRevision: 1, version: 1, counts: { invited, yes: 0, maybe: 0, no: 0, pending: eventInput.eventType === 'APPOINTMENT_POLL' ? invited : 0, registered: 0, waitlisted: 0, reconfirmationRequired: 0 }, canEdit: true, canCancel: true, canRespond: false, canViewParticipants: true, createdAt: now, updatedAt: now };
+      this.planningEvents.push(event);
+      return clone(event) as T;
+    }
+    const planningEventMatch = resource.match(/^planning\/events\/([^/]+)$/);
+    if (planningEventMatch && method === 'GET') {
+      const event = this.planningEvents.find((entry) => entry.id === planningEventMatch[1]);
+      if (!event) throw new Error('Planning event not found.');
+      return clone(event) as T;
+    }
+    if (planningEventMatch && method === 'PUT') {
+      const index = this.planningEvents.findIndex((entry) => entry.id === planningEventMatch[1]);
+      if (index < 0) throw new Error('Planning event not found.');
+      this.planningEvents[index] = { ...this.planningEvents[index], ...normalizeDemoPlanningTiming(body as Record<string, unknown>), version: Number(this.planningEvents[index].version ?? 1) + 1, updatedAt: new Date().toISOString() };
+      return clone(this.planningEvents[index]) as T;
+    }
+    const planningTransitionMatch = resource.match(/^planning\/events\/([^/]+)\/(publish|close|complete|cancel)$/);
+    if (planningTransitionMatch && method === 'POST') {
+      const event = this.planningEvents.find((entry) => entry.id === planningTransitionMatch[1]);
+      if (!event) throw new Error('Planning event not found.');
+      const status = planningTransitionMatch[2] === 'publish' ? 'PUBLISHED' : planningTransitionMatch[2] === 'close' ? 'CLOSED' : planningTransitionMatch[2] === 'complete' ? 'COMPLETED' : 'CANCELLED';
+      Object.assign(event, { status, canRespond: status === 'PUBLISHED', version: Number(event.version ?? 1) + 1, updatedAt: new Date().toISOString() });
+      return clone(event) as T;
+    }
+    const planningParticipationMatch = resource.match(/^planning\/events\/([^/]+)\/participation$/);
+    if (planningParticipationMatch && method === 'PUT') {
+      const event = this.planningEvents.find((entry) => entry.id === planningParticipationMatch[1]);
+      if (!event) throw new Error('Planning event not found.');
+      const status = String((body as { status?: unknown }).status ?? 'WITHDRAWN');
+      event.myParticipation = status === 'WITHDRAWN' ? undefined : { status, effectiveStatus: status, confirmedRevision: event.confirmationRevision, version: 1, updatedAt: new Date().toISOString() };
+      event.version = Number(event.version ?? 1) + 1;
+      return clone(event) as T;
+    }
+    const planningParticipantsMatch = resource.match(/^planning\/events\/([^/]+)\/participants$/);
+    if (planningParticipantsMatch && method === 'GET') {
+      const cursor = requestUrl.searchParams.get('cursor');
+      const limit = demoPageLimit(requestUrl.searchParams.get('limit'));
+      const activeMembers = this.members.filter((member) => member.status === 'ACTIVE');
+      activeMembers.sort((left, right) => left.displayName.localeCompare(right.displayName) || left.id.localeCompare(right.id));
+      const participants = activeMembers.map((member) => ({ membershipId: member.id, displayName: member.displayName, avatarUrl: member.avatarUrl, effectiveStatus: 'YES', status: 'YES', confirmedRevision: 1, version: 1, updatedAt: new Date().toISOString() }));
+      const cursorIndex = cursor ? participants.findIndex((participant) => participant.membershipId === cursor) : -1;
+      if (cursor && cursorIndex < 0) throw new Error('Planning participant cursor is invalid.');
+      const page = participants.slice(cursorIndex + 1, cursorIndex + 1 + limit + 1);
+      const nextCursor = page.length > limit ? page[limit - 1].membershipId : undefined;
+      return { items: clone(page.slice(0, limit)), ...(nextCursor ? { nextCursor } : {}) } as T;
+    }
     if (resource === 'public-join-link' && method === 'GET') return clone(this.publicJoinLink) as T;
     if (resource === 'public-join-link' && method === 'PUT') {
       const input = body as { enabled: boolean; expiresAt: string | null };
@@ -516,8 +614,11 @@ export class DemoTransport {
       const dashboard = clone({
         ...this.dashboard,
         recentBookings: this.dashboard.recentBookings.map((booking) => this.bookingWithCurrentIdentities(booking)),
-      });
+      }) as Record<string, unknown>;
       if (!can(this.currentMembership(groupId)?.effectiveGrants, 'VIEW_GROUP_STATISTICS')) delete dashboard.groupOutstanding;
+      dashboard.planningEnabled = this.planningSettings.enabled;
+      dashboard.nextPlanningEvent = this.planningEvents.find((entry) => entry.status === 'PUBLISHED');
+      dashboard.openPlanningActionCount = dashboard.nextPlanningEvent ? 1 : 0;
       return dashboard as T;
     }
     if (resource === 'transaction-settings' && method === 'GET') return clone({

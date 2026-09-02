@@ -6,7 +6,7 @@ import { effectivePermissionKeys } from '@/app/permissions';
 import { Toggle } from '@/components/ui/Toggle';
 import styles from './RightsPanel.module.css';
 
-type PermissionGroupKey = 'administration' | 'bookings' | 'finance' | 'catalog';
+type PermissionGroupKey = 'administration' | 'bookings' | 'finance' | 'catalog' | 'planning';
 
 const PERMISSION_GROUPS: ReadonlyArray<{ key: PermissionGroupKey; permissions: readonly PermissionKey[] }> = [
   {
@@ -24,6 +24,10 @@ const PERMISSION_GROUPS: ReadonlyArray<{ key: PermissionGroupKey; permissions: r
   {
     key: 'catalog',
     permissions: ['CATALOG_MANAGEMENT'],
+  },
+  {
+    key: 'planning',
+    permissions: ['USE_PLANNING', 'CREATE_PLANNING_EVENTS', 'VIEW_PLANNING_PARTICIPANTS', 'MANAGE_PLANNING_EVENTS'],
   },
 ];
 

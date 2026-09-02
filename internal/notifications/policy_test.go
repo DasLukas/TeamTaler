@@ -87,7 +87,7 @@ func TestNotificationPolicyVersioningAndPreferenceRetention(t *testing.T) {
 	service := Service{DB: db, EmailDeliveryAvailable: true, PushDeliveryAvailable: true}
 	actor := domain.Principal{UserID: membership.UserID}
 	settings, err := service.GetGroupSettings(ctx, membership)
-	if err != nil || settings.Version != 1 || len(settings.Events) != 7 {
+	if err != nil || settings.Version != 1 || len(settings.Events) != 14 {
 		t.Fatalf("initial group settings=%#v err=%v", settings, err)
 	}
 	updates := make([]GroupEventUpdate, 0, len(settings.Events))

@@ -26,6 +26,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/exportnotifications"
 	"github.com/DasLukas/TeamTaler/internal/httpapi"
 	"github.com/DasLukas/TeamTaler/internal/notifications"
+	planningservice "github.com/DasLukas/TeamTaler/internal/planning"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/storage"
 	systemadmin "github.com/DasLukas/TeamTaler/internal/system"
@@ -130,7 +131,24 @@ func serve(arguments []string) error {
 	if err != nil {
 		return fmt.Errorf("configure settlement reminder worker: %w", err)
 	}
-	backgroundRunners := []backgroundRunner{{name: "settlement reminders", run: reminderWorker.Run}}
+	planningWorker, err := notifications.NewPlanningWorker(db, notificationService, slog.Default())
+	if err != nil {
+		return fmt.Errorf("configure planning notification worker: %w", err)
+	}
+	planningLifecycleWorker, err := planningservice.NewLifecycleWorker(db, slog.Default())
+	if err != nil {
+		return fmt.Errorf("configure planning lifecycle worker: %w", err)
+	}
+	planningSeriesWorker, err := planningservice.NewSeriesMaterializationWorker(db, slog.Default())
+	if err != nil {
+		return fmt.Errorf("configure planning series materialization worker: %w", err)
+	}
+	backgroundRunners := []backgroundRunner{
+		{name: "settlement reminders", run: reminderWorker.Run},
+		{name: "planning notifications", run: planningWorker.Run},
+		{name: "planning lifecycle", run: planningLifecycleWorker.Run},
+		{name: "planning series materialization", run: planningSeriesWorker.Run},
+	}
 	exportStore, err := exporting.NewFileArtifactStore(filepath.Join(cfg.DataDirectory, "exports"))
 	if err != nil {
 		return fmt.Errorf("configure data export artifact store: %w", err)

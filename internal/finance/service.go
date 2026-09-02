@@ -108,11 +108,52 @@ type LedgerEntry struct {
 // Dashboard is the group-scoped landing-page read model combining account,
 // booking, notification, and optional permission-gated group totals.
 type Dashboard struct {
-	Account          Account          `json:"account"`
-	OpenPeriod       domain.Period    `json:"openPeriod"`
-	RecentBookings   []domain.Booking `json:"recentBookings"`
-	UnreadCount      int64            `json:"unreadNotificationCount"`
-	GroupOutstanding *int64           `json:"groupOutstandingMinor,omitempty,string"`
+	Account                 Account               `json:"account"`
+	OpenPeriod              domain.Period         `json:"openPeriod"`
+	RecentBookings          []domain.Booking      `json:"recentBookings"`
+	UnreadCount             int64                 `json:"unreadNotificationCount"`
+	GroupOutstanding        *int64                `json:"groupOutstandingMinor,omitempty,string"`
+	PlanningEnabled         bool                  `json:"planningEnabled"`
+	NextPlanningEvent       *PlanningEventSummary `json:"nextPlanningEvent,omitempty"`
+	OpenPlanningActionCount int64                 `json:"openPlanningActionCount"`
+}
+
+// PlanningParticipationCounts contains privacy-safe aggregate response totals
+// for the next event shown on the dashboard. It deliberately excludes member
+// identities and mirrors the aggregate contract of the planning module.
+type PlanningParticipationCounts struct {
+	Invited                int64 `json:"invited"`
+	Yes                    int64 `json:"yes"`
+	Maybe                  int64 `json:"maybe"`
+	No                     int64 `json:"no"`
+	Pending                int64 `json:"pending"`
+	Registered             int64 `json:"registered"`
+	Waitlisted             int64 `json:"waitlisted"`
+	ReconfirmationRequired int64 `json:"reconfirmationRequired"`
+}
+
+// PlanningEventSummary is the privacy-safe next-event dashboard projection.
+// It contains the presentation fields required by the shared agenda event
+// card, aggregate participation totals, and no participant identities.
+type PlanningEventSummary struct {
+	ID                    string                      `json:"id"`
+	SeriesID              string                      `json:"seriesId,omitempty"`
+	Title                 string                      `json:"title"`
+	Description           string                      `json:"description"`
+	Location              string                      `json:"location"`
+	EventType             string                      `json:"eventType"`
+	AllDay                bool                        `json:"allDay"`
+	TimeZone              string                      `json:"timeZone"`
+	StartDate             string                      `json:"startDate,omitempty"`
+	EndDateExclusive      string                      `json:"endDateExclusive,omitempty"`
+	StartsAt              string                      `json:"startsAt"`
+	EndsAt                string                      `json:"endsAt,omitempty"`
+	Status                string                      `json:"status"`
+	Counts                PlanningParticipationCounts `json:"counts"`
+	MyEffectiveStatus     string                      `json:"myEffectiveStatus,omitempty"`
+	MyParticipationStatus string                      `json:"myParticipationStatus,omitempty"`
+	ActionRequired        bool                        `json:"actionRequired"`
+	CanRespond            bool                        `json:"canRespond"`
 }
 
 // GroupOutstanding returns the signed net receivable across every member

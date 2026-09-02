@@ -1,6 +1,6 @@
 // Command teamtaler-testdata creates a disposable local TeamTaler database
 // containing representative German users, groups, catalog items, bookings,
-// payments, notifications, and settlements.
+// payments, notifications, settlements, and time-relative planning events.
 package main
 
 import (
@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/DasLukas/TeamTaler/internal/auth"
@@ -23,6 +24,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/media"
 	"github.com/DasLukas/TeamTaler/internal/notifications"
 	"github.com/DasLukas/TeamTaler/internal/periods"
+	"github.com/DasLukas/TeamTaler/internal/planning"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/storage"
 	systemadmin "github.com/DasLukas/TeamTaler/internal/system"
@@ -38,6 +40,7 @@ const (
 	secondaryMemberEmail = "noah@example.test"
 	secondaryCategory    = "Vereinsheim"
 	secondaryProduct     = "Vereinskaffee"
+	planningFixtureZone  = "Europe/Berlin"
 )
 
 // fixtureAssets contains local-only media normalized into protected storage.
@@ -124,6 +127,7 @@ func run() error {
 	bookingService := bookings.Service{DB: db, Groups: groupService, Notifications: notificationService}
 	financeService := finance.Service{DB: db, Notifications: notificationService}
 	periodService := periods.Service{DB: db, Notifications: notificationService}
+	planningService := planning.Service{DB: db}
 
 	if err := authService.Bootstrap(ctx, adminEmail, "Ada Administratorin", testPassword, primaryGroupName, "EUR"); err != nil {
 		return fmt.Errorf("bootstrap administrator: %w", err)
@@ -302,9 +306,12 @@ func run() error {
 	}); err != nil {
 		return err
 	}
+	if err := seedPlanning(ctx, planningService, adminSession.Principal, adminGroup.Membership, baseNow); err != nil {
+		return err
+	}
 
 	seedNow = baseNow.AddDate(0, 0, 5)
-	if err := seedSecondaryGroup(ctx, authService, groupService, catalogService, bookingService, financeService, periodService, notificationService, cfg.DataDirectory, adminSession.Principal); err != nil {
+	if err := seedSecondaryGroup(ctx, authService, groupService, catalogService, bookingService, financeService, periodService, planningService, notificationService, cfg.DataDirectory, adminSession.Principal, baseNow); err != nil {
 		return err
 	}
 	if _, err := db.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
@@ -392,7 +399,7 @@ func seedSystemOnlyAdministrator(ctx context.Context, db *sql.DB, grantingUserID
 }
 
 // seedSecondaryGroup creates an unbranded group and one closed settlement.
-func seedSecondaryGroup(ctx context.Context, authService auth.Service, groupService groups.Service, catalogService catalog.Service, bookingService bookings.Service, financeService finance.Service, periodService periods.Service, notificationService notifications.Service, dataDirectory string, administrator domain.Principal) error {
+func seedSecondaryGroup(ctx context.Context, authService auth.Service, groupService groups.Service, catalogService catalog.Service, bookingService bookings.Service, financeService finance.Service, periodService periods.Service, planningService planning.Service, notificationService notifications.Service, dataDirectory string, administrator domain.Principal, planningReference time.Time) error {
 	group, err := groupService.Create(ctx, administrator, secondaryGroupName, "EUR")
 	if err != nil {
 		return fmt.Errorf("create secondary test group: %w", err)
@@ -444,6 +451,9 @@ func seedSecondaryGroup(ctx context.Context, authService auth.Service, groupServ
 		if err := configureNotifications(ctx, notificationService, groupService, administrator, group.Membership); err != nil {
 			return err
 		}
+		if err := seedPlanning(ctx, planningService, administrator, group.Membership, planningReference); err != nil {
+			return err
+		}
 		result, closeErr := periodService.Close(ctx, administrator, group.Membership, "seed-close-secondary", periodID, periods.CloseInput{Label: "Vereinsabend", DueAt: platform.Now().AddDate(0, 0, 14).Format("2006-01-02"), NextPeriodLabel: "Nächster Vereinsabend"})
 		if closeErr != nil {
 			return fmt.Errorf("close secondary settlement: %w", closeErr)
@@ -453,6 +463,510 @@ func seedSecondaryGroup(ctx context.Context, authService auth.Service, groupServ
 		}
 		return nil
 	})
+}
+
+// seedPlanning enables the module and publishes representative timed and
+// all-day events before, during, and after the current test-server date.
+//
+// Parameters:
+//   - ctx: Bounds all planning settings, event, audience, and response writes.
+//   - service: Planning service backed by the disposable fixture database.
+//   - actor: Group administrator recorded as creator and publisher.
+//   - membership: Administrator membership that owns the seeded events.
+//   - reference: Stable server-start time from which every standalone and
+//     recurring fixture schedule is derived.
+//
+// Returns:
+//   - error: Configuration, authorization, validation, or persistence failures.
+//
+// The helper temporarily advances the shared fixture clock to realistic event
+// creation times and restores it before returning.
+func seedPlanning(ctx context.Context, service planning.Service, actor domain.Principal, membership domain.Membership, reference time.Time) error {
+	originalNow := platform.Now
+	clockNow := reference
+	platform.Now = func() time.Time { return clockNow }
+	defer func() { platform.Now = originalNow }()
+
+	settings, err := service.GetSettings(ctx, membership)
+	if err != nil {
+		return fmt.Errorf("read planning settings for group %q: %w", membership.GroupID, err)
+	}
+	if !settings.Enabled {
+		if _, err := service.UpdateSettings(ctx, actor, membership, true, settings.Version); err != nil {
+			return fmt.Errorf("enable planning for group %q: %w", membership.GroupID, err)
+		}
+	}
+	fixtureLocation, err := time.LoadLocation(planningFixtureZone)
+	if err != nil {
+		return fmt.Errorf("load planning fixture timezone: %w", err)
+	}
+
+	capacity := 3
+	responseDeadlineMinutesBefore := 12 * 60
+	events := []struct {
+		idempotencyKey string
+		title          string
+		description    string
+		location       string
+		eventType      string
+		createdAt      time.Time
+		startsAt       time.Time
+		endsAt         time.Time
+		deadlineLead   *int
+		capacity       *int
+		waitlist       bool
+		response       string
+	}{
+		{
+			idempotencyKey: "seed-planning-past-appointment",
+			title:          "Vergangener Teamabend",
+			description:    "Dieser Termin liegt neun Tage vor dem Start des Testservers.",
+			location:       "Vereinsheim",
+			eventType:      planning.EventAppointment,
+			createdAt:      reference.AddDate(0, 0, -10),
+			startsAt:       reference.AddDate(0, 0, -9),
+			endsAt:         reference.AddDate(0, 0, -9).Add(time.Hour),
+		},
+		{
+			idempotencyKey: "seed-planning-past-poll",
+			title:          "Vergangene Essensabfrage",
+			description:    "Diese Abfrage liegt fünf Tage vor dem Start des Testservers.",
+			location:       "Küche",
+			eventType:      planning.EventAppointmentPoll,
+			createdAt:      reference.AddDate(0, 0, -6),
+			startsAt:       reference.AddDate(0, 0, -5),
+			endsAt:         reference.AddDate(0, 0, -5).Add(time.Hour),
+			deadlineLead:   &responseDeadlineMinutesBefore,
+			response:       "YES",
+		},
+		{
+			idempotencyKey: "seed-planning-past-registration",
+			title:          "Vergangenes Schichtessen",
+			description:    "Diese Anmeldung liegt zwei Tage vor dem Start des Testservers.",
+			location:       "Aufenthaltsraum",
+			eventType:      planning.EventAppointmentRegistration,
+			createdAt:      reference.AddDate(0, 0, -3),
+			startsAt:       reference.AddDate(0, 0, -2),
+			endsAt:         reference.AddDate(0, 0, -2).Add(2 * time.Hour),
+			deadlineLead:   &responseDeadlineMinutesBefore,
+			capacity:       &capacity,
+			waitlist:       true,
+			response:       "REGISTERED",
+		},
+		{
+			idempotencyKey: "seed-planning-current-appointment",
+			title:          "Laufender Teamtermin",
+			description:    "Dieser Termin läuft beim Start des Testservers gerade.",
+			location:       "Vereinsheim",
+			eventType:      planning.EventAppointment,
+			createdAt:      reference.Add(-time.Hour),
+			startsAt:       reference.Add(-30 * time.Minute),
+			endsAt:         reference.Add(30 * time.Minute),
+		},
+		{
+			idempotencyKey: "seed-planning-future-appointment",
+			title:          "Kommender Teamabend",
+			description:    "Dieser Termin liegt zwei Tage nach dem Start des Testservers.",
+			location:       "Vereinsheim",
+			eventType:      planning.EventAppointment,
+			createdAt:      reference,
+			startsAt:       reference.AddDate(0, 0, 2),
+			endsAt:         reference.AddDate(0, 0, 2).Add(time.Hour),
+		},
+		{
+			idempotencyKey: "seed-planning-future-poll",
+			title:          "Kommende Essensabfrage",
+			description:    "Diese Abfrage liegt fünf Tage nach dem Start des Testservers.",
+			location:       "Küche",
+			eventType:      planning.EventAppointmentPoll,
+			createdAt:      reference,
+			startsAt:       reference.AddDate(0, 0, 5),
+			endsAt:         reference.AddDate(0, 0, 5).Add(time.Hour),
+			deadlineLead:   &responseDeadlineMinutesBefore,
+			response:       "MAYBE",
+		},
+		{
+			idempotencyKey: "seed-planning-future-registration",
+			title:          "Kommendes Schichtessen",
+			description:    "Diese Anmeldung liegt neun Tage nach dem Start des Testservers.",
+			location:       "Aufenthaltsraum",
+			eventType:      planning.EventAppointmentRegistration,
+			createdAt:      reference,
+			startsAt:       reference.AddDate(0, 0, 9),
+			endsAt:         reference.AddDate(0, 0, 9).Add(2 * time.Hour),
+			deadlineLead:   &responseDeadlineMinutesBefore,
+			capacity:       &capacity,
+			waitlist:       true,
+			response:       "REGISTERED",
+		},
+	}
+
+	for _, seed := range events {
+		clockNow = seed.createdAt
+		endsAt := platform.Timestamp(seed.endsAt)
+		event, err := service.CreateEvent(ctx, actor, membership, seed.idempotencyKey, planning.EventInput{
+			Title:                         seed.title,
+			Description:                   seed.description,
+			Location:                      seed.location,
+			EventType:                     seed.eventType,
+			AudienceType:                  planning.AudienceAllActive,
+			StartsAt:                      platform.Timestamp(seed.startsAt),
+			EndsAt:                        &endsAt,
+			ResponseDeadlineMinutesBefore: seed.deadlineLead,
+			Capacity:                      seed.capacity,
+			WaitlistEnabled:               seed.waitlist,
+		})
+		if err != nil {
+			return fmt.Errorf("create planning fixture %q for group %q: %w", seed.title, membership.GroupID, err)
+		}
+		if seed.response != "" {
+			if _, err := service.SetParticipation(ctx, actor, membership, event.ID, seed.response); err != nil {
+				return fmt.Errorf("set planning response for %q in group %q: %w", seed.title, membership.GroupID, err)
+			}
+		}
+	}
+
+	// Keep every event type represented in both schedule modes on the current
+	// civil date. Poll and registration all-day occurrences come from their
+	// weekly series; this standalone multi-day appointment spans the civil dates
+	// around today without depending on UTC midnight.
+	referenceDate := reference.In(fixtureLocation)
+	clockNow = reference.AddDate(0, 0, -2)
+	if _, err := service.CreateEvent(ctx, actor, membership, "seed-planning-current-all-day-appointment", planning.EventInput{
+		Title:            "Mehrtägiges Planungstreffen",
+		Description:      "Ein ganztägiger, mehrtägiger Termin für Tages-, Wochen-, Monats- und Agendaansicht.",
+		Location:         "Vereinsheim",
+		EventType:        planning.EventAppointment,
+		AudienceType:     planning.AudienceAllActive,
+		AllDay:           true,
+		StartDate:        referenceDate.AddDate(0, 0, -1).Format(time.DateOnly),
+		EndDateExclusive: referenceDate.AddDate(0, 0, 2).Format(time.DateOnly),
+	}); err != nil {
+		return fmt.Errorf("create current all-day planning fixture for group %q: %w", membership.GroupID, err)
+	}
+
+	// Create the recurring fixtures from a historical clock so their bounded
+	// COUNT ranges span calendar dates before, on, and after server startup.
+	clockNow = reference.AddDate(0, 0, -15)
+	return seedPlanningSeries(ctx, service, actor, membership, reference, responseDeadlineMinutesBefore, capacity)
+}
+
+// seedPlanningSeries creates published timed weekly and all-day recurring
+// series for every planning type and turns later occurrences into
+// representative edit and cancellation exceptions through the public planning
+// service.
+//
+// Parameters:
+//   - ctx: Bounds series creation and occurrence mutation writes.
+//   - service: Planning service backed by the disposable fixture database.
+//   - actor: Group administrator recorded in the audit trail.
+//   - membership: Administrator membership that owns the series.
+//   - reference: Stable server-start time that centers weekly fixtures and
+//     locates the next daylight-saving transition fixture.
+//   - responseDeadlineMinutesBefore: Relative response deadline for interactive series.
+//   - capacity: Registration capacity used with the waitlist fixture.
+//
+// Returns:
+//   - error: Series creation, lookup, validation, or occurrence mutation failures.
+func seedPlanningSeries(ctx context.Context, service planning.Service, actor domain.Principal, membership domain.Membership, reference time.Time, responseDeadlineMinutesBefore, capacity int) error {
+	occurrenceCount := 5
+	fixtureLocation, err := time.LoadLocation(planningFixtureZone)
+	if err != nil {
+		return fmt.Errorf("load planning fixture timezone: %w", err)
+	}
+	nextTransition, err := nextFixtureOffsetTransitionDate(reference, fixtureLocation)
+	if err != nil {
+		return err
+	}
+	referenceDate := reference.In(fixtureLocation)
+	appointmentStart := planningFixtureClock(reference, fixtureLocation, 9, 0)
+	pollStart := planningFixtureClock(reference, fixtureLocation, 9, 30)
+	registrationStart := planningFixtureClock(reference, fixtureLocation, 10, 0)
+	series := []struct {
+		idempotencyKey string
+		title          string
+		description    string
+		location       string
+		eventType      string
+		firstStart     time.Time
+		duration       time.Duration
+		allDay         bool
+		firstDate      time.Time
+		durationDays   int
+		frequency      string
+		deadlineLead   *int
+		capacity       *int
+		waitlist       bool
+	}{
+		{
+			idempotencyKey: "seed-planning-series-appointment",
+			title:          "Wöchentlicher Teamabend",
+			description:    "Eine wiederkehrende Terminserie mit einer individuell verschobenen Folgeveranstaltung.",
+			location:       "Vereinsheim",
+			eventType:      planning.EventAppointment,
+			firstStart:     appointmentStart.AddDate(0, 0, -14),
+			duration:       time.Hour,
+		},
+		{
+			idempotencyKey: "seed-planning-series-poll",
+			title:          "Wöchentliche Essensabfrage",
+			description:    "Eine wiederkehrende Abfrage mit einer relativen Rückmeldefrist.",
+			location:       "Küche",
+			eventType:      planning.EventAppointmentPoll,
+			firstStart:     pollStart.AddDate(0, 0, -14),
+			duration:       time.Hour,
+			deadlineLead:   &responseDeadlineMinutesBefore,
+		},
+		{
+			idempotencyKey: "seed-planning-series-registration",
+			title:          "Wöchentliches Schichtessen",
+			description:    "Eine wiederkehrende Anmeldung mit Kapazität, Warteliste und einer einzeln abgesagten Folgeveranstaltung.",
+			location:       "Aufenthaltsraum",
+			eventType:      planning.EventAppointmentRegistration,
+			firstStart:     registrationStart.AddDate(0, 0, -14),
+			duration:       2 * time.Hour,
+			deadlineLead:   &responseDeadlineMinutesBefore,
+			capacity:       &capacity,
+			waitlist:       true,
+		},
+		{
+			idempotencyKey: "seed-planning-series-all-day-appointment",
+			title:          "Ganztägige DST-Teamtage",
+			description:    "Eine ganztägige Terminserie mit zweitägigen Vorkommen über den nächsten Zeitzonenwechsel.",
+			location:       "Vereinsheim",
+			eventType:      planning.EventAppointment,
+			allDay:         true,
+			firstDate:      nextTransition.AddDate(0, 0, -2),
+			durationDays:   2,
+			frequency:      planning.RecurrenceDaily,
+		},
+		{
+			idempotencyKey: "seed-planning-series-all-day-poll",
+			title:          "Ganztägige Essensabfrage",
+			description:    "Eine zweitägige ganztägige Abfrageserie vor, am und nach dem Testserverdatum.",
+			location:       "Küche",
+			eventType:      planning.EventAppointmentPoll,
+			allDay:         true,
+			firstDate:      referenceDate.AddDate(0, 0, -14),
+			durationDays:   2,
+			frequency:      planning.RecurrenceWeekly,
+			deadlineLead:   &responseDeadlineMinutesBefore,
+		},
+		{
+			idempotencyKey: "seed-planning-series-all-day-registration",
+			title:          "Ganztägige Schichtanmeldung",
+			description:    "Eine ganztägige Anmeldeserie mit Kapazität, Warteliste und einer einzeln verlängerten Ausnahme.",
+			location:       "Aufenthaltsraum",
+			eventType:      planning.EventAppointmentRegistration,
+			allDay:         true,
+			firstDate:      referenceDate.AddDate(0, 0, -14),
+			durationDays:   1,
+			frequency:      planning.RecurrenceWeekly,
+			deadlineLead:   &responseDeadlineMinutesBefore,
+			capacity:       &capacity,
+			waitlist:       true,
+		},
+	}
+
+	var appointmentSeriesID, registrationSeriesID, allDayRegistrationSeriesID string
+	for _, seed := range series {
+		input := planning.EventInput{
+			Title:                         seed.title,
+			Description:                   seed.description,
+			Location:                      seed.location,
+			EventType:                     seed.eventType,
+			AudienceType:                  planning.AudienceAllActive,
+			ResponseDeadlineMinutesBefore: seed.deadlineLead,
+			Capacity:                      seed.capacity,
+			WaitlistEnabled:               seed.waitlist,
+		}
+		if seed.allDay {
+			input.AllDay = true
+			input.StartDate = seed.firstDate.Format(time.DateOnly)
+			input.EndDateExclusive = seed.firstDate.AddDate(0, 0, seed.durationDays).Format(time.DateOnly)
+		} else {
+			endsAt := platform.Timestamp(seed.firstStart.Add(seed.duration))
+			input.StartsAt = platform.Timestamp(seed.firstStart)
+			input.EndsAt = &endsAt
+		}
+		frequency := seed.frequency
+		if frequency == "" {
+			frequency = planning.RecurrenceWeekly
+		}
+		created, err := service.CreateSeries(ctx, actor, membership, seed.idempotencyKey, planning.SeriesCreateCommand{
+			EventInput: input,
+			Recurrence: planning.RecurrenceInput{
+				Frequency: frequency,
+				Interval:  1,
+				Range: planning.RecurrenceRangeInput{
+					Type:  planning.RecurrenceRangeCount,
+					Count: &occurrenceCount,
+				},
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("create planning series %q for group %q: %w", seed.title, membership.GroupID, err)
+		}
+		switch seed.eventType {
+		case planning.EventAppointment:
+			if !seed.allDay {
+				appointmentSeriesID = created.Series.ID
+			}
+		case planning.EventAppointmentRegistration:
+			if seed.allDay {
+				allDayRegistrationSeriesID = created.Series.ID
+			} else {
+				registrationSeriesID = created.Series.ID
+			}
+		}
+	}
+
+	appointment, err := seriesOccurrence(ctx, service, membership, appointmentSeriesID, 1)
+	if err != nil {
+		return fmt.Errorf("load editable planning-series occurrence for group %q: %w", membership.GroupID, err)
+	}
+	shifted, err := shiftedPlanningEventInput(appointment, 30*time.Minute)
+	if err != nil {
+		return fmt.Errorf("prepare edited planning-series occurrence for group %q: %w", membership.GroupID, err)
+	}
+	shifted.Title = "Verschobener Teamabend"
+	if _, err := service.UpdateEvent(ctx, actor, membership, appointment.ID, shifted, appointment.Version); err != nil {
+		return fmt.Errorf("edit planning-series occurrence for group %q: %w", membership.GroupID, err)
+	}
+
+	registration, err := seriesOccurrence(ctx, service, membership, registrationSeriesID, 1)
+	if err != nil {
+		return fmt.Errorf("load cancellable planning-series occurrence for group %q: %w", membership.GroupID, err)
+	}
+	if _, err := service.Transition(ctx, actor, membership, registration.ID, "CANCELLED", registration.Version); err != nil {
+		return fmt.Errorf("cancel planning-series occurrence for group %q: %w", membership.GroupID, err)
+	}
+
+	allDayRegistration, err := seriesOccurrence(ctx, service, membership, allDayRegistrationSeriesID, 3)
+	if err != nil {
+		return fmt.Errorf("load editable all-day planning-series occurrence for group %q: %w", membership.GroupID, err)
+	}
+	extendedAllDay := planning.EventInput{
+		Title:                         "Verlängerte ganztägige Schichtanmeldung",
+		Description:                   allDayRegistration.Description,
+		Location:                      allDayRegistration.Location,
+		EventType:                     allDayRegistration.EventType,
+		AudienceType:                  allDayRegistration.AudienceType,
+		AllDay:                        true,
+		TimeZone:                      allDayRegistration.TimeZone,
+		StartDate:                     allDayRegistration.StartDate,
+		EndDateExclusive:              addFixtureCalendarDays(allDayRegistration.EndDateExclusive, 1),
+		ResponseDeadlineMinutesBefore: allDayRegistration.ResponseDeadlineMinutesBefore,
+		Capacity:                      allDayRegistration.Capacity,
+		WaitlistEnabled:               allDayRegistration.WaitlistEnabled,
+	}
+	if _, err := service.UpdateEvent(ctx, actor, membership, allDayRegistration.ID, extendedAllDay, allDayRegistration.Version); err != nil {
+		return fmt.Errorf("edit all-day planning-series occurrence for group %q: %w", membership.GroupID, err)
+	}
+	return nil
+}
+
+// nextFixtureOffsetTransitionDate returns the next civil date whose noon has a
+// different UTC offset from the reference date in location.
+//
+// Parameters:
+//   - reference: Instant whose local date starts the bounded search.
+//   - location: Pinned IANA location whose transitions are inspected.
+//
+// Returns:
+//   - time.Time: Transition date represented at UTC midnight for date arithmetic.
+//   - error: No transition was found within the supported 400-day fixture horizon.
+func nextFixtureOffsetTransitionDate(reference time.Time, location *time.Location) (time.Time, error) {
+	local := reference.In(location)
+	baseline := time.Date(local.Year(), local.Month(), local.Day(), 12, 0, 0, 0, location)
+	_, baselineOffset := baseline.Zone()
+	for days := 1; days <= 400; days++ {
+		candidate := baseline.AddDate(0, 0, days)
+		_, offset := candidate.Zone()
+		if offset != baselineOffset {
+			return time.Date(candidate.Year(), candidate.Month(), candidate.Day(), 0, 0, 0, 0, time.UTC), nil
+		}
+	}
+	return time.Time{}, errors.New("planning fixture timezone has no offset transition within 400 days")
+}
+
+// planningFixtureClock resolves a stable local wall-clock slot on the civil
+// date containing reference.
+//
+// Parameters:
+//   - reference: Instant whose local civil date anchors the result.
+//   - location: Pinned IANA location used by the planning fixture.
+//   - hour: Local hour from 0 through 23.
+//   - minute: Local minute from 0 through 59.
+//
+// Returns:
+//   - time.Time: The requested wall-clock slot with the location attached.
+func planningFixtureClock(reference time.Time, location *time.Location, hour, minute int) time.Time {
+	local := reference.In(location)
+	return time.Date(local.Year(), local.Month(), local.Day(), hour, minute, 0, 0, location)
+}
+
+// addFixtureCalendarDays shifts a strict fixture date without elapsed-time or
+// daylight-saving arithmetic.
+//
+// Parameters:
+//   - value: Calendar date in YYYY-MM-DD form.
+//   - days: Signed count of civil days to add.
+//
+// Returns:
+//   - string: Shifted date, or the unchanged input when it is malformed.
+func addFixtureCalendarDays(value string, days int) string {
+	date, err := time.Parse(time.DateOnly, value)
+	if err != nil {
+		return value
+	}
+	return date.AddDate(0, 0, days).Format(time.DateOnly)
+}
+
+// seriesOccurrence returns the zero-based occurrence from one series through
+// the same visibility checks used by regular clients.
+func seriesOccurrence(ctx context.Context, service planning.Service, membership domain.Membership, seriesID string, offset int) (planning.Event, error) {
+	if strings.TrimSpace(seriesID) == "" || offset < 0 {
+		return planning.Event{}, errors.New("series occurrence requires a series identifier and a non-negative offset")
+	}
+	var eventID string
+	if err := service.DB.QueryRowContext(ctx, `SELECT id FROM planning_events WHERE group_id=? AND series_id=? ORDER BY series_sequence LIMIT 1 OFFSET ?`, membership.GroupID, seriesID, offset).Scan(&eventID); err != nil {
+		return planning.Event{}, err
+	}
+	return service.GetEvent(ctx, membership, eventID)
+}
+
+// shiftedPlanningEventInput copies an event's editable fields and shifts its
+// complete time interval by delta without changing its relative deadlines.
+func shiftedPlanningEventInput(event planning.Event, delta time.Duration) (planning.EventInput, error) {
+	start, err := time.Parse(time.RFC3339, event.StartsAt)
+	if err != nil {
+		return planning.EventInput{}, err
+	}
+	startsAt := platform.Timestamp(start.Add(delta))
+	var endsAt *string
+	if event.EndsAt != nil {
+		end, err := time.Parse(time.RFC3339, *event.EndsAt)
+		if err != nil {
+			return planning.EventInput{}, err
+		}
+		value := platform.Timestamp(end.Add(delta))
+		endsAt = &value
+	}
+	return planning.EventInput{
+		Title:                         event.Title,
+		Description:                   event.Description,
+		Location:                      event.Location,
+		EventType:                     event.EventType,
+		AudienceType:                  event.AudienceType,
+		StartsAt:                      startsAt,
+		EndsAt:                        endsAt,
+		ResponseDeadlineMinutesBefore: event.ResponseDeadlineMinutesBefore,
+		Capacity:                      event.Capacity,
+		WaitlistEnabled:               event.WaitlistEnabled,
+		TargetRoleIDs:                 event.TargetRoleIDs,
+		TargetMembershipIDs:           event.TargetMembershipIDs,
+	}, nil
 }
 
 // assignAdministratorStandardRoles combines only built-in standard roles.

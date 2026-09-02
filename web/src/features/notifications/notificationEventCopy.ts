@@ -9,6 +9,10 @@ const EVENT_COPY_KEYS: Record<ConfigurableNotificationEventType, { description: 
   SETTLEMENT_CREATED: { label: 'notifications.preferences.events.settlementCreated.label', description: 'notifications.preferences.events.settlementCreated.description' },
   SETTLEMENT_DUE_SOON: { label: 'notifications.preferences.events.settlementDueSoon.label', description: 'notifications.preferences.events.settlementDueSoon.description' },
   SETTLEMENT_OVERDUE: { label: 'notifications.preferences.events.settlementOverdue.label', description: 'notifications.preferences.events.settlementOverdue.description' },
+  PLANNING_EVENT_PUBLISHED: { label: 'notifications.preferences.events.planningPublished.label', description: 'notifications.preferences.events.planningPublished.description' },
+  PLANNING_EVENT_UPDATED: { label: 'notifications.preferences.events.planningChanged.label', description: 'notifications.preferences.events.planningChanged.description' },
+  PLANNING_EVENT_CANCELLED: { label: 'notifications.preferences.events.planningCancelled.label', description: 'notifications.preferences.events.planningCancelled.description' },
+  PLANNING_WAITLIST_PROMOTED: { label: 'notifications.preferences.events.planningPromoted.label', description: 'notifications.preferences.events.planningPromoted.description' },
 };
 
 /**
