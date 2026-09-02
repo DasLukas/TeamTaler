@@ -108,6 +108,21 @@ describe('BehaviorSettingsPanel', () => {
     expect(within(planningRegion).queryByRole('button')).not.toBeInTheDocument();
   });
 
+  it('refreshes member notification preferences when planning is disabled', async () => {
+    const user = userEvent.setup();
+    apiMock.getPlanningSettings.mockResolvedValue({ enabled: true, version: 1, timeZone: 'Europe/Berlin' });
+    apiMock.updatePlanningSettings.mockResolvedValue({ enabled: false, version: 2, timeZone: 'Europe/Berlin' });
+    const queryClient = renderPanel();
+    const removeQueries = vi.spyOn(queryClient, 'removeQueries');
+
+    const planningRegion = await screen.findByRole('region', { name: i18n.t('behaviorSettings.planning.title') });
+    await user.click(within(planningRegion).getByRole('switch', { name: i18n.t('behaviorSettings.planning.toggle') }));
+    await user.click(await screen.findByRole('button', { name: i18n.t('behaviorSettings.planning.disable') }));
+
+    await waitFor(() => expect(apiMock.updatePlanningSettings).toHaveBeenCalledWith('group-a', false, 1));
+    expect(removeQueries).toHaveBeenCalledWith({ queryKey: ['notification-preferences', 'group-a'] });
+  });
+
   it('removes the legacy booking-visibility switch from the new settings UI', async () => {
     renderPanel();
     expect(await screen.findByRole('switch', { name: i18n.t('behaviorSettings.notifications.enableEvent', { event: i18n.t('notifications.preferences.events.bookingAssigned.label') }) })).toBeVisible();
@@ -132,6 +147,7 @@ describe('BehaviorSettingsPanel', () => {
     apiMock.updateGroupSettings.mockResolvedValue({ ...settings, settlementsEnabled: true });
     const queryClient = renderPanel();
     const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
+    const removeQueries = vi.spyOn(queryClient, 'removeQueries');
 
     expect(await screen.findByRole('region', { name: i18n.t('behaviorSettings.financeSectionTitle') })).toBeVisible();
     const toggle = screen.getByRole('switch', { name: i18n.t('behaviorSettings.settlementsToggle') });
@@ -145,6 +161,7 @@ describe('BehaviorSettingsPanel', () => {
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['dashboard', 'group-a'] });
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['periods', 'group-a'] });
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['settlements', 'group-a'] });
+    expect(removeQueries).toHaveBeenCalledWith({ queryKey: ['notification-preferences', 'group-a'] });
   });
 
   it('persists each reason context through an accessible three-state control', async () => {

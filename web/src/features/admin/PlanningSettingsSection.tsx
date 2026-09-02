@@ -7,6 +7,7 @@ import type { Session } from '@/api/types';
 import { ConfirmationDialog } from '@/components/ui/ConfirmationDialog';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { Toggle } from '@/components/ui/Toggle';
+import { notificationKeys } from '@/features/notifications/notificationQueryKeys';
 import { planningKeys } from '@/features/planning/planningQueryKeys';
 import styles from './BehaviorSettingsPanel.module.css';
 
@@ -26,6 +27,7 @@ export function PlanningSettingsSection({ groupId }: { groupId: string }) {
           predicate: (cachedQuery) => cachedQuery.queryKey[0] === 'planning' && cachedQuery.queryKey[1] === groupId && cachedQuery.queryKey[2] !== 'settings',
         });
       }
+      queryClient.removeQueries({ queryKey: notificationKeys.preferences(groupId) });
       await queryClient.invalidateQueries({ queryKey: ['dashboard', groupId] });
       setConfirmDisable(false);
     },

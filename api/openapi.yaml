@@ -1675,7 +1675,7 @@ paths:
         - $ref: '#/components/parameters/GroupId'
       responses:
         '200':
-          description: Group-enabled events with effective channel availability
+          description: Events exposed by enabled modules, including effective group and channel availability
           headers: { ETag: { schema: { type: string } } }
           content: { application/json: { schema: { $ref: '#/components/schemas/NotificationPreferences' } } }
         '401': { $ref: '#/components/responses/Problem' }
@@ -1684,7 +1684,7 @@ paths:
     put:
       tags: [Groups]
       summary: Update independent email and push choices
-      description: Disabled group events and unavailable system channels are immutable; retained hidden choices are not deleted.
+      description: Disabled group events, disabled optional-module events, and unavailable system channels are immutable; retained hidden choices are not deleted.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/CSRFToken'
@@ -5682,7 +5682,7 @@ components:
         dueSoonLeadDays: { type: integer, minimum: 1, maximum: 30, default: 3 }
         overdueRepeatDays: { type: integer, minimum: 0, maximum: 90, default: 7 }
         availableChannels: { type: array, items: { $ref: '#/components/schemas/NotificationChannel' } }
-        events: { type: array, minItems: 7, maxItems: 7, items: { $ref: '#/components/schemas/GroupNotificationEventSetting' } }
+        events: { type: array, minItems: 14, maxItems: 14, items: { $ref: '#/components/schemas/GroupNotificationEventSetting' } }
         updatedAt: { type: string, format: date-time }
     GroupNotificationSettingsUpdate:
       type: object
@@ -5694,8 +5694,8 @@ components:
         overdueRepeatDays: { type: integer, minimum: 0, maximum: 90 }
         events:
           type: array
-          minItems: 7
-          maxItems: 7
+          minItems: 14
+          maxItems: 14
           items:
             type: object
             additionalProperties: false
@@ -5721,7 +5721,7 @@ components:
       properties:
         version: { type: integer, format: int64, minimum: 1 }
         availableChannels: { type: array, items: { $ref: '#/components/schemas/NotificationChannel' } }
-        events: { type: array, minItems: 7, maxItems: 7, items: { $ref: '#/components/schemas/NotificationEventPreference' } }
+        events: { type: array, minItems: 4, maxItems: 14, items: { $ref: '#/components/schemas/NotificationEventPreference' } }
     NotificationPreferencesUpdate:
       type: object
       additionalProperties: false
@@ -5730,7 +5730,7 @@ components:
         events:
           type: array
           minItems: 1
-          maxItems: 7
+          maxItems: 14
           items:
             type: object
             additionalProperties: false

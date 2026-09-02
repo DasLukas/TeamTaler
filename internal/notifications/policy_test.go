@@ -159,6 +159,65 @@ func TestNotificationPolicyVersioningAndPreferenceRetention(t *testing.T) {
 	}
 }
 
+func TestNotificationPreferencesHideEventsOwnedByDisabledModules(t *testing.T) {
+	ctx := context.Background()
+	db, membership := openNotificationPolicyFixture(t)
+	defer db.Close()
+	service := Service{DB: db, EmailDeliveryAvailable: true, PushDeliveryAvailable: true}
+	if _, err := db.ExecContext(ctx, `INSERT INTO membership_notification_channels(group_id,membership_id,event_type,channel,enabled_at,updated_at)
+		VALUES(?,?,?,?,?,?)`, membership.GroupID, membership.ID, TypePlanningEventPublished, ChannelEmail, "2026-08-20T08:00:00Z", "2026-08-20T08:00:00Z"); err != nil {
+		t.Fatalf("seed retained planning preference: %v", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `UPDATE group_settings SET settlements_enabled=0 WHERE group_id=?`, membership.GroupID); err != nil {
+		t.Fatalf("disable settlements: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE group_planning_settings SET enabled=0 WHERE group_id=?`, membership.GroupID); err != nil {
+		t.Fatalf("disable planning: %v", err)
+	}
+	preferences, err := service.GetPreferences(ctx, membership)
+	if err != nil {
+		t.Fatalf("read preferences for disabled modules: %v", err)
+	}
+	for _, event := range preferences.Events {
+		if IsPlanningEvent(event.Type) || event.Type == TypeSettlementCreated || event.Type == TypeSettlementDueSoon || event.Type == TypeSettlementOverdue {
+			t.Fatalf("disabled module event remained visible: %s", event.Type)
+		}
+	}
+	if len(preferences.Events) != 4 {
+		t.Fatalf("visible base events=%d, want 4", len(preferences.Events))
+	}
+	enabled := true
+	if _, err := service.UpdatePreferences(ctx, membership, PreferencesUpdate{Events: []PreferenceUpdate{{Type: TypeSettlementCreated, Email: &enabled}}}, preferences.Version); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("hidden settlement event update error=%v, want validation", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `UPDATE group_planning_settings SET enabled=1 WHERE group_id=?`, membership.GroupID); err != nil {
+		t.Fatalf("enable planning: %v", err)
+	}
+	preferences, err = service.GetPreferences(ctx, membership)
+	if err != nil {
+		t.Fatalf("read preferences after enabling planning: %v", err)
+	}
+	planningVisible := false
+	planningPreferenceRestored := false
+	for _, event := range preferences.Events {
+		planningVisible = planningVisible || IsPlanningEvent(event.Type)
+		if event.Type == TypePlanningEventPublished {
+			planningPreferenceRestored = event.Email
+		}
+		if event.Type == TypeSettlementCreated || event.Type == TypeSettlementDueSoon || event.Type == TypeSettlementOverdue {
+			t.Fatalf("settlement event visible while settlements remain disabled: %s", event.Type)
+		}
+	}
+	if !planningVisible {
+		t.Fatal("planning events remained hidden after enabling planning")
+	}
+	if !planningPreferenceRestored {
+		t.Fatal("stored planning preference was not restored after enabling planning")
+	}
+}
+
 func openNotificationPolicyFixture(t *testing.T) (*sql.DB, domain.Membership) {
 	t.Helper()
 	ctx := context.Background()
@@ -174,7 +233,8 @@ func openNotificationPolicyFixture(t *testing.T) (*sql.DB, domain.Membership) {
 		{`INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('user-policy','member@example.test','Member','hash',?,?)`, []any{now, now}},
 		{`INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES('group-policy','Policy group','EUR',?,?)`, []any{now, now}},
 		{`INSERT INTO memberships(id,group_id,user_id,joined_at) VALUES('member-policy','group-policy','user-policy',?)`, []any{now}},
-		{`INSERT INTO group_settings(group_id,members_can_view_all_bookings,notification_emails_enabled,updated_at) VALUES('group-policy',0,0,?)`, []any{now}},
+		{`INSERT INTO group_settings(group_id,members_can_view_all_bookings,notification_emails_enabled,settlements_enabled,updated_at) VALUES('group-policy',0,0,1,?)`, []any{now}},
+		{`UPDATE group_planning_settings SET enabled=1 WHERE group_id='group-policy'`, nil},
 	} {
 		if _, err := db.ExecContext(ctx, seed.statement, seed.arguments...); err != nil {
 			db.Close()

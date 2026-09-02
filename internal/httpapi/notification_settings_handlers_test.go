@@ -50,8 +50,8 @@ func TestNotificationSettingsHandlersEnforceETagsAndExposeCanonicalContract(t *t
 	getPreferences := roleHandlerRequest(principal, administrator.GroupID, http.MethodGet, "")
 	preferencesResponse := httptest.NewRecorder()
 	server.handleGetNotificationPreferences(preferencesResponse, getPreferences)
-	if preferencesResponse.Code != http.StatusOK || preferencesResponse.Header().Get("ETag") != `"v1"` {
-		t.Fatalf("get notification preferences status=%d ETag=%q body=%s", preferencesResponse.Code, preferencesResponse.Header().Get("ETag"), preferencesResponse.Body.String())
+	if preferencesResponse.Code != http.StatusOK || preferencesResponse.Header().Get("ETag") != `"v1"` || preferencesResponse.Header().Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("get notification preferences status=%d ETag=%q cache=%q body=%s", preferencesResponse.Code, preferencesResponse.Header().Get("ETag"), preferencesResponse.Header().Get("Cache-Control"), preferencesResponse.Body.String())
 	}
 	email := true
 	preferenceBody, err := json.Marshal(notifications.PreferencesUpdate{Events: []notifications.PreferenceUpdate{{Type: notifications.TypeBookingAssigned, Email: &email}}})

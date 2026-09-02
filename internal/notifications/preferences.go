@@ -51,7 +51,8 @@ type GroupEventUpdate struct {
 
 // EventPreference contains the current member's independent external channel
 // choices and the effective group gate for one catalog event. Stored choices
-// remain visible when the group temporarily disables the event.
+// remain visible when the group temporarily disables the event, while events
+// owned by a disabled optional module are omitted from the member projection.
 type EventPreference struct {
 	EventDefinition
 	Enabled        bool `json:"enabled"`
@@ -188,9 +189,9 @@ func (s Service) UpdateGroupSettings(ctx context.Context, actor domain.Principal
 	return result, err
 }
 
-// GetPreferences returns the complete effective event matrix for the current
-// membership. Disabled group events remain visible but cannot be edited, and
-// their stored channel choices are retained for a future re-enable.
+// GetPreferences returns the effective event matrix for the current membership.
+// Disabled group events remain visible but cannot be edited. Events owned by a
+// disabled optional module are hidden without deleting stored channel choices.
 func (s Service) GetPreferences(ctx context.Context, membership domain.Membership) (Preferences, error) {
 	var result Preferences
 	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
@@ -203,6 +204,10 @@ func (s Service) GetPreferences(ctx context.Context, membership domain.Membershi
 		}
 		result.AvailableChannels = availableChannels(availability)
 		if err := tx.QueryRowContext(ctx, `SELECT version FROM membership_notification_settings WHERE group_id=? AND membership_id=?`, membership.GroupID, membership.ID).Scan(&result.Version); err != nil {
+			return err
+		}
+		modules, err := readNotificationModuleAvailability(ctx, tx, membership.GroupID)
+		if err != nil {
 			return err
 		}
 		rows, err := tx.QueryContext(ctx, `SELECT catalog.event_type,
@@ -229,7 +234,7 @@ func (s Service) GetPreferences(ctx context.Context, membership domain.Membershi
 				return err
 			}
 			definition, supported := Definition(eventType)
-			if !supported {
+			if !supported || !modules.allows(eventType) {
 				continue
 			}
 			result.Events = append(result.Events, EventPreference{EventDefinition: definition, Enabled: groupEnabled, Email: emailEnabled, Push: pushEnabled, EmailAvailable: availability.EmailAvailable, PushAvailable: availability.PushAvailable})
@@ -277,9 +282,16 @@ func (s Service) UpdatePreferences(ctx context.Context, membership domain.Member
 		if currentVersion != expectedVersion {
 			return domain.ErrPrecondition
 		}
+		modules, err := readNotificationModuleAvailability(ctx, tx, membership.GroupID)
+		if err != nil {
+			return err
+		}
 		now := platform.Timestamp(platform.Now())
 		changed := false
 		for _, update := range input.Events {
+			if !modules.allows(update.Type) {
+				return domain.ValidationError{Field: "events.type", Message: "can only change events exposed by an enabled module"}
+			}
 			var groupEnabled bool
 			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM group_notification_events WHERE group_id=? AND event_type=?)`, membership.GroupID, update.Type).Scan(&groupEnabled); err != nil {
 				return err
@@ -324,6 +336,34 @@ func (s Service) UpdatePreferences(ctx context.Context, membership domain.Member
 		return Preferences{}, err
 	}
 	return s.GetPreferences(ctx, membership)
+}
+
+type notificationModuleAvailability struct {
+	planningEnabled    bool
+	settlementsEnabled bool
+}
+
+func readNotificationModuleAvailability(ctx context.Context, queryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, groupID string) (notificationModuleAvailability, error) {
+	var result notificationModuleAvailability
+	err := queryer.QueryRowContext(ctx, `SELECT planning.enabled,settings.settlements_enabled
+		FROM group_planning_settings planning
+		JOIN group_settings settings ON settings.group_id=planning.group_id
+		WHERE planning.group_id=?`, groupID).Scan(&result.planningEnabled, &result.settlementsEnabled)
+	return result, err
+}
+
+func (availability notificationModuleAvailability) allows(eventType EventType) bool {
+	if IsPlanningEvent(eventType) {
+		return availability.planningEnabled
+	}
+	switch eventType {
+	case TypeSettlementCreated, TypeSettlementDueSoon, TypeSettlementOverdue:
+		return availability.settlementsEnabled
+	default:
+		return true
+	}
 }
 
 func (s Service) channelAvailability(ctx context.Context, tx *sql.Tx) (ChannelAvailability, error) {

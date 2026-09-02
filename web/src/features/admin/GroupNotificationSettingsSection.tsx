@@ -9,6 +9,7 @@ import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { Toggle } from '@/components/ui/Toggle';
 import { notificationEventCopy } from '@/features/notifications/notificationEventCopy';
+import { notificationKeys } from '@/features/notifications/notificationQueryKeys';
 import styles from './GroupNotificationSettingsSection.module.css';
 
 interface NotificationPolicyFormProps {
@@ -78,7 +79,7 @@ function NotificationPolicyForm({ groupId, settings }: NotificationPolicyFormPro
     }),
     onSuccess: async (persisted) => {
       queryClient.setQueryData(['group-notification-settings', groupId], persisted);
-      await queryClient.invalidateQueries({ queryKey: ['notification-preferences', groupId] });
+      await queryClient.invalidateQueries({ queryKey: notificationKeys.preferences(groupId) });
     },
     onError: async () => { await queryClient.invalidateQueries({ queryKey: ['group-notification-settings', groupId] }); },
   });

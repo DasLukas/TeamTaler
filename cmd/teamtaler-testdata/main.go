@@ -231,9 +231,6 @@ func run() error {
 		}); err != nil {
 			return err
 		}
-		if err := configureNotifications(ctx, notificationService, groupService, adminSession.Principal, adminGroup.Membership); err != nil {
-			return err
-		}
 		seedNow = baseNow.AddDate(0, 0, 1)
 		july, closeErr := periodService.Close(ctx, adminSession.Principal, adminGroup.Membership, "seed-close-july", periodID, periods.CloseInput{Label: "Erste Abrechnung", DueAt: seedNow.AddDate(0, 0, 10).Format("2006-01-02"), NextPeriodLabel: "Zweiter Zeitraum"})
 		if closeErr != nil {
@@ -307,6 +304,9 @@ func run() error {
 		return err
 	}
 	if err := seedPlanning(ctx, planningService, adminSession.Principal, adminGroup.Membership, baseNow); err != nil {
+		return err
+	}
+	if err := configureNotifications(ctx, notificationService, groupService, adminSession.Principal, adminGroup.Membership); err != nil {
 		return err
 	}
 
@@ -448,10 +448,10 @@ func seedSecondaryGroup(ctx context.Context, authService auth.Service, groupServ
 		if err := seedPayments(ctx, financeService, administrator, group.Membership, platform.Timestamp(platform.Now()), []paymentSeed{{key: "seed-secondary-payment-noah", membershipID: noah.membership.ID, amountMinor: 250, method: "CASH", reference: "Bareinzahlung"}}); err != nil {
 			return err
 		}
-		if err := configureNotifications(ctx, notificationService, groupService, administrator, group.Membership); err != nil {
+		if err := seedPlanning(ctx, planningService, administrator, group.Membership, planningReference); err != nil {
 			return err
 		}
-		if err := seedPlanning(ctx, planningService, administrator, group.Membership, planningReference); err != nil {
+		if err := configureNotifications(ctx, notificationService, groupService, administrator, group.Membership); err != nil {
 			return err
 		}
 		result, closeErr := periodService.Close(ctx, administrator, group.Membership, "seed-close-secondary", periodID, periods.CloseInput{Label: "Vereinsabend", DueAt: platform.Now().AddDate(0, 0, 14).Format("2006-01-02"), NextPeriodLabel: "Nächster Vereinsabend"})

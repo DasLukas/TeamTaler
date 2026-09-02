@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { Field, SelectInput } from '@/components/ui/FormField';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { Toggle } from '@/components/ui/Toggle';
+import { notificationKeys } from '@/features/notifications/notificationQueryKeys';
 import { ThemePicker } from '@/features/appearance/ThemePicker';
 import { isPaymentTargetValid } from '@/features/finance/paymentTargets';
 import { ConfigurableListEditor } from './ConfigurableListEditor';
@@ -208,6 +209,7 @@ function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canMan
     },
     onSuccess: async (persisted) => {
       queryClient.setQueryData<GroupSettings>(['group-settings', groupId], persisted);
+      queryClient.removeQueries({ queryKey: notificationKeys.preferences(groupId) });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['booking-context', groupId] }),
         queryClient.invalidateQueries({ queryKey: ['transaction-settings', groupId] }),
