@@ -12,6 +12,7 @@
   min-width: 0;
   margin: 0 auto;
   padding: 50px 42px 72px;
+  container-type: inline-size;
 }
 
 .balanceRow {

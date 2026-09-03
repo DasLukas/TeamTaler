@@ -137,6 +137,48 @@ describe('MemberMultiSelect', () => {
     expect(screen.queryByLabelText(i18n.t('dialog.sheetHandle'))).not.toBeInTheDocument();
   });
 
+  it('filters members, existing guests, and pending guests by name', async () => {
+    const user = userEvent.setup();
+    render(<MemberMultiSelect
+      canBookForGuests
+      id="target-picker"
+      label={i18n.t('booking.forMember')}
+      onAddGuest={vi.fn()}
+      onChange={vi.fn()}
+      onRemoveGuest={vi.fn()}
+      pendingGuestNames={['Pending Guest']}
+      placeholder={i18n.t('booking.selectMembers')}
+      selectedIds={[]}
+      targets={targets}
+    />);
+
+    await user.click(screen.getByRole('button', { name: i18n.t('booking.forMember') }));
+    const dialog = screen.getByRole('dialog', { name: i18n.t('booking.forMember') });
+    const search = screen.getByRole('searchbox', { name: i18n.t('booking.searchRecipients') });
+
+    await user.type(search, 'existing');
+    expect(within(dialog).queryByText('Regular Member')).not.toBeInTheDocument();
+    expect(within(dialog).getByText('Existing Guest')).toBeVisible();
+    expect(within(dialog).queryByText('Pending Guest')).not.toBeInTheDocument();
+
+    await user.clear(search);
+    await user.type(search, 'pending');
+    expect(within(dialog).getByText('Pending Guest')).toBeVisible();
+    expect(within(dialog).queryByText('Existing Guest')).not.toBeInTheDocument();
+
+    await user.clear(search);
+    await user.type(search, 'missing');
+    expect(within(dialog).getByText(i18n.t('booking.noRecipientsFound'))).toBeVisible();
+    expect(screen.getByPlaceholderText(i18n.t('booking.guestNamePlaceholder'))).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: i18n.t('booking.forMember') }));
+    await user.click(screen.getByRole('button', { name: i18n.t('booking.forMember') }));
+    const reopenedDialog = screen.getByRole('dialog', { name: i18n.t('booking.forMember') });
+    expect(within(reopenedDialog).getByRole('searchbox', { name: i18n.t('booking.searchRecipients') })).toHaveValue('');
+    expect(within(reopenedDialog).getByText('Regular Member')).toBeVisible();
+    expect(within(reopenedDialog).getByText('Pending Guest')).toBeVisible();
+  });
+
   it('matches server-side control-character, code-point, and case-folding validation', async () => {
     const user = userEvent.setup();
     const onAddGuest = vi.fn();
