@@ -81,6 +81,8 @@
   gap: var(--space-4);
 }
 
+.tabPanel[hidden] { display: none; }
+
 .sectionHeading {
   display: grid;
   gap: var(--space-1);

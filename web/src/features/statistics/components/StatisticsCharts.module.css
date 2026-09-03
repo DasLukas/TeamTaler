@@ -22,8 +22,7 @@
 }
 
 .frameHeader h3,
-.frameHeader p,
-.statusBar p {
+.frameHeader p {
   margin: 0;
 }
 
@@ -358,29 +357,6 @@
 .kpi[data-tone='positive'] dd { color: var(--color-status-success); }
 .kpi[data-tone='warning'] dd { color: var(--color-status-warning); }
 
-.statusBar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-muted);
-}
-
-.statusBar p {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
-  color: var(--color-text-muted);
-  font-size: var(--font-size-xs);
-}
-
-.statusBar strong { color: var(--color-text-strong); }
-
 .financeTrendFrame .plot { height: auto; }
 
 .financeTrendPanel {
@@ -445,8 +421,6 @@
   .plot { height: 260px; }
   .activityFrame .plot { height: auto; }
   .activityPlot { height: 112px; }
-  .statusBar { align-items: center; }
-  .statusBar p { display: grid; gap: var(--space-1); }
 
   .trendRankingRow {
     grid-template-columns: minmax(0, 1fr) auto;

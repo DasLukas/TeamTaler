@@ -345,14 +345,16 @@ export const de = {
     accessChangedTitle: 'Statistik nicht mehr verfügbar',
     accessChangedMessage: 'Der Zugriff wurde geändert oder die Statistik für diese Gruppe ausgeschaltet.',
     other: 'Weitere',
-    generatedAt: 'Erstellt am {{date}} · {{timezone}}',
-    refreshing: 'Wird aktualisiert …',
-    refresh: 'Aktualisieren',
     sections: {
       members: 'Buchungen & Einkaufsübersicht',
       membersDescription: 'Vergangene gültige Buchungen als Orientierung für euren nächsten Einkauf.',
       finance: 'Finanzen',
       financeDescription: 'Offener Gruppensaldo, Einzahlungen und überfällige Beträge.',
+    },
+    tabs: {
+      label: 'Statistikbereich',
+      bookings: 'Buchungen',
+      finance: 'Finanzen',
     },
     filters: {
       label: 'Statistikzeitraum',

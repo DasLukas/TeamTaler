@@ -1,4 +1,4 @@
-import type { Money, StatisticsBucket, StatisticsMeta } from '@/api/types';
+import type { Money, StatisticsBucket } from '@/api/types';
 import { formatMoney } from '@/api/money';
 
 const integerFormatter = new Intl.NumberFormat('de-DE');
@@ -55,19 +55,6 @@ export function formatStatisticsPeriod(periodStart: string, bucket: StatisticsBu
     ? { month: 'short', year: '2-digit', timeZone: timezone }
     : { day: '2-digit', month: '2-digit', timeZone: timezone };
   return new Intl.DateTimeFormat('de-DE', options).format(new Date(periodStart));
-}
-
-/** Formats the inclusive human-readable range represented by server metadata. */
-export function formatStatisticsMetaRange(meta: StatisticsMeta): string {
-  const start = new Date(meta.fromInclusive);
-  const inclusiveEnd = new Date(new Date(meta.toExclusive).getTime() - 1);
-  const formatter = new Intl.DateTimeFormat('de-DE', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    timeZone: meta.timezone,
-  });
-  return `${formatter.format(start)}–${formatter.format(inclusiveEnd)}`;
 }
 
 /** Formats exact money while retaining the supplied canonical currency. */

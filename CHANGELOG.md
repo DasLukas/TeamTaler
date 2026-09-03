@@ -6,13 +6,14 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ### Added
 
-- An optional group statistics workspace with one explicitly authorized, continuous booking-activity and aggregate-finance dashboard, shareable date-range state, server-selected calendar granularity, and responsive chart visualizations without a secondary table view.
+- An optional group statistics workspace with one explicit authorization and one unified snapshot, presented through compact booking and finance tabs with shareable date-range state, server-selected calendar granularity, and responsive chart visualizations without a secondary table view.
 - Two distinct anonymous booking KPIs for active participants and booked products; the easily confused booking-transaction count is intentionally omitted from the overview.
 - Simple product and category visuals with privacy-aware adaptive buckets, direct visible totals, microtrends, and accessible series summaries as orientation for future purchases.
 - A focused group-finance summary centered on the current receivable and one ordered closing-receivable trend.
 
 ### Changed
 
+- Statistics now separate booking and finance presentation into accessible client-side tabs, reducing page length without splitting the permission, feature switch, endpoint, loading state, or cached snapshot. The redundant provenance and manual refresh bar was removed; route, group, and range changes continue to load data automatically.
 - `VIEW_STATISTICS` now controls the complete statistics dashboard, the overview's aggregate group receivable, and group-wide account category totals. `VIEW_ALL_BOOKING_ACTIVITY` no longer implies statistics access and remains only a small-cohort ranking bypass for callers that separately hold `VIEW_STATISTICS`.
 - Custom statistics ranges use inclusive group-local `YYYY-MM-DD` bounds at the API boundary and half-open instants internally; an upper bound covering today or the future is capped at the response generation instant. Preset ranges and a maximum of 60 day, week, month, or year buckets are resolved by the server in the group's configured time zone.
 - The statistics reading path now prioritizes historical product and category bookings as purchase orientation, followed by compact booking activity and one finance trend. Membership composition, account-state distribution, category-charge, ledger-reconciliation, percentage comparison, and secondary finance panels were removed.
