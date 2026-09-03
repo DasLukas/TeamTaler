@@ -3,17 +3,50 @@ import Save from 'lucide-react/dist/esm/icons/save';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
-import type { GroupNotificationSettings } from '@/api/types';
+import type { GroupNotificationEventSetting, GroupNotificationSettings } from '@/api/types';
 import { Button } from '@/components/ui/Button';
 import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { Toggle } from '@/components/ui/Toggle';
 import { notificationEventCopy } from '@/features/notifications/notificationEventCopy';
+import { notificationKeys } from '@/features/notifications/notificationQueryKeys';
 import styles from './GroupNotificationSettingsSection.module.css';
 
 interface NotificationPolicyFormProps {
   groupId: string;
   settings: GroupNotificationSettings;
+}
+
+const NOTIFICATION_CATEGORIES = ['BOOKINGS', 'PAYMENTS', 'PLANNING', 'SETTLEMENTS'] as const;
+const KNOWN_NOTIFICATION_CATEGORIES = new Set<string>(NOTIFICATION_CATEGORIES);
+
+interface NotificationEventGroup {
+  category: string;
+  events: GroupNotificationEventSetting[];
+}
+
+function notificationCategory(event: GroupNotificationEventSetting): string {
+  const category = event.category.toUpperCase();
+  if (KNOWN_NOTIFICATION_CATEGORIES.has(category)) return category;
+  if (event.eventType.startsWith('BOOKING_')) return 'BOOKINGS';
+  if (event.eventType.startsWith('PAYMENT_')) return 'PAYMENTS';
+  if (event.eventType.startsWith('PLANNING_')) return 'PLANNING';
+  if (event.eventType.startsWith('SETTLEMENT_')) return 'SETTLEMENTS';
+  return 'OTHER';
+}
+
+function groupNotificationEvents(events: GroupNotificationEventSetting[]): NotificationEventGroup[] {
+  const grouped = new Map<string, GroupNotificationEventSetting[]>();
+  for (const event of events) {
+    const category = notificationCategory(event);
+    const categoryEvents = grouped.get(category);
+    if (categoryEvents) categoryEvents.push(event);
+    else grouped.set(category, [event]);
+  }
+  return [...NOTIFICATION_CATEGORIES, 'OTHER'].flatMap((category) => {
+    const categoryEvents = grouped.get(category);
+    return categoryEvents ? [{ category, events: categoryEvents }] : [];
+  });
 }
 
 function supportedTimezones(current: string): string[] {
@@ -31,6 +64,7 @@ function NotificationPolicyForm({ groupId, settings }: NotificationPolicyFormPro
   const [overdueRepeatDays, setOverdueRepeatDays] = useState(settings.overdueRepeatDays);
   const [events, setEvents] = useState(settings.events);
   const timezones = useMemo(() => supportedTimezones(settings.timezone), [settings.timezone]);
+  const eventGroups = useMemo(() => groupNotificationEvents(events), [events]);
   const changed = timezone !== settings.timezone
     || dueSoonLeadDays !== settings.dueSoonLeadDays
     || overdueRepeatDays !== settings.overdueRepeatDays
@@ -45,18 +79,24 @@ function NotificationPolicyForm({ groupId, settings }: NotificationPolicyFormPro
     }),
     onSuccess: async (persisted) => {
       queryClient.setQueryData(['group-notification-settings', groupId], persisted);
-      await queryClient.invalidateQueries({ queryKey: ['notification-preferences', groupId] });
+      await queryClient.invalidateQueries({ queryKey: notificationKeys.preferences(groupId) });
     },
     onError: async () => { await queryClient.invalidateQueries({ queryKey: ['group-notification-settings', groupId] }); },
   });
   return <section aria-labelledby="group-notification-settings-title" className={styles.card}>
     <header><h4 id="group-notification-settings-title">{t('behaviorSettings.notifications.title')}</h4><p>{t('behaviorSettings.notifications.intro')}</p></header>
-    <div className={styles.eventList}>{events.map((event, index) => {
-      const copy = notificationEventCopy(event.eventType, t);
-      return <div className={styles.eventRow} key={event.eventType}>
-        <div><strong>{copy.label}</strong><span>{copy.description}</span></div>
-        <Toggle checked={event.enabled} disabled={mutation.isPending} label={t('behaviorSettings.notifications.enableEvent', { event: copy.label })} onChange={(enabled) => { setEvents((current) => current.map((entry, eventIndex) => eventIndex === index ? { ...entry, enabled } : entry)); mutation.reset(); }} />
-      </div>;
+    <div className={styles.eventGroups}>{eventGroups.map((group) => {
+      const category = t(`behaviorSettings.notifications.categories.${group.category}`);
+      return <section aria-label={t('behaviorSettings.notifications.categoryLabel', { category })} className={styles.eventGroup} key={group.category}>
+        <h5>{category}</h5>
+        <div className={styles.eventList}>{group.events.map((event) => {
+          const copy = notificationEventCopy(event.eventType, t);
+          return <div className={styles.eventRow} key={event.eventType}>
+            <div><strong>{copy.label}</strong><span>{copy.description}</span></div>
+            <Toggle checked={event.enabled} disabled={mutation.isPending} label={t('behaviorSettings.notifications.enableEvent', { event: copy.label })} onChange={(enabled) => { setEvents((current) => current.map((entry) => entry.eventType === event.eventType ? { ...entry, enabled } : entry)); mutation.reset(); }} />
+          </div>;
+        })}</div>
+      </section>;
     })}</div>
     <div className={styles.reminders}>
       <Field htmlFor="notification-timezone" label={t('behaviorSettings.notifications.timezone')}><SelectInput id="notification-timezone" onChange={(event) => setTimezone(event.target.value)} value={timezone}>{timezones.map((value) => <option key={value} value={value}>{value}</option>)}</SelectInput></Field>

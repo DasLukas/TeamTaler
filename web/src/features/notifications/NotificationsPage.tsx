@@ -1,4 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
+import { Link } from '@tanstack/react-router';
 import Bell from 'lucide-react/dist/esm/icons/bell';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -6,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import type { NotificationPage, NotificationSummary } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
+import { canUsePlanning } from '@/app/groupCapabilities';
 import { Page } from '@/components/layout/Page';
 import { Button } from '@/components/ui/Button';
 import { StatePanel } from '@/components/ui/StatePanel';
@@ -24,7 +26,7 @@ const notificationListKey = (groupId: string) => ['notifications', groupId] as c
  */
 export function NotificationsPage() {
   const { t } = useTranslation();
-  const { activeGroupId, session, setActiveGroupId } = useActiveGroup();
+  const { activeGroupId, activeGroup, session, setActiveGroupId } = useActiveGroup();
   const queryClient = useQueryClient();
   const listRef = useRef<HTMLDivElement>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
@@ -199,10 +201,14 @@ export function NotificationsPage() {
             const exportPath = notification.context.exportId && notification.context.exportScope
               ? dataExportPath(notification.context.exportId, notification.context.exportScope)
               : null;
+            const planningEventId = notification.context.planningEventId && /^[A-Za-z0-9_-]{1,128}$/.test(notification.context.planningEventId)
+              ? notification.context.planningEventId
+              : null;
+            const canOpenPlanningEvent = Boolean(planningEventId && activeGroup.planningEnabled && canUsePlanning(activeGroup.membership?.effectiveGrants));
             return (
             <article className={`${styles.notification} ${notification.readAt ? styles.read : ''}`} data-focused={focusedNotificationId === notification.id || undefined} data-notification-id={notification.id} data-unread={notification.readAt ? 'false' : 'true'} id={`notification-${notification.id}`} key={notification.id} tabIndex={-1}>
               <span className={styles.icon}><Bell aria-hidden="true" size={21} /></span>
-              <div><h2>{notification.title}</h2><p>{notification.message}</p><time dateTime={notification.createdAt}>{formatGermanDateTime(notification.createdAt)}</time>{exportPath ? <a className={styles.action} href={exportPath}>{t('notifications.events.openDataExport')}</a> : null}</div>
+              <div><h2>{notification.title}</h2><p>{notification.message}</p><time dateTime={notification.createdAt}>{formatGermanDateTime(notification.createdAt)}</time>{exportPath ? <a className={styles.action} href={exportPath}>{t('notifications.events.openDataExport')}</a> : null}{canOpenPlanningEvent && planningEventId ? <Link className={styles.action} params={{ eventId: planningEventId }} to="/planning/events/$eventId">{t('notifications.events.openPlanningEvent')}</Link> : null}</div>
               <span className={styles.label}>{notification.readAt ? t('notifications.read') : t('notifications.new')}</span>
             </article>
             );

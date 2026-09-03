@@ -1,8 +1,5 @@
 import { Link, useRouterState } from '@tanstack/react-router';
-import BookOpenCheck from 'lucide-react/dist/esm/icons/book-open-check';
-import Clock3 from 'lucide-react/dist/esm/icons/clock-3';
 import Ellipsis from 'lucide-react/dist/esm/icons/ellipsis';
-import Home from 'lucide-react/dist/esm/icons/home';
 import { useTranslation } from 'react-i18next';
 import { memberPaths } from '@/app/paths';
 import { canOpenBooking } from '@/app/groupCapabilities';
@@ -10,17 +7,12 @@ import { useActiveGroup } from '@/app/useActiveGroup';
 import styles from './BottomNavigation.module.css';
 import { NotificationBadge } from '@/features/notifications/NotificationBadge';
 import { useUnreadNotificationCount } from '@/features/notifications/NotificationSummaryContext';
-
-const items = [
-  { to: memberPaths.overview, key: 'overview', icon: Home },
-  { to: memberPaths.booking, key: 'book', icon: BookOpenCheck },
-  { to: '/activities', key: 'activities', icon: Clock3 },
-  { to: memberPaths.more, key: 'more', icon: Ellipsis },
-] as const;
+import { mobilePrimaryModuleKeys, moduleNavigationItems } from './navigationItems';
 
 const overflowPaths = new Set<string>([
   memberPaths.more,
   memberPaths.notifications,
+  memberPaths.planning,
   memberPaths.finance,
   memberPaths.catalog,
   '/admin',
@@ -38,6 +30,10 @@ export function BottomNavigation() {
   const { activeGroup } = useActiveGroup();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const overflowActive = overflowPaths.has(pathname);
+  const items = [
+    ...moduleNavigationItems.filter((item) => mobilePrimaryModuleKeys.has(item.key)),
+    { to: memberPaths.more, key: 'more', icon: Ellipsis, capability: null },
+  ] as const;
   return (
     <nav aria-label={t('nav.mobilePrimary')} className={styles.nav}>
       {items.filter((item) => item.key !== 'book' || canOpenBooking(activeGroup.membership?.effectiveGrants)).map(({ to, key, icon: Icon }) => (

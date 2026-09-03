@@ -20,6 +20,12 @@ import {
   adaptNotificationPreferences,
   adaptPermissionDefinition,
   adaptPayment,
+  adaptPlanningEvent,
+  adaptPlanningEventPage,
+  adaptPlanningParticipantPage,
+  adaptPlanningSeries,
+  adaptPlanningSeriesResult,
+  adaptPlanningSettings,
   adaptPeriod,
   adaptProduct,
   adaptPushSubscriptions,
@@ -91,6 +97,17 @@ import type {
   Payment,
   PaymentCollectionQuery,
   PaymentCommand,
+  PlanningEvent,
+  PlanningEventInput,
+  PlanningEventPage,
+  PlanningParticipantPage,
+  PlanningParticipationStatus,
+  PlanningSeries,
+  PlanningSeriesCreateInput,
+  PlanningSeriesResult,
+  PlanningSeriesScope,
+  PlanningSeriesUpdateInput,
+  PlanningSettings,
   SelfPaymentCommand,
   Period,
   PermissionDefinition,
@@ -247,6 +264,16 @@ const groupPath = (groupId: string, resource: string) => `/groups/${encodeURICom
 const groupRootPath = (groupId: string) => `/groups/${encodeURIComponent(groupId)}`;
 const systemGroupPath = (groupId: string, resource = '') => `/system/groups/${encodeURIComponent(groupId)}${resource ? `/${resource}` : ''}`;
 const json = (value: unknown) => JSON.stringify(value);
+
+function planningEventPayload(input: PlanningEventInput): Omit<PlanningEventInput, 'audience'> & { audienceType: PlanningEventInput['audience']['type']; targetRoleIds: string[]; targetMembershipIds: string[] } {
+  const { audience, ...fields } = input;
+  return {
+    ...fields,
+    audienceType: audience.type,
+    targetRoleIds: audience.roleIds,
+    targetMembershipIds: audience.memberIds,
+  };
+}
 
 async function fileSha256(file: File): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
@@ -645,6 +672,54 @@ export const api = {
     method: 'PATCH',
     body: json(settings),
   })),
+  getPlanningSettings: async (groupId: string): Promise<PlanningSettings> => adaptPlanningSettings(await request<unknown>(groupPath(groupId, 'planning/settings'))),
+  updatePlanningSettings: async (groupId: string, enabled: boolean, version: number): Promise<PlanningSettings> => adaptPlanningSettings(await request<unknown>(groupPath(groupId, 'planning/settings'), {
+    method: 'PUT',
+    headers: versionHeaders(version),
+    body: json({ enabled }),
+  })),
+  getPlanningEvents: async (groupId: string, query: { from?: string; fromDate?: string; to?: string; toDateExclusive?: string; cursor?: string; status?: string; limit?: number } = {}): Promise<PlanningEventPage> => {
+    const path = collectionPath(groupPath(groupId, 'planning/events'), query);
+    return adaptPlanningEventPage(await request<unknown>(path));
+  },
+  getPlanningEvent: async (groupId: string, eventId: string): Promise<PlanningEvent> => adaptPlanningEvent(await request<unknown>(groupPath(groupId, `planning/events/${encodeURIComponent(eventId)}`))),
+  createPlanningEvent: async (groupId: string, input: PlanningEventInput): Promise<PlanningEvent> => {
+    const path = groupPath(groupId, 'planning/events');
+    const payload = planningEventPayload(input);
+    return adaptPlanningEvent(await idempotentRequest<unknown>(groupId, 'planning.event.create', path, payload, { method: 'POST', body: json(payload) }));
+  },
+  updatePlanningEvent: async (groupId: string, eventId: string, input: PlanningEventInput, version: number): Promise<PlanningEvent> => adaptPlanningEvent(await request<unknown>(groupPath(groupId, `planning/events/${encodeURIComponent(eventId)}`), {
+    method: 'PUT',
+    headers: versionHeaders(version),
+    body: json(planningEventPayload(input)),
+  })),
+  transitionPlanningEvent: async (groupId: string, eventId: string, transition: 'close' | 'complete' | 'cancel', version: number): Promise<PlanningEvent> => adaptPlanningEvent(await request<unknown>(groupPath(groupId, `planning/events/${encodeURIComponent(eventId)}/${transition}`), {
+    method: 'POST',
+    headers: versionHeaders(version),
+  })),
+  updatePlanningParticipation: async (groupId: string, eventId: string, eventType: PlanningEvent['eventType'], status: PlanningParticipationStatus | 'WITHDRAWN'): Promise<PlanningEvent> => {
+    const wireStatus = status === 'ATTENDING' ? eventType === 'APPOINTMENT_REGISTRATION' ? 'REGISTERED' : 'YES' : status === 'DECLINED' ? 'NO' : status;
+    return adaptPlanningEvent(await request<unknown>(groupPath(groupId, `planning/events/${encodeURIComponent(eventId)}/participation`), { method: 'PUT', body: json({ status: wireStatus }) }));
+  },
+  getPlanningParticipants: async (groupId: string, eventId: string, cursor?: string, limit?: number): Promise<PlanningParticipantPage> => adaptPlanningParticipantPage(await request<unknown>(collectionPath(groupPath(groupId, `planning/events/${encodeURIComponent(eventId)}/participants`), { cursor, limit }))),
+  createPlanningSeries: async (groupId: string, input: PlanningSeriesCreateInput): Promise<PlanningSeriesResult> => {
+    const path = groupPath(groupId, 'planning/series');
+    const { recurrence, ...eventInput } = input;
+    const payload = { ...planningEventPayload(eventInput), recurrence };
+    return adaptPlanningSeriesResult(await idempotentRequest<unknown>(groupId, 'planning.series.create', path, payload, { method: 'POST', body: json(payload) }));
+  },
+  getPlanningSeries: async (groupId: string, seriesId: string): Promise<PlanningSeries> => adaptPlanningSeries(await request<unknown>(groupPath(groupId, `planning/series/${encodeURIComponent(seriesId)}`))),
+  updatePlanningSeries: async (groupId: string, seriesId: string, input: PlanningSeriesUpdateInput, version: number): Promise<PlanningSeries> => {
+    const path = groupPath(groupId, `planning/series/${encodeURIComponent(seriesId)}`);
+    const { recurrence, scope, fromOriginalStartAt, ...eventInput } = input;
+    const payload = { ...planningEventPayload(eventInput), recurrence, scope, fromOriginalStartAt };
+    return adaptPlanningSeries(await idempotentRequest<unknown>(groupId, 'planning.series.update', path, payload, { method: 'PUT', headers: versionHeaders(version), body: json(payload) }));
+  },
+  cancelPlanningSeries: async (groupId: string, seriesId: string, scope: Exclude<PlanningSeriesScope, 'THIS'>, fromOriginalStartAt: string | undefined, version: number): Promise<void> => {
+    const path = groupPath(groupId, `planning/series/${encodeURIComponent(seriesId)}/cancel`);
+    const payload = { scope, ...(fromOriginalStartAt ? { fromOriginalStartAt } : {}) };
+    await idempotentRequest<void>(groupId, 'planning.series.cancel', path, payload, { method: 'POST', headers: versionHeaders(version), body: json(payload) });
+  },
   updateThemePreference: async (groupId: string, themeOverride: ThemeId | null): Promise<ThemePreference> => adaptThemePreference(await request<unknown>(groupPath(groupId, 'theme-preference'), {
     method: 'PUT',
     body: json({ themeOverride }),

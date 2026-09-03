@@ -13,6 +13,10 @@
   font-size: clamp(2.35rem, 4vw, 3.1rem);
 }
 
+.planningPreview {
+  margin-top: var(--space-8);
+}
+
 .personalBalanceSection > h2 {
   margin-bottom: var(--space-3);
 }
