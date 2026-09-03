@@ -3,15 +3,15 @@ package statistics
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/DasLukas/TeamTaler/internal/authorization"
 	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 )
 
-func (s Service) memberDashboard(ctx context.Context, membership domain.Membership, _ dashboardContext, rangeValue resolvedRange) (MemberDashboard, error) {
-	dashboard := MemberDashboard{
-		Meta:     rangeValue.meta,
+func (s Service) memberStatistics(ctx context.Context, membership domain.Membership, rangeValue resolvedRange) (MemberStatistics, bool, error) {
+	dashboard := MemberStatistics{
 		Activity: make([]MemberActivityPoint, len(rangeValue.buckets)),
 		TopCategories: MemberCategoryBreakdown{
 			Items: make([]MemberCategoryItem, 0),
@@ -25,34 +25,44 @@ func (s Service) memberDashboard(ctx context.Context, membership domain.Membersh
 	}
 
 	if err := s.queryMemberSnapshot(ctx, membership.GroupID, rangeValue.meta.GeneratedAt, &dashboard.MemberSnapshot); err != nil {
-		return MemberDashboard{}, err
+		return MemberStatistics{}, false, err
 	}
 	breakdownParticipants, err := s.queryMemberSummary(ctx, membership.GroupID, rangeValue, &dashboard.Summary)
 	if err != nil {
-		return MemberDashboard{}, err
+		return MemberStatistics{}, false, err
 	}
 	if err := s.queryMemberActivity(ctx, membership.GroupID, rangeValue, dashboard.Activity); err != nil {
-		return MemberDashboard{}, err
+		return MemberStatistics{}, false, err
 	}
 
 	canViewAll, err := authorization.NewPolicy(s.queryer()).Can(ctx, membership.GroupID, membership.ID, domain.PermissionViewAllBookingActivity, authorization.GroupResource(membership.GroupID))
 	if err != nil {
-		return MemberDashboard{}, err
+		return MemberStatistics{}, false, err
 	}
 	suppressed := breakdownParticipants > 0 && breakdownParticipants < privacyParticipantThreshold && !canViewAll
-	dashboard.Meta.PrivacyThresholdApplied = suppressed
 	dashboard.TopCategories.Suppressed = suppressed
 	dashboard.TopProducts.Suppressed = suppressed
 	if suppressed {
-		return dashboard, nil
+		return dashboard, true, nil
 	}
-	if dashboard.TopCategories.Items, err = s.queryTopCategories(ctx, membership.GroupID, rangeValue); err != nil {
-		return MemberDashboard{}, err
+	privacyMask := make([]bool, len(rangeValue.buckets))
+	privacyApplied := false
+	if !canViewAll {
+		privacyMask, err = s.queryBreakdownPrivacyMask(ctx, membership.GroupID, rangeValue)
+		if err != nil {
+			return MemberStatistics{}, false, err
+		}
+		for _, masked := range privacyMask {
+			privacyApplied = privacyApplied || masked
+		}
 	}
-	if dashboard.TopProducts.Items, err = s.queryTopProducts(ctx, membership.GroupID, rangeValue); err != nil {
-		return MemberDashboard{}, err
+	if dashboard.TopCategories.Items, err = s.queryTopCategories(ctx, membership.GroupID, rangeValue, privacyMask); err != nil {
+		return MemberStatistics{}, false, err
 	}
-	return dashboard, nil
+	if dashboard.TopProducts.Items, err = s.queryTopProducts(ctx, membership.GroupID, rangeValue, privacyMask); err != nil {
+		return MemberStatistics{}, false, err
+	}
+	return dashboard, privacyApplied, nil
 }
 
 const timeFormatWithOffset = "2006-01-02T15:04:05Z07:00"
@@ -94,6 +104,38 @@ func (s Service) queryMemberSummary(ctx context.Context, groupID string, rangeVa
 	return breakdownParticipants, nil
 }
 
+func (s Service) queryBreakdownPrivacyMask(ctx context.Context, groupID string, rangeValue resolvedRange) ([]bool, error) {
+	values, args := bucketValues(rangeValue)
+	query := `WITH buckets(bucket_index,from_utc,to_utc) AS (VALUES ` + values + `)
+		SELECT bucket.bucket_index,count(DISTINCT booking.target_membership_id)
+		FROM buckets bucket
+		JOIN bookings booking ON booking.created_at>=bucket.from_utc AND booking.created_at<bucket.to_utc
+		WHERE booking.group_id=? AND (booking.voided_at IS NULL OR booking.voided_at>=?)
+		GROUP BY bucket.bucket_index`
+	args = append(args, groupID, platform.Timestamp(rangeValue.to))
+	rows, err := s.queryer().QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query breakdown privacy mask: %w", err)
+	}
+	defer rows.Close()
+	mask := make([]bool, len(rangeValue.buckets))
+	for rows.Next() {
+		var bucketIndex int
+		var participants int64
+		if err := rows.Scan(&bucketIndex, &participants); err != nil {
+			return nil, err
+		}
+		if bucketIndex < 0 || bucketIndex >= len(mask) {
+			return nil, fmt.Errorf("breakdown privacy mask returned invalid bucket index %d", bucketIndex)
+		}
+		mask[bucketIndex] = participants > 0 && participants < privacyParticipantThreshold
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return mask, nil
+}
+
 func (s Service) queryMemberActivity(ctx context.Context, groupID string, rangeValue resolvedRange, points []MemberActivityPoint) error {
 	values, args := bucketValues(rangeValue)
 	from, to := platform.Timestamp(rangeValue.from), platform.Timestamp(rangeValue.to)
@@ -130,63 +172,225 @@ func (s Service) queryMemberActivity(ctx context.Context, groupID string, rangeV
 	return rows.Err()
 }
 
-func (s Service) queryTopCategories(ctx context.Context, groupID string, rangeValue resolvedRange) ([]MemberCategoryItem, error) {
-	rows, err := s.queryer().QueryContext(ctx, `SELECT booking.category_id,category.name,category.icon,sum(booking.quantity)
-		FROM bookings booking
-		JOIN categories category ON category.group_id=booking.group_id AND category.id=booking.category_id
-		WHERE booking.group_id=? AND booking.created_at>=? AND booking.created_at<?
-		  AND (booking.voided_at IS NULL OR booking.voided_at>=?)
-		GROUP BY booking.category_id,category.name,category.icon
-		ORDER BY sum(booking.quantity) DESC,lower(category.name),booking.category_id`,
-		groupID, platform.Timestamp(rangeValue.from), platform.Timestamp(rangeValue.to), platform.Timestamp(rangeValue.to))
+func (s Service) queryTopCategories(ctx context.Context, groupID string, rangeValue resolvedRange, privacyMask []bool) ([]MemberCategoryItem, error) {
+	values, args, hasVisibleBuckets, err := breakdownBucketValues(rangeValue, privacyMask)
+	if err != nil {
+		return nil, err
+	}
+	if !hasVisibleBuckets {
+		return make([]MemberCategoryItem, 0), nil
+	}
+	query := `WITH buckets(bucket_index,from_utc,to_utc,is_visible) AS (VALUES ` + values + `),
+		contributions AS (
+			SELECT booking.category_id,category.name AS category_name,category.icon,bucket.bucket_index,sum(booking.quantity) AS units
+			FROM buckets bucket
+			JOIN bookings booking ON booking.created_at>=bucket.from_utc AND booking.created_at<bucket.to_utc
+			JOIN categories category ON category.group_id=booking.group_id AND category.id=booking.category_id
+			WHERE bucket.is_visible=1 AND booking.group_id=? AND (booking.voided_at IS NULL OR booking.voided_at>=?)
+			GROUP BY booking.category_id,category.name,category.icon,bucket.bucket_index
+		), totals AS (
+			SELECT category_id,category_name,icon,sum(units) AS total_units
+			FROM contributions
+			GROUP BY category_id,category_name,icon
+		), ranked AS (
+			SELECT category_id,category_name,icon,total_units,
+				row_number() OVER (ORDER BY total_units DESC,lower(category_name),category_id) AS item_rank
+			FROM totals
+		), projected AS (
+			SELECT
+				CASE WHEN ranked.item_rank<=` + fmt.Sprint(topBreakdownLimit) + ` THEN ranked.category_id ELSE '' END AS category_id,
+				CASE WHEN ranked.item_rank<=` + fmt.Sprint(topBreakdownLimit) + ` THEN ranked.category_name ELSE 'Other' END AS category_name,
+				CASE WHEN ranked.item_rank<=` + fmt.Sprint(topBreakdownLimit) + ` THEN ranked.icon ELSE 'other' END AS icon,
+				CASE WHEN ranked.item_rank<=` + fmt.Sprint(topBreakdownLimit) + ` THEN ranked.item_rank ELSE ` + fmt.Sprint(topBreakdownLimit+1) + ` END AS display_rank,
+				contribution.bucket_index,sum(contribution.units) AS units
+			FROM contributions contribution
+			JOIN ranked ON ranked.category_id=contribution.category_id
+			GROUP BY
+				CASE WHEN ranked.item_rank<=` + fmt.Sprint(topBreakdownLimit) + ` THEN ranked.category_id ELSE '' END,
+				CASE WHEN ranked.item_rank<=` + fmt.Sprint(topBreakdownLimit) + ` THEN ranked.category_name ELSE 'Other' END,
+				CASE WHEN ranked.item_rank<=` + fmt.Sprint(topBreakdownLimit) + ` THEN ranked.icon ELSE 'other' END,
+				CASE WHEN ranked.item_rank<=` + fmt.Sprint(topBreakdownLimit) + ` THEN ranked.item_rank ELSE ` + fmt.Sprint(topBreakdownLimit+1) + ` END,
+				contribution.bucket_index
+		)
+		SELECT category_id,category_name,icon,bucket_index,units,
+			sum(units) OVER (PARTITION BY display_rank) AS total_units
+		FROM projected
+		ORDER BY display_rank,bucket_index`
+	args = append(args, groupID, platform.Timestamp(rangeValue.to))
+	rows, err := s.queryer().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	items := make([]MemberCategoryItem, 0)
+	positions := make(map[string]int)
 	for rows.Next() {
-		var item MemberCategoryItem
-		if err := rows.Scan(&item.CategoryID, &item.CategoryName, &item.Icon, &item.ValidBookedUnits); err != nil {
+		var categoryID, categoryName, icon string
+		var bucketIndex int
+		var units, total int64
+		if err := rows.Scan(&categoryID, &categoryName, &icon, &bucketIndex, &units, &total); err != nil {
 			return nil, err
 		}
-		if len(items) < 6 {
-			items = append(items, item)
-		} else if len(items) == 6 {
-			items = append(items, MemberCategoryItem{CategoryName: "Other", Icon: "other", ValidBookedUnits: item.ValidBookedUnits, IsOther: true})
-		} else {
-			items[6].ValidBookedUnits += item.ValidBookedUnits
+		position, exists := positions[categoryID]
+		if !exists {
+			position = len(positions)
+			if position < topBreakdownLimit {
+				items = append(items, MemberCategoryItem{
+					CategoryID: categoryID, CategoryName: categoryName, Icon: icon,
+					ValidBookedUnits: total, Series: memberBreakdownSeries(rangeValue, privacyMask),
+				})
+			} else {
+				position = topBreakdownLimit
+				if len(items) == topBreakdownLimit {
+					items = append(items, MemberCategoryItem{
+						CategoryName: "Other", Icon: "other", IsOther: true,
+						Series: memberBreakdownSeries(rangeValue, privacyMask),
+					})
+				}
+				items[position].ValidBookedUnits += total
+			}
+			positions[categoryID] = position
+		}
+		if err := addMemberBreakdownUnits(items[position].Series, bucketIndex, units); err != nil {
+			return nil, fmt.Errorf("category statistics: %w", err)
 		}
 	}
 	return items, rows.Err()
 }
 
-func (s Service) queryTopProducts(ctx context.Context, groupID string, rangeValue resolvedRange) ([]MemberProductItem, error) {
-	rows, err := s.queryer().QueryContext(ctx, `SELECT booking.product_id,product.name,booking.category_id,category.name,sum(booking.quantity)
-		FROM bookings booking
-		JOIN products product ON product.group_id=booking.group_id AND product.id=booking.product_id
-		JOIN categories category ON category.group_id=booking.group_id AND category.id=booking.category_id
-		WHERE booking.group_id=? AND booking.created_at>=? AND booking.created_at<?
-		  AND (booking.voided_at IS NULL OR booking.voided_at>=?)
-		GROUP BY booking.product_id,product.name,booking.category_id,category.name
-		ORDER BY sum(booking.quantity) DESC,lower(product.name),booking.product_id`,
-		groupID, platform.Timestamp(rangeValue.from), platform.Timestamp(rangeValue.to), platform.Timestamp(rangeValue.to))
+func (s Service) queryTopProducts(ctx context.Context, groupID string, rangeValue resolvedRange, privacyMask []bool) ([]MemberProductItem, error) {
+	values, args, hasVisibleBuckets, err := breakdownBucketValues(rangeValue, privacyMask)
+	if err != nil {
+		return nil, err
+	}
+	if !hasVisibleBuckets {
+		return make([]MemberProductItem, 0), nil
+	}
+	query := `WITH buckets(bucket_index,from_utc,to_utc,is_visible) AS (VALUES ` + values + `),
+		contributions AS (
+			SELECT booking.product_id,product.name AS product_name,booking.category_id,category.name AS category_name,
+				bucket.bucket_index,sum(booking.quantity) AS units
+			FROM buckets bucket
+			JOIN bookings booking ON booking.created_at>=bucket.from_utc AND booking.created_at<bucket.to_utc
+			JOIN products product ON product.group_id=booking.group_id AND product.id=booking.product_id
+			JOIN categories category ON category.group_id=booking.group_id AND category.id=booking.category_id
+			WHERE bucket.is_visible=1 AND booking.group_id=? AND (booking.voided_at IS NULL OR booking.voided_at>=?)
+			GROUP BY booking.product_id,product.name,booking.category_id,category.name,bucket.bucket_index
+		), totals AS (
+			SELECT product_id,product_name,category_id,category_name,sum(units) AS total_units
+			FROM contributions
+			GROUP BY product_id,product_name,category_id,category_name
+		), ranked AS (
+			SELECT product_id,product_name,category_id,category_name,total_units,
+				row_number() OVER (ORDER BY total_units DESC,lower(product_name),product_id) AS item_rank
+			FROM totals
+		), projected AS (
+			SELECT
+				CASE WHEN ranked.item_rank<=` + fmt.Sprint(topBreakdownLimit) + ` THEN ranked.product_id ELSE '' END AS product_id,
+				CASE WHEN ranked.item_rank<=` + fmt.Sprint(topBreakdownLimit) + ` THEN ranked.product_name ELSE 'Other' END AS product_name,
+				CASE WHEN ranked.item_rank<=` + fmt.Sprint(topBreakdownLimit) + ` THEN ranked.category_id ELSE '' END AS category_id,
+				CASE WHEN ranked.item_rank<=` + fmt.Sprint(topBreakdownLimit) + ` THEN ranked.category_name ELSE 'Other' END AS category_name,
+				CASE WHEN ranked.item_rank<=` + fmt.Sprint(topBreakdownLimit) + ` THEN ranked.item_rank ELSE ` + fmt.Sprint(topBreakdownLimit+1) + ` END AS display_rank,
+				contribution.bucket_index,sum(contribution.units) AS units
+			FROM contributions contribution
+			JOIN ranked ON ranked.product_id=contribution.product_id
+			GROUP BY
+				CASE WHEN ranked.item_rank<=` + fmt.Sprint(topBreakdownLimit) + ` THEN ranked.product_id ELSE '' END,
+				CASE WHEN ranked.item_rank<=` + fmt.Sprint(topBreakdownLimit) + ` THEN ranked.product_name ELSE 'Other' END,
+				CASE WHEN ranked.item_rank<=` + fmt.Sprint(topBreakdownLimit) + ` THEN ranked.category_id ELSE '' END,
+				CASE WHEN ranked.item_rank<=` + fmt.Sprint(topBreakdownLimit) + ` THEN ranked.category_name ELSE 'Other' END,
+				CASE WHEN ranked.item_rank<=` + fmt.Sprint(topBreakdownLimit) + ` THEN ranked.item_rank ELSE ` + fmt.Sprint(topBreakdownLimit+1) + ` END,
+				contribution.bucket_index
+		)
+		SELECT product_id,product_name,category_id,category_name,bucket_index,units,
+			sum(units) OVER (PARTITION BY display_rank) AS total_units
+		FROM projected
+		ORDER BY display_rank,bucket_index`
+	args = append(args, groupID, platform.Timestamp(rangeValue.to))
+	rows, err := s.queryer().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	items := make([]MemberProductItem, 0)
+	positions := make(map[string]int)
 	for rows.Next() {
-		var item MemberProductItem
-		if err := rows.Scan(&item.ProductID, &item.ProductName, &item.CategoryID, &item.CategoryName, &item.ValidBookedUnits); err != nil {
+		var productID, productName, categoryID, categoryName string
+		var bucketIndex int
+		var units, total int64
+		if err := rows.Scan(&productID, &productName, &categoryID, &categoryName, &bucketIndex, &units, &total); err != nil {
 			return nil, err
 		}
-		if len(items) < 6 {
-			items = append(items, item)
-		} else if len(items) == 6 {
-			items = append(items, MemberProductItem{ProductName: "Other", CategoryName: "Other", ValidBookedUnits: item.ValidBookedUnits, IsOther: true})
-		} else {
-			items[6].ValidBookedUnits += item.ValidBookedUnits
+		position, exists := positions[productID]
+		if !exists {
+			position = len(positions)
+			if position < topBreakdownLimit {
+				items = append(items, MemberProductItem{
+					ProductID: productID, ProductName: productName, CategoryID: categoryID, CategoryName: categoryName,
+					ValidBookedUnits: total, Series: memberBreakdownSeries(rangeValue, privacyMask),
+				})
+			} else {
+				position = topBreakdownLimit
+				if len(items) == topBreakdownLimit {
+					items = append(items, MemberProductItem{
+						ProductName: "Other", CategoryName: "Other", IsOther: true,
+						Series: memberBreakdownSeries(rangeValue, privacyMask),
+					})
+				}
+				items[position].ValidBookedUnits += total
+			}
+			positions[productID] = position
+		}
+		if err := addMemberBreakdownUnits(items[position].Series, bucketIndex, units); err != nil {
+			return nil, fmt.Errorf("product statistics: %w", err)
 		}
 	}
 	return items, rows.Err()
+}
+
+const topBreakdownLimit = 6
+
+// breakdownBucketValues creates one bounded CTE row per resolved bucket and
+// carries the shared privacy decision into the category and product queries.
+func breakdownBucketValues(rangeValue resolvedRange, privacyMask []bool) (string, []any, bool, error) {
+	if len(privacyMask) != len(rangeValue.buckets) {
+		return "", nil, false, fmt.Errorf("breakdown privacy mask has %d buckets, want %d", len(privacyMask), len(rangeValue.buckets))
+	}
+	rows := make([]string, len(rangeValue.buckets))
+	args := make([]any, 0, len(rangeValue.buckets)*4)
+	hasVisibleBuckets := false
+	for index, bucket := range rangeValue.buckets {
+		visible := !privacyMask[index]
+		rows[index] = "(?,?,?,?)"
+		args = append(args, index, platform.Timestamp(bucket.from), platform.Timestamp(bucket.to), visible)
+		hasVisibleBuckets = hasVisibleBuckets || visible
+	}
+	return strings.Join(rows, ","), args, hasVisibleBuckets, nil
+}
+
+func memberBreakdownSeries(rangeValue resolvedRange, privacyMask []bool) []MemberBreakdownPoint {
+	points := make([]MemberBreakdownPoint, len(rangeValue.buckets))
+	for index, bucket := range rangeValue.buckets {
+		points[index].PeriodStart = bucket.periodStart.Format(timeFormatWithOffset)
+		points[index].PrivacySuppressed = privacyMask[index]
+		points[index].IsPartial = !bucket.from.Equal(bucket.periodStart.UTC()) || !bucket.to.Equal(nextBucket(bucket.periodStart, rangeValue.meta.Bucket).UTC())
+		if !privacyMask[index] {
+			points[index].ValidBookedUnits = new(int64)
+		}
+	}
+	return points
+}
+
+func addMemberBreakdownUnits(points []MemberBreakdownPoint, bucketIndex int, units int64) error {
+	if bucketIndex < 0 || bucketIndex >= len(points) {
+		return fmt.Errorf("returned invalid bucket index %d", bucketIndex)
+	}
+	if points[bucketIndex].PrivacySuppressed {
+		return nil
+	}
+	if points[bucketIndex].ValidBookedUnits == nil {
+		return fmt.Errorf("visible bucket %d has no value", bucketIndex)
+	}
+	*points[bucketIndex].ValidBookedUnits += units
+	return nil
 }

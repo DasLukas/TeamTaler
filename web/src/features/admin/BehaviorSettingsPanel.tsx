@@ -184,6 +184,7 @@ function StatisticsFeatureSetting({ groupId, settings }: StatisticsFeatureSettin
         groups: session.groups.map((group) => group.id === groupId ? { ...group, statisticsEnabled: persisted.statisticsEnabled } : group),
       } : session);
       queryClient.removeQueries({ queryKey: ['statistics', groupId] });
+      void queryClient.invalidateQueries({ queryKey: ['dashboard', groupId] });
     },
   });
 

@@ -111,8 +111,8 @@ func run() error {
 		return errors.New("test-data seeding requires an empty database")
 	}
 
-	seedNow := time.Now().UTC().Truncate(time.Second)
-	baseNow := seedNow
+	baseNow := time.Now().UTC().Truncate(time.Second).AddDate(0, 0, -5)
+	seedNow := baseNow
 	originalNow := platform.Now
 	platform.Now = func() time.Time { return seedNow }
 	defer func() { platform.Now = originalNow }()

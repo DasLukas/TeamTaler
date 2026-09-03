@@ -94,7 +94,7 @@ describe('RightsPanel role definitions', () => {
 
   it('uses concise descriptions for booking and balance permissions', async () => {
     mocks.getPermissionDefinitions.mockResolvedValue([
-      { key: 'VIEW_GROUP_STATISTICS' },
+      { key: 'VIEW_STATISTICS' },
       { key: 'RECORD_OWN_PAYMENT' },
       { key: 'CREATE_OWN_BOOKING' },
       { key: 'VOID_OWN_BOOKING' },
@@ -103,8 +103,8 @@ describe('RightsPanel role definitions', () => {
     ]);
     renderPanel();
 
-    expect(await screen.findByText('Zeigt aggregierte Finanzkennzahlen und den offenen Nettosaldo der Gruppe.')).toBeVisible();
-    expect(screen.getByText('Finanzstatistiken')).toBeVisible();
+    expect(await screen.findByText('Zeigt sämtliche aggregierten Mitglieder-, Aktivitäts- und Finanzstatistiken der Gruppe.')).toBeVisible();
+    expect(screen.getByText('Statistik')).toBeVisible();
     expect(screen.getByText('Erlaubt Einzahlungen auf das eigene Konto.')).toBeVisible();
     expect(screen.getByText('Erlaubt Buchungen auf das eigene Konto.')).toBeVisible();
     expect(screen.getByText('Erlaubt Stornos von selbst erstellten oder dem eigenen Konto zugewiesenen Buchungen.')).toBeVisible();
@@ -131,7 +131,7 @@ describe('RightsPanel role definitions', () => {
     ]);
     expect(within(administration).getAllByRole('switch')).toHaveLength(3);
     expect(within(bookings).getAllByRole('switch')).toHaveLength(6);
-    expect(within(statistics).getAllByRole('switch')).toHaveLength(2);
+    expect(within(statistics).getAllByRole('switch')).toHaveLength(1);
     expect(within(finance).getAllByRole('switch')).toHaveLength(2);
     expect(within(catalog).getAllByRole('switch')).toHaveLength(1);
     expect(screen.getAllByRole('switch')).toHaveLength(PERMISSION_KEYS.length - 1);

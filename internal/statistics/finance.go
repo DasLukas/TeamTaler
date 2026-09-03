@@ -9,9 +9,8 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/platform"
 )
 
-func (s Service) financeDashboard(ctx context.Context, membership domain.Membership, configuration dashboardContext, rangeValue resolvedRange) (FinanceDashboard, error) {
-	dashboard := FinanceDashboard{
-		Meta:       rangeValue.meta,
+func (s Service) financeStatistics(ctx context.Context, membership domain.Membership, configuration dashboardContext, rangeValue resolvedRange) (FinanceStatistics, error) {
+	dashboard := FinanceStatistics{
 		Currency:   configuration.currency,
 		Series:     make([]FinanceActivityPoint, len(rangeValue.buckets)),
 		Categories: make([]FinanceCategoryItem, 0),
@@ -20,19 +19,19 @@ func (s Service) financeDashboard(ctx context.Context, membership domain.Members
 		dashboard.Series[index].PeriodStart = bucket.periodStart.Format(timeFormatWithOffset)
 	}
 	if err := s.queryReceivableSnapshot(ctx, membership.GroupID, rangeValue, &dashboard.ReceivableSnapshot); err != nil {
-		return FinanceDashboard{}, err
+		return FinanceStatistics{}, err
 	}
 	if err := s.queryFinancialFlows(ctx, membership.GroupID, rangeValue, &dashboard.Flows, dashboard.Series); err != nil {
-		return FinanceDashboard{}, err
+		return FinanceStatistics{}, err
 	}
 	var err error
 	if dashboard.Categories, err = s.queryFinanceCategories(ctx, membership.GroupID, rangeValue); err != nil {
-		return FinanceDashboard{}, err
+		return FinanceStatistics{}, err
 	}
 	if configuration.settlementsEnabled {
 		dashboard.Overdue = &OverdueSnapshot{AsOf: rangeValue.meta.GeneratedAt}
 		if err := s.queryOverdueSnapshot(ctx, membership.GroupID, rangeValue, dashboard.Overdue); err != nil {
-			return FinanceDashboard{}, err
+			return FinanceStatistics{}, err
 		}
 	}
 	return dashboard, nil

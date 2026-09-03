@@ -39,6 +39,7 @@ import type {
   Session,
   Settlement,
   StatisticsBucket,
+  StatisticsDashboard,
   StatisticsMeta,
   SmtpTlsMode,
   SystemAccount,
@@ -1102,7 +1103,7 @@ export function adaptDashboard(input: unknown): Dashboard {
   };
 }
 
-/** Adapts statistics provenance shared by member and finance projections. */
+/** Adapts provenance shared by every section of one statistics snapshot. */
 function adaptStatisticsMeta(input: unknown): StatisticsMeta {
   const source = asRecord(input);
   const bucket: StatisticsBucket = source.bucket === 'WEEK' || source.bucket === 'MONTH' || source.bucket === 'YEAR' ? source.bucket : 'DAY';
@@ -1118,20 +1119,33 @@ function adaptStatisticsMeta(input: unknown): StatisticsMeta {
   };
 }
 
+/** Adapts privacy-aware category and product values without coercing hidden points to zero. */
+function adaptMemberBreakdownSeries(input: unknown): MemberStatistics['topCategories']['items'][number]['series'] {
+  return (Array.isArray(input) ? input : []).map((entry) => {
+    const point = asRecord(entry);
+    const value = point.validBookedUnits;
+    return {
+      periodStart: String(point.periodStart ?? ''),
+      validBookedUnits: typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value) && value >= 0 ? value : null,
+      privacySuppressed: point.privacySuppressed === true,
+      isPartial: point.isPartial === true,
+    };
+  });
+}
+
 /**
- * Adapts the exact member statistics wire contract.
+ * Adapts the member section of the statistics wire contract.
  *
- * @param input - Member statistics response from the group endpoint.
+ * @param input - Member statistics section from the group endpoint.
  * @returns Canonical anonymous member activity statistics.
  */
-export function adaptMemberStatistics(input: unknown): MemberStatistics {
+function adaptMemberStatistics(input: unknown): MemberStatistics {
   const source = asRecord(input);
   const memberSnapshot = asRecord(source.memberSnapshot);
   const summary = asRecord(source.summary);
   const topCategories = asRecord(source.topCategories);
   const topProducts = asRecord(source.topProducts);
   return {
-    meta: adaptStatisticsMeta(source.meta),
     memberSnapshot: {
       regularMembers: Number(memberSnapshot.regularMembers ?? 0),
       temporaryGuests: Number(memberSnapshot.temporaryGuests ?? 0),
@@ -1161,6 +1175,7 @@ export function adaptMemberStatistics(input: unknown): MemberStatistics {
           icon: categoryIcon(item.icon),
           validBookedUnits: Number(item.validBookedUnits ?? 0),
           isOther: item.isOther === true,
+          series: adaptMemberBreakdownSeries(item.series),
         };
       }),
     },
@@ -1175,6 +1190,7 @@ export function adaptMemberStatistics(input: unknown): MemberStatistics {
           categoryName: String(item.categoryName ?? ''),
           validBookedUnits: Number(item.validBookedUnits ?? 0),
           isOther: item.isOther === true,
+          series: adaptMemberBreakdownSeries(item.series),
         };
       }),
     },
@@ -1182,20 +1198,19 @@ export function adaptMemberStatistics(input: unknown): MemberStatistics {
 }
 
 /**
- * Adapts the exact finance statistics wire contract without converting money
+ * Adapts the finance section of the statistics wire contract without converting money
  * to floating-point values.
  *
- * @param input - Finance statistics response from the group endpoint.
+ * @param input - Finance statistics section from the group endpoint.
  * @returns Canonical aggregate finance statistics with exact money values.
  */
-export function adaptFinanceStatistics(input: unknown): FinanceStatistics {
+function adaptFinanceStatistics(input: unknown): FinanceStatistics {
   const source = asRecord(input);
   const currency = String(source.currency || 'EUR');
   const snapshot = asRecord(source.receivableSnapshot);
   const flows = asRecord(source.flows);
   const overdue = source.overdue && typeof source.overdue === 'object' ? asRecord(source.overdue) : null;
   return {
-    meta: adaptStatisticsMeta(source.meta),
     currency,
     receivableSnapshot: {
       asOf: String(snapshot.asOf ?? ''),
@@ -1239,6 +1254,21 @@ export function adaptFinanceStatistics(input: unknown): FinanceStatistics {
       periodCount: Number(overdue.periodCount ?? 0),
       asOf: String(overdue.asOf ?? ''),
     } : null,
+  };
+}
+
+/**
+ * Adapts the unified statistics response without weakening exact money values.
+ *
+ * @param input - Complete response from the group statistics endpoint.
+ * @returns Canonical shared metadata plus member and finance sections.
+ */
+export function adaptStatisticsDashboard(input: unknown): StatisticsDashboard {
+  const source = asRecord(input);
+  return {
+    meta: adaptStatisticsMeta(source.meta),
+    members: adaptMemberStatistics(source.members),
+    finance: adaptFinanceStatistics(source.finance),
   };
 }
 

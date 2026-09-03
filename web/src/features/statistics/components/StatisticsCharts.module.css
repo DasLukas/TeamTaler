@@ -2,23 +2,28 @@
   display: grid;
   min-width: 0;
   margin: 0;
-  padding: var(--space-6);
+  padding: var(--space-4);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-sm);
-  gap: var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+  gap: var(--space-3);
 }
 
 .frameHeader {
   display: grid;
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
   gap: var(--space-2);
+}
+
+.frameHeader h3 {
+  font-size: var(--font-size-md);
+  letter-spacing: -0.01em;
 }
 
 .frameHeader h3,
 .frameHeader p,
-.statusBar p,
-.dataDetails summary {
+.statusBar p {
   margin: 0;
 }
 
@@ -34,91 +39,322 @@
   height: 300px;
 }
 
-.dataDetails {
-  border-top: 1px solid var(--color-border);
-  padding-top: var(--space-3);
+.activityFrame {
+  padding: var(--space-4);
+  gap: var(--space-3);
 }
 
-.dataDetails summary {
-  width: fit-content;
-  color: var(--color-text-brand);
-  cursor: pointer;
-  font-size: var(--font-size-sm);
-  font-weight: 700;
+.activityFrame .frameHeader {
+  padding-bottom: var(--space-2);
+  gap: var(--space-1);
 }
 
-.tableViewport {
-  max-width: 100%;
-  margin-top: var(--space-3);
+.activityFrame .plot {
+  height: auto;
+}
+
+.activityPanel {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-3);
+}
+
+.activityMetrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  overflow-x: auto;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-muted);
+  overflow: hidden;
 }
 
-.tableViewport table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--font-size-sm);
+.activityMetrics > div {
+  --activity-accent: var(--chart-axis);
+
+  position: relative;
+  display: grid;
+  min-width: 0;
+  align-content: center;
+  padding: var(--space-2) var(--space-3);
+  border-inline-start: 1px solid var(--color-border);
+  gap: 2px;
+}
+
+.activityMetrics > div:first-child { border-inline-start: 0; }
+.activityMetrics > div[data-series='posted'] { --activity-accent: var(--chart-primary); }
+.activityMetrics > div[data-series='reversed'] { --activity-accent: var(--chart-negative); }
+
+.activityMetrics > div::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--activity-accent);
+  content: '';
+}
+
+.activityMetrics dt,
+.activityMetrics dd,
+.activityMetrics small {
+  margin: 0;
+}
+
+.activityMetrics dt,
+.activityMetrics small {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.activityMetrics dt {
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
-.tableViewport th,
-.tableViewport td {
+.activityMetrics dd {
+  color: var(--color-text-strong);
+  font-size: var(--font-size-xl);
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.activityMetrics dd span { color: var(--color-text-muted); }
+
+.activityPlot {
+  width: 100%;
+  min-width: 0;
+  height: 120px;
+}
+
+.activitySingleBucket {
+  display: grid;
+  min-height: 84px;
+  place-content: center;
   padding: var(--space-3);
-  border-bottom: 1px solid var(--color-border);
-  text-align: right;
-}
-
-.tableViewport th:first-child,
-.tableViewport td:first-child {
-  text-align: left;
-}
-
-.tableViewport thead th {
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-sm);
   color: var(--color-text-muted);
   background: var(--color-surface-muted);
-  font-size: var(--font-size-xs);
-  text-transform: uppercase;
+  text-align: center;
+  gap: var(--space-1);
 }
 
-.tableViewport tbody tr:last-child > * {
-  border-bottom: 0;
+.activitySingleBucket strong { color: var(--color-text-strong); }
+
+.trendRankingFrame {
+  padding: var(--space-4);
+  gap: var(--space-3);
 }
 
-.kpi {
+.trendRankingFrame .frameHeader {
+  padding-bottom: var(--space-2);
+  gap: var(--space-1);
+}
+
+.trendRankingFrame .plot { height: auto; }
+
+.trendRankingList {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  gap: var(--space-1);
+}
+
+.trendRankingRow {
+  display: grid;
+  grid-template-columns: minmax(8rem, 1fr) minmax(6rem, 1.25fr) minmax(7rem, 0.8fr) auto;
+  min-width: 0;
+  min-height: 58px;
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  gap: var(--space-3);
+}
+
+.trendName,
+.trendTotal,
+.trendMicro {
   display: grid;
   min-width: 0;
-  min-height: 126px;
-  align-content: space-between;
-  padding: var(--space-5);
+  gap: 2px;
+}
+
+.trendName strong {
+  overflow: hidden;
+  color: var(--color-text-strong);
+  font-size: var(--font-size-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trendName small,
+.trendTotal small,
+.trendMicro small {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  line-height: 1.25;
+}
+
+.trendTotal {
+  justify-items: end;
+  text-align: end;
+}
+
+.trendTotal strong {
+  color: var(--color-text-strong);
+  font-size: var(--font-size-md);
+  font-variant-numeric: tabular-nums;
+}
+
+.trendBar {
+  height: 8px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: var(--color-border);
+}
+
+.trendBar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--chart-primary);
+}
+
+.rankingSparkline {
+  display: block;
+  width: 100%;
+  min-width: 6rem;
+  height: 32px;
+  overflow: visible;
+}
+
+.rankingTrendSegment,
+.rankingPartialSegment,
+.rankingProtectedMark {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.rankingTrendSegment {
+  stroke: var(--chart-primary);
+  stroke-linecap: round;
+  stroke-width: 2;
+}
+
+.rankingPartialSegment {
+  stroke: var(--chart-primary);
+  stroke-dasharray: 3 3;
+  stroke-linecap: round;
+  stroke-width: 2;
+}
+
+.rankingProtectedMark {
+  stroke: var(--chart-axis);
+  stroke-dasharray: 2 3;
+  stroke-width: 1;
+}
+
+.rankingTrendPoint { fill: var(--chart-primary); }
+
+.rankingSparklineOther .rankingTrendSegment,
+.rankingSparklineOther .rankingPartialSegment {
+  stroke: var(--chart-axis);
+  stroke-dasharray: 3 3;
+}
+
+.rankingSparklineOther .rankingTrendPoint { fill: var(--chart-axis); }
+
+.rankingSparklineOther .rankingPartialPoint { stroke: var(--chart-axis); }
+
+.rankingPartialPoint {
+  fill: var(--color-surface-raised);
+  stroke: var(--chart-primary);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.trendRankingRow[data-other='true'] .trendBar > span { background: var(--chart-axis); }
+
+.kpi {
+  --metric-accent: var(--chart-primary);
+
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  min-width: 0;
+  min-height: 112px;
+  align-content: start;
+  padding: var(--space-4);
+  overflow: hidden;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-sm);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
   gap: var(--space-2);
 }
 
-.kpi dt {
+.kpi::before {
+  position: absolute;
+  z-index: 2;
+  inset: 0 0 auto;
+  height: 3px;
+  background: var(--metric-accent);
+  content: '';
+}
+
+.kpiHeader {
+  z-index: 1;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.kpiHeader dt {
   color: var(--color-text-muted);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-xs);
   font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+
+.kpiStatus {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-full);
+  background: var(--metric-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--metric-accent) 14%, transparent);
 }
 
 .kpi dd {
+  z-index: 1;
   margin: 0;
   color: var(--color-text-strong);
-  font-size: clamp(1.55rem, 3vw, 2.15rem);
+  font-size: clamp(1.7rem, 3vw, 2.35rem);
   font-weight: 800;
   letter-spacing: -0.035em;
   line-height: 1.08;
   overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
 }
 
 .kpi small {
+  z-index: 1;
   color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
   line-height: 1.35;
 }
 
+.kpi[data-tone='positive'] { --metric-accent: var(--chart-positive); }
+.kpi[data-tone='warning'] { --metric-accent: var(--chart-due); }
 .kpi[data-tone='positive'] dd { color: var(--color-status-success); }
 .kpi[data-tone='warning'] dd { color: var(--color-status-warning); }
 
@@ -126,8 +362,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-4);
-  padding: var(--space-3) var(--space-4);
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface-muted);
@@ -144,6 +380,45 @@
 }
 
 .statusBar strong { color: var(--color-text-strong); }
+
+.financeTrendFrame .plot { height: auto; }
+
+.financeTrendPanel {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.financeTrendPlot {
+  width: 100%;
+  min-width: 0;
+  height: 210px;
+}
+
+.financeTrendValues {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.financeTrendValues > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3) 0;
+  border-inline-start: 1px solid var(--color-border);
+}
+
+.financeTrendValues > div:first-child { border-inline-start: 0; }
+
+.financeTrendValues dt,
+.financeTrendValues dd {
+  margin: 0;
+  font-size: var(--font-size-sm);
+}
+
+.financeTrendValues dt { color: var(--color-text-muted); }
+.financeTrendValues dd { color: var(--color-text-strong); font-weight: 700; font-variant-numeric: tabular-nums; }
 
 .singleBucket {
   display: grid;
@@ -166,14 +441,38 @@
 .singleBucket small { margin-top: var(--space-2); }
 
 @media (max-width: 767px) {
-  .frame { padding: var(--space-5); }
+  .frame { padding: var(--space-4); }
   .plot { height: 260px; }
-  .statusBar { align-items: stretch; flex-direction: column; }
-  .statusBar button { width: 100%; }
+  .activityFrame .plot { height: auto; }
+  .activityPlot { height: 112px; }
+  .statusBar { align-items: center; }
+  .statusBar p { display: grid; gap: var(--space-1); }
+
+  .trendRankingRow {
+    grid-template-columns: minmax(0, 1fr) auto;
+    min-height: 0;
+    padding-inline: var(--space-2);
+  }
+
+  .trendName strong {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .trendTotal { grid-column: 2; grid-row: 1; justify-items: end; }
+  .trendBar,
+  .trendMicro { grid-column: 1 / -1; }
+}
+
+@media (max-width: 520px) {
+  .financeTrendValues { grid-template-columns: minmax(0, 1fr); }
+  .financeTrendValues > div { border-inline-start: 0; }
+  .financeTrendValues > div + div { border-top: 1px solid var(--color-border); }
 }
 
 @media (max-width: 420px) {
   .frame { padding-inline: var(--space-4); }
   .plot { height: 240px; }
-  .kpi { min-height: 112px; }
+  .kpi { min-height: 108px; }
 }

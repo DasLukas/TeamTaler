@@ -200,8 +200,7 @@ export type PermissionKey =
   | 'FINANCE_MANAGEMENT'
   | 'CATALOG_MANAGEMENT'
   | 'VIEW_MEMBER_DIRECTORY'
-  | 'VIEW_MEMBER_STATISTICS'
-  | 'VIEW_GROUP_STATISTICS'
+  | 'VIEW_STATISTICS'
   | 'VIEW_ALL_BOOKING_ACTIVITY'
   | 'RECORD_OWN_PAYMENT'
   | 'CREATE_OWN_BOOKING'
@@ -218,8 +217,7 @@ export const PERMISSION_KEYS = [
   'FINANCE_MANAGEMENT',
   'CATALOG_MANAGEMENT',
   'VIEW_MEMBER_DIRECTORY',
-  'VIEW_MEMBER_STATISTICS',
-  'VIEW_GROUP_STATISTICS',
+  'VIEW_STATISTICS',
   'VIEW_ALL_BOOKING_ACTIVITY',
   'RECORD_OWN_PAYMENT',
   'CREATE_OWN_BOOKING',
@@ -948,14 +946,14 @@ export function isStatisticsRange(value: unknown): value is StatisticsRange {
 /** Aggregation grain selected by the server for the resolved range. */
 export type StatisticsBucket = 'DAY' | 'WEEK' | 'MONTH' | 'YEAR';
 
-/** Query accepted by both statistics endpoints. */
+/** Query accepted by the group statistics endpoint. */
 export interface StatisticsQuery {
   range?: StatisticsRange;
   from?: string;
   to?: string;
 }
 
-/** Common provenance returned with every statistics projection. */
+/** Common provenance returned with the complete statistics dashboard. */
 export interface StatisticsMeta {
   generatedAt: string;
   timezone: string;
@@ -996,6 +994,7 @@ export interface MemberStatisticsCategory {
   icon: Category['icon'];
   validBookedUnits: number;
   isOther: boolean;
+  series: MemberStatisticsBreakdownPoint[];
 }
 
 /** One ranked product in the member statistics projection. */
@@ -1006,6 +1005,15 @@ export interface MemberStatisticsProduct {
   categoryName: string;
   validBookedUnits: number;
   isOther: boolean;
+  series: MemberStatisticsBreakdownPoint[];
+}
+
+/** One privacy-aware category or product value in a shared statistics bucket. */
+export interface MemberStatisticsBreakdownPoint {
+  periodStart: string;
+  validBookedUnits: number | null;
+  privacySuppressed: boolean;
+  isPartial: boolean;
 }
 
 /** Privacy-aware ranked result that may suppress its item details. */
@@ -1014,9 +1022,8 @@ export interface StatisticsRankedResult<Item> {
   items: Item[];
 }
 
-/** Anonymous member-oriented statistics projection. */
+/** Anonymous member-oriented section of the statistics dashboard. */
 export interface MemberStatistics {
-  meta: StatisticsMeta;
   memberSnapshot: MemberStatisticsSnapshot;
   summary: MemberStatisticsSummary;
   activity: MemberStatisticsActivityPoint[];
@@ -1070,15 +1077,21 @@ export interface FinanceStatisticsOverdue {
   asOf: string;
 }
 
-/** Complete administrator-oriented aggregate finance projection. */
+/** Aggregate finance section of the statistics dashboard. */
 export interface FinanceStatistics {
-  meta: StatisticsMeta;
   currency: string;
   receivableSnapshot: FinanceStatisticsReceivableSnapshot;
   flows: FinanceStatisticsFlows;
   series: FinanceStatisticsSeriesPoint[];
   categories: FinanceStatisticsCategory[];
   overdue: FinanceStatisticsOverdue | null;
+}
+
+/** Complete group statistics dashboard returned as one authorized snapshot. */
+export interface StatisticsDashboard {
+  meta: StatisticsMeta;
+  members: MemberStatistics;
+  finance: FinanceStatistics;
 }
 
 /** Dashboard data for the active group and member. */

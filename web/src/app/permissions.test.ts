@@ -25,14 +25,14 @@ describe('permission evaluation', () => {
       'VOID_ANY_BOOKING',
       'VOID_OWN_BOOKING',
       'VIEW_ALL_BOOKING_ACTIVITY',
-      'VIEW_MEMBER_STATISTICS',
     ]));
     expect(can(direct, 'VOID_OWN_BOOKING')).toBe(true);
     expect(canAny(direct, ['FINANCE_MANAGEMENT', 'VIEW_ALL_BOOKING_ACTIVITY'])).toBe(true);
   });
 
-  it('projects broad booking activity into anonymous member statistics', () => {
-    expect(can(grants('VIEW_ALL_BOOKING_ACTIVITY'), 'VIEW_MEMBER_STATISTICS')).toBe(true);
+  it('keeps broad booking activity separate from unified statistics', () => {
+    expect(can(grants('VIEW_ALL_BOOKING_ACTIVITY'), 'VIEW_STATISTICS')).toBe(false);
+    expect(can(grants('VIEW_STATISTICS'), 'VIEW_STATISTICS')).toBe(true);
   });
 
   it('does not infer unrelated permissions', () => {

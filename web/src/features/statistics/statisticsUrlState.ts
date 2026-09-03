@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { isStatisticsRange, type StatisticsQuery, type StatisticsRange } from '@/api/types';
-import type { StatisticsView } from '@/app/groupCapabilities';
 
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const SERVER_DEFAULT_SCOPE_KEY = 'teamTalerStatisticsDefaultScope';
 
 /** Complete shareable statistics page state. */
 export interface StatisticsUrlState {
-  view: StatisticsView;
   range: StatisticsRange | null;
   from: string;
   to: string;
@@ -15,7 +13,6 @@ export interface StatisticsUrlState {
 
 /** Controlled URL state returned by {@link useStatisticsUrlState}. */
 export interface StatisticsUrlStateController extends StatisticsUrlState {
-  setView: (view: StatisticsView) => void;
   setRange: (range: StatisticsRange) => void;
   setCustomDates: (from: string, to: string) => void;
   normalizeResolvedRange: (range: StatisticsRange) => void;
@@ -47,17 +44,13 @@ function historyStateWithoutServerDefault(): unknown {
   return remainingState;
 }
 
-/** Reads and normalizes statistics state from the current browser URL. */
-function readUrlState(availableViews: readonly StatisticsView[]): StatisticsUrlState {
+/** Reads statistics state from the current browser URL. */
+function readUrlState(): StatisticsUrlState {
   const parameters = new URLSearchParams(window.location.search);
-  const requestedView = parameters.get('view');
-  const view = availableViews.includes(requestedView as StatisticsView) ? requestedView as StatisticsView : availableViews[0];
-  if (!view) throw new Error('Statistics URL state requires at least one available view.');
   const requestedRange = parameters.get('range');
   const rangeWasServerDefault = typeof (window.history.state as Record<string, unknown> | null)?.[SERVER_DEFAULT_SCOPE_KEY] === 'string';
   const range = !rangeWasServerDefault && isStatisticsRange(requestedRange) ? requestedRange : null;
   return {
-    view,
     range,
     from: parameters.get('from') ?? '',
     to: parameters.get('to') ?? '',
@@ -67,7 +60,7 @@ function readUrlState(availableViews: readonly StatisticsView[]): StatisticsUrlS
 /** Writes only statistics-owned parameters while retaining unrelated URL state. */
 function writeUrlState(state: StatisticsUrlState, mode: 'push' | 'replace', historyState: unknown = window.history.state): void {
   const url = new URL(window.location.href);
-  url.searchParams.set('view', state.view);
+  url.searchParams.delete('view');
   if (state.range) url.searchParams.set('range', state.range);
   else url.searchParams.delete('range');
   if (state.range === 'CUSTOM' && state.from) url.searchParams.set('from', state.from);
@@ -91,7 +84,7 @@ export function isValidCustomStatisticsRange(state: Pick<StatisticsUrlState, 'ra
 }
 
 /**
- * Converts page state to the exact query accepted by statistics endpoints.
+ * Converts page state to the exact query accepted by the statistics endpoint.
  *
  * @param state - Current range and inclusive custom date values.
  * @returns A server query, or `null` while a custom range is incomplete.
@@ -105,55 +98,44 @@ export function statisticsQueryFromUrlState(state: Pick<StatisticsUrlState, 'ran
 }
 
 /**
- * Owns view and range state in canonical, back/forward-aware URL parameters.
+ * Owns range state in canonical, back/forward-aware URL parameters.
  *
- * @param availableViews - Ordered views authorized for the active group.
  * @param resolutionScope - Active group identifier used to scope server-selected defaults.
  * @returns Controlled state and explicit navigation callbacks.
  */
-export function useStatisticsUrlState(availableViews: readonly StatisticsView[], resolutionScope: string): StatisticsUrlStateController {
-  const availableViewsKey = availableViews.join('|');
-  const stableAvailableViews = useMemo(() => availableViewsKey.split('|').filter(Boolean) as StatisticsView[], [availableViewsKey]);
-  const [state, setState] = useState<StatisticsUrlState>(() => readUrlState(stableAvailableViews));
+export function useStatisticsUrlState(resolutionScope: string): StatisticsUrlStateController {
+  const [state, setState] = useState<StatisticsUrlState>(readUrlState);
   const [serverDefaultResolved, setServerDefaultResolved] = useState(false);
-  const normalizedView = stableAvailableViews.includes(state.view) ? state.view : stableAvailableViews[0];
-  const normalizedState = useMemo(() => state.view === normalizedView ? state : { ...state, view: normalizedView }, [normalizedView, state]);
 
   useEffect(() => {
-    if (normalizedState.view) writeUrlState(normalizedState, 'replace');
-  }, [normalizedState]);
+    writeUrlState(state, 'replace');
+  }, [state]);
 
   useEffect(() => {
     const synchronizeFromHistory = () => {
       setServerDefaultResolved(false);
-      setState(readUrlState(stableAvailableViews));
+      setState(readUrlState());
     };
     window.addEventListener('popstate', synchronizeFromHistory);
     return () => window.removeEventListener('popstate', synchronizeFromHistory);
-  }, [stableAvailableViews]);
-
-  const update = useCallback((next: StatisticsUrlState, mode: 'push' | 'replace') => {
-    writeUrlState(next, mode);
-    setState(next);
   }, []);
 
-  const setView = useCallback((view: StatisticsView) => update({ ...normalizedState, view }, 'push'), [normalizedState, update]);
   const setRange = useCallback((range: StatisticsRange) => {
-    const customDates = range === 'CUSTOM' && (!normalizedState.from || !normalizedState.to) ? defaultCustomDates() : { from: normalizedState.from, to: normalizedState.to };
+    const customDates = range === 'CUSTOM' && (!state.from || !state.to) ? defaultCustomDates() : { from: state.from, to: state.to };
     setServerDefaultResolved(false);
-    const next = { ...normalizedState, ...customDates, range };
+    const next = { ...state, ...customDates, range };
     writeUrlState(next, 'push', historyStateWithoutServerDefault());
     setState(next);
-  }, [normalizedState]);
+  }, [state]);
   const setCustomDates = useCallback((from: string, to: string) => {
     setServerDefaultResolved(false);
-    const next = { ...normalizedState, from, to };
+    const next = { ...state, from, to };
     writeUrlState(next, 'replace', historyStateWithoutServerDefault());
     setState(next);
-  }, [normalizedState]);
+  }, [state]);
   const normalizeResolvedRange = useCallback((range: StatisticsRange) => {
-    if (normalizedState.range) return;
-    const normalized = { ...normalizedState, range };
+    if (state.range) return;
+    const normalized = { ...state, range };
     setServerDefaultResolved(true);
     const currentHistoryState = window.history.state;
     const historyState = currentHistoryState && typeof currentHistoryState === 'object'
@@ -161,8 +143,8 @@ export function useStatisticsUrlState(availableViews: readonly StatisticsView[],
       : { [SERVER_DEFAULT_SCOPE_KEY]: resolutionScope };
     writeUrlState(normalized, 'replace', historyState);
     setState(normalized);
-  }, [normalizedState, resolutionScope]);
+  }, [resolutionScope, state]);
 
-  const query = serverDefaultResolved ? {} : statisticsQueryFromUrlState(normalizedState);
-  return { ...normalizedState, setView, setRange, setCustomDates, normalizeResolvedRange, query };
+  const query = useMemo(() => serverDefaultResolved ? {} : statisticsQueryFromUrlState(state), [serverDefaultResolved, state]);
+  return { ...state, setRange, setCustomDates, normalizeResolvedRange, query };
 }

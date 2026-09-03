@@ -1723,9 +1723,10 @@ paths:
       summary: Read the active member dashboard
       description: |
         Returns the authenticated membership's personal account data.
-        `groupOutstandingMinor` requires `VIEW_GROUP_STATISTICS`; its omission
-        must not be interpreted as a zero group balance. The amount spans the
-        complete ledger and is independent of settlement periods.
+        `groupOutstandingMinor` requires both the enabled statistics feature
+        and `VIEW_STATISTICS`; its omission must not be interpreted as a zero
+        group balance. The amount spans the complete ledger and is independent
+        of settlement periods.
       parameters:
         - $ref: '#/components/parameters/GroupId'
       responses:
@@ -1735,58 +1736,36 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Dashboard' }
         '403': { $ref: '#/components/responses/Problem' }
-  /groups/{groupId}/statistics/members:
+  /groups/{groupId}/statistics:
     get:
       tags: [Statistics]
-      summary: Read anonymous member activity statistics
+      summary: Read the complete group statistics dashboard
       description: |
         Requires an enabled group statistics feature and effective
-        `VIEW_MEMBER_STATISTICS`. `VIEW_ALL_BOOKING_ACTIVITY` implies that
-        permission and bypasses small-cohort suppression. Otherwise category
-        and product breakdowns are suppressed when only one or two distinct
-        memberships contribute valid booked units to the ranking cohort; a
-        zero-contributor cohort returns empty breakdowns. At most 60
-        server-selected calendar buckets are returned.
-        When `range` is omitted, the server selects `CURRENT_PERIOD` if it is
-        available and `LAST_30_DAYS` otherwise; the canonical selection is in
-        response metadata.
-        For `CUSTOM`, `from` and `to` are local `YYYY-MM-DD` dates in the group
-        timezone and `to` is inclusive at the wire. The effective exclusive end
-        is capped at `generatedAt`, so current or future end dates never expose
-        a future snapshot. A range that starts in the future is rejected.
-      parameters:
-        - $ref: '#/components/parameters/GroupId'
-        - name: range
-          in: query
-          schema: { $ref: '#/components/schemas/StatisticsRangePreset' }
-        - name: from
-          in: query
-          schema: { type: string, format: date }
-        - name: to
-          in: query
-          schema: { type: string, format: date }
-      responses:
-        '200':
-          description: Anonymous member statistics
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/MemberStatisticsDashboard' }
-        '403': { $ref: '#/components/responses/Problem' }
-        '422': { $ref: '#/components/responses/Problem' }
-  /groups/{groupId}/statistics/finance:
-    get:
-      tags: [Statistics]
-      summary: Read aggregate group finance statistics
-      description: |
-        Requires an enabled group statistics feature and effective
-        `VIEW_GROUP_STATISTICS`. Flows use ledger creation timestamps and
-        reconcile as closing = opening + booking charges - payments +
-        adjustments. Reversal ledger entries retain their booking or payment
-        flow classification and appear in the bucket of the reversal entry's
-        own creation timestamp. Overdue exposure is null while settlements are
+        `VIEW_STATISTICS`. The member and finance sections use one authorization
+        decision, range resolution, generation time, and read-only database
+        snapshot. Member category and product breakdowns are suppressed when
+        only one or two distinct memberships contribute valid booked units;
+        `VIEW_ALL_BOOKING_ACTIVITY` bypasses only that suppression and never
+        grants statistics access. A zero-contributor cohort returns empty
+        breakdowns. Each visible top-six category and product, plus an optional
+        `Other` remainder, includes a series over the same adaptive buckets as
+        member activity. For callers without `VIEW_ALL_BOOKING_ACTIVITY`, every
+        category and product point in a bucket with only one or two distinct
+        valid contributors is returned as a protected null. Empty buckets remain
+        visible zeroes, and `isPartial` identifies range-clipped buckets. Ranking
+        order, item totals, top-six selection, and the `Other` remainder use only
+        visible buckets. Items without any visible contribution are omitted, so
+        protected bucket values cannot be reconstructed from ranking totals.
+
+        Financial flows use ledger creation timestamps and reconcile as closing
+        = opening + booking charges - payments + adjustments. Reversal entries
+        retain their original flow classification and use the reversal entry's
+        creation bucket. Overdue exposure is null while settlements are
         disabled; otherwise it is a current `generatedAt` snapshot and does not
         rewind with a historical chart range. At most 60 server-selected
-        calendar buckets are returned.
+        calendar buckets are returned for each series.
+
         When `range` is omitted, the server selects `CURRENT_PERIOD` if it is
         available and `LAST_30_DAYS` otherwise; the canonical selection is in
         response metadata.
@@ -1807,10 +1786,10 @@ paths:
           schema: { type: string, format: date }
       responses:
         '200':
-          description: Aggregate finance statistics
+          description: Complete member-activity and finance statistics
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/FinanceStatisticsDashboard' }
+              schema: { $ref: '#/components/schemas/StatisticsDashboard' }
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/logo:
@@ -4945,7 +4924,7 @@ components:
         defaultTheme: { $ref: '#/components/schemas/ThemeId' }
         statisticsEnabled:
           type: boolean
-          description: Whether the separate statistics dashboard endpoints are enabled for this group.
+          description: Whether the unified group statistics feature is enabled.
         membership: { $ref: '#/components/schemas/Membership' }
     GroupSettings:
       type: object
@@ -4963,7 +4942,7 @@ components:
           description: Whether the running server has complete SMTP delivery configuration.
         statisticsEnabled:
           type: boolean
-          description: Master switch for the separate statistics dashboard endpoints.
+          description: Master switch for every group-wide statistics projection.
         settlementsEnabled:
           type: boolean
           description: Whether administrators may close the unchanged technical open period and create settlement statements.
@@ -5375,8 +5354,7 @@ components:
         - FINANCE_MANAGEMENT
         - CATALOG_MANAGEMENT
         - VIEW_MEMBER_DIRECTORY
-        - VIEW_MEMBER_STATISTICS
-        - VIEW_GROUP_STATISTICS
+        - VIEW_STATISTICS
         - VIEW_ALL_BOOKING_ACTIVITY
         - RECORD_OWN_PAYMENT
         - CREATE_OWN_BOOKING
@@ -6190,7 +6168,7 @@ components:
           items: { $ref: '#/components/schemas/CategoryStatistic' }
         groupCategoryStatistics:
           type: array
-          description: Anonymous category totals across the group for the open period when settlements are enabled, otherwise across all periods; an empty array without VIEW_GROUP_STATISTICS.
+          description: Anonymous category totals across the group for the open period when settlements are enabled, otherwise across all periods; an empty array unless statistics are enabled and VIEW_STATISTICS is effective.
           items: { $ref: '#/components/schemas/CategoryStatistic' }
         recentEntries:
           type: array
@@ -6218,7 +6196,7 @@ components:
           description: Whether settlements are enabled and the group currently has an open period.
         privacyThresholdApplied:
           type: boolean
-          description: True only when small-cohort suppression removed breakdown items.
+          description: True when small-cohort suppression removed complete breakdowns or protected one or more demand-series buckets.
     MemberStatisticsSnapshot:
       type: object
       additionalProperties: false
@@ -6253,24 +6231,59 @@ components:
     MemberStatisticsCategoryItem:
       type: object
       additionalProperties: false
-      required: [categoryId, categoryName, icon, validBookedUnits, isOther]
+      required: [categoryId, categoryName, icon, validBookedUnits, isOther, series]
       properties:
         categoryId: { type: string }
         categoryName: { type: string }
         icon: { $ref: '#/components/schemas/CategoryIcon' }
-        validBookedUnits: { type: integer, format: int64, minimum: 0 }
+        validBookedUnits:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Sum of visible series points only; protected buckets neither contribute nor affect ranking order.
         isOther: { type: boolean }
+        series:
+          type: array
+          maxItems: 60
+          description: Privacy-aware valid booked units for every bucket described by the shared statistics metadata.
+          items: { $ref: '#/components/schemas/MemberStatisticsBreakdownPoint' }
     MemberStatisticsProductItem:
       type: object
       additionalProperties: false
-      required: [productId, productName, categoryId, categoryName, validBookedUnits, isOther]
+      required: [productId, productName, categoryId, categoryName, validBookedUnits, isOther, series]
       properties:
         productId: { type: string }
         productName: { type: string }
         categoryId: { type: string }
         categoryName: { type: string }
-        validBookedUnits: { type: integer, format: int64, minimum: 0 }
+        validBookedUnits:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Sum of visible series points only; protected buckets neither contribute nor affect ranking order.
         isOther: { type: boolean }
+        series:
+          type: array
+          maxItems: 60
+          description: Privacy-aware valid booked units for every bucket described by the shared statistics metadata.
+          items: { $ref: '#/components/schemas/MemberStatisticsBreakdownPoint' }
+    MemberStatisticsBreakdownPoint:
+      type: object
+      additionalProperties: false
+      required: [periodStart, validBookedUnits, privacySuppressed, isPartial]
+      properties:
+        periodStart: { type: string, format: date-time }
+        validBookedUnits:
+          description: Exact units, including zero, or null when privacySuppressed is true.
+          oneOf:
+            - { type: integer, format: int64, minimum: 0 }
+            - { type: 'null' }
+        privacySuppressed:
+          type: boolean
+          description: Whether all category and product values in this bucket are hidden because only one or two memberships contributed valid bookings.
+        isPartial:
+          type: boolean
+          description: Whether the first or last bucket was clipped by the effective statistics range and therefore does not cover its full calendar interval.
     MemberStatisticsCategoryBreakdown:
       type: object
       additionalProperties: false
@@ -6280,6 +6293,7 @@ components:
         items:
           type: array
           maxItems: 7
+          description: Top six visible category totals plus an optional Other remainder; categories without a visible contribution are omitted.
           items: { $ref: '#/components/schemas/MemberStatisticsCategoryItem' }
     MemberStatisticsProductBreakdown:
       type: object
@@ -6290,13 +6304,13 @@ components:
         items:
           type: array
           maxItems: 7
+          description: Top six visible product totals plus an optional Other remainder; products without a visible contribution are omitted.
           items: { $ref: '#/components/schemas/MemberStatisticsProductItem' }
-    MemberStatisticsDashboard:
+    MemberStatisticsSection:
       type: object
       additionalProperties: false
-      required: [meta, memberSnapshot, summary, activity, topCategories, topProducts]
+      required: [memberSnapshot, summary, activity, topCategories, topProducts]
       properties:
-        meta: { $ref: '#/components/schemas/StatisticsMeta' }
         memberSnapshot: { $ref: '#/components/schemas/MemberStatisticsSnapshot' }
         summary: { $ref: '#/components/schemas/MemberStatisticsSummary' }
         activity:
@@ -6358,12 +6372,11 @@ components:
         accountCount: { type: integer, format: int64, minimum: 0 }
         periodCount: { type: integer, format: int64, minimum: 0 }
         asOf: { type: string, format: date-time }
-    FinanceStatisticsDashboard:
+    FinanceStatisticsSection:
       type: object
       additionalProperties: false
-      required: [meta, currency, receivableSnapshot, flows, series, categories, overdue]
+      required: [currency, receivableSnapshot, flows, series, categories, overdue]
       properties:
-        meta: { $ref: '#/components/schemas/StatisticsMeta' }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         receivableSnapshot: { $ref: '#/components/schemas/ReceivableStatisticsSnapshot' }
         flows: { $ref: '#/components/schemas/FinancialStatisticsFlows' }
@@ -6379,6 +6392,14 @@ components:
           oneOf:
             - $ref: '#/components/schemas/OverdueStatisticsSnapshot'
             - type: 'null'
+    StatisticsDashboard:
+      type: object
+      additionalProperties: false
+      required: [meta, members, finance]
+      properties:
+        meta: { $ref: '#/components/schemas/StatisticsMeta' }
+        members: { $ref: '#/components/schemas/MemberStatisticsSection' }
+        finance: { $ref: '#/components/schemas/FinanceStatisticsSection' }
     Dashboard:
       type: object
       required: [account, openPeriod, recentBookings, unreadNotificationCount]
@@ -6391,7 +6412,7 @@ components:
         unreadNotificationCount: { type: integer, format: int64 }
         groupOutstandingMinor:
           $ref: '#/components/schemas/MinorUnits'
-          description: Signed complete-ledger net receivable across all member accounts; omitted without VIEW_GROUP_STATISTICS. Positive values are owed to the group and negative values are member credit.
+          description: Signed complete-ledger net receivable across all member accounts; omitted unless statistics are enabled and VIEW_STATISTICS is effective. Positive values are owed to the group and negative values are member credit.
     PaymentCommand:
       type: object
       additionalProperties: false

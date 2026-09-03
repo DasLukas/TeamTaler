@@ -138,11 +138,12 @@ describe('BehaviorSettingsPanel', () => {
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['statistics', 'group-a'] });
   });
 
-  it('persists the statistics master switch and clears every cached statistics view', async () => {
+  it('persists the statistics master switch and clears the cached statistics snapshot', async () => {
     const user = userEvent.setup();
     apiMock.updateGroupSettings.mockResolvedValue({ ...settings, statisticsEnabled: true });
     const queryClient = renderPanel();
     const removeQueries = vi.spyOn(queryClient, 'removeQueries');
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
     const statisticsRegion = await screen.findByRole('region', { name: i18n.t('behaviorSettings.statisticsTitle') });
 
     await user.click(within(statisticsRegion).getByRole('switch', { name: i18n.t('behaviorSettings.statisticsToggle') }));
@@ -150,6 +151,7 @@ describe('BehaviorSettingsPanel', () => {
 
     await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { statisticsEnabled: true }));
     expect(removeQueries).toHaveBeenCalledWith({ queryKey: ['statistics', 'group-a'] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['dashboard', 'group-a'] });
     expect(queryClient.getQueryData<Session>(['session'])?.groups[0]?.statisticsEnabled).toBe(true);
   });
 

@@ -16,8 +16,8 @@ import (
 
 func TestDefinitionsAndPermissionImplications(t *testing.T) {
 	definitions := authorization.Definitions()
-	if len(definitions) != 15 {
-		t.Fatalf("definition count = %d, want 15", len(definitions))
+	if len(definitions) != 14 {
+		t.Fatalf("definition count = %d, want 14", len(definitions))
 	}
 	if definitions[0].ImpliedPermissions == nil {
 		t.Fatal("permission implications are nil, want an empty API array")
@@ -25,6 +25,14 @@ func TestDefinitionsAndPermissionImplications(t *testing.T) {
 	definitions[0].Description = "mutated"
 	if authorization.Definitions()[0].Description == "mutated" {
 		t.Fatal("Definitions returned shared mutable data")
+	}
+	if !authorization.IsKnownPermission(domain.PermissionViewStatistics) {
+		t.Fatal("VIEW_STATISTICS is not registered")
+	}
+	for _, legacy := range []domain.PermissionKey{"VIEW_MEMBER_STATISTICS", "VIEW_GROUP_STATISTICS"} {
+		if authorization.IsKnownPermission(legacy) {
+			t.Fatalf("legacy permission %s is still registered", legacy)
+		}
 	}
 
 	effective := authorization.ExpandPermissions([]domain.PermissionKey{
@@ -37,18 +45,20 @@ func TestDefinitionsAndPermissionImplications(t *testing.T) {
 		domain.PermissionVoidAnyBooking,
 		domain.PermissionVoidOwnBooking,
 		domain.PermissionViewAllBookingActivity,
-		domain.PermissionViewMemberStatistics,
 		domain.PermissionViewMemberDirectory,
 	} {
 		if !containsPermission(effective, permission) {
 			t.Fatalf("expanded permissions %#v do not contain %s", effective, permission)
 		}
 	}
-	if len(effective) != 6 {
-		t.Fatalf("expanded permissions = %#v, want six unique keys", effective)
+	if len(effective) != 5 {
+		t.Fatalf("expanded permissions = %#v, want five unique keys", effective)
 	}
 	if containsPermission(effective, domain.PermissionBookForGuests) {
 		t.Fatal("BOOK_FOR_OTHERS must not imply BOOK_FOR_GUESTS")
+	}
+	if containsPermission(effective, domain.PermissionViewStatistics) {
+		t.Fatal("VIEW_ALL_BOOKING_ACTIVITY must not imply VIEW_STATISTICS")
 	}
 	memberManagement := authorization.ExpandPermissions([]domain.PermissionKey{domain.PermissionMemberManagement})
 	if !containsPermission(memberManagement, domain.PermissionViewMemberDirectory) || len(memberManagement) != 2 {
@@ -285,7 +295,7 @@ func TestSeedGroupRolesIsIdempotentAndAssignsProtectedAdministratorRole(t *testi
 	}
 	wantGrantCounts := map[string]int{
 		authorization.PresetRoleID("group-seed", domain.RolePresetGroupAdministrator): 4,
-		authorization.TemplateRoleID("group-seed", domain.RoleTemplateMember):         3,
+		authorization.TemplateRoleID("group-seed", domain.RoleTemplateMember):         2,
 		authorization.TemplateRoleID("group-seed", domain.RoleTemplateFinance):        5,
 		authorization.TemplateRoleID("group-seed", domain.RoleTemplateCatalog):        2,
 		authorization.GuestRoleID("group-seed"):                                       1,
@@ -295,6 +305,26 @@ func TestSeedGroupRolesIsIdempotentAndAssignsProtectedAdministratorRole(t *testi
 		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM role_permission_grants WHERE group_id='group-seed' AND role_id=?`, roleID).Scan(&got); err != nil || got != want {
 			t.Fatalf("role %s grant count = %d, %v, want %d, nil", roleID, got, err, want)
 		}
+	}
+	var financeStatisticsGrants, otherStatisticsGrants int
+	if err := db.QueryRowContext(ctx, `
+		SELECT count(*)
+		FROM role_permission_grants
+		WHERE group_id='group-seed'
+		  AND role_id=?
+		  AND permission_key='VIEW_STATISTICS'`, authorization.TemplateRoleID("group-seed", domain.RoleTemplateFinance)).Scan(&financeStatisticsGrants); err != nil {
+		t.Fatalf("count finance statistics grants: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT count(*)
+		FROM role_permission_grants
+		WHERE group_id='group-seed'
+		  AND role_id<>?
+		  AND permission_key='VIEW_STATISTICS'`, authorization.TemplateRoleID("group-seed", domain.RoleTemplateFinance)).Scan(&otherStatisticsGrants); err != nil {
+		t.Fatalf("count non-finance statistics grants: %v", err)
+	}
+	if financeStatisticsGrants != 1 || otherStatisticsGrants != 0 {
+		t.Fatalf("finance/non-finance statistics grants = %d/%d, want 1/0", financeStatisticsGrants, otherStatisticsGrants)
 	}
 	var guestPreset sql.NullString
 	var guestName, guestDescription string

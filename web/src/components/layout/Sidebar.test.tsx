@@ -47,12 +47,12 @@ describe('Sidebar role navigation', () => {
     expect(links.indexOf('Finanzen')).toBeLessThan(links.indexOf('Einstellungen'));
   });
 
-  it('shows statistics only when the group switch and one view permission are both effective', () => {
-    usePermissions(['VIEW_MEMBER_STATISTICS'], [], true);
+  it('shows statistics only when the group switch and unified permission are both effective', () => {
+    usePermissions(['VIEW_STATISTICS'], [], true);
     const rendered = render(<Sidebar collapsed={false} onCollapsedChange={vi.fn()} />);
     expect(screen.getByRole('link', { name: 'Statistiken' })).toHaveAttribute('href', '/statistics');
 
-    usePermissions(['VIEW_MEMBER_STATISTICS'], [], false);
+    usePermissions(['VIEW_STATISTICS'], [], false);
     rendered.rerender(<Sidebar collapsed={false} onCollapsedChange={vi.fn()} />);
     expect(screen.queryByRole('link', { name: 'Statistiken' })).not.toBeInTheDocument();
   });

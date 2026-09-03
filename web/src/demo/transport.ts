@@ -30,6 +30,7 @@ import type {
   PermissionGrant,
   PermissionKey,
   SelfPaymentCommand,
+  StatisticsBucket,
   Period,
   PermissionUpdate,
   Product,
@@ -50,9 +51,8 @@ import {
   demoBookings,
   demoCategories,
   demoDashboard,
-  demoFinanceStatisticsWire,
   demoLedger,
-  demoMemberStatisticsWire,
+  demoStatisticsWire,
   demoMembers,
   demoNotifications,
   demoPayments,
@@ -86,8 +86,7 @@ interface DemoActivityReversal {
 
 const DEMO_ROUTE_POLICIES: readonly DemoRoutePolicy[] = [
   { methods: ['GET', 'PATCH'], resource: /^settings$/, anyOf: ['GROUP_ADMINISTRATION', 'MEMBER_MANAGEMENT', 'ROLE_MANAGEMENT', 'FINANCE_MANAGEMENT'] },
-  { methods: ['GET'], resource: /^statistics\/members$/, anyOf: ['VIEW_MEMBER_STATISTICS'] },
-  { methods: ['GET'], resource: /^statistics\/finance$/, anyOf: ['VIEW_GROUP_STATISTICS'] },
+  { methods: ['GET'], resource: /^statistics$/, anyOf: ['VIEW_STATISTICS'] },
   { methods: ['POST', 'DELETE'], resource: /^logo$/, anyOf: ['GROUP_ADMINISTRATION'] },
   { methods: ['GET'], resource: /^members$/, anyOf: ['VIEW_MEMBER_DIRECTORY'] },
   { methods: ['PATCH', 'DELETE'], resource: /^members\/[^/]+$/, anyOf: ['MEMBER_MANAGEMENT'] },
@@ -126,6 +125,89 @@ const DEMO_ROUTE_POLICIES: readonly DemoRoutePolicy[] = [
 
 const clone = <T,>(value: T): T => structuredClone(value);
 const identifier = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
+
+interface DemoStatisticsBucketPoint {
+  periodStart: string;
+  isPartial: boolean;
+}
+
+const demoDatePattern = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** Parses a stable calendar-only demo date without depending on the host timezone. */
+function parseDemoCalendarDate(value: string): Date {
+  const match = demoDatePattern.exec(value);
+  if (!match) throw new Error('A valid demo calendar date is required.');
+  return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+}
+
+/** Returns the calendar start used by one statistics bucket. */
+function floorDemoStatisticsBucket(value: Date, bucket: StatisticsBucket): Date {
+  const result = new Date(value);
+  if (bucket === 'WEEK') result.setUTCDate(result.getUTCDate() - ((result.getUTCDay() + 6) % 7));
+  if (bucket === 'MONTH' || bucket === 'YEAR') result.setUTCDate(1);
+  if (bucket === 'YEAR') result.setUTCMonth(0);
+  return result;
+}
+
+/** Advances one calendar-aligned statistics bucket. */
+function nextDemoStatisticsBucket(value: Date, bucket: StatisticsBucket): Date {
+  const result = new Date(value);
+  if (bucket === 'DAY') result.setUTCDate(result.getUTCDate() + 1);
+  if (bucket === 'WEEK') result.setUTCDate(result.getUTCDate() + 7);
+  if (bucket === 'MONTH') result.setUTCMonth(result.getUTCMonth() + 1);
+  if (bucket === 'YEAR') result.setUTCFullYear(result.getUTCFullYear() + 1);
+  return result;
+}
+
+/** Returns the last Sunday in a month as a calendar-only UTC value. */
+function lastDemoSunday(year: number, month: number): Date {
+  const result = new Date(Date.UTC(year, month + 1, 0));
+  result.setUTCDate(result.getUTCDate() - result.getUTCDay());
+  return result;
+}
+
+/** Formats a Europe/Berlin local midnight with its seasonal offset. */
+function formatDemoPeriodStart(value: Date): string {
+  const year = value.getUTCFullYear();
+  const springTransition = lastDemoSunday(year, 2);
+  const autumnTransition = lastDemoSunday(year, 9);
+  const summerTime = value > springTransition && value <= autumnTransition;
+  return `${value.toISOString().slice(0, 10)}T00:00:00${summerTime ? '+02:00' : '+01:00'}`;
+}
+
+/** Builds at most 60 aligned buckets and marks clipped boundaries as partial. */
+function buildDemoStatisticsBuckets(fromDate: string, toExclusiveDate: string, bucket: StatisticsBucket, endsAtGeneratedTime: boolean): DemoStatisticsBucketPoint[] {
+  const from = parseDemoCalendarDate(fromDate);
+  const end = parseDemoCalendarDate(toExclusiveDate);
+  if (endsAtGeneratedTime) end.setUTCHours(12, 30);
+  const points: DemoStatisticsBucketPoint[] = [];
+  let cursor = floorDemoStatisticsBucket(from, bucket);
+  while (cursor < end && points.length < 60) {
+    const next = nextDemoStatisticsBucket(cursor, bucket);
+    points.push({
+      periodStart: formatDemoPeriodStart(cursor),
+      isPartial: cursor < from || next > end,
+    });
+    cursor = next;
+  }
+  return points;
+}
+
+/** Distributes one exact signed total across buckets with a deterministic trend. */
+function distributeDemoTotal(total: number, count: number, seed: number): number[] {
+  if (count === 0) return [];
+  const sign = total < 0 ? -1 : 1;
+  const magnitude = Math.abs(total);
+  const weights = Array.from({ length: count }, (_, index) => 1 + ((index * 7 + seed) % 5) + Math.floor((index * 2) / count));
+  const weightTotal = weights.reduce((sum, weight) => sum + weight, 0);
+  const exact = weights.map((weight) => (magnitude * weight) / weightTotal);
+  const values = exact.map(Math.floor);
+  const remainder = magnitude - values.reduce((sum, value) => sum + value, 0);
+  const remainderOrder = exact.map((value, index) => ({ index, fraction: value - Math.floor(value) }))
+    .sort((left, right) => right.fraction - left.fraction || left.index - right.index);
+  for (let index = 0; index < remainder; index += 1) values[remainderOrder[index].index] += 1;
+  return values.map((value) => value * sign);
+}
 
 async function blobText(blob: Blob): Promise<string> {
   if (typeof blob.text === 'function') return blob.text();
@@ -404,11 +486,11 @@ export class DemoTransport {
     const [, groupId, resource] = groupMatch;
     this.authorizeGroupRoute(groupId, resource, method);
 
-    if ((resource === 'statistics/members' || resource === 'statistics/finance') && !this.groupSettings.statisticsEnabled) {
+    if (resource === 'statistics' && !this.groupSettings.statisticsEnabled) {
       throw new Error('Statistics are disabled for this group.');
     }
 
-    if ((resource === 'statistics/members' || resource === 'statistics/finance') && method === 'GET') {
+    if (resource === 'statistics' && method === 'GET') {
       const currentPeriodAvailable = this.groupSettings.settlementsEnabled && this.periods.some((period) => period.status === 'OPEN');
       const requestedRange = requestUrl.searchParams.get('range');
       if (requestedRange !== null && !isStatisticsRange(requestedRange)) throw new Error('The statistics range is not supported.');
@@ -448,16 +530,63 @@ export class DemoTransport {
         : calendarMonths <= 60 ? 'MONTH'
         : 'YEAR';
       const meta = {
-        ...demoMemberStatisticsWire.meta,
-        generatedAt: demoMemberStatisticsWire.meta.generatedAt,
+        ...demoStatisticsWire.meta,
+        generatedAt: demoStatisticsWire.meta.generatedAt,
         preset,
-        fromInclusive: `${fromDate}T00:00:00${preset === 'ALL_TIME' ? '+01:00' : '+02:00'}`,
-        toExclusive: endsAtGeneratedTime ? demoMemberStatisticsWire.meta.generatedAt : `${toExclusiveDate}T00:00:00+02:00`,
+        fromInclusive: formatDemoPeriodStart(parseDemoCalendarDate(fromDate)),
+        toExclusive: endsAtGeneratedTime ? demoStatisticsWire.meta.generatedAt : formatDemoPeriodStart(parseDemoCalendarDate(toExclusiveDate)),
         bucket,
         currentPeriodAvailable,
       };
-      const projection = resource === 'statistics/members' ? demoMemberStatisticsWire : demoFinanceStatisticsWire;
-      return clone({ ...projection, meta }) as T;
+      const buckets = buildDemoStatisticsBuckets(fromDate, toExclusiveDate, bucket, endsAtGeneratedTime);
+      const postedUnits = distributeDemoTotal(66, buckets.length, 3);
+      const reversedUnits = distributeDemoTotal(5, buckets.length, 11);
+      const members = {
+        ...demoStatisticsWire.members,
+        activity: buckets.map((point, index) => ({
+          periodStart: point.periodStart,
+          postedUnits: postedUnits[index],
+          reversedUnits: reversedUnits[index],
+        })),
+        topCategories: {
+          ...demoStatisticsWire.members.topCategories,
+          items: demoStatisticsWire.members.topCategories.items.map((item, itemIndex) => {
+            const units = distributeDemoTotal(item.validBookedUnits, buckets.length, itemIndex + 17);
+            return {
+              ...item,
+              series: buckets.map((point, index) => ({ ...point, validBookedUnits: units[index], privacySuppressed: false })),
+            };
+          }),
+        },
+        topProducts: {
+          ...demoStatisticsWire.members.topProducts,
+          items: demoStatisticsWire.members.topProducts.items.map((item, itemIndex) => {
+            const units = distributeDemoTotal(item.validBookedUnits, buckets.length, itemIndex + 29);
+            return {
+              ...item,
+              series: buckets.map((point, index) => ({ ...point, validBookedUnits: units[index], privacySuppressed: false })),
+            };
+          }),
+        },
+      };
+      const charges = distributeDemoTotal(Number(demoStatisticsWire.finance.flows.netBookingChargesMinor), buckets.length, 41);
+      const payments = distributeDemoTotal(Number(demoStatisticsWire.finance.flows.netPaymentsMinor), buckets.length, 47);
+      const adjustments = distributeDemoTotal(Number(demoStatisticsWire.finance.flows.netAdjustmentsMinor), buckets.length, 53);
+      let closing = Number(demoStatisticsWire.finance.flows.openingNetReceivableMinor);
+      const finance = {
+        ...demoStatisticsWire.finance,
+        series: buckets.map((point, index) => {
+          closing += charges[index] - payments[index] + adjustments[index];
+          return {
+            periodStart: point.periodStart,
+            netBookingChargesMinor: String(charges[index]),
+            netPaymentsMinor: String(payments[index]),
+            netAdjustmentsMinor: String(adjustments[index]),
+            closingNetReceivableMinor: String(closing),
+          };
+        }),
+      };
+      return clone({ meta, members, finance }) as T;
     }
 
     if (resource === 'settings' && method === 'GET') return clone(this.groupSettings) as T;
@@ -586,7 +715,11 @@ export class DemoTransport {
         ...this.dashboard,
         recentBookings: this.dashboard.recentBookings.map((booking) => this.bookingWithCurrentIdentities(booking)),
       });
-      if (!can(this.currentMembership(groupId)?.effectiveGrants, 'VIEW_GROUP_STATISTICS')) delete dashboard.groupOutstanding;
+      const canViewStatistics = this.groupSettings.statisticsEnabled && can(this.currentMembership(groupId)?.effectiveGrants, 'VIEW_STATISTICS');
+      if (!canViewStatistics) {
+        delete dashboard.groupOutstanding;
+        dashboard.groupCategoryTotals = [];
+      }
       return dashboard as T;
     }
     if (resource === 'transaction-settings' && method === 'GET') return clone({

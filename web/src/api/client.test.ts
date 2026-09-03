@@ -97,6 +97,24 @@ describe('high-risk API idempotency', () => {
     expect(requestBody(fetchMock.mock.calls[2])).toEqual({ themeOverride: null });
   });
 
+  it('loads the complete statistics snapshot from one canonical endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      meta: { generatedAt: '2026-08-28T10:00:00Z', timezone: 'Europe/Berlin', preset: 'CUSTOM', fromInclusive: '2026-08-01T00:00:00Z', toExclusive: '2026-08-06T00:00:00Z', bucket: 'DAY', privacyThresholdApplied: false, currentPeriodAvailable: false },
+      members: { memberSnapshot: {}, summary: {}, activity: [], topCategories: {}, topProducts: {} },
+      finance: { currency: 'EUR', receivableSnapshot: {}, flows: {}, series: [], categories: [], overdue: null },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.getStatistics('group-a', { range: 'CUSTOM', from: '2026-08-01', to: '2026-08-05' })).resolves.toMatchObject({
+      meta: { preset: 'CUSTOM' },
+      members: { memberSnapshot: { regularMembers: 0 } },
+      finance: { currency: 'EUR' },
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group-a/statistics?range=CUSTOM&from=2026-08-01&to=2026-08-05');
+  });
+
   it('reuses the same key after a lost network response', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(session('user-a')))

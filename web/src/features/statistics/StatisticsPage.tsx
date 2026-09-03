@@ -1,9 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useId, useMemo, useRef, type KeyboardEvent } from 'react';
+import { useEffect, useId } from 'react';
 import { useTranslation } from 'react-i18next';
-import { api } from '@/api/client';
-import { isStatisticsRange, type FinanceStatistics, type Group, type MemberStatistics, type StatisticsMeta } from '@/api/types';
-import { availableStatisticsViews, type StatisticsView } from '@/app/groupCapabilities';
+import { api, ApiError } from '@/api/client';
+import { isStatisticsRange, type StatisticsMeta } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Page } from '@/components/layout/Page';
 import { StatePanel } from '@/components/ui/StatePanel';
@@ -14,42 +13,31 @@ import { statisticsQueryKeys, statisticsRangeOptions } from './statisticsQueries
 import { useStatisticsUrlState } from './statisticsUrlState';
 import styles from './StatisticsPage.module.css';
 
-type StatisticsProjection = MemberStatistics | FinanceStatistics;
-
-/** Returns the endpoint projection independently authorized for one view. */
-function loadStatistics(groupId: string, view: StatisticsView, query: Parameters<typeof api.getMemberStatistics>[1]): Promise<StatisticsProjection> {
-  return view === 'members' ? api.getMemberStatistics(groupId, query) : api.getFinanceStatistics(groupId, query);
-}
-
-/** Resolves the next tab index for horizontal keyboard navigation. */
-function nextTabIndex(event: KeyboardEvent<HTMLButtonElement>, currentIndex: number, tabCount: number): number | null {
-  if (event.key === 'Home') return 0;
-  if (event.key === 'End') return tabCount - 1;
-  if (event.key === 'ArrowRight') return (currentIndex + 1) % tabCount;
-  if (event.key === 'ArrowLeft') return (currentIndex - 1 + tabCount) % tabCount;
-  return null;
+/** Returns whether a failed refresh invalidates access to every cached statistic. */
+function isStatisticsAccessError(error: unknown): boolean {
+  return error instanceof ApiError && (error.problem.status === 401 || error.problem.status === 403);
 }
 
 /**
- * Renders the independently authorized member and finance statistics workspace.
+ * Renders the complete group statistics workspace as one authorized snapshot.
  *
  * React owns URL, query, and responsive layout state. Recharts remains inside
- * the lazy route and only receives presentation-ready SVG coordinates.
+ * the lazy route and renders a bounded number of accessible SVG charts.
  *
- * @returns The active statistics view with shareable filters and freshness data.
+ * @param props - Active group identity used for query and cache isolation.
+ * @returns The continuous statistics dashboard with shareable range filters.
  */
-function StatisticsPageContent({ activeGroup, activeGroupId }: { activeGroup: Group; activeGroupId: string }) {
+function StatisticsPageContent({ activeGroupId }: { activeGroupId: string }) {
   const { t } = useTranslation();
-  const availableViews = useMemo(() => availableStatisticsViews(activeGroup), [activeGroup]);
-  const urlState = useStatisticsUrlState(availableViews, activeGroupId);
-  const tabGroupId = useId();
-  const tabRefs = useRef<Partial<Record<StatisticsView, HTMLButtonElement | null>>>({});
+  const urlState = useStatisticsUrlState(activeGroupId);
+  const membersHeadingId = useId();
+  const financeHeadingId = useId();
   const queryInput = urlState.query;
   const statisticsQuery = useQuery({
-    queryKey: statisticsQueryKeys.view(activeGroupId, urlState.view, queryInput ?? { range: 'CUSTOM', from: urlState.from, to: urlState.to }),
-    queryFn: () => loadStatistics(activeGroupId, urlState.view, queryInput ?? {}),
+    queryKey: statisticsQueryKeys.dashboard(activeGroupId, queryInput ?? { range: 'CUSTOM', from: urlState.from, to: urlState.to }),
+    queryFn: () => api.getStatistics(activeGroupId, queryInput ?? {}),
     enabled: queryInput !== null,
-    placeholderData: (previousData, previousQuery) => previousQuery?.queryKey[1] === activeGroupId && previousQuery.queryKey[2] === urlState.view ? previousData : undefined,
+    placeholderData: (previousData, previousQuery) => previousQuery?.queryKey[1] === activeGroupId ? previousData : undefined,
     staleTime: 0,
     refetchInterval: false,
   });
@@ -60,54 +48,17 @@ function StatisticsPageContent({ activeGroup, activeGroupId }: { activeGroup: Gr
     if (resolvedPreset) normalizeResolvedRange(resolvedPreset);
   }, [normalizeResolvedRange, resolvedPreset]);
 
-  const selectView = (view: StatisticsView) => {
-    urlState.setView(view);
-    window.requestAnimationFrame(() => tabRefs.current[view]?.focus());
-  };
-  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
-    const nextIndex = nextTabIndex(event, index, availableViews.length);
-    if (nextIndex === null) return;
-    event.preventDefault();
-    selectView(availableViews[nextIndex]);
-  };
   const changeRange = (value: string) => {
     if (isStatisticsRange(value)) urlState.setRange(value);
   };
 
-  const renderProjection = (data: StatisticsProjection) => urlState.view === 'members'
-    ? <MemberStatisticsView data={data as MemberStatistics} />
-    : <FinanceStatisticsView data={data as FinanceStatistics} />;
   const meta: StatisticsMeta | undefined = statisticsQuery.data?.meta;
+  const accessInvalidated = statisticsQuery.isError && isStatisticsAccessError(statisticsQuery.error);
   const currentPeriodAvailable = meta?.currentPeriodAvailable ?? null;
   const rangeResolving = urlState.range === null;
 
   return (
     <Page className={styles.page} intro={t('statistics.intro')} title={t('statistics.title')} wide>
-      {availableViews.length > 1 ? (
-        <div aria-label={t('statistics.views.label')} className={styles.tabs} role="tablist">
-          {availableViews.map((view, index) => {
-            const selected = view === urlState.view;
-            return (
-              <button
-                aria-controls={`${tabGroupId}-panel`}
-                aria-selected={selected}
-                className={selected ? styles.activeTab : undefined}
-                id={`${tabGroupId}-${view}-tab`}
-                key={view}
-                onClick={() => selectView(view)}
-                onKeyDown={(event) => handleTabKeyDown(event, index)}
-                ref={(element) => { tabRefs.current[view] = element; }}
-                role="tab"
-                tabIndex={selected ? 0 : -1}
-                type="button"
-              >
-                {t(`statistics.views.${view}`)}
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
-
       <section aria-label={t('statistics.filters.label')} className={styles.filters}>
         <label className={styles.rangeField}>
           <span>{t('statistics.filters.range')}</span>
@@ -133,22 +84,33 @@ function StatisticsPageContent({ activeGroup, activeGroupId }: { activeGroup: Gr
         ) : null}
       </section>
 
-      <div
-        aria-labelledby={availableViews.length > 1 ? `${tabGroupId}-${urlState.view}-tab` : undefined}
-        className={styles.panel}
-        id={`${tabGroupId}-panel`}
-        role={availableViews.length > 1 ? 'tabpanel' : undefined}
-        tabIndex={availableViews.length > 1 ? 0 : undefined}
-      >
+      <div className={styles.panel}>
         {queryInput === null ? (
           <StatePanel kind="empty" message={t('statistics.filters.invalidCustomMessage')} title={t('statistics.filters.invalidCustomTitle')} />
+        ) : accessInvalidated ? (
+          <StatePanel actionLabel={t('common.retry')} kind="error" message={t('statistics.accessChangedMessage')} onAction={() => void statisticsQuery.refetch()} title={t('statistics.accessChangedTitle')} />
         ) : statisticsQuery.isPending || !statisticsQuery.data ? (
           statisticsQuery.isError ? <StatePanel actionLabel={t('common.retry')} kind="error" message={t('statistics.loadError')} onAction={() => void statisticsQuery.refetch()} /> : <StatePanel kind="loading" />
         ) : (
           <div className={styles.results}>
             {meta ? <StatisticsStatus meta={meta} onRefresh={() => void statisticsQuery.refetch()} refreshing={statisticsQuery.isFetching} /> : null}
             {statisticsQuery.isError ? <p className={styles.staleWarning} role="alert">{t('statistics.refreshError')}</p> : null}
-            {renderProjection(statisticsQuery.data)}
+            <div className={styles.sections}>
+              <section aria-labelledby={membersHeadingId} className={styles.dashboardSection}>
+                <header className={styles.sectionHeading}>
+                  <h2 id={membersHeadingId}>{t('statistics.sections.members')}</h2>
+                  <p>{t('statistics.sections.membersDescription')}</p>
+                </header>
+                <MemberStatisticsView data={statisticsQuery.data.members} meta={statisticsQuery.data.meta} />
+              </section>
+              <section aria-labelledby={financeHeadingId} className={styles.dashboardSection}>
+                <header className={styles.sectionHeading}>
+                  <h2 id={financeHeadingId}>{t('statistics.sections.finance')}</h2>
+                  <p>{t('statistics.sections.financeDescription')}</p>
+                </header>
+                <FinanceStatisticsView data={statisticsQuery.data.finance} meta={statisticsQuery.data.meta} />
+              </section>
+            </div>
           </div>
         )}
       </div>
@@ -162,6 +124,6 @@ function StatisticsPageContent({ activeGroup, activeGroupId }: { activeGroup: Gr
  * @returns The statistics workspace scoped to the current active group.
  */
 export function StatisticsPage() {
-  const { activeGroup, activeGroupId } = useActiveGroup();
-  return <StatisticsPageContent activeGroup={activeGroup} activeGroupId={activeGroupId} key={activeGroupId} />;
+  const { activeGroupId } = useActiveGroup();
+  return <StatisticsPageContent activeGroupId={activeGroupId} key={activeGroupId} />;
 }

@@ -23,48 +23,100 @@ describe('DemoTransport account security', () => {
 describe('DemoTransport statistics projections', () => {
   it('returns complete exact default projections with server-selected range metadata', async () => {
     const transport = new DemoTransport();
-    const members = await transport.request<{
+    const statistics = await transport.request<{
       meta: { preset: string; bucket: string; generatedAt: string; toExclusive: string; currentPeriodAvailable: boolean };
-      activity: Array<{ periodStart: string }>;
-    }>('/groups/group-sv-adler/statistics/members');
-    const finance = await transport.request<{
-      flows: { openingNetReceivableMinor: string; netBookingChargesMinor: string; netPaymentsMinor: string; netAdjustmentsMinor: string; closingNetReceivableMinor: string };
-      series: Array<{ periodStart: string }>;
-    }>('/groups/group-sv-adler/statistics/finance');
+      members: {
+        activity: Array<{ periodStart: string }>;
+        topCategories: { items: Array<{ validBookedUnits: number; series: Array<{ periodStart: string; validBookedUnits: number | null; privacySuppressed: boolean; isPartial: boolean }> }> };
+        topProducts: { items: Array<{ validBookedUnits: number; series: Array<{ periodStart: string; validBookedUnits: number | null; privacySuppressed: boolean; isPartial: boolean }> }> };
+      };
+      finance: {
+        flows: { openingNetReceivableMinor: string; netBookingChargesMinor: string; netPaymentsMinor: string; netAdjustmentsMinor: string; closingNetReceivableMinor: string };
+        series: Array<{ periodStart: string }>;
+      };
+    }>('/groups/group-sv-adler/statistics');
 
-    expect(members.meta).toMatchObject({ preset: 'LAST_30_DAYS', bucket: 'DAY', currentPeriodAvailable: false });
-    expect(members.meta.toExclusive).toBe(members.meta.generatedAt);
-    expect(members.activity).toHaveLength(30);
-    expect(members.activity[0].periodStart).toContain('2026-07-30');
-    expect(members.activity.at(-1)?.periodStart).toContain('2026-08-28');
-    expect(finance.series).toHaveLength(30);
+    expect(statistics.meta).toMatchObject({ preset: 'LAST_30_DAYS', bucket: 'DAY', currentPeriodAvailable: false });
+    expect(statistics.meta.toExclusive).toBe(statistics.meta.generatedAt);
+    expect(statistics.members.activity).toHaveLength(30);
+    expect(statistics.members.activity[0].periodStart).toContain('2026-07-30');
+    expect(statistics.members.activity.at(-1)?.periodStart).toContain('2026-08-28');
+    expect(statistics.members.topCategories.items.every((item) => item.series.length === 30)).toBe(true);
+    expect(statistics.members.topProducts.items.every((item) => item.series.length === 30)).toBe(true);
+    expect(statistics.members.topProducts.items[0].series.at(-1)).toMatchObject({ privacySuppressed: false, isPartial: true });
+    for (const item of [...statistics.members.topCategories.items, ...statistics.members.topProducts.items]) {
+      expect(item.series.reduce((sum, point) => sum + (point.validBookedUnits ?? 0), 0)).toBe(item.validBookedUnits);
+    }
+    expect(statistics.finance.series).toHaveLength(30);
     expect(
-      BigInt(finance.flows.openingNetReceivableMinor)
-      + BigInt(finance.flows.netBookingChargesMinor)
-      - BigInt(finance.flows.netPaymentsMinor)
-      + BigInt(finance.flows.netAdjustmentsMinor),
-    ).toBe(BigInt(finance.flows.closingNetReceivableMinor));
+      BigInt(statistics.finance.flows.openingNetReceivableMinor)
+      + BigInt(statistics.finance.flows.netBookingChargesMinor)
+      - BigInt(statistics.finance.flows.netPaymentsMinor)
+      + BigInt(statistics.finance.flows.netAdjustmentsMinor),
+    ).toBe(BigInt(statistics.finance.flows.closingNetReceivableMinor));
   });
 
   it('accepts inclusive custom dates, caps today at generation time, and rejects unavailable current period', async () => {
     const transport = new DemoTransport();
-    const historical = await transport.request<{ meta: { preset: string; bucket: string; toExclusive: string } }>('/groups/group-sv-adler/statistics/members?range=CUSTOM&from=2026-08-01&to=2026-08-05');
-    const currentDay = await transport.request<{ meta: { generatedAt: string; toExclusive: string } }>('/groups/group-sv-adler/statistics/members?range=CUSTOM&from=2026-08-28&to=2026-08-28');
+    const historical = await transport.request<{
+      meta: { preset: string; bucket: string; toExclusive: string };
+      members: { activity: unknown[]; topProducts: { items: Array<{ series: Array<{ isPartial: boolean }> }> } };
+    }>('/groups/group-sv-adler/statistics?range=CUSTOM&from=2026-08-01&to=2026-08-05');
+    const currentDay = await transport.request<{
+      meta: { generatedAt: string; toExclusive: string };
+      members: { activity: unknown[]; topProducts: { items: Array<{ series: Array<{ isPartial: boolean }> }> } };
+    }>('/groups/group-sv-adler/statistics?range=CUSTOM&from=2026-08-28&to=2026-08-28');
 
     expect(historical.meta).toMatchObject({ preset: 'CUSTOM', bucket: 'DAY', toExclusive: '2026-08-06T00:00:00+02:00' });
+    expect(historical.members.activity).toHaveLength(5);
+    expect(historical.members.topProducts.items[0].series.at(-1)?.isPartial).toBe(false);
     expect(currentDay.meta.toExclusive).toBe(currentDay.meta.generatedAt);
-    await expect(transport.request('/groups/group-sv-adler/statistics/members?range=CURRENT_PERIOD')).rejects.toThrow(/not available/i);
+    expect(currentDay.members.activity).toHaveLength(1);
+    expect(currentDay.members.topProducts.items[0].series[0].isPartial).toBe(true);
+    await expect(transport.request('/groups/group-sv-adler/statistics?range=CURRENT_PERIOD')).rejects.toThrow(/not available/i);
+  });
+
+  it.each([
+    ['LAST_90_DAYS', 'WEEK', 14],
+    ['LAST_12_MONTHS', 'MONTH', 12],
+    ['ALL_TIME', 'MONTH', 32],
+  ])('aligns every %s series to the shared %s bucket axis', async (range, expectedBucket, expectedLength) => {
+    const transport = new DemoTransport();
+    const statistics = await transport.request<{
+      meta: { bucket: string };
+      members: {
+        activity: Array<{ periodStart: string }>;
+        topCategories: { items: Array<{ isOther: boolean; series: Array<{ periodStart: string; validBookedUnits: number | null }> }> };
+        topProducts: { items: Array<{ isOther: boolean; series: Array<{ periodStart: string; validBookedUnits: number | null }> }> };
+      };
+      finance: { series: Array<{ periodStart: string }> };
+    }>(`/groups/group-sv-adler/statistics?range=${range}`);
+    const sharedAxis = statistics.members.activity.map((point) => point.periodStart);
+
+    expect(statistics.meta.bucket).toBe(expectedBucket);
+    expect(sharedAxis).toHaveLength(expectedLength);
+    expect(statistics.finance.series.map((point) => point.periodStart)).toEqual(sharedAxis);
+    for (const item of [...statistics.members.topCategories.items, ...statistics.members.topProducts.items]) {
+      expect(item.series.map((point) => point.periodStart)).toEqual(sharedAxis);
+    }
+    expect(statistics.members.topCategories.items.at(-1)?.isOther).toBe(true);
+    expect(statistics.members.topProducts.items.at(-1)?.isOther).toBe(true);
   });
 
   it('follows the statistics master switch and enables the current period with settlements', async () => {
     const transport = new DemoTransport();
     await transport.request('/groups/group-sv-adler/settings', jsonRequest('PATCH', { settlementsEnabled: true }));
-    await expect(transport.request<{ meta: { preset: string; currentPeriodAvailable: boolean } }>('/groups/group-sv-adler/statistics/members')).resolves.toMatchObject({
+    await expect(transport.request<{ meta: { preset: string; currentPeriodAvailable: boolean } }>('/groups/group-sv-adler/statistics')).resolves.toMatchObject({
       meta: { preset: 'CURRENT_PERIOD', currentPeriodAvailable: true },
     });
 
     await transport.request('/groups/group-sv-adler/settings', jsonRequest('PATCH', { statisticsEnabled: false }));
-    await expect(transport.request('/groups/group-sv-adler/statistics/members')).rejects.toThrow(/disabled/i);
+    await expect(transport.request('/groups/group-sv-adler/statistics')).rejects.toThrow(/disabled/i);
+    await expect(transport.request<Dashboard>('/groups/group-sv-adler/dashboard')).resolves.toMatchObject({
+      groupCategoryTotals: [],
+    });
+    const dashboard = await transport.request<Dashboard>('/groups/group-sv-adler/dashboard');
+    expect(dashboard.groupOutstanding).toBeUndefined();
   });
 });
 

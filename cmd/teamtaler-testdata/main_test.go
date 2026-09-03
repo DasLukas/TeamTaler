@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -80,7 +81,7 @@ func TestRunSeedsDiverseGermanEnvironment(t *testing.T) {
 		'role:CATALOG_MANAGER:' || group_id,
 		'role:GUEST:' || group_id
 	)`, nil, 0)
-	assertCount(t, ctx, db, `SELECT count(*) FROM role_permission_grants`, nil, 30)
+	assertCount(t, ctx, db, `SELECT count(*) FROM role_permission_grants`, nil, 28)
 	assertCount(t, ctx, db, `SELECT count(*) FROM role_permission_grants WHERE permission_key IN ('BOOK_FOR_OTHERS','BOOK_FOR_GUESTS')`, nil, 0)
 	assertCount(t, ctx, db, `SELECT count(*) FROM bookings WHERE voided_at IS NULL`, nil, 28)
 	assertCount(t, ctx, db, `SELECT count(*) FROM bookings WHERE voided_at IS NOT NULL AND void_reason=? AND voided_by IS NOT NULL`, []any{"Doppelte Testbuchung"}, 1)
@@ -88,6 +89,10 @@ func TestRunSeedsDiverseGermanEnvironment(t *testing.T) {
 	assertCount(t, ctx, db, `SELECT count(*) FROM payments WHERE reversed_at IS NOT NULL AND reversal_reason=? AND reversed_by IS NOT NULL`, []any{"Doppelte Testzahlung"}, 1)
 	assertCount(t, ctx, db, `SELECT count(*) FROM periods WHERE status='CLOSED'`, nil, 3)
 	assertCount(t, ctx, db, `SELECT count(*) FROM periods WHERE status='OPEN'`, nil, 2)
+	fixtureNow := time.Now().UTC().Add(time.Second).Format(time.RFC3339Nano)
+	assertCount(t, ctx, db, `SELECT count(*) FROM periods WHERE starts_at>?`, []any{fixtureNow}, 0)
+	assertCount(t, ctx, db, `SELECT count(*) FROM bookings WHERE created_at>?`, []any{fixtureNow}, 0)
+	assertCount(t, ctx, db, `SELECT count(*) FROM payments WHERE created_at>?`, []any{fixtureNow}, 0)
 	assertMinimumCount(t, ctx, db, `SELECT count(*) FROM period_statements`, nil, 12)
 	assertCount(t, ctx, db, `SELECT count(DISTINCT image_key) FROM (
 		SELECT image_key FROM products WHERE image_key IS NOT NULL

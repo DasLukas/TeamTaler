@@ -6,27 +6,13 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/statistics"
 )
 
-func (s *Server) handleMemberStatistics(response http.ResponseWriter, request *http.Request) {
+func (s *Server) handleStatistics(response http.ResponseWriter, request *http.Request) {
 	_, membership, err := s.membership(request)
 	if err != nil {
 		writeProblem(response, request, err)
 		return
 	}
-	dashboard, err := s.statistics.Members(request.Context(), membership, statisticsQuery(request))
-	if err != nil {
-		writeProblem(response, request, err)
-		return
-	}
-	writeJSON(response, http.StatusOK, dashboard)
-}
-
-func (s *Server) handleFinanceStatistics(response http.ResponseWriter, request *http.Request) {
-	_, membership, err := s.membership(request)
-	if err != nil {
-		writeProblem(response, request, err)
-		return
-	}
-	dashboard, err := s.statistics.Finance(request.Context(), membership, statisticsQuery(request))
+	dashboard, err := s.statistics.Dashboard(request.Context(), membership, statisticsQuery(request))
 	if err != nil {
 		writeProblem(response, request, err)
 		return

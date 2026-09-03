@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Group, PermissionKey } from '@/api/types';
-import { availableStatisticsViews, canOpenStatistics } from './groupCapabilities';
+import { canOpenStatistics } from './groupCapabilities';
 
 function group(statisticsEnabled: boolean, permissions: readonly PermissionKey[]): Pick<Group, 'statisticsEnabled' | 'membership'> {
   return {
@@ -15,21 +15,15 @@ function group(statisticsEnabled: boolean, permissions: readonly PermissionKey[]
   };
 }
 
-describe('statistics group capabilities', () => {
-  it('keeps both views hidden behind the group master switch', () => {
-    const disabled = group(false, ['VIEW_MEMBER_STATISTICS', 'VIEW_GROUP_STATISTICS']);
-
-    expect(availableStatisticsViews(disabled)).toEqual([]);
-    expect(canOpenStatistics(disabled)).toBe(false);
+describe('statistics group capability', () => {
+  it('requires the group master switch and unified statistics grant', () => {
+    expect(canOpenStatistics(group(false, ['VIEW_STATISTICS']))).toBe(false);
+    expect(canOpenStatistics(group(true, []))).toBe(false);
+    expect(canOpenStatistics(group(true, ['VIEW_STATISTICS']))).toBe(true);
   });
 
-  it('returns only independently granted views in stable tab order', () => {
-    expect(availableStatisticsViews(group(true, ['VIEW_GROUP_STATISTICS']))).toEqual(['finance']);
-    expect(availableStatisticsViews(group(true, ['VIEW_MEMBER_STATISTICS']))).toEqual(['members']);
-    expect(availableStatisticsViews(group(true, ['VIEW_GROUP_STATISTICS', 'VIEW_MEMBER_STATISTICS']))).toEqual(['members', 'finance']);
-  });
-
-  it('honors the broad activity permission implication for member statistics', () => {
-    expect(availableStatisticsViews(group(true, ['VIEW_ALL_BOOKING_ACTIVITY']))).toEqual(['members']);
+  it('does not derive statistics access from broad booking activity', () => {
+    expect(canOpenStatistics(group(true, ['VIEW_ALL_BOOKING_ACTIVITY']))).toBe(false);
+    expect(canOpenStatistics(group(true, ['VOID_ANY_BOOKING']))).toBe(false);
   });
 });

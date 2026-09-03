@@ -50,35 +50,35 @@ func TestFinanceReconcilesNetFlowsAndHistoricalSnapshot(t *testing.T) {
 
 	fixture.enableStatistics(t, true)
 	service := fixture.service()
-	if _, err := service.Finance(fixture.ctx, fixture.membership, Query{}); !errors.Is(err, domain.ErrForbidden) {
-		t.Fatalf("ungranted finance statistics error=%v, want forbidden", err)
+	if _, err := service.Dashboard(fixture.ctx, fixture.membership, Query{}); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("ungranted statistics error=%v, want forbidden", err)
 	}
-	fixture.grant(t, domain.PermissionViewGroupStatistics)
-	dashboard, err := service.Finance(fixture.ctx, fixture.membership, Query{
+	fixture.grant(t, domain.PermissionViewStatistics)
+	dashboard, err := service.Dashboard(fixture.ctx, fixture.membership, Query{
 		Preset: PresetCustom, From: "2026-08-01", To: "2026-08-31",
 	})
 	if err != nil {
 		t.Fatalf("read finance statistics: %v", err)
 	}
-	if dashboard.Flows.OpeningNetReceivableMinor != 100 || dashboard.Flows.NetBookingChargesMinor != 300 ||
-		dashboard.Flows.NetPaymentsMinor != 0 || dashboard.Flows.NetAdjustmentsMinor != 50 || dashboard.Flows.ClosingNetReceivableMinor != 450 {
-		t.Fatalf("finance flows=%#v, want reconciled 100+300-0+50=450", dashboard.Flows)
+	if dashboard.Finance.Flows.OpeningNetReceivableMinor != 100 || dashboard.Finance.Flows.NetBookingChargesMinor != 300 ||
+		dashboard.Finance.Flows.NetPaymentsMinor != 0 || dashboard.Finance.Flows.NetAdjustmentsMinor != 50 || dashboard.Finance.Flows.ClosingNetReceivableMinor != 450 {
+		t.Fatalf("finance flows=%#v, want reconciled 100+300-0+50=450", dashboard.Finance.Flows)
 	}
-	if dashboard.ReceivableSnapshot.NetReceivableMinor != 450 || dashboard.ReceivableSnapshot.GrossReceivableMinor != 450 || dashboard.ReceivableSnapshot.BalancedAccountCount != 3 || dashboard.ReceivableSnapshot.AsOf != dashboard.Meta.ToExclusive {
-		t.Fatalf("historical receivable snapshot=%#v meta=%#v", dashboard.ReceivableSnapshot, dashboard.Meta)
+	if dashboard.Finance.ReceivableSnapshot.NetReceivableMinor != 450 || dashboard.Finance.ReceivableSnapshot.GrossReceivableMinor != 450 || dashboard.Finance.ReceivableSnapshot.BalancedAccountCount != 3 || dashboard.Finance.ReceivableSnapshot.AsOf != dashboard.Meta.ToExclusive {
+		t.Fatalf("historical receivable snapshot=%#v meta=%#v", dashboard.Finance.ReceivableSnapshot, dashboard.Meta)
 	}
-	if len(dashboard.Series) == 0 || dashboard.Series[len(dashboard.Series)-1].ClosingNetReceivableMinor != 450 {
-		t.Fatalf("finance closing series=%#v", dashboard.Series)
+	if len(dashboard.Finance.Series) == 0 || dashboard.Finance.Series[len(dashboard.Finance.Series)-1].ClosingNetReceivableMinor != 450 {
+		t.Fatalf("finance closing series=%#v", dashboard.Finance.Series)
 	}
-	if len(dashboard.Categories) != 1 || dashboard.Categories[0].CategoryName != "Current category" || dashboard.Categories[0].NetBookingChargesMinor != 300 {
-		t.Fatalf("finance category aggregation=%#v", dashboard.Categories)
+	if len(dashboard.Finance.Categories) != 1 || dashboard.Finance.Categories[0].CategoryName != "Current category" || dashboard.Finance.Categories[0].NetBookingChargesMinor != 300 {
+		t.Fatalf("finance category aggregation=%#v", dashboard.Finance.Categories)
 	}
 }
 
 func TestFinanceOverdueIsCurrentAndLongRangesUseYearBuckets(t *testing.T) {
 	fixture := newStatisticsFixture(t)
 	fixture.enableStatistics(t, true)
-	fixture.grant(t, domain.PermissionViewGroupStatistics)
+	fixture.grant(t, domain.PermissionViewStatistics)
 	if _, err := fixture.db.ExecContext(fixture.ctx, `INSERT INTO periods(id,group_id,label,status,starts_at,closed_at,due_at,created_at)
 		VALUES('period-overdue',?,'Overdue','CLOSED','2026-08-01T00:00:00Z','2026-08-02T00:00:00Z','2026-09-01','2026-08-01T00:00:00Z')`, fixture.membership.GroupID); err != nil {
 		t.Fatalf("insert overdue period: %v", err)
@@ -91,17 +91,17 @@ func TestFinanceOverdueIsCurrentAndLongRangesUseYearBuckets(t *testing.T) {
 		t.Fatalf("insert overdue statement: %v", err)
 	}
 
-	dashboard, err := fixture.service().Finance(fixture.ctx, fixture.membership, Query{
+	dashboard, err := fixture.service().Dashboard(fixture.ctx, fixture.membership, Query{
 		Preset: PresetCustom, From: "2015-01-01", To: "2026-08-31",
 	})
 	if err != nil {
 		t.Fatalf("read long-range finance statistics: %v", err)
 	}
-	if dashboard.Meta.Bucket != BucketYear || len(dashboard.Series) > maxSeriesBuckets {
-		t.Fatalf("long-range buckets=%s/%d, want YEAR and at most %d", dashboard.Meta.Bucket, len(dashboard.Series), maxSeriesBuckets)
+	if dashboard.Meta.Bucket != BucketYear || len(dashboard.Finance.Series) > maxSeriesBuckets {
+		t.Fatalf("long-range buckets=%s/%d, want YEAR and at most %d", dashboard.Meta.Bucket, len(dashboard.Finance.Series), maxSeriesBuckets)
 	}
-	if dashboard.Overdue == nil || dashboard.Overdue.AmountMinor != 1000 || dashboard.Overdue.AccountCount != 1 || dashboard.Overdue.PeriodCount != 1 || dashboard.Overdue.AsOf != dashboard.Meta.GeneratedAt {
-		t.Fatalf("current overdue snapshot=%#v meta=%#v", dashboard.Overdue, dashboard.Meta)
+	if dashboard.Finance.Overdue == nil || dashboard.Finance.Overdue.AmountMinor != 1000 || dashboard.Finance.Overdue.AccountCount != 1 || dashboard.Finance.Overdue.PeriodCount != 1 || dashboard.Finance.Overdue.AsOf != dashboard.Meta.GeneratedAt {
+		t.Fatalf("current overdue snapshot=%#v meta=%#v", dashboard.Finance.Overdue, dashboard.Meta)
 	}
 }
 

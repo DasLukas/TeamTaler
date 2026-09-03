@@ -37,73 +37,47 @@ type dashboardContext struct {
 	groupCreatedAt     time.Time
 }
 
-// Members returns anonymous booking and membership aggregates. The group must
-// have statistics enabled and membership must currently hold
-// VIEW_MEMBER_STATISTICS, either directly or through a permission implication.
-// Query validation, authorization, disabled features, and database failures are
-// returned as errors.
-func (s Service) Members(ctx context.Context, membership domain.Membership, query Query) (MemberDashboard, error) {
+// Dashboard returns member, booking, and complete-ledger finance aggregates
+// from one read-only database snapshot. The group must have statistics enabled
+// and membership must currently hold VIEW_STATISTICS. All returned money values
+// retain int64 precision and serialize as strings. Query validation,
+// authorization, disabled features, and database failures are returned as
+// errors.
+func (s Service) Dashboard(ctx context.Context, membership domain.Membership, query Query) (Dashboard, error) {
 	if s.DB == nil {
-		return MemberDashboard{}, errors.New("statistics service requires a database")
+		return Dashboard{}, errors.New("statistics service requires a database")
 	}
 	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
-		return MemberDashboard{}, err
+		return Dashboard{}, err
 	}
 	defer tx.Rollback()
 	snapshot := s
 	snapshot.reader = tx
-	configuration, err := snapshot.authorize(ctx, membership, domain.PermissionViewMemberStatistics)
+	configuration, err := snapshot.authorize(ctx, membership)
 	if err != nil {
-		return MemberDashboard{}, err
+		return Dashboard{}, err
 	}
 	rangeValue, err := snapshot.resolveRange(ctx, membership.GroupID, query, configuration)
 	if err != nil {
-		return MemberDashboard{}, err
+		return Dashboard{}, err
 	}
-	dashboard, err := snapshot.memberDashboard(ctx, membership, configuration, rangeValue)
+	members, privacyApplied, err := snapshot.memberStatistics(ctx, membership, rangeValue)
 	if err != nil {
-		return MemberDashboard{}, err
+		return Dashboard{}, err
+	}
+	rangeValue.meta.PrivacyThresholdApplied = privacyApplied
+	finance, err := snapshot.financeStatistics(ctx, membership, configuration, rangeValue)
+	if err != nil {
+		return Dashboard{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		return MemberDashboard{}, err
+		return Dashboard{}, err
 	}
-	return dashboard, nil
+	return Dashboard{Meta: rangeValue.meta, Members: members, Finance: finance}, nil
 }
 
-// Finance returns complete-ledger financial aggregates. The group must have
-// statistics enabled and membership must currently hold VIEW_GROUP_STATISTICS.
-// All returned money values retain int64 precision and serialize as strings.
-func (s Service) Finance(ctx context.Context, membership domain.Membership, query Query) (FinanceDashboard, error) {
-	if s.DB == nil {
-		return FinanceDashboard{}, errors.New("statistics service requires a database")
-	}
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
-	if err != nil {
-		return FinanceDashboard{}, err
-	}
-	defer tx.Rollback()
-	snapshot := s
-	snapshot.reader = tx
-	configuration, err := snapshot.authorize(ctx, membership, domain.PermissionViewGroupStatistics)
-	if err != nil {
-		return FinanceDashboard{}, err
-	}
-	rangeValue, err := snapshot.resolveRange(ctx, membership.GroupID, query, configuration)
-	if err != nil {
-		return FinanceDashboard{}, err
-	}
-	dashboard, err := snapshot.financeDashboard(ctx, membership, configuration, rangeValue)
-	if err != nil {
-		return FinanceDashboard{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return FinanceDashboard{}, err
-	}
-	return dashboard, nil
-}
-
-func (s Service) authorize(ctx context.Context, membership domain.Membership, permission domain.PermissionKey) (dashboardContext, error) {
+func (s Service) authorize(ctx context.Context, membership domain.Membership) (dashboardContext, error) {
 	queryer := s.queryer()
 	var configuration dashboardContext
 	var createdAt string
@@ -122,7 +96,7 @@ func (s Service) authorize(ctx context.Context, membership domain.Membership, pe
 	if !configuration.statisticsEnabled {
 		return dashboardContext{}, domain.ErrForbidden
 	}
-	if err := authorization.Require(ctx, queryer, membership.GroupID, membership.ID, permission, authorization.GroupResource(membership.GroupID)); err != nil {
+	if err := authorization.Require(ctx, queryer, membership.GroupID, membership.ID, domain.PermissionViewStatistics, authorization.GroupResource(membership.GroupID)); err != nil {
 		return dashboardContext{}, err
 	}
 	configuration.groupCreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)

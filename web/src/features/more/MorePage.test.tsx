@@ -47,7 +47,7 @@ describe('MorePage role navigation', () => {
   });
 
   it('places an authorized statistics workspace first in the mobile overflow list', () => {
-    usePermissions(['VIEW_GROUP_STATISTICS'], [], true);
+    usePermissions(['VIEW_STATISTICS'], [], true);
     render(<MorePage />);
 
     expect(menuItems()).toEqual(['Benachrichtigungen', 'Statistiken', 'Mein Konto', 'Abmelden']);

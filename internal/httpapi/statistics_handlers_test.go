@@ -15,7 +15,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/statistics"
 )
 
-func TestStatisticsHandlersEnforceIndependentPermissionsAndExactMoneyWire(t *testing.T) {
+func TestStatisticsHandlerEnforcesUnifiedAccessAndExactMoneyWire(t *testing.T) {
 	server, principal, administrator := invitationImportServer(t, false)
 	clock := time.Date(2026, time.August, 28, 12, 0, 0, 0, time.UTC)
 	server.statistics = statistics.Service{DB: server.db, Clock: func() time.Time { return clock }}
@@ -29,9 +29,9 @@ func TestStatisticsHandlersEnforceIndependentPermissionsAndExactMoneyWire(t *tes
 	}
 
 	disabled := httptest.NewRecorder()
-	server.handleMemberStatistics(disabled, request("/api/v1/groups/"+administrator.GroupID+"/statistics/members"))
+	server.handleStatistics(disabled, request("/api/v1/groups/"+administrator.GroupID+"/statistics"))
 	if disabled.Code != http.StatusForbidden {
-		t.Fatalf("disabled member statistics status=%d body=%s", disabled.Code, disabled.Body.String())
+		t.Fatalf("disabled statistics status=%d body=%s", disabled.Code, disabled.Body.String())
 	}
 	enabled := true
 	if _, err := server.groups.UpdateSettings(context.Background(), principal, administrator, groups.SettingsUpdate{StatisticsEnabled: &enabled}); err != nil {
@@ -45,33 +45,20 @@ func TestStatisticsHandlersEnforceIndependentPermissionsAndExactMoneyWire(t *tes
 			t.Fatalf("grant handler permission %s: %v", permission, err)
 		}
 	}
-	grant(domain.PermissionViewMemberStatistics)
+
+	permissionDenied := httptest.NewRecorder()
+	server.handleStatistics(permissionDenied, request("/api/v1/groups/"+administrator.GroupID+"/statistics"))
+	if permissionDenied.Code != http.StatusForbidden {
+		t.Fatalf("ungranted statistics status=%d body=%s", permissionDenied.Code, permissionDenied.Body.String())
+	}
+	grant(domain.PermissionViewStatistics)
 
 	unsupportedRange := httptest.NewRecorder()
-	server.handleMemberStatistics(unsupportedRange, request("/api/v1/groups/"+administrator.GroupID+"/statistics/members?range=UNSUPPORTED"))
+	server.handleStatistics(unsupportedRange, request("/api/v1/groups/"+administrator.GroupID+"/statistics?range=UNSUPPORTED"))
 	if unsupportedRange.Code != http.StatusUnprocessableEntity || !strings.Contains(unsupportedRange.Body.String(), "range: contains an unsupported statistics preset") {
 		t.Fatalf("unsupported statistics range status=%d body=%s", unsupportedRange.Code, unsupportedRange.Body.String())
 	}
 
-	membersResponse := httptest.NewRecorder()
-	server.handleMemberStatistics(membersResponse, request("/api/v1/groups/"+administrator.GroupID+"/statistics/members?range=CUSTOM&from=2026-08-28&to=2026-08-28"))
-	if membersResponse.Code != http.StatusOK {
-		t.Fatalf("member statistics status=%d body=%s", membersResponse.Code, membersResponse.Body.String())
-	}
-	var memberDashboard statistics.MemberDashboard
-	if err := json.Unmarshal(membersResponse.Body.Bytes(), &memberDashboard); err != nil {
-		t.Fatalf("decode member statistics: %v", err)
-	}
-	if memberDashboard.Meta.Preset != statistics.PresetCustom || memberDashboard.Meta.ToExclusive != memberDashboard.Meta.GeneratedAt || memberDashboard.Summary.CancellationRate != nil {
-		t.Fatalf("member statistics contract=%#v", memberDashboard)
-	}
-
-	financeDenied := httptest.NewRecorder()
-	server.handleFinanceStatistics(financeDenied, request("/api/v1/groups/"+administrator.GroupID+"/statistics/finance"))
-	if financeDenied.Code != http.StatusForbidden {
-		t.Fatalf("finance permission separation status=%d body=%s", financeDenied.Code, financeDenied.Body.String())
-	}
-	grant(domain.PermissionViewGroupStatistics)
 	var periodID string
 	if err := server.db.QueryRow(`SELECT id FROM periods WHERE group_id=? AND status='OPEN'`, administrator.GroupID).Scan(&periodID); err != nil {
 		t.Fatalf("read statistics handler period: %v", err)
@@ -81,17 +68,29 @@ func TestStatisticsHandlersEnforceIndependentPermissionsAndExactMoneyWire(t *tes
 		VALUES('statistics-wire-ledger',?,?,?,'MEMBER_RECEIVABLE',?,'Exact amount','2026-08-28T09:00:00Z')`, administrator.GroupID, periodID, administrator.ID, exactAmount); err != nil {
 		t.Fatalf("insert exact statistics amount: %v", err)
 	}
-	financeResponse := httptest.NewRecorder()
-	server.handleFinanceStatistics(financeResponse, request("/api/v1/groups/"+administrator.GroupID+"/statistics/finance?range=CUSTOM&from=2026-08-28&to=2026-08-28"))
-	if financeResponse.Code != http.StatusOK {
-		t.Fatalf("finance statistics status=%d body=%s", financeResponse.Code, financeResponse.Body.String())
+	response := httptest.NewRecorder()
+	server.handleStatistics(response, request("/api/v1/groups/"+administrator.GroupID+"/statistics?range=CUSTOM&from=2026-08-28&to=2026-08-28"))
+	if response.Code != http.StatusOK {
+		t.Fatalf("statistics status=%d body=%s", response.Code, response.Body.String())
+	}
+	var dashboard statistics.Dashboard
+	if err := json.Unmarshal(response.Body.Bytes(), &dashboard); err != nil {
+		t.Fatalf("decode statistics: %v", err)
+	}
+	if dashboard.Meta.Preset != statistics.PresetCustom || dashboard.Meta.ToExclusive != dashboard.Meta.GeneratedAt || dashboard.Members.Summary.CancellationRate != nil {
+		t.Fatalf("statistics contract=%#v", dashboard)
 	}
 	var document map[string]any
-	if err := json.Unmarshal(financeResponse.Body.Bytes(), &document); err != nil {
+	if err := json.Unmarshal(response.Body.Bytes(), &document); err != nil {
 		t.Fatalf("decode finance statistics wire: %v", err)
 	}
-	snapshot, ok := document["receivableSnapshot"].(map[string]any)
+	members, membersOK := document["members"].(map[string]any)
+	finance, financeOK := document["finance"].(map[string]any)
+	snapshot, ok := finance["receivableSnapshot"].(map[string]any)
 	if !ok || snapshot["netReceivableMinor"] != "9007199254740993" {
-		t.Fatalf("finance exact minor-unit wire=%s", financeResponse.Body.String())
+		t.Fatalf("finance exact minor-unit wire=%s", response.Body.String())
+	}
+	if !membersOK || !financeOK || members["meta"] != nil || finance["meta"] != nil {
+		t.Fatalf("statistics sections must share top-level meta: %s", response.Body.String())
 	}
 }

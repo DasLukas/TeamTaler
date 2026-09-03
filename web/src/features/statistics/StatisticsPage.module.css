@@ -3,62 +3,13 @@
   min-width: 0;
 }
 
-.tabs {
-  display: flex;
-  width: 100%;
-  min-width: 0;
-  gap: var(--space-8);
-  margin-bottom: var(--space-5);
-  border-bottom: 1px solid var(--color-border);
-  overflow-x: auto;
-  overscroll-behavior-inline: contain;
-  scrollbar-width: none;
-  scroll-snap-type: inline proximity;
-  -webkit-overflow-scrolling: touch;
-}
-
-.tabs::-webkit-scrollbar { display: none; }
-
-.tabs button {
-  position: relative;
-  min-height: 48px;
-  padding: 0 var(--space-2);
-  border: 0;
-  color: var(--color-text);
-  background: transparent;
-  white-space: nowrap;
-  scroll-snap-align: start;
-}
-
-.tabs button:hover { color: var(--color-text-brand); }
-
-.tabs button:focus-visible {
-  border-radius: var(--radius-sm);
-  outline: 3px solid var(--color-focus-ring);
-  outline-offset: -3px;
-}
-
-.tabs .activeTab {
-  color: var(--color-text-brand);
-  font-weight: 800;
-}
-
-.tabs .activeTab::after {
-  position: absolute;
-  inset: auto var(--space-2) 0;
-  height: 3px;
-  border-radius: var(--radius-full) var(--radius-full) 0 0;
-  background: var(--color-brand);
-  content: '';
-}
-
 .filters {
   display: flex;
   align-items: end;
   flex-wrap: wrap;
-  gap: var(--space-4);
-  margin-bottom: var(--space-5);
-  padding: var(--space-4);
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  padding: var(--space-3);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   background: var(--color-surface-muted);
@@ -77,7 +28,7 @@
 
 .rangeField select,
 .customDates input {
-  min-height: 44px;
+  min-height: 40px;
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-md);
   color: var(--color-text);
@@ -116,7 +67,40 @@
 
 .results {
   display: grid;
-  gap: var(--space-5);
+  gap: var(--space-4);
+}
+
+.sections {
+  display: grid;
+  gap: clamp(var(--space-7), 4vw, var(--space-10));
+}
+
+.dashboardSection {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-4);
+}
+
+.sectionHeading {
+  display: grid;
+  gap: var(--space-1);
+  padding-block-end: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sectionHeading h2,
+.sectionHeading p {
+  margin: 0;
+}
+
+.sectionHeading h2 {
+  color: var(--color-text);
+  font-size: clamp(var(--font-size-xl), 2vw, var(--font-size-2xl));
+  letter-spacing: -0.025em;
+}
+
+.sectionHeading p {
+  color: var(--color-text-muted);
 }
 
 .staleWarning {
@@ -129,18 +113,21 @@
 }
 
 @media (max-width: 767px) {
-  .tabs {
-    width: calc(100% + (var(--space-5) * 2));
-    max-width: none;
-    gap: var(--space-6);
-    margin-inline: calc(var(--space-5) * -1);
-    padding-inline: var(--space-5);
-    scroll-padding-inline: var(--space-5);
+  .filters {
+    align-items: stretch;
+    gap: var(--space-3);
   }
 
-  .filters { align-items: stretch; }
   .rangeField,
-  .customDates,
-  .customDates label { width: 100%; }
-  .customDates { align-items: stretch; }
+  .customDates { width: 100%; }
+
+  .customDates {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+    gap: var(--space-3);
+  }
+
+  .customDates label { min-width: 0; }
+  .customDates input { width: 100%; min-width: 0; }
 }

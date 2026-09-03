@@ -1,7 +1,7 @@
 import { Navigate, Outlet } from '@tanstack/react-router';
 import { lazy, Suspense } from 'react';
 import { useTranslation } from 'react-i18next';
-import { availableStatisticsViews, canOpenBooking, preferredMemberPath } from './groupCapabilities';
+import { canOpenBooking, canOpenStatistics, preferredMemberPath } from './groupCapabilities';
 import { useActiveGroup, useOptionalActiveGroup } from './useActiveGroup';
 import { Page } from '@/components/layout/Page';
 import { StatePanel } from '@/components/ui/StatePanel';
@@ -44,7 +44,7 @@ export function StatisticsPermissionRoute() {
   if (!activeGroup.statisticsEnabled) {
     return <Page title={t('statistics.title')}><StatePanel kind="empty" message={t('statistics.disabledMessage')} title={t('statistics.disabledTitle')} /></Page>;
   }
-  if (availableStatisticsViews(activeGroup).length === 0) {
+  if (!canOpenStatistics(activeGroup)) {
     return <Page title={t('statistics.title')}><StatePanel kind="error" message={t('statistics.noAccessMessage')} title={t('statistics.noAccessTitle')} /></Page>;
   }
   return <Suspense fallback={<Page title={t('statistics.title')}><StatePanel kind="loading" /></Page>}><StatisticsPage /></Suspense>;

@@ -19,7 +19,7 @@ const PERMISSION_GROUPS: ReadonlyArray<{ key: PermissionGroupKey; permissions: r
   },
   {
     key: 'statistics',
-    permissions: ['VIEW_MEMBER_STATISTICS', 'VIEW_GROUP_STATISTICS'],
+    permissions: ['VIEW_STATISTICS'],
   },
   {
     key: 'finance',

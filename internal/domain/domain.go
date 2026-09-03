@@ -91,10 +91,8 @@ const (
 	PermissionCatalogManagement PermissionKey = "CATALOG_MANAGEMENT"
 	// PermissionViewMemberDirectory permits reading the group's member directory.
 	PermissionViewMemberDirectory PermissionKey = "VIEW_MEMBER_DIRECTORY"
-	// PermissionViewMemberStatistics permits reading anonymized member activity aggregates.
-	PermissionViewMemberStatistics PermissionKey = "VIEW_MEMBER_STATISTICS"
-	// PermissionViewGroupStatistics permits reading aggregate group financial statistics.
-	PermissionViewGroupStatistics PermissionKey = "VIEW_GROUP_STATISTICS"
+	// PermissionViewStatistics permits reading all group member, activity, and financial statistics.
+	PermissionViewStatistics PermissionKey = "VIEW_STATISTICS"
 	// PermissionViewAllBookingActivity permits viewing every identified group booking in the activity feed.
 	PermissionViewAllBookingActivity PermissionKey = "VIEW_ALL_BOOKING_ACTIVITY"
 	// PermissionRecordOwnPayment permits self-service payment recording for the current member.

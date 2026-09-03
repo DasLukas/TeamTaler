@@ -12,13 +12,16 @@ export interface KpiCardProps {
 /**
  * Renders one compact definition-list metric.
  *
- * @param props - Metric label, exact value, optional context, and semantic tone.
- * @returns A theme-aware KPI definition suitable for a surrounding `dl`.
+ * @param props - Metric label, exact value, optional context, visual, and tone.
+ * @returns A theme-aware monitoring panel suitable for a surrounding `dl`.
  */
 export function KpiCard({ label, value, hint, tone = 'default' }: KpiCardProps) {
   return (
     <div className={styles.kpi} data-tone={tone}>
-      <dt>{label}</dt>
+      <div className={styles.kpiHeader}>
+        <dt>{label}</dt>
+        <span aria-hidden="true" className={styles.kpiStatus} />
+      </div>
       <dd>{value}</dd>
       {hint ? <small>{hint}</small> : null}
     </div>

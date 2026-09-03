@@ -1,9 +1,10 @@
-import { Bar, BarChart, CartesianGrid, Legend, Tooltip, XAxis, YAxis } from 'recharts';
+import { Bar, BarChart, CartesianGrid, XAxis } from 'recharts';
 import { useTranslation } from 'react-i18next';
 import type { MemberStatisticsActivityPoint, StatisticsMeta } from '@/api/types';
 import { ChartFrame } from './ChartFrame';
-import { responsiveStatisticsChartProps, statisticsChartTheme } from './chartTheme';
+import { responsiveStatisticsChartProps } from './chartTheme';
 import { formatStatisticsInteger, formatStatisticsPeriod } from '../statisticsFormat';
+import styles from './StatisticsCharts.module.css';
 
 /** Properties accepted by the member activity trend. */
 export interface MemberActivityChartProps {
@@ -13,30 +14,59 @@ export interface MemberActivityChartProps {
 }
 
 /**
- * Renders posted and reversed units as grouped discrete bucket bars.
+ * Renders booked and reversed product quantities as compact grouped bucket bars.
  *
  * @param props - Server buckets, range metadata, and visible interpretation.
- * @returns A responsive grouped bar chart and exact data table.
+ * @returns A compact responsive chart with totals visible without hover.
  */
 export function MemberActivityChart({ activity, meta, summary }: MemberActivityChartProps) {
   const { t } = useTranslation();
   const data = activity.map((point) => ({ ...point, label: formatStatisticsPeriod(point.periodStart, meta.bucket, meta.timezone) }));
+  const postedTotal = data.reduce((total, point) => total + point.postedUnits, 0);
+  const reversedTotal = data.reduce((total, point) => total + point.reversedUnits, 0);
+  const onlyPoint = data[0];
   return (
     <ChartFrame
-      columns={[t('statistics.chart.period'), t('statistics.members.postedUnits'), t('statistics.members.reversedUnits')]}
-      rows={data.map((point) => ({ key: point.periodStart, cells: [point.label, formatStatisticsInteger(point.postedUnits), formatStatisticsInteger(point.reversedUnits)] }))}
+      className={styles.activityFrame}
       summary={summary}
       title={t('statistics.members.activityTitle')}
     >
-      <BarChart {...responsiveStatisticsChartProps} accessibilityLayer data={data} margin={{ top: 12, right: 18, bottom: 8, left: 0 }}>
-        <CartesianGrid stroke="var(--chart-grid)" vertical={false} />
-        <XAxis axisLine={false} dataKey="label" minTickGap={28} tick={{ fill: 'var(--chart-axis)', fontSize: 12 }} tickLine={false} />
-        <YAxis axisLine={false} tick={{ fill: 'var(--chart-axis)', fontSize: 12 }} tickFormatter={(value) => formatStatisticsInteger(Number(value))} tickLine={false} width={42} />
-        <Tooltip contentStyle={statisticsChartTheme.tooltipContent} cursor={statisticsChartTheme.cursor} formatter={(value, name) => [formatStatisticsInteger(Number(value)), name === 'postedUnits' ? t('statistics.members.postedUnits') : t('statistics.members.reversedUnits')]} itemStyle={statisticsChartTheme.tooltipItem} labelStyle={statisticsChartTheme.tooltipLabel} />
-        <Legend formatter={(value) => <span style={statisticsChartTheme.legendText}>{value === 'postedUnits' ? t('statistics.members.postedUnits') : t('statistics.members.reversedUnits')}</span>} />
-        <Bar dataKey="postedUnits" fill="var(--chart-primary)" isAnimationActive={false} maxBarSize={24} radius={[4, 4, 0, 0]} />
-        <Bar dataKey="reversedUnits" fill="var(--chart-negative)" isAnimationActive={false} maxBarSize={24} radius={[4, 4, 0, 0]} />
-      </BarChart>
+      <div className={styles.activityPanel}>
+        <dl className={styles.activityMetrics}>
+          <div data-series="posted">
+            <dt>{t('statistics.members.postedUnits')}</dt>
+            <dd>{formatStatisticsInteger(postedTotal)}</dd>
+            <small>{t('statistics.members.activityTotal')}</small>
+          </div>
+          <div data-series="reversed">
+            <dt>{t('statistics.members.reversedUnits')}</dt>
+            <dd>{formatStatisticsInteger(reversedTotal)}</dd>
+            <small>{t('statistics.members.activityTotal')}</small>
+          </div>
+        </dl>
+        {data.length > 1 ? (
+          <>
+            <p className="sr-only">{data.map((point) => t('statistics.members.activityPointSummary', {
+              period: point.label,
+              posted: formatStatisticsInteger(point.postedUnits),
+              reversed: formatStatisticsInteger(point.reversedUnits),
+            })).join(' ')}</p>
+            <div aria-hidden="true" className={styles.activityPlot}>
+              <BarChart {...responsiveStatisticsChartProps} barCategoryGap="35%" barGap={2} data={data} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
+              <CartesianGrid stroke="var(--chart-grid)" vertical={false} />
+              <XAxis axisLine={false} dataKey="label" minTickGap={28} tick={{ fill: 'var(--chart-axis)', fontSize: 11 }} tickLine={false} />
+              <Bar dataKey="postedUnits" fill="var(--chart-primary)" isAnimationActive={false} maxBarSize={14} radius={[3, 3, 0, 0]} />
+              <Bar dataKey="reversedUnits" fill="var(--chart-negative)" isAnimationActive={false} maxBarSize={14} radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </div>
+          </>
+        ) : (
+          <div className={styles.activitySingleBucket} role="note">
+            <strong>{onlyPoint?.label}</strong>
+            <span>{t('statistics.members.activitySingleBucket')}</span>
+          </div>
+        )}
+      </div>
     </ChartFrame>
   );
 }

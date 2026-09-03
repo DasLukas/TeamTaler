@@ -1,13 +1,11 @@
 import type { StatisticsQuery, StatisticsRange } from '@/api/types';
-import type { StatisticsView } from '@/app/groupCapabilities';
 
-/** Stable React Query keys for all statistics projections. */
+/** Stable React Query keys for complete statistics snapshots. */
 export const statisticsQueryKeys = {
   all: (groupId: string) => ['statistics', groupId] as const,
-  view: (groupId: string, view: StatisticsView, query: StatisticsQuery) => [
+  dashboard: (groupId: string, query: StatisticsQuery) => [
     'statistics',
     groupId,
-    view,
     query.range ?? 'SERVER_DEFAULT',
     query.from ?? null,
     query.to ?? null,

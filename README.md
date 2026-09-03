@@ -9,7 +9,7 @@ This README is the primary entry point for the person who installs and operates 
 - Multiple isolated groups in one installation.
 - Account-synchronized light, dark, and system color modes with group defaults and optional per-member theme choices.
 - Group-owned roles and granular permissions for administration, bookings, finance, catalogue management, and reporting.
-- An optional statistics workspace with separately authorized member-activity and financial views, privacy-aware aggregate breakdowns, server-resolved date ranges, and responsive theme-aware charts.
+- An optional statistics workspace with one explicit access right, a compact unified dashboard of historical booking trends, a few booking and finance indicators, privacy-aware product and category visuals for purchase orientation, server-resolved date ranges, and responsive theme-aware charts.
 - Fixed-price and user-defined-price products with category, file or camera image capture, archive, and ordering support.
 - Account balances, incoming payments with optional or required image/PDF receipts, configurable PayPal.Me and EUR SEPA payment instructions, immutable corrections, optional accounting periods, and settlement history.
 - One server-paginated chronological activity history for authorized bookings, incoming payments, their timestamped reversals, and account corrections, including linked original/reversal navigation, member identity, signed amounts, receipts, status badges, transaction-type filtering, and a persistent card/table choice on phones.

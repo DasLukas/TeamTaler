@@ -35,7 +35,7 @@ export function StatisticsStatus({ meta, refreshing, onRefresh }: StatisticsStat
         <span>{t('statistics.generatedAt', { date: generatedAt, timezone: meta.timezone })}</span>
         {refreshing ? <span>{t('statistics.refreshing')}</span> : null}
       </p>
-      <Button disabled={refreshing} leadingIcon={<RefreshCw size={17} />} onClick={onRefresh} size="small" variant="secondary">{t('statistics.refresh')}</Button>
+      <Button aria-label={t('statistics.refresh')} collapseLabelAt="narrow" disabled={refreshing} leadingIcon={<RefreshCw size={17} />} onClick={onRefresh} size="small" variant="secondary">{t('statistics.refresh')}</Button>
     </div>
   );
 }

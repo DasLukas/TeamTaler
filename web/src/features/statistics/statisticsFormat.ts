@@ -2,16 +2,10 @@ import type { Money, StatisticsBucket, StatisticsMeta } from '@/api/types';
 import { formatMoney } from '@/api/money';
 
 const integerFormatter = new Intl.NumberFormat('de-DE');
-const percentFormatter = new Intl.NumberFormat('de-DE', { style: 'percent', maximumFractionDigits: 1 });
 
 /** Formats an integer count using the application locale. */
 export function formatStatisticsInteger(value: number): string {
   return integerFormatter.format(value);
-}
-
-/** Formats a nullable ratio without inventing a value for an empty denominator. */
-export function formatStatisticsRate(value: number | null): string {
-  return value === null ? '–' : percentFormatter.format(value);
 }
 
 /** BigInt-safe coordinate scale shared by all values in one money chart. */
@@ -23,8 +17,8 @@ export interface MoneyChartScale {
 
 /**
  * Creates a common integer divisor that keeps every SVG coordinate safe.
- * Exact values are never reconstructed from coordinates; labels and tables
- * retain their original minor-unit strings.
+ * Exact values are never reconstructed from coordinates; visible endpoint
+ * labels and assistive summaries retain their original minor-unit strings.
  *
  * @param values - Exact values plotted together in one chart.
  * @returns A scale whose quotient is always a safe JavaScript number.

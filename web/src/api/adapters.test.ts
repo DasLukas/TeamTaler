@@ -1,39 +1,61 @@
 import { describe, expect, it } from 'vitest';
 import i18n from '@/i18n';
-import { adaptAccountSummaries, adaptActivity, adaptAppearancePreference, adaptBooking, adaptCategories, adaptDashboard, adaptFinanceStatistics, adaptGroupNotificationSettings, adaptGroupSettings, adaptInstanceCapabilities, adaptLedger, adaptMembership, adaptMemberStatistics, adaptNotification, adaptNotificationDestination, adaptNotificationPreferences, adaptPayment, adaptPaymentTarget, adaptPermissionDefinition, adaptPermissionGrants, adaptProduct, adaptPushSubscriptions, adaptRole, adaptSession, adaptSettlement, adaptSystemAudit, adaptSystemGroupDeletionImpact, adaptSystemGroups, adaptSystemSettings, adaptThemePreference, adaptTransactionSettings } from './adapters';
+import { adaptAccountSummaries, adaptActivity, adaptAppearancePreference, adaptBooking, adaptCategories, adaptDashboard, adaptGroupNotificationSettings, adaptGroupSettings, adaptInstanceCapabilities, adaptLedger, adaptMembership, adaptNotification, adaptNotificationDestination, adaptNotificationPreferences, adaptPayment, adaptPaymentTarget, adaptPermissionDefinition, adaptPermissionGrants, adaptProduct, adaptPushSubscriptions, adaptRole, adaptSession, adaptSettlement, adaptStatisticsDashboard, adaptSystemAudit, adaptSystemGroupDeletionImpact, adaptSystemGroups, adaptSystemSettings, adaptThemePreference, adaptTransactionSettings } from './adapters';
 
 describe('API adapters', () => {
-  it('adapts the exact privacy-aware member statistics wire contract', () => {
-    const statistics = adaptMemberStatistics({
+  it('adapts the exact privacy-aware member section of the unified statistics contract', () => {
+    const statistics = adaptStatisticsDashboard({
       meta: { generatedAt: '2026-08-28T10:00:00Z', timezone: 'Europe/Berlin', preset: 'ALL_TIME', fromInclusive: '2024-01-01T00:00:00Z', toExclusive: '2026-08-29T00:00:00Z', bucket: 'YEAR', privacyThresholdApplied: true, currentPeriodAvailable: false },
-      memberSnapshot: { regularMembers: 2, temporaryGuests: 1, asOf: '2026-08-28T10:00:00Z' },
-      summary: { activeParticipants: 0, bookingCount: 0, validBookedUnits: 0, cancellationRate: null },
-      activity: [{ periodStart: '2026-01-01T00:00:00Z', postedUnits: 0, reversedUnits: 0 }],
-      topCategories: { suppressed: true, items: [] },
-      topProducts: { suppressed: false, items: [{ productId: '', productName: 'Other', categoryId: '', categoryName: 'Other', validBookedUnits: 4, isOther: true }] },
+      members: {
+        memberSnapshot: { regularMembers: 2, temporaryGuests: 1, asOf: '2026-08-28T10:00:00Z' },
+        summary: { activeParticipants: 0, bookingCount: 0, validBookedUnits: 0, cancellationRate: null },
+        activity: [{ periodStart: '2026-01-01T00:00:00Z', postedUnits: 0, reversedUnits: 0 }],
+        topCategories: { suppressed: true, items: [] },
+        topProducts: { suppressed: false, items: [{
+          productId: '', productName: 'Other', categoryId: '', categoryName: 'Other', validBookedUnits: 4, isOther: true,
+          series: [
+            { periodStart: '2026-01-01T00:00:00Z', validBookedUnits: 3, privacySuppressed: false, isPartial: false },
+            { periodStart: '2026-02-01T00:00:00Z', validBookedUnits: null, privacySuppressed: true, isPartial: false },
+            { periodStart: '2026-03-01T00:00:00Z', validBookedUnits: -1, privacySuppressed: false, isPartial: true },
+            { periodStart: '2026-04-01T00:00:00Z', validBookedUnits: 0 },
+            { periodStart: '2026-05-01T00:00:00Z', validBookedUnits: 1.5 },
+          ],
+        }] },
+      },
+      finance: { currency: 'EUR', receivableSnapshot: {}, flows: {}, series: [], categories: [], overdue: null },
     });
 
     expect(statistics.meta).toMatchObject({ preset: 'ALL_TIME', bucket: 'YEAR', privacyThresholdApplied: true, currentPeriodAvailable: false });
-    expect(statistics.summary.cancellationRate).toBeNull();
-    expect(statistics.topCategories).toEqual({ suppressed: true, items: [] });
-    expect(statistics.topProducts.items[0]).toMatchObject({ productId: '', categoryId: '', isOther: true });
+    expect(statistics.members.summary.cancellationRate).toBeNull();
+    expect(statistics.members.topCategories).toEqual({ suppressed: true, items: [] });
+    expect(statistics.members.topProducts.items[0]).toMatchObject({ productId: '', categoryId: '', isOther: true });
+    expect(statistics.members.topProducts.items[0].series).toEqual([
+      { periodStart: '2026-01-01T00:00:00Z', validBookedUnits: 3, privacySuppressed: false, isPartial: false },
+      { periodStart: '2026-02-01T00:00:00Z', validBookedUnits: null, privacySuppressed: true, isPartial: false },
+      { periodStart: '2026-03-01T00:00:00Z', validBookedUnits: null, privacySuppressed: false, isPartial: true },
+      { periodStart: '2026-04-01T00:00:00Z', validBookedUnits: 0, privacySuppressed: false, isPartial: false },
+      { periodStart: '2026-05-01T00:00:00Z', validBookedUnits: null, privacySuppressed: false, isPartial: false },
+    ]);
   });
 
-  it('retains exact int64 strings in the finance statistics wire contract', () => {
-    const statistics = adaptFinanceStatistics({
+  it('retains exact int64 strings in the unified finance statistics contract', () => {
+    const statistics = adaptStatisticsDashboard({
       meta: { generatedAt: '2026-08-28T10:00:00Z', timezone: 'Europe/Berlin', preset: 'LAST_30_DAYS', fromInclusive: '2026-07-30T00:00:00Z', toExclusive: '2026-08-29T00:00:00Z', bucket: 'DAY', privacyThresholdApplied: false, currentPeriodAvailable: true },
-      currency: 'EUR',
-      receivableSnapshot: { asOf: '2026-08-29T00:00:00Z', grossReceivableMinor: '9223372036854775807', memberCreditMinor: '1', netReceivableMinor: '9223372036854775806', openAccountCount: 1, balancedAccountCount: 0, creditAccountCount: 1 },
-      flows: { openingNetReceivableMinor: '10', netBookingChargesMinor: '5', netPaymentsMinor: '2', netAdjustmentsMinor: '-1', closingNetReceivableMinor: '12' },
-      series: [{ periodStart: '2026-08-01T00:00:00Z', netBookingChargesMinor: '5', netPaymentsMinor: '2', netAdjustmentsMinor: '-1', closingNetReceivableMinor: '12' }],
-      categories: [{ categoryId: '', categoryName: 'Other', icon: 'other', netBookingChargesMinor: '-1', isOther: true }],
-      overdue: { amountMinor: '100', accountCount: 1, periodCount: 2, asOf: '2026-08-28T10:00:00Z' },
+      members: { memberSnapshot: {}, summary: {}, activity: [], topCategories: {}, topProducts: {} },
+      finance: {
+        currency: 'EUR',
+        receivableSnapshot: { asOf: '2026-08-29T00:00:00Z', grossReceivableMinor: '9223372036854775807', memberCreditMinor: '1', netReceivableMinor: '9223372036854775806', openAccountCount: 1, balancedAccountCount: 0, creditAccountCount: 1 },
+        flows: { openingNetReceivableMinor: '10', netBookingChargesMinor: '5', netPaymentsMinor: '2', netAdjustmentsMinor: '-1', closingNetReceivableMinor: '12' },
+        series: [{ periodStart: '2026-08-01T00:00:00Z', netBookingChargesMinor: '5', netPaymentsMinor: '2', netAdjustmentsMinor: '-1', closingNetReceivableMinor: '12' }],
+        categories: [{ categoryId: '', categoryName: 'Other', icon: 'other', netBookingChargesMinor: '-1', isOther: true }],
+        overdue: { amountMinor: '100', accountCount: 1, periodCount: 2, asOf: '2026-08-28T10:00:00Z' },
+      },
     });
 
-    expect(statistics.receivableSnapshot.grossReceivable).toEqual({ minorUnits: '9223372036854775807', currency: 'EUR' });
-    expect(statistics.flows.netPayments.minorUnits).toBe('2');
-    expect(statistics.categories[0]).toMatchObject({ isOther: true, netBookingCharges: { minorUnits: '-1', currency: 'EUR' } });
-    expect(statistics.overdue?.amount.minorUnits).toBe('100');
+    expect(statistics.finance.receivableSnapshot.grossReceivable).toEqual({ minorUnits: '9223372036854775807', currency: 'EUR' });
+    expect(statistics.finance.flows.netPayments.minorUnits).toBe('2');
+    expect(statistics.finance.categories[0]).toMatchObject({ isOther: true, netBookingCharges: { minorUnits: '-1', currency: 'EUR' } });
+    expect(statistics.finance.overdue?.amount.minorUnits).toBe('100');
   });
   it('adapts signed unified activities and source action metadata', () => {
     expect(adaptActivity({

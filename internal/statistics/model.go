@@ -41,8 +41,8 @@ const (
 	privacyParticipantThreshold = int64(3)
 )
 
-// Query contains the optional statistics range parameters accepted by both
-// dashboard endpoints. From and To are required only for CUSTOM and use local
+// Query contains the optional statistics range parameters accepted by the
+// dashboard endpoint. From and To are required only for CUSTOM and use local
 // YYYY-MM-DD dates. To is inclusive at the wire; its effective exclusive bound
 // is the earlier of the following local midnight and the generation instant.
 // An empty Preset selects CURRENT_PERIOD when settlements are enabled and an
@@ -93,21 +93,35 @@ type MemberActivityPoint struct {
 
 // MemberCategoryItem is one anonymous category ranking item.
 type MemberCategoryItem struct {
-	CategoryID       string `json:"categoryId"`
-	CategoryName     string `json:"categoryName"`
-	Icon             string `json:"icon"`
-	ValidBookedUnits int64  `json:"validBookedUnits"`
-	IsOther          bool   `json:"isOther"`
+	CategoryID       string                 `json:"categoryId"`
+	CategoryName     string                 `json:"categoryName"`
+	Icon             string                 `json:"icon"`
+	ValidBookedUnits int64                  `json:"validBookedUnits"`
+	IsOther          bool                   `json:"isOther"`
+	Series           []MemberBreakdownPoint `json:"series"`
 }
 
 // MemberProductItem is one anonymous product ranking item.
 type MemberProductItem struct {
-	ProductID        string `json:"productId"`
-	ProductName      string `json:"productName"`
-	CategoryID       string `json:"categoryId"`
-	CategoryName     string `json:"categoryName"`
-	ValidBookedUnits int64  `json:"validBookedUnits"`
-	IsOther          bool   `json:"isOther"`
+	ProductID        string                 `json:"productId"`
+	ProductName      string                 `json:"productName"`
+	CategoryID       string                 `json:"categoryId"`
+	CategoryName     string                 `json:"categoryName"`
+	ValidBookedUnits int64                  `json:"validBookedUnits"`
+	IsOther          bool                   `json:"isOther"`
+	Series           []MemberBreakdownPoint `json:"series"`
+}
+
+// MemberBreakdownPoint contains valid booked units for one dashboard bucket.
+// ValidBookedUnits is nil when the bucket is privacy-suppressed and otherwise
+// points to an exact value, including zero. IsPartial marks a bucket clipped by
+// the effective dashboard range. Every visible category and product series
+// contains exactly one point for each bucket described by Meta.
+type MemberBreakdownPoint struct {
+	PeriodStart       string `json:"periodStart"`
+	ValidBookedUnits  *int64 `json:"validBookedUnits"`
+	PrivacySuppressed bool   `json:"privacySuppressed"`
+	IsPartial         bool   `json:"isPartial"`
 }
 
 // MemberCategoryBreakdown contains category items or an explicit privacy
@@ -124,9 +138,9 @@ type MemberProductBreakdown struct {
 	Items      []MemberProductItem `json:"items"`
 }
 
-// MemberDashboard is the anonymous member statistics response.
-type MemberDashboard struct {
-	Meta           Meta                    `json:"meta"`
+// MemberStatistics contains anonymous membership and booking aggregates for a
+// statistics dashboard.
+type MemberStatistics struct {
 	MemberSnapshot MemberSnapshot          `json:"memberSnapshot"`
 	Summary        MemberSummary           `json:"summary"`
 	Activity       []MemberActivityPoint   `json:"activity"`
@@ -186,16 +200,25 @@ type OverdueSnapshot struct {
 	AsOf         string `json:"asOf"`
 }
 
-// FinanceDashboard is the aggregate finance statistics response. Overdue is
-// nil while optional settlements are disabled.
-type FinanceDashboard struct {
-	Meta               Meta                   `json:"meta"`
+// FinanceStatistics contains complete-ledger financial aggregates for a
+// statistics dashboard. Overdue is nil while optional settlements are
+// disabled.
+type FinanceStatistics struct {
 	Currency           string                 `json:"currency"`
 	ReceivableSnapshot ReceivableSnapshot     `json:"receivableSnapshot"`
 	Flows              FinancialFlows         `json:"flows"`
 	Series             []FinanceActivityPoint `json:"series"`
 	Categories         []FinanceCategoryItem  `json:"categories"`
 	Overdue            *OverdueSnapshot       `json:"overdue"`
+}
+
+// Dashboard is the complete statistics response. Meta applies to both member
+// and finance aggregates, which are produced from the same read-only database
+// snapshot and resolved range.
+type Dashboard struct {
+	Meta    Meta              `json:"meta"`
+	Members MemberStatistics  `json:"members"`
+	Finance FinanceStatistics `json:"finance"`
 }
 
 type resolvedRange struct {

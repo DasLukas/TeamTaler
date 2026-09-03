@@ -42,17 +42,12 @@ var permissionDefinitions = []domain.PermissionDefinition{
 		Description: "View the active member directory without administrative account details.",
 	},
 	{
-		Key:         domain.PermissionViewMemberStatistics,
-		Description: "View anonymized member activity statistics for the group.",
+		Key:         domain.PermissionViewStatistics,
+		Description: "View all member, activity, and financial statistics for the group.",
 	},
 	{
-		Key:         domain.PermissionViewGroupStatistics,
-		Description: "View aggregate group financial statistics.",
-	},
-	{
-		Key:                domain.PermissionViewAllBookingActivity,
-		Description:        "View identified booking activity for every member in the group activity feed.",
-		ImpliedPermissions: []domain.PermissionKey{domain.PermissionViewMemberStatistics},
+		Key:         domain.PermissionViewAllBookingActivity,
+		Description: "View identified booking activity for every member in the group activity feed.",
 	},
 	{
 		Key:         domain.PermissionRecordOwnPayment,
@@ -565,7 +560,6 @@ func SeedGroupRoles(ctx context.Context, tx *sql.Tx, groupID, actorUserID, admin
 			grants: []domain.PermissionKey{
 				domain.PermissionCreateOwnBooking,
 				domain.PermissionViewMemberDirectory,
-				domain.PermissionViewMemberStatistics,
 			},
 		},
 		{
@@ -575,7 +569,7 @@ func SeedGroupRoles(ctx context.Context, tx *sql.Tx, groupID, actorUserID, admin
 				domain.PermissionFinanceManagement,
 				domain.PermissionRecordOwnPayment,
 				domain.PermissionViewAllBookingActivity,
-				domain.PermissionViewGroupStatistics,
+				domain.PermissionViewStatistics,
 				domain.PermissionViewMemberDirectory,
 			},
 		},

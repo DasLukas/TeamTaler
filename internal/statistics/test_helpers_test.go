@@ -59,6 +59,9 @@ func newStatisticsFixture(t *testing.T) *statisticsFixture {
 	if _, err := db.ExecContext(ctx, `UPDATE group_notification_settings SET timezone='Europe/Berlin' WHERE group_id=?`, fixture.membership.GroupID); err != nil {
 		t.Fatalf("set fixture timezone: %v", err)
 	}
+	if _, err := db.ExecContext(ctx, `UPDATE memberships SET joined_at='2026-07-01T00:00:00Z' WHERE id=?`, fixture.membership.ID); err != nil {
+		t.Fatalf("set deterministic fixture membership join time: %v", err)
+	}
 	return fixture
 }
 

@@ -3,7 +3,6 @@ import type { PermissionGrant, PermissionKey } from '@/api/types';
 /** Permissions implied by a broader group-wide permission. */
 export const PERMISSION_IMPLICATIONS: Readonly<Partial<Record<PermissionKey, readonly PermissionKey[]>>> = {
   MEMBER_MANAGEMENT: ['VIEW_MEMBER_DIRECTORY'],
-  VIEW_ALL_BOOKING_ACTIVITY: ['VIEW_MEMBER_STATISTICS'],
   VOID_ANY_BOOKING: ['VOID_OWN_BOOKING', 'VIEW_ALL_BOOKING_ACTIVITY'],
   BOOK_FOR_OTHERS: ['VIEW_MEMBER_DIRECTORY'],
 };
@@ -24,7 +23,7 @@ const GROUP_CONTEXT: GroupPermissionContext = { type: 'GROUP' };
  * @example
  * ```ts
  * effectivePermissionKeys([{ permission: 'VOID_ANY_BOOKING', scope: { type: 'GROUP' } }]);
- * // Set('VOID_ANY_BOOKING', 'VOID_OWN_BOOKING', 'VIEW_ALL_BOOKING_ACTIVITY', 'VIEW_MEMBER_STATISTICS')
+ * // Set('VOID_ANY_BOOKING', 'VOID_OWN_BOOKING', 'VIEW_ALL_BOOKING_ACTIVITY')
  * ```
  */
 export function effectivePermissionKeys(grants: readonly PermissionGrant[] = []): ReadonlySet<PermissionKey> {
