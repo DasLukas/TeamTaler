@@ -2,13 +2,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { GroupRole } from '@/api/types';
+import type { GroupRole, PlanningEvent } from '@/api/types';
 import { demoDashboard, demoSession } from '@/demo/data';
 import i18n from '@/i18n';
 import { DashboardPage } from './DashboardPage';
 
 const mocks = vi.hoisted(() => ({
   getDashboard: vi.fn(),
+  getPlanningSettings: vi.fn(),
   getTransactionSettings: vi.fn(),
   getCategories: vi.fn(),
   useActiveGroup: vi.fn(),
@@ -17,6 +18,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/api/client', () => ({
   api: {
     getDashboard: mocks.getDashboard,
+    getPlanningSettings: mocks.getPlanningSettings,
     getTransactionSettings: mocks.getTransactionSettings,
     getCategories: mocks.getCategories,
     createOwnPayment: vi.fn(),
@@ -42,6 +44,7 @@ describe('DashboardPage information-only overview', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getDashboard.mockResolvedValue(demoDashboard);
+    mocks.getPlanningSettings.mockResolvedValue({ enabled: true, version: 1, timeZone: 'Europe/Berlin' });
     mocks.getTransactionSettings.mockResolvedValue(transactionSettings);
     mocks.useActiveGroup.mockReturnValue({ activeGroupId: demoSession.activeGroupId, activeGroup: demoSession.groups[0], session: demoSession });
   });
@@ -101,6 +104,55 @@ describe('DashboardPage information-only overview', () => {
 
     expect(await screen.findByRole('heading', { name: i18n.t('dashboard.groupBalance.title') })).toBeVisible();
     expect(screen.getByText(/\+25,90/, { selector: 'div[data-financial-state="due"] strong' })).toBeVisible();
+  });
+
+  it('formats the next planning event in the group time zone', async () => {
+    const event: PlanningEvent = {
+      id: 'planning-night-shift',
+      version: 1,
+      eventType: 'APPOINTMENT',
+      status: 'PUBLISHED',
+      title: 'Night shift',
+      description: '',
+      location: '',
+      allDay: false,
+      timeZone: 'Europe/Berlin',
+      startsAt: '2026-08-31T22:30:00.000Z',
+      waitlistEnabled: false,
+      confirmationRevision: 1,
+      audience: { type: 'ALL_ACTIVE_MEMBERS', roleIds: [], memberIds: [] },
+      participation: { invited: 1, attending: 0, maybe: 0, declined: 0, unanswered: 0, waitlisted: 0, reconfirmationRequired: 0 },
+      canEdit: false,
+      canCancel: false,
+      canRespond: false,
+      canViewParticipants: false,
+    };
+    mocks.getDashboard.mockResolvedValue({ ...demoDashboard, planning: { event, actionRequired: false } });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    render(<QueryClientProvider client={queryClient}><DashboardPage /></QueryClientProvider>);
+
+    expect(await screen.findByText('01.09.2026, 00:30')).toBeVisible();
+    expect(mocks.getPlanningSettings).toHaveBeenCalledWith(demoSession.activeGroupId);
+  });
+
+  it('formats an all-day dashboard event without a midnight time', async () => {
+    const event: PlanningEvent = {
+      id: 'planning-weekend', version: 1, eventType: 'APPOINTMENT', status: 'PUBLISHED', title: 'Team weekend', description: '', location: '', allDay: true, startDate: '2026-09-05', endDateExclusive: '2026-09-08', timeZone: 'Europe/Berlin', startsAt: '2026-09-04T22:00:00Z', endsAt: '2026-09-07T22:00:00Z', waitlistEnabled: false, confirmationRevision: 1, audience: { type: 'ALL_ACTIVE_MEMBERS', roleIds: [], memberIds: [] }, participation: { invited: 1, attending: 0, maybe: 0, declined: 0, unanswered: 0, waitlisted: 0, reconfirmationRequired: 0 }, canEdit: false, canCancel: false, canRespond: false, canViewParticipants: false,
+    };
+    mocks.getDashboard.mockResolvedValue({ ...demoDashboard, planning: { event, actionRequired: false } });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    render(<QueryClientProvider client={queryClient}><DashboardPage /></QueryClientProvider>);
+
+    const schedule = await screen.findByText('05.09.2026–07.09.2026 · Ganztägig');
+    expect(schedule).toBeVisible();
+    expect(screen.queryByText(/00:00/)).not.toBeInTheDocument();
+    const openBalanceHeading = screen.getByRole('heading', { name: i18n.t('booking.openBalance') });
+    const planningLink = screen.getByRole('link', { name: /Team weekend/ });
+    expect(openBalanceHeading.compareDocumentPosition(planningLink) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    const allActivitiesLink = screen.getByRole('link', { name: i18n.t('dashboard.allActivities') });
+    expect(allActivitiesLink.compareDocumentPosition(planningLink) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
   });
 
   it('marks a negative open balance as credit in the member\'s favor', async () => {

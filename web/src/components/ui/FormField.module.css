@@ -10,6 +10,10 @@
   font-weight: 700;
 }
 
+.requiredMarker {
+  color: var(--color-status-danger);
+}
+
 .control {
   box-sizing: border-box;
   display: block;

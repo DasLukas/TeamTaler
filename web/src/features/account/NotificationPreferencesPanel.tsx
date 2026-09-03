@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/Button';
 import { TextInput } from '@/components/ui/FormField';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { Toggle } from '@/components/ui/Toggle';
+import { notificationKeys } from '@/features/notifications/notificationQueryKeys';
 import { notificationEventCopy } from '@/features/notifications/notificationEventCopy';
 import { formatGermanDateTime } from '@/features/shared/dateFormat';
 import {
@@ -56,8 +57,8 @@ function PreferenceMatrix({ groupId, preferences }: PreferenceMatrixProps) {
         return 'email' in update || 'push' in update ? [update] : [];
       }),
     }),
-    onSuccess: (persisted) => queryClient.setQueryData(['notification-preferences', groupId], persisted),
-    onError: async () => { await queryClient.invalidateQueries({ queryKey: ['notification-preferences', groupId] }); },
+    onSuccess: (persisted) => queryClient.setQueryData(notificationKeys.preferences(groupId), persisted),
+    onError: async () => { await queryClient.invalidateQueries({ queryKey: notificationKeys.preferences(groupId) }); },
   });
   const setChannel = (index: number, channel: 'email' | 'push', checked: boolean) => {
     setEvents((current) => current.map((event, eventIndex) => eventIndex === index ? { ...event, [channel]: checked } : event));
@@ -173,14 +174,14 @@ export function NotificationPreferencesPanel() {
   const session = useSession();
   const groupId = activeGroup?.activeGroupId;
   const preferences = useQuery({
-    queryKey: ['notification-preferences', groupId],
+    queryKey: notificationKeys.preferences(groupId),
     queryFn: () => api.getNotificationPreferences(groupId as string),
     enabled: Boolean(groupId),
   });
   return <>
     {!groupId ? null : preferences.isLoading ? <div className={styles.state}><StatePanel kind="loading" /></div>
       : preferences.isError || !preferences.data ? <div className={styles.state}><StatePanel kind="error" message={t('notifications.preferences.loadError')} /></div>
-        : <PreferenceMatrix groupId={groupId} key={`${groupId}:${preferences.data.version}:${Number(preferences.data.channels.email)}:${Number(preferences.data.channels.push)}`} preferences={preferences.data} />}
+        : <PreferenceMatrix groupId={groupId} key={`${groupId}:${preferences.data.version}:${Number(preferences.data.channels.email)}:${Number(preferences.data.channels.push)}:${preferences.data.events.map((event) => `${event.eventType}:${Number(event.enabled)}`).join(',')}`} preferences={preferences.data} />}
     <PushDevices capabilities={capabilities} key={session.user.id} userId={session.user.id} />
   </>;
 }

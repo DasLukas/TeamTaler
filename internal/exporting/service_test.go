@@ -94,6 +94,7 @@ func TestGroupExportProducesSafeCompleteArchive(t *testing.T) {
 	for _, required := range []string{
 		"manifest.json", "schema.json", "data/group.csv", "data/audit_events.csv", "data/payment_attachments.csv",
 		"data/public_join_link.csv", "data/public_join_registrations.csv", "data/notifications.csv",
+		"data/planning_series_cancelled_ranges.csv",
 		"data/legacy_membership_roles.csv", "data/legacy_membership_permissions.csv", "data/legacy_category_permissions.csv",
 	} {
 		if _, found := entries[required]; !found {
@@ -108,6 +109,24 @@ func TestGroupExportProducesSafeCompleteArchive(t *testing.T) {
 	}
 	if !strings.Contains(string(entries["data/bookings.csv"]), "currency") || !strings.Contains(string(entries["data/payments.csv"]), "currency") {
 		t.Fatal("money datasets do not identify their currency")
+	}
+	planningSeriesCSV := string(entries["data/planning_series.csv"])
+	for _, column := range []string{"created_by_membership_id", "updated_by_membership_id"} {
+		if !strings.Contains(planningSeriesCSV, column) {
+			t.Fatalf("planning-series export lacks %q: %s", column, planningSeriesCSV)
+		}
+	}
+	planningSeriesRevisionsCSV := string(entries["data/planning_series_revisions.csv"])
+	for _, column := range []string{"effective_from_original_start_at", "effective_from_sequence", "all_day", "start_date", "duration_days", "response_deadline_minutes_before"} {
+		if !strings.Contains(planningSeriesRevisionsCSV, column) {
+			t.Fatalf("planning-series revision export lacks %q: %s", column, planningSeriesRevisionsCSV)
+		}
+	}
+	planningEventsCSV := string(entries["data/planning_events.csv"])
+	for _, column := range []string{"series_id", "series_sequence", "original_start_at", "original_start_date", "is_series_exception", "all_day", "timezone", "start_date", "end_date_exclusive", "response_deadline_minutes_before", "created_by_membership_id", "updated_by_membership_id", "published_at", "closed_at", "completed_at", "cancelled_at"} {
+		if !strings.Contains(planningEventsCSV, column) {
+			t.Fatalf("planning-event export lacks %q: %s", column, planningEventsCSV)
+		}
 	}
 	paymentMethodsCSV := string(entries["data/payment_methods.csv"])
 	for _, value := range []string{"payment_target_type", "paypal_me_handle", "sepa_recipient_name", "sepa_iban", "sepa_bic", "PAYPAL_ME", "Club123", "NONE"} {
@@ -161,7 +180,7 @@ func TestPersonalExportAuthorizationPasswordAndIdempotency(t *testing.T) {
 	if _, found := entries["data/invitations.csv"]; found {
 		t.Fatal("personal archive contains group-administrator invitations.csv")
 	}
-	for _, required := range []string{"data/payment_allocations.csv", "data/period_adjustment_allocations.csv"} {
+	for _, required := range []string{"data/payment_allocations.csv", "data/period_adjustment_allocations.csv", "data/planning_series_cancelled_ranges.csv"} {
 		if _, found := entries[required]; !found {
 			t.Fatalf("personal archive is missing %s", required)
 		}

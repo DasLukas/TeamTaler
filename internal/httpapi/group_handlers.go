@@ -3,8 +3,10 @@ package httpapi
 import (
 	"bytes"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -14,6 +16,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/finance"
 	"github.com/DasLukas/TeamTaler/internal/groups"
+	"github.com/DasLukas/TeamTaler/internal/platform"
 )
 
 type paymentMethodUpdateRequest struct {
@@ -583,7 +586,48 @@ func (s *Server) handleDashboard(response http.ResponseWriter, request *http.Req
 		writeProblem(response, request, err)
 		return
 	}
-	dashboard := finance.Dashboard{Account: account, OpenPeriod: openPeriod, RecentBookings: recent, UnreadCount: unread, GroupOutstanding: groupOutstanding}
+	var planningEnabled bool
+	_ = s.db.QueryRowContext(request.Context(), `SELECT enabled FROM group_planning_settings WHERE group_id=?`, membership.GroupID).Scan(&planningEnabled)
+	var nextPlanning *finance.PlanningEventSummary
+	var openPlanningActions int64
+	canUsePlanning, _ := authorization.NewPolicy(s.db).Can(request.Context(), membership.GroupID, membership.ID, domain.PermissionUsePlanning, authorization.GroupResource(membership.GroupID))
+	if planningEnabled && canUsePlanning {
+		nowMicros := platform.Now().UnixMicro()
+		var item finance.PlanningEventSummary
+		var participationStatus string
+		var responseDeadline sql.NullInt64
+		var effectiveEnd int64
+		err := s.db.QueryRowContext(request.Context(), `SELECT event.id,coalesce(event.series_id,''),event.title,event.description,event.location,event.event_type,event.all_day,coalesce(event.timezone,''),coalesce(event.start_date,''),coalesce(event.end_date_exclusive,''),event.starts_at,coalesce(event.ends_at,''),coalesce(event.ends_at_us,event.starts_at_us),event.status,event.response_deadline_us,coalesce(participation.status,'') FROM planning_events event JOIN planning_event_audience audience ON audience.event_id=event.id AND audience.membership_id=? LEFT JOIN planning_participations participation ON participation.event_id=event.id AND participation.membership_id=audience.membership_id WHERE event.group_id=? AND event.status IN ('PUBLISHED','CLOSED') AND ((event.all_day=0 AND event.starts_at_us>=?) OR (event.all_day=1 AND event.ends_at_us>?)) ORDER BY event.starts_at_us,event.id LIMIT 1`, membership.ID, membership.GroupID, nowMicros, nowMicros).Scan(&item.ID, &item.SeriesID, &item.Title, &item.Description, &item.Location, &item.EventType, &item.AllDay, &item.TimeZone, &item.StartDate, &item.EndDateExclusive, &item.StartsAt, &item.EndsAt, &effectiveEnd, &item.Status, &responseDeadline, &participationStatus)
+		if err == nil {
+			if err := s.db.QueryRowContext(request.Context(), `SELECT count(*),
+				coalesce(sum(participation.status='YES'),0),coalesce(sum(participation.status='MAYBE'),0),
+				coalesce(sum(participation.status='NO'),0),coalesce(sum(participation.status='REGISTERED'),0),
+				coalesce(sum(participation.status='WAITLISTED'),0),
+				0
+				FROM planning_event_audience audience
+				JOIN memberships member ON member.id=audience.membership_id AND member.status='ACTIVE' AND member.deleted_at IS NULL
+				JOIN users recipient ON recipient.id=member.user_id AND recipient.active=1 AND recipient.email IS NOT NULL AND recipient.password_hash IS NOT NULL
+				LEFT JOIN planning_participations participation ON participation.event_id=audience.event_id AND participation.membership_id=audience.membership_id
+				WHERE audience.event_id=?`, item.ID).Scan(&item.Counts.Invited, &item.Counts.Yes, &item.Counts.Maybe, &item.Counts.No, &item.Counts.Registered, &item.Counts.Waitlisted, &item.Counts.ReconfirmationRequired); err != nil {
+				writeProblem(response, request, err)
+				return
+			}
+			if item.EventType == "APPOINTMENT_POLL" {
+				item.Counts.Pending = item.Counts.Invited - item.Counts.Yes - item.Counts.Maybe - item.Counts.No
+			}
+			item.MyParticipationStatus = participationStatus
+			item.MyEffectiveStatus = participationStatus
+			deadlineOpen := !responseDeadline.Valid || responseDeadline.Int64 > nowMicros
+			item.CanRespond = item.Status == "PUBLISHED" && item.EventType != "APPOINTMENT" && deadlineOpen && effectiveEnd > nowMicros
+			item.ActionRequired = item.CanRespond && item.EventType == "APPOINTMENT_POLL" && participationStatus == ""
+			nextPlanning = &item
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			writeProblem(response, request, err)
+			return
+		}
+		_ = s.db.QueryRowContext(request.Context(), `SELECT count(*) FROM planning_events event JOIN planning_event_audience audience ON audience.event_id=event.id AND audience.membership_id=? LEFT JOIN planning_participations participation ON participation.event_id=event.id AND participation.membership_id=audience.membership_id WHERE event.group_id=? AND event.status='PUBLISHED' AND event.event_type='APPOINTMENT_POLL' AND participation.membership_id IS NULL AND (event.response_deadline_us IS NULL OR event.response_deadline_us>?) AND coalesce(event.ends_at_us,event.starts_at_us)>?`, membership.ID, membership.GroupID, nowMicros, nowMicros).Scan(&openPlanningActions)
+	}
+	dashboard := finance.Dashboard{Account: account, OpenPeriod: openPeriod, RecentBookings: recent, UnreadCount: unread, GroupOutstanding: groupOutstanding, PlanningEnabled: planningEnabled && canUsePlanning, NextPlanningEvent: nextPlanning, OpenPlanningActionCount: openPlanningActions}
 	writeJSON(response, http.StatusOK, dashboard)
 }
 

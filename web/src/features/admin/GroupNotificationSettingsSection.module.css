@@ -3,8 +3,12 @@
 .card header p,
 .notice { margin: 0; }
 .card header p { margin-top: var(--space-2); color: var(--color-text-muted); }
-.eventList { display: grid; }
-.eventRow { display: flex; align-items: center; justify-content: space-between; gap: var(--space-5); padding: var(--space-4) 0; border-top: 1px solid var(--color-border); }
+.eventGroups { display: grid; gap: var(--space-5); }
+.eventGroup { display: grid; gap: var(--space-2); }
+.eventGroup h5 { margin: 0; color: var(--color-text-strong); font-size: var(--font-size-sm); }
+.eventList { display: grid; overflow: hidden; border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); }
+.eventRow { display: flex; min-height: 82px; align-items: center; justify-content: space-between; gap: var(--space-5); padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--color-border); }
+.eventRow:last-child { border-bottom: 0; }
 .eventRow > div { display: grid; gap: var(--space-1); }
 .eventRow span { color: var(--color-text-muted); font-size: var(--font-size-sm); }
 .reminders { display: grid; grid-template-columns: minmax(220px, 1.2fr) repeat(2, minmax(180px, .8fr)); align-items: start; gap: var(--space-4); padding-top: var(--space-4); border-top: 1px solid var(--color-border); }
@@ -15,6 +19,7 @@
 .state { padding: var(--space-5) 0; }
 @media (max-width: 760px) {
   .card { padding: var(--space-5); }
+  .eventRow { min-height: 74px; gap: var(--space-3); padding-inline: var(--space-4); }
   .reminders { grid-template-columns: minmax(0, 1fr); }
   .footer { align-items: stretch; flex-direction: column; }
   .footer button { width: 100%; }

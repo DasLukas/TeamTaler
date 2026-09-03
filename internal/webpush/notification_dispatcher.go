@@ -150,6 +150,16 @@ func (d *NotificationDispatcher) processOne(ctx context.Context) (bool, error) {
 		d.releaseAfterCancellation(job)
 		return true, nil
 	}
+	policyCode, err := notifications.CheckDeliveryPolicy(ctx, d.db, job.id, notifications.ChannelPush)
+	if err != nil {
+		d.releaseWithoutAttempt(job)
+		return true, err
+	}
+	if policyCode != "" {
+		return true, withPushCompletionContext(func(completionContext context.Context) error {
+			return d.markTerminal(completionContext, job, "FAILED", policyCode)
+		})
+	}
 	delivery, err := d.loadDelivery(ctx, job, configuration.KeyID)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -191,6 +201,16 @@ func (d *NotificationDispatcher) processOne(ctx context.Context) (bool, error) {
 		}
 		return true, withPushCompletionContext(func(completionContext context.Context) error {
 			return d.markTerminal(completionContext, job, "FAILED", "recipient_or_subscription_unavailable")
+		})
+	}
+	policyCode, err = notifications.CheckDeliveryPolicy(ctx, d.db, job.id, notifications.ChannelPush)
+	if err != nil {
+		d.releaseWithoutAttempt(job)
+		return true, err
+	}
+	if policyCode != "" {
+		return true, withPushCompletionContext(func(completionContext context.Context) error {
+			return d.markTerminal(completionContext, job, "FAILED", policyCode)
 		})
 	}
 	payload, err := json.Marshal(map[string]string{

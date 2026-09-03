@@ -9,10 +9,11 @@ info:
     State-changing authenticated requests require the `X-CSRF-Token` header.
     Product creation, invitation CSV imports, raw-data export creation, and financial mutations that
     create or reverse bookings, payments, or periods additionally require an
-    `Idempotency-Key`. A batch-booking idempotency scope includes every managed
+    `Idempotency-Key`. Planning-event and planning-series creation also require this key. A batch-booking idempotency scope includes every managed
     guest created by that command. Versioned role and assignment replacement
     or deletion, public join-link updates, system-setting and SMTP revision
-    mutations, provisioning-invitation replacement, and global group lifecycle
+    mutations, planning settings, planning events and recurring series,
+    provisioning-invitation replacement, and global group lifecycle
     commands require a strong `If-Match` ETag where they target an existing
     versioned resource.
   license:
@@ -27,6 +28,7 @@ tags:
   - name: Authorization
   - name: System
   - name: Groups
+  - name: Planning
   - name: Catalog
   - name: Activities
   - name: Bookings
@@ -1673,7 +1675,7 @@ paths:
         - $ref: '#/components/parameters/GroupId'
       responses:
         '200':
-          description: Group-enabled events with effective channel availability
+          description: Events exposed by enabled modules, including effective group and channel availability
           headers: { ETag: { schema: { type: string } } }
           content: { application/json: { schema: { $ref: '#/components/schemas/NotificationPreferences' } } }
         '401': { $ref: '#/components/responses/Problem' }
@@ -1682,7 +1684,7 @@ paths:
     put:
       tags: [Groups]
       summary: Update independent email and push choices
-      description: Disabled group events and unavailable system channels are immutable; retained hidden choices are not deleted.
+      description: Disabled group events, disabled optional-module events, and unavailable system channels are immutable; retained hidden choices are not deleted.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/CSRFToken'
@@ -1734,6 +1736,299 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Dashboard' }
         '403': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/planning/settings:
+    get:
+      tags: [Planning]
+      summary: Read the optional planning module state
+      description: Requires `USE_PLANNING` or `GROUP_ADMINISTRATION`. The time zone is shared with the group notification schedule.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Current versioned planning settings
+          headers: { ETag: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlanningSettings' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+    put:
+      tags: [Planning]
+      summary: Enable or disable planning for the group
+      description: Requires `GROUP_ADMINISTRATION`. Disabling planning cancels pending planning tasks and unsent external deliveries without deleting planning data.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [enabled]
+              properties: { enabled: { type: boolean } }
+      responses:
+        '200':
+          description: Updated planning settings
+          headers: { ETag: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlanningSettings' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/planning/series:
+    post:
+      tags: [Planning]
+      summary: Create a recurring planning series
+      description: Requires `CREATE_PLANNING_EVENTS`. The recurrence rule is structured and materialized idempotently in the group's time zone; optional publication commits atomically with creation.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PlanningSeriesCreateInput' } } }
+      responses:
+        '201':
+          description: Created series and its first materialized occurrence
+          headers: { ETag: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlanningSeriesCreateResult' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/planning/series/{seriesId}:
+    get:
+      tags: [Planning]
+      summary: Read a recurring planning series
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/PlanningSeriesId'
+      responses:
+        '200':
+          description: Series details
+          headers: { ETag: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlanningSeries' } } }
+        '404': { $ref: '#/components/responses/Problem' }
+    put:
+      tags: [Planning]
+      summary: Replace a complete series or its selected future segment
+      description: Owners may change their own series; `MANAGE_PLANNING_EVENTS` may change every series. `ALL` affects future, non-final occurrences in the complete series. `THIS_AND_FOLLOWING` starts at the required original occurrence timestamp. Individually changed or cancelled occurrences remain exceptions and are not silently overwritten.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/PlanningSeriesId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PlanningSeriesUpdateInput' } } }
+      responses:
+        '200':
+          description: Updated series revision
+          headers: { ETag: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlanningSeries' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/planning/series/{seriesId}/cancel:
+    post:
+      tags: [Planning]
+      summary: Cancel a complete series or its selected future segment
+      description: >-
+        `ALL` cancels every unfinished occurrence in the series.
+        `THIS_AND_FOLLOWING` cancels every unfinished occurrence from the required
+        original occurrence timestamp onward. Both scopes include future manually
+        changed or cancelled exceptions in their selected range. Affected rows are
+        retained as auditable cancellations; past and completed occurrences are
+        immutable. Recipients receive one bundled series notification rather than
+        one notification per occurrence.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/PlanningSeriesId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PlanningSeriesMutationInput' } } }
+      responses:
+        '204': { description: Series or future series segment cancelled }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/planning/events:
+    get:
+      tags: [Planning]
+      summary: List visible planning events in a bounded calendar interval
+      description: |
+        Events require membership in the snapshotted audience unless the
+        requester owns or manages them. `from` and `to` are the backwards-
+        compatible instant bounds and use half-open overlap semantics. The
+        optional `fromDate` and `toDateExclusive` pair applies civil-date
+        overlap semantics to all-day events. Calendar clients may send both
+        pairs so timed and all-day rows are filtered in their native domains.
+        Each complete range is limited to 366 days.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - name: from
+          in: query
+          description: Inclusive RFC 3339 instant lower bound for timed events and legacy all-event queries.
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          description: Exclusive RFC 3339 instant upper bound for timed events and legacy all-event queries.
+          schema: { type: string, format: date-time }
+        - name: fromDate
+          in: query
+          description: Inclusive ISO civil-date lower bound for all-day events. Requires `toDateExclusive`.
+          schema: { type: string, format: date }
+        - name: toDateExclusive
+          in: query
+          description: Exclusive ISO civil-date upper bound for all-day events. Requires `fromDate` and may be at most 366 days later.
+          schema: { type: string, format: date }
+        - name: status
+          in: query
+          description: Optional exact lifecycle-state filter applied before cursor pagination.
+          schema: { $ref: '#/components/schemas/PlanningEventStatus' }
+        - $ref: '#/components/parameters/PlanningCursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Chronological visible event page
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlanningEventPage' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Planning]
+      summary: Create a planning event
+      description: Requires `CREATE_PLANNING_EVENTS`. This endpoint publishes a single occurrence and snapshots its audience atomically; use the series endpoint for recurrence.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PlanningEventInput' } } }
+      responses:
+        '201':
+          description: Published event
+          headers: { ETag: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlanningEvent' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/planning/events/{eventId}:
+    get:
+      tags: [Planning]
+      summary: Read one visible planning event
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/PlanningEventId'
+      responses:
+        '200':
+          description: Privacy-filtered event read model
+          headers: { ETag: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlanningEvent' } } }
+        '404': { $ref: '#/components/responses/Problem' }
+    put:
+      tags: [Planning]
+      summary: Replace one planning occurrence
+      description: Owners may edit their own event; `MANAGE_PLANNING_EVENTS` may edit every event. For a recurring event this always creates or updates an exception for only this occurrence. Published audiences are add-only. Existing responses and registrations remain effective, and affected members receive an update notification.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/PlanningEventId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PlanningEventInput' } } }
+      responses:
+        '200':
+          description: Updated event
+          headers: { ETag: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlanningEvent' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/planning/events/{eventId}/close:
+    post:
+      tags: [Planning]
+      summary: Close event participation
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/PlanningEventId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      responses:
+        '200': { description: Closed event, content: { application/json: { schema: { $ref: '#/components/schemas/PlanningEvent' } } } }
+        '412': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/planning/events/{eventId}/complete:
+    post:
+      tags: [Planning]
+      summary: Complete an ended event
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/PlanningEventId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      responses:
+        '200': { description: Completed event, content: { application/json: { schema: { $ref: '#/components/schemas/PlanningEvent' } } } }
+        '412': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/planning/events/{eventId}/cancel:
+    post:
+      tags: [Planning]
+      summary: Cancel one event occurrence
+      description: For a recurring event this cancels only this occurrence and retains an auditable series exception.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/PlanningEventId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      responses:
+        '200': { description: Cancelled event, content: { application/json: { schema: { $ref: '#/components/schemas/PlanningEvent' } } } }
+        '412': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/planning/events/{eventId}/participation:
+    put:
+      tags: [Planning]
+      summary: Set the current membership response or registration
+      description: Appointment polls accept `YES`, `MAYBE`, or `NO`; appointment registration accepts `REGISTERED` or `WITHDRAWN`. Capacity and FIFO waitlist assignment are transactional.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/PlanningEventId'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [status]
+              properties:
+                status: { type: string, enum: [YES, MAYBE, NO, REGISTERED, WITHDRAWN] }
+      responses:
+        '200':
+          description: Event with updated own participation and aggregates
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlanningEvent' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/planning/events/{eventId}/participants:
+    get:
+      tags: [Planning]
+      summary: List identified event participants
+      description: Requires event ownership, `VIEW_PLANNING_PARTICIPANTS`, or `MANAGE_PLANNING_EVENTS`. Results use stable case-insensitive display-name and membership-ID keyset pagination.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/PlanningEventId'
+        - $ref: '#/components/parameters/PlanningCursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Authorized participant page
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlanningParticipantPage' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/logo:
     post:
       tags: [Groups]
@@ -3737,6 +4032,16 @@ components:
       in: path
       required: true
       schema: { type: string }
+    PlanningEventId:
+      name: eventId
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
+    PlanningSeriesId:
+      name: seriesId
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
     ExportId:
       name: exportId
       in: path
@@ -3770,6 +4075,11 @@ components:
       name: limit
       in: query
       schema: { type: integer, minimum: 1, maximum: 200, default: 100 }
+    PlanningCursor:
+      name: cursor
+      in: query
+      description: Continuation token returned as `nextCursor` by the preceding planning page. Reuse it only with the same event collection, interval, and lifecycle filter.
+      schema: { type: string, maxLength: 2048 }
     TableSearch:
       name: q
       in: query
@@ -3797,6 +4107,380 @@ components:
         application/problem+json:
           schema: { $ref: '#/components/schemas/RoleConflictProblem' }
   schemas:
+    PlanningEventType:
+      type: string
+      enum: [APPOINTMENT, APPOINTMENT_POLL, APPOINTMENT_REGISTRATION]
+      description: Stable behavior contract for a plain appointment, an appointment poll, or appointment registration with optional capacity.
+    PlanningEventStatus:
+      type: string
+      enum: [PUBLISHED, CLOSED, COMPLETED, CANCELLED]
+    PlanningAudienceType:
+      type: string
+      enum: [ALL_ACTIVE_MEMBERS, SELECTED_ROLES, SELECTED_MEMBERS, SELECTED_TARGETS]
+      description: "`SELECTED_TARGETS` resolves the union of selected roles and individual memberships. The legacy single-source values remain readable for compatibility."
+    PlanningSettings:
+      type: object
+      additionalProperties: false
+      required: [enabled, version, updatedAt, timeZone]
+      properties:
+        enabled: { type: boolean }
+        version: { type: integer, minimum: 1 }
+        updatedAt: { type: string, format: date-time }
+        timeZone:
+          type: string
+          minLength: 1
+          description: IANA time zone shared with the group's notification schedule.
+    PlanningAudienceFields:
+      type: object
+      properties:
+        audienceType: { $ref: '#/components/schemas/PlanningAudienceType' }
+        targetRoleIds:
+          type: array
+          uniqueItems: true
+          description: Role targets. May be combined with targetMembershipIds when audienceType is SELECTED_TARGETS.
+          items: { type: string }
+        targetMembershipIds:
+          type: array
+          uniqueItems: true
+          description: Individual membership targets. May be combined with targetRoleIds when audienceType is SELECTED_TARGETS.
+          items: { type: string }
+    PlanningEventContentInput:
+      type: object
+      required: [eventType, audienceType, title]
+      properties:
+        eventType: { $ref: '#/components/schemas/PlanningEventType' }
+        audienceType: { $ref: '#/components/schemas/PlanningAudienceType' }
+        targetRoleIds:
+          type: array
+          uniqueItems: true
+          items: { type: string }
+        targetMembershipIds:
+          type: array
+          uniqueItems: true
+          items: { type: string }
+        title: { type: string, minLength: 1, maxLength: 160 }
+        description: { type: string, maxLength: 4000, default: '' }
+        location: { type: string, maxLength: 240, default: '' }
+        responseDeadlineMinutesBefore:
+          type: [integer, 'null']
+          minimum: 0
+          maximum: 525600
+          description: Optional for polls and registrations. When present, the server derives each occurrence's absolute deadline from its start; omission leaves responses open until the event ends or is closed manually.
+        capacity: { type: [integer, 'null'], minimum: 1, maximum: 100000 }
+        waitlistEnabled: { type: boolean, default: false }
+    PlanningTimedEventScheduleInput:
+      type: object
+      required: [startsAt]
+      properties:
+        allDay: { type: boolean, const: false, default: false }
+        startsAt: { type: string, format: date-time }
+        endsAt: { type: [string, 'null'], format: date-time }
+      not:
+        anyOf:
+          - required: [timeZone]
+          - required: [startDate]
+          - required: [endDateExclusive]
+    PlanningAllDayEventScheduleInput:
+      type: object
+      required: [allDay, startDate, endDateExclusive]
+      properties:
+        allDay: { type: boolean, const: true }
+        timeZone:
+          type: string
+          minLength: 1
+          description: Optional client assertion. When present it must match the server-selected group or pinned series time zone.
+        startDate: { type: string, format: date }
+        endDateExclusive:
+          type: string
+          format: date
+          description: Exclusive local calendar end date. Standalone events support 1 to 366 calendar days.
+      not:
+        anyOf:
+          - required: [startsAt]
+          - required: [endsAt]
+    PlanningEventInput:
+      allOf:
+        - $ref: '#/components/schemas/PlanningEventContentInput'
+        - oneOf:
+            - $ref: '#/components/schemas/PlanningTimedEventScheduleInput'
+            - $ref: '#/components/schemas/PlanningAllDayEventScheduleInput'
+    PlanningParticipationCounts:
+      type: object
+      additionalProperties: false
+      required: [invited, yes, maybe, no, pending, registered, waitlisted, reconfirmationRequired]
+      properties:
+        invited: { type: integer, minimum: 0 }
+        yes: { type: integer, minimum: 0 }
+        maybe: { type: integer, minimum: 0 }
+        no: { type: integer, minimum: 0 }
+        pending: { type: integer, minimum: 0 }
+        registered: { type: integer, minimum: 0 }
+        waitlisted: { type: integer, minimum: 0 }
+        reconfirmationRequired:
+          type: integer
+          minimum: 0
+          maximum: 0
+          deprecated: true
+          description: Compatibility field retained for older clients; always zero.
+    PlanningParticipation:
+      type: object
+      additionalProperties: false
+      required: [status, effectiveStatus, confirmedRevision, version]
+      properties:
+        membershipId: { type: string }
+        displayName: { type: string }
+        status: { type: string, enum: [YES, MAYBE, NO, REGISTERED, WAITLISTED, WITHDRAWN] }
+        effectiveStatus: { type: string, enum: [YES, MAYBE, NO, REGISTERED, WAITLISTED, WITHDRAWN, PENDING] }
+        confirmedRevision: { type: integer, minimum: 0 }
+        version: { type: integer, minimum: 0 }
+        respondedAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    PlanningEvent:
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/PlanningEventContentInput'
+        - type: object
+          required: [id, eventType, status, audienceType, title, allDay, timeZone, startsAt, waitlistEnabled, confirmationRevision, version, counts, createdAt, updatedAt, canEdit, canCancel, canRespond, canViewParticipants]
+          properties:
+            id: { type: string }
+            seriesId: { type: string }
+            originalStartAt:
+              type: string
+              format: date-time
+              description: Immutable generated start used to address this occurrence even when it is moved.
+            originalStartDate:
+              type: string
+              format: date
+              description: Immutable generated local date retained by all-day series occurrences, including manual exceptions.
+            isSeriesException: { type: boolean }
+            allDay: { type: boolean }
+            timeZone:
+              type: string
+              minLength: 1
+              description: IANA time zone pinned to the event at creation for stable rendering and later mode changes.
+            startDate: { type: string, format: date }
+            endDateExclusive: { type: string, format: date }
+            startsAt:
+              type: string
+              format: date-time
+              description: Canonical start instant. For all-day events this is derived from startDate and timeZone for compatibility and ordering.
+            endsAt:
+              type: [string, 'null']
+              format: date-time
+              description: Canonical exclusive end instant when present. All-day events always provide the boundary derived from endDateExclusive.
+            responseDeadline:
+              type: [string, 'null']
+              format: date-time
+              description: Optional absolute occurrence deadline derived by the server from responseDeadlineMinutesBefore.
+            status: { $ref: '#/components/schemas/PlanningEventStatus' }
+            confirmationRevision:
+              type: integer
+              minimum: 1
+              deprecated: true
+              description: Legacy compatibility marker that no longer changes when an event is edited.
+            version: { type: integer, minimum: 1 }
+            counts: { $ref: '#/components/schemas/PlanningParticipationCounts' }
+            myParticipation: { $ref: '#/components/schemas/PlanningParticipation' }
+            createdByName: { type: string }
+            canEdit: { type: boolean }
+            canCancel: { type: boolean }
+            canRespond: { type: boolean }
+            canViewParticipants: { type: boolean }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
+          oneOf:
+            - properties:
+                allDay: { const: false }
+              not:
+                anyOf:
+                  - required: [startDate]
+                  - required: [endDateExclusive]
+                  - required: [originalStartDate]
+            - required: [startDate, endDateExclusive, endsAt]
+              properties:
+                allDay: { const: true }
+    DashboardPlanningEventSummary:
+      type: object
+      additionalProperties: false
+      required: [id, title, description, location, eventType, allDay, timeZone, startsAt, status, counts, actionRequired, canRespond]
+      properties:
+        id: { type: string }
+        seriesId:
+          type: string
+          description: Stable series identifier when the dashboard event is a recurring occurrence.
+        title: { type: string }
+        description:
+          type: string
+          description: Event description used by the shared agenda presentation.
+        location:
+          type: string
+          description: Event location used by the shared agenda presentation.
+        eventType: { $ref: '#/components/schemas/PlanningEventType' }
+        allDay: { type: boolean }
+        timeZone:
+          type: string
+          minLength: 1
+          description: IANA time zone pinned to the event at creation.
+        startDate: { type: string, format: date }
+        endDateExclusive: { type: string, format: date }
+        startsAt: { type: string, format: date-time }
+        endsAt:
+          type: string
+          format: date-time
+          description: Optional event end used by the shared Agenda schedule presentation.
+        status: { $ref: '#/components/schemas/PlanningEventStatus' }
+        counts: { $ref: '#/components/schemas/PlanningParticipationCounts' }
+        myEffectiveStatus:
+          type: string
+          enum: [YES, MAYBE, NO, REGISTERED, WAITLISTED, WITHDRAWN, PENDING]
+        myParticipationStatus:
+          type: string
+          enum: [YES, MAYBE, NO, REGISTERED, WAITLISTED, WITHDRAWN]
+        actionRequired: { type: boolean }
+        canRespond: { type: boolean }
+    PlanningEventPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/PlanningEvent' }
+        nextCursor: { type: string }
+    PlanningRecurrenceFrequency:
+      type: string
+      enum: [DAILY, WEEKLY, MONTHLY, YEARLY]
+    PlanningRecurrenceRange:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type: { type: string, enum: [COUNT, UNTIL, NEVER] }
+        count: { type: [integer, 'null'], minimum: 2, maximum: 500 }
+        until: { type: [string, 'null'], format: date }
+    PlanningRecurrenceInput:
+      type: object
+      additionalProperties: false
+      required: [frequency, interval, range]
+      properties:
+        frequency: { $ref: '#/components/schemas/PlanningRecurrenceFrequency' }
+        interval: { type: integer, minimum: 1, maximum: 99 }
+        weekdays:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [MO, TU, WE, TH, FR, SA, SU] }
+        monthlyMode: { type: string, enum: [DAY_OF_MONTH, NTH_WEEKDAY, LAST_DAY] }
+        range: { $ref: '#/components/schemas/PlanningRecurrenceRange' }
+    PlanningSeriesMutationScope:
+      type: string
+      enum: [ALL, THIS_AND_FOLLOWING]
+    PlanningSeriesMutationInput:
+      type: object
+      additionalProperties: false
+      required: [scope]
+      properties:
+        scope: { $ref: '#/components/schemas/PlanningSeriesMutationScope' }
+        fromOriginalStartAt:
+          type: [string, 'null']
+          format: date-time
+          description: Required only for THIS_AND_FOLLOWING and must identify a generated occurrence in the series. Cancellation includes future manual exceptions at or after this boundary; updates preserve them.
+    PlanningSeriesCreateInput:
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/PlanningEventContentInput'
+        - type: object
+          required: [recurrence]
+          properties:
+            recurrence: { $ref: '#/components/schemas/PlanningRecurrenceInput' }
+        - oneOf:
+            - allOf:
+                - $ref: '#/components/schemas/PlanningTimedEventScheduleInput'
+                - required: [endsAt]
+            - $ref: '#/components/schemas/PlanningAllDayEventScheduleInput'
+    PlanningSeriesUpdateInput:
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/PlanningEventContentInput'
+        - type: object
+          required: [recurrence, scope]
+          properties:
+            recurrence: { $ref: '#/components/schemas/PlanningRecurrenceInput' }
+            scope: { $ref: '#/components/schemas/PlanningSeriesMutationScope' }
+            fromOriginalStartAt:
+              type: [string, 'null']
+              format: date-time
+              description: Required only for THIS_AND_FOLLOWING.
+        - oneOf:
+            - allOf:
+                - $ref: '#/components/schemas/PlanningTimedEventScheduleInput'
+                - required: [endsAt]
+            - $ref: '#/components/schemas/PlanningAllDayEventScheduleInput'
+    PlanningSeries:
+      type: object
+      additionalProperties: false
+      required: [id, status, timeZone, eventType, title, description, location, allDay, waitlistEnabled, audienceType, targetRoleIds, targetMembershipIds, recurrence, version, createdAt, updatedAt, canEdit, canCancel]
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [PUBLISHED, CANCELLED] }
+        timeZone:
+          type: string
+          minLength: 1
+          description: IANA time zone used to resolve every local recurrence date.
+        eventType: { $ref: '#/components/schemas/PlanningEventType' }
+        title: { type: string, minLength: 1, maxLength: 160 }
+        description: { type: string, maxLength: 4000 }
+        location: { type: string, maxLength: 240 }
+        allDay: { type: boolean }
+        startDate: { type: string, format: date }
+        durationDays: { type: integer, minimum: 1, maximum: 7 }
+        durationMinutes: { type: integer, minimum: 1, maximum: 10080 }
+        responseDeadlineMinutesBefore: { type: integer, minimum: 0, maximum: 525600 }
+        capacity: { type: integer, minimum: 1, maximum: 100000 }
+        waitlistEnabled: { type: boolean }
+        audienceType: { $ref: '#/components/schemas/PlanningAudienceType' }
+        targetRoleIds:
+          type: array
+          uniqueItems: true
+          items: { type: string }
+        targetMembershipIds:
+          type: array
+          uniqueItems: true
+          items: { type: string }
+        recurrence: { $ref: '#/components/schemas/PlanningRecurrenceInput' }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        canEdit: { type: boolean }
+        canCancel: { type: boolean }
+      oneOf:
+        - required: [durationMinutes]
+          properties:
+            allDay: { const: false }
+          not:
+            anyOf:
+              - required: [startDate]
+              - required: [durationDays]
+        - required: [startDate, durationDays]
+          properties:
+            allDay: { const: true }
+          not:
+            required: [durationMinutes]
+    PlanningSeriesCreateResult:
+      type: object
+      additionalProperties: false
+      required: [series, firstOccurrence]
+      properties:
+        series: { $ref: '#/components/schemas/PlanningSeries' }
+        firstOccurrence: { $ref: '#/components/schemas/PlanningEvent' }
+    PlanningParticipantPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/PlanningParticipation' }
+        nextCursor: { type: string }
     MinorUnits:
       type: string
       pattern: '^-?[0-9]+$'
@@ -4857,13 +5541,16 @@ components:
         avatarUrl: { type: string }
     Group:
       type: object
-      required: [id, name, currency, defaultTheme, membership]
+      required: [id, name, currency, defaultTheme, planningEnabled, membership]
       properties:
         id: { type: string }
         name: { type: string }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         logoUrl: { type: string }
         defaultTheme: { $ref: '#/components/schemas/ThemeId' }
+        planningEnabled:
+          type: boolean
+          description: Effective group feature switch used to hide planning navigation and routes when disabled.
         membership: { $ref: '#/components/schemas/Membership' }
     GroupSettings:
       type: object
@@ -4970,7 +5657,7 @@ components:
       properties:
         type:
           type: string
-          enum: [BOOKING_ASSIGNED, BOOKING_REVERSED, PAYMENT_RECORDED, PAYMENT_REVERSED, SETTLEMENT_CREATED, SETTLEMENT_DUE_SOON, SETTLEMENT_OVERDUE]
+          enum: [BOOKING_ASSIGNED, BOOKING_REVERSED, PAYMENT_RECORDED, PAYMENT_REVERSED, SETTLEMENT_CREATED, SETTLEMENT_DUE_SOON, SETTLEMENT_OVERDUE, PLANNING_EVENT_PUBLISHED, PLANNING_EVENT_UPDATED, PLANNING_EVENT_CANCELLED, PLANNING_WAITLIST_PROMOTED, PLANNING_SERIES_PUBLISHED, PLANNING_SERIES_UPDATED, PLANNING_SERIES_CANCELLED]
         category: { type: string }
         label: { type: string }
         description: { type: string }
@@ -5004,7 +5691,7 @@ components:
         dueSoonLeadDays: { type: integer, minimum: 1, maximum: 30, default: 3 }
         overdueRepeatDays: { type: integer, minimum: 0, maximum: 90, default: 7 }
         availableChannels: { type: array, items: { $ref: '#/components/schemas/NotificationChannel' } }
-        events: { type: array, minItems: 7, maxItems: 7, items: { $ref: '#/components/schemas/GroupNotificationEventSetting' } }
+        events: { type: array, minItems: 14, maxItems: 14, items: { $ref: '#/components/schemas/GroupNotificationEventSetting' } }
         updatedAt: { type: string, format: date-time }
     GroupNotificationSettingsUpdate:
       type: object
@@ -5016,8 +5703,8 @@ components:
         overdueRepeatDays: { type: integer, minimum: 0, maximum: 90 }
         events:
           type: array
-          minItems: 7
-          maxItems: 7
+          minItems: 14
+          maxItems: 14
           items:
             type: object
             additionalProperties: false
@@ -5043,7 +5730,7 @@ components:
       properties:
         version: { type: integer, format: int64, minimum: 1 }
         availableChannels: { type: array, items: { $ref: '#/components/schemas/NotificationChannel' } }
-        events: { type: array, minItems: 7, maxItems: 7, items: { $ref: '#/components/schemas/NotificationEventPreference' } }
+        events: { type: array, minItems: 4, maxItems: 14, items: { $ref: '#/components/schemas/NotificationEventPreference' } }
     NotificationPreferencesUpdate:
       type: object
       additionalProperties: false
@@ -5052,7 +5739,7 @@ components:
         events:
           type: array
           minItems: 1
-          maxItems: 7
+          maxItems: 14
           items:
             type: object
             additionalProperties: false
@@ -5295,6 +5982,10 @@ components:
         - VOID_ANY_BOOKING
         - BOOK_FOR_OTHERS
         - BOOK_FOR_GUESTS
+        - USE_PLANNING
+        - CREATE_PLANNING_EVENTS
+        - VIEW_PLANNING_PARTICIPANTS
+        - MANAGE_PLANNING_EVENTS
     PermissionScopeType:
       type: string
       enum: [GROUP, CATEGORY, PRODUCT]
@@ -6109,7 +6800,7 @@ components:
           items: { $ref: '#/components/schemas/LedgerEntry' }
     Dashboard:
       type: object
-      required: [account, openPeriod, recentBookings, unreadNotificationCount]
+      required: [account, openPeriod, recentBookings, unreadNotificationCount, planningEnabled]
       properties:
         account: { $ref: '#/components/schemas/Account' }
         openPeriod: { $ref: '#/components/schemas/Period' }
@@ -6117,6 +6808,14 @@ components:
           type: array
           items: { $ref: '#/components/schemas/Booking' }
         unreadNotificationCount: { type: integer, format: int64 }
+        planningEnabled: { type: boolean }
+        openPlanningActionCount:
+          type: integer
+          minimum: 0
+          description: Visible unanswered attendance-poll actions currently required from the authenticated membership.
+        nextPlanningEvent:
+          $ref: '#/components/schemas/DashboardPlanningEventSummary'
+          description: Next visible event for the authenticated membership; omitted when no future event is available.
         groupOutstandingMinor:
           $ref: '#/components/schemas/MinorUnits'
           description: Signed complete-ledger net receivable across all member accounts; omitted without VIEW_GROUP_STATISTICS. Positive values are owed to the group and negative values are member credit.
@@ -6255,7 +6954,7 @@ components:
         groupId: { type: string }
         type:
           type: string
-          enum: [BOOKING_ASSIGNED, BOOKING_REVERSED, PAYMENT_RECORDED, PAYMENT_REVERSED, SETTLEMENT_CREATED, SETTLEMENT_DUE_SOON, SETTLEMENT_OVERDUE, DATA_EXPORT_READY, DATA_EXPORT_FAILED]
+          enum: [BOOKING_ASSIGNED, BOOKING_REVERSED, PAYMENT_RECORDED, PAYMENT_REVERSED, SETTLEMENT_CREATED, SETTLEMENT_DUE_SOON, SETTLEMENT_OVERDUE, PLANNING_EVENT_PUBLISHED, PLANNING_EVENT_UPDATED, PLANNING_EVENT_CANCELLED, PLANNING_WAITLIST_PROMOTED, PLANNING_SERIES_PUBLISHED, PLANNING_SERIES_UPDATED, PLANNING_SERIES_CANCELLED, DATA_EXPORT_READY, DATA_EXPORT_FAILED]
         title: { type: string }
         body: { type: string }
         resourceType: { type: string }
@@ -6276,6 +6975,12 @@ components:
         dueAt: { type: string, format: date }
         exportId: { type: string }
         exportScope: { $ref: '#/components/schemas/DataExportScope' }
+        planningEventId: { type: string }
+        planningEventTitle: { type: string }
+        planningSeriesId: { type: string }
+        planningSeriesTitle: { type: string }
+        planningStartsAt: { type: string, format: date-time }
+        planningStatus: { type: string }
     NotificationSummary:
       type: object
       additionalProperties: false

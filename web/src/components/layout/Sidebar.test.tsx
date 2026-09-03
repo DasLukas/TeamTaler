@@ -4,20 +4,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PermissionKey } from '@/api/types';
 import { NotificationSummaryContext } from '@/features/notifications/NotificationSummaryContext';
 import { Sidebar } from './Sidebar';
+import { visibleSidebarItemCount } from './sidebarOverflow';
 
 const mocks = vi.hoisted(() => ({ useActiveGroup: vi.fn() }));
 
 vi.mock('@/app/useActiveGroup', () => ({ useActiveGroup: () => mocks.useActiveGroup() }));
 vi.mock('@tanstack/react-router', () => ({
-  Link: (props: { children: ReactNode; to: string; title?: string; 'aria-label'?: string }) => (
-    <a aria-label={props['aria-label']} href={props.to} title={props.title}>{props.children}</a>
+  Link: (props: { children: ReactNode; to: string; title?: string; onClick?: () => void; role?: string; 'aria-label'?: string }) => (
+    <a aria-label={props['aria-label']} href={props.to} onClick={props.onClick} role={props.role} title={props.title}>{props.children}</a>
   ),
+  useRouterState: ({ select }: { select: (state: { location: { pathname: string } }) => string }) => select({ location: { pathname: '/overview' } }),
 }));
 vi.mock('@/components/brand/Brand', () => ({ Brand: () => <div>brand</div> }));
 vi.mock('@/components/auth/LogoutButton', () => ({ LogoutButton: () => <button type="button">logout</button> }));
 
 function usePermissions(permissions: PermissionKey[], systemRoles: string[] = []): void {
-  const group = { id: 'group-a', name: 'Group A', currency: 'EUR', membership: { id: 'member-a', effectiveGrants: permissions.map((permission) => ({ permission, scope: { type: 'GROUP' as const } })) } };
+  const group = { id: 'group-a', name: 'Group A', currency: 'EUR', planningEnabled: true, membership: { id: 'member-a', effectiveGrants: permissions.map((permission) => ({ permission, scope: { type: 'GROUP' as const } })) } };
   mocks.useActiveGroup.mockReturnValue({ session: { groups: [group], systemRoles }, activeGroupId: group.id, setActiveGroupId: vi.fn() });
 }
 
@@ -45,6 +47,22 @@ describe('Sidebar role navigation', () => {
     const links = screen.getAllByRole('link').map((link) => link.textContent);
     expect(links.indexOf('Katalog')).toBeLessThan(links.indexOf('Finanzen'));
     expect(links.indexOf('Finanzen')).toBeLessThan(links.indexOf('Einstellungen'));
+  });
+
+  it('uses the canonical module order shared with mobile navigation', () => {
+    usePermissions(['CREATE_OWN_BOOKING', 'USE_PLANNING', 'CATALOG_MANAGEMENT', 'FINANCE_MANAGEMENT', 'GROUP_ADMINISTRATION']);
+    render(<Sidebar collapsed={false} onCollapsedChange={vi.fn()} />);
+
+    const navigation = screen.getByRole('navigation', { name: 'Hauptnavigation' });
+    expect(Array.from(navigation.querySelectorAll('a')).map((link) => link.textContent)).toEqual([
+      'Übersicht',
+      'Buchen',
+      'Aktivitäten',
+      'Planung',
+      'Katalog',
+      'Finanzen',
+      'Einstellungen',
+    ]);
   });
 
   it('shows settings to a system administrator without group administration rights', () => {
@@ -101,5 +119,31 @@ describe('Sidebar role navigation', () => {
     const badge = screen.getByLabelText('3 ungelesene Benachrichtigungen');
     expect(badge.parentElement?.querySelector('svg')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Benachrichtigungen' })).toContainElement(badge);
+  });
+
+  it('reserves one overflow slot and moves modules into an accessible More menu', () => {
+    const originalClientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get() { return this.getAttribute('aria-label') === 'Hauptnavigation' ? 160 : 0; } });
+    try {
+      usePermissions(['CREATE_OWN_BOOKING', 'CATALOG_MANAGEMENT', 'FINANCE_MANAGEMENT', 'GROUP_ADMINISTRATION']);
+      render(<Sidebar collapsed={false} onCollapsedChange={vi.fn()} />);
+
+      expect(screen.getByRole('link', { name: 'Übersicht' })).toBeVisible();
+      expect(screen.queryByRole('link', { name: 'Buchen' })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Mehr' }));
+      const menu = screen.getByRole('menu', { name: 'Mehr' });
+      expect(menu).toContainElement(screen.getByRole('menuitem', { name: 'Buchen' }));
+      expect(screen.getByRole('link', { name: 'Benachrichtigungen' })).toBeVisible();
+      expect(screen.getByRole('link', { name: 'Mein Konto' })).toBeVisible();
+      expect(screen.getByRole('button', { name: 'logout' })).toBeVisible();
+    } finally {
+      if (originalClientHeight) Object.defineProperty(HTMLElement.prototype, 'clientHeight', originalClientHeight);
+    }
+  });
+
+  it('calculates progressive overflow without hiding the More trigger itself', () => {
+    expect(visibleSidebarItemCount(7, 500, 56, 8)).toBe(7);
+    expect(visibleSidebarItemCount(7, 224, 56, 8)).toBe(2);
+    expect(visibleSidebarItemCount(7, 96, 48, 8)).toBe(0);
   });
 });
