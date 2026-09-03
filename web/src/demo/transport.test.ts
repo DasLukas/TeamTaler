@@ -453,8 +453,8 @@ describe('DemoTransport group settings', () => {
     const transport = new DemoTransport();
     await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings')).resolves.toMatchObject({
       settlementsEnabled: false,
-      notificationEmailsEnabled: false,
-      notificationEmailDeliveryAvailable: true,
+      settlementDueSoonDays: 3,
+      settlementOverdueRepeatDays: 7,
       defaultRoleId: 'role-guest',
       ownBookingReasonMode: 'OFF',
       foreignBookingReasonMode: 'REQUIRED',
@@ -476,8 +476,8 @@ describe('DemoTransport group settings', () => {
     await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ notificationEmailsEnabled: true }),
-    })).resolves.toMatchObject({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-guest' });
+      body: JSON.stringify({ settlementDueSoonDays: 5, settlementOverdueRepeatDays: 10 }),
+    })).resolves.toMatchObject({ settlementDueSoonDays: 5, settlementOverdueRepeatDays: 10, defaultRoleId: 'role-guest' });
     await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings', jsonRequest('PATCH', {
       ownBookingReasonMode: 'OPTIONAL',
       foreignBookingReasonMode: 'OFF',
@@ -496,7 +496,7 @@ describe('DemoTransport group settings', () => {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ defaultRoleId: 'role-finance' }),
-    })).resolves.toMatchObject({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-finance' });
+    })).resolves.toMatchObject({ settlementDueSoonDays: 5, settlementOverdueRepeatDays: 10, defaultRoleId: 'role-finance' });
     await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -507,7 +507,7 @@ describe('DemoTransport group settings', () => {
       headers: { 'Content-Type': 'application/json', 'If-Match': '"v1"' },
       body: JSON.stringify({ membersCanViewAllBookings: true }),
     })).rejects.toThrow();
-    await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings')).resolves.toMatchObject({ notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-finance' });
+    await expect(transport.request<GroupSettings>('/groups/group-sv-adler/settings')).resolves.toMatchObject({ settlementDueSoonDays: 5, settlementOverdueRepeatDays: 10, defaultRoleId: 'role-finance' });
   });
 
   it('roundtrips nullable PayPal.Me and SEPA payment targets through member settings', async () => {

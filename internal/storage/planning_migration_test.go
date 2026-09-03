@@ -30,12 +30,11 @@ func TestPlanningMigrationSeedsDisabledFeaturePermissionsAndPushDefaults(t *test
 	if err = db.QueryRowContext(ctx, `SELECT enabled FROM group_planning_settings WHERE group_id='g'`).Scan(&enabled); err != nil || enabled {
 		t.Fatalf("enabled=%v err=%v", enabled, err)
 	}
-	var definitions, events, push int
+	var definitions, push int
 	_ = db.QueryRowContext(ctx, `SELECT count(*) FROM permission_definitions WHERE key LIKE '%PLANNING%'`).Scan(&definitions)
-	_ = db.QueryRowContext(ctx, `SELECT count(*) FROM group_notification_events WHERE group_id='g' AND event_type LIKE 'PLANNING_%'`).Scan(&events)
 	_ = db.QueryRowContext(ctx, `SELECT count(*) FROM membership_notification_channels WHERE membership_id='m' AND event_type LIKE 'PLANNING_%' AND channel='PUSH'`).Scan(&push)
-	if definitions != 4 || events != 7 || push != 7 {
-		t.Fatalf("definitions/events/push=%d/%d/%d", definitions, events, push)
+	if definitions != 4 || push != 7 {
+		t.Fatalf("definitions/push=%d/%d", definitions, push)
 	}
 	assertPlanningMigrationColumns(t, ctx, db, "planning_events", "series_id", "series_revision", "series_sequence", "original_start_at", "original_start_date", "is_series_exception", "response_deadline_minutes_before", "all_day", "timezone", "start_date", "end_date_exclusive", "starts_at_us", "ends_at_us", "response_deadline_us")
 	assertPlanningMigrationColumns(t, ctx, db, "planning_series_revisions", "effective_from_original_start_at", "effective_from_sequence", "response_deadline_minutes_before", "all_day", "start_date", "duration_days")

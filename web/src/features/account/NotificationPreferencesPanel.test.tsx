@@ -44,11 +44,11 @@ const preferences: NotificationPreferences = {
   events: [
     {
       eventType: 'BOOKING_ASSIGNED', category: 'BOOKINGS', name: 'Booking assigned', description: '', supportedChannels: ['EMAIL', 'PUSH'],
-      enabled: true, email: true, push: false, emailAvailable: true, pushAvailable: false,
+      email: true, push: false, emailAvailable: true, pushAvailable: false,
     },
     {
       eventType: 'SETTLEMENT_DUE_SOON', category: 'SETTLEMENTS', name: 'Settlement due soon', description: '', supportedChannels: ['EMAIL', 'PUSH'],
-      enabled: false, email: false, push: false, emailAvailable: false, pushAvailable: false,
+      email: false, push: false, emailAvailable: false, pushAvailable: false,
     },
   ],
 };
@@ -72,7 +72,7 @@ describe('NotificationPreferencesPanel', () => {
     apiMock.updateNotificationPreferences.mockResolvedValue({ ...preferences, version: 3, events: [{ ...preferences.events[0], email: false }, preferences.events[1]] });
   });
 
-  it('persists only an editable changed channel and keeps group-disabled rows immutable', async () => {
+  it('persists only an editable changed channel and groups events by topic', async () => {
     const user = userEvent.setup();
     renderPanel();
 
@@ -81,6 +81,8 @@ describe('NotificationPreferencesPanel', () => {
     const disabledEmailToggle = screen.getByRole('switch', { name: i18n.t('notifications.preferences.emailFor', { event: i18n.t('notifications.preferences.events.settlementDueSoon.label') }) });
     expect(pushToggle).toBeDisabled();
     expect(disabledEmailToggle).toBeDisabled();
+    expect(screen.getByText(i18n.t('notifications.preferences.categories.BOOKINGS'))).toBeVisible();
+    expect(screen.getByText(i18n.t('notifications.preferences.categories.SETTLEMENTS'))).toBeVisible();
     expect(screen.queryByText('Auf dem Sperrbildschirm erscheinen nur Gruppenname und Ereignisart.')).not.toBeInTheDocument();
 
     await user.click(emailToggle);

@@ -48,7 +48,7 @@ describe('RightsPanel role definitions', () => {
     });
     mocks.getRoles.mockResolvedValue([baseRole]);
     mocks.getPermissionDefinitions.mockResolvedValue([{ key: 'VOID_OWN_BOOKING' }]);
-    mocks.getGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
+    mocks.getGroupSettings.mockResolvedValue({ defaultRoleId: 'role-member' });
     mocks.updateRole.mockResolvedValue({ ...baseRole, grants: [], version: 2 });
   });
 

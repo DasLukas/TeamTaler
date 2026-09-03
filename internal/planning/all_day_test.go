@@ -244,7 +244,7 @@ func TestAllDayCreateIdempotencyDoesNotDependOnCurrentGroupTimeZone(t *testing.T
 	setPlanningTimeZone(t, fixture, "America/New_York")
 	replayed, err := fixture.Service.CreateEvent(ctx, fixture.Principal, fixture.Membership, "planning-all-day-idempotency-0001", input)
 	if err != nil {
-		t.Fatalf("replay all-day event after group time-zone change: %v", err)
+		t.Fatalf("replay all-day event after installation time-zone change: %v", err)
 	}
 	if replayed.ID != created.ID || replayed.TimeZone != "Europe/Berlin" || replayed.StartsAt != created.StartsAt {
 		t.Fatalf("replayed event=%#v created=%#v", replayed, created)
@@ -260,7 +260,5 @@ func allDayEventInput(title, startDate, endDateExclusive string) EventInput {
 
 func setPlanningTimeZone(t *testing.T, fixture planningServiceFixture, timeZone string) {
 	t.Helper()
-	if _, err := fixture.DB.ExecContext(context.Background(), `UPDATE group_notification_settings SET timezone=? WHERE group_id=?`, timeZone, fixture.Membership.GroupID); err != nil {
-		t.Fatalf("set planning time zone: %v", err)
-	}
+	*fixture.TimeZone = timeZone
 }

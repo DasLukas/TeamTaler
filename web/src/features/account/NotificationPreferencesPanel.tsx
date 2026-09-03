@@ -29,6 +29,7 @@ import {
 import styles from './NotificationPreferencesPanel.module.css';
 
 const PUSH_DEVICES_QUERY_KEY = ['push-subscriptions'] as const;
+const NOTIFICATION_CATEGORY_ORDER = ['BOOKINGS', 'PAYMENTS', 'SETTLEMENTS', 'PLANNING', 'OTHER'] as const;
 
 interface PreferenceMatrixProps {
   groupId: string;
@@ -40,6 +41,13 @@ function PreferenceMatrix({ groupId, preferences }: PreferenceMatrixProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [events, setEvents] = useState(preferences.events);
+  const groupedEvents = NOTIFICATION_CATEGORY_ORDER.map((category) => ({
+    category,
+    events: events.flatMap((event, index) => {
+      const normalizedCategory = NOTIFICATION_CATEGORY_ORDER.includes(event.category as typeof NOTIFICATION_CATEGORY_ORDER[number]) ? event.category : 'OTHER';
+      return normalizedCategory === category ? [{ event, index }] : [];
+    }),
+  })).filter((group) => group.events.length > 0);
   const changed = events.some((event, index) => (
     event.email !== preferences.events[index]?.email || event.push !== preferences.events[index]?.push
   ));
@@ -47,7 +55,6 @@ function PreferenceMatrix({ groupId, preferences }: PreferenceMatrixProps) {
     mutationFn: () => api.updateNotificationPreferences(groupId, {
       version: preferences.version,
       events: events.flatMap((event, index) => {
-        if (!event.enabled) return [];
         const persisted = preferences.events[index];
         const update = {
           eventType: event.eventType,
@@ -73,17 +80,21 @@ function PreferenceMatrix({ groupId, preferences }: PreferenceMatrixProps) {
       <div className={styles.tableWrapper}>
         <table className={styles.matrix}>
           <thead><tr><th>{t('notifications.preferences.event')}</th><th>{t('notifications.preferences.inApp')}</th><th>{t('notifications.preferences.email')}</th><th>{t('notifications.preferences.push')}</th></tr></thead>
-          <tbody>{events.map((event, index) => {
-            const copy = notificationEventCopy(event.eventType, t);
-            return <tr data-disabled={!event.enabled || undefined} key={event.eventType}>
-              <th scope="row"><strong>{copy.label}</strong><span>{copy.description}</span>{!event.enabled ? <small>{t('notifications.preferences.groupDisabled')}</small> : null}</th>
-              <td>{event.enabled
-                ? <span aria-label={t('notifications.preferences.inAppAlways')} className={styles.alwaysOn}>✓</span>
-                : <span aria-label={t('notifications.preferences.groupDisabled')} className={styles.inactive}>–</span>}</td>
-              <td><Toggle checked={event.email} disabled={mutation.isPending || !event.emailAvailable} label={t('notifications.preferences.emailFor', { event: copy.label })} onChange={(checked) => setChannel(index, 'email', checked)} /></td>
-              <td><Toggle checked={event.push} disabled={mutation.isPending || !event.pushAvailable} label={t('notifications.preferences.pushFor', { event: copy.label })} onChange={(checked) => setChannel(index, 'push', checked)} /></td>
-            </tr>;
-          })}</tbody>
+          {groupedEvents.map((group) => {
+            const labelId = `notification-category-${group.category.toLowerCase()}`;
+            return <tbody aria-labelledby={labelId} key={group.category}>
+              <tr className={styles.categoryRow}><th colSpan={4} id={labelId}>{t(`notifications.preferences.categories.${group.category}`)}</th></tr>
+              {group.events.map(({ event, index }) => {
+                const copy = notificationEventCopy(event.eventType, t);
+                return <tr key={event.eventType}>
+                  <th scope="row"><strong>{copy.label}</strong><span>{copy.description}</span></th>
+                  <td><span aria-label={t('notifications.preferences.inAppAlways')} className={styles.alwaysOn}>✓</span></td>
+                  <td><Toggle checked={event.email} disabled={mutation.isPending || !event.emailAvailable} label={t('notifications.preferences.emailFor', { event: copy.label })} onChange={(checked) => setChannel(index, 'email', checked)} /></td>
+                  <td><Toggle checked={event.push} disabled={mutation.isPending || !event.pushAvailable} label={t('notifications.preferences.pushFor', { event: copy.label })} onChange={(checked) => setChannel(index, 'push', checked)} /></td>
+                </tr>;
+              })}
+            </tbody>;
+          })}
         </table>
       </div>
       {!preferences.channels.email ? <p className={styles.notice}>{t('notifications.preferences.emailUnavailable')}</p> : null}
@@ -178,10 +189,13 @@ export function NotificationPreferencesPanel() {
     queryFn: () => api.getNotificationPreferences(groupId as string),
     enabled: Boolean(groupId),
   });
+  const preferenceProjectionKey = preferences.data?.events
+    .map((event) => [event.eventType, event.email, event.push, event.emailAvailable, event.pushAvailable].join(':'))
+    .join('|') ?? '';
   return <>
     {!groupId ? null : preferences.isLoading ? <div className={styles.state}><StatePanel kind="loading" /></div>
       : preferences.isError || !preferences.data ? <div className={styles.state}><StatePanel kind="error" message={t('notifications.preferences.loadError')} /></div>
-        : <PreferenceMatrix groupId={groupId} key={`${groupId}:${preferences.data.version}:${Number(preferences.data.channels.email)}:${Number(preferences.data.channels.push)}:${preferences.data.events.map((event) => `${event.eventType}:${Number(event.enabled)}`).join(',')}`} preferences={preferences.data} />}
+        : <PreferenceMatrix groupId={groupId} key={`${groupId}:${preferences.data.version}:${Number(preferences.data.channels.email)}:${Number(preferences.data.channels.push)}:${preferenceProjectionKey}`} preferences={preferences.data} />}
     <PushDevices capabilities={capabilities} key={session.user.id} userId={session.user.id} />
   </>;
 }

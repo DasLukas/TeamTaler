@@ -13,6 +13,9 @@ const EVENT_COPY_KEYS: Record<ConfigurableNotificationEventType, { description: 
   PLANNING_EVENT_UPDATED: { label: 'notifications.preferences.events.planningChanged.label', description: 'notifications.preferences.events.planningChanged.description' },
   PLANNING_EVENT_CANCELLED: { label: 'notifications.preferences.events.planningCancelled.label', description: 'notifications.preferences.events.planningCancelled.description' },
   PLANNING_WAITLIST_PROMOTED: { label: 'notifications.preferences.events.planningPromoted.label', description: 'notifications.preferences.events.planningPromoted.description' },
+  PLANNING_SERIES_PUBLISHED: { label: 'notifications.preferences.events.planningSeriesPublished.label', description: 'notifications.preferences.events.planningSeriesPublished.description' },
+  PLANNING_SERIES_UPDATED: { label: 'notifications.preferences.events.planningSeriesChanged.label', description: 'notifications.preferences.events.planningSeriesChanged.description' },
+  PLANNING_SERIES_CANCELLED: { label: 'notifications.preferences.events.planningSeriesCancelled.label', description: 'notifications.preferences.events.planningSeriesCancelled.description' },
 };
 
 /**

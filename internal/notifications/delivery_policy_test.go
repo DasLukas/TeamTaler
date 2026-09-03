@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestCheckDeliveryPolicyReevaluatesPlanningGroupEventAndMemberGates(t *testing.T) {
+func TestCheckDeliveryPolicyReevaluatesPlanningAndMemberGates(t *testing.T) {
 	ctx := context.Background()
 	db, membership := openNotificationPolicyFixture(t)
 	defer db.Close()
@@ -34,15 +34,6 @@ func TestCheckDeliveryPolicyReevaluatesPlanningGroupEventAndMemberGates(t *testi
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO membership_notification_channels(group_id,membership_id,event_type,channel,enabled_at,updated_at) VALUES(?,?,?,?,?,?)`, membership.GroupID, membership.ID, TypePlanningEventPublished, ChannelEmail, now, now); err != nil {
 		t.Fatalf("restore member preference: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `DELETE FROM group_notification_events WHERE group_id=? AND event_type='PLANNING_EVENT_PUBLISHED'`, membership.GroupID); err != nil {
-		t.Fatalf("disable group event: %v", err)
-	}
-	if code, err := CheckDeliveryPolicy(ctx, db, "job-planning-policy", ChannelEmail); err != nil || code != DeliveryCodeEventDisabled {
-		t.Fatalf("event-disabled code=%q err=%v", code, err)
-	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO group_notification_events(group_id,event_type,enabled_at) VALUES(?,?,?)`, membership.GroupID, TypePlanningEventPublished, now); err != nil {
-		t.Fatalf("restore group event: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `UPDATE group_planning_settings SET enabled=0,updated_at=? WHERE group_id=?`, now, membership.GroupID); err != nil {
 		t.Fatalf("disable planning module: %v", err)

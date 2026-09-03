@@ -1586,8 +1586,7 @@ paths:
       summary: Partially update group or membership settings
       description: |
         `defaultTheme` requires `GROUP_ADMINISTRATION`. `defaultRoleId` requires `ROLE_MANAGEMENT` or
-        `GROUP_ADMINISTRATION`. The deprecated `notificationEmailsEnabled`
-        compatibility field requires `GROUP_ADMINISTRATION`. Finance and booking fields require
+        `GROUP_ADMINISTRATION`. Finance, settlement-reminder, and booking fields require
         `GROUP_ADMINISTRATION` or `FINANCE_MANAGEMENT`.
       parameters:
         - $ref: '#/components/parameters/GroupId'
@@ -1630,43 +1629,6 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
-  /groups/{groupId}/notification-settings:
-    get:
-      tags: [Groups]
-      summary: Read the group notification event policy
-      description: Requires `GROUP_ADMINISTRATION` and returns a strong version ETag.
-      parameters:
-        - $ref: '#/components/parameters/GroupId'
-      responses:
-        '200':
-          description: Versioned event policy and reminder schedule
-          headers: { ETag: { schema: { type: string } } }
-          content: { application/json: { schema: { $ref: '#/components/schemas/GroupNotificationSettings' } } }
-        '401': { $ref: '#/components/responses/Problem' }
-        '403': { $ref: '#/components/responses/Problem' }
-        '404': { $ref: '#/components/responses/Problem' }
-    put:
-      tags: [Groups]
-      summary: Replace the group notification event policy
-      parameters:
-        - $ref: '#/components/parameters/GroupId'
-        - $ref: '#/components/parameters/CSRFToken'
-        - $ref: '#/components/parameters/RequiredIfMatch'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/GroupNotificationSettingsUpdate' }
-      responses:
-        '200':
-          description: Updated policy
-          headers: { ETag: { schema: { type: string } } }
-          content: { application/json: { schema: { $ref: '#/components/schemas/GroupNotificationSettings' } } }
-        '401': { $ref: '#/components/responses/Problem' }
-        '403': { $ref: '#/components/responses/Problem' }
-        '404': { $ref: '#/components/responses/Problem' }
-        '412': { $ref: '#/components/responses/Problem' }
-        '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/notification-preferences:
     get:
       tags: [Groups]
@@ -1675,7 +1637,7 @@ paths:
         - $ref: '#/components/parameters/GroupId'
       responses:
         '200':
-          description: Events exposed by enabled modules, including effective group and channel availability
+          description: Events exposed by enabled modules, including effective channel availability
           headers: { ETag: { schema: { type: string } } }
           content: { application/json: { schema: { $ref: '#/components/schemas/NotificationPreferences' } } }
         '401': { $ref: '#/components/responses/Problem' }
@@ -1684,7 +1646,7 @@ paths:
     put:
       tags: [Groups]
       summary: Update independent email and push choices
-      description: Disabled group events, disabled optional-module events, and unavailable system channels are immutable; retained hidden choices are not deleted.
+      description: Disabled optional-module events and unavailable system channels are immutable; retained hidden choices are not deleted.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/CSRFToken'
@@ -1740,7 +1702,7 @@ paths:
     get:
       tags: [Planning]
       summary: Read the optional planning module state
-      description: Requires `USE_PLANNING` or `GROUP_ADMINISTRATION`. The time zone is shared with the group notification schedule.
+      description: Requires `USE_PLANNING` or `GROUP_ADMINISTRATION`. The installation-wide system time zone is pinned when a new event or series is created.
       parameters:
         - $ref: '#/components/parameters/GroupId'
       responses:
@@ -4986,7 +4948,7 @@ components:
     SystemSettings:
       type: object
       additionalProperties: false
-      required: [revision, instanceName, defaultCurrency, mediaUploadMaxBytes, mediaUploadHardLimitBytes, attachmentUploadMaxBytes, attachmentUploadHardLimitBytes, publicJoinEnabled, maintenanceMode, maintenanceMessage, smtp, webPush, updatedAt]
+      required: [revision, instanceName, defaultCurrency, timeZone, mediaUploadMaxBytes, mediaUploadHardLimitBytes, attachmentUploadMaxBytes, attachmentUploadHardLimitBytes, publicJoinEnabled, maintenanceMode, maintenanceMessage, smtp, webPush, updatedAt]
       properties:
         revision:
           type: integer
@@ -4994,6 +4956,10 @@ components:
           minimum: 1
         instanceName: { $ref: '#/components/schemas/EffectiveStringSetting' }
         defaultCurrency: { $ref: '#/components/schemas/EffectiveStringSetting' }
+        timeZone:
+          allOf:
+            - $ref: '#/components/schemas/EffectiveStringSetting'
+          description: Installation-wide IANA time zone used for reminders and newly created planning records.
         mediaUploadMaxBytes: { $ref: '#/components/schemas/EffectiveIntegerSetting' }
         mediaUploadHardLimitBytes:
           type: integer
@@ -5020,6 +4986,7 @@ components:
       properties:
         instanceName: { type: string, minLength: 1, maxLength: 120 }
         defaultCurrency: { type: string, pattern: '^[A-Z]{3}$' }
+        timeZone: { type: string, minLength: 1, maxLength: 120, example: Europe/Berlin }
         mediaUploadMaxBytes: { type: integer, format: int64, minimum: 1048576, maximum: 26214400, multipleOf: 1048576 }
         attachmentUploadMaxBytes: { type: integer, format: int64, minimum: 1048576, maximum: 52428800, multipleOf: 1048576 }
         publicJoinEnabled: { type: boolean }
@@ -5030,6 +4997,7 @@ components:
       enum:
         - instance.name
         - instance.default_currency
+        - instance.timezone
         - media.upload_max_bytes
         - attachment.upload_max_bytes
         - access.public_join_enabled
@@ -5555,20 +5523,22 @@ components:
     GroupSettings:
       type: object
       additionalProperties: false
-      required: [defaultTheme, notificationEmailsEnabled, notificationEmailDeliveryAvailable, settlementsEnabled, defaultRoleId, ownBookingReasonMode, foreignBookingReasonMode, ownPaymentReasonMode, otherPaymentReasonMode, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
+      required: [defaultTheme, settlementsEnabled, settlementDueSoonDays, settlementOverdueRepeatDays, defaultRoleId, ownBookingReasonMode, foreignBookingReasonMode, ownPaymentReasonMode, otherPaymentReasonMode, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
       properties:
         defaultTheme: { $ref: '#/components/schemas/ThemeId' }
-        notificationEmailsEnabled:
-          type: boolean
-          deprecated: true
-          description: Legacy migration source retained for compatibility; new delivery policy uses `/notification-settings` and `/notification-preferences`.
-        notificationEmailDeliveryAvailable:
-          type: boolean
-          readOnly: true
-          description: Whether the running server has complete SMTP delivery configuration.
         settlementsEnabled:
           type: boolean
           description: Whether administrators may close the unchanged technical open period and create settlement statements.
+        settlementDueSoonDays:
+          type: integer
+          minimum: 1
+          maximum: 30
+          description: Calendar days before a settlement due date when its personal reminder is first created.
+        settlementOverdueRepeatDays:
+          type: integer
+          minimum: 0
+          maximum: 90
+          description: Calendar-day interval for repeated overdue reminders; zero creates only the first reminder.
         defaultRoleId:
           type: [string, 'null']
           description: Group-owned non-administrative role preselected for new invitations and used by CSV rows without roles.
@@ -5611,13 +5581,11 @@ components:
       minProperties: 1
       properties:
         defaultTheme: { $ref: '#/components/schemas/ThemeId' }
-        notificationEmailsEnabled:
-          type: boolean
-          deprecated: true
-          description: Legacy compatibility field; new clients must use the dedicated notification policy endpoints.
         settlementsEnabled:
           type: boolean
           description: Enables or disables period closing without changing periods, ledger entries, balances, or settlement history.
+        settlementDueSoonDays: { type: integer, minimum: 1, maximum: 30 }
+        settlementOverdueRepeatDays: { type: integer, minimum: 0, maximum: 90 }
         defaultRoleId:
           type: string
           minLength: 1
@@ -5675,50 +5643,12 @@ components:
         defaultEnabled: { type: boolean }
         reminder: { type: boolean }
         supportedChannels: { type: array, items: { $ref: '#/components/schemas/NotificationChannel' } }
-    GroupNotificationEventSetting:
-      allOf:
-        - $ref: '#/components/schemas/NotificationEventDefinition'
-        - type: object
-          required: [enabled]
-          properties: { enabled: { type: boolean } }
-    GroupNotificationSettings:
-      type: object
-      additionalProperties: false
-      required: [version, timezone, dueSoonLeadDays, overdueRepeatDays, availableChannels, events, updatedAt]
-      properties:
-        version: { type: integer, format: int64, minimum: 1 }
-        timezone: { type: string, default: Europe/Berlin }
-        dueSoonLeadDays: { type: integer, minimum: 1, maximum: 30, default: 3 }
-        overdueRepeatDays: { type: integer, minimum: 0, maximum: 90, default: 7 }
-        availableChannels: { type: array, items: { $ref: '#/components/schemas/NotificationChannel' } }
-        events: { type: array, minItems: 14, maxItems: 14, items: { $ref: '#/components/schemas/GroupNotificationEventSetting' } }
-        updatedAt: { type: string, format: date-time }
-    GroupNotificationSettingsUpdate:
-      type: object
-      additionalProperties: false
-      required: [timezone, dueSoonLeadDays, overdueRepeatDays, events]
-      properties:
-        timezone: { type: string }
-        dueSoonLeadDays: { type: integer, minimum: 1, maximum: 30 }
-        overdueRepeatDays: { type: integer, minimum: 0, maximum: 90 }
-        events:
-          type: array
-          minItems: 14
-          maxItems: 14
-          items:
-            type: object
-            additionalProperties: false
-            required: [type, enabled]
-            properties:
-              type: { $ref: '#/components/schemas/NotificationEventDefinition/properties/type' }
-              enabled: { type: boolean }
     NotificationEventPreference:
       allOf:
         - $ref: '#/components/schemas/NotificationEventDefinition'
         - type: object
-          required: [enabled, email, push, emailAvailable, pushAvailable]
+          required: [email, push, emailAvailable, pushAvailable]
           properties:
-            enabled: { type: boolean }
             email: { type: boolean }
             push: { type: boolean }
             emailAvailable: { type: boolean }

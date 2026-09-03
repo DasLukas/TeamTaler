@@ -158,7 +158,7 @@ func newClaimFixture(t *testing.T, ctx context.Context) (*sql.DB, Service) {
 	seed := []string{
 		`INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('admin-user','admin@example.test','Admin','hash','2026-08-08T12:00:00Z','2026-08-08T12:00:00Z')`,
 		`INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES('group-claim','Claim Group','EUR','2026-08-08T12:00:00Z','2026-08-08T12:00:00Z')`,
-		`INSERT INTO group_settings(group_id,members_can_view_all_bookings,notification_emails_enabled,default_role_id,updated_at) VALUES('group-claim',0,0,'role:MEMBER:group-claim','2026-08-08T12:00:00Z')`,
+		`INSERT INTO group_settings(group_id,members_can_view_all_bookings,default_role_id,updated_at) VALUES('group-claim',0,'role:MEMBER:group-claim','2026-08-08T12:00:00Z')`,
 		`INSERT INTO memberships(id,group_id,user_id,status,joined_at) VALUES('admin-member','group-claim','admin-user','ACTIVE','2026-08-08T12:00:00Z')`,
 	}
 	for index, statement := range seed {

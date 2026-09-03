@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import i18n from '@/i18n';
-import { adaptAccountSummaries, adaptActivity, adaptAppearancePreference, adaptBooking, adaptCategories, adaptDashboard, adaptGroupNotificationSettings, adaptGroupSettings, adaptInstanceCapabilities, adaptLedger, adaptMembership, adaptNotification, adaptNotificationDestination, adaptNotificationPreferences, adaptPayment, adaptPaymentTarget, adaptPermissionDefinition, adaptPermissionGrants, adaptProduct, adaptPushSubscriptions, adaptRole, adaptSession, adaptSettlement, adaptSystemAudit, adaptSystemGroupDeletionImpact, adaptSystemGroups, adaptSystemSettings, adaptThemePreference, adaptTransactionSettings } from './adapters';
+import { adaptAccountSummaries, adaptActivity, adaptAppearancePreference, adaptBooking, adaptCategories, adaptDashboard, adaptGroupSettings, adaptInstanceCapabilities, adaptLedger, adaptMembership, adaptNotification, adaptNotificationDestination, adaptNotificationPreferences, adaptPayment, adaptPaymentTarget, adaptPermissionDefinition, adaptPermissionGrants, adaptProduct, adaptPushSubscriptions, adaptRole, adaptSession, adaptSettlement, adaptSystemAudit, adaptSystemGroupDeletionImpact, adaptSystemGroups, adaptSystemSettings, adaptThemePreference, adaptTransactionSettings } from './adapters';
 
 describe('API adapters', () => {
   it('adapts signed unified activities and source action metadata', () => {
@@ -80,6 +80,7 @@ describe('API adapters', () => {
       revision: 9,
       instanceName: { value: 'Club Cloud', source: 'DATABASE', overrideVersion: 3, updatedAt: '2026-08-15T10:00:00Z' },
       defaultCurrency: { value: 'CHF', source: 'ENVIRONMENT' },
+      timeZone: { value: 'Europe/Berlin', source: 'DATABASE' },
       mediaUploadMaxBytes: { value: 786432, source: 'DATABASE', overrideVersion: 1 },
       mediaUploadHardLimitBytes: 1048576,
       publicJoinEnabled: { value: false, source: 'DATABASE' },
@@ -100,7 +101,7 @@ describe('API adapters', () => {
       },
       updatedAt: '2026-08-15T11:00:00Z',
     });
-    expect(settings).toMatchObject({ revision: 9, mediaUploadHardLimitBytes: 1048576, smtp: { passwordConfigured: true, passwordSource: 'DATABASE', tlsMode: { value: 'starttls' }, testStatus: 'VERIFIED', revision: 4 } });
+    expect(settings).toMatchObject({ revision: 9, timeZone: { value: 'Europe/Berlin', source: 'DATABASE' }, mediaUploadHardLimitBytes: 1048576, smtp: { passwordConfigured: true, passwordSource: 'DATABASE', tlsMode: { value: 'starttls' }, testStatus: 'VERIFIED', revision: 4 } });
     expect(settings.webPush).toMatchObject({ enabled: { value: true }, privateKeyConfigured: true, privateKeySource: 'DATABASE', publicKey: 'public-key', keyId: 'key-a', active: true });
     expect(settings.smtp).not.toHaveProperty('password');
 
@@ -108,18 +109,11 @@ describe('API adapters', () => {
 	expect(unconfiguredSMTP.port).toMatchObject({ value: 587, source: 'CODE' });
   });
 
-  it('normalizes notification policy, preference, and redacted device contracts', () => {
+  it('normalizes notification preferences and redacted device contracts', () => {
     const event = {
       type: 'SETTLEMENT_DUE_SOON', category: 'SETTLEMENTS', label: 'Settlement due soon', description: 'A settlement is due soon.',
-      supportedChannels: ['EMAIL', 'PUSH'], enabled: true,
+      supportedChannels: ['EMAIL', 'PUSH'],
     };
-    expect(adaptGroupNotificationSettings({
-      version: 4, timezone: 'Europe/Berlin', dueSoonLeadDays: 3, overdueRepeatDays: 7,
-      availableChannels: ['EMAIL'], events: [event],
-    })).toMatchObject({
-      version: 4, channels: { email: true, push: false },
-      events: [{ eventType: 'SETTLEMENT_DUE_SOON', name: 'Settlement due soon', enabled: true }],
-    });
     expect(adaptNotificationPreferences({
       version: 2, availableChannels: ['PUSH'], events: [{ ...event, email: true, push: false, emailAvailable: false, pushAvailable: true }],
     })).toMatchObject({

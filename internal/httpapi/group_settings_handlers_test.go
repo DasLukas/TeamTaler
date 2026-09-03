@@ -10,7 +10,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/domain"
 )
 
-func TestGroupSettingsExposeOnlyNotificationDelivery(t *testing.T) {
+func TestGroupSettingsExposeFinanceReminderCadence(t *testing.T) {
 	t.Parallel()
 	server, principal, administrator := invitationImportServer(t, false)
 
@@ -24,18 +24,18 @@ func TestGroupSettingsExposeOnlyNotificationDelivery(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &settings); err != nil {
 		t.Fatalf("decode settings: %v", err)
 	}
-	if settings.NotificationEmailsEnabled || settings.SettlementsEnabled {
+	if settings.SettlementsEnabled || settings.SettlementDueSoonDays != 3 || settings.SettlementOverdueRepeatDays != 7 {
 		t.Fatalf("default settings = %#v", settings)
 	}
 
-	update := roleHandlerRequest(principal, administrator.GroupID, http.MethodPatch, `{"settlementsEnabled":true,"defaultTheme":"NRW"}`)
+	update := roleHandlerRequest(principal, administrator.GroupID, http.MethodPatch, `{"settlementsEnabled":true,"settlementDueSoonDays":5,"settlementOverdueRepeatDays":10,"defaultTheme":"NRW"}`)
 	updatedResponse := httptest.NewRecorder()
 	server.handleUpdateGroupSettings(updatedResponse, update)
 	if updatedResponse.Code != http.StatusOK {
 		t.Fatalf("settings update status = %d, body = %s", updatedResponse.Code, updatedResponse.Body.String())
 	}
 	var updatedSettings domain.GroupSettings
-	if err := json.Unmarshal(updatedResponse.Body.Bytes(), &updatedSettings); err != nil || !updatedSettings.SettlementsEnabled || updatedSettings.DefaultTheme != domain.ThemeNRW {
+	if err := json.Unmarshal(updatedResponse.Body.Bytes(), &updatedSettings); err != nil || !updatedSettings.SettlementsEnabled || updatedSettings.SettlementDueSoonDays != 5 || updatedSettings.SettlementOverdueRepeatDays != 10 || updatedSettings.DefaultTheme != domain.ThemeNRW {
 		t.Fatalf("updated settings = %#v, err = %v", updatedSettings, err)
 	}
 

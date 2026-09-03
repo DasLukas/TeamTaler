@@ -568,9 +568,7 @@ func TestSeriesUsesPinnedTimezoneAndRedactsTargets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create timezone series: %v", err)
 	}
-	if _, err := fixture.DB.ExecContext(ctx, `UPDATE group_notification_settings SET timezone='UTC' WHERE group_id=?`, fixture.Membership.GroupID); err != nil {
-		t.Fatalf("change group timezone: %v", err)
-	}
+	setPlanningTimeZone(t, fixture, "UTC")
 	update := SeriesUpdateCommand{EventInput: command.EventInput, Recurrence: command.Recurrence, Scope: SeriesScopeAll}
 	updated, err := fixture.Service.UpdateSeries(ctx, fixture.Principal, fixture.Membership, created.Series.ID, update, created.Series.Version)
 	if err != nil {

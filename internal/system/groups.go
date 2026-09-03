@@ -678,7 +678,7 @@ func (s Service) purgeGroup(ctx context.Context, actorUserID, groupID string, in
 		"payment_allocations", "period_adjustment_allocations", "bookings", "payment_attachments", "payments",
 		"audit_events", "idempotency_results", "category_permissions", "membership_permissions",
 		"membership_notification_channels", "membership_role_assignments", "membership_roles", "group_reason_suggestions",
-		"group_payment_methods", "group_notification_events", "group_notification_settings", "group_settings", "role_permission_grants", "roles",
+		"group_payment_methods", "group_settings", "role_permission_grants", "roles",
 		"products", "categories", "periods", "memberships",
 	}
 	for _, table := range deleteOrder {

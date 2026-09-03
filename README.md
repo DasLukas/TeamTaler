@@ -141,7 +141,7 @@ Bootstrap refuses to run after an account already exists. It never accepts a pas
 
 ### 6. Open the instance
 
-Open `TEAMTALER_PUBLIC_URL` in a browser and sign in with the bootstrap account. The first settings tab is **System**, where the instance identity, default currency, media and receipt limits, SMTP, public joining, maintenance mode, groups, and global system audit are managed.
+Open `TEAMTALER_PUBLIC_URL` in a browser and sign in with the bootstrap account. The first settings tab is **System**, where the instance identity, default currency, installation-wide time zone, media and receipt limits, SMTP, public joining, maintenance mode, groups, and global system audit are managed.
 
 ## Configuration
 
@@ -173,6 +173,7 @@ The standard container also uses fixed runtime paths from `.env.example`. Detail
 | --- | --- | --- |
 | `TEAMTALER_INSTANCE_NAME` | `TeamTaler` | Public instance name. |
 | `TEAMTALER_DEFAULT_CURRENCY` | `EUR` | Currency suggested for newly created groups. Existing groups are unchanged. |
+| `TEAMTALER_TIMEZONE` | `Europe/Berlin` | Installation-wide IANA time zone used for settlement reminders and new planning events or series. Existing planning records retain their pinned zone. |
 | `TEAMTALER_MEDIA_UPLOAD_MAX_BYTES` | `5242880` | Shared raw upload limit for product images, group logos, and avatars. |
 | `TEAMTALER_ATTACHMENT_UPLOAD_MAX_BYTES` | `15728640` | Raw upload limit for one payment receipt. |
 | `TEAMTALER_PUBLIC_JOIN_ENABLED` | `true` | Global availability of otherwise valid public join links. |
@@ -226,7 +227,7 @@ TeamTaler implements the browser Push API directly with VAPID; it does not requi
 
 Permission is requested only after a signed-in user selects **Enable push notifications**. Each browser installation becomes an account-owned device that can be renamed or revoked. Browser consent is reconciled only for the same account; switching accounts requires a new explicit opt-in and replaces any unknown prior browser subscription. iPhone and iPad users must first install TeamTaler on the Home Screen. Push messages deliberately contain only the group name, generic event copy, a relative route, and an opaque notification identifier; member names, products, amounts, and due dates remain behind authenticated in-app navigation.
 
-System administrators control whether email and push channels are available. Group administrators choose the allowed event types and settlement-reminder schedule. Every member then selects email and push independently for each allowed event; selecting both produces both deliveries, while the in-app inbox remains the canonical history. Events owned by the optional planning or settlement module are omitted from member preferences while that module is disabled. Stored choices remain intact and return when the module is enabled again. Existing security, invitation, password-reset, and email-verification messages are transactional and are not optional notification events.
+System administrators control whether email and push channels are available and select the installation-wide IANA time zone. Every member independently selects email and push for each event shown in topic groups in the account settings; selecting both produces both deliveries, while the in-app inbox remains always active and is the canonical history. Events owned by the optional planning or settlement module are omitted while that module is disabled. Stored choices remain intact and return when the module is enabled again. Group or finance administrators configure the settlement due-soon lead time and overdue repeat interval in the group's settlement settings. Existing security, invitation, password-reset, and email-verification messages are transactional and are not optional notification events.
 
 ## System administration
 
@@ -277,6 +278,7 @@ teamtaler admin system settings set \
   [--revision VERSION] \
   [--instance-name NAME] \
   [--default-currency EUR] \
+  [--time-zone Europe/Berlin] \
   [--media-upload-max-bytes BYTES] \
   [--attachment-upload-max-bytes BYTES] \
   [--public-join-enabled true|false] \
@@ -292,6 +294,7 @@ Reset keys are:
 
 - `instance.name`
 - `instance.default_currency`
+- `instance.timezone`
 - `media.upload_max_bytes`
 - `attachment.upload_max_bytes`
 - `access.public_join_enabled`

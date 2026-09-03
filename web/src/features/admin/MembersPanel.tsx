@@ -31,6 +31,7 @@ import type {
 } from '@/api/types';
 import { can } from '@/app/permissions';
 import { useActiveGroup } from '@/app/useActiveGroup';
+import { useInstanceCapabilities } from '@/app/useSession';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { ConfirmationDialog } from '@/components/ui/ConfirmationDialog';
@@ -496,6 +497,7 @@ const emptyInvitationInput = (): InvitationInput => ({ email: '', displayName: '
 export function MembersPanel() {
   const { t } = useTranslation();
   const { activeGroupId, activeGroup, session } = useActiveGroup();
+  const capabilities = useInstanceCapabilities();
   const queryClient = useQueryClient();
   const inviteFormId = useId();
   const editInvitationFormId = useId();
@@ -888,7 +890,7 @@ export function MembersPanel() {
           fallbackHint={t('members.oldLinksInvalid')}
           linkLabel={t('members.invitationLink')}
         /> : <div className={styles.confirmDialog}>
-          <p>{t(settingsQuery.data.notificationEmailDeliveryAvailable ? 'members.resendExplanationEmail' : 'members.resendExplanationManual', { email: selectedInvitation?.email ?? '' })}</p>
+          <p>{t(capabilities.emailNotificationsAvailable ? 'members.resendExplanationEmail' : 'members.resendExplanationManual', { email: selectedInvitation?.email ?? '' })}</p>
           {resendMutation.isError ? <p className={styles.error} role="alert">{resendMutation.error.message}</p> : null}
           <ModalFooter><div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={resendMutation.isPending} leadingIcon={<RotateCcw size={17} />} onClick={() => resendMutation.mutate()}>{t('members.resend')}</Button></div></ModalFooter>
         </div>}

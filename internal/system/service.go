@@ -1,8 +1,11 @@
 package system
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/DasLukas/TeamTaler/internal/config"
 )
@@ -37,6 +40,9 @@ func NewService(db *sql.DB, defaults Defaults, passwordCipher PasswordCipher, op
 	if defaults.AttachmentUploadMaxBytes == 0 {
 		defaults.AttachmentUploadMaxBytes = config.DefaultAttachmentUploadBytes
 	}
+	if strings.TrimSpace(defaults.TimeZone) == "" {
+		defaults.TimeZone = "Europe/Berlin"
+	}
 	if err := validateDefaults(defaults); err != nil {
 		return Service{}, err
 	}
@@ -65,6 +71,9 @@ func validateDefaults(defaults Defaults) error {
 	if err := validateCurrency(defaults.DefaultCurrency); err != nil {
 		return fmt.Errorf("invalid default currency: %w", err)
 	}
+	if err := validateTimeZone(defaults.TimeZone); err != nil {
+		return fmt.Errorf("invalid default time zone: %w", err)
+	}
 	if err := validateMediaUploadLimit(defaults.MediaUploadMaxBytes, MaximumMediaUploadBytes); err != nil {
 		return fmt.Errorf("invalid default media upload limit: %w", err)
 	}
@@ -91,6 +100,40 @@ func validateDefaults(defaults Defaults) error {
 		if source != SettingSourceCode && source != SettingSourceEnvironment {
 			return fmt.Errorf("invalid default source %q for %q", source, key)
 		}
+	}
+	return nil
+}
+
+// ResolveTimeZoneTx returns the effective installation-wide IANA time zone from
+// the caller's transaction snapshot.
+//
+// Parameters:
+//   - ctx: Request or worker context.
+//   - tx: Open database transaction used for a consistent settings snapshot.
+//
+// Returns:
+//   - string: Valid effective IANA time zone.
+//   - error: Storage or persisted-settings validation failure.
+//
+// Example: zone, err := service.ResolveTimeZoneTx(ctx, tx).
+func (s Service) ResolveTimeZoneTx(ctx context.Context, tx *sql.Tx) (string, error) {
+	if tx == nil {
+		return "", fmt.Errorf("resolve system time zone: transaction is required")
+	}
+	loaded, err := s.loadSettings(ctx, tx)
+	if err != nil {
+		return "", err
+	}
+	return loaded.settings.TimeZone.Value, nil
+}
+
+func validateTimeZone(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "Local" || len(value) > 120 {
+		return fmt.Errorf("must contain a valid IANA time zone")
+	}
+	if _, err := time.LoadLocation(value); err != nil {
+		return fmt.Errorf("must contain a valid IANA time zone")
 	}
 	return nil
 }

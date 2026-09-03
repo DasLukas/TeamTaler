@@ -106,7 +106,7 @@ describe('DashboardPage information-only overview', () => {
     expect(screen.getByText(/\+25,90/, { selector: 'div[data-financial-state="due"] strong' })).toBeVisible();
   });
 
-  it('formats the next planning event in the group time zone', async () => {
+  it('formats the next planning event in the installation time zone', async () => {
     const event: PlanningEvent = {
       id: 'planning-night-shift',
       version: 1,

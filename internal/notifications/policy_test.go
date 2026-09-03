@@ -13,7 +13,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/storage"
 )
 
-func TestCreateTxAppliesGroupMemberAndIndependentSystemChannelGates(t *testing.T) {
+func TestCreateTxAppliesMemberAndIndependentSystemChannelGates(t *testing.T) {
 	ctx := context.Background()
 	db, membership := openNotificationPolicyFixture(t)
 	defer db.Close()
@@ -71,40 +71,21 @@ func TestCreateTxAppliesGroupMemberAndIndependentSystemChannelGates(t *testing.T
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM notifications WHERE id=?`, rolledBack.ID).Scan(&rolledBackRows); err != nil || rolledBackRows != 0 {
 		t.Fatalf("rolled-back notification rows=%d err=%v", rolledBackRows, err)
 	}
-	if _, err := db.ExecContext(ctx, `DELETE FROM group_notification_events WHERE group_id=? AND event_type='BOOKING_ASSIGNED'`, membership.GroupID); err != nil {
-		t.Fatalf("disable group event: %v", err)
+	if _, err := db.ExecContext(ctx, `DELETE FROM membership_notification_channels WHERE group_id=? AND membership_id=? AND event_type='BOOKING_ASSIGNED'`, membership.GroupID, membership.ID); err != nil {
+		t.Fatalf("disable member channels: %v", err)
 	}
 	disabled := create("booking-disabled", "2026-08-20T08:03:00Z", false)
-	if disabled.ID != "" {
-		t.Fatalf("disabled group event created notification %q", disabled.ID)
+	if disabled.ID == "" {
+		t.Fatal("personal channel choices suppressed the in-app notification")
 	}
+	assertDeliveryChannels(t, db, disabled.ID, nil)
 }
 
-func TestNotificationPolicyVersioningAndPreferenceRetention(t *testing.T) {
+func TestNotificationPreferenceVersioningAndRetention(t *testing.T) {
 	ctx := context.Background()
 	db, membership := openNotificationPolicyFixture(t)
 	defer db.Close()
 	service := Service{DB: db, EmailDeliveryAvailable: true, PushDeliveryAvailable: true}
-	actor := domain.Principal{UserID: membership.UserID}
-	settings, err := service.GetGroupSettings(ctx, membership)
-	if err != nil || settings.Version != 1 || len(settings.Events) != 14 {
-		t.Fatalf("initial group settings=%#v err=%v", settings, err)
-	}
-	updates := make([]GroupEventUpdate, 0, len(settings.Events))
-	for _, event := range settings.Events {
-		updates = append(updates, GroupEventUpdate{Type: event.Type, Enabled: true})
-	}
-	settings, err = service.UpdateGroupSettings(ctx, actor, membership, GroupSettingsUpdate{
-		Timezone: "Europe/Berlin", DueSoonLeadDays: 4, OverdueRepeatDays: 7, Events: updates,
-	}, settings.Version)
-	if err != nil || settings.Version != 2 {
-		t.Fatalf("updated group settings=%#v err=%v", settings, err)
-	}
-	if _, err := service.UpdateGroupSettings(ctx, actor, membership, GroupSettingsUpdate{
-		Timezone: "Europe/Berlin", DueSoonLeadDays: 4, OverdueRepeatDays: 7, Events: updates,
-	}, 1); !errors.Is(err, domain.ErrPrecondition) {
-		t.Fatalf("stale group policy error=%v, want precondition", err)
-	}
 	preferences, err := service.GetPreferences(ctx, membership)
 	if err != nil || preferences.Version != 1 || len(preferences.AvailableChannels) != 2 {
 		t.Fatalf("initial preferences=%#v err=%v", preferences, err)
@@ -129,33 +110,12 @@ func TestNotificationPolicyVersioningAndPreferenceRetention(t *testing.T) {
 		t.Fatalf("preferences changed while Push was unavailable: %#v", unavailableOverdue)
 	}
 	service.PushDeliveryAvailable = true
-	for index := range updates {
-		if updates[index].Type == TypeSettlementOverdue {
-			updates[index].Enabled = false
-		}
-	}
-	settings, err = service.UpdateGroupSettings(ctx, actor, membership, GroupSettingsUpdate{
-		Timezone: "Europe/Berlin", DueSoonLeadDays: 4, OverdueRepeatDays: 7, Events: updates,
-	}, settings.Version)
-	if err != nil {
-		t.Fatalf("disable overdue event: %v", err)
-	}
 	preferences, err = service.GetPreferences(ctx, membership)
 	if err != nil {
-		t.Fatalf("read retained preferences: %v", err)
+		t.Fatalf("read restored channel availability: %v", err)
 	}
-	var overdue EventPreference
-	for _, event := range preferences.Events {
-		if event.Type == TypeSettlementOverdue {
-			overdue = event
-		}
-	}
-	if overdue.Enabled || overdue.Email || !overdue.Push {
-		t.Fatalf("retained disabled event preferences=%#v", overdue)
-	}
-	disable := false
-	if _, err := service.UpdatePreferences(ctx, membership, PreferencesUpdate{Events: []PreferenceUpdate{{Type: TypeSettlementOverdue, Email: &disable}}}, preferences.Version); !errors.Is(err, domain.ErrValidation) {
-		t.Fatalf("disabled group event preference error=%v, want validation", err)
+	if len(preferences.AvailableChannels) != 2 || preferences.AvailableChannels[1] != ChannelPush {
+		t.Fatalf("restored channel availability=%#v", preferences.AvailableChannels)
 	}
 }
 
@@ -233,7 +193,7 @@ func openNotificationPolicyFixture(t *testing.T) (*sql.DB, domain.Membership) {
 		{`INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('user-policy','member@example.test','Member','hash',?,?)`, []any{now, now}},
 		{`INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES('group-policy','Policy group','EUR',?,?)`, []any{now, now}},
 		{`INSERT INTO memberships(id,group_id,user_id,joined_at) VALUES('member-policy','group-policy','user-policy',?)`, []any{now}},
-		{`INSERT INTO group_settings(group_id,members_can_view_all_bookings,notification_emails_enabled,settlements_enabled,updated_at) VALUES('group-policy',0,0,1,?)`, []any{now}},
+		{`INSERT INTO group_settings(group_id,members_can_view_all_bookings,settlements_enabled,updated_at) VALUES('group-policy',0,1,?)`, []any{now}},
 		{`UPDATE group_planning_settings SET enabled=1 WHERE group_id='group-policy'`, nil},
 	} {
 		if _, err := db.ExecContext(ctx, seed.statement, seed.arguments...); err != nil {

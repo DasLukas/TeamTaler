@@ -738,8 +738,8 @@ export interface TransactionSettings {
 export interface GroupSettings {
   defaultTheme: ThemeId;
   settlementsEnabled: boolean;
-  notificationEmailsEnabled: boolean;
-  notificationEmailDeliveryAvailable: boolean;
+  settlementDueSoonDays: number;
+  settlementOverdueRepeatDays: number;
   defaultRoleId: string | null;
   ownBookingReasonMode: ReasonMode;
   foreignBookingReasonMode: ReasonMode;
@@ -759,7 +759,8 @@ export interface GroupSettings {
 export interface GroupSettingsUpdateInput {
   defaultTheme?: ThemeId;
   settlementsEnabled?: boolean;
-  notificationEmailsEnabled?: boolean;
+  settlementDueSoonDays?: number;
+  settlementOverdueRepeatDays?: number;
   defaultRoleId?: string;
   ownBookingReasonMode?: ReasonMode;
   foreignBookingReasonMode?: ReasonMode;
@@ -884,6 +885,7 @@ export interface SystemSettings {
   revision: number;
   instanceName: SystemSetting<string>;
   defaultCurrency: SystemSetting<string>;
+  timeZone: SystemSetting<string>;
   mediaUploadMaxBytes: SystemSetting<number>;
   attachmentUploadMaxBytes: SystemSetting<number>;
   publicJoinEnabled: SystemSetting<boolean>;
@@ -901,6 +903,7 @@ export interface SystemSettings {
 export type ResettableSystemSettingKey =
   | 'instanceName'
   | 'defaultCurrency'
+  | 'timeZone'
   | 'mediaUploadMaxBytes'
   | 'attachmentUploadMaxBytes'
   | 'publicJoinEnabled'
@@ -911,6 +914,7 @@ export type ResettableSystemSettingKey =
 export interface SystemSettingsUpdate {
   instanceName?: string;
   defaultCurrency?: string;
+  timeZone?: string;
   mediaUploadMaxBytes?: number;
   attachmentUploadMaxBytes?: number;
   publicJoinEnabled?: boolean;
@@ -1377,6 +1381,9 @@ export type NotificationEventType =
   | 'PLANNING_EVENT_UPDATED'
   | 'PLANNING_EVENT_CANCELLED'
   | 'PLANNING_WAITLIST_PROMOTED'
+  | 'PLANNING_SERIES_PUBLISHED'
+  | 'PLANNING_SERIES_UPDATED'
+  | 'PLANNING_SERIES_CANCELLED'
   | 'DATA_EXPORT_READY'
   | 'DATA_EXPORT_FAILED'
   | 'SYSTEM';
@@ -1384,7 +1391,7 @@ export type NotificationEventType =
 /** Notification events whose optional external channels are user-configurable. */
 export type ConfigurableNotificationEventType = Exclude<NotificationEventType, 'DATA_EXPORT_READY' | 'DATA_EXPORT_FAILED' | 'SYSTEM'>;
 
-/** Optional external delivery channels controlled by system, group, and member policy. */
+/** Optional external delivery channels controlled by system and member policy. */
 export type NotificationChannel = 'EMAIL' | 'PUSH';
 
 /** User-facing metadata for one event from the server-owned notification catalog. */
@@ -1402,32 +1409,8 @@ export interface NotificationChannelAvailability {
   push: boolean;
 }
 
-/** One administrator-controlled event policy within a group. */
-export interface GroupNotificationEventSetting extends NotificationEventDefinition {
-  enabled: boolean;
-}
-
-/** Versioned group policy that determines which events members may configure. */
-export interface GroupNotificationSettings {
-  version: number;
-  timezone: string;
-  dueSoonLeadDays: number;
-  overdueRepeatDays: number;
-  channels: NotificationChannelAvailability;
-  events: GroupNotificationEventSetting[];
-}
-
-/** Editable group notification-policy fields. */
-export interface GroupNotificationSettingsUpdate {
-  version: number;
-  timezone: string;
-  dueSoonLeadDays: number;
-  overdueRepeatDays: number;
-  events: Array<{ eventType: ConfigurableNotificationEventType; enabled: boolean }>;
-}
-
 /** One member's effective preferences for a group event. */
-export interface NotificationPreference extends GroupNotificationEventSetting {
+export interface NotificationPreference extends NotificationEventDefinition {
   email: boolean;
   push: boolean;
   emailAvailable: boolean;

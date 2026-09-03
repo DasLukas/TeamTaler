@@ -9,7 +9,6 @@ import {
   adaptCategories,
   adaptDashboard,
   adaptGroupSettings,
-  adaptGroupNotificationSettings,
   adaptInstanceCapabilities,
   adaptTransactionSettings,
   adaptLedger,
@@ -79,8 +78,6 @@ import type {
   LedgerEntry,
   LoginCommand,
   GroupPreference,
-  GroupNotificationSettings,
-  GroupNotificationSettingsUpdate,
   GroupSettings,
   GroupSettingsUpdateInput,
   InstanceCapabilities,
@@ -342,6 +339,7 @@ function collectionPage<Item>(items: Item[], headers: Headers, requestedLimit?: 
 const systemSettingKeys: Record<ResettableSystemSettingKey, string> = {
   instanceName: 'instance.name',
   defaultCurrency: 'instance.default_currency',
+  timeZone: 'instance.timezone',
   mediaUploadMaxBytes: 'media.upload_max_bytes',
   attachmentUploadMaxBytes: 'attachment.upload_max_bytes',
   publicJoinEnabled: 'access.public_join_enabled',
@@ -646,17 +644,6 @@ export const api = {
   },
   updateGroupName: async (groupId: string, name: string): Promise<{ name: string }> => request<{ name: string }>(groupRootPath(groupId), { method: 'PATCH', body: json({ name }) }),
   getGroupSettings: async (groupId: string): Promise<GroupSettings> => adaptGroupSettings(await request<unknown>(groupPath(groupId, 'settings'))),
-  getGroupNotificationSettings: async (groupId: string): Promise<GroupNotificationSettings> => adaptGroupNotificationSettings(await request<unknown>(groupPath(groupId, 'notification-settings'))),
-  updateGroupNotificationSettings: async (groupId: string, settings: GroupNotificationSettingsUpdate): Promise<GroupNotificationSettings> => adaptGroupNotificationSettings(await request<unknown>(groupPath(groupId, 'notification-settings'), {
-    method: 'PUT',
-    headers: versionHeaders(settings.version),
-    body: json({
-      timezone: settings.timezone,
-      dueSoonLeadDays: settings.dueSoonLeadDays,
-      overdueRepeatDays: settings.overdueRepeatDays,
-      events: settings.events.map((event) => ({ type: event.eventType, enabled: event.enabled })),
-    }),
-  })),
   getNotificationPreferences: async (groupId: string): Promise<NotificationPreferences> => adaptNotificationPreferences(await request<unknown>(groupPath(groupId, 'notification-preferences'))),
   updateNotificationPreferences: async (groupId: string, preferences: NotificationPreferencesUpdate): Promise<NotificationPreferences> => adaptNotificationPreferences(await request<unknown>(groupPath(groupId, 'notification-preferences'), {
     method: 'PUT',

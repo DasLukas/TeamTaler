@@ -829,14 +829,14 @@ describe('high-risk API idempotency', () => {
 
   it('reads and updates typed group behavior settings', async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ settlementsEnabled: false, notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' }))
-      .mockResolvedValueOnce(jsonResponse({ settlementsEnabled: false, notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' }));
+      .mockResolvedValueOnce(jsonResponse({ settlementsEnabled: false, settlementDueSoonDays: 3, settlementOverdueRepeatDays: 7, defaultRoleId: 'role-member' }))
+      .mockResolvedValueOnce(jsonResponse({ settlementsEnabled: false, settlementDueSoonDays: 5, settlementOverdueRepeatDays: 10, defaultRoleId: 'role-member' }));
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(api.getGroupSettings('group-a')).resolves.toMatchObject({
       settlementsEnabled: false,
-      notificationEmailsEnabled: false,
-      notificationEmailDeliveryAvailable: true,
+      settlementDueSoonDays: 3,
+      settlementOverdueRepeatDays: 7,
       defaultRoleId: 'role-member',
       paymentMethods: [
         { id: 'BANK_TRANSFER', label: 'Überweisung', attachmentMode: 'OFF' },
@@ -846,10 +846,10 @@ describe('high-risk API idempotency', () => {
         { id: 'OTHER', label: 'Sonstige', attachmentMode: 'OPTIONAL' },
       ],
     });
-    await expect(api.updateGroupSettings('group-a', { notificationEmailsEnabled: true })).resolves.toMatchObject({
+    await expect(api.updateGroupSettings('group-a', { settlementDueSoonDays: 5, settlementOverdueRepeatDays: 10 })).resolves.toMatchObject({
       settlementsEnabled: false,
-      notificationEmailsEnabled: true,
-      notificationEmailDeliveryAvailable: true,
+      settlementDueSoonDays: 5,
+      settlementOverdueRepeatDays: 10,
       defaultRoleId: 'role-member',
       paymentMethods: expect.any(Array),
     });
@@ -858,7 +858,7 @@ describe('high-risk API idempotency', () => {
     expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/groups/group-a/settings');
     expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: 'PATCH' });
     expect(new Headers((fetchMock.mock.calls[1][1] as RequestInit).headers).get('If-Match')).toBeNull();
-    expect(requestBody(fetchMock.mock.calls[1])).toEqual({ notificationEmailsEnabled: true });
+    expect(requestBody(fetchMock.mock.calls[1])).toEqual({ settlementDueSoonDays: 5, settlementOverdueRepeatDays: 10 });
   });
 
   it('always sends the assignment version for legacy member-permission updates', async () => {
@@ -1159,12 +1159,23 @@ describe('system-administration API contract', () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ revision: 8 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await api.resetSystemSettings(['instanceName', 'mediaUploadMaxBytes'], 7);
+    await api.resetSystemSettings(['instanceName', 'timeZone', 'mediaUploadMaxBytes'], 7);
 
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/system/settings/reset');
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' });
     expect(new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers).get('If-Match')).toBe('"v7"');
-    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ keys: ['instance.name', 'media.upload_max_bytes'] });
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ keys: ['instance.name', 'instance.timezone', 'media.upload_max_bytes'] });
+  });
+
+  it('updates the installation time zone with the aggregate settings revision', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ revision: 9 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.updateSystemSettings({ timeZone: 'America/New_York' }, 8);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/system/settings');
+    expect(new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers).get('If-Match')).toBe('"v8"');
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ timeZone: 'America/New_York' });
   });
 
   it('uses the TLS-only SMTP PUT and keeps a successful test revision', async () => {
@@ -1256,18 +1267,14 @@ describe('notification preference and push-device API contract', () => {
       availableChannels: ['PUSH'],
       events: [{ type: 'BOOKING_ASSIGNED', enabled: true, email: true, push: true, emailAvailable: false, pushAvailable: true, supportedChannels: ['EMAIL', 'PUSH'] }],
     };
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ version: 2, timezone: 'Europe/Berlin', dueSoonLeadDays: 3, overdueRepeatDays: 7, availableChannels: ['EMAIL'], events: [] }))
-      .mockResolvedValueOnce(jsonResponse(response));
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(response));
     vi.stubGlobal('fetch', fetchMock);
 
-    await api.updateGroupNotificationSettings('group/a', { version: 1, timezone: 'Europe/Berlin', dueSoonLeadDays: 3, overdueRepeatDays: 7, events: [{ eventType: 'BOOKING_ASSIGNED', enabled: true }] });
     await api.updateNotificationPreferences('group/a', { version: 2, events: [{ eventType: 'BOOKING_ASSIGNED', push: true }] });
 
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group%2Fa/notification-settings');
-    expect(new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers).get('If-Match')).toBe('"v1"');
-    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ timezone: 'Europe/Berlin', dueSoonLeadDays: 3, overdueRepeatDays: 7, events: [{ type: 'BOOKING_ASSIGNED', enabled: true }] });
-    expect(requestBody(fetchMock.mock.calls[1])).toEqual({ events: [{ type: 'BOOKING_ASSIGNED', push: true }] });
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group%2Fa/notification-preferences');
+    expect(new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers).get('If-Match')).toBe('"v2"');
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ events: [{ type: 'BOOKING_ASSIGNED', push: true }] });
   });
 
   it('registers browser key material while exposing only redacted device metadata', async () => {

@@ -94,13 +94,11 @@ var groupDatasets = []dataset{
 	{name: "planning_notification_runs", query: `SELECT id,task_id,group_id,event_id,target_membership_id,event_type,notification_id,processed_at FROM planning_notification_runs WHERE group_id=? ORDER BY processed_at,id`, args: groupArg},
 	{name: "group", query: `SELECT id,name,currency,status,version,created_at,updated_at,archived_at,archived_by,archived_from_status,
 		CASE WHEN logo_key IS NULL THEN 0 ELSE 1 END AS logo_present FROM groups WHERE id=?`, args: groupArg},
-	{name: "group_settings", query: `SELECT group_id,members_can_view_all_bookings,notification_emails_enabled,default_role_id,
+	{name: "group_settings", query: `SELECT group_id,members_can_view_all_bookings,default_role_id,
 		foreign_booking_reason_required,own_payment_reason_required,other_payment_reason_required,settlements_enabled,
-		own_booking_reason_mode,foreign_booking_reason_mode,own_payment_reason_mode,other_payment_reason_mode,default_theme,updated_at
+		own_booking_reason_mode,foreign_booking_reason_mode,own_payment_reason_mode,other_payment_reason_mode,default_theme,
+		settlement_due_soon_days,settlement_overdue_repeat_days,updated_at
 		FROM group_settings WHERE group_id=?`, args: groupArg},
-	{name: "notification_settings", query: `SELECT group_id,timezone,settlement_due_soon_days,settlement_overdue_repeat_days,version,updated_at
-		FROM group_notification_settings WHERE group_id=?`, args: groupArg},
-	{name: "notification_events", query: `SELECT group_id,event_type,enabled_at FROM group_notification_events WHERE group_id=? ORDER BY event_type`, args: groupArg},
 	{name: "payment_methods", query: `SELECT group_id,id,label,sort_order,attachment_mode,payment_target_type,paypal_me_handle,
 		sepa_recipient_name,sepa_iban,sepa_bic,created_at FROM group_payment_methods
 		WHERE group_id=? ORDER BY sort_order,id`, args: groupArg},

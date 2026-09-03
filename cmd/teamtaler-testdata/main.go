@@ -306,7 +306,7 @@ func run() error {
 	if err := seedPlanning(ctx, planningService, adminSession.Principal, adminGroup.Membership, baseNow); err != nil {
 		return err
 	}
-	if err := configureNotifications(ctx, notificationService, groupService, adminSession.Principal, adminGroup.Membership); err != nil {
+	if err := configureNotifications(ctx, notificationService, groupService, adminGroup.Membership); err != nil {
 		return err
 	}
 
@@ -451,7 +451,7 @@ func seedSecondaryGroup(ctx context.Context, authService auth.Service, groupServ
 		if err := seedPlanning(ctx, planningService, administrator, group.Membership, planningReference); err != nil {
 			return err
 		}
-		if err := configureNotifications(ctx, notificationService, groupService, administrator, group.Membership); err != nil {
+		if err := configureNotifications(ctx, notificationService, groupService, group.Membership); err != nil {
 			return err
 		}
 		result, closeErr := periodService.Close(ctx, administrator, group.Membership, "seed-close-secondary", periodID, periods.CloseInput{Label: "Vereinsabend", DueAt: platform.Now().AddDate(0, 0, 14).Format("2006-01-02"), NextPeriodLabel: "Nächster Vereinsabend"})
@@ -1012,6 +1012,7 @@ func withTemporaryBookingGrants(ctx context.Context, db *sql.DB, groupID string,
 // configureGroup enables all group features and German transaction choices.
 func configureGroup(ctx context.Context, service groups.Service, actor domain.Principal, membership domain.Membership) error {
 	enabled := true
+	dueSoonDays, overdueRepeatDays := 7, 3
 	optional, required := domain.ReasonModeOptional, domain.ReasonModeRequired
 	methods := []domain.PaymentMethod{
 		{ID: "BANK_TRANSFER", Label: "Überweisung", AttachmentMode: domain.AttachmentModeOff},
@@ -1022,25 +1023,14 @@ func configureGroup(ctx context.Context, service groups.Service, actor domain.Pr
 	}
 	bookingReasons := append([]domain.ConfigurableItem(nil), bookingReasonSeeds...)
 	paymentReasons := append([]domain.ConfigurableItem(nil), paymentReasonSeeds...)
-	if _, err := service.UpdateSettings(ctx, actor, membership, groups.SettingsUpdate{NotificationEmailsEnabled: &enabled, SettlementsEnabled: &enabled, OwnBookingReasonMode: &optional, ForeignBookingReasonMode: &required, OwnPaymentReasonMode: &required, OtherPaymentReasonMode: &required, PaymentMethods: &methods, BookingReasons: &bookingReasons, PaymentReasons: &paymentReasons}); err != nil {
+	if _, err := service.UpdateSettings(ctx, actor, membership, groups.SettingsUpdate{SettlementsEnabled: &enabled, SettlementDueSoonDays: &dueSoonDays, SettlementOverdueRepeatDays: &overdueRepeatDays, OwnBookingReasonMode: &optional, ForeignBookingReasonMode: &required, OwnPaymentReasonMode: &required, OtherPaymentReasonMode: &required, PaymentMethods: &methods, BookingReasons: &bookingReasons, PaymentReasons: &paymentReasons}); err != nil {
 		return fmt.Errorf("configure features for group %q: %w", membership.GroupID, err)
 	}
 	return nil
 }
 
-// configureNotifications enables every event and both channels for all members.
-func configureNotifications(ctx context.Context, service notifications.Service, groupService groups.Service, actor domain.Principal, administrator domain.Membership) error {
-	settings, err := service.GetGroupSettings(ctx, administrator)
-	if err != nil {
-		return fmt.Errorf("read notification settings for group %q: %w", administrator.GroupID, err)
-	}
-	events := make([]notifications.GroupEventUpdate, 0, len(notifications.Catalog()))
-	for _, definition := range notifications.Catalog() {
-		events = append(events, notifications.GroupEventUpdate{Type: definition.Type, Enabled: true})
-	}
-	if _, err := service.UpdateGroupSettings(ctx, actor, administrator, notifications.GroupSettingsUpdate{Timezone: "Europe/Berlin", DueSoonLeadDays: 7, OverdueRepeatDays: 3, Events: events}, settings.Version); err != nil {
-		return fmt.Errorf("enable notification events for group %q: %w", administrator.GroupID, err)
-	}
+// configureNotifications enables both personal channels for every exposed event.
+func configureNotifications(ctx context.Context, service notifications.Service, groupService groups.Service, administrator domain.Membership) error {
 	members, err := groupService.ListMembers(ctx, administrator)
 	if err != nil {
 		return fmt.Errorf("list notification members for group %q: %w", administrator.GroupID, err)
@@ -1051,8 +1041,8 @@ func configureNotifications(ctx context.Context, service notifications.Service, 
 		if readErr != nil {
 			return fmt.Errorf("read notification preferences for %q: %w", member.DisplayName, readErr)
 		}
-		updates := make([]notifications.PreferenceUpdate, 0, len(events))
-		for _, event := range events {
+		updates := make([]notifications.PreferenceUpdate, 0, len(preferences.Events))
+		for _, event := range preferences.Events {
 			updates = append(updates, notifications.PreferenceUpdate{Type: event.Type, Email: &enabled, Push: &enabled})
 		}
 		if _, updateErr := service.UpdatePreferences(ctx, member, notifications.PreferencesUpdate{Events: updates}, preferences.Version); updateErr != nil {

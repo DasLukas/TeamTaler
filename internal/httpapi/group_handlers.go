@@ -139,23 +139,22 @@ func (s *Server) handleGetGroupSettings(response http.ResponseWriter, request *h
 		writeProblem(response, request, err)
 		return
 	}
-	runtimeSettings, _ := effectiveSystemSettings(request)
 	writeJSON(response, http.StatusOK, map[string]any{
-		"defaultTheme":                       settings.DefaultTheme,
-		"notificationEmailsEnabled":          settings.NotificationEmailsEnabled,
-		"notificationEmailDeliveryAvailable": runtimeSettings.SMTP.Active,
-		"settlementsEnabled":                 settings.SettlementsEnabled,
-		"defaultRoleId":                      settings.DefaultRoleID,
-		"ownBookingReasonMode":               settings.OwnBookingReasonMode,
-		"foreignBookingReasonMode":           settings.ForeignBookingReasonMode,
-		"ownPaymentReasonMode":               settings.OwnPaymentReasonMode,
-		"otherPaymentReasonMode":             settings.OtherPaymentReasonMode,
-		"foreignBookingReasonRequired":       settings.ForeignBookingReasonRequired,
-		"ownPaymentReasonRequired":           settings.OwnPaymentReasonRequired,
-		"otherPaymentReasonRequired":         settings.OtherPaymentReasonRequired,
-		"paymentMethods":                     settings.PaymentMethods,
-		"bookingReasons":                     settings.BookingReasons,
-		"paymentReasons":                     settings.PaymentReasons,
+		"defaultTheme":                 settings.DefaultTheme,
+		"settlementsEnabled":           settings.SettlementsEnabled,
+		"settlementDueSoonDays":        settings.SettlementDueSoonDays,
+		"settlementOverdueRepeatDays":  settings.SettlementOverdueRepeatDays,
+		"defaultRoleId":                settings.DefaultRoleID,
+		"ownBookingReasonMode":         settings.OwnBookingReasonMode,
+		"foreignBookingReasonMode":     settings.ForeignBookingReasonMode,
+		"ownPaymentReasonMode":         settings.OwnPaymentReasonMode,
+		"otherPaymentReasonMode":       settings.OtherPaymentReasonMode,
+		"foreignBookingReasonRequired": settings.ForeignBookingReasonRequired,
+		"ownPaymentReasonRequired":     settings.OwnPaymentReasonRequired,
+		"otherPaymentReasonRequired":   settings.OtherPaymentReasonRequired,
+		"paymentMethods":               settings.PaymentMethods,
+		"bookingReasons":               settings.BookingReasons,
+		"paymentReasons":               settings.PaymentReasons,
 	})
 }
 
@@ -187,8 +186,9 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 	}
 	var input struct {
 		DefaultTheme                 *domain.ThemeID               `json:"defaultTheme"`
-		NotificationEmailsEnabled    *bool                         `json:"notificationEmailsEnabled"`
 		SettlementsEnabled           *bool                         `json:"settlementsEnabled"`
+		SettlementDueSoonDays        *int                          `json:"settlementDueSoonDays"`
+		SettlementOverdueRepeatDays  *int                          `json:"settlementOverdueRepeatDays"`
 		DefaultRoleID                *string                       `json:"defaultRoleId"`
 		OwnBookingReasonMode         *domain.ReasonMode            `json:"ownBookingReasonMode"`
 		ForeignBookingReasonMode     *domain.ReasonMode            `json:"foreignBookingReasonMode"`
@@ -205,17 +205,12 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		writeProblem(response, request, err)
 		return
 	}
-	if input.DefaultTheme == nil && input.NotificationEmailsEnabled == nil && input.SettlementsEnabled == nil && input.DefaultRoleID == nil &&
+	if input.DefaultTheme == nil && input.SettlementsEnabled == nil && input.SettlementDueSoonDays == nil && input.SettlementOverdueRepeatDays == nil && input.DefaultRoleID == nil &&
 		input.OwnBookingReasonMode == nil && input.ForeignBookingReasonMode == nil && input.OwnPaymentReasonMode == nil && input.OtherPaymentReasonMode == nil &&
 		input.ForeignBookingReasonRequired == nil &&
 		input.OwnPaymentReasonRequired == nil && input.OtherPaymentReasonRequired == nil && input.PaymentMethods == nil &&
 		input.BookingReasons == nil && input.PaymentReasons == nil {
 		writeProblem(response, request, domain.ValidationError{Field: "settings", Message: "must contain at least one supported field"})
-		return
-	}
-	runtimeSettings, _ := effectiveSystemSettings(request)
-	if input.NotificationEmailsEnabled != nil && *input.NotificationEmailsEnabled && !runtimeSettings.SMTP.Active {
-		writeProblem(response, request, domain.ValidationError{Field: "notificationEmailsEnabled", Message: "requires configured SMTP delivery"})
 		return
 	}
 	var paymentMethods *[]domain.PaymentMethod
@@ -236,8 +231,9 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 	}
 	settings, err := s.groups.UpdateSettings(request.Context(), principal, membership, groups.SettingsUpdate{
 		DefaultTheme:                 input.DefaultTheme,
-		NotificationEmailsEnabled:    input.NotificationEmailsEnabled,
 		SettlementsEnabled:           input.SettlementsEnabled,
+		SettlementDueSoonDays:        input.SettlementDueSoonDays,
+		SettlementOverdueRepeatDays:  input.SettlementOverdueRepeatDays,
 		DefaultRoleID:                input.DefaultRoleID,
 		OwnBookingReasonMode:         input.OwnBookingReasonMode,
 		ForeignBookingReasonMode:     input.ForeignBookingReasonMode,
@@ -256,21 +252,21 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		return
 	}
 	writeJSON(response, http.StatusOK, map[string]any{
-		"defaultTheme":                       settings.DefaultTheme,
-		"notificationEmailsEnabled":          settings.NotificationEmailsEnabled,
-		"notificationEmailDeliveryAvailable": runtimeSettings.SMTP.Active,
-		"settlementsEnabled":                 settings.SettlementsEnabled,
-		"defaultRoleId":                      settings.DefaultRoleID,
-		"ownBookingReasonMode":               settings.OwnBookingReasonMode,
-		"foreignBookingReasonMode":           settings.ForeignBookingReasonMode,
-		"ownPaymentReasonMode":               settings.OwnPaymentReasonMode,
-		"otherPaymentReasonMode":             settings.OtherPaymentReasonMode,
-		"foreignBookingReasonRequired":       settings.ForeignBookingReasonRequired,
-		"ownPaymentReasonRequired":           settings.OwnPaymentReasonRequired,
-		"otherPaymentReasonRequired":         settings.OtherPaymentReasonRequired,
-		"paymentMethods":                     settings.PaymentMethods,
-		"bookingReasons":                     settings.BookingReasons,
-		"paymentReasons":                     settings.PaymentReasons,
+		"defaultTheme":                 settings.DefaultTheme,
+		"settlementsEnabled":           settings.SettlementsEnabled,
+		"settlementDueSoonDays":        settings.SettlementDueSoonDays,
+		"settlementOverdueRepeatDays":  settings.SettlementOverdueRepeatDays,
+		"defaultRoleId":                settings.DefaultRoleID,
+		"ownBookingReasonMode":         settings.OwnBookingReasonMode,
+		"foreignBookingReasonMode":     settings.ForeignBookingReasonMode,
+		"ownPaymentReasonMode":         settings.OwnPaymentReasonMode,
+		"otherPaymentReasonMode":       settings.OtherPaymentReasonMode,
+		"foreignBookingReasonRequired": settings.ForeignBookingReasonRequired,
+		"ownPaymentReasonRequired":     settings.OwnPaymentReasonRequired,
+		"otherPaymentReasonRequired":   settings.OtherPaymentReasonRequired,
+		"paymentMethods":               settings.PaymentMethods,
+		"bookingReasons":               settings.BookingReasons,
+		"paymentReasons":               settings.PaymentReasons,
 	})
 }
 

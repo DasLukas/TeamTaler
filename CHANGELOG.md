@@ -4,6 +4,16 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+### Changed
+
+- Notification event selection is now exclusively personal: the account settings group events by topic, while in-app history remains enabled and each member controls only their own Email and Push choices.
+- The installation-wide IANA time zone is now managed through System administration and the operator CLI. New planning events, new series, and settlement reminders use it; existing planning records retain their pinned zone.
+- Settlement due-soon and overdue-repeat cadence now belongs to the group's settlement configuration and remains editable by group or finance administrators.
+
+### Removed
+
+- Removed the obsolete group notification allowlist, group-level email toggle, group notification settings API, and their storage tables.
+
 ## [1.2.0] - 2026-08-28
 
 ### Added

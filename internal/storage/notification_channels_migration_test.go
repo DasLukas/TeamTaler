@@ -52,10 +52,7 @@ func TestNotificationChannelsMigrationPreservesPoliciesAndOutboxStatuses(t *test
 		t.Fatalf("apply notification channel migration: %v", err)
 	}
 
-	var groupEvents, emailPreferences, pushPreferences int
-	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM group_notification_events WHERE group_id='group-one'`).Scan(&groupEvents); err != nil || groupEvents != 14 {
-		t.Fatalf("default group events=%d err=%v, want 14", groupEvents, err)
-	}
+	var emailPreferences, pushPreferences int
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM membership_notification_channels WHERE membership_id='member-one' AND channel='EMAIL'`).Scan(&emailPreferences); err != nil || emailPreferences != 7 {
 		t.Fatalf("migrated email preferences=%d err=%v, want 7", emailPreferences, err)
 	}
@@ -99,10 +96,7 @@ func TestNotificationChannelsMigrationPreservesPoliciesAndOutboxStatuses(t *test
 	if _, err := db.ExecContext(ctx, `INSERT INTO memberships(id,group_id,user_id,joined_at) VALUES('member-two','group-two','user-two',?)`, now); err != nil {
 		t.Fatalf("insert membership after migration: %v", err)
 	}
-	var seededEvents, seededPreferenceVersion, seededPushPreferences, seededEmailPreferences int
-	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM group_notification_events WHERE group_id='group-two'`).Scan(&seededEvents); err != nil || seededEvents != 14 {
-		t.Fatalf("new group event defaults=%d err=%v, want 14", seededEvents, err)
-	}
+	var seededPreferenceVersion, seededPushPreferences, seededEmailPreferences int
 	if err := db.QueryRowContext(ctx, `SELECT version FROM membership_notification_settings WHERE membership_id='member-two'`).Scan(&seededPreferenceVersion); err != nil || seededPreferenceVersion != 1 {
 		t.Fatalf("new membership preference version=%d err=%v, want 1", seededPreferenceVersion, err)
 	}

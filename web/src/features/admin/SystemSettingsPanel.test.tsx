@@ -41,6 +41,7 @@ const settings: SystemSettings = {
   revision: 4,
   instanceName: value('TeamTaler'),
   defaultCurrency: value('EUR'),
+  timeZone: value('Europe/Berlin'),
   mediaUploadMaxBytes: value(5 * 1024 * 1024),
   mediaUploadHardLimitBytes: 25 * 1024 * 1024,
   attachmentUploadMaxBytes: value(15 * 1024 * 1024),
@@ -321,12 +322,25 @@ describe('SystemSettingsPanel', () => {
     await waitFor(() => expect(apiMock.updateSystemSettings).toHaveBeenCalledWith({ instanceName: 'Club Cloud' }, 4));
   });
 
+  it('persists the installation time zone from general system settings', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    const section = (await screen.findByRole('heading', { name: 'Allgemein' })).closest('section');
+    if (!section) throw new Error('Missing general settings section.');
+
+    await user.selectOptions(within(section).getByLabelText('Zentrale Zeitzone'), 'America/New_York');
+    await user.click(within(section).getByRole('button', { name: 'Speichern' }));
+
+    await waitFor(() => expect(apiMock.updateSystemSettings).toHaveBeenCalledWith({ timeZone: 'America/New_York' }, 4));
+  });
+
   it('places one confirmed reset action directly before save in every settings section', async () => {
     const user = userEvent.setup();
     const overriddenSettings: SystemSettings = {
       ...settings,
       instanceName: value('Club Cloud', 'DATABASE'),
       defaultCurrency: value('USD', 'DATABASE'),
+      timeZone: value('America/New_York', 'DATABASE'),
       mediaUploadMaxBytes: value(12 * 1024 * 1024, 'DATABASE'),
       publicJoinEnabled: value(false, 'DATABASE'),
       maintenanceMode: value(true, 'DATABASE'),
@@ -360,7 +374,7 @@ describe('SystemSettingsPanel', () => {
     await user.click(within(screen.getByRole('dialog', { name: 'Allgemein zurücksetzen?' })).getByRole('button', { name: 'Zurücksetzen' }));
 
     await waitFor(() => expect(apiMock.resetSystemSettings).toHaveBeenCalledWith(
-      ['instanceName', 'defaultCurrency', 'mediaUploadMaxBytes'],
+      ['instanceName', 'defaultCurrency', 'timeZone', 'mediaUploadMaxBytes'],
       4,
     ));
     expect(within(generalSection).getByLabelText('Instanzname')).toHaveValue('TeamTaler');

@@ -52,7 +52,6 @@ func TestPlanningWorkerCreatesOneBundledNotificationPerSeriesRevision(t *testing
 		args  []any
 	}{
 		{`UPDATE group_planning_settings SET enabled=1,updated_at=? WHERE group_id=?`, []any{timestamp, membership.GroupID}},
-		{`INSERT OR IGNORE INTO group_notification_events(group_id,event_type,enabled_at) VALUES(?,?,?)`, []any{membership.GroupID, TypePlanningSeriesPublished, timestamp}},
 		{`INSERT INTO planning_series(id,group_id,status,timezone,current_revision,version,created_by_membership_id,updated_by_membership_id,published_at,created_at,updated_at)
 			VALUES('series-published',?,'PUBLISHED','Europe/Berlin',1,1,?,?,?, ?,?)`, []any{membership.GroupID, membership.ID, membership.ID, timestamp, timestamp, timestamp}},
 		{`INSERT INTO planning_series_revisions(group_id,series_id,revision,effective_from_original_start_at,effective_from_sequence,title,description,location,event_type,audience_type,starts_at,duration_minutes,response_deadline_minutes_before,waitlist_enabled,frequency,interval_value,weekdays_json,range_type,occurrence_count,created_by_membership_id,created_at)

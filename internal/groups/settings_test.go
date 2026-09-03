@@ -37,7 +37,7 @@ func TestGroupSettingsDefaultAuthorizationPersistenceAndAudit(t *testing.T) {
 	admin := items[0].Membership
 	settings, err := service.Settings(ctx, admin)
 	guestRoleID := authorization.GuestRoleID(admin.GroupID)
-	if err != nil || settings.DefaultTheme != domain.ThemeTeamTaler || settings.NotificationEmailsEnabled || settings.SettlementsEnabled || settings.DefaultRoleID == nil || *settings.DefaultRoleID != guestRoleID {
+	if err != nil || settings.DefaultTheme != domain.ThemeTeamTaler || settings.SettlementsEnabled || settings.SettlementDueSoonDays != 3 || settings.SettlementOverdueRepeatDays != 7 || settings.DefaultRoleID == nil || *settings.DefaultRoleID != guestRoleID {
 		t.Fatalf("default settings=%#v err=%v", settings, err)
 	}
 	if !settings.ForeignBookingReasonRequired || !settings.OwnPaymentReasonRequired || settings.OtherPaymentReasonRequired || len(settings.PaymentMethods) != 5 {
@@ -66,8 +66,8 @@ func TestGroupSettingsDefaultAuthorizationPersistenceAndAudit(t *testing.T) {
 	if _, err := service.Settings(ctx, regularMember); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("regular-member settings read error=%v, want forbidden", err)
 	}
-	notifications := true
-	if _, err := service.UpdateSettings(ctx, session.Principal, regularMember, SettingsUpdate{NotificationEmailsEnabled: &notifications}); !errors.Is(err, domain.ErrForbidden) {
+	dueSoonDays := 5
+	if _, err := service.UpdateSettings(ctx, session.Principal, regularMember, SettingsUpdate{SettlementDueSoonDays: &dueSoonDays}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("regular-member settings update error=%v, want forbidden", err)
 	}
 	nrwTheme := domain.ThemeNRW
@@ -80,14 +80,14 @@ func TestGroupSettingsDefaultAuthorizationPersistenceAndAudit(t *testing.T) {
 		t.Fatalf("updated default theme=%#v err=%v", updated, err)
 	}
 
-	updated, err = service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{NotificationEmailsEnabled: &notifications})
-	if err != nil || !updated.NotificationEmailsEnabled {
+	updated, err = service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{SettlementDueSoonDays: &dueSoonDays})
+	if err != nil || updated.SettlementDueSoonDays != 5 {
 		t.Fatalf("updated settings=%#v err=%v", updated, err)
 	}
-	notifications = false
-	updated, err = service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{NotificationEmailsEnabled: &notifications})
-	if err != nil || updated.NotificationEmailsEnabled {
-		t.Fatalf("partial notification update=%#v err=%v", updated, err)
+	dueSoonDays = 3
+	updated, err = service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{SettlementDueSoonDays: &dueSoonDays})
+	if err != nil || updated.SettlementDueSoonDays != 3 {
+		t.Fatalf("partial reminder update=%#v err=%v", updated, err)
 	}
 	financeRoleID := authorization.TemplateRoleID(admin.GroupID, domain.RoleTemplateFinance)
 	updated, err = service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{DefaultRoleID: &financeRoleID})
@@ -122,7 +122,7 @@ func TestGroupSettingsDefaultAuthorizationPersistenceAndAudit(t *testing.T) {
 		t.Fatalf("delete default role error=%v, want conflict", err)
 	}
 	persisted, err := service.Settings(ctx, admin)
-	if err != nil || persisted.NotificationEmailsEnabled || persisted.DefaultRoleID == nil || *persisted.DefaultRoleID != financeRoleID {
+	if err != nil || persisted.SettlementDueSoonDays != 3 || persisted.DefaultRoleID == nil || *persisted.DefaultRoleID != financeRoleID {
 		t.Fatalf("persisted settings=%#v err=%v", persisted, err)
 	}
 	var auditCount int

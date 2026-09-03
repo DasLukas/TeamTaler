@@ -21,9 +21,6 @@ func TestPlanningEventHandlerAcceptsAllDaySchedule(t *testing.T) {
 	if _, err := server.planning.UpdateSettings(ctx, principal, administrator, true, settings.Version); err != nil {
 		t.Fatalf("enable planning: %v", err)
 	}
-	if _, err := server.db.ExecContext(ctx, `UPDATE group_notification_settings SET timezone='Europe/Berlin' WHERE group_id=?`, administrator.GroupID); err != nil {
-		t.Fatalf("set group time zone: %v", err)
-	}
 
 	body := `{"title":"All-day planning","eventType":"APPOINTMENT","audienceType":"ALL_ACTIVE_MEMBERS","allDay":true,"startDate":"2026-03-29","endDateExclusive":"2026-03-30"}`
 	request := roleHandlerRequest(principal, administrator.GroupID, http.MethodPost, body)

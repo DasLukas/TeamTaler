@@ -3,19 +3,17 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { GroupNotificationSettings, GroupSettings, Role, Session } from '@/api/types';
+import type { GroupSettings, Role, Session } from '@/api/types';
 import { ActiveGroupContext } from '@/app/active-group-context';
 import i18n from '@/i18n';
 import { BehaviorSettingsPanel } from './BehaviorSettingsPanel';
 
 const apiMock = vi.hoisted(() => ({
   getGroupSettings: vi.fn(),
-  getGroupNotificationSettings: vi.fn(),
   getPlanningSettings: vi.fn(),
   getRoles: vi.fn(),
   removeGroupLogo: vi.fn(),
   updateGroupSettings: vi.fn(),
-  updateGroupNotificationSettings: vi.fn(),
   updatePlanningSettings: vi.fn(),
   updateGroupName: vi.fn(),
   uploadGroupLogo: vi.fn(),
@@ -55,8 +53,8 @@ describe('BehaviorSettingsPanel', () => {
   const settings: GroupSettings = {
     defaultTheme: 'TEAMTALER',
     settlementsEnabled: false,
-    notificationEmailsEnabled: false,
-    notificationEmailDeliveryAvailable: true,
+    settlementDueSoonDays: 3,
+    settlementOverdueRepeatDays: 7,
     defaultRoleId: 'role-member',
     ownBookingReasonMode: 'OFF',
     foreignBookingReasonMode: 'REQUIRED',
@@ -74,28 +72,11 @@ describe('BehaviorSettingsPanel', () => {
     bookingReasons: [],
     paymentReasons: [],
   };
-  const notificationSettings: GroupNotificationSettings = {
-    version: 1,
-    timezone: 'Europe/Berlin',
-    dueSoonLeadDays: 3,
-    overdueRepeatDays: 7,
-    channels: { email: true, push: false },
-    events: [{
-      eventType: 'BOOKING_ASSIGNED',
-      category: 'booking',
-      name: 'Booking assigned',
-      description: 'A booking was assigned.',
-      supportedChannels: ['EMAIL', 'PUSH'],
-      enabled: true,
-    }],
-  };
-
   beforeEach(() => {
     vi.clearAllMocks();
     session.groups[0]!.currency = 'EUR';
     session.groups[0]!.membership!.effectiveGrants = [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } }];
     apiMock.getGroupSettings.mockResolvedValue(settings);
-    apiMock.getGroupNotificationSettings.mockResolvedValue(notificationSettings);
     apiMock.getPlanningSettings.mockResolvedValue({ enabled: false, version: 1, timeZone: 'Europe/Berlin' });
     apiMock.getRoles.mockResolvedValue(roles);
   });
@@ -125,7 +106,7 @@ describe('BehaviorSettingsPanel', () => {
 
   it('removes the legacy booking-visibility switch from the new settings UI', async () => {
     renderPanel();
-    expect(await screen.findByRole('switch', { name: i18n.t('behaviorSettings.notifications.enableEvent', { event: i18n.t('notifications.preferences.events.bookingAssigned.label') }) })).toBeVisible();
+    expect(await screen.findByRole('region', { name: i18n.t('behaviorSettings.groupSectionTitle') })).toBeVisible();
     expect(screen.queryByRole('switch', { name: i18n.t('behaviorSettings.bookingVisibilityToggle') })).not.toBeInTheDocument();
   });
 
@@ -134,7 +115,7 @@ describe('BehaviorSettingsPanel', () => {
 
     expect(screen.queryByRole('heading', { level: 2, name: i18n.t('behaviorSettings.title') })).not.toBeInTheDocument();
     expect(await screen.findByRole('region', { name: i18n.t('behaviorSettings.groupSectionTitle') })).toBeVisible();
-    expect(await screen.findByRole('region', { name: i18n.t('behaviorSettings.notifications.title') })).toBeVisible();
+    expect(screen.queryByText(i18n.t('notifications.preferences.title'))).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: i18n.t('behaviorSettings.rolesMembersSectionTitle') })).not.toBeInTheDocument();
     expect(await screen.findByRole('region', { name: i18n.t('behaviorSettings.defaultRoleTitle') })).toBeVisible();
     expect(screen.getByLabelText(i18n.t('behaviorSettings.defaultRoleFieldLabel'))).toHaveValue('role-member');
@@ -162,6 +143,21 @@ describe('BehaviorSettingsPanel', () => {
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['periods', 'group-a'] });
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['settlements', 'group-a'] });
     expect(removeQueries).toHaveBeenCalledWith({ queryKey: ['notification-preferences', 'group-a'] });
+  });
+
+  it('persists reminder cadence from the settlement section', async () => {
+    const user = userEvent.setup();
+    apiMock.getGroupSettings.mockResolvedValue({ ...settings, settlementsEnabled: true });
+    apiMock.updateGroupSettings.mockResolvedValue({ ...settings, settlementsEnabled: true, settlementDueSoonDays: 5, settlementOverdueRepeatDays: 10 });
+    renderPanel();
+
+    await user.clear(await screen.findByLabelText(i18n.t('behaviorSettings.settlementDueSoonDays')));
+    await user.type(screen.getByLabelText(i18n.t('behaviorSettings.settlementDueSoonDays')), '5');
+    await user.clear(screen.getByLabelText(i18n.t('behaviorSettings.settlementOverdueRepeatDays')));
+    await user.type(screen.getByLabelText(i18n.t('behaviorSettings.settlementOverdueRepeatDays')), '10');
+    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
+
+    await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { settlementDueSoonDays: 5, settlementOverdueRepeatDays: 10 }));
   });
 
   it('confirms before staging settlement deactivation', async () => {
@@ -204,58 +200,6 @@ describe('BehaviorSettingsPanel', () => {
     await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { ownBookingReasonMode: 'OPTIONAL' }));
   });
 
-  it('saves the group event policy independently from channel availability', async () => {
-    const user = userEvent.setup();
-    apiMock.updateGroupNotificationSettings.mockResolvedValue({ ...notificationSettings, events: [{ ...notificationSettings.events[0], enabled: false }] });
-    renderPanel();
-    const toggle = await screen.findByRole('switch', { name: i18n.t('behaviorSettings.notifications.enableEvent', { event: i18n.t('notifications.preferences.events.bookingAssigned.label') }) });
-
-    await user.click(toggle);
-    await user.click(within(screen.getByRole('region', { name: i18n.t('behaviorSettings.notifications.title') })).getByRole('button', { name: i18n.t('common.save') }));
-
-    await waitFor(() => expect(apiMock.updateGroupNotificationSettings).toHaveBeenCalledWith('group-a', {
-      version: 1,
-      timezone: 'Europe/Berlin',
-      dueSoonLeadDays: 3,
-      overdueRepeatDays: 7,
-      events: [{ eventType: 'BOOKING_ASSIGNED', enabled: false }],
-    }));
-  });
-
-  it('groups notification events by their server-owned topic metadata', async () => {
-    apiMock.getGroupNotificationSettings.mockResolvedValue({
-      ...notificationSettings,
-      events: [
-        notificationSettings.events[0],
-        { eventType: 'PAYMENT_RECORDED', category: 'PAYMENTS', name: 'Payment recorded', description: 'A payment was recorded.', supportedChannels: ['EMAIL', 'PUSH'], enabled: true },
-        { eventType: 'PLANNING_EVENT_PUBLISHED', category: 'PLANNING', name: 'Planning event published', description: 'A planning event was published.', supportedChannels: ['EMAIL', 'PUSH'], enabled: true },
-        { eventType: 'SETTLEMENT_CREATED', category: 'SETTLEMENTS', name: 'Settlement created', description: 'A settlement was created.', supportedChannels: ['EMAIL', 'PUSH'], enabled: true },
-      ],
-    });
-    renderPanel();
-
-    const notificationRegion = await screen.findByRole('region', { name: i18n.t('behaviorSettings.notifications.title') });
-    expect(within(notificationRegion).getAllByRole('heading', { level: 5 }).map((heading) => heading.textContent)).toEqual([
-      i18n.t('behaviorSettings.notifications.categories.BOOKINGS'),
-      i18n.t('behaviorSettings.notifications.categories.PAYMENTS'),
-      i18n.t('behaviorSettings.notifications.categories.PLANNING'),
-      i18n.t('behaviorSettings.notifications.categories.SETTLEMENTS'),
-    ]);
-    const planningCategory = i18n.t('behaviorSettings.notifications.categories.PLANNING');
-    expect(within(within(notificationRegion).getByRole('region', { name: i18n.t('behaviorSettings.notifications.categoryLabel', { category: planningCategory }) })).getByRole('switch', {
-      name: i18n.t('behaviorSettings.notifications.enableEvent', { event: i18n.t('notifications.preferences.events.planningPublished.label') }),
-    })).toBeVisible();
-  });
-
-  it('keeps event policy editable while unavailable channels are explained', async () => {
-    apiMock.getGroupNotificationSettings.mockResolvedValue({ ...notificationSettings, channels: { email: false, push: false } });
-    renderPanel();
-
-    expect(await screen.findByRole('switch', { name: i18n.t('behaviorSettings.notifications.enableEvent', { event: i18n.t('notifications.preferences.events.bookingAssigned.label') }) })).toBeEnabled();
-    expect(screen.getByText(i18n.t('behaviorSettings.notifications.emailUnavailable'))).toBeVisible();
-    expect(screen.getByText(i18n.t('behaviorSettings.notifications.pushUnavailable'))).toBeVisible();
-  });
-
   it('shows a localized error when settings cannot be loaded', async () => {
     apiMock.getGroupSettings.mockRejectedValue(new Error('denied'));
     renderPanel();
@@ -295,7 +239,6 @@ describe('BehaviorSettingsPanel', () => {
     await waitFor(() => expect(apiMock.getGroupSettings).toHaveBeenCalled());
     expect(screen.queryByRole('region', { name: i18n.t('behaviorSettings.defaultRoleTitle') })).not.toBeInTheDocument();
     expect(screen.queryByLabelText(i18n.t('groupSettings.nameLabel'))).not.toBeInTheDocument();
-    expect(screen.queryByRole('switch', { name: i18n.t('behaviorSettings.notificationEmailToggle') })).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: i18n.t('behaviorSettings.financeSectionTitle') })).not.toBeInTheDocument();
     expect(apiMock.getRoles).not.toHaveBeenCalled();
   });
@@ -319,7 +262,6 @@ describe('BehaviorSettingsPanel', () => {
     expect(await screen.findByRole('region', { name: i18n.t('behaviorSettings.bookingTitle') })).toBeVisible();
     expect(screen.queryByLabelText(i18n.t('groupSettings.nameLabel'))).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: i18n.t('behaviorSettings.defaultRoleTitle') })).not.toBeInTheDocument();
-    expect(screen.queryByRole('switch', { name: i18n.t('behaviorSettings.notificationEmailToggle') })).not.toBeInTheDocument();
     expect(apiMock.getRoles).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') })).toBeVisible();
   });
@@ -330,7 +272,6 @@ describe('BehaviorSettingsPanel', () => {
 
     expect(await screen.findByRole('region', { name: i18n.t('behaviorSettings.defaultRoleTitle') })).toBeVisible();
     expect(screen.queryByLabelText(i18n.t('groupSettings.nameLabel'))).not.toBeInTheDocument();
-    expect(screen.queryByRole('switch', { name: i18n.t('behaviorSettings.notificationEmailToggle') })).not.toBeInTheDocument();
     expect(apiMock.getRoles).toHaveBeenCalled();
   });
 

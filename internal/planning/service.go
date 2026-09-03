@@ -155,7 +155,14 @@ type EventListQuery struct {
 type Service struct {
 	// DB stores events, series, participation, audit records, and durable tasks.
 	DB *sql.DB
+	// ResolveTimeZone resolves the installation-wide IANA time zone in the
+	// caller's business transaction. A nil resolver uses Europe/Berlin.
+	ResolveTimeZone TimeZoneResolver
 }
+
+// TimeZoneResolver returns the effective installation-wide IANA time zone in
+// the caller's current business transaction.
+type TimeZoneResolver func(context.Context, *sql.Tx) (string, error)
 
 func require(ctx context.Context, q authorization.Queryer, m domain.Membership, p domain.PermissionKey) error {
 	return authorization.Require(ctx, q, m.GroupID, m.ID, p, authorization.GroupResource(m.GroupID))
@@ -194,7 +201,7 @@ func enabled(ctx context.Context, q interface {
 	return nil
 }
 
-// GetSettings returns the planning feature gate and group time zone visible to
+// GetSettings returns the planning feature gate and installation time zone visible to
 // a membership with planning-use or group-administration permission.
 //
 // m supplies the tenant boundary and authorization subject. The method returns
@@ -202,11 +209,18 @@ func enabled(ctx context.Context, q interface {
 //
 // Example: settings, err := service.GetSettings(ctx, membership).
 func (s Service) GetSettings(ctx context.Context, m domain.Membership) (Settings, error) {
-	if err := requireAny(ctx, s.DB, m, domain.PermissionUsePlanning, domain.PermissionGroupAdministration); err != nil {
-		return Settings{}, err
-	}
 	var v Settings
-	err := s.DB.QueryRowContext(ctx, `SELECT planning.enabled,planning.version,planning.updated_at,notifications.timezone FROM group_planning_settings planning JOIN group_notification_settings notifications ON notifications.group_id=planning.group_id WHERE planning.group_id=?`, m.GroupID).Scan(&v.Enabled, &v.Version, &v.UpdatedAt, &v.TimeZone)
+	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		if err := requireAny(ctx, tx, m, domain.PermissionUsePlanning, domain.PermissionGroupAdministration); err != nil {
+			return err
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT enabled,version,updated_at FROM group_planning_settings WHERE group_id=?`, m.GroupID).Scan(&v.Enabled, &v.Version, &v.UpdatedAt); err != nil {
+			return err
+		}
+		var err error
+		v.TimeZone, err = s.timeZone(ctx, tx)
+		return err
+	})
 	return v, err
 }
 
@@ -242,7 +256,11 @@ func (s Service) UpdateSettings(ctx context.Context, a domain.Principal, m domai
 		if err := audit.Record(ctx, tx, m.GroupID, a.UserID, m.ID, "group.planning_settings.updated", "group_planning_settings", m.GroupID, map[string]any{"enabled": on}); err != nil {
 			return err
 		}
-		return tx.QueryRowContext(ctx, `SELECT planning.enabled,planning.version,planning.updated_at,notifications.timezone FROM group_planning_settings planning JOIN group_notification_settings notifications ON notifications.group_id=planning.group_id WHERE planning.group_id=?`, m.GroupID).Scan(&out.Enabled, &out.Version, &out.UpdatedAt, &out.TimeZone)
+		if err := tx.QueryRowContext(ctx, `SELECT enabled,version,updated_at FROM group_planning_settings WHERE group_id=?`, m.GroupID).Scan(&out.Enabled, &out.Version, &out.UpdatedAt); err != nil {
+			return err
+		}
+		out.TimeZone, err = s.timeZone(ctx, tx)
+		return err
 	})
 	if err == nil && on {
 		_, err = s.materializeGroupSeries(ctx, m.GroupID, platform.Now().AddDate(1, 0, 0))
@@ -396,20 +414,35 @@ func calendarDateBoundary(field string, date time.Time, location *time.Location)
 	return boundary, nil
 }
 
-func planningGroupTimeZone(ctx context.Context, queryer interface {
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-}, groupID, requested string) (string, error) {
-	var pinned string
-	if err := queryer.QueryRowContext(ctx, `SELECT timezone FROM group_notification_settings WHERE group_id=?`, groupID).Scan(&pinned); err != nil {
-		return "", err
+func (s Service) timeZone(ctx context.Context, tx *sql.Tx) (string, error) {
+	pinned := "Europe/Berlin"
+	var err error
+	if s.ResolveTimeZone != nil {
+		pinned, err = s.ResolveTimeZone(ctx, tx)
+		if err != nil {
+			return "", err
+		}
 	}
 	pinned = strings.TrimSpace(pinned)
 	if _, err := time.LoadLocation(pinned); err != nil {
-		return "", domain.ValidationError{Field: "timeZone", Message: "the group time zone is invalid"}
+		return "", domain.ValidationError{Field: "timeZone", Message: "the installation time zone is invalid"}
+	}
+	return pinned, nil
+}
+
+func (s Service) planningTimeZone(ctx context.Context, requested string) (string, error) {
+	var pinned string
+	err := storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
+		var err error
+		pinned, err = s.timeZone(ctx, tx)
+		return err
+	})
+	if err != nil {
+		return "", err
 	}
 	requested = strings.TrimSpace(requested)
 	if requested != "" && requested != pinned {
-		return "", domain.ValidationError{Field: "timeZone", Message: "must match the group time zone"}
+		return "", domain.ValidationError{Field: "timeZone", Message: "must match the installation time zone"}
 	}
 	return pinned, nil
 }
@@ -440,7 +473,7 @@ func (s Service) CreateEvent(ctx context.Context, a domain.Principal, m domain.M
 	if !in.AllDay && requestedTimeZone != "" {
 		return Event{}, domain.ValidationError{Field: "timeZone", Message: "must be omitted for a timed event"}
 	}
-	pinned, err := planningGroupTimeZone(ctx, s.DB, m.GroupID, requestedTimeZone)
+	pinned, err := s.planningTimeZone(ctx, requestedTimeZone)
 	if err != nil {
 		return Event{}, err
 	}

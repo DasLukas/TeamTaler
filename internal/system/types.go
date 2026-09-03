@@ -22,6 +22,8 @@ const (
 	SettingInstanceName SettingKey = "instance.name"
 	// SettingDefaultCurrency controls the currency assigned to new groups.
 	SettingDefaultCurrency SettingKey = "instance.default_currency"
+	// SettingTimeZone controls the installation-wide IANA scheduling time zone.
+	SettingTimeZone SettingKey = "instance.timezone"
 	// SettingMediaUploadMaxBytes controls the maximum accepted source-media size.
 	SettingMediaUploadMaxBytes SettingKey = "media.upload_max_bytes"
 	// SettingAttachmentUploadMaxBytes controls the maximum payment receipt size.
@@ -65,6 +67,7 @@ func AllSettingKeys() []SettingKey {
 var allSettingKeys = []SettingKey{
 	SettingInstanceName,
 	SettingDefaultCurrency,
+	SettingTimeZone,
 	SettingMediaUploadMaxBytes,
 	SettingAttachmentUploadMaxBytes,
 	SettingPublicJoinEnabled,
@@ -208,6 +211,7 @@ type WebPushSettings struct {
 type Defaults struct {
 	InstanceName             string
 	DefaultCurrency          string
+	TimeZone                 string
 	MediaUploadMaxBytes      int64
 	AttachmentUploadMaxBytes int64
 	PublicJoinEnabled        bool
@@ -225,6 +229,7 @@ type Settings struct {
 	Revision                       int64           `json:"revision"`
 	InstanceName                   Setting[string] `json:"instanceName"`
 	DefaultCurrency                Setting[string] `json:"defaultCurrency"`
+	TimeZone                       Setting[string] `json:"timeZone"`
 	MediaUploadMaxBytes            Setting[int64]  `json:"mediaUploadMaxBytes"`
 	MediaUploadHardLimitBytes      int64           `json:"mediaUploadHardLimitBytes"`
 	AttachmentUploadMaxBytes       Setting[int64]  `json:"attachmentUploadMaxBytes"`
@@ -264,6 +269,7 @@ type WebPushPatch struct {
 type SettingsPatch struct {
 	InstanceName             *string       `json:"instanceName,omitempty"`
 	DefaultCurrency          *string       `json:"defaultCurrency,omitempty"`
+	TimeZone                 *string       `json:"timeZone,omitempty"`
 	MediaUploadMaxBytes      *int64        `json:"mediaUploadMaxBytes,omitempty"`
 	AttachmentUploadMaxBytes *int64        `json:"attachmentUploadMaxBytes,omitempty"`
 	PublicJoinEnabled        *bool         `json:"publicJoinEnabled,omitempty"`

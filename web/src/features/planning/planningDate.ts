@@ -102,7 +102,7 @@ export interface DefaultPlanningTimeRange {
 }
 
 /**
- * Builds the next full-hour planning range in the group time zone.
+ * Builds the next full-hour planning range in the installation time zone.
  *
  * When a calendar date is supplied, the start keeps that exact date and only
  * borrows the suggested time of day. A skipped DST hour falls back to noon on

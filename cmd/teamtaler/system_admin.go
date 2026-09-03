@@ -202,9 +202,10 @@ func systemSettingsCommand(ctx context.Context, runtime *localSystemRuntime, arg
 		if *jsonOutput {
 			return writeCommandJSON(settings)
 		}
-		fmt.Printf("Revision: %d\nInstance name: %s (%s)\nDefault currency: %s (%s)\nMedia upload bytes: %d (%s; allowed maximum %d)\nAttachment upload bytes: %d (%s; allowed maximum %d)\nPublic join: %t\nMaintenance: %t\n",
+		fmt.Printf("Revision: %d\nInstance name: %s (%s)\nDefault currency: %s (%s)\nTime zone: %s (%s)\nMedia upload bytes: %d (%s; allowed maximum %d)\nAttachment upload bytes: %d (%s; allowed maximum %d)\nPublic join: %t\nMaintenance: %t\n",
 			settings.Revision, settings.InstanceName.Value, settings.InstanceName.Source,
 			settings.DefaultCurrency.Value, settings.DefaultCurrency.Source,
+			settings.TimeZone.Value, settings.TimeZone.Source,
 			settings.MediaUploadMaxBytes.Value, settings.MediaUploadMaxBytes.Source, settings.MediaUploadHardLimitBytes,
 			settings.AttachmentUploadMaxBytes.Value, settings.AttachmentUploadMaxBytes.Source, settings.AttachmentUploadHardLimitBytes,
 			settings.PublicJoinEnabled.Value, settings.MaintenanceMode.Value)
@@ -214,6 +215,7 @@ func systemSettingsCommand(ctx context.Context, runtime *localSystemRuntime, arg
 		revision := flags.Int64("revision", 0, "expected settings revision (defaults to current)")
 		instanceName := flags.String("instance-name", "", "instance display name")
 		currency := flags.String("default-currency", "", "default three-letter currency")
+		timeZone := flags.String("time-zone", "", "installation-wide IANA time zone")
 		mediaBytes := flags.Int64("media-upload-max-bytes", 0, "whole-MiB raw media limit in bytes (1048576 through 26214400)")
 		attachmentBytes := flags.Int64("attachment-upload-max-bytes", 0, "whole-MiB receipt limit in bytes (1048576 through 52428800)")
 		publicJoin := flags.String("public-join-enabled", "", "true or false")
@@ -230,6 +232,9 @@ func systemSettingsCommand(ctx context.Context, runtime *localSystemRuntime, arg
 		}
 		if visited["default-currency"] {
 			patch.DefaultCurrency = currency
+		}
+		if visited["time-zone"] {
+			patch.TimeZone = timeZone
 		}
 		if visited["media-upload-max-bytes"] {
 			patch.MediaUploadMaxBytes = mediaBytes
@@ -254,7 +259,7 @@ func systemSettingsCommand(ctx context.Context, runtime *localSystemRuntime, arg
 		if visited["maintenance-message"] {
 			patch.MaintenanceMessage = maintenanceMessage
 		}
-		if patch.InstanceName == nil && patch.DefaultCurrency == nil && patch.MediaUploadMaxBytes == nil && patch.AttachmentUploadMaxBytes == nil &&
+		if patch.InstanceName == nil && patch.DefaultCurrency == nil && patch.TimeZone == nil && patch.MediaUploadMaxBytes == nil && patch.AttachmentUploadMaxBytes == nil &&
 			patch.PublicJoinEnabled == nil && patch.MaintenanceMode == nil && patch.MaintenanceMessage == nil {
 			return errors.New("at least one system setting flag is required")
 		}

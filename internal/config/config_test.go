@@ -270,6 +270,7 @@ func TestLoadReadsMutableInstanceDefaults(t *testing.T) {
 	want := InstanceDefaults{
 		InstanceName:             "Example TeamTaler",
 		DefaultCurrency:          "USD",
+		TimeZone:                 "Europe/Berlin",
 		MediaUploadMaxBytes:      10 << 20,
 		AttachmentUploadMaxBytes: DefaultAttachmentUploadBytes,
 		PublicJoinEnabled:        false,
@@ -290,6 +291,7 @@ func TestLoadRejectsUnsafeMutableInstanceDefaults(t *testing.T) {
 	}{
 		{name: "instance controls", variable: "TEAMTALER_INSTANCE_NAME", value: "Unsafe\nName"},
 		{name: "currency", variable: "TEAMTALER_DEFAULT_CURRENCY", value: "EURO"},
+		{name: "time zone", variable: "TEAMTALER_TIMEZONE", value: "Mars/Olympus"},
 		{name: "media too small", variable: "TEAMTALER_MEDIA_UPLOAD_MAX_BYTES", value: "1024"},
 		{name: "media fractional MiB", variable: "TEAMTALER_MEDIA_UPLOAD_MAX_BYTES", value: "1310720"},
 		{name: "public join boolean", variable: "TEAMTALER_PUBLIC_JOIN_ENABLED", value: "yes"},

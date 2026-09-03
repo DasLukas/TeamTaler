@@ -101,6 +101,8 @@ type InstanceDefaults struct {
 	InstanceName string
 	// DefaultCurrency is preselected when a system administrator creates a group.
 	DefaultCurrency string
+	// TimeZone is the installation-wide IANA time zone used by schedules.
+	TimeZone string
 	// MediaUploadMaxBytes limits raw image input before decoding.
 	MediaUploadMaxBytes int64
 	// AttachmentUploadMaxBytes limits payment receipt input before normalization.
@@ -238,6 +240,13 @@ func loadInstanceDefaults() (InstanceDefaults, error) {
 	if !isCurrencyCode(defaultCurrency) {
 		return InstanceDefaults{}, fmt.Errorf("TEAMTALER_DEFAULT_CURRENCY must be a three-letter uppercase currency code")
 	}
+	timeZone := strings.TrimSpace(env("TEAMTALER_TIMEZONE", "Europe/Berlin"))
+	if timeZone == "" || timeZone == "Local" || len(timeZone) > 120 {
+		return InstanceDefaults{}, fmt.Errorf("TEAMTALER_TIMEZONE must be a valid IANA time zone")
+	}
+	if _, err := time.LoadLocation(timeZone); err != nil {
+		return InstanceDefaults{}, fmt.Errorf("TEAMTALER_TIMEZONE must be a valid IANA time zone")
+	}
 	mediaUploadMaxBytes, err := strconv.ParseInt(env("TEAMTALER_MEDIA_UPLOAD_MAX_BYTES", strconv.FormatInt(DefaultMediaUploadBytes, 10)), 10, 64)
 	if err != nil || mediaUploadMaxBytes < MinimumMediaUploadBytes || mediaUploadMaxBytes > MaximumMediaUploadBytes || mediaUploadMaxBytes%MediaUploadUnitBytes != 0 {
 		return InstanceDefaults{}, fmt.Errorf("TEAMTALER_MEDIA_UPLOAD_MAX_BYTES must be a whole MiB value between %d and %d", MinimumMediaUploadBytes, MaximumMediaUploadBytes)
@@ -261,6 +270,7 @@ func loadInstanceDefaults() (InstanceDefaults, error) {
 	return InstanceDefaults{
 		InstanceName:             instanceName,
 		DefaultCurrency:          defaultCurrency,
+		TimeZone:                 timeZone,
 		MediaUploadMaxBytes:      mediaUploadMaxBytes,
 		AttachmentUploadMaxBytes: attachmentUploadMaxBytes,
 		PublicJoinEnabled:        publicJoinEnabled,

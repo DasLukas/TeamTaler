@@ -125,6 +125,7 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	notificationService := notifications.Service{
 		DB: db, EmailDeliveryAvailable: emailInfrastructureAvailable, PushDeliveryAvailable: pushSecrets != nil,
 	}
+	notificationService.ResolveTimeZone = systemService.ResolveTimeZoneTx
 	notificationService.ResolveChannelAvailability = func(ctx context.Context, tx *sql.Tx) (notifications.ChannelAvailability, error) {
 		availability, err := systemService.ResolveNotificationChannelsTx(ctx, tx)
 		if err != nil {
@@ -166,7 +167,7 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 		finance:            finance.Service{DB: db, Notifications: notificationService, Attachments: paymentattachments.Store{DataDirectory: cfg.DataDirectory}},
 		exports:            exportService,
 		periods:            periods.Service{DB: db, Notifications: notificationService},
-		planning:           planning.Service{DB: db},
+		planning:           planning.Service{DB: db, ResolveTimeZone: systemService.ResolveTimeZoneTx},
 		notifications:      notificationService,
 		systemAdmin:        systemService,
 		pushSubscriptions:  pushSubscriptions,
@@ -241,8 +242,6 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/settings", server.handleGetGroupSettings)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/settings", server.handleUpdateGroupSettings)
 	mux.HandleFunc("PUT /api/v1/groups/{groupID}/theme-preference", server.handleUpdateThemePreference)
-	mux.HandleFunc("GET /api/v1/groups/{groupID}/notification-settings", server.handleGetGroupNotificationSettings)
-	mux.HandleFunc("PUT /api/v1/groups/{groupID}/notification-settings", server.handleUpdateGroupNotificationSettings)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/notification-preferences", server.handleGetNotificationPreferences)
 	mux.HandleFunc("PUT /api/v1/groups/{groupID}/notification-preferences", server.handleUpdateNotificationPreferences)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/transaction-settings", server.handleGetTransactionSettings)

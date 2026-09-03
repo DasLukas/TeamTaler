@@ -385,8 +385,9 @@ func (mode AttachmentMode) Required() bool { return mode == AttachmentModeRequir
 // of one group.
 type GroupSettings struct {
 	DefaultTheme                 ThemeID            `json:"defaultTheme"`
-	NotificationEmailsEnabled    bool               `json:"notificationEmailsEnabled"`
 	SettlementsEnabled           bool               `json:"settlementsEnabled"`
+	SettlementDueSoonDays        int                `json:"settlementDueSoonDays"`
+	SettlementOverdueRepeatDays  int                `json:"settlementOverdueRepeatDays"`
 	DefaultRoleID                *string            `json:"defaultRoleId"`
 	OwnBookingReasonMode         ReasonMode         `json:"ownBookingReasonMode"`
 	ForeignBookingReasonMode     ReasonMode         `json:"foreignBookingReasonMode"`

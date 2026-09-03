@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { adaptDashboard, adaptGroupNotificationSettings, adaptPlanningEvent, adaptPlanningParticipant, adaptPlanningSeries, adaptPlanningSettings } from './adapters';
+import { adaptDashboard, adaptPlanningEvent, adaptPlanningParticipant, adaptPlanningSeries, adaptPlanningSettings } from './adapters';
 
 const baseEvent = {
   id: 'event-1', eventType: 'APPOINTMENT_POLL', status: 'PUBLISHED', title: 'Shift meal', startsAt: '2026-08-31T16:00:00Z', endsAt: null,
@@ -41,7 +41,7 @@ describe('planning adapters', () => {
     expect(event.participation.attending).toBe(2);
   });
 
-  it('adapts group timezone and structured series recurrence', () => {
+  it('adapts the installation timezone and structured series recurrence', () => {
     expect(adaptPlanningSettings({ enabled: true, version: 2, timeZone: 'Europe/Berlin' })).toMatchObject({ enabled: true, version: 2, timeZone: 'Europe/Berlin' });
     expect(adaptPlanningSeries({ id: 'series-1', status: 'PUBLISHED', timeZone: 'Europe/Berlin', eventType: 'APPOINTMENT_POLL', title: 'Meal', durationMinutes: 60, audienceType: 'SELECTED_TARGETS', targetRoleIds: ['role-1'], targetMembershipIds: ['member-1'], version: 1, recurrence: { frequency: 'WEEKLY', interval: 2, weekdays: ['MO', 'FR'], range: { type: 'COUNT', count: 8 } } })).toMatchObject({
       audience: { type: 'SELECTED_TARGETS', roleIds: ['role-1'], memberIds: ['member-1'] },
@@ -77,10 +77,4 @@ describe('planning adapters', () => {
     expect(dashboard.planning?.event.viewerParticipation?.status).toBe('MAYBE');
   });
 
-  it('keeps all four backend planning notification names configurable', () => {
-    const settings = adaptGroupNotificationSettings({});
-    expect(settings.events.filter((event) => event.eventType.startsWith('PLANNING_')).map((event) => event.eventType)).toEqual([
-      'PLANNING_EVENT_PUBLISHED', 'PLANNING_EVENT_UPDATED', 'PLANNING_EVENT_CANCELLED', 'PLANNING_WAITLIST_PROMOTED',
-    ]);
-  });
 });

@@ -70,6 +70,13 @@ function currencyOptionLabel(currency: string): string {
   return `${currency} - ${symbol}`;
 }
 
+/** Returns the browser-supported IANA time zones plus the currently persisted value. */
+function supportedTimeZones(current: string): string[] {
+  const internationalization = Intl as typeof Intl & { supportedValuesOf?: (key: 'timeZone') => string[] };
+  const available = internationalization.supportedValuesOf?.('timeZone') ?? ['Europe/Berlin', 'UTC'];
+  return [...new Set([current, 'UTC', ...available])].filter(Boolean).sort((left, right) => left.localeCompare(right));
+}
+
 interface ResetConfirmationDialogProps {
   errorMessage?: string;
   onClose: () => void;
@@ -121,7 +128,7 @@ function useResetSettingsMutation() {
   });
 }
 
-/** General identity, currency, and media-limit settings. */
+/** General identity, currency, time-zone, and media-limit settings. */
 function GeneralSettingsSection({ settings }: { settings: SystemSettings }) {
   const { t } = useTranslation();
   const mutation = useSettingsMutation();
@@ -129,6 +136,8 @@ function GeneralSettingsSection({ settings }: { settings: SystemSettings }) {
   const [resetOpen, setResetOpen] = useState(false);
   const [instanceName, setInstanceName] = useState(settings.instanceName.value);
   const [defaultCurrency, setDefaultCurrency] = useState(settings.defaultCurrency.value);
+  const [timeZone, setTimeZone] = useState(settings.timeZone.value);
+  const timeZones = useMemo(() => supportedTimeZones(settings.timeZone.value), [settings.timeZone.value]);
   const [mediaLimitMiB, setMediaLimitMiB] = useState(settings.mediaUploadMaxBytes.value / MEBIBYTE);
   const [attachmentLimitMiB, setAttachmentLimitMiB] = useState(settings.attachmentUploadMaxBytes.value / MEBIBYTE);
   const submit = (event: FormEvent) => {
@@ -140,6 +149,7 @@ function GeneralSettingsSection({ settings }: { settings: SystemSettings }) {
       update: {
         ...(instanceName.trim() !== settings.instanceName.value ? { instanceName: instanceName.trim() } : {}),
         ...(defaultCurrency !== settings.defaultCurrency.value ? { defaultCurrency } : {}),
+        ...(timeZone !== settings.timeZone.value ? { timeZone } : {}),
         ...(mediaUploadMaxBytes !== settings.mediaUploadMaxBytes.value ? { mediaUploadMaxBytes } : {}),
         ...(attachmentUploadMaxBytes !== settings.attachmentUploadMaxBytes.value ? { attachmentUploadMaxBytes } : {}),
       },
@@ -147,6 +157,7 @@ function GeneralSettingsSection({ settings }: { settings: SystemSettings }) {
   };
   const changed = instanceName.trim() !== settings.instanceName.value
     || defaultCurrency !== settings.defaultCurrency.value
+    || timeZone !== settings.timeZone.value
     || mediaLimitMiB * MEBIBYTE !== settings.mediaUploadMaxBytes.value
     || attachmentLimitMiB * MEBIBYTE !== settings.attachmentUploadMaxBytes.value;
   const pending = mutation.isPending || resetMutation.isPending;
@@ -155,6 +166,7 @@ function GeneralSettingsSection({ settings }: { settings: SystemSettings }) {
   const resetKeys: ResettableSystemSettingKey[] = [
     ...(settings.instanceName.source === 'DATABASE' ? ['instanceName' as const] : []),
     ...(settings.defaultCurrency.source === 'DATABASE' ? ['defaultCurrency' as const] : []),
+    ...(settings.timeZone.source === 'DATABASE' ? ['timeZone' as const] : []),
     ...(settings.mediaUploadMaxBytes.source === 'DATABASE' ? ['mediaUploadMaxBytes' as const] : []),
     ...(settings.attachmentUploadMaxBytes.source === 'DATABASE' ? ['attachmentUploadMaxBytes' as const] : []),
   ];
@@ -162,6 +174,7 @@ function GeneralSettingsSection({ settings }: { settings: SystemSettings }) {
     onSuccess: (persisted) => {
       setInstanceName(persisted.instanceName.value);
       setDefaultCurrency(persisted.defaultCurrency.value);
+      setTimeZone(persisted.timeZone.value);
       setMediaLimitMiB(persisted.mediaUploadMaxBytes.value / MEBIBYTE);
       setAttachmentLimitMiB(persisted.attachmentUploadMaxBytes.value / MEBIBYTE);
       setResetOpen(false);
@@ -188,6 +201,13 @@ function GeneralSettingsSection({ settings }: { settings: SystemSettings }) {
           </Field>
         </div>
         <div className={styles.fieldBlock}>
+          <Field hint={t('systemSettings.general.timeZoneHint')} htmlFor="system-time-zone" label={t('systemSettings.general.timeZone')}>
+            <SelectInput id="system-time-zone" onChange={(event) => setTimeZone(event.target.value)} required value={timeZone}>
+              {timeZones.map((zone) => <option key={zone} value={zone}>{zone}</option>)}
+            </SelectInput>
+          </Field>
+        </div>
+        <div className={styles.fieldBlock}>
           <Field hint={t('systemSettings.general.mediaLimitHint')} htmlFor="system-media-limit" label={t('systemSettings.general.mediaLimit')}>
             <TextInput id="system-media-limit" max={maximumMediaLimitMiB} min={1} onChange={(event) => setMediaLimitMiB(event.target.valueAsNumber)} required step={1} type="number" value={mediaLimitMiB} />
           </Field>
@@ -196,7 +216,7 @@ function GeneralSettingsSection({ settings }: { settings: SystemSettings }) {
         {mutation.isSuccess || resetMutation.isSuccess ? <p className={styles.success} role="status">{t('systemSettings.saved')}</p> : null}
         <div className={styles.actions}>
           <Button disabled={pending || resetKeys.length === 0} leadingIcon={<RotateCcw size={17} />} onClick={() => setResetOpen(true)} variant="secondary">{t('systemSettings.reset')}</Button>
-          <Button disabled={!changed || pending || !instanceName.trim() || !/^[A-Z]{3}$/.test(defaultCurrency) || !Number.isInteger(mediaLimitMiB) || mediaLimitMiB < 1 || mediaLimitMiB > maximumMediaLimitMiB || !Number.isInteger(attachmentLimitMiB) || attachmentLimitMiB < 1 || attachmentLimitMiB > maximumAttachmentLimitMiB} leadingIcon={<Save size={17} />} type="submit">{pending ? t('common.saving') : t('common.save')}</Button>
+          <Button disabled={!changed || pending || !instanceName.trim() || !timeZone || !/^[A-Z]{3}$/.test(defaultCurrency) || !Number.isInteger(mediaLimitMiB) || mediaLimitMiB < 1 || mediaLimitMiB > maximumMediaLimitMiB || !Number.isInteger(attachmentLimitMiB) || attachmentLimitMiB < 1 || attachmentLimitMiB > maximumAttachmentLimitMiB} leadingIcon={<Save size={17} />} type="submit">{pending ? t('common.saving') : t('common.save')}</Button>
         </div>
       </form>
       <ResetConfirmationDialog errorMessage={resetMutation.isError ? t('systemSettings.saveError') : undefined} onClose={() => setResetOpen(false)} onConfirm={reset} open={resetOpen} pending={resetMutation.isPending} sectionName={t('systemSettings.general.title')} />

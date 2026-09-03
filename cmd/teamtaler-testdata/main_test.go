@@ -77,7 +77,7 @@ func TestRunSeedsDiverseGermanEnvironment(t *testing.T) {
 		assertCount(t, ctx, db, `SELECT count(*) FROM group_reason_suggestions r JOIN groups g ON g.id=r.group_id WHERE g.name=? AND r.kind='BOOKING'`, []any{groupName}, 4)
 		assertCount(t, ctx, db, `SELECT count(*) FROM group_reason_suggestions r JOIN groups g ON g.id=r.group_id WHERE g.name=? AND r.kind='PAYMENT'`, []any{groupName}, 4)
 	}
-	assertCount(t, ctx, db, `SELECT count(*) FROM group_settings WHERE settlements_enabled=1 AND notification_emails_enabled=1`, nil, 2)
+	assertCount(t, ctx, db, `SELECT count(*) FROM group_settings WHERE settlements_enabled=1 AND settlement_due_soon_days=7 AND settlement_overdue_repeat_days=3`, nil, 2)
 	assertCount(t, ctx, db, `SELECT count(*) FROM group_planning_settings WHERE enabled=1`, nil, 2)
 	assertCount(t, ctx, db, `SELECT count(*) FROM planning_series WHERE status='PUBLISHED'`, nil, 12)
 	for eventType := range map[string]struct{}{
@@ -157,7 +157,6 @@ func TestRunSeedsDiverseGermanEnvironment(t *testing.T) {
 	assertCount(t, ctx, db, `SELECT count(*) FROM planning_participations WHERE status='YES'`, nil, 2)
 	assertCount(t, ctx, db, `SELECT count(*) FROM planning_participations WHERE status='MAYBE'`, nil, 2)
 	assertCount(t, ctx, db, `SELECT count(*) FROM planning_participations WHERE status='REGISTERED'`, nil, 4)
-	assertCount(t, ctx, db, `SELECT count(*) FROM group_notification_events`, nil, 28)
 	assertCount(t, ctx, db, `SELECT count(*) FROM membership_notification_channels`, nil, 308)
 	assertCount(t, ctx, db, `SELECT count(*) FROM roles`, nil, 10)
 	assertCount(t, ctx, db, `SELECT count(*) FROM roles WHERE preset_key='GROUP_ADMINISTRATOR'`, nil, 2)

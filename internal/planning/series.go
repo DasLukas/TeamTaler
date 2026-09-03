@@ -194,7 +194,7 @@ func (s Service) CreateSeries(ctx context.Context, actor domain.Principal, membe
 	if err := idempotency.ValidateKey(idempotencyKey); err != nil {
 		return SeriesCreateResult{}, err
 	}
-	location, timezone, err := s.seriesLocation(ctx, membership.GroupID)
+	location, timezone, err := s.seriesLocation(ctx)
 	if err != nil {
 		return SeriesCreateResult{}, err
 	}
@@ -750,7 +750,7 @@ func normalizeSeriesCommand(event *EventInput, recurrence *RecurrenceInput, loca
 		return domain.ValidationError{Field: "timeZone", Message: "must be omitted for a timed event"}
 	}
 	if event.AllDay && requested != "" && requested != location.String() {
-		return domain.ValidationError{Field: "timeZone", Message: "must match the group time zone"}
+		return domain.ValidationError{Field: "timeZone", Message: "must match the installation time zone"}
 	}
 	event.TimeZone = location.String()
 	if err := normalizeSeriesEvent(event); err != nil {
@@ -1385,9 +1385,9 @@ func seriesMutationBoundary(ctx context.Context, tx *sql.Tx, seriesID string, sc
 	return boundary, nil
 }
 
-func (s Service) seriesLocation(ctx context.Context, groupID string) (*time.Location, string, error) {
-	var timezone string
-	if err := s.DB.QueryRowContext(ctx, `SELECT timezone FROM group_notification_settings WHERE group_id=?`, groupID).Scan(&timezone); err != nil {
+func (s Service) seriesLocation(ctx context.Context) (*time.Location, string, error) {
+	timezone, err := s.planningTimeZone(ctx, "")
+	if err != nil {
 		return nil, "", err
 	}
 	location, err := time.LoadLocation(timezone)

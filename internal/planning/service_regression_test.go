@@ -20,6 +20,7 @@ type planningServiceFixture struct {
 	Service    Service
 	Principal  domain.Principal
 	Membership domain.Membership
+	TimeZone   *string
 }
 
 func openPlanningServiceFixture(t *testing.T) planningServiceFixture {
@@ -40,7 +41,8 @@ func openPlanningServiceFixture(t *testing.T) planningServiceFixture {
 		db.Close()
 		t.Fatalf("create fixture group: %v", err)
 	}
-	service := Service{DB: db}
+	timeZone := "Europe/Berlin"
+	service := Service{DB: db, ResolveTimeZone: func(context.Context, *sql.Tx) (string, error) { return timeZone, nil }}
 	settings, err := service.GetSettings(ctx, group.Membership)
 	if err != nil {
 		db.Close()
@@ -51,7 +53,7 @@ func openPlanningServiceFixture(t *testing.T) planningServiceFixture {
 		t.Fatalf("enable planning: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
-	return planningServiceFixture{DB: db, Service: service, Principal: principal, Membership: group.Membership}
+	return planningServiceFixture{DB: db, Service: service, Principal: principal, Membership: group.Membership, TimeZone: &timeZone}
 }
 
 func (fixture planningServiceFixture) addMember(t *testing.T, suffix, displayName string) (domain.Principal, domain.Membership) {

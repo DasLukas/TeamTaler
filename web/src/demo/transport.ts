@@ -287,8 +287,8 @@ export class DemoTransport {
   private groupSettings: GroupSettings = {
     defaultTheme: 'TEAMTALER',
     settlementsEnabled: false,
-    notificationEmailsEnabled: false,
-    notificationEmailDeliveryAvailable: true,
+    settlementDueSoonDays: 3,
+    settlementOverdueRepeatDays: 7,
     defaultRoleId: 'role-guest',
     ownBookingReasonMode: 'OFF',
     foreignBookingReasonMode: 'REQUIRED',
@@ -427,7 +427,7 @@ export class DemoTransport {
       const update = body as GroupSettingsUpdateInput;
       const updatesDefaultTheme = update.defaultTheme !== undefined;
       const updatesSettlements = update.settlementsEnabled !== undefined;
-      const updatesNotificationEmails = update.notificationEmailsEnabled !== undefined;
+      const updatesSettlementReminders = update.settlementDueSoonDays !== undefined || update.settlementOverdueRepeatDays !== undefined;
       const updatesDefaultRole = update.defaultRoleId !== undefined;
       const updatesTransactionSettings = update.ownBookingReasonMode !== undefined
         || update.foreignBookingReasonMode !== undefined
@@ -439,7 +439,7 @@ export class DemoTransport {
         || update.paymentMethods !== undefined
         || update.bookingReasons !== undefined
         || update.paymentReasons !== undefined;
-      if (!updatesDefaultTheme && !updatesSettlements && !updatesNotificationEmails && !updatesDefaultRole && !updatesTransactionSettings) throw new Error('At least one group setting is required.');
+      if (!updatesDefaultTheme && !updatesSettlements && !updatesSettlementReminders && !updatesDefaultRole && !updatesTransactionSettings) throw new Error('At least one group setting is required.');
       if (updatesDefaultTheme) {
         this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
         if (!isThemeId(update.defaultTheme)) throw new Error('The default theme is not supported.');
@@ -447,10 +447,10 @@ export class DemoTransport {
       if (updatesDefaultRole) {
         this.requireAnyPermission(groupId, ['ROLE_MANAGEMENT', 'GROUP_ADMINISTRATION']);
       }
-      if (updatesNotificationEmails) this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
-      if (updatesSettlements || updatesTransactionSettings) this.requireAnyPermission(groupId, ['GROUP_ADMINISTRATION', 'FINANCE_MANAGEMENT']);
+      if (updatesSettlements || updatesSettlementReminders || updatesTransactionSettings) this.requireAnyPermission(groupId, ['GROUP_ADMINISTRATION', 'FINANCE_MANAGEMENT']);
       if (updatesSettlements && typeof update.settlementsEnabled !== 'boolean') throw new Error('Settlement availability must be a boolean.');
-      if (updatesNotificationEmails && typeof update.notificationEmailsEnabled !== 'boolean') throw new Error('Notification email delivery must be a boolean.');
+      if (update.settlementDueSoonDays !== undefined && (!Number.isInteger(update.settlementDueSoonDays) || update.settlementDueSoonDays < 1 || update.settlementDueSoonDays > 30)) throw new Error('Settlement due-soon days must be between 1 and 30.');
+      if (update.settlementOverdueRepeatDays !== undefined && (!Number.isInteger(update.settlementOverdueRepeatDays) || update.settlementOverdueRepeatDays < 0 || update.settlementOverdueRepeatDays > 90)) throw new Error('Settlement overdue repeat days must be between 0 and 90.');
       const submittedReasonModes = [update.ownBookingReasonMode, update.foreignBookingReasonMode, update.ownPaymentReasonMode, update.otherPaymentReasonMode].filter((value) => value !== undefined);
       if (submittedReasonModes.some((value) => value !== 'OFF' && value !== 'OPTIONAL' && value !== 'REQUIRED')) throw new Error('Reason modes must be OFF, OPTIONAL, or REQUIRED.');
       if (updatesDefaultRole) {
@@ -478,7 +478,8 @@ export class DemoTransport {
         ...this.groupSettings,
         ...(updatesDefaultTheme ? { defaultTheme: update.defaultTheme as GroupSettings['defaultTheme'] } : {}),
         ...(updatesSettlements ? { settlementsEnabled: update.settlementsEnabled as boolean } : {}),
-        ...(updatesNotificationEmails ? { notificationEmailsEnabled: update.notificationEmailsEnabled as boolean } : {}),
+        ...(update.settlementDueSoonDays !== undefined ? { settlementDueSoonDays: update.settlementDueSoonDays } : {}),
+        ...(update.settlementOverdueRepeatDays !== undefined ? { settlementOverdueRepeatDays: update.settlementOverdueRepeatDays } : {}),
         ...(updatesDefaultRole ? { defaultRoleId: update.defaultRoleId as string } : {}),
         ...(update.ownBookingReasonMode !== undefined ? { ownBookingReasonMode: update.ownBookingReasonMode } : {}),
         foreignBookingReasonMode,

@@ -201,8 +201,8 @@ func openLifecycleFixture(t *testing.T) *sql.DB {
 		`INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES
 		 ('group-lifecycle','Lifecycle','EUR','2026-08-29T10:00:00Z','2026-08-29T10:00:00Z'),
 		 ('group-disabled','Disabled','EUR','2026-08-29T10:00:00Z','2026-08-29T10:00:00Z')`,
-		`INSERT INTO group_settings(group_id,members_can_view_all_bookings,notification_emails_enabled,updated_at) VALUES
-		 ('group-lifecycle',0,0,'2026-08-29T10:00:00Z'),('group-disabled',0,0,'2026-08-29T10:00:00Z')`,
+		`INSERT INTO group_settings(group_id,members_can_view_all_bookings,updated_at) VALUES
+		 ('group-lifecycle',0,'2026-08-29T10:00:00Z'),('group-disabled',0,'2026-08-29T10:00:00Z')`,
 		`INSERT INTO memberships(id,group_id,user_id,status,joined_at,temporary_guest_name_key) VALUES
 		 ('member-owner','group-lifecycle','user-owner','ACTIVE','2026-08-29T10:00:00Z',NULL),
 		 ('member-waiting','group-lifecycle','user-waiting','ACTIVE','2026-08-29T10:00:00Z',NULL),

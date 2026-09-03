@@ -116,6 +116,7 @@ func serve(arguments []string) error {
 	emailInfrastructureAvailable := len(cfg.EmailTokenKey) == 32
 	pushInfrastructureAvailable := pushSecrets != nil
 	notificationService := notifications.Service{DB: db, EmailDeliveryAvailable: emailInfrastructureAvailable, PushDeliveryAvailable: pushInfrastructureAvailable}
+	notificationService.ResolveTimeZone = systemService.ResolveTimeZoneTx
 	notificationService.ResolveChannelAvailability = func(ctx context.Context, tx *sql.Tx) (notifications.ChannelAvailability, error) {
 		availability, err := systemService.ResolveNotificationChannelsTx(ctx, tx)
 		if err != nil {

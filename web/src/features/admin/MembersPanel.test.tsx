@@ -3,8 +3,10 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { InvitationImportResult, InvitationMetadata, InvitationUpdateInput, Membership, Role, Session } from '@/api/types';
+import type { InstanceCapabilities, InvitationImportResult, InvitationMetadata, InvitationUpdateInput, Membership, Role, Session } from '@/api/types';
 import { ActiveGroupContext } from '@/app/active-group-context';
+import { SessionContext } from '@/app/session-context';
+import { DEFAULT_INSTANCE_CAPABILITIES } from '@/app/useSession';
 import modalStyles from '@/components/ui/Modal.module.css';
 import i18n from '@/i18n';
 import { MembersPanel } from './MembersPanel';
@@ -119,13 +121,18 @@ const invitationMetadata: InvitationMetadata[] = [{
  *
  * @returns The query client used by the rendered panel.
  */
-function renderMembers(activeSession: Session = session): QueryClient {
+function renderMembers(
+  activeSession: Session = session,
+  instanceCapabilities: InstanceCapabilities = { ...DEFAULT_INSTANCE_CAPABILITIES, emailNotificationsAvailable: true },
+): QueryClient {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>
-      <ActiveGroupContext.Provider value={{ session: activeSession, activeGroup: activeSession.groups[0], activeGroupId: 'group-a', setActiveGroupId: vi.fn() }}>
-        {children}
-      </ActiveGroupContext.Provider>
+      <SessionContext.Provider value={{ session: activeSession, instanceCapabilities }}>
+        <ActiveGroupContext.Provider value={{ session: activeSession, activeGroup: activeSession.groups[0], activeGroupId: 'group-a', setActiveGroupId: vi.fn() }}>
+          {children}
+        </ActiveGroupContext.Provider>
+      </SessionContext.Provider>
     </QueryClientProvider>
   );
   render(<MembersPanel />, { wrapper });
@@ -137,8 +144,8 @@ describe('MembersPanel invitations', () => {
     vi.clearAllMocks();
     apiMock.getMembers.mockResolvedValue(members);
     apiMock.getRoles.mockResolvedValue(roles);
-    apiMock.getGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
-    apiMock.updateGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-finance' });
+    apiMock.getGroupSettings.mockResolvedValue({ defaultRoleId: 'role-member' });
+    apiMock.updateGroupSettings.mockResolvedValue({ defaultRoleId: 'role-finance' });
     apiMock.getPublicJoinLink.mockResolvedValue({ enabled: false, expired: false, expiresAt: null, version: 0, emailVerificationAvailable: true });
   apiMock.getCategories.mockResolvedValue([]);
     apiMock.createInvitation.mockResolvedValue({
@@ -450,7 +457,7 @@ describe('MembersPanel invitations', () => {
 
   it('explains why a credentialless guest cannot be claimed before a default role is configured', async () => {
     apiMock.getMembers.mockResolvedValue([...members, temporaryGuest]);
-    apiMock.getGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: null });
+    apiMock.getGroupSettings.mockResolvedValue({ defaultRoleId: null });
     renderMembers();
 
     const claimButton = await screen.findByRole('button', { name: i18n.t('members.claimGuestFor', { name: temporaryGuest.displayName }) });
@@ -576,7 +583,6 @@ describe('MembersPanel invitations', () => {
       emailDeliveryStatus: 'NOT_REQUESTED',
       emailSentAt: undefined,
     };
-    apiMock.getGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: false, defaultRoleId: 'role-member' });
     apiMock.getInvitations.mockResolvedValue([linkOnlyInvitation]);
     apiMock.resendInvitationEmail.mockResolvedValue({
       invitationId: linkOnlyInvitation.id,
@@ -584,7 +590,7 @@ describe('MembersPanel invitations', () => {
       expiresAt: '2026-08-13T12:00:00Z',
       acceptUrl: 'https://teamtaler.example/invite#token=renewed-manual',
     });
-    renderMembers();
+    renderMembers(session, { ...DEFAULT_INSTANCE_CAPABILITIES, emailNotificationsAvailable: false });
 
     await user.click(await screen.findByRole('button', { name: i18n.t('members.resendFor', { email: linkOnlyInvitation.email }) }));
     const dialog = screen.getByRole('dialog', { name: i18n.t('members.resendTitle') });
@@ -603,7 +609,6 @@ describe('MembersPanel invitations', () => {
       emailDeliveryStatus: 'NOT_REQUESTED',
       emailSentAt: undefined,
     };
-    apiMock.getGroupSettings.mockResolvedValue({ notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' });
     apiMock.getInvitations.mockResolvedValue([previouslyManualInvitation]);
     apiMock.resendInvitationEmail.mockResolvedValue({
       invitationId: previouslyManualInvitation.id,

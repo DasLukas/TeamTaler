@@ -12,7 +12,6 @@ import type {
   Dashboard,
   EmailDeliveryStatus,
   Group,
-  GroupNotificationSettings,
   GroupSettings,
   GroupRole,
   InstanceCapabilities,
@@ -95,6 +94,9 @@ const NOTIFICATION_EVENT_TYPES: Notification['eventType'][] = [
   'PLANNING_EVENT_UPDATED',
   'PLANNING_EVENT_CANCELLED',
   'PLANNING_WAITLIST_PROMOTED',
+  'PLANNING_SERIES_PUBLISHED',
+  'PLANNING_SERIES_UPDATED',
+  'PLANNING_SERIES_CANCELLED',
   'DATA_EXPORT_READY',
   'DATA_EXPORT_FAILED',
 ];
@@ -110,6 +112,9 @@ const CONFIGURABLE_NOTIFICATION_EVENT_TYPES: ConfigurableNotificationEventType[]
   'PLANNING_EVENT_UPDATED',
   'PLANNING_EVENT_CANCELLED',
   'PLANNING_WAITLIST_PROMOTED',
+  'PLANNING_SERIES_PUBLISHED',
+  'PLANNING_SERIES_UPDATED',
+  'PLANNING_SERIES_CANCELLED',
 ];
 
 const participationStatus = (value: unknown): PlanningParticipationStatus | undefined => {
@@ -261,6 +266,7 @@ export function adaptSystemSettings(input: unknown): SystemSettings {
     revision: Number(source.revision ?? envelope.revision ?? 1),
     instanceName: stringSetting(source.instanceName, 'TeamTaler'),
     defaultCurrency: stringSetting(source.defaultCurrency, 'EUR'),
+    timeZone: stringSetting(source.timeZone, 'Europe/Berlin'),
     mediaUploadMaxBytes: numberSetting(source.mediaUploadMaxBytes, DEFAULT_MEDIA_UPLOAD_MAX_BYTES),
     attachmentUploadMaxBytes: numberSetting(source.attachmentUploadMaxBytes, DEFAULT_ATTACHMENT_UPLOAD_MAX_BYTES),
     publicJoinEnabled: booleanSetting(source.publicJoinEnabled, true),
@@ -306,45 +312,11 @@ function notificationEventDefinition(input: unknown, fallbackType?: unknown): No
   };
 }
 
-function notificationEventEntries(source: JsonRecord): unknown[] {
-  if (Array.isArray(source.events)) return source.events;
-  if (Array.isArray(source.catalog)) return source.catalog;
-  return CONFIGURABLE_NOTIFICATION_EVENT_TYPES;
-}
-
-/**
- * Normalizes the versioned group notification policy and its event catalog.
- *
- * @param input - Direct or enveloped response from the group notification-settings endpoint.
- * @returns A stable policy model with explicit channel availability.
- */
-export function adaptGroupNotificationSettings(input: unknown): GroupNotificationSettings {
-  const envelope = asRecord(input);
-  const source = envelope.notificationSettings && typeof envelope.notificationSettings === 'object'
-    ? asRecord(envelope.notificationSettings)
-    : envelope.settings && typeof envelope.settings === 'object' ? asRecord(envelope.settings) : envelope;
-  const enabledEvents = new Set(Array.isArray(source.enabledEvents) ? source.enabledEvents.map(String) : []);
-  const events = notificationEventEntries(source).flatMap((entry) => {
-    const definition = notificationEventDefinition(entry);
-    if (!definition) return [];
-    const event = entry && typeof entry === 'object' ? asRecord(entry) : {};
-    return [{ ...definition, enabled: event.enabled === true || enabledEvents.has(definition.eventType) }];
-  });
-  return {
-    version: Number(source.version ?? envelope.version ?? 1),
-    timezone: typeof source.timezone === 'string' && source.timezone ? source.timezone : 'Europe/Berlin',
-    dueSoonLeadDays: Number(source.dueSoonLeadDays ?? 3),
-    overdueRepeatDays: Number(source.overdueRepeatDays ?? 7),
-    channels: notificationChannelAvailability(source),
-    events,
-  };
-}
-
 /**
  * Normalizes the current member's per-event notification preference matrix.
  *
  * @param input - Direct or enveloped response from the notification-preferences endpoint.
- * @returns Effective group policy and independent Email/Push selections.
+ * @returns Independent Email/Push selections and current channel availability.
  */
 export function adaptNotificationPreferences(input: unknown): NotificationPreferences {
   const envelope = asRecord(input);
@@ -362,14 +334,12 @@ export function adaptNotificationPreferences(input: unknown): NotificationPrefer
     if (!definition) return [];
     const event = entry && typeof entry === 'object' ? asRecord(entry) : {};
     const selectedChannels = Array.isArray(event.channels) ? notificationChannels(event.channels) : [];
-    const enabled = event.enabled !== false && event.groupEnabled !== false;
     return [{
       ...definition,
-      enabled,
       email: event.email === true || selectedChannels.includes('EMAIL'),
       push: event.push === true || selectedChannels.includes('PUSH'),
-      emailAvailable: enabled && (event.emailAvailable === true || channels.email) && definition.supportedChannels.includes('EMAIL'),
-      pushAvailable: enabled && (event.pushAvailable === true || channels.push) && definition.supportedChannels.includes('PUSH'),
+      emailAvailable: (event.emailAvailable === true || channels.email) && definition.supportedChannels.includes('EMAIL'),
+      pushAvailable: (event.pushAvailable === true || channels.push) && definition.supportedChannels.includes('PUSH'),
     }];
   });
   return { version: Number(source.version ?? envelope.version ?? 1), channels, events };
@@ -531,8 +501,8 @@ export function adaptGroupSettings(input: unknown): GroupSettings {
   return {
     defaultTheme: isThemeId(source.defaultTheme) ? source.defaultTheme : 'TEAMTALER',
     settlementsEnabled: source.settlementsEnabled === true,
-    notificationEmailsEnabled: source.notificationEmailsEnabled === true,
-    notificationEmailDeliveryAvailable: source.notificationEmailDeliveryAvailable === true,
+    settlementDueSoonDays: Number(source.settlementDueSoonDays ?? 3),
+    settlementOverdueRepeatDays: Number(source.settlementOverdueRepeatDays ?? 7),
     defaultRoleId: typeof source.defaultRoleId === 'string' && source.defaultRoleId ? source.defaultRoleId : null,
     ownBookingReasonMode,
     foreignBookingReasonMode,

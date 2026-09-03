@@ -28,11 +28,17 @@
 .matrix thead th { border-top: 0; color: var(--color-text-muted); font-size: var(--font-size-sm); }
 .matrix th:first-child { width: 100%; min-width: 280px; text-align: left; }
 .matrix tbody th { display: grid; gap: var(--space-1); }
-.matrix tbody th span,
-.matrix tbody th small { color: var(--color-text-muted); font-size: var(--font-size-sm); font-weight: 400; }
-.matrix tr[data-disabled] { background: var(--color-surface-muted); }
+.matrix tbody th span { color: var(--color-text-muted); font-size: var(--font-size-sm); font-weight: 400; }
+.matrix .categoryRow th {
+  display: table-cell;
+  padding-block: var(--space-3);
+  color: var(--color-brand);
+  background: var(--color-surface-muted);
+  font-size: var(--font-size-sm);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
 .alwaysOn { display: inline-grid; width: 28px; height: 28px; place-items: center; border-radius: var(--radius-full); color: var(--color-status-success); background: var(--color-status-success-subtle); font-weight: 800; }
-.inactive { color: var(--color-text-muted); }
 .notice { padding: var(--space-4); border-radius: var(--radius-md); color: var(--color-text-muted); background: var(--color-surface-muted); font-size: var(--font-size-sm); }
 .footer { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
 .error { color: var(--color-status-danger); }
