@@ -441,7 +441,7 @@ export function ActivitiesPage() {
           isLoading={activitiesQuery.isLoading}
           isLoadingMore={activitiesQuery.isFetchingNextPage}
           labels={{ ...labels, searchLabel: t('activities.searchLabel'), searchPlaceholder: t('activities.searchPlaceholder') }}
-          minTableWidth="1480px"
+          minTableWidth="1680px"
           onFiltersChange={onFiltersChange}
           onLoadMore={() => void activitiesQuery.fetchNextPage()}
           onSearchChange={onSearchChange}

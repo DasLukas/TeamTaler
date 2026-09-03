@@ -197,6 +197,19 @@ describe('ActivitiesPage unified feed', () => {
     expect(apiMock.getActivitiesPage).toHaveBeenCalledWith('group-a', expect.objectContaining({ limit: 50, sort: 'occurredAt', direction: 'desc' }));
   });
 
+  it('reserves enough table width to keep receipt and reversal actions inline', async () => {
+    renderActivities();
+
+    const table = await screen.findByRole('table', { name: i18n.t('activities.title') });
+    const viewport = table.parentElement;
+    const receiptAction = await within(table).findByRole('button', { name: i18n.t('paymentAttachment.action') });
+    const paymentRow = receiptAction.closest('tr');
+
+    expect(viewport?.style.getPropertyValue('--data-table-min-width')).toBe('1680px');
+    expect(paymentRow).not.toBeNull();
+    expect(within(paymentRow as HTMLElement).getByRole('button', { name: i18n.t('activities.reverse') })).toBeVisible();
+  });
+
   it('renders audited reversals and links both entries without refetching loaded targets', async () => {
     const user = userEvent.setup();
     apiMock.getActivitiesPage.mockResolvedValue(activityPage([bookingReversal, reversedBooking]));

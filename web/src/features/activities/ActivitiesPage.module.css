@@ -74,15 +74,15 @@
   z-index: 1;
   top: 0;
 }
-.activityList th:nth-child(1) { width: 9%; }
+.activityList th:nth-child(1) { width: 8%; }
 .activityList th:nth-child(2) { width: 13%; }
 .activityList th:nth-child(3) { width: 13%; }
-.activityList th:nth-child(4) { width: 17%; }
+.activityList th:nth-child(4) { width: 15%; }
 .activityList th:nth-child(5) { width: 8%; }
 .activityList th:nth-child(6) { width: 12%; }
 .activityList th:nth-child(7) { width: 8%; }
 .activityList th:nth-child(8) { width: 10%; }
-.activityList th:nth-child(9) { width: 10%; }
+.activityList th:nth-child(9) { width: 13%; }
 .activityList td:nth-child(5) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .activityList td:nth-child(6),
 .activityList td:nth-child(7) { overflow-wrap: normal; white-space: nowrap; }
@@ -91,9 +91,8 @@
 .activityList td:last-child button { white-space: nowrap; }
 .rowActions { display: flex; align-items: center; justify-content: flex-start; gap: var(--space-1); }
 .activityList td:last-child .rowActions {
-  min-width: 0;
-  max-width: 100%;
-  flex-wrap: wrap;
+  min-width: max-content;
+  flex-wrap: nowrap;
 }
 .activityCard {
   min-width: 0;
@@ -197,25 +196,26 @@
 .reversalForm .windowNotice { padding: var(--space-3); border-radius: var(--radius-md); color: var(--color-brand); background: var(--color-surface-brand-subtle); font-size: var(--font-size-sm); }
 
 @media (min-width: 1800px) {
-  .activityList th:nth-child(1) { width: 9%; }
+  .activityList th:nth-child(1) { width: 8%; }
   .activityList th:nth-child(2) { width: 14%; }
   .activityList th:nth-child(3) { width: 14%; }
-  .activityList th:nth-child(4) { width: 16%; }
+  .activityList th:nth-child(4) { width: 14%; }
+  .activityList th:nth-child(5) { width: 7%; }
   .activityList th:nth-child(8) { width: 10%; }
-  .activityList th:nth-child(9) { width: 9%; }
+  .activityList th:nth-child(9) { width: 13%; }
 
 }
 
 @media (min-width: 768px) and (max-width: 1199px) {
-  .activityList th:nth-child(1) { width: 11%; }
+  .activityList th:nth-child(1) { width: 10%; }
   .activityList th:nth-child(2),
   .activityList th:nth-child(3) { width: 13%; }
-  .activityList th:nth-child(4) { width: 17%; }
+  .activityList th:nth-child(4) { width: 15%; }
   .activityList th:nth-child(5) { width: 7%; }
   .activityList th:nth-child(6) { width: 11%; }
   .activityList th:nth-child(7) { width: 7%; }
   .activityList th:nth-child(8) { width: 11%; }
-  .activityList th:nth-child(9) { width: 10%; }
+  .activityList th:nth-child(9) { width: 13%; }
 }
 
 @media (max-width: 767px) {
