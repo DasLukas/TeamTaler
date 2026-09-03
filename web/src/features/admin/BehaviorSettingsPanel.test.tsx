@@ -117,7 +117,10 @@ describe('BehaviorSettingsPanel', () => {
     expect(await screen.findByRole('region', { name: i18n.t('behaviorSettings.groupSectionTitle') })).toBeVisible();
     expect(screen.queryByText(i18n.t('notifications.preferences.title'))).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: i18n.t('behaviorSettings.rolesMembersSectionTitle') })).not.toBeInTheDocument();
-    expect(await screen.findByRole('region', { name: i18n.t('behaviorSettings.defaultRoleTitle') })).toBeVisible();
+    const defaultRoleRegion = await screen.findByRole('region', { name: i18n.t('behaviorSettings.defaultRoleTitle') });
+    const planningRegion = screen.getByRole('region', { name: i18n.t('behaviorSettings.planning.title') });
+    expect(defaultRoleRegion).toBeVisible();
+    expect(defaultRoleRegion.compareDocumentPosition(planningRegion) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByLabelText(i18n.t('behaviorSettings.defaultRoleFieldLabel'))).toHaveValue('role-member');
     expect(screen.getByLabelText(i18n.t('groupSettings.nameLabel'))).toHaveValue('Group A');
     expect(screen.getByLabelText(i18n.t('groupSettings.imageLabel'))).toBeVisible();

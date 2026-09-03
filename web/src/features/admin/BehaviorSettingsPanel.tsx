@@ -241,8 +241,8 @@ function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canMan
         <header><h3 id="group-settings-section-title">{t('behaviorSettings.groupSectionTitle')}</h3></header>
         {canManageGroup ? <GroupSettingsPanel embedded /> : null}
         {canManageGroup ? <DefaultThemeSetting groupId={groupId} key={`${groupId}:${settings.defaultTheme}`} settings={settings} /> : null}
-        {canManageGroup ? <PlanningSettingsSection groupId={groupId} /> : null}
         {canManageDefaultRole && roles ? <DefaultRoleSetting groupId={groupId} key={`${groupId}:${settings.defaultRoleId ?? ''}`} roles={roles} settings={settings} /> : null}
+        {canManageGroup ? <PlanningSettingsSection groupId={groupId} /> : null}
       </section>
 
       {canManageFinancialSettings ? <section aria-labelledby="finance-settings-title" className={styles.settingsSection}>
