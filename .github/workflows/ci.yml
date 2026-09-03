@@ -32,7 +32,10 @@ jobs:
       - name: Vet
         run: go vet ./cmd/... ./internal/... ./migrations
       - name: Test with race detector
-        run: go test -race -coverprofile=coverage.out ./cmd/... ./internal/... ./migrations
+        # SQLite-heavy packages each create fully migrated test databases. Limit
+        # package concurrency to prevent race-instrumented migrations from
+        # starving one another and exceeding Go's per-package timeout.
+        run: go test -race -p 2 -coverprofile=coverage.out ./cmd/... ./internal/... ./migrations
       - name: Build
         run: go build -trimpath ./cmd/teamtaler
       - name: Upload backend coverage
