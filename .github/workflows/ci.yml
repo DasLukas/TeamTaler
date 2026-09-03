@@ -31,18 +31,68 @@ jobs:
         run: test -z "$(gofmt -l cmd internal migrations)"
       - name: Vet
         run: go vet ./cmd/... ./internal/... ./migrations
-      - name: Test with race detector
-        # SQLite-heavy packages each create fully migrated test databases. Limit
-        # package concurrency to prevent race-instrumented migrations from
-        # starving one another and exceeding Go's per-package timeout.
-        run: go test -race -p 2 -coverprofile=coverage.out ./cmd/... ./internal/... ./migrations
       - name: Build
         run: go build -trimpath ./cmd/teamtaler
+
+  backend-race:
+    name: Backend race (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: core
+            packages: >-
+              ./cmd/...
+              ./internal/activities
+              ./internal/audit
+              ./internal/auth
+              ./internal/authorization
+              ./internal/backup
+              ./internal/bookings
+              ./internal/catalog
+              ./internal/config
+              ./internal/domain
+              ./internal/email
+              ./internal/exporting/...
+              ./internal/exportnotifications
+              ./internal/finance
+              ./internal/groups
+              ./internal/idempotency
+              ./internal/ledger
+              ./internal/media
+              ./internal/memberimport
+              ./internal/notifications
+              ./internal/paymentattachments
+              ./internal/periods
+              ./internal/platform
+              ./internal/tablequery
+              ./internal/webpush
+              ./migrations
+          - name: httpapi
+            packages: ./internal/httpapi
+          - name: integration
+            packages: ./internal/integration
+          - name: planning
+            packages: ./internal/planning
+          - name: storage-system
+            packages: ./internal/storage ./internal/system
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: 1.26.x
+          cache: true
+      - name: Test with race detector
+        run: go test -race -p 2 -coverprofile=coverage-${{ matrix.name }}.out ${{ matrix.packages }}
       - name: Upload backend coverage
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: backend-coverage
-          path: coverage.out
+          name: backend-coverage-${{ matrix.name }}
+          path: coverage-${{ matrix.name }}.out
 
   frontend:
     name: Frontend
@@ -80,6 +130,7 @@ jobs:
     name: Container smoke test
     needs:
       - backend
+      - backend-race
       - frontend
     runs-on: ubuntu-latest
     timeout-minutes: 20
