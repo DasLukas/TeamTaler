@@ -79,6 +79,7 @@ func (s *Server) handleGetNotificationPreferences(response http.ResponseWriter, 
 		writeProblem(response, request, err)
 		return
 	}
+	response.Header().Set("Cache-Control", "private, no-store")
 	response.Header().Set("ETag", versionETag(preferences.Version))
 	writeJSON(response, http.StatusOK, preferences)
 }

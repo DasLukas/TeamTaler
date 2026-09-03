@@ -8,17 +8,9 @@
   padding: calc(30px + var(--shell-safe-area-top, 0px)) 18px calc(24px + var(--shell-safe-area-bottom, 0px)) calc(18px + var(--shell-safe-area-left, 0px));
   color: var(--color-navigation-text);
   background: linear-gradient(165deg, var(--color-navigation) 0%, var(--color-navigation-gradient-end) 100%);
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
-  scrollbar-color: color-mix(in srgb, var(--color-navigation-text) 32%, transparent) transparent;
-  scrollbar-width: thin;
+  overflow: hidden;
   transition: width var(--motion-normal) ease, padding var(--motion-normal) ease;
 }
-
-.sidebar::-webkit-scrollbar { width: 5px; }
-.sidebar::-webkit-scrollbar-track { background: transparent; }
-.sidebar::-webkit-scrollbar-thumb { border-radius: var(--radius-full); background: color-mix(in srgb, var(--color-navigation-text) 32%, transparent); }
 
 .sidebarHeader {
   position: relative;
@@ -89,7 +81,11 @@
 .groupSelector { flex: 0 0 auto; }
 
 .nav {
+  position: relative;
   display: grid;
+  min-height: 0;
+  flex: 1 1 auto;
+  align-content: start;
   gap: var(--space-2);
   margin-top: 26px;
 }
@@ -144,11 +140,50 @@
 }
 
 .bottom {
+  flex: 0 0 auto;
   display: grid;
   gap: 0;
   margin-top: auto;
   padding-top: var(--space-4);
   border-top: 1px solid color-mix(in srgb, var(--color-navigation-text) 12%, transparent);
+}
+
+.overflowMenu {
+  position: fixed;
+  z-index: 90;
+  display: grid;
+  width: min(260px, calc(100vw - 24px));
+  max-height: calc(100dvh - 16px);
+  gap: 4px;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-md);
+  overflow-y: auto;
+}
+
+.overflowMenuLink {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-md);
+  color: var(--color-text-strong);
+  font-weight: 650;
+}
+
+.overflowMenuLink:hover,
+.overflowMenuActive {
+  color: var(--color-text-brand);
+  background: var(--color-surface-brand-subtle);
+}
+
+.overflowMenuLink:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: -2px;
 }
 
 @media (max-width: 767px) {

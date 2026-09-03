@@ -18,7 +18,7 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Custom statistics ranges use inclusive group-local `YYYY-MM-DD` bounds at the API boundary and half-open instants internally; an upper bound covering today or the future is capped at the response generation instant. Preset ranges and a maximum of 60 day, week, month, or year buckets are resolved by the server in the group's configured time zone.
 - The statistics reading path now prioritizes historical product and category bookings as purchase orientation, followed by compact booking activity and one finance trend. Membership composition, account-state distribution, category-charge, ledger-reconciliation, percentage comparison, and secondary finance panels were removed.
 - Alternate statistics table views and secondary finance charts were removed; the full authorized API response remains available as a stable accounting and privacy contract while the UI projects only the decision-relevant subset.
-- New groups grant statistics only to the editable `Finanzverwaltung` starter role. Migration `0046` maps direct `VIEW_GROUP_STATISTICS` grants to `VIEW_STATISTICS`, deliberately drops member-only and implied legacy access, and removes both legacy permission definitions.
+- New groups grant statistics only to the editable `Finanzverwaltung` starter role. Migration `0051` maps direct `VIEW_GROUP_STATISTICS` grants to `VIEW_STATISTICS`, deliberately drops member-only and implied legacy access, and removes both legacy permission definitions.
 
 ### Security
 

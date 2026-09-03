@@ -101,8 +101,8 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, name, curre
 // List returns all active groups and effective permissions for userID. ctx
 // bounds the query; an empty result is valid, while database errors are returned.
 func (s Service) List(ctx context.Context, userID string) ([]domain.Group, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT g.id,g.name,g.currency,g.logo_key,settings.default_theme,settings.statistics_enabled,m.id,m.status,m.theme_override,u.email,u.display_name,u.avatar_key
-		FROM memberships m JOIN groups g ON g.id=m.group_id JOIN group_settings settings ON settings.group_id=g.id JOIN users u ON u.id=m.user_id
+	rows, err := s.DB.QueryContext(ctx, `SELECT g.id,g.name,g.currency,g.logo_key,settings.default_theme,settings.statistics_enabled,planning.enabled,m.id,m.status,m.theme_override,u.email,u.display_name,u.avatar_key
+		FROM memberships m JOIN groups g ON g.id=m.group_id JOIN group_settings settings ON settings.group_id=g.id JOIN group_planning_settings planning ON planning.group_id=g.id JOIN users u ON u.id=m.user_id
 		WHERE m.user_id=? AND m.status='ACTIVE' AND g.status='ACTIVE' ORDER BY lower(g.name)`, userID)
 	if err != nil {
 		return nil, err
@@ -113,7 +113,7 @@ func (s Service) List(ctx context.Context, userID string) ([]domain.Group, error
 		var group domain.Group
 		var logoKey, avatarKey, themeOverride sql.NullString
 		group.Membership.UserID = userID
-		if err := rows.Scan(&group.ID, &group.Name, &group.Currency, &logoKey, &group.DefaultTheme, &group.StatisticsEnabled, &group.Membership.ID, &group.Membership.Status, &themeOverride, &group.Membership.Email, &group.Membership.DisplayName, &avatarKey); err != nil {
+		if err := rows.Scan(&group.ID, &group.Name, &group.Currency, &logoKey, &group.DefaultTheme, &group.StatisticsEnabled, &group.PlanningEnabled, &group.Membership.ID, &group.Membership.Status, &themeOverride, &group.Membership.Email, &group.Membership.DisplayName, &avatarKey); err != nil {
 			return nil, err
 		}
 		group.Membership.ThemeOverride = nullableThemeID(themeOverride)

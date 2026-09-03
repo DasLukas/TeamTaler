@@ -16,8 +16,8 @@ import (
 
 func TestDefinitionsAndPermissionImplications(t *testing.T) {
 	definitions := authorization.Definitions()
-	if len(definitions) != 14 {
-		t.Fatalf("definition count = %d, want 14", len(definitions))
+	if len(definitions) != 18 {
+		t.Fatalf("definition count = %d, want 18", len(definitions))
 	}
 	if definitions[0].ImpliedPermissions == nil {
 		t.Fatal("permission implications are nil, want an empty API array")
@@ -294,10 +294,10 @@ func TestSeedGroupRolesIsIdempotentAndAssignsProtectedAdministratorRole(t *testi
 		t.Fatalf("seeded roles/system presets/admin assignments = %d/%d/%d, want 5/1/1", roleCount, presetRoleCount, adminAssignmentCount)
 	}
 	wantGrantCounts := map[string]int{
-		authorization.PresetRoleID("group-seed", domain.RolePresetGroupAdministrator): 4,
-		authorization.TemplateRoleID("group-seed", domain.RoleTemplateMember):         2,
-		authorization.TemplateRoleID("group-seed", domain.RoleTemplateFinance):        5,
-		authorization.TemplateRoleID("group-seed", domain.RoleTemplateCatalog):        2,
+		authorization.PresetRoleID("group-seed", domain.RolePresetGroupAdministrator): 8,
+		authorization.TemplateRoleID("group-seed", domain.RoleTemplateMember):         3,
+		authorization.TemplateRoleID("group-seed", domain.RoleTemplateFinance):        6,
+		authorization.TemplateRoleID("group-seed", domain.RoleTemplateCatalog):        3,
 		authorization.GuestRoleID("group-seed"):                                       1,
 	}
 	for roleID, want := range wantGrantCounts {
@@ -336,10 +336,14 @@ func TestSeedGroupRolesIsIdempotentAndAssignsProtectedAdministratorRole(t *testi
 	}
 	policy := authorization.NewPolicy(db)
 	wantAdministratorPermissions := map[domain.PermissionKey]bool{
-		domain.PermissionGroupAdministration: true,
-		domain.PermissionMemberManagement:    true,
-		domain.PermissionRoleManagement:      true,
-		domain.PermissionViewMemberDirectory: true,
+		domain.PermissionGroupAdministration:      true,
+		domain.PermissionMemberManagement:         true,
+		domain.PermissionRoleManagement:           true,
+		domain.PermissionViewMemberDirectory:      true,
+		domain.PermissionUsePlanning:              true,
+		domain.PermissionCreatePlanningEvents:     true,
+		domain.PermissionViewPlanningParticipants: true,
+		domain.PermissionManagePlanningEvents:     true,
 	}
 	for _, definition := range authorization.Definitions() {
 		allowed, err := policy.Can(ctx, "group-seed", "admin-seed", definition.Key, authorization.GroupResource("group-seed"))

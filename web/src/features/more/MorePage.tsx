@@ -1,13 +1,9 @@
 import { Link } from '@tanstack/react-router';
-import Boxes from 'lucide-react/dist/esm/icons/boxes';
 import Bell from 'lucide-react/dist/esm/icons/bell';
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
 import CircleUserRound from 'lucide-react/dist/esm/icons/circle-user-round';
-import ChartNoAxesCombined from 'lucide-react/dist/esm/icons/chart-no-axes-combined';
-import Settings from 'lucide-react/dist/esm/icons/settings';
-import WalletCards from 'lucide-react/dist/esm/icons/wallet-cards';
 import { useTranslation } from 'react-i18next';
-import { canOpenStatistics, hasGroupCapability } from '@/app/groupCapabilities';
+import { canOpenStatistics, canUsePlanning, hasGroupCapability } from '@/app/groupCapabilities';
 import { memberPaths } from '@/app/paths';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { isSystemAdministrator } from '@/app/useSession';
@@ -17,14 +13,9 @@ import { LogoutButton } from '@/components/auth/LogoutButton';
 import styles from './MorePage.module.css';
 import { NotificationBadge } from '@/features/notifications/NotificationBadge';
 import { useUnreadNotificationCount } from '@/features/notifications/NotificationSummaryContext';
+import { mobilePrimaryModuleKeys, moduleNavigationItems } from '@/components/layout/navigationItems';
 
-const links = [
-  { to: memberPaths.statistics, labelKey: 'nav.statistics', icon: ChartNoAxesCombined, capability: null, statistics: true },
-  { to: memberPaths.finance, labelKey: 'nav.finance', icon: WalletCards, capability: 'finance', statistics: false },
-  { to: memberPaths.catalog, labelKey: 'nav.catalog', icon: Boxes, capability: 'catalog', statistics: false },
-  { to: '/admin', labelKey: 'nav.administration', icon: Settings, capability: 'administration', statistics: false },
-  { to: '/account', labelKey: 'nav.account', icon: CircleUserRound, capability: null, statistics: false },
-] as const;
+const overflowModules = moduleNavigationItems.filter((item) => !mobilePrimaryModuleKeys.has(item.key));
 
 /**
  * Renders the mobile overflow destination for secondary application areas.
@@ -36,6 +27,7 @@ export function MorePage() {
   const { session, activeGroup } = useActiveGroup();
   const grants = activeGroup.membership?.effectiveGrants;
   const unreadCount = useUnreadNotificationCount();
+  const canPlan = Boolean(activeGroup.planningEnabled && canUsePlanning(grants));
   return (
     <Page title={t('more.title')}>
       <section className={styles.profile}>
@@ -43,8 +35,17 @@ export function MorePage() {
         <div><strong>{session.user.displayName}</strong><span>{session.user.email}</span><small>{activeGroup.name}</small></div>
       </section>
       <nav aria-label={t('nav.additional')} className={styles.links}>
+        {overflowModules
+          .filter((item) => {
+            if (item.capability === 'planning') return canPlan;
+            if (item.capability === 'statistics') return canOpenStatistics(activeGroup);
+            if (item.capability === 'administration') return hasGroupCapability(grants, item.capability) || isSystemAdministrator(session);
+            if (item.capability === 'catalog' || item.capability === 'finance') return hasGroupCapability(grants, item.capability);
+            return false;
+          })
+          .map(({ to, key, icon: Icon }) => <Link key={to} to={to}><Icon aria-hidden="true" size={23} /><span>{t(`nav.${key}`)}</span><ChevronRight aria-hidden="true" size={20} /></Link>)}
         <Link to={memberPaths.notifications}><Bell aria-hidden="true" size={23} /><span>{t('nav.notifications')}</span><span className={styles.end}><NotificationBadge count={unreadCount} /><ChevronRight aria-hidden="true" size={20} /></span></Link>
-        {links.filter((item) => item.statistics ? canOpenStatistics(activeGroup) : item.capability === null || hasGroupCapability(grants, item.capability) || item.to === '/admin' && isSystemAdministrator(session)).map(({ to, labelKey, icon: Icon }) => <Link key={to} to={to}><Icon aria-hidden="true" size={23} /><span>{t(labelKey)}</span><ChevronRight aria-hidden="true" size={20} /></Link>)}
+        <Link to="/account"><CircleUserRound aria-hidden="true" size={23} /><span>{t('nav.account')}</span><ChevronRight aria-hidden="true" size={20} /></Link>
         <LogoutButton className={styles.logout} showChevron />
       </nav>
     </Page>

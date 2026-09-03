@@ -44,7 +44,7 @@ func TestSystemRoleSemanticsMigrationNormalizesPresetMetadataAndSeedsNewGroups(t
 	if err := db.QueryRowContext(ctx, `SELECT default_role_id FROM group_settings WHERE group_id='group-existing'`).Scan(&existingDefaultRoleID); err != nil {
 		t.Fatalf("read existing default role: %v", err)
 	}
-	if existingRoleCount != 4 || existingAdministratorGrantCount != 14 || existingGuestCount != 0 || existingSystemPresetCount != 1 || existingMemberName != "Member" || existingDefaultRoleID != "role:MEMBER:group-existing" {
+	if existingRoleCount != 4 || existingAdministratorGrantCount != 18 || existingGuestCount != 0 || existingSystemPresetCount != 1 || existingMemberName != "Member" || existingDefaultRoleID != "role:MEMBER:group-existing" {
 		t.Fatalf("existing role state after preset normalization: roles=%d adminGrants=%d guests=%d presets=%d member=%q default=%q", existingRoleCount, existingAdministratorGrantCount, existingGuestCount, existingSystemPresetCount, existingMemberName, existingDefaultRoleID)
 	}
 
@@ -63,11 +63,11 @@ func TestSystemRoleSemanticsMigrationNormalizesPresetMetadataAndSeedsNewGroups(t
 		grants      string
 	}
 	want := []expectedRole{
-		{id: "role:CATALOG_MANAGER:group-new", name: "Katalogverwaltung", description: "Standardrolle für Katalogverwaltung", grants: "CATALOG_MANAGEMENT,VIEW_MEMBER_DIRECTORY"},
-		{id: "role:FINANCE_MANAGER:group-new", name: "Finanzverwaltung", description: "Standardrolle für Finanzverwaltung", grants: "FINANCE_MANAGEMENT,RECORD_OWN_PAYMENT,VIEW_ALL_BOOKING_ACTIVITY,VIEW_MEMBER_DIRECTORY,VIEW_STATISTICS"},
-		{id: "role:GROUP_ADMINISTRATOR:group-new", presetKey: sql.NullString{String: "GROUP_ADMINISTRATOR", Valid: true}, name: "Group administrator", description: "Standardrolle für Administratorrolle mit vollständigem Zugriff auf die Gruppe", grants: "GROUP_ADMINISTRATION,MEMBER_MANAGEMENT,ROLE_MANAGEMENT,VIEW_MEMBER_DIRECTORY"},
+		{id: "role:CATALOG_MANAGER:group-new", name: "Katalogverwaltung", description: "Standardrolle für Katalogverwaltung", grants: "CATALOG_MANAGEMENT,USE_PLANNING,VIEW_MEMBER_DIRECTORY"},
+		{id: "role:FINANCE_MANAGER:group-new", name: "Finanzverwaltung", description: "Standardrolle für Finanzverwaltung", grants: "FINANCE_MANAGEMENT,RECORD_OWN_PAYMENT,USE_PLANNING,VIEW_ALL_BOOKING_ACTIVITY,VIEW_MEMBER_DIRECTORY,VIEW_STATISTICS"},
+		{id: "role:GROUP_ADMINISTRATOR:group-new", presetKey: sql.NullString{String: "GROUP_ADMINISTRATOR", Valid: true}, name: "Group administrator", description: "Standardrolle für Administratorrolle mit vollständigem Zugriff auf die Gruppe", grants: "CREATE_PLANNING_EVENTS,GROUP_ADMINISTRATION,MANAGE_PLANNING_EVENTS,MEMBER_MANAGEMENT,ROLE_MANAGEMENT,USE_PLANNING,VIEW_MEMBER_DIRECTORY,VIEW_PLANNING_PARTICIPANTS"},
 		{id: "role:GUEST:group-new", name: "Gast", description: "Standardrolle für Gäste", grants: "CREATE_OWN_BOOKING"},
-		{id: "role:MEMBER:group-new", name: "Mitglied", description: "Standardrolle für reguläre Gruppenmitglieder", grants: "CREATE_OWN_BOOKING,VIEW_MEMBER_DIRECTORY"},
+		{id: "role:MEMBER:group-new", name: "Mitglied", description: "Standardrolle für reguläre Gruppenmitglieder", grants: "CREATE_OWN_BOOKING,USE_PLANNING,VIEW_MEMBER_DIRECTORY"},
 	}
 	rows, err := db.QueryContext(ctx, `SELECT id,preset_key,name,description FROM roles WHERE group_id='group-new' ORDER BY id`)
 	if err != nil {

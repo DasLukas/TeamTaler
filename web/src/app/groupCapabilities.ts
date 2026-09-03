@@ -33,6 +33,16 @@ export function canOpenBooking(grants: readonly PermissionGrant[] | undefined): 
   return can(grants, 'CREATE_OWN_BOOKING') || can(grants, 'BOOK_FOR_OTHERS') || can(grants, 'BOOK_FOR_GUESTS');
 }
 
+/** Determines whether a membership may open the enabled planning workspace. */
+export function canUsePlanning(grants: readonly PermissionGrant[] | undefined): boolean {
+  return can(grants, 'USE_PLANNING');
+}
+
+/** Determines whether a membership may create planning events. */
+export function canCreatePlanningEvents(grants: readonly PermissionGrant[] | undefined): boolean {
+  return can(grants, 'CREATE_PLANNING_EVENTS');
+}
+
 /**
  * Determines whether the active group may open the complete statistics workspace.
  *

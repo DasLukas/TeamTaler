@@ -7,6 +7,7 @@ import type { NotificationPreferences, Session } from '@/api/types';
 import { ActiveGroupContext } from '@/app/active-group-context';
 import { SessionContext } from '@/app/session-context';
 import { DEFAULT_INSTANCE_CAPABILITIES } from '@/app/useSession';
+import { notificationKeys } from '@/features/notifications/notificationQueryKeys';
 import i18n from '@/i18n';
 import { NotificationPreferencesPanel } from './NotificationPreferencesPanel';
 
@@ -52,7 +53,7 @@ const preferences: NotificationPreferences = {
   ],
 };
 
-function renderPanel(): void {
+function renderPanel(): QueryClient {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={queryClient}>
     <SessionContext.Provider value={{ session, instanceCapabilities: DEFAULT_INSTANCE_CAPABILITIES }}>
@@ -60,6 +61,7 @@ function renderPanel(): void {
     </SessionContext.Provider>
   </QueryClientProvider>;
   render(<NotificationPreferencesPanel />, { wrapper });
+  return queryClient;
 }
 
 describe('NotificationPreferencesPanel', () => {
@@ -95,5 +97,25 @@ describe('NotificationPreferencesPanel', () => {
     renderPanel();
 
     expect(await screen.findByText('E-Mail-Benachrichtigungen sind derzeit nicht verfügbar.')).toBeVisible();
+  });
+
+  it('renders only module events exposed by the server projection', async () => {
+    apiMock.getNotificationPreferences.mockResolvedValue({ ...preferences, events: [preferences.events[0]] });
+    renderPanel();
+
+    expect(await screen.findByText(i18n.t('notifications.preferences.events.bookingAssigned.label'))).toBeVisible();
+    expect(screen.queryByText(i18n.t('notifications.preferences.events.settlementDueSoon.label'))).not.toBeInTheDocument();
+    expect(screen.queryByText(i18n.t('notifications.preferences.events.planningPublished.label'))).not.toBeInTheDocument();
+  });
+
+  it('rebuilds editable rows when the server projection changes without a version increment', async () => {
+    const queryClient = renderPanel();
+    expect(await screen.findByText(i18n.t('notifications.preferences.events.settlementDueSoon.label'))).toBeVisible();
+    apiMock.getNotificationPreferences.mockResolvedValue({ ...preferences, events: [preferences.events[0]] });
+
+    await queryClient.invalidateQueries({ queryKey: notificationKeys.preferences('group-a') });
+
+    await waitFor(() => expect(screen.queryByText(i18n.t('notifications.preferences.events.settlementDueSoon.label'))).not.toBeInTheDocument());
+    expect(screen.getByText(i18n.t('notifications.preferences.events.bookingAssigned.label'))).toBeVisible();
   });
 });

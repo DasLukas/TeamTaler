@@ -18,6 +18,8 @@ import { NotificationsPage } from '@/features/notifications/NotificationsPage';
 import { NotFoundPage } from './NotFoundPage';
 import { memberPaths } from './paths';
 import { BookingPermissionRoute, GroupRequiredRoute, PreferredWorkspaceRedirect, StatisticsPermissionRoute } from './PermissionRoutes';
+import { PlanningCreateScreen, PlanningDetailScreen, PlanningEditScreen, PlanningIndexScreen } from '@/features/planning/PlanningRouteScreens';
+import { validatePlanningSearch } from '@/features/planning/planningSearch';
 
 const rootRoute = createRootRoute({
   component: Outlet,
@@ -39,6 +41,15 @@ const groupRequiredRoute = createRoute({
 const landingRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: memberPaths.landing, component: PreferredWorkspaceRedirect });
 const dashboardRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: memberPaths.overview, component: DashboardPage });
 const statisticsRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: memberPaths.statistics, component: StatisticsPermissionRoute });
+const planningRoute = createRoute({
+  getParentRoute: () => groupRequiredRoute,
+  path: memberPaths.planning,
+  validateSearch: validatePlanningSearch,
+  component: PlanningIndexScreen,
+});
+const planningNewRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: memberPaths.planningNew, validateSearch: validatePlanningSearch, component: PlanningCreateScreen });
+const planningDetailRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: '/planning/events/$eventId', validateSearch: validatePlanningSearch, component: PlanningDetailScreen });
+const planningEditRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: '/planning/events/$eventId/edit', validateSearch: validatePlanningSearch, component: PlanningEditScreen });
 const bookingRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: memberPaths.booking, component: BookingPermissionRoute });
 const legacyReportsRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: memberPaths.legacyReports, component: () => <Navigate replace to={memberPaths.overview} /> });
 const activitiesRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: '/activities', component: ActivitiesPage });
@@ -58,7 +69,7 @@ const publicJoinVerificationRoute = createRoute({ getParentRoute: () => rootRout
 
 const routeTree = rootRoute.addChildren([
   authenticatedRoute.addChildren([
-    groupRequiredRoute.addChildren([landingRoute, dashboardRoute, statisticsRoute, bookingRoute, legacyReportsRoute, activitiesRoute, catalogRoute, financeRoute, notificationsRoute, moreRoute]),
+    groupRequiredRoute.addChildren([landingRoute, dashboardRoute, planningRoute, planningNewRoute, planningDetailRoute, planningEditRoute, statisticsRoute, bookingRoute, legacyReportsRoute, activitiesRoute, catalogRoute, financeRoute, notificationsRoute, moreRoute]),
     adminRoute,
     accountRoute,
   ]),

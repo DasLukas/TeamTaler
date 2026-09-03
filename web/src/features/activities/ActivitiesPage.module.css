@@ -90,6 +90,11 @@
 .activityList td:nth-child(9) { padding-inline: var(--space-2); }
 .activityList td:last-child button { white-space: nowrap; }
 .rowActions { display: flex; align-items: center; justify-content: flex-start; gap: var(--space-1); }
+.activityList td:last-child .rowActions {
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
 .activityCard {
   min-width: 0;
   overflow: hidden;

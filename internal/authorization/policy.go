@@ -75,6 +75,10 @@ var permissionDefinitions = []domain.PermissionDefinition{
 		Key:         domain.PermissionBookForGuests,
 		Description: "Create bookings for existing or newly created temporary guests.",
 	},
+	{Key: domain.PermissionUsePlanning, Description: "View planning events and manage own participation."},
+	{Key: domain.PermissionCreatePlanningEvents, Description: "Create and manage own planning events.", ImpliedPermissions: []domain.PermissionKey{domain.PermissionUsePlanning}},
+	{Key: domain.PermissionViewPlanningParticipants, Description: "View identified planning participants.", ImpliedPermissions: []domain.PermissionKey{domain.PermissionUsePlanning}},
+	{Key: domain.PermissionManagePlanningEvents, Description: "Manage all planning events and recurring series.", ImpliedPermissions: []domain.PermissionKey{domain.PermissionUsePlanning, domain.PermissionCreatePlanningEvents, domain.PermissionViewPlanningParticipants}},
 }
 
 var permissionOrder = func() map[domain.PermissionKey]int {
@@ -552,6 +556,10 @@ func SeedGroupRoles(ctx context.Context, tx *sql.Tx, groupID, actorUserID, admin
 				domain.PermissionMemberManagement,
 				domain.PermissionRoleManagement,
 				domain.PermissionViewMemberDirectory,
+				domain.PermissionUsePlanning,
+				domain.PermissionCreatePlanningEvents,
+				domain.PermissionViewPlanningParticipants,
+				domain.PermissionManagePlanningEvents,
 			},
 		},
 		{
@@ -560,6 +568,7 @@ func SeedGroupRoles(ctx context.Context, tx *sql.Tx, groupID, actorUserID, admin
 			grants: []domain.PermissionKey{
 				domain.PermissionCreateOwnBooking,
 				domain.PermissionViewMemberDirectory,
+				domain.PermissionUsePlanning,
 			},
 		},
 		{
@@ -571,6 +580,7 @@ func SeedGroupRoles(ctx context.Context, tx *sql.Tx, groupID, actorUserID, admin
 				domain.PermissionViewAllBookingActivity,
 				domain.PermissionViewStatistics,
 				domain.PermissionViewMemberDirectory,
+				domain.PermissionUsePlanning,
 			},
 		},
 		{
@@ -579,6 +589,7 @@ func SeedGroupRoles(ctx context.Context, tx *sql.Tx, groupID, actorUserID, admin
 			grants: []domain.PermissionKey{
 				domain.PermissionCatalogManagement,
 				domain.PermissionViewMemberDirectory,
+				domain.PermissionUsePlanning,
 			},
 		},
 		{

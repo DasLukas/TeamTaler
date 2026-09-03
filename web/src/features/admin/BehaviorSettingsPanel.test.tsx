@@ -11,10 +11,12 @@ import { BehaviorSettingsPanel } from './BehaviorSettingsPanel';
 const apiMock = vi.hoisted(() => ({
   getGroupSettings: vi.fn(),
   getGroupNotificationSettings: vi.fn(),
+  getPlanningSettings: vi.fn(),
   getRoles: vi.fn(),
   removeGroupLogo: vi.fn(),
   updateGroupSettings: vi.fn(),
   updateGroupNotificationSettings: vi.fn(),
+  updatePlanningSettings: vi.fn(),
   updateGroupName: vi.fn(),
   uploadGroupLogo: vi.fn(),
 }));
@@ -95,7 +97,31 @@ describe('BehaviorSettingsPanel', () => {
     session.groups[0]!.membership!.effectiveGrants = [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } }];
     apiMock.getGroupSettings.mockResolvedValue(settings);
     apiMock.getGroupNotificationSettings.mockResolvedValue(notificationSettings);
+    apiMock.getPlanningSettings.mockResolvedValue({ enabled: false, version: 1, timeZone: 'Europe/Berlin' });
     apiMock.getRoles.mockResolvedValue(roles);
+  });
+
+  it('uses the planning toggle as the only activation control', async () => {
+    renderPanel();
+
+    const planningRegion = await screen.findByRole('region', { name: i18n.t('behaviorSettings.planning.title') });
+    expect(within(planningRegion).getByRole('switch', { name: i18n.t('behaviorSettings.planning.toggle') })).toBeVisible();
+    expect(within(planningRegion).queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('refreshes member notification preferences when planning is disabled', async () => {
+    const user = userEvent.setup();
+    apiMock.getPlanningSettings.mockResolvedValue({ enabled: true, version: 1, timeZone: 'Europe/Berlin' });
+    apiMock.updatePlanningSettings.mockResolvedValue({ enabled: false, version: 2, timeZone: 'Europe/Berlin' });
+    const queryClient = renderPanel();
+    const removeQueries = vi.spyOn(queryClient, 'removeQueries');
+
+    const planningRegion = await screen.findByRole('region', { name: i18n.t('behaviorSettings.planning.title') });
+    await user.click(within(planningRegion).getByRole('switch', { name: i18n.t('behaviorSettings.planning.toggle') }));
+    await user.click(await screen.findByRole('button', { name: i18n.t('behaviorSettings.planning.disable') }));
+
+    await waitFor(() => expect(apiMock.updatePlanningSettings).toHaveBeenCalledWith('group-a', false, 1));
+    expect(removeQueries).toHaveBeenCalledWith({ queryKey: ['notification-preferences', 'group-a'] });
   });
 
   it('removes the legacy booking-visibility switch from the new settings UI', async () => {
@@ -122,6 +148,7 @@ describe('BehaviorSettingsPanel', () => {
     apiMock.updateGroupSettings.mockResolvedValue({ ...settings, settlementsEnabled: true });
     const queryClient = renderPanel();
     const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
+    const removeQueries = vi.spyOn(queryClient, 'removeQueries');
 
     expect(await screen.findByRole('region', { name: i18n.t('behaviorSettings.financeSectionTitle') })).toBeVisible();
     const toggle = screen.getByRole('switch', { name: i18n.t('behaviorSettings.settlementsToggle') });
@@ -136,6 +163,7 @@ describe('BehaviorSettingsPanel', () => {
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['periods', 'group-a'] });
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['settlements', 'group-a'] });
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['statistics', 'group-a'] });
+    expect(removeQueries).toHaveBeenCalledWith({ queryKey: ['notification-preferences', 'group-a'] });
   });
 
   it('persists the statistics master switch and clears the cached statistics snapshot', async () => {
@@ -153,6 +181,33 @@ describe('BehaviorSettingsPanel', () => {
     expect(removeQueries).toHaveBeenCalledWith({ queryKey: ['statistics', 'group-a'] });
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['dashboard', 'group-a'] });
     expect(queryClient.getQueryData<Session>(['session'])?.groups[0]?.statisticsEnabled).toBe(true);
+  });
+
+  it('confirms before staging settlement deactivation', async () => {
+    const user = userEvent.setup();
+    apiMock.getGroupSettings.mockResolvedValue({ ...settings, settlementsEnabled: true });
+    apiMock.updateGroupSettings.mockResolvedValue({ ...settings, settlementsEnabled: false });
+    renderPanel();
+
+    const toggle = await screen.findByRole('switch', { name: i18n.t('behaviorSettings.settlementsToggle') });
+    expect(toggle).toBeChecked();
+    await user.click(toggle);
+
+    const dialog = screen.getByRole('dialog', { name: i18n.t('behaviorSettings.settlementsDisableTitle') });
+    expect(dialog).toBeVisible();
+    expect(toggle).toBeChecked();
+    expect(apiMock.updateGroupSettings).not.toHaveBeenCalled();
+
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('common.cancel') }));
+    expect(screen.queryByRole('dialog', { name: i18n.t('behaviorSettings.settlementsDisableTitle') })).not.toBeInTheDocument();
+    expect(toggle).toBeChecked();
+
+    await user.click(toggle);
+    await user.click(within(screen.getByRole('dialog', { name: i18n.t('behaviorSettings.settlementsDisableTitle') })).getByRole('button', { name: i18n.t('behaviorSettings.settlementsDisable') }));
+    expect(toggle).not.toBeChecked();
+
+    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
+    await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { settlementsEnabled: false }));
   });
 
   it('persists each reason context through an accessible three-state control', async () => {
@@ -184,6 +239,31 @@ describe('BehaviorSettingsPanel', () => {
       overdueRepeatDays: 7,
       events: [{ eventType: 'BOOKING_ASSIGNED', enabled: false }],
     }));
+  });
+
+  it('groups notification events by their server-owned topic metadata', async () => {
+    apiMock.getGroupNotificationSettings.mockResolvedValue({
+      ...notificationSettings,
+      events: [
+        notificationSettings.events[0],
+        { eventType: 'PAYMENT_RECORDED', category: 'PAYMENTS', name: 'Payment recorded', description: 'A payment was recorded.', supportedChannels: ['EMAIL', 'PUSH'], enabled: true },
+        { eventType: 'PLANNING_EVENT_PUBLISHED', category: 'PLANNING', name: 'Planning event published', description: 'A planning event was published.', supportedChannels: ['EMAIL', 'PUSH'], enabled: true },
+        { eventType: 'SETTLEMENT_CREATED', category: 'SETTLEMENTS', name: 'Settlement created', description: 'A settlement was created.', supportedChannels: ['EMAIL', 'PUSH'], enabled: true },
+      ],
+    });
+    renderPanel();
+
+    const notificationRegion = await screen.findByRole('region', { name: i18n.t('behaviorSettings.notifications.title') });
+    expect(within(notificationRegion).getAllByRole('heading', { level: 5 }).map((heading) => heading.textContent)).toEqual([
+      i18n.t('behaviorSettings.notifications.categories.BOOKINGS'),
+      i18n.t('behaviorSettings.notifications.categories.PAYMENTS'),
+      i18n.t('behaviorSettings.notifications.categories.PLANNING'),
+      i18n.t('behaviorSettings.notifications.categories.SETTLEMENTS'),
+    ]);
+    const planningCategory = i18n.t('behaviorSettings.notifications.categories.PLANNING');
+    expect(within(within(notificationRegion).getByRole('region', { name: i18n.t('behaviorSettings.notifications.categoryLabel', { category: planningCategory }) })).getByRole('switch', {
+      name: i18n.t('behaviorSettings.notifications.enableEvent', { event: i18n.t('notifications.preferences.events.planningPublished.label') }),
+    })).toBeVisible();
   });
 
   it('keeps event policy editable while unavailable channels are explained', async () => {

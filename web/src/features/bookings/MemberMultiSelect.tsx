@@ -1,8 +1,9 @@
 import Check from 'lucide-react/dist/esm/icons/check';
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down';
 import Plus from 'lucide-react/dist/esm/icons/plus';
+import Search from 'lucide-react/dist/esm/icons/search';
 import UsersRound from 'lucide-react/dist/esm/icons/users-round';
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { BookingTarget } from '@/api/types';
 import { Avatar } from '@/components/ui/Avatar';
@@ -60,6 +61,7 @@ export function MemberMultiSelect({
   const compact = useMediaQuery('(max-width: 767px)');
   const rootRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
+  const [searchValue, setSearchValue] = useState('');
   const [guestName, setGuestName] = useState('');
   const [guestNameError, setGuestNameError] = useState('');
   const [selectionError, setSelectionError] = useState('');
@@ -67,18 +69,30 @@ export function MemberMultiSelect({
   const selectedTargets = targets.filter((target) => selected.has(target.membershipId));
   const regularTargets = targets.filter((target) => !target.isTemporaryGuest);
   const guestTargets = targets.filter((target) => target.isTemporaryGuest);
+  const normalizedSearch = searchValue.trim().toLocaleLowerCase();
+  const matchesSearch = (name: string) => !normalizedSearch || name.toLocaleLowerCase().includes(normalizedSearch);
+  const visibleRegularTargets = regularTargets.filter((target) => matchesSearch(target.displayName));
+  const visibleGuestTargets = guestTargets.filter((target) => matchesSearch(target.displayName));
+  const visiblePendingGuests = pendingGuestNames
+    .map((name, index) => ({ index, name }))
+    .filter(({ name }) => matchesSearch(name));
+  const hasVisibleTargets = visibleRegularTargets.length + visibleGuestTargets.length + visiblePendingGuests.length > 0;
   const totalTargetCount = selectedIds.length + pendingGuestNames.length;
   const useSheet = overlayOnMobile && compact;
+  const closePicker = useCallback(() => {
+    setOpen(false);
+    setSearchValue('');
+  }, []);
 
   useEffect(() => {
     if (!open || useSheet) return undefined;
     const closeForOutsideClick = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+      if (!rootRef.current?.contains(event.target as Node)) closePicker();
     };
     const closeForEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
-      setOpen(false);
+      closePicker();
       document.getElementById(id)?.focus();
     };
     document.addEventListener('pointerdown', closeForOutsideClick);
@@ -87,7 +101,7 @@ export function MemberMultiSelect({
       document.removeEventListener('pointerdown', closeForOutsideClick);
       document.removeEventListener('keydown', closeForEscape);
     };
-  }, [id, open, useSheet]);
+  }, [closePicker, id, open, useSheet]);
 
   const update = (membershipId: string, checked: boolean) => {
     if (checked && totalTargetCount >= MAX_BATCH_TARGETS) {
@@ -152,14 +166,26 @@ export function MemberMultiSelect({
 
   const targetEditor = (
     <>
-      {regularTargets.length > 0 ? <div aria-labelledby={`${id}-regular-members-label`} className={styles.group} role="group">
+      <label className={styles.search}>
+        <span className="sr-only">{t('booking.searchRecipients')}</span>
+        <Search aria-hidden="true" size={18} />
+        <input
+          aria-label={t('booking.searchRecipients')}
+          autoComplete="off"
+          onChange={(event) => setSearchValue(event.target.value)}
+          placeholder={t('booking.searchRecipientsPlaceholder')}
+          type="search"
+          value={searchValue}
+        />
+      </label>
+      {visibleRegularTargets.length > 0 ? <div aria-labelledby={`${id}-regular-members-label`} className={styles.group} role="group">
         <p className={styles.groupLabel} id={`${id}-regular-members-label`}>{t('booking.regularMembers')}</p>
-        {regularTargets.map(renderTarget)}
+        {visibleRegularTargets.map(renderTarget)}
       </div> : null}
-      {guestTargets.length > 0 || pendingGuestNames.length > 0 || canBookForGuests ? <div aria-labelledby={`${id}-guests-label`} className={`${styles.group} ${regularTargets.length > 0 ? styles.guestGroup : ''}`} role="group">
+      {visibleGuestTargets.length > 0 || visiblePendingGuests.length > 0 || canBookForGuests ? <div aria-labelledby={`${id}-guests-label`} className={`${styles.group} ${visibleRegularTargets.length > 0 ? styles.guestGroup : ''}`} role="group">
         <p className={styles.groupLabel} id={`${id}-guests-label`}>{t('booking.guests')}</p>
-        {guestTargets.map(renderTarget)}
-        {pendingGuestNames.map((name, index) => (
+        {visibleGuestTargets.map(renderTarget)}
+        {visiblePendingGuests.map(({ index, name }) => (
           <label className={styles.option} key={`${name}-${index}`}>
             <input checked onChange={() => { setSelectionError(''); onRemoveGuest(index); }} type="checkbox" />
             <Avatar decorative name={name} size="small" />
@@ -186,6 +212,7 @@ export function MemberMultiSelect({
           {guestNameError ? <p className={styles.guestError} id={`${id}-guest-name-error`} role="alert">{guestNameError}</p> : null}
         </div> : null}
       </div> : null}
+      {!hasVisibleTargets ? <p className={styles.emptySearch}>{t('booking.noRecipientsFound')}</p> : null}
       {selectionError ? <p className={styles.guestError} role="alert">{selectionError}</p> : null}
     </>
   );
@@ -199,7 +226,7 @@ export function MemberMultiSelect({
         className={`${styles.trigger} ${iconOnly ? styles.iconTrigger : ''}`}
         disabled={disabled}
         id={id}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => { if (open) closePicker(); else setOpen(true); }}
         title={label}
         type="button"
       >
@@ -221,7 +248,7 @@ export function MemberMultiSelect({
         )}
       </button>
       {open && useSheet ? (
-        <Modal onClose={() => setOpen(false)} open title={t('booking.selectRecipients')} variant="sheet">
+        <Modal onClose={closePicker} open title={t('booking.selectRecipients')} variant="sheet">
           <div className={styles.sheetContent}>{targetEditor}</div>
         </Modal>
       ) : null}

@@ -8,7 +8,7 @@ import (
 
 func TestUnifiedStatisticsPermissionMigrationUsesSafeGrantSemanticsAndSeedsFutureGroups(t *testing.T) {
 	ctx := context.Background()
-	db := openDatabaseThroughMigration(t, "0045_statistics_dashboard.sql")
+	db := openDatabaseThroughMigration(t, "0050_statistics_dashboard.sql")
 	defer db.Close()
 	const now = "2026-08-28T10:00:00Z"
 

@@ -15,4 +15,10 @@ describe('Toggle', () => {
     await user.click(toggle);
     expect(onChange).toHaveBeenCalledWith(true);
   });
+
+  it('associates optional supporting copy with the switch', () => {
+    render(<><p id="switch-description">Supporting copy</p><Toggle checked={false} descriptionId="switch-description" label="Described switch" onChange={vi.fn()} /></>);
+
+    expect(screen.getByRole('switch', { name: 'Described switch' })).toHaveAccessibleDescription('Supporting copy');
+  });
 });

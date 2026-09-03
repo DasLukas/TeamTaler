@@ -11,6 +11,7 @@ var (
 	ErrNotFound             = errors.New("resource not found")
 	ErrForbidden            = errors.New("operation is not permitted")
 	ErrConflict             = errors.New("resource conflict")
+	ErrPlanningDisabled     = errors.New("planning is disabled")
 	ErrValidation           = errors.New("validation failed")
 	ErrUnauthenticated      = errors.New("authentication required")
 	ErrPrecondition         = errors.New("precondition failed")
@@ -108,6 +109,14 @@ const (
 	PermissionBookForOthers PermissionKey = "BOOK_FOR_OTHERS"
 	// PermissionBookForGuests permits bookings for credentialless temporary guests.
 	PermissionBookForGuests PermissionKey = "BOOK_FOR_GUESTS"
+	// PermissionUsePlanning permits access to published planning events and own participation.
+	PermissionUsePlanning PermissionKey = "USE_PLANNING"
+	// PermissionCreatePlanningEvents permits members to create and manage their own events.
+	PermissionCreatePlanningEvents PermissionKey = "CREATE_PLANNING_EVENTS"
+	// PermissionViewPlanningParticipants permits identified participant reads.
+	PermissionViewPlanningParticipants PermissionKey = "VIEW_PLANNING_PARTICIPANTS"
+	// PermissionManagePlanningEvents permits management of all events and recurring series.
+	PermissionManagePlanningEvents PermissionKey = "MANAGE_PLANNING_EVENTS"
 )
 
 // PermissionScopeType identifies the resource boundary attached to a permission grant.
@@ -310,6 +319,7 @@ type Group struct {
 	LogoURL           string     `json:"logoUrl,omitempty"`
 	DefaultTheme      ThemeID    `json:"defaultTheme"`
 	StatisticsEnabled bool       `json:"statisticsEnabled"`
+	PlanningEnabled   bool       `json:"planningEnabled"`
 	Membership        Membership `json:"membership"`
 }
 

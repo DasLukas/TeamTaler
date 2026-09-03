@@ -1,7 +1,7 @@
 import { Navigate, Outlet } from '@tanstack/react-router';
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { canOpenBooking, canOpenStatistics, preferredMemberPath } from './groupCapabilities';
+import { canOpenBooking, canOpenStatistics, canUsePlanning, preferredMemberPath } from './groupCapabilities';
 import { useActiveGroup, useOptionalActiveGroup } from './useActiveGroup';
 import { Page } from '@/components/layout/Page';
 import { StatePanel } from '@/components/ui/StatePanel';
@@ -48,4 +48,17 @@ export function StatisticsPermissionRoute() {
     return <Page title={t('statistics.title')}><StatePanel kind="error" message={t('statistics.noAccessMessage')} title={t('statistics.noAccessTitle')} /></Page>;
   }
   return <Suspense fallback={<Page title={t('statistics.title')}><StatePanel kind="loading" /></Page>}><StatisticsPage /></Suspense>;
+}
+
+/** Prevents disabled or unauthorized planning routes from issuing domain queries. */
+export function PlanningPermissionRoute({ children }: { children: ReactNode }) {
+  const { t } = useTranslation();
+  const { activeGroup } = useActiveGroup();
+  if (!activeGroup.planningEnabled) {
+    return <StatePanel kind="empty" message={t('planning.disabledMessage')} title={t('planning.disabledTitle')} />;
+  }
+  if (!canUsePlanning(activeGroup.membership?.effectiveGrants)) {
+    return <StatePanel kind="empty" message={t('planning.noAccessMessage')} title={t('planning.noAccessTitle')} />;
+  }
+  return children;
 }

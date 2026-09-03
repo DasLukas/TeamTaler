@@ -12,10 +12,19 @@ vi.mock('@tanstack/react-router', () => ({ Link: ({ children, to }: { children: 
 vi.mock('@/components/ui/Avatar', () => ({ Avatar: () => <div>avatar</div> }));
 vi.mock('@/components/auth/LogoutButton', () => ({ LogoutButton: () => <button type="button">Abmelden</button> }));
 
-function usePermissions(permissions: PermissionKey[], systemRoles: string[] = [], statisticsEnabled = false): void {
+function usePermissions(
+  permissions: PermissionKey[],
+  systemRoles: string[] = [],
+  features: { planningEnabled?: boolean; statisticsEnabled?: boolean } = {},
+): void {
   mocks.useActiveGroup.mockReturnValue({
     session: { user: { displayName: 'Alex', email: 'alex@example.test' }, systemRoles },
-    activeGroup: { name: 'Group A', statisticsEnabled, membership: { effectiveGrants: permissions.map((permission) => ({ permission, scope: { type: 'GROUP' as const } })) } },
+    activeGroup: {
+      name: 'Group A',
+      planningEnabled: features.planningEnabled ?? false,
+      statisticsEnabled: features.statisticsEnabled ?? false,
+      membership: { effectiveGrants: permissions.map((permission) => ({ permission, scope: { type: 'GROUP' as const } })) },
+    },
   });
 }
 
@@ -31,13 +40,13 @@ describe('MorePage role navigation', () => {
     usePermissions(['FINANCE_MANAGEMENT', 'CATALOG_MANAGEMENT', 'GROUP_ADMINISTRATION']);
     render(<MorePage />);
 
-    expect(menuItems()).toEqual(['Benachrichtigungen', 'Finanzen', 'Katalog', 'Einstellungen', 'Mein Konto', 'Abmelden']);
+    expect(menuItems()).toEqual(['Katalog', 'Finanzen', 'Einstellungen', 'Benachrichtigungen', 'Mein Konto', 'Abmelden']);
     expect(screen.getByRole('link', { name: 'Benachrichtigungen' })).toHaveAttribute('href', '/notifications');
   });
 
   it.each([
-    { permissions: ['FINANCE_MANAGEMENT'] as PermissionKey[], expected: ['Benachrichtigungen', 'Finanzen', 'Mein Konto', 'Abmelden'] },
-    { permissions: ['CATALOG_MANAGEMENT'] as PermissionKey[], expected: ['Benachrichtigungen', 'Katalog', 'Mein Konto', 'Abmelden'] },
+    { permissions: ['FINANCE_MANAGEMENT'] as PermissionKey[], expected: ['Finanzen', 'Benachrichtigungen', 'Mein Konto', 'Abmelden'] },
+    { permissions: ['CATALOG_MANAGEMENT'] as PermissionKey[], expected: ['Katalog', 'Benachrichtigungen', 'Mein Konto', 'Abmelden'] },
     { permissions: [] as PermissionKey[], expected: ['Benachrichtigungen', 'Mein Konto', 'Abmelden'] },
   ])('filters unavailable workspaces for $permissions', ({ permissions, expected }) => {
     usePermissions(permissions);
@@ -47,10 +56,10 @@ describe('MorePage role navigation', () => {
   });
 
   it('places an authorized statistics workspace first in the mobile overflow list', () => {
-    usePermissions(['VIEW_STATISTICS'], [], true);
+    usePermissions(['VIEW_STATISTICS'], [], { statisticsEnabled: true });
     render(<MorePage />);
 
-    expect(menuItems()).toEqual(['Benachrichtigungen', 'Statistiken', 'Mein Konto', 'Abmelden']);
+    expect(menuItems()).toEqual(['Statistiken', 'Benachrichtigungen', 'Mein Konto', 'Abmelden']);
     expect(screen.getByRole('link', { name: 'Statistiken' })).toHaveAttribute('href', '/statistics');
   });
 
@@ -60,10 +69,17 @@ describe('MorePage role navigation', () => {
     expect(screen.getByLabelText('7 ungelesene Benachrichtigungen')).toHaveTextContent('7');
   });
 
+  it('preserves the desktop module order before fixed account actions', () => {
+    usePermissions(['USE_PLANNING', 'VIEW_STATISTICS', 'FINANCE_MANAGEMENT'], [], { planningEnabled: true, statisticsEnabled: true });
+    render(<MorePage />);
+
+    expect(menuItems()).toEqual(['Planung', 'Statistiken', 'Finanzen', 'Benachrichtigungen', 'Mein Konto', 'Abmelden']);
+  });
+
   it('shows system settings independently from group capabilities', () => {
     usePermissions([], ['SYSTEM_ADMINISTRATOR']);
     render(<MorePage />);
 
-    expect(menuItems()).toEqual(['Benachrichtigungen', 'Einstellungen', 'Mein Konto', 'Abmelden']);
+    expect(menuItems()).toEqual(['Einstellungen', 'Benachrichtigungen', 'Mein Konto', 'Abmelden']);
   });
 });
