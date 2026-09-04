@@ -1,4 +1,4 @@
-import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from 'react';
+import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
 import styles from './FormField.module.css';
 
 /** Properties accepted by the form-field wrapper. */
@@ -46,4 +46,14 @@ export function TextInput(props: InputHTMLAttributes<HTMLInputElement>) {
  */
 export function SelectInput(props: SelectHTMLAttributes<HTMLSelectElement>) {
   return <select className={styles.control} {...props} />;
+}
+
+/**
+ * Renders the TeamTaler multiline text-input primitive.
+ *
+ * @param props - Native textarea attributes.
+ * @returns A styled native textarea.
+ */
+export function TextArea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return <textarea className={`${styles.control} ${styles.textarea}`} {...props} />;
 }

@@ -40,6 +40,7 @@ import type { DataTableDateRange } from '@/features/shared/DataTable';
 import { useDataTableUrlState } from '@/features/shared/useDataTableUrlState';
 import styles from './SystemSettingsPanel.module.css';
 import { SystemWebPushSettingsSection } from './SystemWebPushSettingsSection';
+import { LegalDocumentsSettingsSection } from './LegalDocumentsSettingsSection';
 
 const SETTINGS_QUERY_KEY = ['system-settings'] as const;
 const GROUPS_QUERY_KEY = ['system-groups'] as const;
@@ -615,6 +616,7 @@ export function SystemSettingsPanel() {
   return (
     <div className={styles.content}>
       <GeneralSettingsSection key={`general-${settings.data.revision}`} settings={settings.data} />
+      <LegalDocumentsSettingsSection />
       <SmtpSettingsSection key={`smtp-${settings.data.revision}`} settings={settings.data} />
       <SystemWebPushSettingsSection key={`web-push-${settings.data.revision}`} settings={settings.data} />
       <AccessSettingsSection key={`access-${settings.data.revision}`} settings={settings.data} />

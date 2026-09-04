@@ -695,6 +695,92 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /legal-documents:
+    get:
+      tags: [System]
+      summary: Read public legal documents
+      description: |
+        Returns only the effective Markdown source for the imprint and privacy
+        policy. Database, actor, revision, source, and host-file metadata are
+        deliberately omitted. Raw HTML is not part of the rendering contract.
+      security: []
+      responses:
+        '200':
+          description: Current public legal content
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublicLegalDocuments' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /system/legal-documents:
+    get:
+      tags: [System]
+      summary: Read effective legal documents
+      description: Requires a current `SYSTEM_ADMINISTRATOR` database assignment.
+      responses:
+        '200':
+          description: Effective legal documents, sources, and aggregate version
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SystemLegalDocuments' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+    put:
+      tags: [System]
+      summary: Persist legal-document overrides
+      description: |
+        Replaces each supplied document with a versioned database override.
+        Authorization and the aggregate ETag are revalidated in the write
+        transaction. Database content takes precedence over live host files.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SystemLegalDocumentsUpdate' }
+      responses:
+        '200':
+          description: Updated effective legal documents
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SystemLegalDocuments' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /system/legal-documents/reset:
+    post:
+      tags: [System]
+      summary: Remove selected legal-document overrides
+      description: The current live host file becomes effective immediately; a missing file reveals the built-in empty value.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SystemLegalDocumentsReset' }
+      responses:
+        '200':
+          description: Effective legal documents after reset
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SystemLegalDocuments' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /system/settings:
     get:
       tags: [System]
@@ -4886,6 +4972,66 @@ components:
     SystemRole:
       type: string
       enum: [SYSTEM_ADMINISTRATOR]
+    LegalDocumentSource:
+      type: string
+      enum: [DATABASE, FILE, CODE]
+    LegalDocument:
+      type: object
+      additionalProperties: false
+      required: [content, source, configured]
+      properties:
+        content:
+          type: string
+          maxLength: 65536
+          description: Effective UTF-8 Markdown source. Raw HTML is not supported by the web renderer.
+        source: { $ref: '#/components/schemas/LegalDocumentSource' }
+        configured: { type: boolean }
+        overrideVersion:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Present only for a database override.
+        updatedAt:
+          type: string
+          format: date-time
+          description: Override timestamp or host-file modification time.
+    PublicLegalDocuments:
+      type: object
+      additionalProperties: false
+      required: [imprint, privacyPolicy]
+      properties:
+        imprint: { type: string, maxLength: 65536 }
+        privacyPolicy: { type: string, maxLength: 65536 }
+    SystemLegalDocuments:
+      type: object
+      additionalProperties: false
+      required: [revision, imprint, privacyPolicy, updatedAt]
+      properties:
+        revision: { type: integer, format: int64, minimum: 1 }
+        imprint: { $ref: '#/components/schemas/LegalDocument' }
+        privacyPolicy: { $ref: '#/components/schemas/LegalDocument' }
+        updatedAt: { type: string, format: date-time }
+        updatedByUserId: { type: string }
+    SystemLegalDocumentsUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        imprint: { type: string, minLength: 1, maxLength: 65536 }
+        privacyPolicy: { type: string, minLength: 1, maxLength: 65536 }
+    LegalDocumentKey:
+      type: string
+      enum: [IMPRINT, PRIVACY_POLICY]
+    SystemLegalDocumentsReset:
+      type: object
+      additionalProperties: false
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/LegalDocumentKey' }
     SystemSettingSource:
       type: string
       enum: [DATABASE, ENVIRONMENT, CODE]

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -164,6 +165,82 @@ func TestSettingsUseTypedOverridesOptimisticConcurrencyAndReset(t *testing.T) {
 	}
 	if reset.Revision != 3 || reset.InstanceName.Value != "Host TeamTaler" || reset.InstanceName.Source != SettingSourceEnvironment || reset.DefaultCurrency.Value != "EUR" || reset.TimeZone.Value != "Europe/Berlin" {
 		t.Fatalf("unexpected reset snapshot: %#v", reset)
+	}
+}
+
+func TestLegalDocumentsUseLiveHostFilesVersionedOverridesAndReset(t *testing.T) {
+	ctx := context.Background()
+	db, baseService := openSystemService(t)
+	defer db.Close()
+	insertSystemTestUser(t, db, "admin", "admin@example.test", true)
+	insertSystemTestUser(t, db, "member", "member@example.test", true)
+	if _, err := baseService.GrantAdministrator(ctx, "admin", ""); err != nil {
+		t.Fatalf("grant administrator: %v", err)
+	}
+	directory := t.TempDir()
+	imprintPath := filepath.Join(directory, "IMPRESSUN.md")
+	privacyPath := filepath.Join(directory, "PRIVACY.md")
+	if err := os.WriteFile(imprintPath, []byte("# Operator\n\nHost operator"), 0o600); err != nil {
+		t.Fatalf("write imprint fixture: %v", err)
+	}
+	if err := os.WriteFile(privacyPath, []byte("# Controller\n\nHost controller"), 0o600); err != nil {
+		t.Fatalf("write privacy fixture: %v", err)
+	}
+	service, err := NewService(
+		db,
+		baseService.defaults,
+		baseService.passwordCipher,
+		WithLegalDocumentFiles(imprintPath, privacyPath),
+	)
+	if err != nil {
+		t.Fatalf("create legal-document service: %v", err)
+	}
+
+	initial, err := service.GetLegalDocuments(ctx)
+	if err != nil {
+		t.Fatalf("get host legal documents: %v", err)
+	}
+	if initial.Revision != 1 || initial.Imprint.Source != LegalDocumentSourceFile || initial.Imprint.Content != "# Operator\n\nHost operator" || initial.PrivacyPolicy.Source != LegalDocumentSourceFile {
+		t.Fatalf("unexpected host legal documents: %#v", initial)
+	}
+	updatedImprint := "# Operator\n\nDatabase operator"
+	updated, err := service.UpdateLegalDocuments(ctx, "admin", initial.Revision, LegalDocumentsPatch{Imprint: &updatedImprint})
+	if err != nil {
+		t.Fatalf("update legal documents: %v", err)
+	}
+	if updated.Revision != 2 || updated.Imprint.Source != LegalDocumentSourceDatabase || updated.Imprint.OverrideVersion != 1 || updated.Imprint.Content != updatedImprint {
+		t.Fatalf("unexpected persisted legal document: %#v", updated.Imprint)
+	}
+	if _, err := service.UpdateLegalDocuments(ctx, "admin", initial.Revision, LegalDocumentsPatch{Imprint: &updatedImprint}); !errors.Is(err, domain.ErrPrecondition) {
+		t.Fatalf("stale legal-document update error=%v, want precondition", err)
+	}
+	if _, err := service.UpdateLegalDocuments(ctx, "member", updated.Revision, LegalDocumentsPatch{Imprint: &updatedImprint}); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("non-administrator legal-document update error=%v, want forbidden", err)
+	}
+
+	if err := os.WriteFile(imprintPath, []byte("# Operator\n\nChanged host operator"), 0o600); err != nil {
+		t.Fatalf("replace imprint fixture: %v", err)
+	}
+	if err := os.WriteFile(privacyPath, []byte("# Controller\n\nChanged host controller"), 0o600); err != nil {
+		t.Fatalf("replace privacy fixture: %v", err)
+	}
+	live, err := service.GetLegalDocuments(ctx)
+	if err != nil {
+		t.Fatalf("get live legal documents: %v", err)
+	}
+	if live.Imprint.Content != updatedImprint || live.PrivacyPolicy.Content != "# Controller\n\nChanged host controller" {
+		t.Fatalf("override precedence or live file refresh failed: %#v", live)
+	}
+	reset, err := service.ResetLegalDocuments(ctx, "admin", live.Revision, []LegalDocumentKey{LegalDocumentImprint})
+	if err != nil {
+		t.Fatalf("reset legal document: %v", err)
+	}
+	if reset.Revision != 3 || reset.Imprint.Source != LegalDocumentSourceFile || reset.Imprint.Content != "# Operator\n\nChanged host operator" {
+		t.Fatalf("unexpected reset legal document: %#v", reset.Imprint)
+	}
+	public, err := service.GetPublicLegalDocuments(ctx)
+	if err != nil || public.Imprint != reset.Imprint.Content || public.PrivacyPolicy != reset.PrivacyPolicy.Content {
+		t.Fatalf("unexpected public legal documents=%#v err=%v", public, err)
 	}
 }
 

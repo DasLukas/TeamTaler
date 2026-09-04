@@ -98,6 +98,63 @@ const (
 	SettingSourceDatabase SettingSource = "DATABASE"
 )
 
+// LegalDocumentKey identifies one public legal document managed by the
+// instance operator.
+type LegalDocumentKey string
+
+const (
+	// LegalDocumentImprint identifies the public operator imprint.
+	LegalDocumentImprint LegalDocumentKey = "IMPRINT"
+	// LegalDocumentPrivacyPolicy identifies the public privacy notice.
+	LegalDocumentPrivacyPolicy LegalDocumentKey = "PRIVACY_POLICY"
+)
+
+// LegalDocumentSource identifies the layer supplying a legal document.
+type LegalDocumentSource string
+
+const (
+	// LegalDocumentSourceCode means no host file or database override supplies
+	// the document, so the built-in empty value is effective.
+	LegalDocumentSourceCode LegalDocumentSource = "CODE"
+	// LegalDocumentSourceFile means the current host file is effective.
+	LegalDocumentSourceFile LegalDocumentSource = "FILE"
+	// LegalDocumentSourceDatabase means an administrator override is effective.
+	LegalDocumentSourceDatabase LegalDocumentSource = "DATABASE"
+)
+
+// LegalDocument is one effective administrator-facing legal document. Content
+// is Markdown source; rendering remains responsible for rejecting raw HTML.
+type LegalDocument struct {
+	Content         string              `json:"content"`
+	Source          LegalDocumentSource `json:"source"`
+	Configured      bool                `json:"configured"`
+	OverrideVersion int64               `json:"overrideVersion,omitempty"`
+	UpdatedAt       string              `json:"updatedAt,omitempty"`
+}
+
+// LegalDocuments is the versioned administrator projection of every public
+// legal document.
+type LegalDocuments struct {
+	Revision        int64         `json:"revision"`
+	Imprint         LegalDocument `json:"imprint"`
+	PrivacyPolicy   LegalDocument `json:"privacyPolicy"`
+	UpdatedAt       string        `json:"updatedAt"`
+	UpdatedByUserID *string       `json:"updatedByUserId,omitempty"`
+}
+
+// PublicLegalDocuments is the metadata-free projection exposed without an
+// authenticated session.
+type PublicLegalDocuments struct {
+	Imprint       string `json:"imprint"`
+	PrivacyPolicy string `json:"privacyPolicy"`
+}
+
+// LegalDocumentsPatch contains optional complete Markdown replacements.
+type LegalDocumentsPatch struct {
+	Imprint       *string `json:"imprint,omitempty"`
+	PrivacyPolicy *string `json:"privacyPolicy,omitempty"`
+}
+
 // SMTPTLSMode identifies the required SMTP transport-security negotiation.
 type SMTPTLSMode string
 
@@ -325,4 +382,5 @@ type Service struct {
 	defaults       Defaults
 	passwordCipher PasswordCipher
 	webPushCipher  WebPushSecretCipher
+	legalFiles     map[LegalDocumentKey]string
 }

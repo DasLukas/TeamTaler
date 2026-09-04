@@ -43,6 +43,17 @@
   width: min(100%, 680px);
 }
 
+.standalone {
+  display: flex;
+  min-height: 100dvh;
+  flex-direction: column;
+}
+
+.standalone .center {
+  min-height: 0;
+  flex: 1 0 auto;
+}
+
 .demo {
   position: sticky;
   z-index: 20;

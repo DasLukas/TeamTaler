@@ -21,6 +21,7 @@ This README is the primary entry point for the person who installs and operates 
 - Local accounts with profile images, password recovery, verified email changes, and server-side sessions.
 - In-app notifications plus independently configurable SMTP and standards-based Web Push delivery.
 - Global system administration for instance settings and the complete group lifecycle.
+- Public, dynamically managed imprint and privacy-policy pages with live host-file fallbacks.
 - Reversible group archival and strongly protected permanent group deletion.
 - Application-consistent backups containing SQLite data and referenced media.
 
@@ -61,6 +62,11 @@ Copy the supplied template:
 cp .env.example .env
 chmod 600 .env
 ```
+
+Before making the instance publicly reachable, replace every bracketed
+placeholder in `legal/IMPRESSUN.md` and `legal/PRIVACY.md`. These English
+Markdown files are mounted read-only into the application container and remain
+editable on the host.
 
 At minimum, edit these values:
 
@@ -142,13 +148,13 @@ Bootstrap refuses to run after an account already exists. It never accepts a pas
 
 ### 6. Open the instance
 
-Open `TEAMTALER_PUBLIC_URL` in a browser and sign in with the bootstrap account. The first settings tab is **System**, where the instance identity, default currency, installation-wide time zone, media and receipt limits, SMTP, public joining, maintenance mode, groups, and global system audit are managed.
+Open `TEAMTALER_PUBLIC_URL` in a browser and sign in with the bootstrap account. The first settings tab is **System**, where the instance identity, legal documents, default currency, installation-wide time zone, media and receipt limits, SMTP, public joining, maintenance mode, groups, and global system audit are managed.
 
 ## Configuration
 
 TeamTaler separates immutable host configuration from runtime-editable instance settings.
 
-- Host configuration is read at process start and changed through `.env` plus a container restart.
+- Host configuration is read at process start and changed through `.env` plus a container restart. The configured legal-document contents are the exception: their files are read on demand.
 - Instance settings use environment variables as defaults. A system administrator may store versioned SQLite overrides through the System tab or CLI. A reset removes the override and immediately reveals the current environment or built-in default.
 
 ### Host configuration
@@ -165,8 +171,20 @@ TeamTaler separates immutable host configuration from runtime-editable instance 
 | `TEAMTALER_PUSH_STORAGE_KEY` | unset | Independent base64-encoded 32-byte key for VAPID overrides and encrypted browser subscriptions. |
 | `TEAMTALER_SMTP_ALLOW_PRIVATE_NETWORK` | `false` | Allows web-configured SMTP targets on private or local networks. Enable only for a trusted private relay requirement. |
 | `TEAMTALER_SMTP_TEST_RECIPIENT` | empty | Optional immutable mailbox for operator-triggered SMTP test messages. Normal application email is unaffected. |
+| `TEAMTALER_IMPRINT_FILE` | unset | Optional live UTF-8 Markdown fallback for the public imprint. Compose uses `/etc/teamtaler/legal/IMPRESSUN.md`. |
+| `TEAMTALER_PRIVACY_POLICY_FILE` | unset | Optional live UTF-8 Markdown fallback for the public privacy policy. Compose uses `/etc/teamtaler/legal/PRIVACY.md`. |
 
 The standard container also uses fixed runtime paths from `.env.example`. Detailed path, proxy-network, and storage guidance is in [deploy/README.md](deploy/README.md).
+
+### Legal documents
+
+The public `/impressum` and `/datenschutz` routes are linked from every signed-out and authenticated application surface. Their content follows this precedence:
+
+1. a versioned database override saved under **Settings → System → Legal content**;
+2. the current host files `legal/IMPRESSUN.md` and `legal/PRIVACY.md`;
+3. an empty built-in value that produces a visible not-configured state.
+
+Resetting a document in System administration removes only its database override and immediately reveals the current host file. Host files are read for every API request when no override exists, so an atomic host-side replacement is visible without a TeamTaler restart. Each file must be regular UTF-8 Markdown no larger than 64 KiB. Raw HTML is deliberately not rendered. The supplied files are templates, not legal advice, and their bracketed placeholders must be replaced with the actual operator, controller, processing activities, and any other legally applicable information before publication.
 
 ### Runtime-editable instance defaults
 

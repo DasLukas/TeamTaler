@@ -32,6 +32,7 @@
     "react-hook-form": "^7.85.0",
     "react-i18next": "^17.0.11",
     "react-is": "19.2.8",
+    "react-markdown": "^10.1.0",
     "recharts": "^3.10.1"
   },
   "devDependencies": {

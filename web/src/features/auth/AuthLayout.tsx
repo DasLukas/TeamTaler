@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { Brand } from '@/components/brand/Brand';
+import { LegalLinks } from '@/components/legal/LegalLinks';
 import styles from './AuthLayout.module.css';
 
 /** Properties accepted by the shared authentication layout. */
@@ -33,7 +34,10 @@ export function AuthLayout({ title, intro, children, footer }: AuthLayoutProps) 
           <h1>{title}</h1>
           <p>{intro}</p>
           {children}
-          {footer ? <footer>{footer}</footer> : null}
+          <footer>
+            {footer ? <div className={styles.contextFooter}>{footer}</div> : null}
+            <LegalLinks />
+          </footer>
         </div>
       </section>
     </main>

@@ -925,6 +925,42 @@ export interface SystemSettingsUpdate {
   maintenanceMessage?: string;
 }
 
+/** Provenance of one effective public legal document. */
+export type LegalDocumentSource = 'CODE' | 'FILE' | 'DATABASE';
+
+/** Effective legal-document content and administrator-facing source metadata. */
+export interface LegalDocument {
+  content: string;
+  source: LegalDocumentSource;
+  configured: boolean;
+  overrideVersion?: number;
+  updatedAt?: string;
+}
+
+/** Versioned legal-document collection available to system administrators. */
+export interface SystemLegalDocuments {
+  revision: number;
+  imprint: LegalDocument;
+  privacyPolicy: LegalDocument;
+  updatedAt: string;
+  updatedByUserId?: string;
+}
+
+/** Metadata-free legal content available on public routes. */
+export interface PublicLegalDocuments {
+  imprint: string;
+  privacyPolicy: string;
+}
+
+/** Complete replacement for one or more legal documents. */
+export interface SystemLegalDocumentsUpdate {
+  imprint?: string;
+  privacyPolicy?: string;
+}
+
+/** Stable legal-document identifiers accepted by the reset endpoint. */
+export type LegalDocumentKey = 'IMPRINT' | 'PRIVACY_POLICY';
+
 /** Complete SMTP update; an omitted password preserves the configured secret. */
 export interface SystemSmtpSettingsUpdate {
   enabled?: boolean;

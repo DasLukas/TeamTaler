@@ -17,7 +17,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/api/client', () => ({ api: mocks }));
 
-vi.mock('@tanstack/react-router', () => ({ useNavigate: () => mocks.navigate }));
+vi.mock('@tanstack/react-router', () => ({
+  Link: ({ children, to, ...props }: { children: React.ReactNode; to: string }) => <a href={to} {...props}>{children}</a>,
+  useNavigate: () => mocks.navigate,
+}));
 
 function renderPage(): void {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });

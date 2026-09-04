@@ -427,6 +427,10 @@ export class DemoTransport {
       instanceName: 'TeamTaler Demo', maintenanceMode: false, maintenanceMessage: '', publicJoinEnabled: true,
       mediaUploadMaxBytes: 5 * 1024 * 1024, attachmentUploadMaxBytes: 15 * 1024 * 1024,
     } as T;
+    if (cleanPath === '/legal-documents' && method === 'GET') return {
+      imprint: '# Operator\n\nTeamTaler development demo',
+      privacyPolicy: '# Controller\n\nThis development demo stores its sample data only in the current browser session.',
+    } as T;
     if (cleanPath === '/auth/capabilities' && method === 'GET') return { passwordResetAvailable: false, emailChangeAvailable: false } as T;
     if (cleanPath === '/me/profile' && method === 'PATCH') {
       const displayName = String((body as { displayName?: unknown }).displayName ?? '').trim();

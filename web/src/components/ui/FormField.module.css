@@ -64,6 +64,13 @@
   border-color: var(--color-border);
 }
 
+.textarea {
+  min-height: 260px;
+  padding-block: var(--space-3);
+  line-height: 1.55;
+  resize: vertical;
+}
+
 .hint,
 .error {
   font-size: var(--font-size-xs);

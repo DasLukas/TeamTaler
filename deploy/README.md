@@ -64,6 +64,7 @@ Create `.env`, set the public URL and proxy CIDRs, and start a pinned release:
 
 ```sh
 cp .env.example .env
+${EDITOR:-vi} legal/IMPRESSUN.md legal/PRIVACY.md
 docker compose pull app
 docker compose up -d app
 ```
@@ -113,6 +114,8 @@ TEAMTALER_PUBLIC_JOIN_ENABLED=true
 TEAMTALER_MAINTENANCE_MODE=false
 TEAMTALER_MAINTENANCE_MESSAGE=
 ```
+
+Compose also mounts `./legal` read-only at `/etc/teamtaler/legal`. The application reads `IMPRESSUN.md` and `PRIVACY.md` on demand whenever no database override exists, so an atomic host-side edit becomes visible without a restart. Both files are bounded UTF-8 Markdown templates and must be completed with the actual operator, controller, and processing details before public access is enabled. A legal-document override saved under **Settings → System → Legal content** takes precedence until that document is reset.
 
 A system administrator may persist versioned overrides from the System settings tab or the local `teamtaler admin system` CLI. Persisted values take precedence and become effective without restarting; reset removes the override and reveals the current environment or code default. Media and receipt endpoints derive their request ceiling from their respective live setting and are not capped by `TEAMTALER_MAX_REQUEST_BYTES`; that variable remains the ordinary API request ceiling. Configure an optional reverse proxy to accept at least 51 MiB so the full 50-MiB receipt range plus multipart reserve remains usable. Image decoder and normalized-output protections remain fixed.
 

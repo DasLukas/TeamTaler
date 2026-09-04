@@ -238,6 +238,18 @@ export const de = {
     existingDisplayNameHint: 'Bei einem bestehenden Konto bleibt dein bisheriger Anzeigename erhalten.',
     acceptInvitation: 'Einladung annehmen',
   },
+  legal: {
+    navigation: 'Rechtliche Informationen',
+    backHome: 'Zur TeamTaler-Startseite',
+    loadError: 'Der Rechtstext konnte nicht geladen werden.',
+    notConfigured: 'Dieser Rechtstext wurde noch nicht veröffentlicht.',
+    imprint: {
+      title: 'Impressum',
+    },
+    privacyPolicy: {
+      title: 'Datenschutz',
+    },
+  },
   booking: {
     noAccessTitle: 'Kein Zugriff',
     noAccessMessage: 'Du benötigst das Recht für eigene oder fremde Buchungen, um diesen Bereich aufzurufen.',
@@ -954,6 +966,35 @@ export const de = {
       mediaLimitHint: 'Einstellbar in ganzen MiB von 1 bis 25.',
       attachmentLimit: 'Maximale Beleg-Uploadgröße in MiB',
       attachmentLimitHint: 'Maximale Größe eines einzelnen Zahlungsbelegs.',
+    },
+    legal: {
+      title: 'Rechtliche Inhalte',
+      intro: 'Pflege Impressum und Datenschutzerklärung als Markdown. Gespeicherte Inhalte werden versioniert in der Datenbank abgelegt und haben Vorrang vor den live gelesenen Host-Dateien.',
+      content: 'Inhalt (Markdown)',
+      source: 'Aktive Quelle',
+      size: '{{current}} von {{maximum}} UTF-8-Bytes',
+      openPublic: 'Öffentliche Seite öffnen',
+      useHostFile: 'Host-Datei verwenden',
+      saved: 'Der Rechtstext wurde gespeichert.',
+      saveError: 'Der Rechtstext konnte nicht gespeichert werden. Lade den aktuellen Stand und versuche es erneut.',
+      loadError: 'Die rechtlichen Inhalte konnten nicht geladen werden.',
+      resetTitle: '{{document}} zurücksetzen?',
+      resetMessage: 'Der gespeicherte Datenbankinhalt wird entfernt. Danach ist sofort die aktuelle Host-Datei wirksam; fehlt sie, bleibt die öffentliche Seite ohne veröffentlichten Inhalt.',
+      sources: {
+        code: 'Nicht eingerichtet',
+        file: 'Host-Datei',
+        database: 'Systemadministration',
+      },
+      imprint: {
+        title: 'Impressum',
+        description: 'Benennt den Betreiber dieser Instanz eindeutig und enthält alle für ihn anwendbaren Pflichtangaben.',
+        hint: 'Mindestens vollständiger Name, ladungsfähige Anschrift und schnelle Kontaktmöglichkeit; je nach Betreiber zusätzlich Register-, Aufsichts-, Berufs- oder Steuerangaben.',
+      },
+      privacyPolicy: {
+        title: 'Datenschutzerklärung',
+        description: 'Benennt den datenschutzrechtlich Verantwortlichen und erklärt alle tatsächlichen Verarbeitungen dieser Instanz.',
+        hint: 'Beschreibe Verantwortlichen, Zwecke, Rechtsgrundlagen, Datenkategorien, Empfänger, Speicherdauern, Betroffenenrechte, Hosting, Protokolle, Cookies sowie aktivierte E-Mail- oder Push-Dienste.',
+      },
     },
     smtp: {
       title: 'E-Mail',

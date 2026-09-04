@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Navigate, Outlet } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ApiError, api, isDevelopmentDemoEnabled } from '@/api/client';
 import { GroupProvider } from '@/app/GroupContext';
@@ -8,6 +8,7 @@ import { SessionProvider } from '@/app/SessionContext';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { DEFAULT_INSTANCE_CAPABILITIES, isSystemAdministrator } from '@/app/useSession';
 import { StatePanel } from '@/components/ui/StatePanel';
+import { LegalFooter } from '@/components/legal/LegalLinks';
 import { NotificationSummaryProvider } from '@/features/notifications/NotificationSummaryProvider';
 import { preservePendingNotificationFromHref } from '@/features/notifications/notificationDeepLink';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
@@ -57,6 +58,11 @@ function RouteOutlet() {
   return <Outlet />;
 }
 
+/** Keeps public legal links reachable while the authenticated shell displays a standalone state. */
+function StandaloneShellState({ children }: { children: ReactNode }) {
+  return <div className={styles.standalone}><main className={styles.center}>{children}</main><LegalFooter /></div>;
+}
+
 /**
  * Renders the authenticated shell shared by group-scoped routes.
  *
@@ -98,19 +104,19 @@ export function AppShell() {
     }
   };
 
-  if (sessionQuery.isLoading) return <main className={styles.center}><StatePanel kind="loading" /></main>;
+  if (sessionQuery.isLoading) return <StandaloneShellState><StatePanel kind="loading" /></StandaloneShellState>;
   if (sessionQuery.error instanceof ApiError && sessionQuery.error.problem.status === 401) {
     return <SessionExpiredRedirect href={window.location.href} />;
   }
   if (sessionQuery.isError || !sessionQuery.data) {
     return (
-      <main className={styles.center}>
+      <StandaloneShellState>
         <StatePanel kind="error" message={t('appShell.sessionError')} actionLabel={t('common.retry')} onAction={() => void sessionQuery.refetch()} />
-      </main>
+      </StandaloneShellState>
     );
   }
   if (sessionQuery.data.groups.length === 0 && !isSystemAdministrator(sessionQuery.data)) {
-    return <main className={styles.center}><StatePanel kind="empty" title={t('appShell.noGroupTitle')} message={t('appShell.noGroupMessage')} /></main>;
+    return <StandaloneShellState><StatePanel kind="empty" title={t('appShell.noGroupTitle')} message={t('appShell.noGroupMessage')} /></StandaloneShellState>;
   }
 
   const instanceCapabilities = instanceCapabilitiesQuery.data ?? DEFAULT_INSTANCE_CAPABILITIES;
@@ -131,6 +137,7 @@ export function AppShell() {
           <div className={styles.maintenance} role="status">{instanceCapabilities.maintenanceMessage || t('appShell.maintenanceBanner')}</div>
         ) : null}
         {sessionQuery.data.groups.length > 0 ? <GroupScopedOutlet /> : <RouteOutlet />}
+        <LegalFooter />
       </main>
     </>
   );

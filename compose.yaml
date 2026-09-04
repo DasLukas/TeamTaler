@@ -14,10 +14,13 @@ services:
       TEAMTALER_DATA_DIR: /var/lib/teamtaler
       TEAMTALER_DATABASE_PATH: /var/lib/teamtaler/teamtaler.db
       TEAMTALER_WEB_DIR: /app/web
+      TEAMTALER_IMPRINT_FILE: /etc/teamtaler/legal/IMPRESSUN.md
+      TEAMTALER_PRIVACY_POLICY_FILE: /etc/teamtaler/legal/PRIVACY.md
     ports:
       - "127.0.0.1:${TEAMTALER_HOST_PORT:-8080}:8080"
     volumes:
       - teamtaler-data:/var/lib/teamtaler
+      - ./legal:/etc/teamtaler/legal:ro
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m

@@ -155,6 +155,62 @@ func TestSystemRoutesUseLiveGlobalAuthorizationAndDelegatedGroupCreation(t *test
 	}
 }
 
+func TestPublicAndSystemLegalDocumentRoutesPreserveFileFallbackAndAuthorization(t *testing.T) {
+	directory := t.TempDir()
+	imprintPath := filepath.Join(directory, "IMPRESSUN.md")
+	privacyPath := filepath.Join(directory, "PRIVACY.md")
+	if err := os.WriteFile(imprintPath, []byte("# Operator\n\nHost operator"), 0o600); err != nil {
+		t.Fatalf("write imprint fixture: %v", err)
+	}
+	if err := os.WriteFile(privacyPath, []byte("# Controller\n\nHost controller"), 0o600); err != nil {
+		t.Fatalf("write privacy fixture: %v", err)
+	}
+	fixture := newSystemHTTPFixture(t, func(configuration *config.Config) {
+		configuration.LegalDocuments = config.LegalDocumentsConfig{
+			ImprintFile: imprintPath, PrivacyPolicyFile: privacyPath,
+		}
+	})
+
+	publicResponse := fixture.serve(auth.Session{}, http.MethodGet, "/api/v1/legal-documents", "", "")
+	if publicResponse.Code != http.StatusOK || !strings.Contains(publicResponse.Body.String(), "Host operator") || !strings.Contains(publicResponse.Body.String(), "Host controller") {
+		t.Fatalf("public legal documents status=%d body=%s", publicResponse.Code, publicResponse.Body.String())
+	}
+	if strings.Contains(publicResponse.Body.String(), "source") || strings.Contains(publicResponse.Body.String(), imprintPath) {
+		t.Fatalf("public legal response exposed administrator metadata: %s", publicResponse.Body.String())
+	}
+
+	member := fixture.createAccount(t, "legal-member@example.test", "Legal Member", "member-password-long-enough")
+	forbidden := fixture.serve(member, http.MethodGet, "/api/v1/system/legal-documents", "", "")
+	if forbidden.Code != http.StatusForbidden {
+		t.Fatalf("member legal administration status=%d body=%s, want 403", forbidden.Code, forbidden.Body.String())
+	}
+	adminResponse := fixture.serve(fixture.bootstrap, http.MethodGet, "/api/v1/system/legal-documents", "", "")
+	if adminResponse.Code != http.StatusOK || adminResponse.Header().Get("ETag") != `"v1"` || !strings.Contains(adminResponse.Body.String(), `"source":"FILE"`) {
+		t.Fatalf("administrator legal documents status=%d ETag=%q body=%s", adminResponse.Code, adminResponse.Header().Get("ETag"), adminResponse.Body.String())
+	}
+
+	updated := fixture.serve(fixture.bootstrap, http.MethodPut, "/api/v1/system/legal-documents", `{"imprint":"# Operator\n\nDatabase operator"}`, adminResponse.Header().Get("ETag"))
+	if updated.Code != http.StatusOK || updated.Header().Get("ETag") != `"v2"` || !strings.Contains(updated.Body.String(), `"source":"DATABASE"`) {
+		t.Fatalf("update legal documents status=%d ETag=%q body=%s", updated.Code, updated.Header().Get("ETag"), updated.Body.String())
+	}
+	if err := os.WriteFile(imprintPath, []byte("# Operator\n\nChanged host operator"), 0o600); err != nil {
+		t.Fatalf("replace imprint fixture: %v", err)
+	}
+	publicResponse = fixture.serve(auth.Session{}, http.MethodGet, "/api/v1/legal-documents", "", "")
+	if !strings.Contains(publicResponse.Body.String(), "Database operator") || strings.Contains(publicResponse.Body.String(), "Changed host operator") {
+		t.Fatalf("database override did not retain precedence: %s", publicResponse.Body.String())
+	}
+
+	reset := fixture.serve(fixture.bootstrap, http.MethodPost, "/api/v1/system/legal-documents/reset", `{"keys":["IMPRINT"]}`, updated.Header().Get("ETag"))
+	if reset.Code != http.StatusOK || reset.Header().Get("ETag") != `"v3"` || !strings.Contains(reset.Body.String(), "Changed host operator") {
+		t.Fatalf("reset legal document status=%d ETag=%q body=%s", reset.Code, reset.Header().Get("ETag"), reset.Body.String())
+	}
+	stale := fixture.serve(fixture.bootstrap, http.MethodPut, "/api/v1/system/legal-documents", `{"privacyPolicy":"# Controller\n\nChanged"}`, adminResponse.Header().Get("ETag"))
+	if stale.Code != http.StatusPreconditionFailed {
+		t.Fatalf("stale legal document status=%d body=%s, want 412", stale.Code, stale.Body.String())
+	}
+}
+
 func TestRuntimeSystemSettingsAndMaintenanceGate(t *testing.T) {
 	fixture := newSystemHTTPFixture(t)
 	member := fixture.createAccount(t, "reader@example.test", "Reader", "reader-password-long-enough")

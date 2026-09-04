@@ -8,6 +8,7 @@ const storedPreferences = new Map<string, string>();
 
 vi.mock('@tanstack/react-query', () => ({ useQuery: mocks.useQuery }));
 vi.mock('@tanstack/react-router', () => ({
+  Link: ({ children, to }: { children: ReactNode; to: string }) => <a href={to}>{children}</a>,
   Navigate: () => <div>redirect</div>,
   Outlet: () => <div>outlet</div>,
 }));
@@ -67,8 +68,10 @@ describe('AppShell empty group state', () => {
 
     render(<AppShell />);
 
-    expect(screen.getByRole('navigation')).toHaveTextContent('system-only-navigation');
+    expect(screen.getByText('system-only-navigation').closest('nav')).toBeInTheDocument();
     expect(screen.getByText('outlet')).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Impressum' })).toHaveAttribute('href', '/impressum');
+    expect(screen.getByRole('link', { name: 'Datenschutz' })).toHaveAttribute('href', '/datenschutz');
     expect(screen.queryByText('Keine aktive Gruppe')).not.toBeInTheDocument();
   });
 

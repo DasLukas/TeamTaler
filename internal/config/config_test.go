@@ -76,6 +76,19 @@ func TestLoadAcceptsRootPublicURL(t *testing.T) {
 	}
 }
 
+func TestLoadReadsLegalDocumentFilePaths(t *testing.T) {
+	clearSMTPEnvironment(t)
+	t.Setenv("TEAMTALER_IMPRINT_FILE", " ./legal/IMPRESSUN.md ")
+	t.Setenv("TEAMTALER_PRIVACY_POLICY_FILE", "/etc/teamtaler/legal/PRIVACY.md")
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.LegalDocuments.ImprintFile != filepath.Clean("./legal/IMPRESSUN.md") || loaded.LegalDocuments.PrivacyPolicyFile != "/etc/teamtaler/legal/PRIVACY.md" {
+		t.Fatalf("unexpected legal-document paths: %#v", loaded.LegalDocuments)
+	}
+}
+
 func TestLoadRequiresDatabaseDirectlyInsideDataDirectory(t *testing.T) {
 	clearSMTPEnvironment(t)
 	dataDirectory := t.TempDir()

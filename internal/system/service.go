@@ -64,6 +64,18 @@ func WithWebPushSecretCipher(cipher WebPushSecretCipher) ServiceOption {
 	return func(service *Service) { service.webPushCipher = cipher }
 }
 
+// WithLegalDocumentFiles configures optional live host-file fallbacks for the
+// imprint and privacy policy. Database overrides retain precedence. Empty paths
+// disable the corresponding file source.
+func WithLegalDocumentFiles(imprintPath, privacyPolicyPath string) ServiceOption {
+	return func(service *Service) {
+		service.legalFiles = map[LegalDocumentKey]string{
+			LegalDocumentImprint:       strings.TrimSpace(imprintPath),
+			LegalDocumentPrivacyPolicy: strings.TrimSpace(privacyPolicyPath),
+		}
+	}
+}
+
 func validateDefaults(defaults Defaults) error {
 	if err := validateInstanceName(defaults.InstanceName); err != nil {
 		return fmt.Errorf("invalid default instance name: %w", err)

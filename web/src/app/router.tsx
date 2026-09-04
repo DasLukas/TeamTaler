@@ -15,6 +15,7 @@ import { DashboardPage } from '@/features/dashboard/DashboardPage';
 import { FinancePage } from '@/features/finance/FinancePage';
 import { MorePage } from '@/features/more/MorePage';
 import { NotificationsPage } from '@/features/notifications/NotificationsPage';
+import { ImprintRoutePage, PrivacyPolicyRoutePage } from '@/features/legal/LazyLegalPages';
 import { NotFoundPage } from './NotFoundPage';
 import { memberPaths } from './paths';
 import { BookingPermissionRoute, GroupRequiredRoute, PreferredWorkspaceRedirect, StatisticsPermissionRoute } from './PermissionRoutes';
@@ -66,6 +67,8 @@ const emailChangeConfirmationRoute = createRoute({ getParentRoute: () => rootRou
 const inviteRoute = createRoute({ getParentRoute: () => rootRoute, path: '/invite', component: InvitationPage });
 const publicJoinRoute = createRoute({ getParentRoute: () => rootRoute, path: '/join', component: PublicJoinPage });
 const publicJoinVerificationRoute = createRoute({ getParentRoute: () => rootRoute, path: '/join/verify', component: PublicJoinVerificationPage });
+const imprintRoute = createRoute({ getParentRoute: () => rootRoute, path: '/impressum', component: ImprintRoutePage });
+const privacyPolicyRoute = createRoute({ getParentRoute: () => rootRoute, path: '/datenschutz', component: PrivacyPolicyRoutePage });
 
 const routeTree = rootRoute.addChildren([
   authenticatedRoute.addChildren([
@@ -80,6 +83,8 @@ const routeTree = rootRoute.addChildren([
   inviteRoute,
   publicJoinRoute,
   publicJoinVerificationRoute,
+  imprintRoute,
+  privacyPolicyRoute,
 ]);
 
 /** Application router with code-defined, fully typed public and authenticated routes. */

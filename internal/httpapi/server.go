@@ -118,6 +118,10 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 		pushSecrets = secrets
 		systemOptions = append(systemOptions, systemadmin.WithWebPushSecretCipher(secrets))
 	}
+	systemOptions = append(systemOptions, systemadmin.WithLegalDocumentFiles(
+		cfg.LegalDocuments.ImprintFile,
+		cfg.LegalDocuments.PrivacyPolicyFile,
+	))
 	systemService, err := systemadmin.NewService(db, systemadmin.DefaultsFromConfig(cfg), smtpPasswordCipher, systemOptions...)
 	if err != nil {
 		panic(fmt.Sprintf("configure system administration: %v", err))
@@ -186,6 +190,7 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /health/live", server.handleLive)
 	mux.HandleFunc("GET /health/ready", server.handleReady)
 	mux.HandleFunc("GET /api/v1/instance/capabilities", server.handleInstanceCapabilities)
+	mux.HandleFunc("GET /api/v1/legal-documents", server.handlePublicLegalDocuments)
 	mux.HandleFunc("POST /api/v1/auth/login", server.handleLogin)
 	mux.HandleFunc("POST /api/v1/auth/logout", server.handleLogout)
 	mux.HandleFunc("GET /api/v1/auth/capabilities", server.handleAccountCapabilities)
@@ -219,6 +224,9 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /api/v1/groups", server.handleListGroups)
 	mux.HandleFunc("POST /api/v1/groups", server.handleCreateGroup)
 	mux.HandleFunc("GET /api/v1/system/settings", server.handleSystemSettings)
+	mux.HandleFunc("GET /api/v1/system/legal-documents", server.handleSystemLegalDocuments)
+	mux.HandleFunc("PUT /api/v1/system/legal-documents", server.handleUpdateSystemLegalDocuments)
+	mux.HandleFunc("POST /api/v1/system/legal-documents/reset", server.handleResetSystemLegalDocuments)
 	mux.HandleFunc("PATCH /api/v1/system/settings", server.handleUpdateSystemSettings)
 	mux.HandleFunc("POST /api/v1/system/settings/reset", server.handleResetSystemSettings)
 	mux.HandleFunc("PUT /api/v1/system/settings/smtp", server.handleUpdateSystemSMTP)

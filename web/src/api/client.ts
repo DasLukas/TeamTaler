@@ -78,6 +78,7 @@ import type {
   InvitationPreview,
   LedgerEntry,
   LoginCommand,
+  LegalDocumentKey,
   GroupPreference,
   GroupSettings,
   GroupSettingsUpdateInput,
@@ -121,6 +122,7 @@ import type {
   PublicJoinLinkUpdate,
   PublicJoinPreview,
   PublicJoinRegistrationInput,
+  PublicLegalDocuments,
   Role,
   RoleAssignment,
   RoleInput,
@@ -138,6 +140,8 @@ import type {
   SystemGroupDeletionImpact,
   ResettableSystemSettingKey,
   SystemSettings,
+  SystemLegalDocuments,
+  SystemLegalDocumentsUpdate,
   SystemSettingsUpdate,
   SystemSmtpSettingsUpdate,
   SystemWebPushSettingsUpdate,
@@ -450,12 +454,24 @@ async function idempotentRequest<T>(groupId: string, operation: string, path: st
 export const api = {
   getSession: async (): Promise<Session> => setSessionActor(adaptSession(await request<unknown>('/session'))),
   getInstanceCapabilities: async (): Promise<InstanceCapabilities> => adaptInstanceCapabilities(await request<unknown>('/instance/capabilities')),
+  getPublicLegalDocuments: async (): Promise<PublicLegalDocuments> => request<PublicLegalDocuments>('/legal-documents'),
   getAuthenticationCapabilities: async (): Promise<AuthenticationCapabilities> => request<AuthenticationCapabilities>('/auth/capabilities'),
   /**
    * Reads the direct or `{ settings }` system document from `GET /system/settings`.
    * Mutations below send camelCase JSON and require `If-Match: "v{revision}"`.
    */
   getSystemSettings: async (): Promise<SystemSettings> => adaptSystemSettings(await request<unknown>('/system/settings')),
+  getSystemLegalDocuments: async (): Promise<SystemLegalDocuments> => request<SystemLegalDocuments>('/system/legal-documents'),
+  updateSystemLegalDocuments: async (update: SystemLegalDocumentsUpdate, revision: number): Promise<SystemLegalDocuments> => request<SystemLegalDocuments>('/system/legal-documents', {
+    method: 'PUT',
+    headers: versionHeaders(revision),
+    body: json(update),
+  }),
+  resetSystemLegalDocuments: async (keys: LegalDocumentKey[], revision: number): Promise<SystemLegalDocuments> => request<SystemLegalDocuments>('/system/legal-documents/reset', {
+    method: 'POST',
+    headers: versionHeaders(revision),
+    body: json({ keys }),
+  }),
   updateSystemSettings: async (update: SystemSettingsUpdate, revision: number): Promise<SystemSettings> => adaptSystemSettings(await request<unknown>('/system/settings', {
     method: 'PATCH',
     headers: versionHeaders(revision),
