@@ -21,6 +21,7 @@ const session: Session = {
     name: 'Group A',
     currency: 'EUR',
     defaultTheme: 'NRW',
+    statisticsEnabled: false,
     membership: { id: 'member-a', roles: ['MEMBER'], groupPermissions: [], themeOverride: null },
   }],
   activeGroupId: 'group-a',

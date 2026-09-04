@@ -17,6 +17,7 @@ import type {
   InstanceCapabilities,
   LedgerEntry,
   Membership,
+  MemberStatistics,
   Notification,
   NotificationChannel,
   NotificationDestination,
@@ -49,6 +50,9 @@ import type {
   ReasonMode,
   Session,
   Settlement,
+  StatisticsBucket,
+  StatisticsDashboard,
+  StatisticsMeta,
   SmtpTlsMode,
   SystemAccount,
   SystemAuditEntry,
@@ -65,7 +69,7 @@ import type {
   ThemePreference,
   User,
 } from './types';
-import { DEFAULT_ATTACHMENT_UPLOAD_MAX_BYTES, DEFAULT_MEDIA_UPLOAD_MAX_BYTES, isCategoryIcon, isColorMode, isPermissionKey, isThemeId } from './types';
+import { DEFAULT_ATTACHMENT_UPLOAD_MAX_BYTES, DEFAULT_MEDIA_UPLOAD_MAX_BYTES, isCategoryIcon, isColorMode, isPermissionKey, isStatisticsRange, isThemeId, type FinanceStatistics } from './types';
 import { formatMoney } from './money';
 import i18n from '@/i18n';
 import { defaultPaymentMethods, historicalPaymentMethodLabel, localizedPaymentMethodLabel } from '@/features/finance/paymentMethods';
@@ -500,6 +504,7 @@ export function adaptGroupSettings(input: unknown): GroupSettings {
   const otherPaymentReasonMode = reasonMode(source.otherPaymentReasonMode, source.otherPaymentReasonRequired, 'OPTIONAL');
   return {
     defaultTheme: isThemeId(source.defaultTheme) ? source.defaultTheme : 'TEAMTALER',
+    statisticsEnabled: source.statisticsEnabled === true,
     settlementsEnabled: source.settlementsEnabled === true,
     settlementDueSoonDays: Number(source.settlementDueSoonDays ?? 3),
     settlementOverdueRepeatDays: Number(source.settlementOverdueRepeatDays ?? 7),
@@ -743,6 +748,7 @@ export function adaptSession(input: unknown): Session {
       currency: String(group.currency || 'EUR'),
       logoUrl: typeof group.logoUrl === 'string' ? group.logoUrl : undefined,
       defaultTheme: isThemeId(group.defaultTheme) ? group.defaultTheme : 'TEAMTALER',
+      statisticsEnabled: group.statisticsEnabled === true,
       planningEnabled: group.planningEnabled === true,
       membership: membership ? {
         id: String(membership.id),
@@ -1299,6 +1305,175 @@ export function adaptDashboard(input: unknown): Dashboard {
     planningEnabled: source.planningEnabled === true,
     openPlanningActionCount: Number(source.openPlanningActionCount ?? 0),
     planning: source.nextPlanningEvent ? { event: adaptPlanningEvent(source.nextPlanningEvent), actionRequired: asRecord(source.nextPlanningEvent).actionRequired === true } : undefined,
+  };
+}
+
+/** Adapts provenance shared by every section of one statistics snapshot. */
+function adaptStatisticsMeta(input: unknown): StatisticsMeta {
+  const source = asRecord(input);
+  const bucket: StatisticsBucket = source.bucket === 'WEEK' || source.bucket === 'MONTH' || source.bucket === 'YEAR' ? source.bucket : 'DAY';
+  return {
+    generatedAt: String(source.generatedAt ?? ''),
+    timezone: String(source.timezone ?? 'UTC'),
+    preset: isStatisticsRange(source.preset) ? source.preset : 'LAST_30_DAYS',
+    fromInclusive: String(source.fromInclusive ?? ''),
+    toExclusive: String(source.toExclusive ?? ''),
+    bucket,
+    privacyThresholdApplied: source.privacyThresholdApplied === true,
+    currentPeriodAvailable: source.currentPeriodAvailable === true,
+  };
+}
+
+/** Adapts privacy-aware category and product values without coercing hidden points to zero. */
+function adaptMemberBreakdownSeries(input: unknown): MemberStatistics['topCategories']['items'][number]['series'] {
+  return (Array.isArray(input) ? input : []).map((entry) => {
+    const point = asRecord(entry);
+    const value = point.validBookedUnits;
+    return {
+      periodStart: String(point.periodStart ?? ''),
+      validBookedUnits: typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value) && value >= 0 ? value : null,
+      privacySuppressed: point.privacySuppressed === true,
+      isPartial: point.isPartial === true,
+    };
+  });
+}
+
+/**
+ * Adapts the member section of the statistics wire contract.
+ *
+ * @param input - Member statistics section from the group endpoint.
+ * @returns Canonical anonymous member activity statistics.
+ */
+function adaptMemberStatistics(input: unknown): MemberStatistics {
+  const source = asRecord(input);
+  const memberSnapshot = asRecord(source.memberSnapshot);
+  const summary = asRecord(source.summary);
+  const topCategories = asRecord(source.topCategories);
+  const topProducts = asRecord(source.topProducts);
+  return {
+    memberSnapshot: {
+      regularMembers: Number(memberSnapshot.regularMembers ?? 0),
+      temporaryGuests: Number(memberSnapshot.temporaryGuests ?? 0),
+      asOf: String(memberSnapshot.asOf ?? ''),
+    },
+    summary: {
+      activeParticipants: Number(summary.activeParticipants ?? 0),
+      bookingCount: Number(summary.bookingCount ?? 0),
+      validBookedUnits: Number(summary.validBookedUnits ?? 0),
+      cancellationRate: typeof summary.cancellationRate === 'number' ? summary.cancellationRate : null,
+    },
+    activity: (Array.isArray(source.activity) ? source.activity : []).map((entry) => {
+      const point = asRecord(entry);
+      return {
+        periodStart: String(point.periodStart ?? ''),
+        postedUnits: Number(point.postedUnits ?? 0),
+        reversedUnits: Number(point.reversedUnits ?? 0),
+      };
+    }),
+    topCategories: {
+      suppressed: topCategories.suppressed === true,
+      items: (Array.isArray(topCategories.items) ? topCategories.items : []).map((entry) => {
+        const item = asRecord(entry);
+        return {
+          categoryId: String(item.categoryId ?? ''),
+          categoryName: String(item.categoryName ?? ''),
+          icon: categoryIcon(item.icon),
+          validBookedUnits: Number(item.validBookedUnits ?? 0),
+          isOther: item.isOther === true,
+          series: adaptMemberBreakdownSeries(item.series),
+        };
+      }),
+    },
+    topProducts: {
+      suppressed: topProducts.suppressed === true,
+      items: (Array.isArray(topProducts.items) ? topProducts.items : []).map((entry) => {
+        const item = asRecord(entry);
+        return {
+          productId: String(item.productId ?? ''),
+          productName: String(item.productName ?? ''),
+          categoryId: String(item.categoryId ?? ''),
+          categoryName: String(item.categoryName ?? ''),
+          validBookedUnits: Number(item.validBookedUnits ?? 0),
+          isOther: item.isOther === true,
+          series: adaptMemberBreakdownSeries(item.series),
+        };
+      }),
+    },
+  };
+}
+
+/**
+ * Adapts the finance section of the statistics wire contract without converting money
+ * to floating-point values.
+ *
+ * @param input - Finance statistics section from the group endpoint.
+ * @returns Canonical aggregate finance statistics with exact money values.
+ */
+function adaptFinanceStatistics(input: unknown): FinanceStatistics {
+  const source = asRecord(input);
+  const currency = String(source.currency || 'EUR');
+  const snapshot = asRecord(source.receivableSnapshot);
+  const flows = asRecord(source.flows);
+  const overdue = source.overdue && typeof source.overdue === 'object' ? asRecord(source.overdue) : null;
+  return {
+    currency,
+    receivableSnapshot: {
+      asOf: String(snapshot.asOf ?? ''),
+      grossReceivable: money(snapshot.grossReceivableMinor, currency),
+      memberCredit: money(snapshot.memberCreditMinor, currency),
+      netReceivable: money(snapshot.netReceivableMinor, currency),
+      openAccountCount: Number(snapshot.openAccountCount ?? 0),
+      balancedAccountCount: Number(snapshot.balancedAccountCount ?? 0),
+      creditAccountCount: Number(snapshot.creditAccountCount ?? 0),
+    },
+    flows: {
+      openingNetReceivable: money(flows.openingNetReceivableMinor, currency),
+      netBookingCharges: money(flows.netBookingChargesMinor, currency),
+      netPayments: money(flows.netPaymentsMinor, currency),
+      netAdjustments: money(flows.netAdjustmentsMinor, currency),
+      closingNetReceivable: money(flows.closingNetReceivableMinor, currency),
+    },
+    series: (Array.isArray(source.series) ? source.series : []).map((entry) => {
+      const point = asRecord(entry);
+      return {
+        periodStart: String(point.periodStart ?? ''),
+        netBookingCharges: money(point.netBookingChargesMinor, currency),
+        netPayments: money(point.netPaymentsMinor, currency),
+        netAdjustments: money(point.netAdjustmentsMinor, currency),
+        closingNetReceivable: money(point.closingNetReceivableMinor, currency),
+      };
+    }),
+    categories: (Array.isArray(source.categories) ? source.categories : []).map((entry) => {
+      const item = asRecord(entry);
+      return {
+        categoryId: String(item.categoryId ?? ''),
+        categoryName: String(item.categoryName ?? ''),
+        icon: categoryIcon(item.icon),
+        netBookingCharges: money(item.netBookingChargesMinor, currency),
+        isOther: item.isOther === true,
+      };
+    }),
+    overdue: overdue ? {
+      amount: money(overdue.amountMinor, currency),
+      accountCount: Number(overdue.accountCount ?? 0),
+      periodCount: Number(overdue.periodCount ?? 0),
+      asOf: String(overdue.asOf ?? ''),
+    } : null,
+  };
+}
+
+/**
+ * Adapts the unified statistics response without weakening exact money values.
+ *
+ * @param input - Complete response from the group statistics endpoint.
+ * @returns Canonical shared metadata plus member and finance sections.
+ */
+export function adaptStatisticsDashboard(input: unknown): StatisticsDashboard {
+  const source = asRecord(input);
+  return {
+    meta: adaptStatisticsMeta(source.meta),
+    members: adaptMemberStatistics(source.members),
+    finance: adaptFinanceStatistics(source.finance),
   };
 }
 

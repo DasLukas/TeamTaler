@@ -10,6 +10,7 @@ This README is the primary entry point for the person who installs and operates 
 - Optional group planning with Day, Week, Month, and Agenda calendars; atomically published timed and all-day single or recurring appointments, appointment polls, appointment registration, series exceptions, capacity-aware waitlists, response-preserving edits, and audience update notifications.
 - Account-synchronized light, dark, and system color modes with group defaults and optional per-member theme choices.
 - Group-owned roles and granular permissions for administration, bookings, finance, catalogue management, and reporting.
+- An optional statistics workspace with one explicit access right, compact booking and finance tabs backed by one unified data snapshot, privacy-aware product and category visuals for purchase orientation, server-resolved date ranges, and responsive theme-aware charts.
 - Fixed-price and user-defined-price products with category, file or camera image capture, archive, and ordering support.
 - Account balances, incoming payments with optional or required image/PDF receipts, configurable PayPal.Me and EUR SEPA payment instructions, immutable corrections, optional accounting periods, and settlement history.
 - One server-paginated chronological activity history for authorized bookings, incoming payments, their timestamped reversals, and account corrections, including linked original/reversal navigation, member identity, signed amounts, receipts, status badges, transaction-type filtering, and a persistent card/table choice on phones.

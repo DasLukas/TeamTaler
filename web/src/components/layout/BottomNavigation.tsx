@@ -12,6 +12,7 @@ import { mobilePrimaryModuleKeys, moduleNavigationItems } from './navigationItem
 const overflowPaths = new Set<string>([
   memberPaths.more,
   memberPaths.notifications,
+  memberPaths.statistics,
   memberPaths.planning,
   memberPaths.finance,
   memberPaths.catalog,

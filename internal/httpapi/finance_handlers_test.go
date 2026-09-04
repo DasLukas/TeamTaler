@@ -14,10 +14,55 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/DasLukas/TeamTaler/internal/authorization"
 	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/finance"
 	systemadmin "github.com/DasLukas/TeamTaler/internal/system"
 )
+
+func TestAccountGroupStatisticsRequireEnabledFeatureAndUnifiedPermission(t *testing.T) {
+	t.Parallel()
+
+	server, _, membership := invitationImportServer(t, false)
+	server.finance = finance.Service{DB: server.db}
+	if _, err := server.db.Exec(`INSERT INTO categories(id,group_id,name,active,sort_order,version,created_at,updated_at,icon)
+		VALUES('category-account-statistics',?,'Account statistics',1,0,1,'2026-08-06T00:00:00Z','2026-08-06T00:00:00Z','other')`, membership.GroupID); err != nil {
+		t.Fatalf("insert account statistics category: %v", err)
+	}
+	roleID := authorization.PresetRoleID(membership.GroupID, domain.RolePresetGroupAdministrator)
+	if _, err := server.db.Exec(`INSERT INTO role_permission_grants(group_id,role_id,permission_key,scope_type,version,created_at,updated_at)
+		VALUES(?,?,?,'GROUP',1,'2026-08-06T00:00:00Z','2026-08-06T00:00:00Z')`, membership.GroupID, roleID, domain.PermissionViewStatistics); err != nil {
+		t.Fatalf("grant statistics permission: %v", err)
+	}
+
+	readAccount := func() finance.Account {
+		t.Helper()
+		account, err := server.finance.Account(context.Background(), membership, membership.ID)
+		if err != nil {
+			t.Fatalf("read account: %v", err)
+		}
+		return account
+	}
+
+	account := readAccount()
+	if len(account.CategoryStats) != 1 || len(account.GroupCategoryStats) != 0 {
+		t.Fatalf("disabled statistics account=%#v", account)
+	}
+	if _, err := server.db.Exec(`UPDATE group_settings SET statistics_enabled=1 WHERE group_id=?`, membership.GroupID); err != nil {
+		t.Fatalf("enable statistics: %v", err)
+	}
+	account = readAccount()
+	if len(account.CategoryStats) != 1 || len(account.GroupCategoryStats) != 1 {
+		t.Fatalf("enabled statistics account=%#v", account)
+	}
+	if _, err := server.db.Exec(`DELETE FROM role_permission_grants WHERE group_id=? AND role_id=? AND permission_key=?`, membership.GroupID, roleID, domain.PermissionViewStatistics); err != nil {
+		t.Fatalf("remove statistics permission: %v", err)
+	}
+	account = readAccount()
+	if len(account.CategoryStats) != 1 || len(account.GroupCategoryStats) != 0 {
+		t.Fatalf("ungranted statistics account=%#v", account)
+	}
+}
 
 func TestHandleCreateOwnPaymentDerivesAuthenticatedMembershipAndRejectsTargetFields(t *testing.T) {
 	t.Parallel()

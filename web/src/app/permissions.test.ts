@@ -30,6 +30,11 @@ describe('permission evaluation', () => {
     expect(canAny(direct, ['FINANCE_MANAGEMENT', 'VIEW_ALL_BOOKING_ACTIVITY'])).toBe(true);
   });
 
+  it('keeps broad booking activity separate from unified statistics', () => {
+    expect(can(grants('VIEW_ALL_BOOKING_ACTIVITY'), 'VIEW_STATISTICS')).toBe(false);
+    expect(can(grants('VIEW_STATISTICS'), 'VIEW_STATISTICS')).toBe(true);
+  });
+
   it('does not infer unrelated permissions', () => {
     const direct = grants('ROLE_MANAGEMENT');
 

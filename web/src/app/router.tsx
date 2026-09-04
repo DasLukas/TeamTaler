@@ -17,7 +17,7 @@ import { MorePage } from '@/features/more/MorePage';
 import { NotificationsPage } from '@/features/notifications/NotificationsPage';
 import { NotFoundPage } from './NotFoundPage';
 import { memberPaths } from './paths';
-import { BookingPermissionRoute, GroupRequiredRoute, PreferredWorkspaceRedirect } from './PermissionRoutes';
+import { BookingPermissionRoute, GroupRequiredRoute, PreferredWorkspaceRedirect, StatisticsPermissionRoute } from './PermissionRoutes';
 import { PlanningCreateScreen, PlanningDetailScreen, PlanningEditScreen, PlanningIndexScreen } from '@/features/planning/PlanningRouteScreens';
 import { validatePlanningSearch } from '@/features/planning/planningSearch';
 
@@ -40,6 +40,7 @@ const groupRequiredRoute = createRoute({
 
 const landingRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: memberPaths.landing, component: PreferredWorkspaceRedirect });
 const dashboardRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: memberPaths.overview, component: DashboardPage });
+const statisticsRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: memberPaths.statistics, component: StatisticsPermissionRoute });
 const planningRoute = createRoute({
   getParentRoute: () => groupRequiredRoute,
   path: memberPaths.planning,
@@ -68,7 +69,7 @@ const publicJoinVerificationRoute = createRoute({ getParentRoute: () => rootRout
 
 const routeTree = rootRoute.addChildren([
   authenticatedRoute.addChildren([
-    groupRequiredRoute.addChildren([landingRoute, dashboardRoute, planningRoute, planningNewRoute, planningDetailRoute, planningEditRoute, bookingRoute, legacyReportsRoute, activitiesRoute, catalogRoute, financeRoute, notificationsRoute, moreRoute]),
+    groupRequiredRoute.addChildren([landingRoute, dashboardRoute, planningRoute, planningNewRoute, planningDetailRoute, planningEditRoute, statisticsRoute, bookingRoute, legacyReportsRoute, activitiesRoute, catalogRoute, financeRoute, notificationsRoute, moreRoute]),
     adminRoute,
     accountRoute,
   ]),

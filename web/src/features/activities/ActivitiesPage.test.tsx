@@ -24,7 +24,7 @@ const scrollIntoViewMock = vi.fn();
 
 const session: Session = {
   user: { id: 'user-viewer', displayName: 'Viewer', email: 'viewer@example.test' },
-  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', defaultTheme: 'TEAMTALER', membership: { id: 'member-viewer', roles: ['MEMBER'], groupPermissions: [], themeOverride: null } }],
+  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', defaultTheme: 'TEAMTALER', statisticsEnabled: false, membership: { id: 'member-viewer', roles: ['MEMBER'], groupPermissions: [], themeOverride: null } }],
   activeGroupId: 'group-a',
   defaultGroupId: null,
   colorMode: 'SYSTEM',

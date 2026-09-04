@@ -141,6 +141,7 @@ func (s *Server) handleGetGroupSettings(response http.ResponseWriter, request *h
 	}
 	writeJSON(response, http.StatusOK, map[string]any{
 		"defaultTheme":                 settings.DefaultTheme,
+		"statisticsEnabled":            settings.StatisticsEnabled,
 		"settlementsEnabled":           settings.SettlementsEnabled,
 		"settlementDueSoonDays":        settings.SettlementDueSoonDays,
 		"settlementOverdueRepeatDays":  settings.SettlementOverdueRepeatDays,
@@ -186,6 +187,7 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 	}
 	var input struct {
 		DefaultTheme                 *domain.ThemeID               `json:"defaultTheme"`
+		StatisticsEnabled            *bool                         `json:"statisticsEnabled"`
 		SettlementsEnabled           *bool                         `json:"settlementsEnabled"`
 		SettlementDueSoonDays        *int                          `json:"settlementDueSoonDays"`
 		SettlementOverdueRepeatDays  *int                          `json:"settlementOverdueRepeatDays"`
@@ -205,7 +207,7 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		writeProblem(response, request, err)
 		return
 	}
-	if input.DefaultTheme == nil && input.SettlementsEnabled == nil && input.SettlementDueSoonDays == nil && input.SettlementOverdueRepeatDays == nil && input.DefaultRoleID == nil &&
+	if input.DefaultTheme == nil && input.StatisticsEnabled == nil && input.SettlementsEnabled == nil && input.SettlementDueSoonDays == nil && input.SettlementOverdueRepeatDays == nil && input.DefaultRoleID == nil &&
 		input.OwnBookingReasonMode == nil && input.ForeignBookingReasonMode == nil && input.OwnPaymentReasonMode == nil && input.OtherPaymentReasonMode == nil &&
 		input.ForeignBookingReasonRequired == nil &&
 		input.OwnPaymentReasonRequired == nil && input.OtherPaymentReasonRequired == nil && input.PaymentMethods == nil &&
@@ -231,6 +233,7 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 	}
 	settings, err := s.groups.UpdateSettings(request.Context(), principal, membership, groups.SettingsUpdate{
 		DefaultTheme:                 input.DefaultTheme,
+		StatisticsEnabled:            input.StatisticsEnabled,
 		SettlementsEnabled:           input.SettlementsEnabled,
 		SettlementDueSoonDays:        input.SettlementDueSoonDays,
 		SettlementOverdueRepeatDays:  input.SettlementOverdueRepeatDays,
@@ -253,6 +256,7 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 	}
 	writeJSON(response, http.StatusOK, map[string]any{
 		"defaultTheme":                 settings.DefaultTheme,
+		"statisticsEnabled":            settings.StatisticsEnabled,
 		"settlementsEnabled":           settings.SettlementsEnabled,
 		"settlementDueSoonDays":        settings.SettlementDueSoonDays,
 		"settlementOverdueRepeatDays":  settings.SettlementOverdueRepeatDays,

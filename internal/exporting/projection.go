@@ -97,7 +97,7 @@ var groupDatasets = []dataset{
 	{name: "group_settings", query: `SELECT group_id,members_can_view_all_bookings,default_role_id,
 		foreign_booking_reason_required,own_payment_reason_required,other_payment_reason_required,settlements_enabled,
 		own_booking_reason_mode,foreign_booking_reason_mode,own_payment_reason_mode,other_payment_reason_mode,default_theme,
-		settlement_due_soon_days,settlement_overdue_repeat_days,updated_at
+		settlement_due_soon_days,settlement_overdue_repeat_days,statistics_enabled,updated_at
 		FROM group_settings WHERE group_id=?`, args: groupArg},
 	{name: "payment_methods", query: `SELECT group_id,id,label,sort_order,attachment_mode,payment_target_type,paypal_me_handle,
 		sepa_recipient_name,sepa_iban,sepa_bic,created_at FROM group_payment_methods

@@ -106,6 +106,7 @@ function BookingWorkspace({ groupId, categories, context, compact }: BookingWork
         queryClient.invalidateQueries({ queryKey: ['activities', groupId] }),
         queryClient.invalidateQueries({ queryKey: ['ledger', groupId] }),
         queryClient.invalidateQueries({ queryKey: ['account-summaries', groupId] }),
+        queryClient.invalidateQueries({ queryKey: ['statistics', groupId] }),
         ...(temporaryGuestDisplayNames.length > 0 ? [queryClient.invalidateQueries({ queryKey: ['members', groupId] })] : []),
       ]);
     },

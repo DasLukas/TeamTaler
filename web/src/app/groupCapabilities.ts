@@ -1,4 +1,4 @@
-import type { PermissionGrant, Session } from '@/api/types';
+import type { Group, PermissionGrant, Session } from '@/api/types';
 import { can } from './permissions';
 import { memberPaths } from './paths';
 
@@ -41,6 +41,16 @@ export function canUsePlanning(grants: readonly PermissionGrant[] | undefined): 
 /** Determines whether a membership may create planning events. */
 export function canCreatePlanningEvents(grants: readonly PermissionGrant[] | undefined): boolean {
   return can(grants, 'CREATE_PLANNING_EVENTS');
+}
+
+/**
+ * Determines whether the active group may open the complete statistics workspace.
+ *
+ * @param group - Active group and its server-projected membership grants.
+ * @returns Whether the master switch and unified statistics grant are effective.
+ */
+export function canOpenStatistics(group: Pick<Group, 'statisticsEnabled' | 'membership'>): boolean {
+  return group.statisticsEnabled && can(group.membership?.effectiveGrants, 'VIEW_STATISTICS');
 }
 
 /**

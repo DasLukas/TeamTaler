@@ -9,10 +9,10 @@ vi.mock('@tanstack/react-router', () => ({
   useRouterState: ({ select }: { select: (state: { location: { pathname: string } }) => string }) => select({ location: { pathname: '/overview' } }),
 }));
 
-const activeGroupState = vi.hoisted(() => ({ planningEnabled: true }));
+const activeGroupState = vi.hoisted(() => ({ planningEnabled: true, statisticsEnabled: true }));
 
 vi.mock('@/app/useActiveGroup', () => ({
-  useActiveGroup: () => ({ activeGroup: { planningEnabled: activeGroupState.planningEnabled, membership: { effectiveGrants: [{ permission: 'CREATE_OWN_BOOKING', scope: { type: 'GROUP' } }, { permission: 'USE_PLANNING', scope: { type: 'GROUP' } }] } } }),
+  useActiveGroup: () => ({ activeGroup: { planningEnabled: activeGroupState.planningEnabled, statisticsEnabled: activeGroupState.statisticsEnabled, membership: { effectiveGrants: [{ permission: 'CREATE_OWN_BOOKING', scope: { type: 'GROUP' } }, { permission: 'USE_PLANNING', scope: { type: 'GROUP' } }, { permission: 'VIEW_STATISTICS', scope: { type: 'GROUP' } }] } } }),
 }));
 
 describe('BottomNavigation', () => {
@@ -23,6 +23,7 @@ describe('BottomNavigation', () => {
 
     expect(screen.getAllByRole('link', { hidden: true }).map((link) => link.textContent)).toEqual(['Übersicht', 'Buchen', 'Aktivitäten', 'Mehr']);
     expect(screen.queryByRole('link', { name: 'Planung' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Statistiken' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Katalog' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Finanzen' })).not.toBeInTheDocument();
   });

@@ -4,11 +4,30 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+### Added
+
+- An optional group statistics workspace with one explicit authorization and one unified snapshot, presented through compact booking and finance tabs with shareable date-range state, server-selected calendar granularity, and responsive chart visualizations without a secondary table view.
+- Two distinct anonymous booking KPIs for active participants and booked products; the easily confused booking-transaction count is intentionally omitted from the overview.
+- Simple product and category visuals with privacy-aware adaptive buckets, direct visible totals, microtrends, and accessible series summaries as orientation for future purchases.
+- A focused group-finance summary centered on the current receivable and one ordered closing-receivable trend.
+
 ### Changed
 
 - Notification event selection is now exclusively personal: the account settings group events by topic, while in-app history remains enabled and each member controls only their own Email and Push choices.
-- The installation-wide IANA time zone is now managed through System administration and the operator CLI. New planning events, new series, and settlement reminders use it; existing planning records retain their pinned zone.
-- Settlement due-soon and overdue-repeat cadence now belongs to the group's settlement configuration and remains editable by group or finance administrators.
+- The installation-wide IANA time zone is now managed through System administration and the operator CLI. New planning events, new series, settlement reminders, and statistics ranges use it; existing planning records retain their pinned zone.
+- Settlement due-soon and overdue-repeat cadence now belongs to the group settlement configuration and remains editable by group or finance administrators.
+- Statistics now separate booking and finance presentation into accessible client-side tabs, reducing page length without splitting the permission, feature switch, endpoint, loading state, or cached snapshot. The redundant provenance and manual refresh bar was removed; route, group, and range changes continue to load data automatically.
+- `VIEW_STATISTICS` now controls the complete statistics dashboard, the overview's aggregate group receivable, and group-wide account category totals. `VIEW_ALL_BOOKING_ACTIVITY` no longer implies statistics access and remains only a small-cohort ranking bypass for callers that separately hold `VIEW_STATISTICS`.
+- Custom statistics ranges use inclusive group-local `YYYY-MM-DD` bounds at the API boundary and half-open instants internally; an upper bound covering today or the future is capped at the response generation instant. Preset ranges and a maximum of 60 day, week, month, or year buckets are resolved by the server in the installation-wide configured time zone.
+- The statistics reading path now prioritizes historical product and category bookings as purchase orientation, followed by compact booking activity and one finance trend. Membership composition, account-state distribution, category-charge, ledger-reconciliation, percentage comparison, and secondary finance panels were removed.
+- Alternate statistics table views and secondary finance charts were removed; the full authorized API response remains available as a stable accounting and privacy contract while the UI projects only the decision-relevant subset.
+- New groups grant statistics only to the editable `Finanzverwaltung` starter role. Migration `0052` maps direct `VIEW_GROUP_STATISTICS` grants to `VIEW_STATISTICS`, deliberately drops member-only and implied legacy access, and removes both legacy permission definitions.
+
+### Security
+
+- Statistics are disabled by default per group. The combined endpoint and every group-wide statistic outside it enforce both the live group switch and `VIEW_STATISTICS`.
+- Member statistics contain no member identifiers or money. Category and product breakdowns are suppressed when only one or two memberships contribute valid bookings, and individual trend buckets with only one or two contributors are returned as explicitly protected gaps, except for callers already authorized to read all identified booking activity.
+- Financial amounts remain exact signed 64-bit minor units serialized as decimal strings; frontend route visibility remains a presentation control rather than an authorization boundary.
 
 ### Removed
 
