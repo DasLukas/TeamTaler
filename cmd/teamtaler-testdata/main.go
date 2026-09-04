@@ -114,8 +114,9 @@ func run() error {
 		return errors.New("test-data seeding requires an empty database")
 	}
 
-	seedNow := time.Now().UTC().Truncate(time.Second)
-	baseNow := seedNow
+	planningReference := time.Now().UTC().Truncate(time.Second)
+	baseNow := planningReference.AddDate(0, 0, -5)
+	seedNow := baseNow
 	originalNow := platform.Now
 	platform.Now = func() time.Time { return seedNow }
 	defer func() { platform.Now = originalNow }()
@@ -303,7 +304,7 @@ func run() error {
 	}); err != nil {
 		return err
 	}
-	if err := seedPlanning(ctx, planningService, adminSession.Principal, adminGroup.Membership, baseNow); err != nil {
+	if err := seedPlanning(ctx, planningService, adminSession.Principal, adminGroup.Membership, planningReference); err != nil {
 		return err
 	}
 	if err := configureNotifications(ctx, notificationService, groupService, adminSession.Principal, adminGroup.Membership); err != nil {
@@ -311,7 +312,7 @@ func run() error {
 	}
 
 	seedNow = baseNow.AddDate(0, 0, 5)
-	if err := seedSecondaryGroup(ctx, authService, groupService, catalogService, bookingService, financeService, periodService, planningService, notificationService, cfg.DataDirectory, adminSession.Principal, baseNow); err != nil {
+	if err := seedSecondaryGroup(ctx, authService, groupService, catalogService, bookingService, financeService, periodService, planningService, notificationService, cfg.DataDirectory, adminSession.Principal, planningReference); err != nil {
 		return err
 	}
 	if _, err := db.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
@@ -1022,7 +1023,7 @@ func configureGroup(ctx context.Context, service groups.Service, actor domain.Pr
 	}
 	bookingReasons := append([]domain.ConfigurableItem(nil), bookingReasonSeeds...)
 	paymentReasons := append([]domain.ConfigurableItem(nil), paymentReasonSeeds...)
-	if _, err := service.UpdateSettings(ctx, actor, membership, groups.SettingsUpdate{NotificationEmailsEnabled: &enabled, SettlementsEnabled: &enabled, OwnBookingReasonMode: &optional, ForeignBookingReasonMode: &required, OwnPaymentReasonMode: &required, OtherPaymentReasonMode: &required, PaymentMethods: &methods, BookingReasons: &bookingReasons, PaymentReasons: &paymentReasons}); err != nil {
+	if _, err := service.UpdateSettings(ctx, actor, membership, groups.SettingsUpdate{NotificationEmailsEnabled: &enabled, StatisticsEnabled: &enabled, SettlementsEnabled: &enabled, OwnBookingReasonMode: &optional, ForeignBookingReasonMode: &required, OwnPaymentReasonMode: &required, OtherPaymentReasonMode: &required, PaymentMethods: &methods, BookingReasons: &bookingReasons, PaymentReasons: &paymentReasons}); err != nil {
 		return fmt.Errorf("configure features for group %q: %w", membership.GroupID, err)
 	}
 	return nil

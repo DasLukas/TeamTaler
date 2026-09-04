@@ -12,10 +12,19 @@ vi.mock('@tanstack/react-router', () => ({ Link: ({ children, to }: { children: 
 vi.mock('@/components/ui/Avatar', () => ({ Avatar: () => <div>avatar</div> }));
 vi.mock('@/components/auth/LogoutButton', () => ({ LogoutButton: () => <button type="button">Abmelden</button> }));
 
-function usePermissions(permissions: PermissionKey[], systemRoles: string[] = [], planningEnabled = false): void {
+function usePermissions(
+  permissions: PermissionKey[],
+  systemRoles: string[] = [],
+  features: { planningEnabled?: boolean; statisticsEnabled?: boolean } = {},
+): void {
   mocks.useActiveGroup.mockReturnValue({
     session: { user: { displayName: 'Alex', email: 'alex@example.test' }, systemRoles },
-    activeGroup: { name: 'Group A', planningEnabled, membership: { effectiveGrants: permissions.map((permission) => ({ permission, scope: { type: 'GROUP' as const } })) } },
+    activeGroup: {
+      name: 'Group A',
+      planningEnabled: features.planningEnabled ?? false,
+      statisticsEnabled: features.statisticsEnabled ?? false,
+      membership: { effectiveGrants: permissions.map((permission) => ({ permission, scope: { type: 'GROUP' as const } })) },
+    },
   });
 }
 
@@ -46,6 +55,14 @@ describe('MorePage role navigation', () => {
     expect(menuItems()).toEqual(expected);
   });
 
+  it('places an authorized statistics workspace first in the mobile overflow list', () => {
+    usePermissions(['VIEW_STATISTICS'], [], { statisticsEnabled: true });
+    render(<MorePage />);
+
+    expect(menuItems()).toEqual(['Statistiken', 'Benachrichtigungen', 'Mein Konto', 'Abmelden']);
+    expect(screen.getByRole('link', { name: 'Statistiken' })).toHaveAttribute('href', '/statistics');
+  });
+
   it('shows the exact unread count on the notification menu item', () => {
     usePermissions([]);
     render(<NotificationSummaryContext.Provider value={7}><MorePage /></NotificationSummaryContext.Provider>);
@@ -53,10 +70,10 @@ describe('MorePage role navigation', () => {
   });
 
   it('preserves the desktop module order before fixed account actions', () => {
-    usePermissions(['USE_PLANNING', 'FINANCE_MANAGEMENT'], [], true);
+    usePermissions(['USE_PLANNING', 'VIEW_STATISTICS', 'FINANCE_MANAGEMENT'], [], { planningEnabled: true, statisticsEnabled: true });
     render(<MorePage />);
 
-    expect(menuItems()).toEqual(['Planung', 'Finanzen', 'Benachrichtigungen', 'Mein Konto', 'Abmelden']);
+    expect(menuItems()).toEqual(['Planung', 'Statistiken', 'Finanzen', 'Benachrichtigungen', 'Mein Konto', 'Abmelden']);
   });
 
   it('shows system settings independently from group capabilities', () => {

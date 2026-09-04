@@ -38,7 +38,7 @@ func TestDashboardGroupOutstandingUsesStatisticsPermission(t *testing.T) {
 		}
 	}
 	administratorRoleID := authorization.PresetRoleID(administrator.GroupID, domain.RolePresetGroupAdministrator)
-	if _, err := server.db.Exec(`INSERT INTO role_permission_grants(group_id,role_id,permission_key,scope_type,version,created_at,updated_at) VALUES(?,?,'VIEW_GROUP_STATISTICS','GROUP',1,?,?)`, administrator.GroupID, administratorRoleID, "2026-08-11T12:00:00Z", "2026-08-11T12:00:00Z"); err != nil {
+	if _, err := server.db.Exec(`INSERT INTO role_permission_grants(group_id,role_id,permission_key,scope_type,version,created_at,updated_at) VALUES(?,?,?,'GROUP',1,?,?)`, administrator.GroupID, administratorRoleID, domain.PermissionViewStatistics, "2026-08-11T12:00:00Z", "2026-08-11T12:00:00Z"); err != nil {
 		t.Fatalf("add statistics permission: %v", err)
 	}
 
@@ -58,11 +58,18 @@ func TestDashboardGroupOutstandingUsesStatisticsPermission(t *testing.T) {
 	}
 
 	dashboard, body := readDashboard()
+	if dashboard.GroupOutstanding != nil || containsJSONField(body, "groupOutstandingMinor") {
+		t.Fatalf("disabled statistics exposed dashboard outstanding=%v body=%s", dashboard.GroupOutstanding, body)
+	}
+	if _, err := server.db.Exec(`UPDATE group_settings SET statistics_enabled=1 WHERE group_id=?`, administrator.GroupID); err != nil {
+		t.Fatalf("enable statistics: %v", err)
+	}
+	dashboard, body = readDashboard()
 	if dashboard.GroupOutstanding == nil || *dashboard.GroupOutstanding != -150 {
 		t.Fatalf("statistics-only dashboard outstanding=%v body=%s", dashboard.GroupOutstanding, body)
 	}
 
-	if _, err := server.db.Exec(`DELETE FROM role_permission_grants WHERE group_id=? AND role_id=? AND permission_key='VIEW_GROUP_STATISTICS'`, administrator.GroupID, administratorRoleID); err != nil {
+	if _, err := server.db.Exec(`DELETE FROM role_permission_grants WHERE group_id=? AND role_id=? AND permission_key=?`, administrator.GroupID, administratorRoleID, domain.PermissionViewStatistics); err != nil {
 		t.Fatalf("remove group-statistics permission: %v", err)
 	}
 	dashboard, body = readDashboard()

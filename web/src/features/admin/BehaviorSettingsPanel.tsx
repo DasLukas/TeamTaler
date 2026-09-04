@@ -45,6 +45,11 @@ interface DefaultThemeSettingProps {
   settings: GroupSettings;
 }
 
+interface StatisticsFeatureSettingProps {
+  groupId: string;
+  settings: GroupSettings;
+}
+
 /** Properties for the accessible three-state reason-policy control. */
 interface ReasonModeControlProps {
   disabled?: boolean;
@@ -165,6 +170,50 @@ function DefaultThemeSetting({ groupId, settings }: DefaultThemeSettingProps) {
 }
 
 /**
+ * Renders the group-wide master switch for the dedicated statistics workspace.
+ *
+ * @param props - Active group identifier and persisted group settings.
+ * @returns An explicit-save feature switch with session projection updates.
+ */
+function StatisticsFeatureSetting({ groupId, settings }: StatisticsFeatureSettingProps) {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const [enabled, setEnabled] = useState(settings.statisticsEnabled);
+  const mutation = useMutation({
+    mutationFn: () => api.updateGroupSettings(groupId, { statisticsEnabled: enabled }),
+    onSuccess: (persisted) => {
+      queryClient.setQueryData<GroupSettings>(['group-settings', groupId], persisted);
+      queryClient.setQueryData<Session>(['session'], (session) => session ? {
+        ...session,
+        groups: session.groups.map((group) => group.id === groupId ? { ...group, statisticsEnabled: persisted.statisticsEnabled } : group),
+      } : session);
+      queryClient.removeQueries({ queryKey: ['statistics', groupId] });
+      void queryClient.invalidateQueries({ queryKey: ['dashboard', groupId] });
+    },
+  });
+
+  return (
+    <section aria-labelledby="statistics-feature-setting-title" className={`${styles.card} ${styles.defaultRoleCard}`}>
+      <div>
+        <div className={styles.settingRow}>
+          <div>
+            <h4 id="statistics-feature-setting-title">{t('behaviorSettings.statisticsTitle')}</h4>
+            <p>{t('behaviorSettings.statisticsDescription')}</p>
+          </div>
+          <Toggle checked={enabled} disabled={mutation.isPending} label={t('behaviorSettings.statisticsToggle')} onChange={(checked) => { setEnabled(checked); mutation.reset(); }} />
+        </div>
+        <p className={styles.notice}>{t(enabled ? 'behaviorSettings.statisticsEnabledNotice' : 'behaviorSettings.statisticsDisabledNotice')}</p>
+      </div>
+      <div className={styles.defaultRoleActions}>
+        {mutation.isError ? <p className={styles.error} role="alert">{t('behaviorSettings.statisticsSaveError')}</p> : null}
+        {mutation.isSuccess ? <p className={styles.success} role="status">{t('behaviorSettings.statisticsSaved')}</p> : null}
+        <Button disabled={enabled === settings.statisticsEnabled || mutation.isPending} leadingIcon={<Save size={17} />} onClick={() => mutation.mutate()}>{mutation.isPending ? t('behaviorSettings.saving') : t('common.save')}</Button>
+      </div>
+    </section>
+  );
+}
+
+/**
  * Renders grouped identity, notification, finance, and transaction settings for one group.
  *
  * @param props - Group identifier and persisted settings.
@@ -221,6 +270,7 @@ function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canMan
         queryClient.invalidateQueries({ queryKey: ['settlements', groupId] }),
         queryClient.invalidateQueries({ queryKey: ['roles', groupId] }),
         queryClient.invalidateQueries({ queryKey: ['members', groupId] }),
+        queryClient.invalidateQueries({ queryKey: ['statistics', groupId] }),
       ]);
     },
     onError: async () => {
@@ -234,6 +284,7 @@ function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canMan
         <header><h3 id="group-settings-section-title">{t('behaviorSettings.groupSectionTitle')}</h3></header>
         {canManageGroup ? <GroupSettingsPanel embedded /> : null}
         {canManageGroup ? <DefaultThemeSetting groupId={groupId} key={`${groupId}:${settings.defaultTheme}`} settings={settings} /> : null}
+        {canManageGroup ? <StatisticsFeatureSetting groupId={groupId} key={`${groupId}:${settings.statisticsEnabled}`} settings={settings} /> : null}
         {canManageGroup ? <GroupNotificationSettingsSection groupId={groupId} /> : null}
         {canManageGroup ? <PlanningSettingsSection groupId={groupId} /> : null}
         {canManageDefaultRole && roles ? <DefaultRoleSetting groupId={groupId} key={`${groupId}:${settings.defaultRoleId ?? ''}`} roles={roles} settings={settings} /> : null}

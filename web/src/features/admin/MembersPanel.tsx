@@ -574,6 +574,7 @@ export function MembersPanel() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: membersQueryKey }),
         queryClient.invalidateQueries({ queryKey: invitationQueryKey }),
+        queryClient.invalidateQueries({ queryKey: ['statistics', activeGroupId] }),
         ...(selfRemoval ? [queryClient.invalidateQueries({ queryKey: ['session'] })] : []),
       ]);
     },
@@ -611,6 +612,7 @@ export function MembersPanel() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: membersQueryKey }),
         queryClient.invalidateQueries({ queryKey: ['booking-context', activeGroupId] }),
+        queryClient.invalidateQueries({ queryKey: ['statistics', activeGroupId] }),
       ]);
     },
   });
@@ -623,6 +625,7 @@ export function MembersPanel() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: invitationQueryKey }),
         queryClient.invalidateQueries({ queryKey: membersQueryKey }),
+        queryClient.invalidateQueries({ queryKey: ['statistics', activeGroupId] }),
       ]);
     },
   });
@@ -646,6 +649,7 @@ export function MembersPanel() {
       queryClient.invalidateQueries({ queryKey: ['payments', activeGroupId] }),
       queryClient.invalidateQueries({ queryKey: ['bookings', activeGroupId] }),
       queryClient.invalidateQueries({ queryKey: ['activity-bookings', activeGroupId] }),
+      queryClient.invalidateQueries({ queryKey: ['statistics', activeGroupId] }),
       queryClient.invalidateQueries({ queryKey: ['session'] }),
     ]);
   }

@@ -23,7 +23,7 @@ import waterImageUrl from './assets/water.webp';
 const grants = (...permissions: PermissionKey[]): PermissionGrant[] => permissions.map((permission) => ({ permission, scope: { type: 'GROUP' } }));
 
 const demoAdministratorRoleIds = ['role-admin', 'role-member', 'role-finance', 'role-catalog'];
-const demoAdministratorGrants = grants('GROUP_ADMINISTRATION', 'MEMBER_MANAGEMENT', 'ROLE_MANAGEMENT', 'FINANCE_MANAGEMENT', 'CATALOG_MANAGEMENT', 'VIEW_MEMBER_DIRECTORY', 'VIEW_GROUP_STATISTICS', 'VIEW_ALL_BOOKING_ACTIVITY', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING', 'VOID_ANY_BOOKING', 'BOOK_FOR_OTHERS', 'BOOK_FOR_GUESTS', 'USE_PLANNING', 'CREATE_PLANNING_EVENTS', 'VIEW_PLANNING_PARTICIPANTS', 'MANAGE_PLANNING_EVENTS');
+const demoAdministratorGrants = grants('GROUP_ADMINISTRATION', 'MEMBER_MANAGEMENT', 'ROLE_MANAGEMENT', 'FINANCE_MANAGEMENT', 'CATALOG_MANAGEMENT', 'VIEW_MEMBER_DIRECTORY', 'VIEW_STATISTICS', 'VIEW_ALL_BOOKING_ACTIVITY', 'RECORD_OWN_PAYMENT', 'CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING', 'VOID_ANY_BOOKING', 'BOOK_FOR_OTHERS', 'BOOK_FOR_GUESTS', 'USE_PLANNING', 'CREATE_PLANNING_EVENTS', 'VIEW_PLANNING_PARTICIPANTS', 'MANAGE_PLANNING_EVENTS');
 
 /** Stable permission registry returned by the development transport. */
 export const demoPermissionDefinitions: PermissionDefinition[] = [
@@ -33,7 +33,7 @@ export const demoPermissionDefinitions: PermissionDefinition[] = [
   { key: 'FINANCE_MANAGEMENT' },
   { key: 'CATALOG_MANAGEMENT' },
   { key: 'VIEW_MEMBER_DIRECTORY' },
-  { key: 'VIEW_GROUP_STATISTICS' },
+  { key: 'VIEW_STATISTICS' },
   { key: 'VIEW_ALL_BOOKING_ACTIVITY' },
   { key: 'RECORD_OWN_PAYMENT' },
   { key: 'CREATE_OWN_BOOKING' },
@@ -63,7 +63,7 @@ export const demoRoles: Role[] = [
     pendingInvitationCount: 0,
   },
   { id: 'role-member', groupId: 'group-sv-adler', name: 'Mitglied', description: 'Standardrolle für reguläre Gruppenmitglieder', nameLocked: false, deletable: true, grants: grants('CREATE_OWN_BOOKING', 'VIEW_MEMBER_DIRECTORY'), version: 1, memberCount: 3, pendingInvitationCount: 0 },
-  { id: 'role-finance', groupId: 'group-sv-adler', name: 'Finanzverwaltung', description: 'Standardrolle für Finanzverwaltung', nameLocked: false, deletable: true, grants: grants('FINANCE_MANAGEMENT', 'RECORD_OWN_PAYMENT', 'VIEW_ALL_BOOKING_ACTIVITY', 'VIEW_GROUP_STATISTICS', 'VIEW_MEMBER_DIRECTORY'), version: 1, memberCount: 2, pendingInvitationCount: 0 },
+  { id: 'role-finance', groupId: 'group-sv-adler', name: 'Finanzverwaltung', description: 'Standardrolle für Finanzverwaltung', nameLocked: false, deletable: true, grants: grants('FINANCE_MANAGEMENT', 'RECORD_OWN_PAYMENT', 'VIEW_ALL_BOOKING_ACTIVITY', 'VIEW_STATISTICS', 'VIEW_MEMBER_DIRECTORY'), version: 1, memberCount: 2, pendingInvitationCount: 0 },
   { id: 'role-catalog', groupId: 'group-sv-adler', name: 'Katalogverwaltung', description: 'Standardrolle für Katalogverwaltung', nameLocked: false, deletable: true, grants: grants('CATALOG_MANAGEMENT', 'VIEW_MEMBER_DIRECTORY'), version: 1, memberCount: 2, pendingInvitationCount: 0 },
   { id: 'role-guest', groupId: 'group-sv-adler', name: 'Gast', description: 'Standardrolle für Gäste', nameLocked: false, deletable: true, grants: grants('CREATE_OWN_BOOKING'), version: 1, memberCount: 0, pendingInvitationCount: 0 },
   { id: 'role-self-payment', groupId: 'group-sv-adler', name: 'Eigene Einzahlungen', description: 'Aus dem bisherigen Einzelrecht migriert', nameLocked: false, deletable: true, grants: grants('RECORD_OWN_PAYMENT'), version: 1, memberCount: 1, pendingInvitationCount: 0 },
@@ -77,8 +77,8 @@ export const demoSession: Session = {
     email: 'lukas@example.test',
   },
   groups: [
-    { id: 'group-sv-adler', name: 'SV Adler', currency: 'EUR', defaultTheme: 'TEAMTALER', planningEnabled: true, membership: { id: 'member-lukas', roleIds: demoAdministratorRoleIds, effectiveGrants: demoAdministratorGrants, roles: ['ADMIN', 'MEMBER', 'FINANCE_MANAGER', 'CATALOG_MANAGER'], groupPermissions: ['SELF_RECORD_PAYMENT'], themeOverride: null } },
-    { id: 'group-freunde', name: 'Kegelclub', currency: 'EUR', defaultTheme: 'NRW', membership: { id: 'member-lukas-kegelclub', roleIds: ['role-member-kegel'], effectiveGrants: grants('CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING'), roles: ['MEMBER'], groupPermissions: [], themeOverride: 'TIEF_IM_WESTEN' } },
+    { id: 'group-sv-adler', name: 'SV Adler', currency: 'EUR', defaultTheme: 'TEAMTALER', statisticsEnabled: true, planningEnabled: true, membership: { id: 'member-lukas', roleIds: demoAdministratorRoleIds, effectiveGrants: demoAdministratorGrants, roles: ['ADMIN', 'MEMBER', 'FINANCE_MANAGER', 'CATALOG_MANAGER'], groupPermissions: ['SELF_RECORD_PAYMENT'], themeOverride: null } },
+    { id: 'group-freunde', name: 'Kegelclub', currency: 'EUR', defaultTheme: 'NRW', statisticsEnabled: false, membership: { id: 'member-lukas-kegelclub', roleIds: ['role-member-kegel'], effectiveGrants: grants('CREATE_OWN_BOOKING', 'VOID_OWN_BOOKING'), roles: ['MEMBER'], groupPermissions: [], themeOverride: 'TIEF_IM_WESTEN' } },
   ],
   activeGroupId: 'group-sv-adler',
   defaultGroupId: null,
@@ -225,7 +225,7 @@ export const demoMembers: Membership[] = [
     isTemporaryGuest: false,
     roles: ['FINANCE_MANAGER', 'MEMBER'],
     roleIds: ['role-finance', 'role-member'],
-    effectiveGrants: grants('FINANCE_MANAGEMENT', 'RECORD_OWN_PAYMENT', 'VIEW_ALL_BOOKING_ACTIVITY', 'VIEW_GROUP_STATISTICS', 'VIEW_MEMBER_DIRECTORY', 'CREATE_OWN_BOOKING'),
+    effectiveGrants: grants('FINANCE_MANAGEMENT', 'RECORD_OWN_PAYMENT', 'VIEW_ALL_BOOKING_ACTIVITY', 'VIEW_STATISTICS', 'VIEW_MEMBER_DIRECTORY', 'CREATE_OWN_BOOKING'),
     groupPermissions: [],
     categoryPermissions: [
       { categoryId: 'category-drinks', assignToOthers: false, voidBookings: false },
@@ -339,6 +339,96 @@ export const demoDashboard: Dashboard = {
   ],
   recentBookings: demoBookings,
   planningEnabled: true,
+};
+
+/** Shared statistics provenance used by the development API. */
+const demoStatisticsMeta = {
+  generatedAt: '2026-08-28T12:30:00+02:00',
+  timezone: 'Europe/Berlin',
+  preset: 'LAST_30_DAYS',
+  fromInclusive: '2026-07-30T00:00:00+02:00',
+  toExclusive: '2026-08-28T12:30:00+02:00',
+  bucket: 'DAY',
+  privacyThresholdApplied: false,
+  currentPeriodAvailable: false,
+};
+
+/** Anonymous member-statistics section used by the development API. */
+const demoMemberStatisticsWire = {
+  memberSnapshot: { regularMembers: 3, temporaryGuests: 0, asOf: '2026-08-28T12:30:00+02:00' },
+  summary: { activeParticipants: 3, bookingCount: 47, validBookedUnits: 61, cancellationRate: 4 / 47 },
+  activity: Array.from({ length: 30 }, (_, index) => ({
+    periodStart: `${new Date(Date.UTC(2026, 6, 30 + index)).toISOString().slice(0, 10)}T00:00:00+02:00`,
+    postedUnits: 2 + (index < 6 ? 1 : 0),
+    reversedUnits: index < 5 ? 1 : 0,
+  })),
+  topCategories: {
+    suppressed: false,
+    items: [
+      { categoryId: 'category-drinks', categoryName: 'Getränke', icon: 'drink', validBookedUnits: 51, isOther: false, series: [] },
+      { categoryId: 'category-penalties', categoryName: 'Strafen', icon: 'penalty', validBookedUnits: 8, isOther: false, series: [] },
+      { categoryId: '', categoryName: 'Other', icon: 'other', validBookedUnits: 2, isOther: true, series: [] },
+    ],
+  },
+  topProducts: {
+    suppressed: false,
+    items: [
+      { productId: 'product-beer', productName: 'Bier', categoryId: 'category-drinks', categoryName: 'Getränke', validBookedUnits: 27, isOther: false, series: [] },
+      { productId: 'product-water', productName: 'Wasser', categoryId: 'category-drinks', categoryName: 'Getränke', validBookedUnits: 15, isOther: false, series: [] },
+      { productId: 'product-spezi', productName: 'Spezi', categoryId: 'category-drinks', categoryName: 'Getränke', validBookedUnits: 9, isOther: false, series: [] },
+      { productId: '', productName: 'Other', categoryId: '', categoryName: 'Other', validBookedUnits: 10, isOther: true, series: [] },
+    ],
+  },
+};
+
+/** Exact-money finance-statistics section used by the development API. */
+const demoFinanceStatisticsWire = {
+  currency: 'EUR',
+  receivableSnapshot: {
+    asOf: '2026-08-28T12:30:00+02:00',
+    grossReceivableMinor: '3340',
+    memberCreditMinor: '750',
+    netReceivableMinor: '2590',
+    openAccountCount: 2,
+    balancedAccountCount: 1,
+    creditAccountCount: 1,
+  },
+  flows: {
+    openingNetReceivableMinor: '1800',
+    netBookingChargesMinor: '8240',
+    netPaymentsMinor: '6900',
+    netAdjustmentsMinor: '-550',
+    closingNetReceivableMinor: '2590',
+  },
+  series: (() => {
+    let closing = 1800;
+    return Array.from({ length: 30 }, (_, index) => {
+      const charges = 274 + (index < 20 ? 1 : 0);
+      const payments = 230;
+      const adjustments = index < 11 ? -50 : 0;
+      closing += charges - payments + adjustments;
+      return {
+        periodStart: `${new Date(Date.UTC(2026, 6, 30 + index)).toISOString().slice(0, 10)}T00:00:00+02:00`,
+        netBookingChargesMinor: String(charges),
+        netPaymentsMinor: String(payments),
+        netAdjustmentsMinor: String(adjustments),
+        closingNetReceivableMinor: String(closing),
+      };
+    });
+  })(),
+  categories: [
+    { categoryId: 'category-drinks', categoryName: 'Getränke', icon: 'drink', netBookingChargesMinor: '6240', isOther: false },
+    { categoryId: 'category-penalties', categoryName: 'Strafen', icon: 'penalty', netBookingChargesMinor: '2500', isOther: false },
+    { categoryId: '', categoryName: 'Other', icon: 'other', netBookingChargesMinor: '-500', isOther: true },
+  ],
+  overdue: null,
+};
+
+/** Complete statistics snapshot returned by the development API. */
+export const demoStatisticsWire = {
+  meta: demoStatisticsMeta,
+  members: demoMemberStatisticsWire,
+  finance: demoFinanceStatisticsWire,
 };
 
 /** Demo account ledger. */

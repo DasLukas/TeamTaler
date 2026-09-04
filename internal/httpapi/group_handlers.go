@@ -144,6 +144,7 @@ func (s *Server) handleGetGroupSettings(response http.ResponseWriter, request *h
 		"defaultTheme":                       settings.DefaultTheme,
 		"notificationEmailsEnabled":          settings.NotificationEmailsEnabled,
 		"notificationEmailDeliveryAvailable": runtimeSettings.SMTP.Active,
+		"statisticsEnabled":                  settings.StatisticsEnabled,
 		"settlementsEnabled":                 settings.SettlementsEnabled,
 		"defaultRoleId":                      settings.DefaultRoleID,
 		"ownBookingReasonMode":               settings.OwnBookingReasonMode,
@@ -188,6 +189,7 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 	var input struct {
 		DefaultTheme                 *domain.ThemeID               `json:"defaultTheme"`
 		NotificationEmailsEnabled    *bool                         `json:"notificationEmailsEnabled"`
+		StatisticsEnabled            *bool                         `json:"statisticsEnabled"`
 		SettlementsEnabled           *bool                         `json:"settlementsEnabled"`
 		DefaultRoleID                *string                       `json:"defaultRoleId"`
 		OwnBookingReasonMode         *domain.ReasonMode            `json:"ownBookingReasonMode"`
@@ -205,7 +207,7 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		writeProblem(response, request, err)
 		return
 	}
-	if input.DefaultTheme == nil && input.NotificationEmailsEnabled == nil && input.SettlementsEnabled == nil && input.DefaultRoleID == nil &&
+	if input.DefaultTheme == nil && input.NotificationEmailsEnabled == nil && input.StatisticsEnabled == nil && input.SettlementsEnabled == nil && input.DefaultRoleID == nil &&
 		input.OwnBookingReasonMode == nil && input.ForeignBookingReasonMode == nil && input.OwnPaymentReasonMode == nil && input.OtherPaymentReasonMode == nil &&
 		input.ForeignBookingReasonRequired == nil &&
 		input.OwnPaymentReasonRequired == nil && input.OtherPaymentReasonRequired == nil && input.PaymentMethods == nil &&
@@ -237,6 +239,7 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 	settings, err := s.groups.UpdateSettings(request.Context(), principal, membership, groups.SettingsUpdate{
 		DefaultTheme:                 input.DefaultTheme,
 		NotificationEmailsEnabled:    input.NotificationEmailsEnabled,
+		StatisticsEnabled:            input.StatisticsEnabled,
 		SettlementsEnabled:           input.SettlementsEnabled,
 		DefaultRoleID:                input.DefaultRoleID,
 		OwnBookingReasonMode:         input.OwnBookingReasonMode,
@@ -259,6 +262,7 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		"defaultTheme":                       settings.DefaultTheme,
 		"notificationEmailsEnabled":          settings.NotificationEmailsEnabled,
 		"notificationEmailDeliveryAvailable": runtimeSettings.SMTP.Active,
+		"statisticsEnabled":                  settings.StatisticsEnabled,
 		"settlementsEnabled":                 settings.SettlementsEnabled,
 		"defaultRoleId":                      settings.DefaultRoleID,
 		"ownBookingReasonMode":               settings.OwnBookingReasonMode,

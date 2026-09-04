@@ -35,9 +35,12 @@ func TestGroupSettingsDefaultAuthorizationPersistenceAndAudit(t *testing.T) {
 		t.Fatalf("list groups: groups=%d err=%v", len(items), err)
 	}
 	admin := items[0].Membership
+	if items[0].StatisticsEnabled {
+		t.Fatal("new group unexpectedly enabled statistics")
+	}
 	settings, err := service.Settings(ctx, admin)
 	guestRoleID := authorization.GuestRoleID(admin.GroupID)
-	if err != nil || settings.DefaultTheme != domain.ThemeTeamTaler || settings.NotificationEmailsEnabled || settings.SettlementsEnabled || settings.DefaultRoleID == nil || *settings.DefaultRoleID != guestRoleID {
+	if err != nil || settings.DefaultTheme != domain.ThemeTeamTaler || settings.NotificationEmailsEnabled || settings.StatisticsEnabled || settings.SettlementsEnabled || settings.DefaultRoleID == nil || *settings.DefaultRoleID != guestRoleID {
 		t.Fatalf("default settings=%#v err=%v", settings, err)
 	}
 	if !settings.ForeignBookingReasonRequired || !settings.OwnPaymentReasonRequired || settings.OtherPaymentReasonRequired || len(settings.PaymentMethods) != 5 {
@@ -70,6 +73,10 @@ func TestGroupSettingsDefaultAuthorizationPersistenceAndAudit(t *testing.T) {
 	if _, err := service.UpdateSettings(ctx, session.Principal, regularMember, SettingsUpdate{NotificationEmailsEnabled: &notifications}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("regular-member settings update error=%v, want forbidden", err)
 	}
+	statisticsEnabled := true
+	if _, err := service.UpdateSettings(ctx, session.Principal, regularMember, SettingsUpdate{StatisticsEnabled: &statisticsEnabled}); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("regular-member statistics update error=%v, want forbidden", err)
+	}
 	nrwTheme := domain.ThemeNRW
 	if _, err := service.UpdateSettings(ctx, session.Principal, regularMember, SettingsUpdate{DefaultTheme: &nrwTheme}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("regular-member theme update error=%v, want forbidden", err)
@@ -93,6 +100,10 @@ func TestGroupSettingsDefaultAuthorizationPersistenceAndAudit(t *testing.T) {
 	updated, err = service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{DefaultRoleID: &financeRoleID})
 	if err != nil || updated.DefaultRoleID == nil || *updated.DefaultRoleID != financeRoleID {
 		t.Fatalf("updated default role=%#v err=%v", updated, err)
+	}
+	updated, err = service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{StatisticsEnabled: &statisticsEnabled})
+	if err != nil || !updated.StatisticsEnabled {
+		t.Fatalf("updated statistics setting=%#v err=%v", updated, err)
 	}
 	administratorRoleID := authorization.PresetRoleID(admin.GroupID, domain.RolePresetGroupAdministrator)
 	if _, err := service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{DefaultRoleID: &administratorRoleID}); !errors.Is(err, domain.ErrValidation) {
@@ -122,12 +133,16 @@ func TestGroupSettingsDefaultAuthorizationPersistenceAndAudit(t *testing.T) {
 		t.Fatalf("delete default role error=%v, want conflict", err)
 	}
 	persisted, err := service.Settings(ctx, admin)
-	if err != nil || persisted.NotificationEmailsEnabled || persisted.DefaultRoleID == nil || *persisted.DefaultRoleID != financeRoleID {
+	if err != nil || persisted.NotificationEmailsEnabled || !persisted.StatisticsEnabled || persisted.DefaultRoleID == nil || *persisted.DefaultRoleID != financeRoleID {
 		t.Fatalf("persisted settings=%#v err=%v", persisted, err)
 	}
 	var auditCount int
-	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM audit_events WHERE group_id=? AND action='group.settings.updated'`, admin.GroupID).Scan(&auditCount); err != nil || auditCount != 4 {
-		t.Fatalf("settings audit count=%d err=%v, want four", auditCount, err)
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM audit_events WHERE group_id=? AND action='group.settings.updated'`, admin.GroupID).Scan(&auditCount); err != nil || auditCount != 5 {
+		t.Fatalf("settings audit count=%d err=%v, want five", auditCount, err)
+	}
+	listed, err := service.List(ctx, session.Principal.UserID)
+	if err != nil || len(listed) != 1 || !listed[0].StatisticsEnabled {
+		t.Fatalf("group statistics projection=%#v err=%v", listed, err)
 	}
 }
 

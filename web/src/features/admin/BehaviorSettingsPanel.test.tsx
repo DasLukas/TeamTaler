@@ -25,7 +25,7 @@ vi.mock('@/api/client', () => ({ api: apiMock }));
 
 const session: Session = {
   user: { id: 'user-a', displayName: 'Admin', email: 'admin@example.test' },
-  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', defaultTheme: 'TEAMTALER', membership: { id: 'member-a', roles: ['ADMIN', 'MEMBER'], groupPermissions: [], effectiveGrants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } }], themeOverride: null } }],
+  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', defaultTheme: 'TEAMTALER', statisticsEnabled: false, membership: { id: 'member-a', roles: ['ADMIN', 'MEMBER'], groupPermissions: [], effectiveGrants: [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } }], themeOverride: null } }],
   activeGroupId: 'group-a',
   defaultGroupId: null,
   colorMode: 'SYSTEM',
@@ -54,6 +54,7 @@ describe('BehaviorSettingsPanel', () => {
   ];
   const settings: GroupSettings = {
     defaultTheme: 'TEAMTALER',
+    statisticsEnabled: false,
     settlementsEnabled: false,
     notificationEmailsEnabled: false,
     notificationEmailDeliveryAvailable: true,
@@ -161,7 +162,25 @@ describe('BehaviorSettingsPanel', () => {
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['dashboard', 'group-a'] });
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['periods', 'group-a'] });
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['settlements', 'group-a'] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['statistics', 'group-a'] });
     expect(removeQueries).toHaveBeenCalledWith({ queryKey: ['notification-preferences', 'group-a'] });
+  });
+
+  it('persists the statistics master switch and clears the cached statistics snapshot', async () => {
+    const user = userEvent.setup();
+    apiMock.updateGroupSettings.mockResolvedValue({ ...settings, statisticsEnabled: true });
+    const queryClient = renderPanel();
+    const removeQueries = vi.spyOn(queryClient, 'removeQueries');
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
+    const statisticsRegion = await screen.findByRole('region', { name: i18n.t('behaviorSettings.statisticsTitle') });
+
+    await user.click(within(statisticsRegion).getByRole('switch', { name: i18n.t('behaviorSettings.statisticsToggle') }));
+    await user.click(within(statisticsRegion).getByRole('button', { name: i18n.t('common.save') }));
+
+    await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { statisticsEnabled: true }));
+    expect(removeQueries).toHaveBeenCalledWith({ queryKey: ['statistics', 'group-a'] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['dashboard', 'group-a'] });
+    expect(queryClient.getQueryData<Session>(['session'])?.groups[0]?.statisticsEnabled).toBe(true);
   });
 
   it('confirms before staging settlement deactivation', async () => {

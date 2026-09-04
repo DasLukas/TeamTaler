@@ -26,6 +26,14 @@ func TestDefinitionsAndPermissionImplications(t *testing.T) {
 	if authorization.Definitions()[0].Description == "mutated" {
 		t.Fatal("Definitions returned shared mutable data")
 	}
+	if !authorization.IsKnownPermission(domain.PermissionViewStatistics) {
+		t.Fatal("VIEW_STATISTICS is not registered")
+	}
+	for _, legacy := range []domain.PermissionKey{"VIEW_MEMBER_STATISTICS", "VIEW_GROUP_STATISTICS"} {
+		if authorization.IsKnownPermission(legacy) {
+			t.Fatalf("legacy permission %s is still registered", legacy)
+		}
+	}
 
 	effective := authorization.ExpandPermissions([]domain.PermissionKey{
 		domain.PermissionBookForOthers,
@@ -48,6 +56,9 @@ func TestDefinitionsAndPermissionImplications(t *testing.T) {
 	}
 	if containsPermission(effective, domain.PermissionBookForGuests) {
 		t.Fatal("BOOK_FOR_OTHERS must not imply BOOK_FOR_GUESTS")
+	}
+	if containsPermission(effective, domain.PermissionViewStatistics) {
+		t.Fatal("VIEW_ALL_BOOKING_ACTIVITY must not imply VIEW_STATISTICS")
 	}
 	memberManagement := authorization.ExpandPermissions([]domain.PermissionKey{domain.PermissionMemberManagement})
 	if !containsPermission(memberManagement, domain.PermissionViewMemberDirectory) || len(memberManagement) != 2 {
@@ -294,6 +305,26 @@ func TestSeedGroupRolesIsIdempotentAndAssignsProtectedAdministratorRole(t *testi
 		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM role_permission_grants WHERE group_id='group-seed' AND role_id=?`, roleID).Scan(&got); err != nil || got != want {
 			t.Fatalf("role %s grant count = %d, %v, want %d, nil", roleID, got, err, want)
 		}
+	}
+	var financeStatisticsGrants, otherStatisticsGrants int
+	if err := db.QueryRowContext(ctx, `
+		SELECT count(*)
+		FROM role_permission_grants
+		WHERE group_id='group-seed'
+		  AND role_id=?
+		  AND permission_key='VIEW_STATISTICS'`, authorization.TemplateRoleID("group-seed", domain.RoleTemplateFinance)).Scan(&financeStatisticsGrants); err != nil {
+		t.Fatalf("count finance statistics grants: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT count(*)
+		FROM role_permission_grants
+		WHERE group_id='group-seed'
+		  AND role_id<>?
+		  AND permission_key='VIEW_STATISTICS'`, authorization.TemplateRoleID("group-seed", domain.RoleTemplateFinance)).Scan(&otherStatisticsGrants); err != nil {
+		t.Fatalf("count non-finance statistics grants: %v", err)
+	}
+	if financeStatisticsGrants != 1 || otherStatisticsGrants != 0 {
+		t.Fatalf("finance/non-finance statistics grants = %d/%d, want 1/0", financeStatisticsGrants, otherStatisticsGrants)
 	}
 	var guestPreset sql.NullString
 	var guestName, guestDescription string

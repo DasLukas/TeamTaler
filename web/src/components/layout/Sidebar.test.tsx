@@ -18,8 +18,19 @@ vi.mock('@tanstack/react-router', () => ({
 vi.mock('@/components/brand/Brand', () => ({ Brand: () => <div>brand</div> }));
 vi.mock('@/components/auth/LogoutButton', () => ({ LogoutButton: () => <button type="button">logout</button> }));
 
-function usePermissions(permissions: PermissionKey[], systemRoles: string[] = []): void {
-  const group = { id: 'group-a', name: 'Group A', currency: 'EUR', planningEnabled: true, membership: { id: 'member-a', effectiveGrants: permissions.map((permission) => ({ permission, scope: { type: 'GROUP' as const } })) } };
+function usePermissions(
+  permissions: PermissionKey[],
+  systemRoles: string[] = [],
+  features: { planningEnabled?: boolean; statisticsEnabled?: boolean } = {},
+): void {
+  const group = {
+    id: 'group-a',
+    name: 'Group A',
+    currency: 'EUR',
+    planningEnabled: features.planningEnabled ?? true,
+    statisticsEnabled: features.statisticsEnabled ?? false,
+    membership: { id: 'member-a', effectiveGrants: permissions.map((permission) => ({ permission, scope: { type: 'GROUP' as const } })) },
+  };
   mocks.useActiveGroup.mockReturnValue({ session: { groups: [group], systemRoles }, activeGroupId: group.id, setActiveGroupId: vi.fn() });
 }
 
@@ -49,8 +60,18 @@ describe('Sidebar role navigation', () => {
     expect(links.indexOf('Finanzen')).toBeLessThan(links.indexOf('Einstellungen'));
   });
 
+  it('shows statistics only when the group switch and unified permission are both effective', () => {
+    usePermissions(['VIEW_STATISTICS'], [], { statisticsEnabled: true });
+    const rendered = render(<Sidebar collapsed={false} onCollapsedChange={vi.fn()} />);
+    expect(screen.getByRole('link', { name: 'Statistiken' })).toHaveAttribute('href', '/statistics');
+
+    usePermissions(['VIEW_STATISTICS'], [], { statisticsEnabled: false });
+    rendered.rerender(<Sidebar collapsed={false} onCollapsedChange={vi.fn()} />);
+    expect(screen.queryByRole('link', { name: 'Statistiken' })).not.toBeInTheDocument();
+  });
+
   it('uses the canonical module order shared with mobile navigation', () => {
-    usePermissions(['CREATE_OWN_BOOKING', 'USE_PLANNING', 'CATALOG_MANAGEMENT', 'FINANCE_MANAGEMENT', 'GROUP_ADMINISTRATION']);
+    usePermissions(['CREATE_OWN_BOOKING', 'USE_PLANNING', 'VIEW_STATISTICS', 'CATALOG_MANAGEMENT', 'FINANCE_MANAGEMENT', 'GROUP_ADMINISTRATION'], [], { statisticsEnabled: true });
     render(<Sidebar collapsed={false} onCollapsedChange={vi.fn()} />);
 
     const navigation = screen.getByRole('navigation', { name: 'Hauptnavigation' });
@@ -59,6 +80,7 @@ describe('Sidebar role navigation', () => {
       'Buchen',
       'Aktivitäten',
       'Planung',
+      'Statistiken',
       'Katalog',
       'Finanzen',
       'Einstellungen',

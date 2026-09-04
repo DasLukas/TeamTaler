@@ -38,6 +38,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/periods"
 	"github.com/DasLukas/TeamTaler/internal/planning"
 	"github.com/DasLukas/TeamTaler/internal/platform"
+	"github.com/DasLukas/TeamTaler/internal/statistics"
 	systemadmin "github.com/DasLukas/TeamTaler/internal/system"
 	webpushservice "github.com/DasLukas/TeamTaler/internal/webpush"
 )
@@ -64,6 +65,7 @@ type Server struct {
 	catalog            catalog.Service
 	bookings           bookings.Service
 	finance            finance.Service
+	statistics         statistics.Service
 	exports            *exporting.Service
 	periods            periods.Service
 	planning           planning.Service
@@ -164,6 +166,7 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 		catalog:            catalog.Service{DB: db},
 		bookings:           bookings.Service{DB: db, Groups: groupService, Notifications: notificationService},
 		finance:            finance.Service{DB: db, Notifications: notificationService, Attachments: paymentattachments.Store{DataDirectory: cfg.DataDirectory}},
+		statistics:         statistics.Service{DB: db},
 		exports:            exportService,
 		periods:            periods.Service{DB: db, Notifications: notificationService},
 		planning:           planning.Service{DB: db},
@@ -249,6 +252,7 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/logo", server.handleGroupLogo)
 	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/logo", server.handleRemoveGroupLogo)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/dashboard", server.handleDashboard)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/statistics", server.handleStatistics)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/planning/settings", server.handleGetPlanningSettings)
 	mux.HandleFunc("PUT /api/v1/groups/{groupID}/planning/settings", server.handleUpdatePlanningSettings)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/planning/series", server.handleCreatePlanningSeries)

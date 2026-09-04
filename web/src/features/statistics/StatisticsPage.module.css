@@ -1,0 +1,135 @@
+.page {
+  width: 100%;
+  min-width: 0;
+}
+
+.filters {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-muted);
+}
+
+.rangeField,
+.customDates label {
+  display: grid;
+  gap: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+
+.rangeField { min-width: min(100%, 240px); }
+
+.rangeField select,
+.customDates input {
+  min-height: 40px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  background: var(--color-surface);
+  font: inherit;
+}
+
+.rangeField select { padding: 0 var(--space-10) 0 var(--space-3); }
+.customDates input { padding: 0 var(--space-3); }
+
+.rangeField select:focus-visible,
+.customDates input:focus-visible {
+  border-color: var(--color-focus-ring);
+  outline: 3px solid color-mix(in srgb, var(--color-focus-ring) 28%, transparent);
+}
+
+.rangeField select:disabled {
+  cursor: progress;
+  opacity: 0.72;
+}
+
+.customDates {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.panel {
+  width: 100%;
+  min-width: 0;
+  min-height: 520px;
+}
+
+.panel:focus { outline: none; }
+
+.results {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.sections {
+  display: grid;
+  gap: clamp(var(--space-7), 4vw, var(--space-10));
+}
+
+.dashboardSection {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-4);
+}
+
+.tabPanel[hidden] { display: none; }
+
+.sectionHeading {
+  display: grid;
+  gap: var(--space-1);
+  padding-block-end: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sectionHeading h2,
+.sectionHeading p {
+  margin: 0;
+}
+
+.sectionHeading h2 {
+  color: var(--color-text);
+  font-size: clamp(var(--font-size-xl), 2vw, var(--font-size-2xl));
+  letter-spacing: -0.025em;
+}
+
+.sectionHeading p {
+  color: var(--color-text-muted);
+}
+
+.staleWarning {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-status-warning-border);
+  border-radius: var(--radius-md);
+  color: var(--color-status-warning);
+  background: var(--color-status-warning-subtle);
+}
+
+@media (max-width: 767px) {
+  .filters {
+    align-items: stretch;
+    gap: var(--space-3);
+  }
+
+  .rangeField,
+  .customDates { width: 100%; }
+
+  .customDates {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+    gap: var(--space-3);
+  }
+
+  .customDates label { min-width: 0; }
+  .customDates input { width: 100%; min-width: 0; }
+}

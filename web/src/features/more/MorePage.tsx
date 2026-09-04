@@ -3,7 +3,7 @@ import Bell from 'lucide-react/dist/esm/icons/bell';
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
 import CircleUserRound from 'lucide-react/dist/esm/icons/circle-user-round';
 import { useTranslation } from 'react-i18next';
-import { canUsePlanning, hasGroupCapability } from '@/app/groupCapabilities';
+import { canOpenStatistics, canUsePlanning, hasGroupCapability } from '@/app/groupCapabilities';
 import { memberPaths } from '@/app/paths';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { isSystemAdministrator } from '@/app/useSession';
@@ -38,6 +38,7 @@ export function MorePage() {
         {overflowModules
           .filter((item) => {
             if (item.capability === 'planning') return canPlan;
+            if (item.capability === 'statistics') return canOpenStatistics(activeGroup);
             if (item.capability === 'administration') return hasGroupCapability(grants, item.capability) || isSystemAdministrator(session);
             if (item.capability === 'catalog' || item.capability === 'finance') return hasGroupCapability(grants, item.capability);
             return false;

@@ -42,8 +42,8 @@ var permissionDefinitions = []domain.PermissionDefinition{
 		Description: "View the active member directory without administrative account details.",
 	},
 	{
-		Key:         domain.PermissionViewGroupStatistics,
-		Description: "View the current consolidated group balance.",
+		Key:         domain.PermissionViewStatistics,
+		Description: "View all member, activity, and financial statistics for the group.",
 	},
 	{
 		Key:         domain.PermissionViewAllBookingActivity,
@@ -578,7 +578,7 @@ func SeedGroupRoles(ctx context.Context, tx *sql.Tx, groupID, actorUserID, admin
 				domain.PermissionFinanceManagement,
 				domain.PermissionRecordOwnPayment,
 				domain.PermissionViewAllBookingActivity,
-				domain.PermissionViewGroupStatistics,
+				domain.PermissionViewStatistics,
 				domain.PermissionViewMemberDirectory,
 				domain.PermissionUsePlanning,
 			},

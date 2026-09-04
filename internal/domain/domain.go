@@ -92,8 +92,8 @@ const (
 	PermissionCatalogManagement PermissionKey = "CATALOG_MANAGEMENT"
 	// PermissionViewMemberDirectory permits reading the group's member directory.
 	PermissionViewMemberDirectory PermissionKey = "VIEW_MEMBER_DIRECTORY"
-	// PermissionViewGroupStatistics permits reading the consolidated group balance.
-	PermissionViewGroupStatistics PermissionKey = "VIEW_GROUP_STATISTICS"
+	// PermissionViewStatistics permits reading all group member, activity, and financial statistics.
+	PermissionViewStatistics PermissionKey = "VIEW_STATISTICS"
 	// PermissionViewAllBookingActivity permits viewing every identified group booking in the activity feed.
 	PermissionViewAllBookingActivity PermissionKey = "VIEW_ALL_BOOKING_ACTIVITY"
 	// PermissionRecordOwnPayment permits self-service payment recording for the current member.
@@ -313,13 +313,14 @@ const (
 
 // Group is the top-level isolation and accounting boundary.
 type Group struct {
-	ID              string     `json:"id"`
-	Name            string     `json:"name"`
-	Currency        string     `json:"currency"`
-	LogoURL         string     `json:"logoUrl,omitempty"`
-	DefaultTheme    ThemeID    `json:"defaultTheme"`
-	PlanningEnabled bool       `json:"planningEnabled"`
-	Membership      Membership `json:"membership"`
+	ID                string     `json:"id"`
+	Name              string     `json:"name"`
+	Currency          string     `json:"currency"`
+	LogoURL           string     `json:"logoUrl,omitempty"`
+	DefaultTheme      ThemeID    `json:"defaultTheme"`
+	StatisticsEnabled bool       `json:"statisticsEnabled"`
+	PlanningEnabled   bool       `json:"planningEnabled"`
+	Membership        Membership `json:"membership"`
 }
 
 // ReasonMode controls whether a transaction reason is hidden, optional, or
@@ -386,6 +387,7 @@ func (mode AttachmentMode) Required() bool { return mode == AttachmentModeRequir
 type GroupSettings struct {
 	DefaultTheme                 ThemeID            `json:"defaultTheme"`
 	NotificationEmailsEnabled    bool               `json:"notificationEmailsEnabled"`
+	StatisticsEnabled            bool               `json:"statisticsEnabled"`
 	SettlementsEnabled           bool               `json:"settlementsEnabled"`
 	DefaultRoleID                *string            `json:"defaultRoleId"`
 	OwnBookingReasonMode         ReasonMode         `json:"ownBookingReasonMode"`

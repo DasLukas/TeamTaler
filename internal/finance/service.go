@@ -50,6 +50,16 @@ func requirePermission(ctx context.Context, queryer authorization.Queryer, membe
 	return nil
 }
 
+// canViewStatistics applies the shared master-switch and authorization rule for
+// group-wide statistical aggregates. It deliberately does not control personal
+// account statistics.
+func (s Service) canViewStatistics(ctx context.Context, membership domain.Membership, statisticsEnabled bool) (bool, error) {
+	if !statisticsEnabled {
+		return false, nil
+	}
+	return authorization.NewPolicy(s.DB).Can(ctx, membership.GroupID, membership.ID, domain.PermissionViewStatistics, authorization.GroupResource(membership.GroupID))
+}
+
 // CategoryStatistic summarizes booking and reversal totals for a category
 // without exposing other member identities. Its period scope follows the
 // group's settlement setting.
@@ -157,14 +167,20 @@ type PlanningEventSummary struct {
 }
 
 // GroupOutstanding returns the signed net receivable across every member
-// account in membership's group when VIEW_GROUP_STATISTICS is effective.
+// account in membership's group when statistics are enabled and
+// VIEW_STATISTICS is effective.
 // Positive values are owed to the group, negative values are member credit,
-// and nil means the caller is not authorized to see the aggregate. The query
-// intentionally spans every accounting period so settlement configuration and
-// period close operations never change the current consolidated balance. ctx
-// bounds authorization and SQL work; policy and database errors propagate.
+// and nil means statistics are disabled or the caller is not authorized to see
+// the aggregate. The query intentionally spans every accounting period so
+// settlement configuration and period close operations never change the
+// current consolidated balance. ctx bounds authorization and SQL work; policy
+// and database errors propagate.
 func (s Service) GroupOutstanding(ctx context.Context, membership domain.Membership) (*int64, error) {
-	allowed, err := authorization.NewPolicy(s.DB).Can(ctx, membership.GroupID, membership.ID, domain.PermissionViewGroupStatistics, authorization.GroupResource(membership.GroupID))
+	var statisticsEnabled bool
+	if err := s.DB.QueryRowContext(ctx, `SELECT statistics_enabled FROM group_settings WHERE group_id=?`, membership.GroupID).Scan(&statisticsEnabled); err != nil {
+		return nil, err
+	}
+	allowed, err := s.canViewStatistics(ctx, membership, statisticsEnabled)
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +197,8 @@ func (s Service) GroupOutstanding(ctx context.Context, membership domain.Members
 // Account returns targetMembershipID's consolidated balance, settlement-aware
 // statistics, permission-gated group aggregates, and recent ledger entries. An
 // empty target selects membership itself; FINANCE_MANAGEMENT is required for a
-// different target and VIEW_GROUP_STATISTICS controls the aggregate section.
+// different target and enabled statistics plus VIEW_STATISTICS control the
+// aggregate section.
 // Category statistics cover the open period while settlements are enabled and
 // all periods while they are disabled; the consolidated balance never changes.
 // ctx bounds queries. It returns the Account or forbidden, not-found, and SQL errors.
@@ -207,10 +224,10 @@ func (s Service) Account(ctx context.Context, membership domain.Membership, targ
 	if err != nil {
 		return Account{}, err
 	}
-	var settlementsEnabled bool
-	if err := s.DB.QueryRowContext(ctx, `SELECT p.id,gs.settlements_enabled
+	var settlementsEnabled, statisticsEnabled bool
+	if err := s.DB.QueryRowContext(ctx, `SELECT p.id,gs.settlements_enabled,gs.statistics_enabled
 		FROM periods p JOIN group_settings gs ON gs.group_id=p.group_id
-		WHERE p.group_id=? AND p.status='OPEN'`, membership.GroupID).Scan(&account.OpenPeriodID, &settlementsEnabled); err != nil {
+		WHERE p.group_id=? AND p.status='OPEN'`, membership.GroupID).Scan(&account.OpenPeriodID, &settlementsEnabled, &statisticsEnabled); err != nil {
 		return Account{}, err
 	}
 	if err := s.DB.QueryRowContext(ctx, `SELECT coalesce(sum(amount_minor),0) FROM ledger_entries WHERE group_id=? AND period_id=? AND membership_id=? AND account='MEMBER_RECEIVABLE'`,
@@ -226,11 +243,11 @@ func (s Service) Account(ctx context.Context, membership domain.Membership, targ
 		return Account{}, err
 	}
 	account.GroupCategoryStats = make([]CategoryStatistic, 0)
-	canViewGroupStatistics, err := authorization.NewPolicy(s.DB).Can(ctx, membership.GroupID, membership.ID, domain.PermissionViewGroupStatistics, authorization.GroupResource(membership.GroupID))
+	canViewStatistics, err := s.canViewStatistics(ctx, membership, statisticsEnabled)
 	if err != nil {
 		return Account{}, err
 	}
-	if canViewGroupStatistics {
+	if canViewStatistics {
 		account.GroupCategoryStats, err = s.categoryStatistics(ctx, membership.GroupID, "", statisticsPeriodID)
 		if err != nil {
 			return Account{}, err

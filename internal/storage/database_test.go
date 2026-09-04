@@ -269,6 +269,8 @@ func TestRemoveCategoryTypeMigrationPreservesExistingRows(t *testing.T) {
 		`INSERT INTO schema_migrations(version) VALUES('0047_remove_planning_drafts.sql')`,
 		`INSERT INTO schema_migrations(version) VALUES('0048_planning_calendar_ranges.sql')`,
 		`INSERT INTO schema_migrations(version) VALUES('0049_remove_planning_reconfirmation.sql')`,
+		`INSERT INTO schema_migrations(version) VALUES('0050_statistics_dashboard.sql')`,
+		`INSERT INTO schema_migrations(version) VALUES('0051_unified_statistics_permission.sql')`,
 		`CREATE TABLE users(id TEXT PRIMARY KEY) STRICT`,
 		`CREATE TABLE groups(id TEXT PRIMARY KEY) STRICT`,
 		`CREATE TABLE invitations(id TEXT PRIMARY KEY, group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE) STRICT`,

@@ -104,6 +104,7 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
         queryClient.invalidateQueries({ queryKey: ['payments', activeGroupId] }),
         queryClient.invalidateQueries({ queryKey: ['account-summaries', activeGroupId] }),
         queryClient.invalidateQueries({ queryKey: ['settlements', activeGroupId] }),
+        queryClient.invalidateQueries({ queryKey: ['statistics', activeGroupId] }),
       ]);
       const dashboard = queryClient.getQueryData<Dashboard>(['dashboard', activeGroupId]);
       setUpdatedBalance(dashboard?.openBalance ?? {

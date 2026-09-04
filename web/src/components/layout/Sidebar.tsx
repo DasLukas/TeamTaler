@@ -7,7 +7,7 @@ import Ellipsis from 'lucide-react/dist/esm/icons/ellipsis';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { memberPaths } from '@/app/paths';
-import { canOpenBooking, canUsePlanning, hasGroupCapability } from '@/app/groupCapabilities';
+import { canOpenBooking, canOpenStatistics, canUsePlanning, hasGroupCapability } from '@/app/groupCapabilities';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { isSystemAdministrator, useInstanceCapabilities } from '@/app/useSession';
 import { Brand } from '@/components/brand/Brand';
@@ -42,6 +42,7 @@ export function Sidebar({ collapsed, onCollapsedChange, onNavigate }: SidebarPro
   const canManageFinance = hasGroupCapability(grants, 'finance');
   const canManageAdministration = hasGroupCapability(grants, 'administration') || isSystemAdministrator(session);
   const canBook = canOpenBooking(grants);
+  const canViewStatistics = activeGroup ? canOpenStatistics(activeGroup) : false;
   const canPlan = Boolean(activeGroup?.planningEnabled && canUsePlanning(grants));
   const unreadCount = useUnreadNotificationCount();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
@@ -55,6 +56,7 @@ export function Sidebar({ collapsed, onCollapsedChange, onNavigate }: SidebarPro
   const availableNavigation = moduleNavigationItems
     .filter((item) => item.key !== 'book' || canBook)
     .filter((item) => item.key !== 'planning' || canPlan)
+    .filter((item) => item.key !== 'statistics' || canViewStatistics)
     .filter((item) => item.key !== 'catalog' || canManageCatalog)
     .filter((item) => item.key !== 'finance' || canManageFinance)
     .filter((item) => item.key !== 'administration' || canManageAdministration);

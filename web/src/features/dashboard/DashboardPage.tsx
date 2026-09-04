@@ -65,8 +65,8 @@ export function DashboardPage() {
   const canRecordPayment = canRecordOwnPayment(activeGroup.membership?.effectiveGrants);
   const openBalanceAmount = BigInt(dashboard.openBalance.minorUnits);
   const openBalanceState = openBalanceAmount > 0n ? 'due' : openBalanceAmount < 0n ? 'credit' : 'balanced';
-  // The API omits this field unless VIEW_GROUP_STATISTICS is effective. Using
-  // the response as the single authorization projection avoids hiding a newly
+  // The API omits this field unless the statistics feature and VIEW_STATISTICS
+  // are effective. Using the response as the single authorization projection avoids hiding a newly
   // granted balance while locally cached membership grants are still stale.
   const groupOutstanding = dashboard.groupOutstanding;
   const showGroupBalance = groupOutstanding !== undefined;

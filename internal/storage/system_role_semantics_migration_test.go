@@ -64,7 +64,7 @@ func TestSystemRoleSemanticsMigrationNormalizesPresetMetadataAndSeedsNewGroups(t
 	}
 	want := []expectedRole{
 		{id: "role:CATALOG_MANAGER:group-new", name: "Katalogverwaltung", description: "Standardrolle für Katalogverwaltung", grants: "CATALOG_MANAGEMENT,USE_PLANNING,VIEW_MEMBER_DIRECTORY"},
-		{id: "role:FINANCE_MANAGER:group-new", name: "Finanzverwaltung", description: "Standardrolle für Finanzverwaltung", grants: "FINANCE_MANAGEMENT,RECORD_OWN_PAYMENT,USE_PLANNING,VIEW_ALL_BOOKING_ACTIVITY,VIEW_GROUP_STATISTICS,VIEW_MEMBER_DIRECTORY"},
+		{id: "role:FINANCE_MANAGER:group-new", name: "Finanzverwaltung", description: "Standardrolle für Finanzverwaltung", grants: "FINANCE_MANAGEMENT,RECORD_OWN_PAYMENT,USE_PLANNING,VIEW_ALL_BOOKING_ACTIVITY,VIEW_MEMBER_DIRECTORY,VIEW_STATISTICS"},
 		{id: "role:GROUP_ADMINISTRATOR:group-new", presetKey: sql.NullString{String: "GROUP_ADMINISTRATOR", Valid: true}, name: "Group administrator", description: "Standardrolle für Administratorrolle mit vollständigem Zugriff auf die Gruppe", grants: "CREATE_PLANNING_EVENTS,GROUP_ADMINISTRATION,MANAGE_PLANNING_EVENTS,MEMBER_MANAGEMENT,ROLE_MANAGEMENT,USE_PLANNING,VIEW_MEMBER_DIRECTORY,VIEW_PLANNING_PARTICIPANTS"},
 		{id: "role:GUEST:group-new", name: "Gast", description: "Standardrolle für Gäste", grants: "CREATE_OWN_BOOKING"},
 		{id: "role:MEMBER:group-new", name: "Mitglied", description: "Standardrolle für reguläre Gruppenmitglieder", grants: "CREATE_OWN_BOOKING,USE_PLANNING,VIEW_MEMBER_DIRECTORY"},

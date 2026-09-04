@@ -7,6 +7,7 @@ describe('member route contract', () => {
     expect(router.routesByPath[memberPaths.landing]).toBeDefined();
     expect(router.routesByPath[memberPaths.booking]).toBeDefined();
     expect(router.routesByPath[memberPaths.overview]).toBeDefined();
+    expect(router.routesByPath[memberPaths.statistics]).toBeDefined();
     expect(router.routesByPath[memberPaths.planning]).toBeDefined();
     expect(router.routesByPath[memberPaths.planningNew]).toBeDefined();
     expect(router.routesByPath['/planning/events/$eventId']).toBeDefined();

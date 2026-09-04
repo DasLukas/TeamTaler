@@ -172,6 +172,7 @@ export function PaymentsPanel() {
     queryClient.invalidateQueries({ queryKey: ['ledger', activeGroupId] }),
     queryClient.invalidateQueries({ queryKey: ['settlements', activeGroupId] }),
     queryClient.invalidateQueries({ queryKey: ['dashboard', activeGroupId] }),
+    queryClient.invalidateQueries({ queryKey: ['statistics', activeGroupId] }),
   ]);
   const resetPaymentDraft = () => {
     setPaymentStep('entry');

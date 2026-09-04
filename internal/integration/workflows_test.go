@@ -73,7 +73,7 @@ func newFixture(t *testing.T) *fixture {
 	result.membership = result.assignPermissionRole(result.membership, "Integration fixture capabilities",
 		domain.PermissionFinanceManagement,
 		domain.PermissionCatalogManagement,
-		domain.PermissionViewGroupStatistics,
+		domain.PermissionViewStatistics,
 		domain.PermissionViewAllBookingActivity,
 		domain.PermissionRecordOwnPayment,
 		domain.PermissionCreateOwnBooking,
@@ -83,6 +83,12 @@ func newFixture(t *testing.T) *fixture {
 		domain.PermissionBookForGuests,
 	)
 	result.group.Membership = result.membership
+	statisticsEnabled := true
+	settings, err := result.groups.UpdateSettings(result.ctx, result.admin, result.membership, groups.SettingsUpdate{StatisticsEnabled: &statisticsEnabled})
+	if err != nil {
+		t.Fatalf("enable statistics: %v", err)
+	}
+	result.group.StatisticsEnabled = settings.StatisticsEnabled
 	return result
 }
 
@@ -309,7 +315,7 @@ func TestGroupOutstandingIncludesPaymentsAndIgnoresSettlementBoundaries(t *testi
 	wantCredit := int64(-150)
 	assertOutstanding(f.membership, &wantCredit)
 	_, statisticsViewer, _ := f.inviteMember("statistics@example.test", "Statistics Viewer", nil)
-	statisticsViewer = f.assignPermissionRole(statisticsViewer, "Group statistics", domain.PermissionViewGroupStatistics)
+	statisticsViewer = f.assignPermissionRole(statisticsViewer, "Group statistics", domain.PermissionViewStatistics)
 	assertOutstanding(statisticsViewer, &wantCredit)
 
 	f.setSettlementsEnabled(true)

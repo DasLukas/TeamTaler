@@ -30,6 +30,7 @@ import type {
   PermissionGrant,
   PermissionKey,
   SelfPaymentCommand,
+  StatisticsBucket,
   Period,
   PermissionUpdate,
   Product,
@@ -41,7 +42,7 @@ import type {
   ReasonMode,
   Session,
 } from '@/api/types';
-import { isCategoryIcon, isColorMode, isThemeId } from '@/api/types';
+import { isCategoryIcon, isColorMode, isStatisticsRange, isThemeId } from '@/api/types';
 import { can } from '@/app/permissions';
 import { MAX_PRODUCT_PRICE_MINOR } from '@/api/money';
 import { zonedDateTimeInputToIso } from '@/features/planning/planningDate';
@@ -52,6 +53,7 @@ import {
   demoCategories,
   demoDashboard,
   demoLedger,
+  demoStatisticsWire,
   demoMembers,
   demoNotifications,
   demoPayments,
@@ -86,6 +88,7 @@ interface DemoActivityReversal {
 
 const DEMO_ROUTE_POLICIES: readonly DemoRoutePolicy[] = [
   { methods: ['GET', 'PATCH'], resource: /^settings$/, anyOf: ['GROUP_ADMINISTRATION', 'MEMBER_MANAGEMENT', 'ROLE_MANAGEMENT', 'FINANCE_MANAGEMENT'] },
+  { methods: ['GET'], resource: /^statistics$/, anyOf: ['VIEW_STATISTICS'] },
   { methods: ['POST', 'DELETE'], resource: /^logo$/, anyOf: ['GROUP_ADMINISTRATION'] },
   { methods: ['GET'], resource: /^members$/, anyOf: ['VIEW_MEMBER_DIRECTORY'] },
   { methods: ['PATCH', 'DELETE'], resource: /^members\/[^/]+$/, anyOf: ['MEMBER_MANAGEMENT'] },
@@ -124,6 +127,89 @@ const DEMO_ROUTE_POLICIES: readonly DemoRoutePolicy[] = [
 
 const clone = <T,>(value: T): T => structuredClone(value);
 const identifier = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
+
+interface DemoStatisticsBucketPoint {
+  periodStart: string;
+  isPartial: boolean;
+}
+
+const demoDatePattern = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** Parses a stable calendar-only demo date without depending on the host timezone. */
+function parseDemoCalendarDate(value: string): Date {
+  const match = demoDatePattern.exec(value);
+  if (!match) throw new Error('A valid demo calendar date is required.');
+  return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+}
+
+/** Returns the calendar start used by one statistics bucket. */
+function floorDemoStatisticsBucket(value: Date, bucket: StatisticsBucket): Date {
+  const result = new Date(value);
+  if (bucket === 'WEEK') result.setUTCDate(result.getUTCDate() - ((result.getUTCDay() + 6) % 7));
+  if (bucket === 'MONTH' || bucket === 'YEAR') result.setUTCDate(1);
+  if (bucket === 'YEAR') result.setUTCMonth(0);
+  return result;
+}
+
+/** Advances one calendar-aligned statistics bucket. */
+function nextDemoStatisticsBucket(value: Date, bucket: StatisticsBucket): Date {
+  const result = new Date(value);
+  if (bucket === 'DAY') result.setUTCDate(result.getUTCDate() + 1);
+  if (bucket === 'WEEK') result.setUTCDate(result.getUTCDate() + 7);
+  if (bucket === 'MONTH') result.setUTCMonth(result.getUTCMonth() + 1);
+  if (bucket === 'YEAR') result.setUTCFullYear(result.getUTCFullYear() + 1);
+  return result;
+}
+
+/** Returns the last Sunday in a month as a calendar-only UTC value. */
+function lastDemoSunday(year: number, month: number): Date {
+  const result = new Date(Date.UTC(year, month + 1, 0));
+  result.setUTCDate(result.getUTCDate() - result.getUTCDay());
+  return result;
+}
+
+/** Formats a Europe/Berlin local midnight with its seasonal offset. */
+function formatDemoPeriodStart(value: Date): string {
+  const year = value.getUTCFullYear();
+  const springTransition = lastDemoSunday(year, 2);
+  const autumnTransition = lastDemoSunday(year, 9);
+  const summerTime = value > springTransition && value <= autumnTransition;
+  return `${value.toISOString().slice(0, 10)}T00:00:00${summerTime ? '+02:00' : '+01:00'}`;
+}
+
+/** Builds at most 60 aligned buckets and marks clipped boundaries as partial. */
+function buildDemoStatisticsBuckets(fromDate: string, toExclusiveDate: string, bucket: StatisticsBucket, endsAtGeneratedTime: boolean): DemoStatisticsBucketPoint[] {
+  const from = parseDemoCalendarDate(fromDate);
+  const end = parseDemoCalendarDate(toExclusiveDate);
+  if (endsAtGeneratedTime) end.setUTCHours(12, 30);
+  const points: DemoStatisticsBucketPoint[] = [];
+  let cursor = floorDemoStatisticsBucket(from, bucket);
+  while (cursor < end && points.length < 60) {
+    const next = nextDemoStatisticsBucket(cursor, bucket);
+    points.push({
+      periodStart: formatDemoPeriodStart(cursor),
+      isPartial: cursor < from || next > end,
+    });
+    cursor = next;
+  }
+  return points;
+}
+
+/** Distributes one exact signed total across buckets with a deterministic trend. */
+function distributeDemoTotal(total: number, count: number, seed: number): number[] {
+  if (count === 0) return [];
+  const sign = total < 0 ? -1 : 1;
+  const magnitude = Math.abs(total);
+  const weights = Array.from({ length: count }, (_, index) => 1 + ((index * 7 + seed) % 5) + Math.floor((index * 2) / count));
+  const weightTotal = weights.reduce((sum, weight) => sum + weight, 0);
+  const exact = weights.map((weight) => (magnitude * weight) / weightTotal);
+  const values = exact.map(Math.floor);
+  const remainder = magnitude - values.reduce((sum, value) => sum + value, 0);
+  const remainderOrder = exact.map((value, index) => ({ index, fraction: value - Math.floor(value) }))
+    .sort((left, right) => right.fraction - left.fraction || left.index - right.index);
+  for (let index = 0; index < remainder; index += 1) values[remainderOrder[index].index] += 1;
+  return values.map((value) => value * sign);
+}
 
 function normalizeDemoPlanningTiming(input: Record<string, unknown>, timeZone = 'Europe/Berlin'): Record<string, unknown> {
   const fields = { ...input };
@@ -286,6 +372,7 @@ export class DemoTransport {
   private invitationTokens = new Map<string, string>();
   private groupSettings: GroupSettings = {
     defaultTheme: 'TEAMTALER',
+    statisticsEnabled: true,
     settlementsEnabled: false,
     notificationEmailsEnabled: false,
     notificationEmailDeliveryAvailable: true,
@@ -422,10 +509,114 @@ export class DemoTransport {
     const [, groupId, resource] = groupMatch;
     this.authorizeGroupRoute(groupId, resource, method);
 
+    if (resource === 'statistics' && !this.groupSettings.statisticsEnabled) {
+      throw new Error('Statistics are disabled for this group.');
+    }
+
+    if (resource === 'statistics' && method === 'GET') {
+      const currentPeriodAvailable = this.groupSettings.settlementsEnabled && this.periods.some((period) => period.status === 'OPEN');
+      const requestedRange = requestUrl.searchParams.get('range');
+      if (requestedRange !== null && !isStatisticsRange(requestedRange)) throw new Error('The statistics range is not supported.');
+      const preset = isStatisticsRange(requestedRange)
+        ? requestedRange
+        : currentPeriodAvailable ? 'CURRENT_PERIOD' : 'LAST_30_DAYS';
+      if (preset === 'CURRENT_PERIOD' && !currentPeriodAvailable) throw new Error('The current settlement period is not available.');
+      const customFrom = requestUrl.searchParams.get('from');
+      const customTo = requestUrl.searchParams.get('to');
+      if (preset === 'CUSTOM' && (!/^\d{4}-\d{2}-\d{2}$/.test(customFrom ?? '') || !/^\d{4}-\d{2}-\d{2}$/.test(customTo ?? '') || String(customFrom) > String(customTo))) {
+        throw new Error('A valid inclusive custom date range is required.');
+      }
+      if (preset !== 'CUSTOM' && (customFrom !== null || customTo !== null)) throw new Error('Custom dates require the CUSTOM range.');
+      if (preset === 'CUSTOM' && String(customFrom) > '2026-08-28') throw new Error('The custom range must start before the generated time.');
+      const endDate = new Date(`${customTo ?? '2026-08-28'}T12:00:00Z`);
+      endDate.setUTCDate(endDate.getUTCDate() + 1);
+      const presetStart: Record<string, string> = {
+        CURRENT_PERIOD: '2026-08-01',
+        LAST_30_DAYS: '2026-07-30',
+        LAST_90_DAYS: '2026-05-31',
+        LAST_12_MONTHS: '2025-09-01',
+        ALL_TIME: '2024-01-01',
+      };
+      const fromDate = preset === 'CUSTOM' ? String(customFrom) : presetStart[preset];
+      const customEndsBeforeToday = preset === 'CUSTOM' && String(customTo) < '2026-08-28';
+      const toExclusiveDate = customEndsBeforeToday ? endDate.toISOString().slice(0, 10) : '2026-08-28';
+      const endsAtGeneratedTime = !customEndsBeforeToday;
+      const daySpan = Math.ceil((Date.parse(`${toExclusiveDate}T12:00:00Z`) - Date.parse(`${fromDate}T12:00:00Z`)) / 86_400_000) + (endsAtGeneratedTime ? 1 : 0);
+      const fromCalendar = new Date(`${fromDate}T12:00:00Z`);
+      const toCalendar = new Date(`${toExclusiveDate}T12:00:00Z`);
+      const calendarMonths = (toCalendar.getUTCFullYear() - fromCalendar.getUTCFullYear()) * 12 + toCalendar.getUTCMonth() - fromCalendar.getUTCMonth() + 1;
+      const bucket = preset === 'LAST_30_DAYS' ? 'DAY'
+        : preset === 'LAST_90_DAYS' ? 'WEEK'
+        : preset === 'LAST_12_MONTHS' ? 'MONTH'
+        : daySpan <= 45 ? 'DAY'
+        : daySpan <= 400 ? 'WEEK'
+        : calendarMonths <= 60 ? 'MONTH'
+        : 'YEAR';
+      const meta = {
+        ...demoStatisticsWire.meta,
+        generatedAt: demoStatisticsWire.meta.generatedAt,
+        preset,
+        fromInclusive: formatDemoPeriodStart(parseDemoCalendarDate(fromDate)),
+        toExclusive: endsAtGeneratedTime ? demoStatisticsWire.meta.generatedAt : formatDemoPeriodStart(parseDemoCalendarDate(toExclusiveDate)),
+        bucket,
+        currentPeriodAvailable,
+      };
+      const buckets = buildDemoStatisticsBuckets(fromDate, toExclusiveDate, bucket, endsAtGeneratedTime);
+      const postedUnits = distributeDemoTotal(66, buckets.length, 3);
+      const reversedUnits = distributeDemoTotal(5, buckets.length, 11);
+      const members = {
+        ...demoStatisticsWire.members,
+        activity: buckets.map((point, index) => ({
+          periodStart: point.periodStart,
+          postedUnits: postedUnits[index],
+          reversedUnits: reversedUnits[index],
+        })),
+        topCategories: {
+          ...demoStatisticsWire.members.topCategories,
+          items: demoStatisticsWire.members.topCategories.items.map((item, itemIndex) => {
+            const units = distributeDemoTotal(item.validBookedUnits, buckets.length, itemIndex + 17);
+            return {
+              ...item,
+              series: buckets.map((point, index) => ({ ...point, validBookedUnits: units[index], privacySuppressed: false })),
+            };
+          }),
+        },
+        topProducts: {
+          ...demoStatisticsWire.members.topProducts,
+          items: demoStatisticsWire.members.topProducts.items.map((item, itemIndex) => {
+            const units = distributeDemoTotal(item.validBookedUnits, buckets.length, itemIndex + 29);
+            return {
+              ...item,
+              series: buckets.map((point, index) => ({ ...point, validBookedUnits: units[index], privacySuppressed: false })),
+            };
+          }),
+        },
+      };
+      const charges = distributeDemoTotal(Number(demoStatisticsWire.finance.flows.netBookingChargesMinor), buckets.length, 41);
+      const payments = distributeDemoTotal(Number(demoStatisticsWire.finance.flows.netPaymentsMinor), buckets.length, 47);
+      const adjustments = distributeDemoTotal(Number(demoStatisticsWire.finance.flows.netAdjustmentsMinor), buckets.length, 53);
+      let closing = Number(demoStatisticsWire.finance.flows.openingNetReceivableMinor);
+      const finance = {
+        ...demoStatisticsWire.finance,
+        series: buckets.map((point, index) => {
+          closing += charges[index] - payments[index] + adjustments[index];
+          return {
+            periodStart: point.periodStart,
+            netBookingChargesMinor: String(charges[index]),
+            netPaymentsMinor: String(payments[index]),
+            netAdjustmentsMinor: String(adjustments[index]),
+            closingNetReceivableMinor: String(closing),
+          };
+        }),
+      };
+      return clone({ meta, members, finance }) as T;
+    }
+
     if (resource === 'settings' && method === 'GET') return clone(this.groupSettings) as T;
     if (resource === 'settings' && method === 'PATCH') {
       const update = body as GroupSettingsUpdateInput;
       const updatesDefaultTheme = update.defaultTheme !== undefined;
+      const updatesStatistics = update.statisticsEnabled !== undefined;
       const updatesSettlements = update.settlementsEnabled !== undefined;
       const updatesNotificationEmails = update.notificationEmailsEnabled !== undefined;
       const updatesDefaultRole = update.defaultRoleId !== undefined;
@@ -439,7 +630,7 @@ export class DemoTransport {
         || update.paymentMethods !== undefined
         || update.bookingReasons !== undefined
         || update.paymentReasons !== undefined;
-      if (!updatesDefaultTheme && !updatesSettlements && !updatesNotificationEmails && !updatesDefaultRole && !updatesTransactionSettings) throw new Error('At least one group setting is required.');
+      if (!updatesDefaultTheme && !updatesStatistics && !updatesSettlements && !updatesNotificationEmails && !updatesDefaultRole && !updatesTransactionSettings) throw new Error('At least one group setting is required.');
       if (updatesDefaultTheme) {
         this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
         if (!isThemeId(update.defaultTheme)) throw new Error('The default theme is not supported.');
@@ -448,8 +639,10 @@ export class DemoTransport {
         this.requireAnyPermission(groupId, ['ROLE_MANAGEMENT', 'GROUP_ADMINISTRATION']);
       }
       if (updatesNotificationEmails) this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
+      if (updatesStatistics) this.requirePermission(groupId, 'GROUP_ADMINISTRATION');
       if (updatesSettlements || updatesTransactionSettings) this.requireAnyPermission(groupId, ['GROUP_ADMINISTRATION', 'FINANCE_MANAGEMENT']);
       if (updatesSettlements && typeof update.settlementsEnabled !== 'boolean') throw new Error('Settlement availability must be a boolean.');
+      if (updatesStatistics && typeof update.statisticsEnabled !== 'boolean') throw new Error('Statistics availability must be a boolean.');
       if (updatesNotificationEmails && typeof update.notificationEmailsEnabled !== 'boolean') throw new Error('Notification email delivery must be a boolean.');
       const submittedReasonModes = [update.ownBookingReasonMode, update.foreignBookingReasonMode, update.ownPaymentReasonMode, update.otherPaymentReasonMode].filter((value) => value !== undefined);
       if (submittedReasonModes.some((value) => value !== 'OFF' && value !== 'OPTIONAL' && value !== 'REQUIRED')) throw new Error('Reason modes must be OFF, OPTIONAL, or REQUIRED.');
@@ -477,6 +670,7 @@ export class DemoTransport {
       this.groupSettings = {
         ...this.groupSettings,
         ...(updatesDefaultTheme ? { defaultTheme: update.defaultTheme as GroupSettings['defaultTheme'] } : {}),
+        ...(updatesStatistics ? { statisticsEnabled: update.statisticsEnabled as boolean } : {}),
         ...(updatesSettlements ? { settlementsEnabled: update.settlementsEnabled as boolean } : {}),
         ...(updatesNotificationEmails ? { notificationEmailsEnabled: update.notificationEmailsEnabled as boolean } : {}),
         ...(updatesDefaultRole ? { defaultRoleId: update.defaultRoleId as string } : {}),
@@ -494,6 +688,10 @@ export class DemoTransport {
       if (updatesDefaultTheme) {
         const group = this.session.groups.find((candidate) => candidate.id === groupId);
         if (group) group.defaultTheme = this.groupSettings.defaultTheme;
+      }
+      if (updatesStatistics) {
+        const group = this.session.groups.find((candidate) => candidate.id === groupId);
+        if (group) group.statisticsEnabled = this.groupSettings.statisticsEnabled;
       }
       return clone(this.groupSettings) as T;
     }
@@ -615,7 +813,11 @@ export class DemoTransport {
         ...this.dashboard,
         recentBookings: this.dashboard.recentBookings.map((booking) => this.bookingWithCurrentIdentities(booking)),
       }) as Record<string, unknown>;
-      if (!can(this.currentMembership(groupId)?.effectiveGrants, 'VIEW_GROUP_STATISTICS')) delete dashboard.groupOutstanding;
+      const canViewStatistics = this.groupSettings.statisticsEnabled && can(this.currentMembership(groupId)?.effectiveGrants, 'VIEW_STATISTICS');
+      if (!canViewStatistics) {
+        delete dashboard.groupOutstanding;
+        dashboard.groupCategoryTotals = [];
+      }
       dashboard.planningEnabled = this.planningSettings.enabled;
       dashboard.nextPlanningEvent = this.planningEvents.find((entry) => entry.status === 'PUBLISHED');
       dashboard.openPlanningActionCount = dashboard.nextPlanningEvent ? 1 : 0;
