@@ -9,7 +9,7 @@ RUN npm ci
 COPY web/ ./
 RUN VITE_BUILD_ID="${VERSION}@${REVISION}" npm run build
 
-FROM golang:1.26-alpine AS go-builder
+FROM golang:1.27-alpine AS go-builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
