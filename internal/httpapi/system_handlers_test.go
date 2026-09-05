@@ -515,7 +515,7 @@ func newSystemHTTPFixture(t *testing.T, configure ...func(*config.Config)) *syst
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	return &systemHTTPFixture{
-		db: database, handler: New(configuration, database, logger), auth: authentication,
+		db: database, handler: New(configuration, database, NewBuildInformation("test", "system-handlers"), logger), auth: authentication,
 		system: systemService, bootstrap: bootstrap, baseURL: publicURL.String(), dataDirectory: dataDirectory,
 	}
 }

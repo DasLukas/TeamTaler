@@ -62,6 +62,10 @@ Item micro-actions keep their visible labels at every viewport and wrap as a gro
 
 Application actions never use browser-native `confirm`, `alert`, or `prompt` dialogs. Confirmable actions use the shared `ConfirmationDialog` component so focus restoration, keyboard dismissal, pending-state protection, responsive action layout, error presentation, icons, and destructive emphasis remain consistent. Feature-specific multi-step workflows may compose the shared `Modal` primitive when they require inputs or richer state, but simple message-and-action confirmations must not recreate dialog markup inside feature code.
 
+## Client update notice
+
+When an open client detects a newer deployed build, it shows one persistent raised notice centered at the bottom of the viewport with the concise message `Eine neue Version ist verfügbar.` and the standard `Jetzt neu laden` action. On compact screens it remains above the fixed bottom navigation and inside the bottom safe area. The notice is global, uses polite status semantics, and contains no version numbers or technical deployment language. It does not appear for failed build checks or matching builds, cannot be dismissed without updating, and never reloads the document automatically. The explicit action uses the shared `Button` with the `RefreshCw` icon.
+
 ## Modal dialogs and bottom sheets
 
 `web/src/components/ui/Modal.tsx` owns modal width, height, overflow, safe-area handling, and responsive sheet behavior. Feature styles must not set a modal's width, maximum width, height, or overflow. Callers select one of the shared `standard`, `wide`, or `workspace` sizes; every `sheet` becomes exactly viewport-wide below the shared compact breakpoint regardless of its desktop size.

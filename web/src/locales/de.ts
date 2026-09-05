@@ -162,6 +162,10 @@ export const de = {
     demoBanner: 'Entwicklungsdemo · Änderungen werden nicht dauerhaft gespeichert',
     maintenanceBanner: 'Die Instanz befindet sich im Wartungsmodus.',
   },
+  clientUpdate: {
+    message: 'Eine neue Version ist verfügbar.',
+    reload: 'Jetzt neu laden',
+  },
   notFound: {
     title: 'Seite nicht gefunden',
     message: 'Diese TeamTaler-Seite existiert nicht oder wurde verschoben.',

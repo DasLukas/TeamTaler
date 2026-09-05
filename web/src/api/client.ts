@@ -58,6 +58,7 @@ import type {
   BookingBulkCommand,
   BookingCommand,
   BookingContext,
+  BuildInformation,
   CatalogOrderCommand,
   Category,
   CategoryCreateCommand,
@@ -453,6 +454,7 @@ async function idempotentRequest<T>(groupId: string, operation: string, path: st
  */
 export const api = {
   getSession: async (): Promise<Session> => setSessionActor(adaptSession(await request<unknown>('/session'))),
+  getBuildInformation: async (): Promise<BuildInformation> => request<BuildInformation>('/instance/build', { cache: 'no-store' }),
   getInstanceCapabilities: async (): Promise<InstanceCapabilities> => adaptInstanceCapabilities(await request<unknown>('/instance/capabilities')),
   getPublicLegalDocuments: async (): Promise<PublicLegalDocuments> => request<PublicLegalDocuments>('/legal-documents'),
   getAuthenticationCapabilities: async (): Promise<AuthenticationCapabilities> => request<AuthenticationCapabilities>('/auth/capabilities'),

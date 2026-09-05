@@ -58,6 +58,7 @@ const systemSettingsKey contextKey = "system-settings"
 // authorization cannot be bypassed by external packages.
 type Server struct {
 	config             config.Config
+	buildInformation   BuildInformation
 	db                 *sql.DB
 	activities         activities.Service
 	auth               auth.Service
@@ -81,11 +82,22 @@ type Server struct {
 	logger             *slog.Logger
 }
 
-// New builds a hardened same-origin handler from cfg, db, and an optional logger.
-// It returns an http.Handler and does not start network listeners. A nil logger
-// selects slog.Default; callers must provide a migrated database. Example:
-// http.ListenAndServe(cfg.ListenAddress, New(cfg, db, nil)).
-func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
+// New builds a hardened same-origin handler from configuration, a migrated
+// database, immutable build information, and an optional logger.
+//
+// Parameters:
+//   - cfg: validated runtime and filesystem configuration.
+//   - db: open database with all supported migrations applied.
+//   - buildInformation: identifier shared with the compiled web client.
+//   - logger: structured request logger; nil selects slog.Default.
+//
+// Returns the complete TeamTaler HTTP handler. Construction panics when a
+// required application service cannot be initialized.
+//
+// Example:
+//
+//	http.ListenAndServe(cfg.ListenAddress, New(cfg, db, NewBuildInformation("1.2.0", "abc123"), nil))
+func New(cfg config.Config, db *sql.DB, buildInformation BuildInformation, logger *slog.Logger) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -164,6 +176,7 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	}
 	server := &Server{
 		config:             cfg,
+		buildInformation:   buildInformation.normalized(),
 		db:                 db,
 		activities:         activities.Service{DB: db},
 		auth:               auth.Service{DB: db, SessionLifetime: cfg.SessionLifetime, TokenSealer: tokenSealer, EmailDeliveryAvailable: emailInfrastructureAvailable},
@@ -189,6 +202,7 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", server.handleLive)
 	mux.HandleFunc("GET /health/ready", server.handleReady)
+	mux.HandleFunc("GET /api/v1/instance/build", server.handleBuildInformation)
 	mux.HandleFunc("GET /api/v1/instance/capabilities", server.handleInstanceCapabilities)
 	mux.HandleFunc("GET /api/v1/legal-documents", server.handlePublicLegalDocuments)
 	mux.HandleFunc("POST /api/v1/auth/login", server.handleLogin)

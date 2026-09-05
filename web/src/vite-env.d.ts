@@ -1,5 +1,13 @@
 /// <reference types="vite/client" />
 
+interface ImportMetaEnv {
+  readonly VITE_BUILD_ID?: string;
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv;
+}
+
 declare module 'lucide-react/dist/esm/icons/*' {
   import type { ForwardRefExoticComponent, RefAttributes } from 'react';
   import type { LucideProps } from 'lucide-react';

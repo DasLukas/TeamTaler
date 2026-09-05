@@ -20,6 +20,7 @@ This README is the primary entry point for the person who installs and operates 
 - Individual invitations, CSV invitation imports, public join links, and temporary guest accounts.
 - Local accounts with profile images, password recovery, verified email changes, and server-side sessions.
 - In-app notifications plus independently configurable SMTP and standards-based Web Push delivery.
+- A client update notice that lets open browser and installed PWA sessions reload after a newer TeamTaler build is deployed.
 - Global system administration for instance settings and the complete group lifecycle.
 - Public, dynamically managed imprint and privacy-policy pages with live host-file fallbacks.
 - Reversible group archival and strongly protected permanent group deletion.

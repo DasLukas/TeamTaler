@@ -4,6 +4,12 @@ import (
 	"net/http"
 )
 
+// handleBuildInformation returns the immutable identifier shared by the
+// running server and the web assets bundled into the same application image.
+func (s *Server) handleBuildInformation(response http.ResponseWriter, _ *http.Request) {
+	writeJSON(response, http.StatusOK, s.buildInformation)
+}
+
 func (s *Server) handleLive(response http.ResponseWriter, _ *http.Request) {
 	writeJSON(response, http.StatusOK, map[string]string{"status": "ok"})
 }

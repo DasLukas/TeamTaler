@@ -95,6 +95,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/InstanceCapabilities'
+  /instance/build:
+    get:
+      tags: [System]
+      summary: Read the deployed application build identifier
+      description: |
+        Returns the immutable identifier shared by the running server and the
+        compiled web client. Clients compare it with their embedded identifier
+        to detect that a newer client deployment is available. The endpoint
+        contains no configuration, account, or authorization data.
+      security: []
+      responses:
+        '200':
+          description: Current deployed application build
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildInformation'
   /auth/password-reset/request:
     post:
       tags: [Authentication]
@@ -4905,6 +4922,16 @@ components:
           type: boolean
           readOnly: true
           description: Whether verified email-address changes are currently configured.
+    BuildInformation:
+      type: object
+      additionalProperties: false
+      required: [buildId]
+      properties:
+        buildId:
+          type: string
+          minLength: 1
+          readOnly: true
+          description: Identifier embedded into both server and compiled web client.
     InstanceCapabilities:
       type: object
       additionalProperties: false

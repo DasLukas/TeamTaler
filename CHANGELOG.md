@@ -6,6 +6,7 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ### Added
 
+- Open web clients now detect a newly deployed TeamTaler build and offer a deliberate reload through a persistent, responsive update notice.
 - An optional group statistics workspace with one explicit authorization and one unified snapshot, presented through compact booking and finance tabs with shareable date-range state, server-selected calendar granularity, and responsive chart visualizations without a secondary table view.
 - Two distinct anonymous booking KPIs for active participants and booked products; the easily confused booking-transaction count is intentionally omitted from the overview.
 - Simple product and category visuals with privacy-aware adaptive buckets, direct visible totals, microtrends, and accessible series summaries as orientation for future purchases.

@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from '@tanstack/react-router';
 import { useState } from 'react';
+import { ClientUpdateNotice } from '@/components/layout/ClientUpdateNotice';
 import { AppearanceProvider } from './AppearanceProvider';
 import { router } from './router';
 
@@ -25,6 +26,7 @@ export function App() {
     <AppearanceProvider>
       <QueryClientProvider client={queryClient}>
         <RouterProvider router={router} />
+        <ClientUpdateNotice />
       </QueryClientProvider>
     </AppearanceProvider>
   );

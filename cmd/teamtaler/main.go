@@ -228,7 +228,7 @@ func serve(arguments []string) error {
 	workerErrors := superviseBackgroundRunners(processContext, backgroundRunners)
 	server := &http.Server{
 		Addr:              cfg.ListenAddress,
-		Handler:           httpapi.New(cfg, db, slog.Default()),
+		Handler:           httpapi.New(cfg, db, httpapi.NewBuildInformation(version, commit), slog.Default()),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,

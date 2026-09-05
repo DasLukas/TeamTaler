@@ -375,6 +375,11 @@ export interface AuthenticationCapabilities {
   emailChangeAvailable: boolean;
 }
 
+/** Immutable identifier shared by the deployed server and compiled web client. */
+export interface BuildInformation {
+  buildId: string;
+}
+
 /** Global roles assigned outside every group and managed exclusively by the host CLI. */
 export type SystemRole = 'SYSTEM_ADMINISTRATOR';
 
