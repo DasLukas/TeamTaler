@@ -66,6 +66,10 @@ Application actions never use browser-native `confirm`, `alert`, or `prompt` dia
 
 When an open client detects a newer deployed build, it shows one persistent raised notice centered at the bottom of the viewport with the concise message `Eine neue Version ist verfügbar.` and the standard `Jetzt neu laden` action. On compact screens it remains above the fixed bottom navigation and inside the bottom safe area. The notice is global, uses polite status semantics, and contains no version numbers or technical deployment language. It does not appear for failed build checks or matching builds, cannot be dismissed without updating, and never reloads the document automatically. The explicit action uses the shared `Button` with the `RefreshCw` icon.
 
+## Push permission onboarding
+
+An eligible signed-in browser receives one compact account-scoped permission question before TeamTaler invokes the native notification request. The non-modal raised notice reuses the client-update notice's bottom-center stack and contains only the `Push-Benachrichtigungen aktivieren?` title, Yes and No actions, and one optional Do not ask again checkbox. No ends the notice for the current app session and creates a persistent account-local opt-out only when the checkbox is selected; a later app start asks again without that opt-out. The Yes action is the only path that may request native permission, and it runs directly from the user's activation gesture. Unsupported browsers, blocked permission, an existing current-device subscription, incomplete server configuration, and non-installed iOS browser sessions never render the notice. Native denial receives specific recovery guidance, while transient registration failures keep retry available.
+
 ## Modal dialogs and bottom sheets
 
 `web/src/components/ui/Modal.tsx` owns modal width, height, overflow, safe-area handling, and responsive sheet behavior. Feature styles must not set a modal's width, maximum width, height, or overflow. Callers select one of the shared `standard`, `wide`, or `workspace` sizes; every `sheet` becomes exactly viewport-wide below the shared compact breakpoint regardless of its desktop size.

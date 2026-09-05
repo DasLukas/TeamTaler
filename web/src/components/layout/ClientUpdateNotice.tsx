@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { clientBuildId } from '@/app/clientBuild';
 import { Button } from '@/components/ui/Button';
+import { FloatingNotice } from './FloatingNoticeRegion';
 import styles from './ClientUpdateNotice.module.css';
 
 const buildCheckIntervalMilliseconds = 5 * 60 * 1_000;
@@ -38,11 +39,13 @@ export function ClientUpdateNotice({ reload = reloadClient }: ClientUpdateNotice
   if (!buildQuery.data || buildQuery.data.buildId === clientBuildId) return null;
 
   return (
-    <aside aria-live="polite" className={styles.notice} role="status">
-      <p className={styles.message}>{t('clientUpdate.message')}</p>
-      <Button className={styles.reload} leadingIcon={<RefreshCw size={16} />} onClick={reload} size="small">
-        {t('clientUpdate.reload')}
-      </Button>
-    </aside>
+    <FloatingNotice>
+      <aside aria-live="polite" className={styles.notice} role="status">
+        <p className={styles.message}>{t('clientUpdate.message')}</p>
+        <Button className={styles.reload} leadingIcon={<RefreshCw size={16} />} onClick={reload} size="small">
+          {t('clientUpdate.reload')}
+        </Button>
+      </aside>
+    </FloatingNotice>
   );
 }

@@ -166,6 +166,16 @@ export const de = {
     message: 'Eine neue Version ist verfügbar.',
     reload: 'Jetzt neu laden',
   },
+  pushOnboarding: {
+    title: 'Push-Benachrichtigungen aktivieren?',
+    decline: 'Nein',
+    allow: 'Ja',
+    neverAskAgain: 'Nicht erneut fragen',
+    close: 'Schließen',
+    permissionDenied: 'Benachrichtigungen sind im Browser blockiert. Du kannst sie in den Website-Einstellungen wieder erlauben.',
+    permissionDismissed: 'Die Browser-Anfrage wurde nicht bestätigt. Du kannst Push-Benachrichtigungen später unter „Mein Konto“ aktivieren.',
+    enableError: 'Push-Benachrichtigungen konnten gerade nicht aktiviert werden. Bitte versuche es erneut.',
+  },
   notFound: {
     title: 'Seite nicht gefunden',
     message: 'Diese TeamTaler-Seite existiert nicht oder wurde verschoben.',

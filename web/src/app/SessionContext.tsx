@@ -1,5 +1,6 @@
 import { useEffect, useMemo, type ReactNode } from 'react';
 import type { InstanceCapabilities, Session } from '@/api/types';
+import { PushPermissionPrompt } from '@/features/push/PushPermissionPrompt';
 import { reconcileWebPush } from '@/features/push/webPush';
 import { useApplyAuthenticatedColorMode } from './useAppearance';
 import { SessionContext } from './session-context';
@@ -25,5 +26,10 @@ export function SessionProvider({ children, instanceCapabilities, session }: Ses
     void reconcileWebPush(instanceCapabilities, session.user.id).catch(() => undefined);
   }, [instanceCapabilities, session.user.id]);
 
-  return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
+  return (
+    <SessionContext.Provider value={value}>
+      {children}
+      <PushPermissionPrompt capabilities={instanceCapabilities} key={session.user.id} userId={session.user.id} />
+    </SessionContext.Provider>
+  );
 }
