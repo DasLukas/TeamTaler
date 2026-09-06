@@ -66,9 +66,15 @@ Application actions never use browser-native `confirm`, `alert`, or `prompt` dia
 
 When an open client detects a newer deployed build, it shows one persistent raised notice centered at the bottom of the viewport with the concise message `Eine neue Version ist verfügbar.` and the standard `Jetzt neu laden` action. On compact screens it remains above the fixed bottom navigation and inside the bottom safe area. The notice is global, uses polite status semantics, and contains no version numbers or technical deployment language. It does not appear for failed build checks or matching builds, cannot be dismissed without updating, and never reloads the document automatically. The explicit action uses the shared `Button` with the `RefreshCw` icon.
 
+## Application version
+
+The loaded client version appears once as quiet centered metadata at the end of the account workspace in the format `TeamTaler · Version 1.2.0`. Imprint and privacy-policy links sit immediately below it in the same compact footer block. The overview retains its own legal footer, while other authenticated workspaces omit legal footer links to keep task views focused. The version presentation remains outside cards, navigation, and primary actions and uses the normalized semantic portion of the embedded client build identifier; release-tag prefixes and commit metadata are omitted from user-facing copy.
+
 ## Push permission onboarding
 
 An eligible signed-in browser receives one compact account-scoped permission question before TeamTaler invokes the native notification request. The non-modal raised notice reuses the client-update notice's bottom-center stack and contains only the `Push-Benachrichtigungen aktivieren?` title, Yes and No actions, and one optional Do not ask again checkbox. No ends the notice for the current app session and creates a persistent account-local opt-out only when the checkbox is selected; a later app start asks again without that opt-out. The Yes action is the only path that may request native permission, and it runs directly from the user's activation gesture. Unsupported browsers, blocked permission, an existing current-device subscription, incomplete server configuration, and non-installed iOS browser sessions never render the notice. Native denial receives specific recovery guidance, while transient registration failures keep retry available.
+
+The account preference matrix exposes only the configurable Email and Push channels. The always-active in-app inbox is stated once in the introductory copy instead of consuming a repetitive non-interactive table column.
 
 ## Modal dialogs and bottom sheets
 

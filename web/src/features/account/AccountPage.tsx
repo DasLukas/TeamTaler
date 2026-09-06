@@ -1,12 +1,15 @@
 import { useTranslation } from 'react-i18next';
-import { Page } from '@/components/layout/Page';
+import { clientVersion } from '@/app/clientBuild';
 import { useOptionalActiveGroup } from '@/app/useActiveGroup';
+import { LegalLinks } from '@/components/legal/LegalLinks';
+import { Page } from '@/components/layout/Page';
+import { DataExportPanel } from '@/features/exports/DataExportPanel';
+import styles from './AccountPage.module.css';
 import { AccountDetailsPanel } from './AccountDetailsPanel';
 import { AccountFinanceSection } from './AccountFinanceSection';
-import { ProfileImagePanel } from './ProfileImagePanel';
-import { NotificationPreferencesPanel } from './NotificationPreferencesPanel';
 import { AppearanceSettingsPanel } from './AppearanceSettingsPanel';
-import { DataExportPanel } from '@/features/exports/DataExportPanel';
+import { NotificationPreferencesPanel } from './NotificationPreferencesPanel';
+import { ProfileImagePanel } from './ProfileImagePanel';
 
 /**
  * Renders independent account settings, profile image, and financial sections.
@@ -25,6 +28,10 @@ export function AccountPage() {
       <NotificationPreferencesPanel />
       {groupContext ? <DataExportPanel groupId={groupContext.activeGroupId} intro={t('exports.data.personalIntro')} scope="PERSONAL" title={t('exports.data.personalTitle')} /> : null}
       {hasActiveGroup ? <AccountFinanceSection /> : null}
+      <footer className={styles.accountMeta}>
+        <span>{t('account.appVersion', { version: clientVersion })}</span>
+        <LegalLinks />
+      </footer>
     </Page>
   );
 }

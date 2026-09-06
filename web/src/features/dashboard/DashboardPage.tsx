@@ -7,6 +7,7 @@ import { api } from '@/api/client';
 import { formatMoney } from '@/api/money';
 import { canRecordOwnPayment, canUsePlanning } from '@/app/groupCapabilities';
 import { useActiveGroup } from '@/app/useActiveGroup';
+import { LegalFooter } from '@/components/legal/LegalLinks';
 import { Avatar } from '@/components/ui/Avatar';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { SelfPaymentDialog } from '@/features/finance/SelfPaymentDialog';
@@ -112,6 +113,7 @@ export function DashboardPage() {
           timeZone={dashboard.planning.event.timeZone ?? planningSettingsQuery.data?.timeZone ?? 'UTC'}
         /> : null}
       </section>
+      <LegalFooter />
     </div>
   );
 }

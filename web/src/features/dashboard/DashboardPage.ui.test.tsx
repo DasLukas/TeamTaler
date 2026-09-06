@@ -73,6 +73,8 @@ describe('DashboardPage information-only overview', () => {
     expect(screen.queryByRole('heading', { name: demoDashboard.currentPeriod.label })).not.toBeInTheDocument();
     expect(screen.queryByText(i18n.t('booking.quickTitle'))).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: i18n.t('booking.submit') })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: i18n.t('legal.imprint.title') })).toHaveAttribute('href', '/impressum');
+    expect(screen.getByRole('link', { name: i18n.t('legal.privacyPolicy.title') })).toHaveAttribute('href', '/datenschutz');
     expect(mocks.getCategories).not.toHaveBeenCalled();
   });
 

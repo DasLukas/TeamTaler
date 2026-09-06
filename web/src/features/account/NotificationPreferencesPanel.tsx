@@ -79,16 +79,15 @@ function PreferenceMatrix({ groupId, preferences }: PreferenceMatrixProps) {
       </header>
       <div className={styles.tableWrapper}>
         <table className={styles.matrix}>
-          <thead><tr><th>{t('notifications.preferences.event')}</th><th>{t('notifications.preferences.inApp')}</th><th>{t('notifications.preferences.email')}</th><th>{t('notifications.preferences.push')}</th></tr></thead>
+          <thead><tr><th>{t('notifications.preferences.event')}</th><th>{t('notifications.preferences.email')}</th><th>{t('notifications.preferences.push')}</th></tr></thead>
           {groupedEvents.map((group) => {
             const labelId = `notification-category-${group.category.toLowerCase()}`;
             return <tbody aria-labelledby={labelId} key={group.category}>
-              <tr className={styles.categoryRow}><th colSpan={4} id={labelId}>{t(`notifications.preferences.categories.${group.category}`)}</th></tr>
+              <tr className={styles.categoryRow}><th colSpan={3} id={labelId}>{t(`notifications.preferences.categories.${group.category}`)}</th></tr>
               {group.events.map(({ event, index }) => {
                 const copy = notificationEventCopy(event.eventType, t);
                 return <tr key={event.eventType}>
                   <th scope="row"><strong>{copy.label}</strong><span>{copy.description}</span></th>
-                  <td><span aria-label={t('notifications.preferences.inAppAlways')} className={styles.alwaysOn}>✓</span></td>
                   <td><Toggle checked={event.email} disabled={mutation.isPending || !event.emailAvailable} label={t('notifications.preferences.emailFor', { event: copy.label })} onChange={(checked) => setChannel(index, 'email', checked)} /></td>
                   <td><Toggle checked={event.push} disabled={mutation.isPending || !event.pushAvailable} label={t('notifications.preferences.pushFor', { event: copy.label })} onChange={(checked) => setChannel(index, 'push', checked)} /></td>
                 </tr>;

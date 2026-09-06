@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -81,6 +81,14 @@ describe('NotificationPreferencesPanel', () => {
     const disabledEmailToggle = screen.getByRole('switch', { name: i18n.t('notifications.preferences.emailFor', { event: i18n.t('notifications.preferences.events.settlementDueSoon.label') }) });
     expect(pushToggle).toBeDisabled();
     expect(disabledEmailToggle).toBeDisabled();
+    const tableHead = screen.getByRole('table').querySelector('thead');
+    expect(tableHead).not.toBeNull();
+    const columnHeaders = within(tableHead as HTMLTableSectionElement);
+    expect(columnHeaders.getAllByRole('columnheader')).toHaveLength(3);
+    expect(columnHeaders.getByRole('columnheader', { name: i18n.t('notifications.preferences.event') })).toBeVisible();
+    expect(columnHeaders.getByRole('columnheader', { name: i18n.t('notifications.preferences.email') })).toBeVisible();
+    expect(columnHeaders.getByRole('columnheader', { name: i18n.t('notifications.preferences.push') })).toBeVisible();
+    expect(columnHeaders.queryByRole('columnheader', { name: 'In TeamTaler' })).not.toBeInTheDocument();
     expect(screen.getByText(i18n.t('notifications.preferences.categories.BOOKINGS'))).toBeVisible();
     expect(screen.getByText(i18n.t('notifications.preferences.categories.SETTLEMENTS'))).toBeVisible();
     expect(screen.queryByText('Auf dem Sperrbildschirm erscheinen nur Gruppenname und Ereignisart.')).not.toBeInTheDocument();

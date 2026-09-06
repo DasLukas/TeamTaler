@@ -20,7 +20,7 @@ This README is the primary entry point for the person who installs and operates 
 - Individual invitations, CSV invitation imports, public join links, and temporary guest accounts.
 - Local accounts with profile images, password recovery, verified email changes, and server-side sessions.
 - In-app notifications plus independently configurable SMTP and standards-based Web Push delivery.
-- A client update notice that lets open browser and installed PWA sessions reload after a newer TeamTaler build is deployed.
+- A client update notice that lets open browser and installed PWA sessions reload after a newer TeamTaler build is deployed, plus a compact version and legal-links block at the end of **My account**.
 - Global system administration for instance settings and the complete group lifecycle.
 - Public, dynamically managed imprint and privacy-policy pages with live host-file fallbacks.
 - Reversible group archival and strongly protected permanent group deletion.
@@ -179,7 +179,7 @@ The standard container also uses fixed runtime paths from `.env.example`. Detail
 
 ### Legal documents
 
-The public `/impressum` and `/datenschutz` routes are linked from every signed-out and authenticated application surface. Their content follows this precedence:
+The public `/impressum` and `/datenschutz` routes remain reachable from signed-out surfaces, authenticated standalone states, the **Overview**, and **My account**. Routine authenticated task views omit the legal footer. Their content follows this precedence:
 
 1. a versioned database override saved under **Settings → System → Legal content**;
 2. the current host files `legal/IMPRESSUN.md` and `legal/PRIVACY.md`;

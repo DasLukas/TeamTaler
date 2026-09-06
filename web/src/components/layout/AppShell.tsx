@@ -137,7 +137,6 @@ export function AppShell() {
           <div className={styles.maintenance} role="status">{instanceCapabilities.maintenanceMessage || t('appShell.maintenanceBanner')}</div>
         ) : null}
         {sessionQuery.data.groups.length > 0 ? <GroupScopedOutlet /> : <RouteOutlet />}
-        <LegalFooter />
       </main>
     </>
   );

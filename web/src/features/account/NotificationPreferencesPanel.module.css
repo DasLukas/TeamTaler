@@ -38,7 +38,6 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
-.alwaysOn { display: inline-grid; width: 28px; height: 28px; place-items: center; border-radius: var(--radius-full); color: var(--color-status-success); background: var(--color-status-success-subtle); font-weight: 800; }
 .notice { padding: var(--space-4); border-radius: var(--radius-md); color: var(--color-text-muted); background: var(--color-surface-muted); font-size: var(--font-size-sm); }
 .footer { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
 .error { color: var(--color-status-danger); }
@@ -55,6 +54,9 @@
 
 @media (max-width: 680px) {
   .card { padding: var(--space-5); }
+  .matrix th,
+  .matrix td { padding: var(--space-3) var(--space-2); }
+  .matrix th:first-child { min-width: 160px; }
   .footer,
   .pushOptIn { align-items: stretch; flex-direction: column; }
   .footer button,

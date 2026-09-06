@@ -620,6 +620,7 @@ export const de = {
   },
   account: {
     title: 'Mein Konto',
+    appVersion: 'TeamTaler · Version {{version}}',
     intro: 'Alle Belastungen, Zahlungen und Korrekturen auf deinem gemeinsamen Gruppenkonto.',
     systemOnlyIntro: 'Verwalte dein persönliches Konto und deine Anmeldedaten.',
     error: 'Dein Konto konnte nicht geladen werden.',
@@ -1694,10 +1695,8 @@ export const de = {
       intro: 'Wähle für jedes Ereignis, ob du zusätzlich eine E-Mail oder Push-Benachrichtigung erhalten möchtest. Hinweise in TeamTaler bleiben immer eingeschaltet.',
       loadError: 'Deine Benachrichtigungseinstellungen konnten nicht geladen werden.',
       event: 'Ereignis',
-      inApp: 'In TeamTaler',
       email: 'E-Mail',
       push: 'Push',
-      inAppAlways: 'In TeamTaler immer aktiv',
       emailFor: 'E-Mail für {{event}}',
       pushFor: 'Push für {{event}}',
       categories: {

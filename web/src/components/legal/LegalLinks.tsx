@@ -8,7 +8,7 @@ export interface LegalLinksProps {
 }
 
 /**
- * Renders persistent links to every public legal document.
+ * Renders links to every public legal document.
  *
  * @param props - Optional additional class name for layout integration.
  * @returns A localized legal-navigation landmark.
@@ -27,7 +27,7 @@ export function LegalLinks({ className = '' }: LegalLinksProps) {
 /**
  * Renders the legal navigation as an application-content footer.
  *
- * @returns A footer suitable for every authenticated route.
+ * @returns A footer for public shell states and explicitly selected application routes.
  */
 export function LegalFooter() {
   return <footer className={styles.footer}><LegalLinks /></footer>;
