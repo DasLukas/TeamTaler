@@ -21,7 +21,7 @@ export function AccountPage() {
   const groupContext = useOptionalActiveGroup();
   const hasActiveGroup = groupContext !== null;
   return (
-    <Page intro={t(hasActiveGroup ? 'account.intro' : 'account.systemOnlyIntro')} title={t('account.title')} wide>
+    <Page className={styles.accountPage} intro={t(hasActiveGroup ? 'account.intro' : 'account.systemOnlyIntro')} title={t('account.title')} wide>
       <AccountDetailsPanel />
       <AppearanceSettingsPanel />
       <ProfileImagePanel />

@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import ChartNoAxesCombined from 'lucide-react/dist/esm/icons/chart-no-axes-combined';
 import ReceiptText from 'lucide-react/dist/esm/icons/receipt-text';
 import Save from 'lucide-react/dist/esm/icons/save';
 import { useState } from 'react';
@@ -172,14 +173,14 @@ function DefaultThemeSetting({ groupId, settings }: DefaultThemeSettingProps) {
  * Renders the group-wide master switch for the dedicated statistics workspace.
  *
  * @param props - Active group identifier and persisted group settings.
- * @returns An explicit-save feature switch with session projection updates.
+ * @returns An immediate feature switch with guarded deactivation and session projection updates.
  */
 function StatisticsFeatureSetting({ groupId, settings }: StatisticsFeatureSettingProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const [enabled, setEnabled] = useState(settings.statisticsEnabled);
+  const [confirmDisable, setConfirmDisable] = useState(false);
   const mutation = useMutation({
-    mutationFn: () => api.updateGroupSettings(groupId, { statisticsEnabled: enabled }),
+    mutationFn: (enabled: boolean) => api.updateGroupSettings(groupId, { statisticsEnabled: enabled }),
     onSuccess: (persisted) => {
       queryClient.setQueryData<GroupSettings>(['group-settings', groupId], persisted);
       queryClient.setQueryData<Session>(['session'], (session) => session ? {
@@ -188,26 +189,41 @@ function StatisticsFeatureSetting({ groupId, settings }: StatisticsFeatureSettin
       } : session);
       queryClient.removeQueries({ queryKey: ['statistics', groupId] });
       void queryClient.invalidateQueries({ queryKey: ['dashboard', groupId] });
+      setConfirmDisable(false);
     },
+    onError: () => void queryClient.invalidateQueries({ queryKey: ['group-settings', groupId] }),
   });
 
   return (
-    <section aria-labelledby="statistics-feature-setting-title" className={`${styles.card} ${styles.defaultRoleCard}`}>
-      <div>
-        <div className={styles.settingRow}>
-          <div>
-            <h4 id="statistics-feature-setting-title">{t('behaviorSettings.statisticsTitle')}</h4>
-            <p>{t('behaviorSettings.statisticsDescription')}</p>
-          </div>
-          <Toggle checked={enabled} disabled={mutation.isPending} label={t('behaviorSettings.statisticsToggle')} onChange={(checked) => { setEnabled(checked); mutation.reset(); }} />
+    <section aria-labelledby="statistics-feature-setting-title" className={styles.card}>
+      <div className={styles.settingRow}>
+        <div>
+          <h4 id="statistics-feature-setting-title">{t('behaviorSettings.statisticsTitle')}</h4>
+          <p>{t('behaviorSettings.statisticsDescription')}</p>
         </div>
-        <p className={styles.notice}>{t(enabled ? 'behaviorSettings.statisticsEnabledNotice' : 'behaviorSettings.statisticsDisabledNotice')}</p>
+        <Toggle checked={settings.statisticsEnabled} disabled={mutation.isPending} label={t('behaviorSettings.statisticsToggle')} onChange={(enabled) => {
+          mutation.reset();
+          if (enabled) mutation.mutate(true);
+          else setConfirmDisable(true);
+        }} />
       </div>
-      <div className={styles.defaultRoleActions}>
-        {mutation.isError ? <p className={styles.error} role="alert">{t('behaviorSettings.statisticsSaveError')}</p> : null}
-        {mutation.isSuccess ? <p className={styles.success} role="status">{t('behaviorSettings.statisticsSaved')}</p> : null}
-        <Button disabled={enabled === settings.statisticsEnabled || mutation.isPending} leadingIcon={<Save size={17} />} onClick={() => mutation.mutate()}>{mutation.isPending ? t('behaviorSettings.saving') : t('common.save')}</Button>
-      </div>
+      <p className={styles.notice}>{t(settings.statisticsEnabled ? 'behaviorSettings.statisticsEnabledNotice' : 'behaviorSettings.statisticsDisabledNotice')}</p>
+      {mutation.isError && !confirmDisable ? <p className={styles.error} role="alert">{t('behaviorSettings.statisticsSaveError')}</p> : null}
+      <ConfirmationDialog
+        confirmIcon={<ChartNoAxesCombined size={17} />}
+        confirmLabel={t('behaviorSettings.statisticsDisable')}
+        errorMessage={mutation.isError ? t('behaviorSettings.statisticsSaveError') : undefined}
+        message={t('behaviorSettings.statisticsDisableImpact')}
+        onClose={() => {
+          mutation.reset();
+          setConfirmDisable(false);
+        }}
+        onConfirm={() => mutation.mutate(false)}
+        open={confirmDisable}
+        pending={mutation.isPending}
+        title={t('behaviorSettings.statisticsDisableTitle')}
+        tone="danger"
+      />
     </section>
   );
 }
@@ -291,7 +307,6 @@ function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canMan
         <header><h3 id="group-settings-section-title">{t('behaviorSettings.groupSectionTitle')}</h3></header>
         {canManageGroup ? <GroupSettingsPanel embedded /> : null}
         {canManageGroup ? <DefaultThemeSetting groupId={groupId} key={`${groupId}:${settings.defaultTheme}`} settings={settings} /> : null}
-        {canManageGroup ? <StatisticsFeatureSetting groupId={groupId} key={`${groupId}:${settings.statisticsEnabled}`} settings={settings} /> : null}
         {canManageDefaultRole && roles ? <DefaultRoleSetting groupId={groupId} key={`${groupId}:${settings.defaultRoleId ?? ''}`} roles={roles} settings={settings} /> : null}
         {canManageGroup ? <PlanningSettingsSection groupId={groupId} /> : null}
       </section>
@@ -334,6 +349,7 @@ function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canMan
             tone="danger"
           />
         </section>
+        {canManageGroup ? <StatisticsFeatureSetting groupId={groupId} key={`${groupId}:${settings.statisticsEnabled}`} settings={settings} /> : null}
       </section> : null}
 
       {canManageFinancialSettings ? <section aria-labelledby="booking-settings-title" className={styles.bookingSection}>

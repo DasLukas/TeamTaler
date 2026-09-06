@@ -150,6 +150,19 @@ describe('BehaviorSettingsPanel', () => {
     expect(removeQueries).toHaveBeenCalledWith({ queryKey: ['notification-preferences', 'group-a'] });
   });
 
+  it('places statistics directly below settlements in the finance section without a save button', async () => {
+    renderPanel();
+
+    const groupRegion = await screen.findByRole('region', { name: i18n.t('behaviorSettings.groupSectionTitle') });
+    const financeRegion = screen.getByRole('region', { name: i18n.t('behaviorSettings.financeSectionTitle') });
+    const settlementsRegion = within(financeRegion).getByRole('region', { name: i18n.t('behaviorSettings.settlementsTitle') });
+    const statisticsRegion = within(financeRegion).getByRole('region', { name: i18n.t('behaviorSettings.statisticsTitle') });
+
+    expect(within(groupRegion).queryByRole('region', { name: i18n.t('behaviorSettings.statisticsTitle') })).not.toBeInTheDocument();
+    expect(settlementsRegion.compareDocumentPosition(statisticsRegion) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(statisticsRegion).queryByRole('button')).not.toBeInTheDocument();
+  });
+
   it('persists reminder cadence from the settlement section', async () => {
     const user = userEvent.setup();
     apiMock.getGroupSettings.mockResolvedValue({ ...settings, settlementsEnabled: true });
@@ -174,12 +187,39 @@ describe('BehaviorSettingsPanel', () => {
     const statisticsRegion = await screen.findByRole('region', { name: i18n.t('behaviorSettings.statisticsTitle') });
 
     await user.click(within(statisticsRegion).getByRole('switch', { name: i18n.t('behaviorSettings.statisticsToggle') }));
-    await user.click(within(statisticsRegion).getByRole('button', { name: i18n.t('common.save') }));
 
+    expect(screen.queryByRole('dialog', { name: i18n.t('behaviorSettings.statisticsDisableTitle') })).not.toBeInTheDocument();
     await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { statisticsEnabled: true }));
     expect(removeQueries).toHaveBeenCalledWith({ queryKey: ['statistics', 'group-a'] });
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['dashboard', 'group-a'] });
     expect(queryClient.getQueryData<Session>(['session'])?.groups[0]?.statisticsEnabled).toBe(true);
+  });
+
+  it('confirms before immediately disabling the statistics dashboard', async () => {
+    const user = userEvent.setup();
+    apiMock.getGroupSettings.mockResolvedValue({ ...settings, statisticsEnabled: true });
+    apiMock.updateGroupSettings.mockResolvedValue({ ...settings, statisticsEnabled: false });
+    renderPanel();
+
+    const statisticsRegion = await screen.findByRole('region', { name: i18n.t('behaviorSettings.statisticsTitle') });
+    const toggle = within(statisticsRegion).getByRole('switch', { name: i18n.t('behaviorSettings.statisticsToggle') });
+    expect(toggle).toBeChecked();
+
+    await user.click(toggle);
+    const dialog = screen.getByRole('dialog', { name: i18n.t('behaviorSettings.statisticsDisableTitle') });
+    expect(dialog).toBeVisible();
+    expect(toggle).toBeChecked();
+    expect(apiMock.updateGroupSettings).not.toHaveBeenCalled();
+
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('common.cancel') }));
+    expect(screen.queryByRole('dialog', { name: i18n.t('behaviorSettings.statisticsDisableTitle') })).not.toBeInTheDocument();
+    expect(toggle).toBeChecked();
+
+    await user.click(toggle);
+    await user.click(within(screen.getByRole('dialog', { name: i18n.t('behaviorSettings.statisticsDisableTitle') })).getByRole('button', { name: i18n.t('behaviorSettings.statisticsDisable') }));
+
+    await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { statisticsEnabled: false }));
+    await waitFor(() => expect(screen.getByRole('switch', { name: i18n.t('behaviorSettings.statisticsToggle') })).not.toBeChecked());
   });
 
   it('confirms before staging settlement deactivation', async () => {
@@ -284,6 +324,7 @@ describe('BehaviorSettingsPanel', () => {
     expect(await screen.findByRole('region', { name: i18n.t('behaviorSettings.bookingTitle') })).toBeVisible();
     expect(screen.queryByLabelText(i18n.t('groupSettings.nameLabel'))).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: i18n.t('behaviorSettings.defaultRoleTitle') })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: i18n.t('behaviorSettings.statisticsTitle') })).not.toBeInTheDocument();
     expect(apiMock.getRoles).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') })).toBeVisible();
   });

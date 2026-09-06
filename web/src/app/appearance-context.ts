@@ -1,5 +1,5 @@
 import { createContext } from 'react';
-import type { ColorMode, ThemeId } from '@/api/types';
+import type { ColorMode, Group, ThemeId } from '@/api/types';
 
 /** Color scheme after resolving an explicit or operating-system preference. */
 export type ResolvedColorScheme = 'light' | 'dark';
@@ -25,6 +25,16 @@ export const SYSTEM_DARK_QUERY = '(prefers-color-scheme: dark)';
 
 /** Theme applied outside authenticated group routes. */
 export const PUBLIC_THEME: ThemeId = 'TEAMTALER';
+
+/**
+ * Resolves a group's effective theme from the membership override and group default.
+ *
+ * @param group - Active or preferred group projection, when one exists.
+ * @returns The membership override, group default, or public TeamTaler fallback.
+ */
+export function resolveEffectiveGroupTheme(group: Pick<Group, 'defaultTheme' | 'membership'> | undefined): ThemeId {
+  return group?.membership?.themeOverride ?? group?.defaultTheme ?? PUBLIC_THEME;
+}
 
 const THEME_COLORS: Record<ThemeId, Record<ResolvedColorScheme, string>> = {
   TEAMTALER: { light: '#03182f', dark: '#03101f' },

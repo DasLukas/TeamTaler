@@ -2,6 +2,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api } from '@/api/client';
 import type { Session } from '@/api/types';
+import { resolveEffectiveGroupTheme } from './appearance-context';
 import { ActiveGroupContext, type ActiveGroupSelectionOptions } from './active-group-context';
 import { useApplyEffectiveGroupTheme } from './useAppearance';
 import { preferredMemberPath } from './groupCapabilities';
@@ -20,7 +21,7 @@ export function GroupProvider({ session, children }: { session: Session; childre
   const [activeGroupId, setActiveGroupId] = useState(initialGroupId);
   const preferenceWrite = useRef<Promise<void>>(Promise.resolve());
   const activeGroup = session.groups.find((group) => group.id === activeGroupId) ?? session.groups[0];
-  const effectiveTheme = activeGroup?.membership?.themeOverride ?? activeGroup?.defaultTheme ?? 'TEAMTALER';
+  const effectiveTheme = resolveEffectiveGroupTheme(activeGroup);
   useApplyEffectiveGroupTheme(effectiveTheme);
   if (!activeGroup) throw new Error('GroupProvider requires an active group.');
   const selectActiveGroup = useCallback((groupId: string, options?: ActiveGroupSelectionOptions) => {

@@ -3,6 +3,8 @@ import { Link } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import { api } from '@/api/client';
+import { resolveEffectiveGroupTheme } from '@/app/appearance-context';
+import { useApplyAuthenticatedColorMode, useApplyEffectiveGroupTheme } from '@/app/useAppearance';
 import { Brand } from '@/components/brand/Brand';
 import { LegalLinks } from '@/components/legal/LegalLinks';
 import { StatePanel } from '@/components/ui/StatePanel';
@@ -30,6 +32,15 @@ function LegalDocumentPage({ document }: LegalDocumentPageProps) {
     retry: false,
     staleTime: 0,
   });
+  const session = useQuery({
+    queryKey: ['session'],
+    queryFn: api.getSession,
+    retry: false,
+    staleTime: 30_000,
+  });
+  const sessionGroup = session.data?.groups.find((group) => group.id === session.data.activeGroupId) ?? session.data?.groups[0];
+  useApplyAuthenticatedColorMode(session.data?.colorMode);
+  useApplyEffectiveGroupTheme(resolveEffectiveGroupTheme(sessionGroup));
   const content = documents.data?.[document] ?? '';
   return (
     <div className={styles.page}>
