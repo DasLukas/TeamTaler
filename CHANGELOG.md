@@ -4,9 +4,14 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-06
+
 ### Added
 
 - Open web clients now detect a newly deployed TeamTaler build and offer a deliberate reload through a persistent, responsive update notice.
+- Public imprint and privacy-policy routes backed by live host Markdown files or versioned system-administrator overrides, with legal links on signed-out surfaces, the overview, and the account page.
+- A compact account footer that displays the deployed TeamTaler version and links directly to the public legal documents.
+- An optional group planning workspace for appointments, polls, and registrations with timed and all-day events, recurring series, occurrence-level edits and cancellations, responsive calendar and agenda views, and configurable notifications.
 - An optional group statistics workspace with one explicit authorization and one unified snapshot, presented through compact booking and finance tabs with shareable date-range state, server-selected calendar granularity, and responsive chart visualizations without a secondary table view.
 - Two distinct anonymous booking KPIs for active participants and booked products; the easily confused booking-transaction count is intentionally omitted from the overview.
 - Simple product and category visuals with privacy-aware adaptive buckets, direct visible totals, microtrends, and accessible series summaries as orientation for future purchases.
@@ -371,7 +376,8 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Explicit acting and charged membership display for every booking, including searchable third-party-assignment cues.
 - Canonical backup-entry allowlisting, target-width Argon2 parameter parsing, and directory-confined SPA asset serving with traversal regression coverage.
 
-[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/DasLukas/TeamTaler/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/DasLukas/TeamTaler/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/DasLukas/TeamTaler/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/DasLukas/TeamTaler/compare/v1.0.0...v1.0.1

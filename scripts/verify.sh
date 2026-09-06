@@ -9,11 +9,12 @@ if [ -n "$unformatted" ]; then
 fi
 
 go vet ./cmd/... ./internal/... ./migrations
-go test -race ./cmd/... ./internal/... ./migrations
+go test -race -p 2 ./cmd/... ./internal/... ./migrations
 (
   cd web
   npm run lint
   npm test
   npm run build
+  npm audit --omit=dev --audit-level=high
 )
 go build -trimpath ./cmd/teamtaler

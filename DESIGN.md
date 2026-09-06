@@ -68,7 +68,7 @@ When an open client detects a newer deployed build, it shows one persistent rais
 
 ## Application version
 
-The loaded client version appears once as quiet centered metadata at the end of the account workspace in the format `TeamTaler · Version 1.2.0`. Imprint and privacy-policy links sit immediately below it in the same compact footer block. Its final page inset matches the overview legal footer instead of retaining the shared page container's larger task-workspace padding. The overview retains its own legal footer, while other authenticated workspaces omit legal footer links to keep task views focused. The version presentation remains outside cards, navigation, and primary actions and uses the normalized semantic portion of the embedded client build identifier; release-tag prefixes and commit metadata are omitted from user-facing copy.
+The loaded client version appears once as quiet centered metadata at the end of the account workspace in the format `TeamTaler · Version 1.3.0`. Imprint and privacy-policy links sit immediately below it in the same compact footer block. Its final page inset matches the overview legal footer instead of retaining the shared page container's larger task-workspace padding. The overview retains its own legal footer, while other authenticated workspaces omit legal footer links to keep task views focused. The version presentation remains outside cards, navigation, and primary actions and uses the normalized semantic portion of the embedded client build identifier; release-tag prefixes and commit metadata are omitted from user-facing copy.
 
 ## Push permission onboarding
 

@@ -1,41 +1,65 @@
-# Controller
+# Privacy notice template
 
-Replace every bracketed placeholder and verify every processing activity before publishing this document.
+> This document is an operator template, not legal advice. Replace every bracketed placeholder, verify each processing activity and retention rule against the live deployment, and remove every inapplicable section before treating it as a complete privacy notice.
 
-[Full legal name of the controller]
+## Controller and contact
 
-[Street and house number]
+[FULL LEGAL NAME OR REGISTERED ORGANIZATION]
 
-[Postal code and city]
+[STREET AND HOUSE NUMBER]
 
-[Country]
+[POSTAL CODE AND CITY]
 
-Email: [privacy@example.com]
+[COUNTRY]
+
+Email: [EMAIL ADDRESS TO BE ADDED]
+
+[DATA PROTECTION OFFICER CONTACT, ONLY IF ONE HAS BEEN APPOINTED]
+
+## Scope and data sources
+
+[DESCRIBE THE GROUPS AND ADULT USERS COVERED BY THIS NOTICE. STATE WHETHER DATA COMES FROM THE DATA SUBJECT, GROUP ADMINISTRATORS, INVITING MEMBERS, OR TRANSACTION PARTICIPANTS.]
 
 ## Hosting and server logs
 
-[Describe the hosting provider, processed log data, purposes, legal basis, recipients, retention period, and any third-country transfers.]
+[IDENTIFY THE HOSTING PROVIDER, PROCESSING LOCATION, DATA PROCESSING AGREEMENT, LOG FIELDS, PURPOSES, LEGAL BASIS, RECIPIENTS, RETENTION PERIOD, AND ANY THIRD-COUNTRY TRANSFERS.]
 
-## User accounts and group administration
+## User accounts, sessions, and group administration
 
-[Describe account, membership, invitation, role, and session data, including purposes, legal bases, recipients, and retention periods.]
+[DESCRIBE EMAIL ADDRESSES, DISPLAY NAMES, PASSWORD HASHES, PROFILE IMAGES, MEMBERSHIPS, ROLES, INVITATIONS, SESSION DATA, PREFERENCES, PURPOSES, LEGAL BASES, RECIPIENTS, AND RETENTION.]
 
-## Bookings and financial records
+## Bookings, payments, settlements, and attachments
 
-[Describe the personal and financial data processed by TeamTaler, including purposes, legal bases, access roles, retention periods, and statutory retention obligations.]
+[DESCRIBE PRODUCTS, BOOKING AND PAYMENT RECORDS, REASONS, PAYMENT DESTINATIONS, RECEIPTS, BALANCES, SETTLEMENTS, ACCESS ROLES, PURPOSES, LEGAL BASES, RETENTION, AND ANY STATUTORY OBLIGATIONS.]
 
-## Email and push notifications
+## Planning, statistics, notifications, and audit records
 
-[Describe configured delivery providers, processed data, purposes, legal bases, retention periods, and any third-country transfers. Remove channels that are not used.]
+[DESCRIBE EVENTS, POLLS, REGISTRATIONS, PRIVACY-SUPPRESSED STATISTICS, IN-APP NOTIFICATIONS, ADMINISTRATIVE AUDIT RECORDS, PURPOSES, ACCESS, LEGAL BASES, AND RETENTION.]
+
+## Email delivery and Web Push
+
+[IDENTIFY THE EMAIL PROVIDER AND BROWSER-SELECTED PUSH SERVICES. DESCRIBE ADDRESSES, DELIVERY METADATA, SUBSCRIPTION DATA, GENERIC PUSH PAYLOADS, CONSENT OR OTHER LEGAL BASES, RETENTION, RECIPIENTS, WITHDRAWAL, AND POSSIBLE THIRD-COUNTRY TRANSFERS.]
 
 ## Cookies and local browser storage
 
-[Describe technically necessary session and CSRF cookies as well as local preferences. State whether any optional technology is used and, if so, how consent is obtained and withdrawn.]
+[DESCRIBE THE STRICT SESSION AND CSRF COOKIES, THEIR LIFETIME, LOCAL DISPLAY AND WORKSPACE PREFERENCES, TEMPORARY IDEMPOTENCY AND NAVIGATION STATE, PURPOSES, AND WHETHER SECTION 25(2) TDDDG APPLIES. DESCRIBE CONSENT FOR ANY OPTIONAL TECHNOLOGY.]
+
+## Exports, backups, deletion, and retention
+
+[DESCRIBE USER-REQUESTED EXPORTS, THEIR EXPIRY, APPLICATION DATA RETENTION, IMMUTABLE FINANCIAL HISTORY, GROUP PURGE, BACKUP CONTENT, BACKUP LOCATION, BACKUP RETENTION, AND DELETION LIMITATIONS.]
+
+## Recipients and international transfers
+
+[LIST AUTHORIZED GROUP ROLES, PROCESSORS, DELIVERY PROVIDERS, PUBLIC AUTHORITIES WHERE LEGALLY REQUIRED, AND SAFEGUARDS FOR ANY TRANSFER OUTSIDE THE EEA. STATE WHETHER DATA IS SOLD OR USED FOR ADVERTISING.]
+
+## Requirement to provide data and automated decisions
+
+[EXPLAIN WHICH DATA IS REQUIRED TO CREATE AND USE AN ACCOUNT, WHICH FIELDS OR CHANNELS ARE OPTIONAL, THE CONSEQUENCES OF NOT PROVIDING REQUIRED DATA, AND WHETHER AUTOMATED DECISION-MAKING OR PROFILING OCCURS.]
 
 ## Data subject rights
 
-[Explain the applicable rights of access, rectification, erasure, restriction, portability, objection, withdrawal of consent, and complaint to a supervisory authority.]
+[EXPLAIN ACCESS, RECTIFICATION, ERASURE, RESTRICTION, PORTABILITY, OBJECTION, WITHDRAWAL OF CONSENT, AND THE RIGHT TO COMPLAIN TO A SUPERVISORY AUTHORITY.]
 
-## Security and updates
+## Security and changes
 
-[Describe relevant security measures at an appropriate level and state when this notice was last updated.]
+[DESCRIBE APPROPRIATE TECHNICAL AND ORGANIZATIONAL MEASURES AT A NON-SENSITIVE LEVEL AND STATE THE LAST-UPDATED DATE.]
