@@ -1,8 +1,11 @@
 .dashboard {
+  display: flex;
   min-height: 100vh;
+  flex-direction: column;
 }
 
 .content {
+  flex: 1;
   width: min(100%, 1040px);
   margin: 0 auto;
   padding: 50px 42px 64px;
@@ -11,6 +14,10 @@
 .content > h1 {
   margin-bottom: var(--space-8);
   font-size: clamp(2.35rem, 4vw, 3.1rem);
+}
+
+.planningPreview {
+  margin-top: var(--space-8);
 }
 
 .personalBalanceSection > h2 {

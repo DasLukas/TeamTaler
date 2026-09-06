@@ -8,6 +8,7 @@ const storedPreferences = new Map<string, string>();
 
 vi.mock('@tanstack/react-query', () => ({ useQuery: mocks.useQuery }));
 vi.mock('@tanstack/react-router', () => ({
+  Link: ({ children, to }: { children: ReactNode; to: string }) => <a href={to}>{children}</a>,
   Navigate: () => <div>redirect</div>,
   Outlet: () => <div>outlet</div>,
 }));
@@ -49,6 +50,8 @@ describe('AppShell empty group state', () => {
 
     expect(screen.getByRole('heading', { name: 'Keine aktive Gruppe' })).toBeVisible();
     expect(screen.getByText('Du wurdest noch keiner Gruppe hinzugefügt oder deine Mitgliedschaft wurde archiviert.')).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Impressum' })).toHaveAttribute('href', '/impressum');
+    expect(screen.getByRole('link', { name: 'Datenschutz' })).toHaveAttribute('href', '/datenschutz');
     expect(screen.queryByText(/CLI/i)).not.toBeInTheDocument();
   });
 
@@ -67,9 +70,21 @@ describe('AppShell empty group state', () => {
 
     render(<AppShell />);
 
-    expect(screen.getByRole('navigation')).toHaveTextContent('system-only-navigation');
+    expect(screen.getByText('system-only-navigation').closest('nav')).toBeInTheDocument();
     expect(screen.getByText('outlet')).toBeVisible();
+    expect(screen.queryByRole('link', { name: 'Impressum' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Datenschutz' })).not.toBeInTheDocument();
     expect(screen.queryByText('Keine aktive Gruppe')).not.toBeInTheDocument();
+  });
+
+  it('does not inject legal links into regular authenticated task routes', () => {
+    mocks.useQuery.mockReturnValue({ data: { user: { id: 'user-a' }, groups: [{ id: 'group-a' }] }, isError: false, isLoading: false });
+
+    render(<AppShell />);
+
+    expect(screen.getByText('outlet')).toBeVisible();
+    expect(screen.queryByRole('link', { name: 'Impressum' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Datenschutz' })).not.toBeInTheDocument();
   });
 
   it('persists the tablet navigation-rail preference across remounts', () => {

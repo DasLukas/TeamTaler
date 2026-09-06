@@ -16,21 +16,17 @@ func TestReminderWorkerUsesLocalScheduleCatchUpAndDedupeAcrossDST(t *testing.T) 
 		t.Fatalf("open database: %v", err)
 	}
 	defer db.Close()
-	const seededAt = "2026-10-01T08:00:00Z"
 	for _, statement := range []string{
 		`INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('user-reminder','member@example.test','Member','hash','2026-10-01T08:00:00Z','2026-10-01T08:00:00Z')`,
 		`INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES('group-reminder','Reminder group','EUR','2026-10-01T08:00:00Z','2026-10-01T08:00:00Z')`,
 		`INSERT INTO memberships(id,group_id,user_id,joined_at) VALUES('member-reminder','group-reminder','user-reminder','2026-10-01T08:00:00Z')`,
-		`INSERT INTO group_settings(group_id,members_can_view_all_bookings,notification_emails_enabled,updated_at) VALUES('group-reminder',0,0,'2026-10-01T08:00:00Z')`,
+		`INSERT INTO group_settings(group_id,members_can_view_all_bookings,settlement_due_soon_days,settlement_overdue_repeat_days,updated_at) VALUES('group-reminder',0,3,7,'2026-10-01T08:00:00Z')`,
 		`INSERT INTO periods(id,group_id,label,status,starts_at,closed_at,due_at,created_at) VALUES('period-reminder','group-reminder','October','CLOSED','2026-10-01T08:00:00Z','2026-10-02T08:00:00Z','2026-10-25','2026-10-01T08:00:00Z')`,
 		`INSERT INTO period_statements(id,group_id,period_id,membership_id,display_name,email,charges_minor,payments_allocated_minor,adjustments_applied_minor,adjustments_provided_minor,amount_due_minor,status,created_at) VALUES('statement-reminder','group-reminder','period-reminder','member-reminder','Member','member@example.test',1000,0,0,0,1000,'OPEN','2026-10-02T08:00:00Z')`,
 	} {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
 			t.Fatalf("seed reminder fixture: %v", err)
 		}
-	}
-	if _, err := db.ExecContext(ctx, `UPDATE group_notification_settings SET timezone='Europe/Berlin',settlement_due_soon_days=3,settlement_overdue_repeat_days=7,updated_at=? WHERE group_id='group-reminder'`, seededAt); err != nil {
-		t.Fatalf("configure reminders: %v", err)
 	}
 	service := Service{DB: db}
 	worker, err := NewReminderWorker(db, service, nil)
@@ -77,7 +73,7 @@ func TestReminderWorkerSkipsCurrentlyPaidStatement(t *testing.T) {
 		`INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('user-paid','paid@example.test','Paid','hash','2026-10-01T08:00:00Z','2026-10-01T08:00:00Z')`,
 		`INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES('group-paid','Paid group','EUR','2026-10-01T08:00:00Z','2026-10-01T08:00:00Z')`,
 		`INSERT INTO memberships(id,group_id,user_id,joined_at) VALUES('member-paid','group-paid','user-paid','2026-10-01T08:00:00Z')`,
-		`INSERT INTO group_settings(group_id,members_can_view_all_bookings,notification_emails_enabled,updated_at) VALUES('group-paid',0,0,'2026-10-01T08:00:00Z')`,
+		`INSERT INTO group_settings(group_id,members_can_view_all_bookings,updated_at) VALUES('group-paid',0,'2026-10-01T08:00:00Z')`,
 		`INSERT INTO periods(id,group_id,label,status,starts_at,closed_at,due_at,created_at) VALUES('period-paid','group-paid','October','CLOSED','2026-10-01T08:00:00Z','2026-10-02T08:00:00Z','2026-10-25','2026-10-01T08:00:00Z')`,
 		`INSERT INTO period_statements(id,group_id,period_id,membership_id,display_name,email,charges_minor,payments_allocated_minor,adjustments_applied_minor,adjustments_provided_minor,amount_due_minor,status,created_at) VALUES('statement-paid','group-paid','period-paid','member-paid','Paid','paid@example.test',1000,0,0,0,1000,'OPEN','2026-10-02T08:00:00Z')`,
 		`INSERT INTO payments(id,group_id,membership_id,amount_minor,received_at,method,created_by,created_at) VALUES('payment-paid','group-paid','member-paid',1000,'2026-10-20','BANK_TRANSFER','member-paid','2026-10-20T08:00:00Z')`,

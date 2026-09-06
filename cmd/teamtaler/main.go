@@ -26,6 +26,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/exportnotifications"
 	"github.com/DasLukas/TeamTaler/internal/httpapi"
 	"github.com/DasLukas/TeamTaler/internal/notifications"
+	planningservice "github.com/DasLukas/TeamTaler/internal/planning"
 	"github.com/DasLukas/TeamTaler/internal/platform"
 	"github.com/DasLukas/TeamTaler/internal/storage"
 	systemadmin "github.com/DasLukas/TeamTaler/internal/system"
@@ -115,6 +116,7 @@ func serve(arguments []string) error {
 	emailInfrastructureAvailable := len(cfg.EmailTokenKey) == 32
 	pushInfrastructureAvailable := pushSecrets != nil
 	notificationService := notifications.Service{DB: db, EmailDeliveryAvailable: emailInfrastructureAvailable, PushDeliveryAvailable: pushInfrastructureAvailable}
+	notificationService.ResolveTimeZone = systemService.ResolveTimeZoneTx
 	notificationService.ResolveChannelAvailability = func(ctx context.Context, tx *sql.Tx) (notifications.ChannelAvailability, error) {
 		availability, err := systemService.ResolveNotificationChannelsTx(ctx, tx)
 		if err != nil {
@@ -130,7 +132,24 @@ func serve(arguments []string) error {
 	if err != nil {
 		return fmt.Errorf("configure settlement reminder worker: %w", err)
 	}
-	backgroundRunners := []backgroundRunner{{name: "settlement reminders", run: reminderWorker.Run}}
+	planningWorker, err := notifications.NewPlanningWorker(db, notificationService, slog.Default())
+	if err != nil {
+		return fmt.Errorf("configure planning notification worker: %w", err)
+	}
+	planningLifecycleWorker, err := planningservice.NewLifecycleWorker(db, slog.Default())
+	if err != nil {
+		return fmt.Errorf("configure planning lifecycle worker: %w", err)
+	}
+	planningSeriesWorker, err := planningservice.NewSeriesMaterializationWorker(db, slog.Default())
+	if err != nil {
+		return fmt.Errorf("configure planning series materialization worker: %w", err)
+	}
+	backgroundRunners := []backgroundRunner{
+		{name: "settlement reminders", run: reminderWorker.Run},
+		{name: "planning notifications", run: planningWorker.Run},
+		{name: "planning lifecycle", run: planningLifecycleWorker.Run},
+		{name: "planning series materialization", run: planningSeriesWorker.Run},
+	}
 	exportStore, err := exporting.NewFileArtifactStore(filepath.Join(cfg.DataDirectory, "exports"))
 	if err != nil {
 		return fmt.Errorf("configure data export artifact store: %w", err)
@@ -209,7 +228,7 @@ func serve(arguments []string) error {
 	workerErrors := superviseBackgroundRunners(processContext, backgroundRunners)
 	server := &http.Server{
 		Addr:              cfg.ListenAddress,
-		Handler:           httpapi.New(cfg, db, slog.Default()),
+		Handler:           httpapi.New(cfg, db, httpapi.NewBuildInformation(version, commit), slog.Default()),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,

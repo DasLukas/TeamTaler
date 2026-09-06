@@ -668,13 +668,17 @@ func (s Service) purgeGroup(ctx context.Context, actorUserID, groupID string, in
 		return DeletionImpact{}, err
 	}
 	deleteOrder := []string{
+		"planning_notification_runs", "planning_notification_tasks", "planning_series_notification_tasks", "planning_participations", "planning_event_audience",
+		"planning_event_target_roles", "planning_event_target_memberships", "planning_events",
+		"planning_series_recipients", "planning_series_target_roles", "planning_series_target_memberships",
+		"planning_series_cancelled_ranges", "planning_series_revisions", "planning_series", "group_planning_settings",
 		"notification_reminder_runs", "notification_delivery_jobs", "invitation_email_outbox", "public_join_email_outbox",
 		"notifications", "invitation_role_assignments", "invitations",
 		"public_join_registrations", "public_join_links", "ledger_entries", "period_statements",
 		"payment_allocations", "period_adjustment_allocations", "bookings", "payment_attachments", "payments",
 		"audit_events", "idempotency_results", "category_permissions", "membership_permissions",
 		"membership_notification_channels", "membership_role_assignments", "membership_roles", "group_reason_suggestions",
-		"group_payment_methods", "group_notification_events", "group_notification_settings", "group_settings", "role_permission_grants", "roles",
+		"group_payment_methods", "group_settings", "role_permission_grants", "roles",
 		"products", "categories", "periods", "memberships",
 	}
 	for _, table := range deleteOrder {

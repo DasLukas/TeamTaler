@@ -1,0 +1,28 @@
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.links a {
+  color: inherit;
+  text-underline-offset: 3px;
+}
+
+.links a:hover {
+  color: var(--color-text-strong);
+}
+
+.footer {
+  padding: var(--space-6) max(var(--space-5), env(safe-area-inset-right, 0px)) calc(var(--space-6) + env(safe-area-inset-bottom, 0px));
+}
+
+@media (max-width: 767px) {
+  .footer {
+    padding-bottom: var(--space-5);
+  }
+}

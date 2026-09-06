@@ -45,6 +45,25 @@
   --color-status-info: #176bc4;
   --color-status-info-subtle: #eef6ff;
 
+  /* Statistics charts use semantic roles so brand and color scheme can change
+     without coupling SVG components to concrete palette values. */
+  --chart-primary: #007c73;
+  --chart-secondary: #176bc4;
+  --chart-tertiary: #9a5a00;
+  --chart-positive: #18794e;
+  --chart-negative: #b52e3d;
+  --chart-due: #8a5200;
+  --chart-neutral: #5a6473;
+  --chart-credit: #18794e;
+  --chart-grid: #d6dce4;
+  --chart-axis: #5a6473;
+  --chart-hover: #edf3f6;
+  --chart-label-on-primary: #ffffff;
+  --chart-label-on-secondary: #ffffff;
+  --chart-label-on-due: #ffffff;
+  --chart-label-on-neutral: #ffffff;
+  --chart-label-on-credit: #ffffff;
+
   --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-size-xs: 0.75rem;
   --font-size-sm: 0.875rem;
@@ -110,6 +129,17 @@
   --color-status-danger-border: #844350;
   --color-status-info: #77baff;
   --color-status-info-subtle: #15334f;
+  --chart-positive: #78d68f;
+  --chart-negative: #ff919d;
+  --chart-due: #ffc766;
+  --chart-neutral: #929eac;
+  --chart-credit: #78d68f;
+  --chart-grid: #2b3b4e;
+  --chart-axis: #b0bbc8;
+  --chart-hover: #192c43;
+  --chart-label-on-due: #07111f;
+  --chart-label-on-neutral: #07111f;
+  --chart-label-on-credit: #07111f;
 }
 
 :root[data-theme='TEAMTALER'][data-color-scheme='dark'] {
@@ -125,6 +155,11 @@
   --color-navigation: #03101f;
   --color-navigation-gradient-end: #073052;
   --color-navigation-accent: #62ddd4;
+  --chart-primary: #62ddd4;
+  --chart-secondary: #77baff;
+  --chart-tertiary: #ffc766;
+  --chart-label-on-primary: #03182f;
+  --chart-label-on-secondary: #07111f;
 }
 
 :root[data-theme='NRW'][data-color-scheme='light'] {
@@ -141,6 +176,11 @@
   --color-navigation: #064622;
   --color-navigation-gradient-end: #13371f;
   --color-navigation-accent: #ffffff;
+  --chart-primary: #007a38;
+  --chart-secondary: #14519b;
+  --chart-tertiary: #9b2634;
+  --chart-label-on-primary: #ffffff;
+  --chart-label-on-secondary: #ffffff;
 }
 
 :root[data-theme='NRW'][data-color-scheme='dark'] {
@@ -172,6 +212,14 @@
   --color-navigation-accent: #ff6678;
   --color-backdrop: rgb(2 10 5 / 72%);
   --color-shadow: rgb(0 0 0 / 42%);
+  --chart-primary: #62dc91;
+  --chart-secondary: #7dc7ff;
+  --chart-tertiary: #ff8e9b;
+  --chart-grid: #2c4435;
+  --chart-axis: #afbeb4;
+  --chart-hover: #1d3426;
+  --chart-label-on-primary: #062214;
+  --chart-label-on-secondary: #062214;
 }
 
 :root[data-theme='TIEF_IM_WESTEN'][data-color-scheme='light'] {
@@ -188,6 +236,11 @@
   --color-navigation: #0f2864;
   --color-navigation-gradient-end: #07578a;
   --color-navigation-accent: #ffcc01;
+  --chart-primary: #0f2864;
+  --chart-secondary: #07578a;
+  --chart-tertiary: #806100;
+  --chart-label-on-primary: #ffffff;
+  --chart-label-on-secondary: #ffffff;
 }
 
 :root[data-theme='TIEF_IM_WESTEN'][data-color-scheme='dark'] {
@@ -219,6 +272,14 @@
   --color-navigation-accent: #ffdc4d;
   --color-backdrop: rgb(1 5 14 / 74%);
   --color-shadow: rgb(0 0 0 / 44%);
+  --chart-primary: #58ceff;
+  --chart-secondary: #ffdc4d;
+  --chart-tertiary: #76e0c2;
+  --chart-grid: #29415d;
+  --chart-axis: #afbed0;
+  --chart-hover: #18314f;
+  --chart-label-on-primary: #071b32;
+  --chart-label-on-secondary: #071b32;
 }
 
 :root[data-theme='FIRE'][data-color-scheme='light'] {
@@ -235,6 +296,11 @@
   --color-navigation: #4a1210;
   --color-navigation-gradient-end: #7b251c;
   --color-navigation-accent: #ffb13b;
+  --chart-primary: #962a27;
+  --chart-secondary: #9a3d16;
+  --chart-tertiary: #765300;
+  --chart-label-on-primary: #ffffff;
+  --chart-label-on-secondary: #ffffff;
 }
 
 :root[data-theme='FIRE'][data-color-scheme='dark'] {
@@ -266,4 +332,12 @@
   --color-navigation-accent: #ffc15c;
   --color-backdrop: rgb(12 5 4 / 74%);
   --color-shadow: rgb(0 0 0 / 46%);
+  --chart-primary: #ff837d;
+  --chart-secondary: #ffc15c;
+  --chart-tertiary: #85d8ff;
+  --chart-grid: #493331;
+  --chart-axis: #c2b4b1;
+  --chart-hover: #342523;
+  --chart-label-on-primary: #2a0908;
+  --chart-label-on-secondary: #2a0908;
 }

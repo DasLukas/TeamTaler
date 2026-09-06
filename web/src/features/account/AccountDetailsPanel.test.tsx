@@ -25,8 +25,8 @@ vi.mock('@tanstack/react-router', () => ({ useNavigate: () => navigateMock }));
 const session: Session = {
   user: { id: 'user-a', displayName: 'Alex Member', email: 'alex@example.test' },
   groups: [
-    { id: 'group-a', name: 'Group A', currency: 'EUR', logoUrl: '/group-a.png', defaultTheme: 'TEAMTALER', membership: { id: 'member-a', roles: ['MEMBER'], groupPermissions: [], themeOverride: null } },
-    { id: 'group-b', name: 'Group B', currency: 'EUR', logoUrl: '/group-b.png', defaultTheme: 'TEAMTALER', membership: { id: 'member-b', roles: ['MEMBER'], groupPermissions: [], themeOverride: null } },
+    { id: 'group-a', name: 'Group A', currency: 'EUR', logoUrl: '/group-a.png', defaultTheme: 'TEAMTALER', statisticsEnabled: false, membership: { id: 'member-a', roles: ['MEMBER'], groupPermissions: [], themeOverride: null } },
+    { id: 'group-b', name: 'Group B', currency: 'EUR', logoUrl: '/group-b.png', defaultTheme: 'TEAMTALER', statisticsEnabled: false, membership: { id: 'member-b', roles: ['MEMBER'], groupPermissions: [], themeOverride: null } },
   ],
   activeGroupId: 'group-a',
   defaultGroupId: null,

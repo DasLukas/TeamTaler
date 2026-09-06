@@ -129,6 +129,16 @@ func (d *NotificationDispatcher) processOne(ctx context.Context) (bool, error) {
 		d.releaseAfterCancellation(job)
 		return true, nil
 	}
+	policyCode, err := notifications.CheckDeliveryPolicy(ctx, d.db, job.jobID, notifications.ChannelEmail)
+	if err != nil {
+		d.releaseAfterCancellation(job)
+		return true, err
+	}
+	if policyCode != "" {
+		return true, withCompletionContext(func(completionContext context.Context) error {
+			return d.markPolicyDenied(completionContext, job, policyCode)
+		})
+	}
 	delivery, err := d.loadDelivery(ctx, job.jobID)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -152,6 +162,16 @@ func (d *NotificationDispatcher) processOne(ctx context.Context) (bool, error) {
 	message := NotificationMessage{
 		ToAddress: delivery.toAddress, ToName: delivery.toName, GroupName: delivery.groupName,
 		Title: title, Body: body, ActionURL: d.publicURL + actionRoute + "?notification=" + url.QueryEscape(job.notificationID),
+	}
+	policyCode, err = notifications.CheckDeliveryPolicy(ctx, d.db, job.jobID, notifications.ChannelEmail)
+	if err != nil {
+		d.releaseAfterCancellation(job)
+		return true, err
+	}
+	if policyCode != "" {
+		return true, withCompletionContext(func(completionContext context.Context) error {
+			return d.markPolicyDenied(completionContext, job, policyCode)
+		})
 	}
 	err = d.sender.SendNotification(ctx, message)
 	if err == nil {
@@ -258,6 +278,21 @@ func (d *NotificationDispatcher) markUndeliverable(ctx context.Context, job clai
 	return nil
 }
 
+func (d *NotificationDispatcher) markPolicyDenied(ctx context.Context, job claimedNotification, code string) error {
+	now := platform.Timestamp(d.now().UTC())
+	result, err := d.db.ExecContext(ctx, `UPDATE notification_delivery_jobs
+		SET status='FAILED',next_attempt_at=NULL,lease_token=NULL,lease_until=NULL,last_error_code=?,updated_at=?
+		WHERE id=? AND channel='EMAIL' AND status='SENDING' AND lease_token=?`, code, now, job.jobID, job.leaseToken)
+	if err != nil {
+		return err
+	}
+	changed, _ := result.RowsAffected()
+	if changed != 1 {
+		return errors.New("notification email lease was lost before policy failure recording")
+	}
+	return nil
+}
+
 func (d *NotificationDispatcher) recordFailure(ctx context.Context, job claimedNotification, code FailureCode) error {
 	now := d.now().UTC()
 	status := string(OutboxStatusFailed)
@@ -311,6 +346,20 @@ func renderNotificationCopy(eventType notifications.EventType, context notificat
 		return "Abrechnung bald fällig", "Eine offene Abrechnung in deiner TeamTaler-Gruppe ist bald fällig."
 	case notifications.TypeSettlementOverdue:
 		return "Abrechnung überfällig", "Eine offene Abrechnung in deiner TeamTaler-Gruppe ist überfällig."
+	case notifications.TypePlanningEventPublished:
+		return "Neue Planung", fmt.Sprintf("Der Termin „%s“ wurde in deiner TeamTaler-Gruppe veröffentlicht.", safeInline(context.PlanningEventTitle))
+	case notifications.TypePlanningEventUpdated:
+		return "Planung geändert", fmt.Sprintf("Der Termin „%s“ wurde geändert.", safeInline(context.PlanningEventTitle))
+	case notifications.TypePlanningEventCancelled:
+		return "Planung abgesagt", fmt.Sprintf("Der Termin „%s“ wurde abgesagt.", safeInline(context.PlanningEventTitle))
+	case notifications.TypePlanningWaitlistPromoted:
+		return "Platz verfügbar", fmt.Sprintf("Du bist bei „%s“ von der Warteliste nachgerückt.", safeInline(context.PlanningEventTitle))
+	case notifications.TypePlanningSeriesPublished:
+		return "Neue Terminserie", fmt.Sprintf("„%s“ wurde als Terminserie veröffentlicht.", safeInline(context.PlanningSeriesTitle))
+	case notifications.TypePlanningSeriesUpdated:
+		return "Terminserie geändert", fmt.Sprintf("„%s“ wurde als Terminserie geändert.", safeInline(context.PlanningSeriesTitle))
+	case notifications.TypePlanningSeriesCancelled:
+		return "Terminserie abgesagt", fmt.Sprintf("„%s“ wurde als Terminserie abgesagt.", safeInline(context.PlanningSeriesTitle))
 	default:
 		return "Neue Benachrichtigung", "In deiner TeamTaler-Gruppe gibt es eine neue Aktivität."
 	}

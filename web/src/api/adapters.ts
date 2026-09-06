@@ -12,12 +12,12 @@ import type {
   Dashboard,
   EmailDeliveryStatus,
   Group,
-  GroupNotificationSettings,
   GroupSettings,
   GroupRole,
   InstanceCapabilities,
   LedgerEntry,
   Membership,
+  MemberStatistics,
   Notification,
   NotificationChannel,
   NotificationDestination,
@@ -29,6 +29,19 @@ import type {
   PaymentAttachmentSummary,
   PaymentMethod,
   PaymentTarget,
+  PlanningAudience,
+  PlanningEvent,
+  PlanningEventBase,
+  PlanningEventPage,
+  PlanningParticipant,
+  PlanningParticipantPage,
+  PlanningParticipationStatus,
+  PlanningRecurrenceInput,
+  PlanningSeries,
+  PlanningSeriesBase,
+  PlanningSeriesResult,
+  PlanningSettings,
+  PlanningWeekday,
   Period,
   Product,
   PushSubscriptionDevice,
@@ -37,6 +50,9 @@ import type {
   ReasonMode,
   Session,
   Settlement,
+  StatisticsBucket,
+  StatisticsDashboard,
+  StatisticsMeta,
   SmtpTlsMode,
   SystemAccount,
   SystemAuditEntry,
@@ -53,7 +69,7 @@ import type {
   ThemePreference,
   User,
 } from './types';
-import { DEFAULT_ATTACHMENT_UPLOAD_MAX_BYTES, DEFAULT_MEDIA_UPLOAD_MAX_BYTES, isCategoryIcon, isColorMode, isPermissionKey, isThemeId } from './types';
+import { DEFAULT_ATTACHMENT_UPLOAD_MAX_BYTES, DEFAULT_MEDIA_UPLOAD_MAX_BYTES, isCategoryIcon, isColorMode, isPermissionKey, isStatisticsRange, isThemeId, type FinanceStatistics } from './types';
 import { formatMoney } from './money';
 import i18n from '@/i18n';
 import { defaultPaymentMethods, historicalPaymentMethodLabel, localizedPaymentMethodLabel } from '@/features/finance/paymentMethods';
@@ -78,6 +94,13 @@ const NOTIFICATION_EVENT_TYPES: Notification['eventType'][] = [
   'SETTLEMENT_CREATED',
   'SETTLEMENT_DUE_SOON',
   'SETTLEMENT_OVERDUE',
+  'PLANNING_EVENT_PUBLISHED',
+  'PLANNING_EVENT_UPDATED',
+  'PLANNING_EVENT_CANCELLED',
+  'PLANNING_WAITLIST_PROMOTED',
+  'PLANNING_SERIES_PUBLISHED',
+  'PLANNING_SERIES_UPDATED',
+  'PLANNING_SERIES_CANCELLED',
   'DATA_EXPORT_READY',
   'DATA_EXPORT_FAILED',
 ];
@@ -89,7 +112,36 @@ const CONFIGURABLE_NOTIFICATION_EVENT_TYPES: ConfigurableNotificationEventType[]
   'SETTLEMENT_CREATED',
   'SETTLEMENT_DUE_SOON',
   'SETTLEMENT_OVERDUE',
+  'PLANNING_EVENT_PUBLISHED',
+  'PLANNING_EVENT_UPDATED',
+  'PLANNING_EVENT_CANCELLED',
+  'PLANNING_WAITLIST_PROMOTED',
+  'PLANNING_SERIES_PUBLISHED',
+  'PLANNING_SERIES_UPDATED',
+  'PLANNING_SERIES_CANCELLED',
 ];
+
+const participationStatus = (value: unknown): PlanningParticipationStatus | undefined => {
+  if (value === 'YES' || value === 'ATTENDING' || value === 'REGISTERED') return 'ATTENDING';
+  if (value === 'MAYBE') return 'MAYBE';
+  if (value === 'NO' || value === 'DECLINED') return 'DECLINED';
+  if (value === 'WAITLISTED') return 'WAITLISTED';
+  return undefined;
+};
+const participationWireStatus = (value: unknown) => value === 'YES' || value === 'MAYBE' || value === 'NO' || value === 'REGISTERED' || value === 'WAITLISTED' || value === 'WITHDRAWN' ? value : undefined;
+
+function planningDateKey(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.toISOString().slice(0, 10) === value ? value : undefined;
+}
+
+function nextPlanningDate(key: string): string {
+  const date = new Date(`${key}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
 function settingSource(value: unknown): SystemSettingSource {
   const normalized = String(value ?? '').toUpperCase();
   if (normalized === 'ENV' || normalized === 'ENVIRONMENT') return 'ENVIRONMENT';
@@ -218,6 +270,7 @@ export function adaptSystemSettings(input: unknown): SystemSettings {
     revision: Number(source.revision ?? envelope.revision ?? 1),
     instanceName: stringSetting(source.instanceName, 'TeamTaler'),
     defaultCurrency: stringSetting(source.defaultCurrency, 'EUR'),
+    timeZone: stringSetting(source.timeZone, 'Europe/Berlin'),
     mediaUploadMaxBytes: numberSetting(source.mediaUploadMaxBytes, DEFAULT_MEDIA_UPLOAD_MAX_BYTES),
     attachmentUploadMaxBytes: numberSetting(source.attachmentUploadMaxBytes, DEFAULT_ATTACHMENT_UPLOAD_MAX_BYTES),
     publicJoinEnabled: booleanSetting(source.publicJoinEnabled, true),
@@ -263,45 +316,11 @@ function notificationEventDefinition(input: unknown, fallbackType?: unknown): No
   };
 }
 
-function notificationEventEntries(source: JsonRecord): unknown[] {
-  if (Array.isArray(source.events)) return source.events;
-  if (Array.isArray(source.catalog)) return source.catalog;
-  return CONFIGURABLE_NOTIFICATION_EVENT_TYPES;
-}
-
-/**
- * Normalizes the versioned group notification policy and its event catalog.
- *
- * @param input - Direct or enveloped response from the group notification-settings endpoint.
- * @returns A stable policy model with explicit channel availability.
- */
-export function adaptGroupNotificationSettings(input: unknown): GroupNotificationSettings {
-  const envelope = asRecord(input);
-  const source = envelope.notificationSettings && typeof envelope.notificationSettings === 'object'
-    ? asRecord(envelope.notificationSettings)
-    : envelope.settings && typeof envelope.settings === 'object' ? asRecord(envelope.settings) : envelope;
-  const enabledEvents = new Set(Array.isArray(source.enabledEvents) ? source.enabledEvents.map(String) : []);
-  const events = notificationEventEntries(source).flatMap((entry) => {
-    const definition = notificationEventDefinition(entry);
-    if (!definition) return [];
-    const event = entry && typeof entry === 'object' ? asRecord(entry) : {};
-    return [{ ...definition, enabled: event.enabled === true || enabledEvents.has(definition.eventType) }];
-  });
-  return {
-    version: Number(source.version ?? envelope.version ?? 1),
-    timezone: typeof source.timezone === 'string' && source.timezone ? source.timezone : 'Europe/Berlin',
-    dueSoonLeadDays: Number(source.dueSoonLeadDays ?? 3),
-    overdueRepeatDays: Number(source.overdueRepeatDays ?? 7),
-    channels: notificationChannelAvailability(source),
-    events,
-  };
-}
-
 /**
  * Normalizes the current member's per-event notification preference matrix.
  *
  * @param input - Direct or enveloped response from the notification-preferences endpoint.
- * @returns Effective group policy and independent Email/Push selections.
+ * @returns Independent Email/Push selections and current channel availability.
  */
 export function adaptNotificationPreferences(input: unknown): NotificationPreferences {
   const envelope = asRecord(input);
@@ -319,14 +338,12 @@ export function adaptNotificationPreferences(input: unknown): NotificationPrefer
     if (!definition) return [];
     const event = entry && typeof entry === 'object' ? asRecord(entry) : {};
     const selectedChannels = Array.isArray(event.channels) ? notificationChannels(event.channels) : [];
-    const enabled = event.enabled !== false && event.groupEnabled !== false;
     return [{
       ...definition,
-      enabled,
       email: event.email === true || selectedChannels.includes('EMAIL'),
       push: event.push === true || selectedChannels.includes('PUSH'),
-      emailAvailable: enabled && (event.emailAvailable === true || channels.email) && definition.supportedChannels.includes('EMAIL'),
-      pushAvailable: enabled && (event.pushAvailable === true || channels.push) && definition.supportedChannels.includes('PUSH'),
+      emailAvailable: (event.emailAvailable === true || channels.email) && definition.supportedChannels.includes('EMAIL'),
+      pushAvailable: (event.pushAvailable === true || channels.push) && definition.supportedChannels.includes('PUSH'),
     }];
   });
   return { version: Number(source.version ?? envelope.version ?? 1), channels, events };
@@ -487,9 +504,10 @@ export function adaptGroupSettings(input: unknown): GroupSettings {
   const otherPaymentReasonMode = reasonMode(source.otherPaymentReasonMode, source.otherPaymentReasonRequired, 'OPTIONAL');
   return {
     defaultTheme: isThemeId(source.defaultTheme) ? source.defaultTheme : 'TEAMTALER',
+    statisticsEnabled: source.statisticsEnabled === true,
     settlementsEnabled: source.settlementsEnabled === true,
-    notificationEmailsEnabled: source.notificationEmailsEnabled === true,
-    notificationEmailDeliveryAvailable: source.notificationEmailDeliveryAvailable === true,
+    settlementDueSoonDays: Number(source.settlementDueSoonDays ?? 3),
+    settlementOverdueRepeatDays: Number(source.settlementOverdueRepeatDays ?? 7),
     defaultRoleId: typeof source.defaultRoleId === 'string' && source.defaultRoleId ? source.defaultRoleId : null,
     ownBookingReasonMode,
     foreignBookingReasonMode,
@@ -730,6 +748,8 @@ export function adaptSession(input: unknown): Session {
       currency: String(group.currency || 'EUR'),
       logoUrl: typeof group.logoUrl === 'string' ? group.logoUrl : undefined,
       defaultTheme: isThemeId(group.defaultTheme) ? group.defaultTheme : 'TEAMTALER',
+      statisticsEnabled: group.statisticsEnabled === true,
+      planningEnabled: group.planningEnabled === true,
       membership: membership ? {
         id: String(membership.id),
         roles: [...(membership.roles as GroupRole[] ?? []), 'MEMBER'],
@@ -751,6 +771,186 @@ export function adaptSession(input: unknown): Session {
     colorMode: isColorMode(source.colorMode) ? source.colorMode : 'SYSTEM',
     systemRoles: Array.isArray(source.systemRoles) && source.systemRoles.includes('SYSTEM_ADMINISTRATOR') ? ['SYSTEM_ADMINISTRATOR'] : [],
     demo: source.demo === true,
+  };
+}
+
+/** Adapts the group-owned planning feature switch. */
+export function adaptPlanningSettings(input: unknown): PlanningSettings {
+  const source = asRecord(input);
+  return {
+    enabled: source.enabled === true,
+    version: Number(source.version ?? 1),
+    timeZone: typeof source.timeZone === 'string' && source.timeZone ? source.timeZone : Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+    updatedAt: typeof source.updatedAt === 'string' ? source.updatedAt : undefined,
+  };
+}
+
+function adaptPlanningAudience(source: JsonRecord): PlanningAudience {
+  const type = source.audienceType === 'SELECTED_ROLES' || source.audienceType === 'SELECTED_MEMBERS' || source.audienceType === 'SELECTED_TARGETS'
+    ? source.audienceType
+    : 'ALL_ACTIVE_MEMBERS';
+  return {
+    type,
+    roleIds: Array.isArray(source.targetRoleIds) ? source.targetRoleIds.map(String) : [],
+    memberIds: Array.isArray(source.targetMembershipIds) ? source.targetMembershipIds.map(String) : [],
+  };
+}
+
+/** Adapts a structured recurrence rule while rejecting unsupported wire values. */
+export function adaptPlanningRecurrence(input: unknown): PlanningRecurrenceInput {
+  const source = asRecord(input);
+  const frequency = source.frequency === 'DAILY' || source.frequency === 'MONTHLY' || source.frequency === 'YEARLY'
+    ? source.frequency
+    : 'WEEKLY';
+  const weekdayValues = new Set(['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU']);
+  const weekdays = Array.isArray(source.weekdays)
+    ? source.weekdays.map(String).filter((value): value is PlanningWeekday => weekdayValues.has(value))
+    : undefined;
+  const monthlyMode = source.monthlyMode === 'NTH_WEEKDAY' || source.monthlyMode === 'LAST_DAY' ? source.monthlyMode : 'DAY_OF_MONTH';
+  const rawRange = asRecord(source.range);
+  const range = rawRange.type === 'COUNT'
+    ? { type: 'COUNT' as const, count: Math.max(2, Math.min(500, Number(rawRange.count ?? 2))) }
+    : rawRange.type === 'UNTIL' && typeof rawRange.until === 'string'
+      ? { type: 'UNTIL' as const, until: rawRange.until }
+      : { type: 'NEVER' as const };
+  return {
+    frequency,
+    interval: Math.max(1, Math.min(99, Number(source.interval ?? 1))),
+    ...(frequency === 'WEEKLY' && weekdays?.length ? { weekdays } : {}),
+    ...(frequency === 'MONTHLY' ? { monthlyMode } : {}),
+    range,
+  };
+}
+
+/** Adapts one planning event and its privacy-safe viewer projection. */
+export function adaptPlanningEvent(input: unknown): PlanningEvent {
+  const source = asRecord(input);
+  const counts = source.counts && typeof source.counts === 'object' ? asRecord(source.counts) : {};
+  const myParticipation = source.myParticipation && typeof source.myParticipation === 'object'
+    ? asRecord(source.myParticipation)
+    : source.myEffectiveStatus || source.myParticipationStatus ? { effectiveStatus: source.myEffectiveStatus, status: source.myParticipationStatus } : undefined;
+  const eventType = source.eventType === 'APPOINTMENT_POLL' || source.eventType === 'APPOINTMENT_REGISTRATION' ? source.eventType : 'APPOINTMENT';
+  const status = source.status === 'CLOSED' || source.status === 'COMPLETED' || source.status === 'CANCELLED' ? source.status : 'PUBLISHED';
+  const effectiveViewerStatus = myParticipation?.effectiveStatus;
+  const viewerStatus = myParticipation?.status === 'WITHDRAWN' || effectiveViewerStatus === 'WITHDRAWN'
+    ? 'WITHDRAWN'
+    : participationStatus(myParticipation?.status ?? effectiveViewerStatus);
+  const startsAt = String(source.startsAt ?? '');
+  const endsAt = typeof source.endsAt === 'string' ? source.endsAt : undefined;
+  const allDay = source.allDay === true;
+  const startDate = planningDateKey(source.startDate) ?? planningDateKey(startsAt.slice(0, 10)) ?? '1970-01-01';
+  const endDateExclusive = planningDateKey(source.endDateExclusive) ?? planningDateKey(endsAt?.slice(0, 10)) ?? nextPlanningDate(startDate);
+  const event: PlanningEventBase = {
+    id: String(source.id),
+    version: Number(source.version ?? 1),
+    eventType,
+    status,
+    title: String(source.title ?? ''),
+    description: String(source.description ?? ''),
+    location: String(source.location ?? ''),
+    startsAt,
+    endsAt,
+    responseDeadline: typeof source.responseDeadline === 'string' ? source.responseDeadline : undefined,
+    responseDeadlineMinutesBefore: Number.isFinite(Number(source.responseDeadlineMinutesBefore)) ? Number(source.responseDeadlineMinutesBefore) : undefined,
+    capacity: Number.isInteger(Number(source.capacity)) && Number(source.capacity) > 0 ? Number(source.capacity) : undefined,
+    waitlistEnabled: source.waitlistEnabled === true,
+    confirmationRevision: Number(source.confirmationRevision ?? 1),
+    audience: adaptPlanningAudience(source),
+    participation: {
+      invited: Number(counts.invited ?? 0),
+      attending: Number(eventType === 'APPOINTMENT_REGISTRATION' ? counts.registered ?? 0 : counts.yes ?? 0),
+      maybe: Number(counts.maybe ?? 0),
+      declined: Number(counts.no ?? 0),
+      unanswered: Number(counts.pending ?? 0),
+      waitlisted: Number(counts.waitlisted ?? 0),
+      reconfirmationRequired: 0,
+      ...(Number.isInteger(Number(source.capacity)) && Number(source.capacity) > 0 ? { capacity: Number(source.capacity) } : {}),
+    },
+    viewerParticipation: viewerStatus ? { status: viewerStatus, wireStatus: participationWireStatus(myParticipation?.status), updatedAt: typeof myParticipation?.updatedAt === 'string' ? myParticipation.updatedAt : undefined } : undefined,
+    createdByName: typeof source.createdByName === 'string' ? source.createdByName : undefined,
+    canEdit: source.canEdit === true,
+    canCancel: source.canCancel === true,
+    canRespond: source.canRespond === true,
+    canViewParticipants: source.canViewParticipants === true,
+    seriesId: typeof source.seriesId === 'string' && source.seriesId ? source.seriesId : undefined,
+    originalStartAt: typeof source.originalStartAt === 'string' && source.originalStartAt ? source.originalStartAt : undefined,
+    originalStartDate: planningDateKey(source.originalStartDate),
+    isSeriesException: source.isSeriesException === true,
+  };
+  return allDay
+    ? { ...event, allDay: true, startDate, endDateExclusive, timeZone: typeof source.timeZone === 'string' && source.timeZone ? source.timeZone : 'UTC' }
+    : { ...event, allDay: false, timeZone: typeof source.timeZone === 'string' && source.timeZone ? source.timeZone : 'UTC' };
+}
+
+/** Adapts a cursor-backed planning-event response. */
+export function adaptPlanningEventPage(input: unknown): PlanningEventPage {
+  const source = Array.isArray(input) ? { items: input } : asRecord(input);
+  return {
+    items: (source.items as unknown[] ?? []).map(adaptPlanningEvent),
+    nextCursor: typeof source.nextCursor === 'string' && source.nextCursor ? source.nextCursor : undefined,
+  };
+}
+
+/** Adapts one group-owned planning series. */
+export function adaptPlanningSeries(input: unknown): PlanningSeries {
+  const source = asRecord(input);
+  const series: PlanningSeriesBase = {
+    id: String(source.id),
+    version: Number(source.version ?? 1),
+    status: source.status === 'CANCELLED' ? 'CANCELLED' : 'PUBLISHED',
+    timeZone: typeof source.timeZone === 'string' && source.timeZone ? source.timeZone : 'UTC',
+    eventType: source.eventType === 'APPOINTMENT_POLL' || source.eventType === 'APPOINTMENT_REGISTRATION' ? source.eventType : 'APPOINTMENT',
+    title: String(source.title ?? ''),
+    description: String(source.description ?? ''),
+    location: String(source.location ?? ''),
+    responseDeadlineMinutesBefore: Number.isFinite(Number(source.responseDeadlineMinutesBefore)) ? Number(source.responseDeadlineMinutesBefore) : undefined,
+    capacity: Number.isInteger(Number(source.capacity)) && Number(source.capacity) > 0 ? Number(source.capacity) : undefined,
+    waitlistEnabled: source.waitlistEnabled === true,
+    audience: adaptPlanningAudience(source),
+    recurrence: adaptPlanningRecurrence(source.recurrence),
+    createdAt: typeof source.createdAt === 'string' ? source.createdAt : undefined,
+    updatedAt: typeof source.updatedAt === 'string' ? source.updatedAt : undefined,
+  };
+  if (source.allDay === true) return {
+    ...series,
+    allDay: true,
+    startDate: planningDateKey(source.startDate) ?? '1970-01-01',
+    durationDays: Math.max(1, Math.round(Number(source.durationDays ?? 1))),
+  };
+  return { ...series, allDay: false, durationMinutes: Math.max(1, Number(source.durationMinutes ?? 60)) };
+}
+
+/** Adapts a series command response and its optionally materialized first occurrence. */
+export function adaptPlanningSeriesResult(input: unknown): PlanningSeriesResult {
+  const source = asRecord(input);
+  return {
+    series: adaptPlanningSeries(source.series ?? source),
+    firstOccurrence: source.firstOccurrence ? adaptPlanningEvent(source.firstOccurrence) : undefined,
+  };
+}
+
+/** Adapts a participant without broadening server-projected identity visibility. */
+export function adaptPlanningParticipant(input: unknown): PlanningParticipant {
+  const source = asRecord(input);
+  const effectiveStatus = source.status === 'WITHDRAWN' || source.effectiveStatus === 'WITHDRAWN' ? 'WITHDRAWN' : participationStatus(source.status ?? source.effectiveStatus);
+  return {
+    membershipId: String(source.membershipId ?? ''),
+    displayName: String(source.displayName ?? i18n.t('common.member')),
+    avatarUrl: typeof source.avatarUrl === 'string' ? source.avatarUrl : undefined,
+    status: source.status === 'WITHDRAWN' ? source.status : participationStatus(source.status),
+    effectiveStatus,
+    confirmedRevision: Number(source.confirmedRevision ?? 0),
+    version: Number(source.version ?? 1),
+    updatedAt: typeof source.updatedAt === 'string' ? source.updatedAt : undefined,
+  };
+}
+
+/** Adapts a cursor-backed participant response. */
+export function adaptPlanningParticipantPage(input: unknown): PlanningParticipantPage {
+  const source = Array.isArray(input) ? { items: input } : asRecord(input);
+  return {
+    items: (source.items as unknown[] ?? []).map(adaptPlanningParticipant),
+    nextCursor: typeof source.nextCursor === 'string' && source.nextCursor ? source.nextCursor : undefined,
   };
 }
 
@@ -1074,7 +1274,15 @@ export function adaptActivity(input: unknown): ActivityEntry {
  */
 export function adaptDashboard(input: unknown): Dashboard {
   const source = asRecord(input);
-  if ('openBalance' in source) return source as unknown as Dashboard;
+  if ('openBalance' in source) {
+    const dashboard = source as unknown as Dashboard;
+    return {
+      ...dashboard,
+      planningEnabled: source.planningEnabled === true,
+      openPlanningActionCount: Number(source.openPlanningActionCount ?? 0),
+      planning: source.nextPlanningEvent ? { event: adaptPlanningEvent(source.nextPlanningEvent), actionRequired: asRecord(source.nextPlanningEvent).actionRequired === true } : undefined,
+    };
+  }
   const account = asRecord(source.account);
   const currentPeriod = adaptPeriod(source.openPeriod);
   return {
@@ -1094,6 +1302,178 @@ export function adaptDashboard(input: unknown): Dashboard {
       return { categoryId: String(statistic.categoryId), categoryName: name, icon: categoryIcon(statistic.icon), quantity: Number(statistic.quantity ?? 0), total: money(statistic.netMinor, account.currency) };
     }),
     recentBookings: (source.recentBookings as unknown[] ?? []).map((entry) => adaptBooking(entry)),
+    planningEnabled: source.planningEnabled === true,
+    openPlanningActionCount: Number(source.openPlanningActionCount ?? 0),
+    planning: source.nextPlanningEvent ? { event: adaptPlanningEvent(source.nextPlanningEvent), actionRequired: asRecord(source.nextPlanningEvent).actionRequired === true } : undefined,
+  };
+}
+
+/** Adapts provenance shared by every section of one statistics snapshot. */
+function adaptStatisticsMeta(input: unknown): StatisticsMeta {
+  const source = asRecord(input);
+  const bucket: StatisticsBucket = source.bucket === 'WEEK' || source.bucket === 'MONTH' || source.bucket === 'YEAR' ? source.bucket : 'DAY';
+  return {
+    generatedAt: String(source.generatedAt ?? ''),
+    timezone: String(source.timezone ?? 'UTC'),
+    preset: isStatisticsRange(source.preset) ? source.preset : 'LAST_30_DAYS',
+    fromInclusive: String(source.fromInclusive ?? ''),
+    toExclusive: String(source.toExclusive ?? ''),
+    bucket,
+    privacyThresholdApplied: source.privacyThresholdApplied === true,
+    currentPeriodAvailable: source.currentPeriodAvailable === true,
+  };
+}
+
+/** Adapts privacy-aware category and product values without coercing hidden points to zero. */
+function adaptMemberBreakdownSeries(input: unknown): MemberStatistics['topCategories']['items'][number]['series'] {
+  return (Array.isArray(input) ? input : []).map((entry) => {
+    const point = asRecord(entry);
+    const value = point.validBookedUnits;
+    return {
+      periodStart: String(point.periodStart ?? ''),
+      validBookedUnits: typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value) && value >= 0 ? value : null,
+      privacySuppressed: point.privacySuppressed === true,
+      isPartial: point.isPartial === true,
+    };
+  });
+}
+
+/**
+ * Adapts the member section of the statistics wire contract.
+ *
+ * @param input - Member statistics section from the group endpoint.
+ * @returns Canonical anonymous member activity statistics.
+ */
+function adaptMemberStatistics(input: unknown): MemberStatistics {
+  const source = asRecord(input);
+  const memberSnapshot = asRecord(source.memberSnapshot);
+  const summary = asRecord(source.summary);
+  const topCategories = asRecord(source.topCategories);
+  const topProducts = asRecord(source.topProducts);
+  return {
+    memberSnapshot: {
+      regularMembers: Number(memberSnapshot.regularMembers ?? 0),
+      temporaryGuests: Number(memberSnapshot.temporaryGuests ?? 0),
+      asOf: String(memberSnapshot.asOf ?? ''),
+    },
+    summary: {
+      activeParticipants: Number(summary.activeParticipants ?? 0),
+      bookingCount: Number(summary.bookingCount ?? 0),
+      validBookedUnits: Number(summary.validBookedUnits ?? 0),
+      cancellationRate: typeof summary.cancellationRate === 'number' ? summary.cancellationRate : null,
+    },
+    activity: (Array.isArray(source.activity) ? source.activity : []).map((entry) => {
+      const point = asRecord(entry);
+      return {
+        periodStart: String(point.periodStart ?? ''),
+        postedUnits: Number(point.postedUnits ?? 0),
+        reversedUnits: Number(point.reversedUnits ?? 0),
+      };
+    }),
+    topCategories: {
+      suppressed: topCategories.suppressed === true,
+      items: (Array.isArray(topCategories.items) ? topCategories.items : []).map((entry) => {
+        const item = asRecord(entry);
+        return {
+          categoryId: String(item.categoryId ?? ''),
+          categoryName: String(item.categoryName ?? ''),
+          icon: categoryIcon(item.icon),
+          validBookedUnits: Number(item.validBookedUnits ?? 0),
+          isOther: item.isOther === true,
+          series: adaptMemberBreakdownSeries(item.series),
+        };
+      }),
+    },
+    topProducts: {
+      suppressed: topProducts.suppressed === true,
+      items: (Array.isArray(topProducts.items) ? topProducts.items : []).map((entry) => {
+        const item = asRecord(entry);
+        return {
+          productId: String(item.productId ?? ''),
+          productName: String(item.productName ?? ''),
+          categoryId: String(item.categoryId ?? ''),
+          categoryName: String(item.categoryName ?? ''),
+          validBookedUnits: Number(item.validBookedUnits ?? 0),
+          isOther: item.isOther === true,
+          series: adaptMemberBreakdownSeries(item.series),
+        };
+      }),
+    },
+  };
+}
+
+/**
+ * Adapts the finance section of the statistics wire contract without converting money
+ * to floating-point values.
+ *
+ * @param input - Finance statistics section from the group endpoint.
+ * @returns Canonical aggregate finance statistics with exact money values.
+ */
+function adaptFinanceStatistics(input: unknown): FinanceStatistics {
+  const source = asRecord(input);
+  const currency = String(source.currency || 'EUR');
+  const snapshot = asRecord(source.receivableSnapshot);
+  const flows = asRecord(source.flows);
+  const overdue = source.overdue && typeof source.overdue === 'object' ? asRecord(source.overdue) : null;
+  return {
+    currency,
+    receivableSnapshot: {
+      asOf: String(snapshot.asOf ?? ''),
+      grossReceivable: money(snapshot.grossReceivableMinor, currency),
+      memberCredit: money(snapshot.memberCreditMinor, currency),
+      netReceivable: money(snapshot.netReceivableMinor, currency),
+      openAccountCount: Number(snapshot.openAccountCount ?? 0),
+      balancedAccountCount: Number(snapshot.balancedAccountCount ?? 0),
+      creditAccountCount: Number(snapshot.creditAccountCount ?? 0),
+    },
+    flows: {
+      openingNetReceivable: money(flows.openingNetReceivableMinor, currency),
+      netBookingCharges: money(flows.netBookingChargesMinor, currency),
+      netPayments: money(flows.netPaymentsMinor, currency),
+      netAdjustments: money(flows.netAdjustmentsMinor, currency),
+      closingNetReceivable: money(flows.closingNetReceivableMinor, currency),
+    },
+    series: (Array.isArray(source.series) ? source.series : []).map((entry) => {
+      const point = asRecord(entry);
+      return {
+        periodStart: String(point.periodStart ?? ''),
+        netBookingCharges: money(point.netBookingChargesMinor, currency),
+        netPayments: money(point.netPaymentsMinor, currency),
+        netAdjustments: money(point.netAdjustmentsMinor, currency),
+        closingNetReceivable: money(point.closingNetReceivableMinor, currency),
+      };
+    }),
+    categories: (Array.isArray(source.categories) ? source.categories : []).map((entry) => {
+      const item = asRecord(entry);
+      return {
+        categoryId: String(item.categoryId ?? ''),
+        categoryName: String(item.categoryName ?? ''),
+        icon: categoryIcon(item.icon),
+        netBookingCharges: money(item.netBookingChargesMinor, currency),
+        isOther: item.isOther === true,
+      };
+    }),
+    overdue: overdue ? {
+      amount: money(overdue.amountMinor, currency),
+      accountCount: Number(overdue.accountCount ?? 0),
+      periodCount: Number(overdue.periodCount ?? 0),
+      asOf: String(overdue.asOf ?? ''),
+    } : null,
+  };
+}
+
+/**
+ * Adapts the unified statistics response without weakening exact money values.
+ *
+ * @param input - Complete response from the group statistics endpoint.
+ * @returns Canonical shared metadata plus member and finance sections.
+ */
+export function adaptStatisticsDashboard(input: unknown): StatisticsDashboard {
+  const source = asRecord(input);
+  return {
+    meta: adaptStatisticsMeta(source.meta),
+    members: adaptMemberStatistics(source.members),
+    finance: adaptFinanceStatistics(source.finance),
   };
 }
 
@@ -1257,7 +1637,7 @@ export function adaptNotification(input: unknown): Notification {
   const source = asRecord(input);
   const type = String(source.type ?? '').toUpperCase();
   const canonicalKind = typeof source.kind === 'string' ? source.kind : undefined;
-  const kind: Notification['kind'] = type.includes('PAYMENT') ? 'PAYMENT' : type.includes('SETTLEMENT') || type.includes('PERIOD') ? 'SETTLEMENT' : type.includes('BOOK') || type.includes('PENAL') ? 'BOOKING' : 'SYSTEM';
+  const kind: Notification['kind'] = type.includes('PLANNING') ? 'PLANNING' : type.includes('PAYMENT') ? 'PAYMENT' : type.includes('SETTLEMENT') || type.includes('PERIOD') ? 'SETTLEMENT' : type.includes('BOOK') || type.includes('PENAL') ? 'BOOKING' : 'SYSTEM';
   const eventType: Notification['eventType'] = NOTIFICATION_EVENT_TYPES.includes(type as Notification['eventType']) ? type as Notification['eventType'] : 'SYSTEM';
   const rawContext = source.context && typeof source.context === 'object' ? asRecord(source.context) : {};
   const context: Notification['context'] = {
@@ -1270,11 +1650,13 @@ export function adaptNotification(input: unknown): Notification {
     dueAt: typeof rawContext.dueAt === 'string' ? rawContext.dueAt : undefined,
     exportId: typeof rawContext.exportId === 'string' ? rawContext.exportId : undefined,
     exportScope: rawContext.exportScope === 'GROUP' || rawContext.exportScope === 'PERSONAL' ? rawContext.exportScope : undefined,
+    planningEventId: typeof rawContext.planningEventId === 'string' ? rawContext.planningEventId : undefined,
   };
   const localizedCopy: Record<Notification['kind'], { title: string; message: string }> = {
     PAYMENT: { title: i18n.t('notifications.fallback.paymentTitle'), message: i18n.t('notifications.fallback.paymentMessage') },
     SETTLEMENT: { title: i18n.t('notifications.fallback.settlementTitle'), message: i18n.t('notifications.fallback.settlementMessage') },
     BOOKING: { title: i18n.t('notifications.fallback.bookingTitle'), message: i18n.t('notifications.fallback.bookingMessage') },
+    PLANNING: { title: i18n.t('notifications.fallback.planningTitle'), message: i18n.t('notifications.fallback.planningMessage') },
     SYSTEM: { title: i18n.t('notifications.fallback.systemTitle'), message: i18n.t('notifications.fallback.systemMessage') },
   };
   const amount = context.amountMinor !== undefined && context.currency ? formatMoney({ minorUnits: context.amountMinor, currency: context.currency }) : undefined;

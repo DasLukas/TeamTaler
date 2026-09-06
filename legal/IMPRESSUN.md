@@ -1,0 +1,41 @@
+# Imprint template
+
+> This document is an operator template, not legal advice. Replace every bracketed placeholder and remove every inapplicable section before treating it as a complete imprint.
+
+## Operator
+
+[FULL LEGAL NAME OR REGISTERED ORGANIZATION]
+
+[STREET AND HOUSE NUMBER]
+
+[POSTAL CODE AND CITY]
+
+[COUNTRY]
+
+## Contact
+
+Email: [EMAIL ADDRESS TO BE ADDED]
+
+## Represented by
+
+[AUTHORIZED REPRESENTATIVE, ONLY FOR A LEGAL ENTITY]
+
+## Register information
+
+[REGISTER, REGISTER COURT, AND REGISTRATION NUMBER, IF APPLICABLE]
+
+## Tax information
+
+[VAT IDENTIFICATION NUMBER OR BUSINESS IDENTIFICATION NUMBER, IF APPLICABLE]
+
+## Regulated profession
+
+[PROFESSIONAL TITLE, AWARDING STATE, CHAMBER, SUPERVISORY AUTHORITY, AND APPLICABLE PROFESSIONAL RULES, IF APPLICABLE]
+
+## Editorial responsibility
+
+[FULL NAME AND SERVICEABLE ADDRESS UNDER SECTION 18(2) OF THE GERMAN MEDIA STATE TREATY, ONLY IF JOURNALISTIC-EDITORIAL CONTENT IS OFFERED]
+
+## Consumer dispute resolution
+
+[REQUIRED CONSUMER-DISPUTE INFORMATION, IF APPLICABLE]

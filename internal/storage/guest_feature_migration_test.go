@@ -140,7 +140,7 @@ func TestGuestFeatureMigrationPreservesReferencesAndEnforcesIdentityInvariants(t
 	}
 
 	var readGrantCount int
-	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM role_permission_grants WHERE role_id='role:GROUP_ADMINISTRATOR:group-main' AND permission_key IN ('VIEW_MEMBER_DIRECTORY','VIEW_GROUP_STATISTICS')`).Scan(&readGrantCount); err != nil || readGrantCount != 2 {
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM role_permission_grants WHERE role_id='role:GROUP_ADMINISTRATOR:group-main' AND permission_key IN ('VIEW_MEMBER_DIRECTORY','VIEW_STATISTICS')`).Scan(&readGrantCount); err != nil || readGrantCount != 2 {
 		t.Fatalf("backfilled read grants=%d err=%v, want 2", readGrantCount, err)
 	}
 	var implied string

@@ -5,13 +5,17 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { formatMoney } from '@/api/money';
-import { canRecordOwnPayment } from '@/app/groupCapabilities';
+import { canRecordOwnPayment, canUsePlanning } from '@/app/groupCapabilities';
 import { useActiveGroup } from '@/app/useActiveGroup';
+import { LegalFooter } from '@/components/legal/LegalLinks';
 import { Avatar } from '@/components/ui/Avatar';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { SelfPaymentDialog } from '@/features/finance/SelfPaymentDialog';
 import { getDashboardGreetingKey } from './greeting';
 import { GroupBalanceCard } from './GroupBalanceCard';
+import { planningKeys } from '@/features/planning/planningQueryKeys';
+import { PlanningEventCard } from '@/features/planning/PlanningEventCard';
+import { formatPlanningEventSchedule } from '@/features/planning/planningTiming';
 import styles from './DashboardPage.module.css';
 
 /**
@@ -45,10 +49,13 @@ export function DashboardPage() {
   const { activeGroupId, activeGroup, session } = useActiveGroup();
   const dashboardQuery = useQuery({ queryKey: ['dashboard', activeGroupId], queryFn: () => api.getDashboard(activeGroupId) });
   const transactionSettingsQuery = useQuery({ queryKey: ['transaction-settings', activeGroupId], queryFn: () => api.getTransactionSettings(activeGroupId) });
+  const planningAvailable = Boolean(activeGroup.planningEnabled && canUsePlanning(activeGroup.membership?.effectiveGrants));
+  const planningCardAvailable = Boolean(planningAvailable && dashboardQuery.data?.planningEnabled && dashboardQuery.data.planning);
+  const planningSettingsQuery = useQuery({ queryKey: planningKeys.settings(activeGroupId), queryFn: () => api.getPlanningSettings(activeGroupId), enabled: planningCardAvailable, staleTime: 60_000 });
   const localHour = useLocalHour();
 
-  if (dashboardQuery.isLoading || transactionSettingsQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
-  if (dashboardQuery.error || transactionSettingsQuery.error || !dashboardQuery.data || !transactionSettingsQuery.data) {
+  if (dashboardQuery.isLoading || transactionSettingsQuery.isLoading || planningCardAvailable && planningSettingsQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
+  if (dashboardQuery.error || transactionSettingsQuery.error || planningCardAvailable && planningSettingsQuery.error || !dashboardQuery.data || !transactionSettingsQuery.data) {
     return <div className={styles.state}><StatePanel kind="error" message={t('dashboard.error')} /></div>;
   }
 
@@ -59,8 +66,8 @@ export function DashboardPage() {
   const canRecordPayment = canRecordOwnPayment(activeGroup.membership?.effectiveGrants);
   const openBalanceAmount = BigInt(dashboard.openBalance.minorUnits);
   const openBalanceState = openBalanceAmount > 0n ? 'due' : openBalanceAmount < 0n ? 'credit' : 'balanced';
-  // The API omits this field unless VIEW_GROUP_STATISTICS is effective. Using
-  // the response as the single authorization projection avoids hiding a newly
+  // The API omits this field unless the statistics feature and VIEW_STATISTICS
+  // are effective. Using the response as the single authorization projection avoids hiding a newly
   // granted balance while locally cached membership grants are still stale.
   const groupOutstanding = dashboard.groupOutstanding;
   const showGroupBalance = groupOutstanding !== undefined;
@@ -97,7 +104,16 @@ export function DashboardPage() {
           </section>
           {groupOutstanding !== undefined ? <GroupBalanceCard balance={groupOutstanding} /> : null}
         </div>
+        {dashboard.planningEnabled && dashboard.planning ? <PlanningEventCard
+          className={styles.planningPreview}
+          event={dashboard.planning.event}
+          navigationSearch={{ view: 'week' }}
+          scheduleLabel={formatPlanningEventSchedule(dashboard.planning.event, dashboard.planning.event.timeZone ?? planningSettingsQuery.data?.timeZone ?? 'UTC', t('planning.allDay'))}
+          showParticipation={dashboard.planning.actionRequired}
+          timeZone={dashboard.planning.event.timeZone ?? planningSettingsQuery.data?.timeZone ?? 'UTC'}
+        /> : null}
       </section>
+      <LegalFooter />
     </div>
   );
 }

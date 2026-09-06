@@ -4,8 +4,8 @@ import "testing"
 
 func TestCatalogProvidesCompleteSafeDeliveryMetadata(t *testing.T) {
 	definitions := Catalog()
-	if len(definitions) != 7 {
-		t.Fatalf("catalog events=%d, want 7", len(definitions))
+	if len(definitions) != 14 {
+		t.Fatalf("catalog events=%d, want 14", len(definitions))
 	}
 	seen := make(map[EventType]struct{}, len(definitions))
 	for index, definition := range definitions {
@@ -19,7 +19,7 @@ func TestCatalogProvidesCompleteSafeDeliveryMetadata(t *testing.T) {
 			t.Fatalf("catalog definition %s has invalid delivery metadata: %#v", definition.Type, definition)
 		}
 		if !definition.DefaultEnabled {
-			t.Fatalf("catalog definition %s is not enabled by default", definition.Type)
+			t.Fatalf("catalog definition %s has unexpected default-enabled state", definition.Type)
 		}
 		if len(definition.SupportedChannels) != 2 || definition.SupportedChannels[0] != ChannelEmail || definition.SupportedChannels[1] != ChannelPush {
 			t.Fatalf("catalog definition %s channels=%v", definition.Type, definition.SupportedChannels)

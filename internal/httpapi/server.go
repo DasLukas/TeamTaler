@@ -36,7 +36,9 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/notifications"
 	"github.com/DasLukas/TeamTaler/internal/paymentattachments"
 	"github.com/DasLukas/TeamTaler/internal/periods"
+	"github.com/DasLukas/TeamTaler/internal/planning"
 	"github.com/DasLukas/TeamTaler/internal/platform"
+	"github.com/DasLukas/TeamTaler/internal/statistics"
 	systemadmin "github.com/DasLukas/TeamTaler/internal/system"
 	webpushservice "github.com/DasLukas/TeamTaler/internal/webpush"
 )
@@ -56,6 +58,7 @@ const systemSettingsKey contextKey = "system-settings"
 // authorization cannot be bypassed by external packages.
 type Server struct {
 	config             config.Config
+	buildInformation   BuildInformation
 	db                 *sql.DB
 	activities         activities.Service
 	auth               auth.Service
@@ -63,8 +66,10 @@ type Server struct {
 	catalog            catalog.Service
 	bookings           bookings.Service
 	finance            finance.Service
+	statistics         statistics.Service
 	exports            *exporting.Service
 	periods            periods.Service
+	planning           planning.Service
 	notifications      notifications.Service
 	systemAdmin        systemadmin.Service
 	pushSubscriptions  *webpushservice.SubscriptionService
@@ -77,11 +82,22 @@ type Server struct {
 	logger             *slog.Logger
 }
 
-// New builds a hardened same-origin handler from cfg, db, and an optional logger.
-// It returns an http.Handler and does not start network listeners. A nil logger
-// selects slog.Default; callers must provide a migrated database. Example:
-// http.ListenAndServe(cfg.ListenAddress, New(cfg, db, nil)).
-func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
+// New builds a hardened same-origin handler from configuration, a migrated
+// database, immutable build information, and an optional logger.
+//
+// Parameters:
+//   - cfg: validated runtime and filesystem configuration.
+//   - db: open database with all supported migrations applied.
+//   - buildInformation: identifier shared with the compiled web client.
+//   - logger: structured request logger; nil selects slog.Default.
+//
+// Returns the complete TeamTaler HTTP handler. Construction panics when a
+// required application service cannot be initialized.
+//
+// Example:
+//
+//	http.ListenAndServe(cfg.ListenAddress, New(cfg, db, NewBuildInformation("1.2.0", "abc123"), nil))
+func New(cfg config.Config, db *sql.DB, buildInformation BuildInformation, logger *slog.Logger) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -114,6 +130,10 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 		pushSecrets = secrets
 		systemOptions = append(systemOptions, systemadmin.WithWebPushSecretCipher(secrets))
 	}
+	systemOptions = append(systemOptions, systemadmin.WithLegalDocumentFiles(
+		cfg.LegalDocuments.ImprintFile,
+		cfg.LegalDocuments.PrivacyPolicyFile,
+	))
 	systemService, err := systemadmin.NewService(db, systemadmin.DefaultsFromConfig(cfg), smtpPasswordCipher, systemOptions...)
 	if err != nil {
 		panic(fmt.Sprintf("configure system administration: %v", err))
@@ -123,6 +143,7 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	notificationService := notifications.Service{
 		DB: db, EmailDeliveryAvailable: emailInfrastructureAvailable, PushDeliveryAvailable: pushSecrets != nil,
 	}
+	notificationService.ResolveTimeZone = systemService.ResolveTimeZoneTx
 	notificationService.ResolveChannelAvailability = func(ctx context.Context, tx *sql.Tx) (notifications.ChannelAvailability, error) {
 		availability, err := systemService.ResolveNotificationChannelsTx(ctx, tx)
 		if err != nil {
@@ -155,6 +176,7 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	}
 	server := &Server{
 		config:             cfg,
+		buildInformation:   buildInformation.normalized(),
 		db:                 db,
 		activities:         activities.Service{DB: db},
 		auth:               auth.Service{DB: db, SessionLifetime: cfg.SessionLifetime, TokenSealer: tokenSealer, EmailDeliveryAvailable: emailInfrastructureAvailable},
@@ -162,8 +184,10 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 		catalog:            catalog.Service{DB: db},
 		bookings:           bookings.Service{DB: db, Groups: groupService, Notifications: notificationService},
 		finance:            finance.Service{DB: db, Notifications: notificationService, Attachments: paymentattachments.Store{DataDirectory: cfg.DataDirectory}},
+		statistics:         statistics.Service{DB: db},
 		exports:            exportService,
 		periods:            periods.Service{DB: db, Notifications: notificationService},
+		planning:           planning.Service{DB: db, ResolveTimeZone: systemService.ResolveTimeZoneTx},
 		notifications:      notificationService,
 		systemAdmin:        systemService,
 		pushSubscriptions:  pushSubscriptions,
@@ -178,7 +202,9 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", server.handleLive)
 	mux.HandleFunc("GET /health/ready", server.handleReady)
+	mux.HandleFunc("GET /api/v1/instance/build", server.handleBuildInformation)
 	mux.HandleFunc("GET /api/v1/instance/capabilities", server.handleInstanceCapabilities)
+	mux.HandleFunc("GET /api/v1/legal-documents", server.handlePublicLegalDocuments)
 	mux.HandleFunc("POST /api/v1/auth/login", server.handleLogin)
 	mux.HandleFunc("POST /api/v1/auth/logout", server.handleLogout)
 	mux.HandleFunc("GET /api/v1/auth/capabilities", server.handleAccountCapabilities)
@@ -212,6 +238,9 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /api/v1/groups", server.handleListGroups)
 	mux.HandleFunc("POST /api/v1/groups", server.handleCreateGroup)
 	mux.HandleFunc("GET /api/v1/system/settings", server.handleSystemSettings)
+	mux.HandleFunc("GET /api/v1/system/legal-documents", server.handleSystemLegalDocuments)
+	mux.HandleFunc("PUT /api/v1/system/legal-documents", server.handleUpdateSystemLegalDocuments)
+	mux.HandleFunc("POST /api/v1/system/legal-documents/reset", server.handleResetSystemLegalDocuments)
 	mux.HandleFunc("PATCH /api/v1/system/settings", server.handleUpdateSystemSettings)
 	mux.HandleFunc("POST /api/v1/system/settings/reset", server.handleResetSystemSettings)
 	mux.HandleFunc("PUT /api/v1/system/settings/smtp", server.handleUpdateSystemSMTP)
@@ -238,14 +267,28 @@ func New(cfg config.Config, db *sql.DB, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/settings", server.handleGetGroupSettings)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/settings", server.handleUpdateGroupSettings)
 	mux.HandleFunc("PUT /api/v1/groups/{groupID}/theme-preference", server.handleUpdateThemePreference)
-	mux.HandleFunc("GET /api/v1/groups/{groupID}/notification-settings", server.handleGetGroupNotificationSettings)
-	mux.HandleFunc("PUT /api/v1/groups/{groupID}/notification-settings", server.handleUpdateGroupNotificationSettings)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/notification-preferences", server.handleGetNotificationPreferences)
 	mux.HandleFunc("PUT /api/v1/groups/{groupID}/notification-preferences", server.handleUpdateNotificationPreferences)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/transaction-settings", server.handleGetTransactionSettings)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/logo", server.handleGroupLogo)
 	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/logo", server.handleRemoveGroupLogo)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/dashboard", server.handleDashboard)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/statistics", server.handleStatistics)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/planning/settings", server.handleGetPlanningSettings)
+	mux.HandleFunc("PUT /api/v1/groups/{groupID}/planning/settings", server.handleUpdatePlanningSettings)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/planning/series", server.handleCreatePlanningSeries)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/planning/series/{seriesID}", server.handleGetPlanningSeries)
+	mux.HandleFunc("PUT /api/v1/groups/{groupID}/planning/series/{seriesID}", server.handleUpdatePlanningSeries)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/planning/series/{seriesID}/cancel", server.handleCancelPlanningSeries)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/planning/events", server.handleListPlanningEvents)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/planning/events", server.handleCreatePlanningEvent)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/planning/events/{eventID}", server.handleGetPlanningEvent)
+	mux.HandleFunc("PUT /api/v1/groups/{groupID}/planning/events/{eventID}", server.handleUpdatePlanningEvent)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/planning/events/{eventID}/close", server.handleClosePlanningEvent)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/planning/events/{eventID}/complete", server.handleCompletePlanningEvent)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/planning/events/{eventID}/cancel", server.handleCancelPlanningEvent)
+	mux.HandleFunc("PUT /api/v1/groups/{groupID}/planning/events/{eventID}/participation", server.handleSetPlanningParticipation)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/planning/events/{eventID}/participants", server.handleListPlanningParticipants)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/members", server.handleListMembers)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/members/{membershipID}", server.handleRenameTemporaryGuest)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/members/{membershipID}/claim-invitation", server.handleCreateTemporaryGuestClaimInvitation)
@@ -566,6 +609,7 @@ func writeJSON(response http.ResponseWriter, status int, value any) {
 
 type problem struct {
 	Type                   string `json:"type"`
+	Code                   string `json:"code,omitempty"`
 	Title                  string `json:"title"`
 	Status                 int    `json:"status"`
 	Detail                 string `json:"detail"`
@@ -590,6 +634,8 @@ func writeProblem(response http.ResponseWriter, request *http.Request, err error
 		status, title, problemType = http.StatusUnprocessableEntity, "Validation Failed", "https://teamtaler.dev/problems/validation"
 	case errors.Is(err, domain.ErrPrecondition):
 		status, title, problemType = http.StatusPreconditionFailed, "Precondition Failed", "https://teamtaler.dev/problems/precondition"
+	case errors.Is(err, domain.ErrPlanningDisabled):
+		status, title, problemType = http.StatusConflict, "Planning Disabled", "https://teamtaler.dev/problems/planning-disabled"
 	case errors.Is(err, domain.ErrConflict), errors.Is(err, domain.ErrIdempotencyReuse):
 		status, title, problemType = http.StatusConflict, "Conflict", "https://teamtaler.dev/problems/conflict"
 	case errors.Is(err, domain.ErrRateLimited):
@@ -608,6 +654,9 @@ func writeProblem(response http.ResponseWriter, request *http.Request, err error
 	response.Header().Set("Content-Type", "application/problem+json; charset=utf-8")
 	response.WriteHeader(status)
 	item := problem{Type: problemType, Title: title, Status: status, Detail: detail, Instance: request.URL.Path}
+	if errors.Is(err, domain.ErrPlanningDisabled) {
+		item.Code = "PLANNING_DISABLED"
+	}
 	if memberCount, invitationCount, ok := roleConflictCounts(err); ok {
 		item.MemberCount = &memberCount
 		item.PendingInvitationCount = &invitationCount

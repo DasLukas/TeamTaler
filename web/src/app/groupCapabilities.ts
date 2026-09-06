@@ -1,4 +1,4 @@
-import type { PermissionGrant, Session } from '@/api/types';
+import type { Group, PermissionGrant, Session } from '@/api/types';
 import { can } from './permissions';
 import { memberPaths } from './paths';
 
@@ -31,6 +31,26 @@ export function canRecordOwnPayment(grants: readonly PermissionGrant[] | undefin
 /** Determines whether a membership may create at least one kind of booking. */
 export function canOpenBooking(grants: readonly PermissionGrant[] | undefined): boolean {
   return can(grants, 'CREATE_OWN_BOOKING') || can(grants, 'BOOK_FOR_OTHERS') || can(grants, 'BOOK_FOR_GUESTS');
+}
+
+/** Determines whether a membership may open the enabled planning workspace. */
+export function canUsePlanning(grants: readonly PermissionGrant[] | undefined): boolean {
+  return can(grants, 'USE_PLANNING');
+}
+
+/** Determines whether a membership may create planning events. */
+export function canCreatePlanningEvents(grants: readonly PermissionGrant[] | undefined): boolean {
+  return can(grants, 'CREATE_PLANNING_EVENTS');
+}
+
+/**
+ * Determines whether the active group may open the complete statistics workspace.
+ *
+ * @param group - Active group and its server-projected membership grants.
+ * @returns Whether the master switch and unified statistics grant are effective.
+ */
+export function canOpenStatistics(group: Pick<Group, 'statisticsEnabled' | 'membership'>): boolean {
+  return group.statisticsEnabled && can(group.membership?.effectiveGrants, 'VIEW_STATISTICS');
 }
 
 /**

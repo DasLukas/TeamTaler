@@ -7,8 +7,10 @@ This README is the primary entry point for the person who installs and operates 
 ## What TeamTaler provides
 
 - Multiple isolated groups in one installation.
+- Optional group planning with Day, Week, Month, and Agenda calendars; atomically published timed and all-day single or recurring appointments, appointment polls, appointment registration, series exceptions, capacity-aware waitlists, response-preserving edits, and audience update notifications.
 - Account-synchronized light, dark, and system color modes with group defaults and optional per-member theme choices.
 - Group-owned roles and granular permissions for administration, bookings, finance, catalogue management, and reporting.
+- An optional statistics workspace with one explicit access right, compact booking and finance tabs backed by one unified data snapshot, privacy-aware product and category visuals for purchase orientation, server-resolved date ranges, and responsive theme-aware charts.
 - Fixed-price and user-defined-price products with category, file or camera image capture, archive, and ordering support.
 - Account balances, incoming payments with optional or required image/PDF receipts, configurable PayPal.Me and EUR SEPA payment instructions, immutable corrections, optional accounting periods, and settlement history.
 - One server-paginated chronological activity history for authorized bookings, incoming payments, their timestamped reversals, and account corrections, including linked original/reversal navigation, member identity, signed amounts, receipts, status badges, transaction-type filtering, and a persistent card/table choice on phones.
@@ -18,7 +20,9 @@ This README is the primary entry point for the person who installs and operates 
 - Individual invitations, CSV invitation imports, public join links, and temporary guest accounts.
 - Local accounts with profile images, password recovery, verified email changes, and server-side sessions.
 - In-app notifications plus independently configurable SMTP and standards-based Web Push delivery.
+- A client update notice that lets open browser and installed PWA sessions reload after a newer TeamTaler build is deployed, plus a compact version and legal-links block at the end of **My account**.
 - Global system administration for instance settings and the complete group lifecycle.
+- Public, dynamically managed imprint and privacy-policy pages with live host-file fallbacks.
 - Reversible group archival and strongly protected permanent group deletion.
 - Application-consistent backups containing SQLite data and referenced media.
 
@@ -60,11 +64,16 @@ cp .env.example .env
 chmod 600 .env
 ```
 
+Before making the instance publicly reachable, replace every bracketed
+placeholder in `legal/IMPRESSUN.md` and `legal/PRIVACY.md`. These English
+Markdown files are mounted read-only into the application container and remain
+editable on the host.
+
 At minimum, edit these values:
 
 ```dotenv
 TEAMTALER_PUBLIC_URL=https://teamtaler.example.com
-TEAMTALER_VERSION=1.2.0
+TEAMTALER_VERSION=1.3.0
 TEAMTALER_HOST_PORT=8080
 TEAMTALER_TRUSTED_PROXY_CIDRS=
 ```
@@ -140,13 +149,13 @@ Bootstrap refuses to run after an account already exists. It never accepts a pas
 
 ### 6. Open the instance
 
-Open `TEAMTALER_PUBLIC_URL` in a browser and sign in with the bootstrap account. The first settings tab is **System**, where the instance identity, default currency, media and receipt limits, SMTP, public joining, maintenance mode, groups, and global system audit are managed.
+Open `TEAMTALER_PUBLIC_URL` in a browser and sign in with the bootstrap account. The first settings tab is **System**, where the instance identity, legal documents, default currency, installation-wide time zone, media and receipt limits, SMTP, public joining, maintenance mode, groups, and global system audit are managed.
 
 ## Configuration
 
 TeamTaler separates immutable host configuration from runtime-editable instance settings.
 
-- Host configuration is read at process start and changed through `.env` plus a container restart.
+- Host configuration is read at process start and changed through `.env` plus a container restart. The configured legal-document contents are the exception: their files are read on demand.
 - Instance settings use environment variables as defaults. A system administrator may store versioned SQLite overrides through the System tab or CLI. A reset removes the override and immediately reveals the current environment or built-in default.
 
 ### Host configuration
@@ -163,8 +172,20 @@ TeamTaler separates immutable host configuration from runtime-editable instance 
 | `TEAMTALER_PUSH_STORAGE_KEY` | unset | Independent base64-encoded 32-byte key for VAPID overrides and encrypted browser subscriptions. |
 | `TEAMTALER_SMTP_ALLOW_PRIVATE_NETWORK` | `false` | Allows web-configured SMTP targets on private or local networks. Enable only for a trusted private relay requirement. |
 | `TEAMTALER_SMTP_TEST_RECIPIENT` | empty | Optional immutable mailbox for operator-triggered SMTP test messages. Normal application email is unaffected. |
+| `TEAMTALER_IMPRINT_FILE` | unset | Optional live UTF-8 Markdown fallback for the public imprint. Compose uses `/etc/teamtaler/legal/IMPRESSUN.md`. |
+| `TEAMTALER_PRIVACY_POLICY_FILE` | unset | Optional live UTF-8 Markdown fallback for the public privacy policy. Compose uses `/etc/teamtaler/legal/PRIVACY.md`. |
 
 The standard container also uses fixed runtime paths from `.env.example`. Detailed path, proxy-network, and storage guidance is in [deploy/README.md](deploy/README.md).
+
+### Legal documents
+
+The public `/impressum` and `/datenschutz` routes remain reachable from signed-out surfaces, authenticated standalone states, the **Overview**, and **My account**. Routine authenticated task views omit the legal footer. Their content follows this precedence:
+
+1. a versioned database override saved under **Settings → System → Legal content**;
+2. the current host files `legal/IMPRESSUN.md` and `legal/PRIVACY.md`;
+3. an empty built-in value that produces a visible not-configured state.
+
+Resetting a document in System administration removes only its database override and immediately reveals the current host file. Host files are read for every API request when no override exists, so an atomic host-side replacement is visible without a TeamTaler restart. Each file must be regular UTF-8 Markdown no larger than 64 KiB. Raw HTML is deliberately not rendered. The supplied files are templates, not legal advice, and their bracketed placeholders must be replaced with the actual operator, controller, processing activities, and any other legally applicable information before publication.
 
 ### Runtime-editable instance defaults
 
@@ -172,6 +193,7 @@ The standard container also uses fixed runtime paths from `.env.example`. Detail
 | --- | --- | --- |
 | `TEAMTALER_INSTANCE_NAME` | `TeamTaler` | Public instance name. |
 | `TEAMTALER_DEFAULT_CURRENCY` | `EUR` | Currency suggested for newly created groups. Existing groups are unchanged. |
+| `TEAMTALER_TIMEZONE` | `Europe/Berlin` | Installation-wide IANA time zone used for settlement reminders and new planning events or series. Existing planning records retain their pinned zone. |
 | `TEAMTALER_MEDIA_UPLOAD_MAX_BYTES` | `5242880` | Shared raw upload limit for product images, group logos, and avatars. |
 | `TEAMTALER_ATTACHMENT_UPLOAD_MAX_BYTES` | `15728640` | Raw upload limit for one payment receipt. |
 | `TEAMTALER_PUBLIC_JOIN_ENABLED` | `true` | Global availability of otherwise valid public join links. |
@@ -215,7 +237,7 @@ A complete environment SMTP configuration is active after startup. A configurati
 
 The System tab and local CLI can send a test message through either effective configuration source. Testing an environment configuration performs delivery without creating database revision state; testing a stored configuration also verifies its exact unchanged revision.
 
-The disposable `make test-server` fixture creates two German-language groups with regular and temporary guest bookings, payments across several accounting periods, closed settlements, fully enabled notification preferences, and mixed group, product, and user image states. It assigns only the five built-in group roles and keeps the stable `admin@example.test` administrator login. The startup output prints every credentialed group membership and the group-less system administrator as a table with the shared development password. When complete SMTP credentials are loaded from `.env.test-server.local`, the script routes operator-triggered SMTP test messages to `TEAMTALER_SMTP_FROM_ADDRESS` through `TEAMTALER_SMTP_TEST_RECIPIENT`; other application email flows retain their actual fixture recipients.
+The disposable `make test-server` fixture creates two German-language groups with regular and temporary guest bookings, payments across several accounting periods, closed settlements, fully enabled notification preferences, and mixed group, product, and user image states. Planning is enabled in both groups. Each calendar receives timed and all-day examples of every event type, overlapping half-hour timed slots on the current `Europe/Berlin` date, a current multi-day event, and events on distinct dates before and after startup. It also contains one timed weekly and one all-day five-occurrence series per event type. The all-day poll and registration series span dates before, on, and after startup; their multi-day occurrences and edited registration exception exercise exclusive date ranges. The all-day appointment series crosses the next `Europe/Berlin` daylight-saving boundary so independent local-midnight conversion remains visible in fixture data. Timed occurrences also demonstrate an individual edit and an auditable cancellation. These dynamic fixtures populate the Day, Week, Month, and 90-day Agenda views without relying on a fixed calendar date. The fixture assigns only the five built-in group roles and keeps the stable `admin@example.test` administrator login. The startup output prints every credentialed group membership and the group-less system administrator as a table with the shared development password. When complete SMTP credentials are loaded from `.env.test-server.local`, the script routes operator-triggered SMTP test messages to `TEAMTALER_SMTP_FROM_ADDRESS` through `TEAMTALER_SMTP_TEST_RECIPIENT`; other application email flows retain their actual fixture recipients.
 
 Runtime SMTP targets are restricted to public network addresses by default. The exact host and port supplied by the immutable environment SMTP block remain allowed for an existing private relay. Set `TEAMTALER_SMTP_ALLOW_PRIVATE_NETWORK=true` only when system administrators must configure additional private targets and are trusted with that network access.
 
@@ -223,9 +245,9 @@ Runtime SMTP targets are restricted to public network addresses by default. The 
 
 TeamTaler implements the browser Push API directly with VAPID; it does not require Firebase or another notification provider. Configure Web Push through `.env`, **Settings → System → Web Push**, or the local operator CLI. A complete environment configuration needs `TEAMTALER_WEB_PUSH_ENABLED=true`, a valid VAPID subject and private key, and the separate `TEAMTALER_PUSH_STORAGE_KEY`. An explicitly enabled but incomplete environment block prevents startup.
 
-Permission is requested only after a signed-in user selects **Enable push notifications**. Each browser installation becomes an account-owned device that can be renamed or revoked. Browser consent is reconciled only for the same account; switching accounts requires a new explicit opt-in and replaces any unknown prior browser subscription. iPhone and iPad users must first install TeamTaler on the Home Screen. Push messages deliberately contain only the group name, generic event copy, a relative route, and an opaque notification identifier; member names, products, amounts, and due dates remain behind authenticated in-app navigation.
+On each eligible signed-in app open, TeamTaler presents one compact account-scoped Yes/No question before requesting browser permission. The native permission request runs only after the user explicitly selects **Yes**. Selecting **Do not ask again** stores a decline for that account and browser; otherwise TeamTaler asks again on a later app start, and manual activation remains available under **My account**. Each browser installation becomes an account-owned device that can be renamed or revoked. Browser consent is reconciled only for the same account; switching accounts requires a new explicit opt-in and replaces any unknown prior browser subscription. iPhone and iPad users must first install TeamTaler on the Home Screen, so the onboarding prompt remains hidden in a regular iOS browser. Push messages deliberately contain only the group name, generic event copy, a relative route, and an opaque notification identifier; member names, products, amounts, and due dates remain behind authenticated in-app navigation.
 
-System administrators control whether email and push channels are available. Group administrators choose the allowed event types and settlement-reminder schedule. Every member then selects email and push independently for each allowed event; selecting both produces both deliveries, while the in-app inbox remains the canonical history. Existing security, invitation, password-reset, and email-verification messages are transactional and are not optional notification events.
+System administrators control whether email and push channels are available and select the installation-wide IANA time zone. Every member independently selects email and push for each event shown in topic groups in the account settings; selecting both produces both deliveries, while the in-app inbox remains always active and is the canonical history. Events owned by the optional planning or settlement module are omitted while that module is disabled. Stored choices remain intact and return when the module is enabled again. Group or finance administrators configure the settlement due-soon lead time and overdue repeat interval in the group's settlement settings. Existing security, invitation, password-reset, and email-verification messages are transactional and are not optional notification events.
 
 ## System administration
 
@@ -276,6 +298,7 @@ teamtaler admin system settings set \
   [--revision VERSION] \
   [--instance-name NAME] \
   [--default-currency EUR] \
+  [--time-zone Europe/Berlin] \
   [--media-upload-max-bytes BYTES] \
   [--attachment-upload-max-bytes BYTES] \
   [--public-join-enabled true|false] \
@@ -291,6 +314,7 @@ Reset keys are:
 
 - `instance.name`
 - `instance.default_currency`
+- `instance.timezone`
 - `media.upload_max_bytes`
 - `attachment.upload_max_bytes`
 - `access.public_join_enabled`

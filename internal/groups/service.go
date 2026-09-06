@@ -101,8 +101,8 @@ func (s Service) Create(ctx context.Context, actor domain.Principal, name, curre
 // List returns all active groups and effective permissions for userID. ctx
 // bounds the query; an empty result is valid, while database errors are returned.
 func (s Service) List(ctx context.Context, userID string) ([]domain.Group, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT g.id,g.name,g.currency,g.logo_key,settings.default_theme,m.id,m.status,m.theme_override,u.email,u.display_name,u.avatar_key
-		FROM memberships m JOIN groups g ON g.id=m.group_id JOIN group_settings settings ON settings.group_id=g.id JOIN users u ON u.id=m.user_id
+	rows, err := s.DB.QueryContext(ctx, `SELECT g.id,g.name,g.currency,g.logo_key,settings.default_theme,settings.statistics_enabled,planning.enabled,m.id,m.status,m.theme_override,u.email,u.display_name,u.avatar_key
+		FROM memberships m JOIN groups g ON g.id=m.group_id JOIN group_settings settings ON settings.group_id=g.id JOIN group_planning_settings planning ON planning.group_id=g.id JOIN users u ON u.id=m.user_id
 		WHERE m.user_id=? AND m.status='ACTIVE' AND g.status='ACTIVE' ORDER BY lower(g.name)`, userID)
 	if err != nil {
 		return nil, err
@@ -113,7 +113,7 @@ func (s Service) List(ctx context.Context, userID string) ([]domain.Group, error
 		var group domain.Group
 		var logoKey, avatarKey, themeOverride sql.NullString
 		group.Membership.UserID = userID
-		if err := rows.Scan(&group.ID, &group.Name, &group.Currency, &logoKey, &group.DefaultTheme, &group.Membership.ID, &group.Membership.Status, &themeOverride, &group.Membership.Email, &group.Membership.DisplayName, &avatarKey); err != nil {
+		if err := rows.Scan(&group.ID, &group.Name, &group.Currency, &logoKey, &group.DefaultTheme, &group.StatisticsEnabled, &group.PlanningEnabled, &group.Membership.ID, &group.Membership.Status, &themeOverride, &group.Membership.Email, &group.Membership.DisplayName, &avatarKey); err != nil {
 			return nil, err
 		}
 		group.Membership.ThemeOverride = nullableThemeID(themeOverride)
@@ -189,8 +189,10 @@ func (s Service) Settings(ctx context.Context, membership domain.Membership) (do
 // SettingsUpdate describes a partial change to group behavior.
 type SettingsUpdate struct {
 	DefaultTheme                 *domain.ThemeID
-	NotificationEmailsEnabled    *bool
+	StatisticsEnabled            *bool
 	SettlementsEnabled           *bool
+	SettlementDueSoonDays        *int
+	SettlementOverdueRepeatDays  *int
 	DefaultRoleID                *string
 	OwnBookingReasonMode         *domain.ReasonMode
 	ForeignBookingReasonMode     *domain.ReasonMode
@@ -210,11 +212,11 @@ type SettingsUpdate struct {
 }
 
 // UpdateSettings atomically applies the supplied group-wide behavior changes.
-// GROUP_ADMINISTRATION protects the default theme and notification delivery;
+// GROUP_ADMINISTRATION protects the default theme and statistics feature;
 // ROLE_MANAGEMENT or GROUP_ADMINISTRATION protects the default role, while either
 // GROUP_ADMINISTRATION or FINANCE_MANAGEMENT protects finance and booking configuration.
 func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, membership domain.Membership, update SettingsUpdate) (domain.GroupSettings, error) {
-	if update.DefaultTheme == nil && update.NotificationEmailsEnabled == nil && update.SettlementsEnabled == nil && update.DefaultRoleID == nil &&
+	if update.DefaultTheme == nil && update.StatisticsEnabled == nil && update.SettlementsEnabled == nil && update.SettlementDueSoonDays == nil && update.SettlementOverdueRepeatDays == nil && update.DefaultRoleID == nil &&
 		update.OwnBookingReasonMode == nil && update.ForeignBookingReasonMode == nil &&
 		update.OwnPaymentReasonMode == nil && update.OtherPaymentReasonMode == nil &&
 		update.ForeignBookingReasonRequired == nil && update.OwnPaymentReasonRequired == nil &&
@@ -231,6 +233,12 @@ func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, mem
 	}
 	if update.DefaultTheme != nil && !update.DefaultTheme.Valid() {
 		return domain.GroupSettings{}, domain.ValidationError{Field: "defaultTheme", Message: "must be TEAMTALER, NRW, TIEF_IM_WESTEN, or FIRE"}
+	}
+	if update.SettlementDueSoonDays != nil && (*update.SettlementDueSoonDays < 1 || *update.SettlementDueSoonDays > 30) {
+		return domain.GroupSettings{}, domain.ValidationError{Field: "settlementDueSoonDays", Message: "must be between 1 and 30"}
+	}
+	if update.SettlementOverdueRepeatDays != nil && (*update.SettlementOverdueRepeatDays < 0 || *update.SettlementOverdueRepeatDays > 90) {
+		return domain.GroupSettings{}, domain.ValidationError{Field: "settlementOverdueRepeatDays", Message: "must be between 0 and 90"}
 	}
 	if err := validateReasonModeUpdates(update); err != nil {
 		return domain.GroupSettings{}, err
@@ -253,11 +261,17 @@ func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, mem
 		if update.DefaultTheme != nil {
 			next.DefaultTheme = *update.DefaultTheme
 		}
-		if update.NotificationEmailsEnabled != nil {
-			next.NotificationEmailsEnabled = *update.NotificationEmailsEnabled
+		if update.StatisticsEnabled != nil {
+			next.StatisticsEnabled = *update.StatisticsEnabled
 		}
 		if update.SettlementsEnabled != nil {
 			next.SettlementsEnabled = *update.SettlementsEnabled
+		}
+		if update.SettlementDueSoonDays != nil {
+			next.SettlementDueSoonDays = *update.SettlementDueSoonDays
+		}
+		if update.SettlementOverdueRepeatDays != nil {
+			next.SettlementOverdueRepeatDays = *update.SettlementOverdueRepeatDays
 		}
 		if update.DefaultRoleID != nil {
 			if err := validateDefaultRole(ctx, tx, membership.GroupID, *update.DefaultRoleID); err != nil {
@@ -325,10 +339,10 @@ func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, mem
 			return nil
 		}
 		now := platform.Timestamp(platform.Now())
-		if _, err := tx.ExecContext(ctx, `UPDATE group_settings SET default_theme=?,notification_emails_enabled=?,settlements_enabled=?,default_role_id=?,
+		if _, err := tx.ExecContext(ctx, `UPDATE group_settings SET default_theme=?,statistics_enabled=?,settlements_enabled=?,settlement_due_soon_days=?,settlement_overdue_repeat_days=?,default_role_id=?,
 			own_booking_reason_mode=?,foreign_booking_reason_mode=?,own_payment_reason_mode=?,other_payment_reason_mode=?,
 			foreign_booking_reason_required=?,own_payment_reason_required=?,other_payment_reason_required=?,updated_at=? WHERE group_id=?`,
-			next.DefaultTheme, next.NotificationEmailsEnabled, next.SettlementsEnabled, nullableText(next.DefaultRoleID), next.OwnBookingReasonMode,
+			next.DefaultTheme, next.StatisticsEnabled, next.SettlementsEnabled, next.SettlementDueSoonDays, next.SettlementOverdueRepeatDays, nullableText(next.DefaultRoleID), next.OwnBookingReasonMode,
 			next.ForeignBookingReasonMode, next.OwnPaymentReasonMode, next.OtherPaymentReasonMode, next.ForeignBookingReasonRequired,
 			next.OwnPaymentReasonRequired, next.OtherPaymentReasonRequired, now, membership.GroupID); err != nil {
 			return err
@@ -349,10 +363,12 @@ func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, mem
 			}
 		}
 		if err := audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "group.settings.updated", "group", membership.GroupID, map[string]any{
-			"defaultTheme":              map[string]domain.ThemeID{"previous": previous.DefaultTheme, "current": next.DefaultTheme},
-			"notificationEmailsEnabled": map[string]bool{"previous": previous.NotificationEmailsEnabled, "current": next.NotificationEmailsEnabled},
-			"settlementsEnabled":        map[string]bool{"previous": previous.SettlementsEnabled, "current": next.SettlementsEnabled},
-			"defaultRoleId":             map[string]any{"previous": previous.DefaultRoleID, "current": next.DefaultRoleID},
+			"defaultTheme":                map[string]domain.ThemeID{"previous": previous.DefaultTheme, "current": next.DefaultTheme},
+			"statisticsEnabled":           map[string]bool{"previous": previous.StatisticsEnabled, "current": next.StatisticsEnabled},
+			"settlementsEnabled":          map[string]bool{"previous": previous.SettlementsEnabled, "current": next.SettlementsEnabled},
+			"settlementDueSoonDays":       map[string]int{"previous": previous.SettlementDueSoonDays, "current": next.SettlementDueSoonDays},
+			"settlementOverdueRepeatDays": map[string]int{"previous": previous.SettlementOverdueRepeatDays, "current": next.SettlementOverdueRepeatDays},
+			"defaultRoleId":               map[string]any{"previous": previous.DefaultRoleID, "current": next.DefaultRoleID},
 			"transactionSettings": map[string]any{
 				"ownBookingReasonMode":         next.OwnBookingReasonMode,
 				"foreignBookingReasonMode":     next.ForeignBookingReasonMode,
@@ -373,7 +389,7 @@ func (s Service) UpdateSettings(ctx context.Context, actor domain.Principal, mem
 }
 
 func requireSettingsUpdatePermissions(ctx context.Context, queryer authorization.Queryer, membership domain.Membership, update SettingsUpdate) error {
-	if update.DefaultTheme != nil {
+	if update.DefaultTheme != nil || update.StatisticsEnabled != nil {
 		if err := requireCurrentPermission(ctx, queryer, membership, domain.PermissionGroupAdministration); err != nil {
 			return err
 		}
@@ -383,17 +399,12 @@ func requireSettingsUpdatePermissions(ctx context.Context, queryer authorization
 			return err
 		}
 	}
-	updatesFinancialConfiguration := update.SettlementsEnabled != nil ||
+	updatesFinancialConfiguration := update.SettlementsEnabled != nil || update.SettlementDueSoonDays != nil || update.SettlementOverdueRepeatDays != nil ||
 		update.OwnBookingReasonMode != nil || update.ForeignBookingReasonMode != nil ||
 		update.OwnPaymentReasonMode != nil || update.OtherPaymentReasonMode != nil ||
 		update.ForeignBookingReasonRequired != nil || update.OwnPaymentReasonRequired != nil ||
 		update.OtherPaymentReasonRequired != nil || update.PaymentMethods != nil ||
 		update.BookingReasons != nil || update.PaymentReasons != nil
-	if update.NotificationEmailsEnabled != nil {
-		if err := requireCurrentPermission(ctx, queryer, membership, domain.PermissionGroupAdministration); err != nil {
-			return err
-		}
-	}
 	if updatesFinancialConfiguration {
 		return requireAnyCurrentPermission(ctx, queryer, membership, domain.PermissionGroupAdministration, domain.PermissionFinanceManagement)
 	}
@@ -416,11 +427,11 @@ type settingsQueryer interface {
 
 func querySettings(ctx context.Context, queryer settingsQueryer, groupID string, settings *domain.GroupSettings) error {
 	var defaultRoleID sql.NullString
-	if err := queryer.QueryRowContext(ctx, `SELECT default_theme,notification_emails_enabled,settlements_enabled,default_role_id,
+	if err := queryer.QueryRowContext(ctx, `SELECT default_theme,statistics_enabled,settlements_enabled,settlement_due_soon_days,settlement_overdue_repeat_days,default_role_id,
 		own_booking_reason_mode,foreign_booking_reason_mode,own_payment_reason_mode,other_payment_reason_mode,
 		foreign_booking_reason_required,own_payment_reason_required,other_payment_reason_required
 		FROM group_settings WHERE group_id=?`, groupID).
-		Scan(&settings.DefaultTheme, &settings.NotificationEmailsEnabled, &settings.SettlementsEnabled, &defaultRoleID, &settings.OwnBookingReasonMode,
+		Scan(&settings.DefaultTheme, &settings.StatisticsEnabled, &settings.SettlementsEnabled, &settings.SettlementDueSoonDays, &settings.SettlementOverdueRepeatDays, &defaultRoleID, &settings.OwnBookingReasonMode,
 			&settings.ForeignBookingReasonMode, &settings.OwnPaymentReasonMode, &settings.OtherPaymentReasonMode, &settings.ForeignBookingReasonRequired,
 			&settings.OwnPaymentReasonRequired, &settings.OtherPaymentReasonRequired); err != nil {
 		return err
@@ -647,7 +658,7 @@ func replacePaymentMethods(ctx context.Context, queryer settingsExecutor, groupI
 }
 
 func groupSettingsEqual(left, right domain.GroupSettings) bool {
-	return left.DefaultTheme == right.DefaultTheme && left.NotificationEmailsEnabled == right.NotificationEmailsEnabled && left.SettlementsEnabled == right.SettlementsEnabled && nullableStringsEqual(left.DefaultRoleID, right.DefaultRoleID) &&
+	return left.DefaultTheme == right.DefaultTheme && left.StatisticsEnabled == right.StatisticsEnabled && left.SettlementsEnabled == right.SettlementsEnabled && left.SettlementDueSoonDays == right.SettlementDueSoonDays && left.SettlementOverdueRepeatDays == right.SettlementOverdueRepeatDays && nullableStringsEqual(left.DefaultRoleID, right.DefaultRoleID) &&
 		left.OwnBookingReasonMode == right.OwnBookingReasonMode && left.ForeignBookingReasonMode == right.ForeignBookingReasonMode &&
 		left.OwnPaymentReasonMode == right.OwnPaymentReasonMode && left.OtherPaymentReasonMode == right.OtherPaymentReasonMode &&
 		left.ForeignBookingReasonRequired == right.ForeignBookingReasonRequired && left.OwnPaymentReasonRequired == right.OwnPaymentReasonRequired &&

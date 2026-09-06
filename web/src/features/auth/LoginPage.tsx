@@ -38,7 +38,7 @@ export function LoginPage() {
   });
 
   return (
-    <AuthLayout footer={<><Link to="/invite">{t('auth.inviteLink')}</Link> · <span>{t('auth.privacy')}</span></>} intro={t('auth.loginIntro')} title={t('auth.loginTitle')}>
+    <AuthLayout footer={<Link to="/invite">{t('auth.inviteLink')}</Link>} intro={t('auth.loginIntro')} title={t('auth.loginTitle')}>
       <form className={styles.form} onSubmit={handleSubmit((values) => loginMutation.mutate(values))}>
         <Field error={errors.email?.message} htmlFor="login-email" label={t('auth.email')}>
           <TextInput autoComplete="email" id="login-email" type="email" {...register('email', { required: t('auth.emailRequired') })} />

@@ -21,12 +21,14 @@ export function useAppearance(): AppearanceState {
 /**
  * Synchronizes the authenticated account preference with the root provider.
  *
- * @param colorMode - Server-authoritative account color mode.
+ * @param colorMode - Server-authoritative account color mode, or undefined while no authenticated session is available.
  */
-export function useApplyAuthenticatedColorMode(colorMode: ColorMode): void {
+export function useApplyAuthenticatedColorMode(colorMode: ColorMode | undefined): void {
   const controller = useContext(AppearanceContext);
   const applyColorMode = controller?.applyColorMode;
-  useLayoutEffect(() => applyColorMode?.(colorMode), [applyColorMode, colorMode]);
+  useLayoutEffect(() => {
+    if (colorMode) applyColorMode?.(colorMode);
+  }, [applyColorMode, colorMode]);
 }
 
 /**

@@ -19,6 +19,7 @@ const session: Session = {
     name: 'Group A',
     currency: 'EUR',
     defaultTheme: 'TEAMTALER',
+    statisticsEnabled: false,
     membership: { id: 'member-a', roles: ['MEMBER'], groupPermissions: ['SELF_RECORD_PAYMENT'], themeOverride: null },
   }],
   activeGroupId: 'group-a',
@@ -124,6 +125,7 @@ describe('SelfPaymentDialog', () => {
     expect(invalidations).toHaveBeenCalledWith({ queryKey: ['dashboard', 'group-a'] });
     expect(invalidations).toHaveBeenCalledWith({ queryKey: ['ledger', 'group-a'] });
     expect(invalidations).toHaveBeenCalledWith({ queryKey: ['settlements', 'group-a'] });
+    expect(invalidations).toHaveBeenCalledWith({ queryKey: ['statistics', 'group-a'] });
   });
 
   it('keeps reviewed values available after a network error', async () => {

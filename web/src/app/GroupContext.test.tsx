@@ -16,8 +16,8 @@ vi.mock('@/api/client', () => ({ api: { recordLastUsedGroup: mocks.recordLastUse
 const session: Session = {
   user: { id: 'user-a', displayName: 'Alex', email: 'alex@example.test' },
   groups: [
-    { id: 'group-a', name: 'Group A', currency: 'EUR', defaultTheme: 'TEAMTALER', membership: { id: 'member-a', roles: ['MEMBER'], groupPermissions: [], themeOverride: null } },
-    { id: 'group-b', name: 'Group B', currency: 'EUR', defaultTheme: 'TEAMTALER', membership: { id: 'member-b', roles: ['MEMBER'], groupPermissions: [], themeOverride: null } },
+    { id: 'group-a', name: 'Group A', currency: 'EUR', defaultTheme: 'TEAMTALER', statisticsEnabled: false, membership: { id: 'member-a', roles: ['MEMBER'], groupPermissions: [], themeOverride: null } },
+    { id: 'group-b', name: 'Group B', currency: 'EUR', defaultTheme: 'TEAMTALER', statisticsEnabled: false, membership: { id: 'member-b', roles: ['MEMBER'], groupPermissions: [], themeOverride: null } },
   ],
   activeGroupId: 'group-a',
   defaultGroupId: null,

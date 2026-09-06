@@ -27,6 +27,7 @@ func DefaultsFromConfig(configuration config.Config) Defaults {
 		// Config literals instead of using config.Load.
 		instanceDefaults.InstanceName = "TeamTaler"
 		instanceDefaults.DefaultCurrency = "EUR"
+		instanceDefaults.TimeZone = "Europe/Berlin"
 		instanceDefaults.MediaUploadMaxBytes = config.DefaultMediaUploadBytes
 		instanceDefaults.AttachmentUploadMaxBytes = config.DefaultAttachmentUploadBytes
 		instanceDefaults.PublicJoinEnabled = true
@@ -41,6 +42,7 @@ func DefaultsFromConfig(configuration config.Config) Defaults {
 	defaults := Defaults{
 		InstanceName:             instanceDefaults.InstanceName,
 		DefaultCurrency:          instanceDefaults.DefaultCurrency,
+		TimeZone:                 instanceDefaults.TimeZone,
 		MediaUploadMaxBytes:      instanceDefaults.MediaUploadMaxBytes,
 		AttachmentUploadMaxBytes: instanceDefaults.AttachmentUploadMaxBytes,
 		PublicJoinEnabled:        instanceDefaults.PublicJoinEnabled,
@@ -69,6 +71,7 @@ func DefaultsFromConfig(configuration config.Config) Defaults {
 	environmentSources := map[SettingKey]string{
 		SettingInstanceName:             "TEAMTALER_INSTANCE_NAME",
 		SettingDefaultCurrency:          "TEAMTALER_DEFAULT_CURRENCY",
+		SettingTimeZone:                 "TEAMTALER_TIMEZONE",
 		SettingMediaUploadMaxBytes:      "TEAMTALER_MEDIA_UPLOAD_MAX_BYTES",
 		SettingAttachmentUploadMaxBytes: "TEAMTALER_ATTACHMENT_UPLOAD_MAX_BYTES",
 		SettingPublicJoinEnabled:        "TEAMTALER_PUBLIC_JOIN_ENABLED",

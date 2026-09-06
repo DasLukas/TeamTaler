@@ -80,7 +80,10 @@ export function CatalogPanel() {
   const productImageInputRef = useRef<HTMLInputElement>(null);
   const productCameraInputRef = useRef<HTMLInputElement>(null);
 
-  const invalidateCatalog = () => queryClient.invalidateQueries({ queryKey: ['categories', activeGroupId] });
+  const invalidateCatalog = () => Promise.all([
+    queryClient.invalidateQueries({ queryKey: ['categories', activeGroupId] }),
+    queryClient.invalidateQueries({ queryKey: ['statistics', activeGroupId] }),
+  ]);
 
   const resetProductImageInput = () => {
     setProductImage(undefined);
@@ -294,6 +297,7 @@ export function CatalogPanel() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['categories', activeGroupId] }),
         queryClient.invalidateQueries({ queryKey: ['dashboard', activeGroupId] }),
+        queryClient.invalidateQueries({ queryKey: ['statistics', activeGroupId] }),
       ]);
     },
     onError: async () => { await invalidateCatalog(); },
@@ -315,6 +319,7 @@ export function CatalogPanel() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['categories', activeGroupId] }),
         queryClient.invalidateQueries({ queryKey: ['dashboard', activeGroupId] }),
+        queryClient.invalidateQueries({ queryKey: ['statistics', activeGroupId] }),
       ]);
     },
   });

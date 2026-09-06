@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -7,6 +7,7 @@ import type { NotificationPreferences, Session } from '@/api/types';
 import { ActiveGroupContext } from '@/app/active-group-context';
 import { SessionContext } from '@/app/session-context';
 import { DEFAULT_INSTANCE_CAPABILITIES } from '@/app/useSession';
+import { notificationKeys } from '@/features/notifications/notificationQueryKeys';
 import i18n from '@/i18n';
 import { NotificationPreferencesPanel } from './NotificationPreferencesPanel';
 
@@ -30,7 +31,7 @@ vi.mock('@/features/push/webPush', () => ({
 
 const session: Session = {
   user: { id: 'user-a', displayName: 'Alex', email: 'alex@example.test' },
-  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', defaultTheme: 'TEAMTALER', membership: { id: 'member-a', roles: ['MEMBER'], groupPermissions: [], themeOverride: null } }],
+  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', defaultTheme: 'TEAMTALER', statisticsEnabled: false, membership: { id: 'member-a', roles: ['MEMBER'], groupPermissions: [], themeOverride: null } }],
   activeGroupId: 'group-a',
   defaultGroupId: null,
   colorMode: 'SYSTEM',
@@ -43,16 +44,16 @@ const preferences: NotificationPreferences = {
   events: [
     {
       eventType: 'BOOKING_ASSIGNED', category: 'BOOKINGS', name: 'Booking assigned', description: '', supportedChannels: ['EMAIL', 'PUSH'],
-      enabled: true, email: true, push: false, emailAvailable: true, pushAvailable: false,
+      email: true, push: false, emailAvailable: true, pushAvailable: false,
     },
     {
       eventType: 'SETTLEMENT_DUE_SOON', category: 'SETTLEMENTS', name: 'Settlement due soon', description: '', supportedChannels: ['EMAIL', 'PUSH'],
-      enabled: false, email: false, push: false, emailAvailable: false, pushAvailable: false,
+      email: false, push: false, emailAvailable: false, pushAvailable: false,
     },
   ],
 };
 
-function renderPanel(): void {
+function renderPanel(): QueryClient {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={queryClient}>
     <SessionContext.Provider value={{ session, instanceCapabilities: DEFAULT_INSTANCE_CAPABILITIES }}>
@@ -60,6 +61,7 @@ function renderPanel(): void {
     </SessionContext.Provider>
   </QueryClientProvider>;
   render(<NotificationPreferencesPanel />, { wrapper });
+  return queryClient;
 }
 
 describe('NotificationPreferencesPanel', () => {
@@ -70,7 +72,7 @@ describe('NotificationPreferencesPanel', () => {
     apiMock.updateNotificationPreferences.mockResolvedValue({ ...preferences, version: 3, events: [{ ...preferences.events[0], email: false }, preferences.events[1]] });
   });
 
-  it('persists only an editable changed channel and keeps group-disabled rows immutable', async () => {
+  it('persists only an editable changed channel and groups events by topic', async () => {
     const user = userEvent.setup();
     renderPanel();
 
@@ -79,6 +81,16 @@ describe('NotificationPreferencesPanel', () => {
     const disabledEmailToggle = screen.getByRole('switch', { name: i18n.t('notifications.preferences.emailFor', { event: i18n.t('notifications.preferences.events.settlementDueSoon.label') }) });
     expect(pushToggle).toBeDisabled();
     expect(disabledEmailToggle).toBeDisabled();
+    const tableHead = screen.getByRole('table').querySelector('thead');
+    expect(tableHead).not.toBeNull();
+    const columnHeaders = within(tableHead as HTMLTableSectionElement);
+    expect(columnHeaders.getAllByRole('columnheader')).toHaveLength(3);
+    expect(columnHeaders.getByRole('columnheader', { name: i18n.t('notifications.preferences.event') })).toBeVisible();
+    expect(columnHeaders.getByRole('columnheader', { name: i18n.t('notifications.preferences.email') })).toBeVisible();
+    expect(columnHeaders.getByRole('columnheader', { name: i18n.t('notifications.preferences.push') })).toBeVisible();
+    expect(columnHeaders.queryByRole('columnheader', { name: 'In TeamTaler' })).not.toBeInTheDocument();
+    expect(screen.getByText(i18n.t('notifications.preferences.categories.BOOKINGS'))).toBeVisible();
+    expect(screen.getByText(i18n.t('notifications.preferences.categories.SETTLEMENTS'))).toBeVisible();
     expect(screen.queryByText('Auf dem Sperrbildschirm erscheinen nur Gruppenname und Ereignisart.')).not.toBeInTheDocument();
 
     await user.click(emailToggle);
@@ -95,5 +107,25 @@ describe('NotificationPreferencesPanel', () => {
     renderPanel();
 
     expect(await screen.findByText('E-Mail-Benachrichtigungen sind derzeit nicht verfügbar.')).toBeVisible();
+  });
+
+  it('renders only module events exposed by the server projection', async () => {
+    apiMock.getNotificationPreferences.mockResolvedValue({ ...preferences, events: [preferences.events[0]] });
+    renderPanel();
+
+    expect(await screen.findByText(i18n.t('notifications.preferences.events.bookingAssigned.label'))).toBeVisible();
+    expect(screen.queryByText(i18n.t('notifications.preferences.events.settlementDueSoon.label'))).not.toBeInTheDocument();
+    expect(screen.queryByText(i18n.t('notifications.preferences.events.planningPublished.label'))).not.toBeInTheDocument();
+  });
+
+  it('rebuilds editable rows when the server projection changes without a version increment', async () => {
+    const queryClient = renderPanel();
+    expect(await screen.findByText(i18n.t('notifications.preferences.events.settlementDueSoon.label'))).toBeVisible();
+    apiMock.getNotificationPreferences.mockResolvedValue({ ...preferences, events: [preferences.events[0]] });
+
+    await queryClient.invalidateQueries({ queryKey: notificationKeys.preferences('group-a') });
+
+    await waitFor(() => expect(screen.queryByText(i18n.t('notifications.preferences.events.settlementDueSoon.label'))).not.toBeInTheDocument());
+    expect(screen.getByText(i18n.t('notifications.preferences.events.bookingAssigned.label'))).toBeVisible();
   });
 });

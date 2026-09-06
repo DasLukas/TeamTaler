@@ -15,9 +15,12 @@ import { DashboardPage } from '@/features/dashboard/DashboardPage';
 import { FinancePage } from '@/features/finance/FinancePage';
 import { MorePage } from '@/features/more/MorePage';
 import { NotificationsPage } from '@/features/notifications/NotificationsPage';
+import { ImprintRoutePage, PrivacyPolicyRoutePage } from '@/features/legal/LazyLegalPages';
 import { NotFoundPage } from './NotFoundPage';
 import { memberPaths } from './paths';
-import { BookingPermissionRoute, GroupRequiredRoute, PreferredWorkspaceRedirect } from './PermissionRoutes';
+import { BookingPermissionRoute, GroupRequiredRoute, PreferredWorkspaceRedirect, StatisticsPermissionRoute } from './PermissionRoutes';
+import { PlanningCreateScreen, PlanningDetailScreen, PlanningEditScreen, PlanningIndexScreen } from '@/features/planning/PlanningRouteScreens';
+import { validatePlanningSearch } from '@/features/planning/planningSearch';
 
 const rootRoute = createRootRoute({
   component: Outlet,
@@ -38,6 +41,16 @@ const groupRequiredRoute = createRoute({
 
 const landingRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: memberPaths.landing, component: PreferredWorkspaceRedirect });
 const dashboardRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: memberPaths.overview, component: DashboardPage });
+const statisticsRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: memberPaths.statistics, component: StatisticsPermissionRoute });
+const planningRoute = createRoute({
+  getParentRoute: () => groupRequiredRoute,
+  path: memberPaths.planning,
+  validateSearch: validatePlanningSearch,
+  component: PlanningIndexScreen,
+});
+const planningNewRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: memberPaths.planningNew, validateSearch: validatePlanningSearch, component: PlanningCreateScreen });
+const planningDetailRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: '/planning/events/$eventId', validateSearch: validatePlanningSearch, component: PlanningDetailScreen });
+const planningEditRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: '/planning/events/$eventId/edit', validateSearch: validatePlanningSearch, component: PlanningEditScreen });
 const bookingRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: memberPaths.booking, component: BookingPermissionRoute });
 const legacyReportsRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: memberPaths.legacyReports, component: () => <Navigate replace to={memberPaths.overview} /> });
 const activitiesRoute = createRoute({ getParentRoute: () => groupRequiredRoute, path: '/activities', component: ActivitiesPage });
@@ -54,10 +67,12 @@ const emailChangeConfirmationRoute = createRoute({ getParentRoute: () => rootRou
 const inviteRoute = createRoute({ getParentRoute: () => rootRoute, path: '/invite', component: InvitationPage });
 const publicJoinRoute = createRoute({ getParentRoute: () => rootRoute, path: '/join', component: PublicJoinPage });
 const publicJoinVerificationRoute = createRoute({ getParentRoute: () => rootRoute, path: '/join/verify', component: PublicJoinVerificationPage });
+const imprintRoute = createRoute({ getParentRoute: () => rootRoute, path: '/impressum', component: ImprintRoutePage });
+const privacyPolicyRoute = createRoute({ getParentRoute: () => rootRoute, path: '/datenschutz', component: PrivacyPolicyRoutePage });
 
 const routeTree = rootRoute.addChildren([
   authenticatedRoute.addChildren([
-    groupRequiredRoute.addChildren([landingRoute, dashboardRoute, bookingRoute, legacyReportsRoute, activitiesRoute, catalogRoute, financeRoute, notificationsRoute, moreRoute]),
+    groupRequiredRoute.addChildren([landingRoute, dashboardRoute, planningRoute, planningNewRoute, planningDetailRoute, planningEditRoute, statisticsRoute, bookingRoute, legacyReportsRoute, activitiesRoute, catalogRoute, financeRoute, notificationsRoute, moreRoute]),
     adminRoute,
     accountRoute,
   ]),
@@ -68,6 +83,8 @@ const routeTree = rootRoute.addChildren([
   inviteRoute,
   publicJoinRoute,
   publicJoinVerificationRoute,
+  imprintRoute,
+  privacyPolicyRoute,
 ]);
 
 /** Application router with code-defined, fully typed public and authenticated routes. */

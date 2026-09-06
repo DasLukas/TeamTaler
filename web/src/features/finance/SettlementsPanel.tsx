@@ -174,6 +174,7 @@ export function SettlementsPanel({ settlements, settlementsEnabled }: Settlement
         queryClient.invalidateQueries({ queryKey: ['settlements', activeGroupId] }),
         queryClient.invalidateQueries({ queryKey: ['dashboard', activeGroupId] }),
         queryClient.invalidateQueries({ queryKey: ['notifications', activeGroupId] }),
+        queryClient.invalidateQueries({ queryKey: ['statistics', activeGroupId] }),
       ]);
     },
   });

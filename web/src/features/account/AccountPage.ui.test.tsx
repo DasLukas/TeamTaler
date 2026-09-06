@@ -1,10 +1,15 @@
 import { render, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AccountPage } from './AccountPage';
 
 const mocks = vi.hoisted(() => ({ activeGroup: vi.fn() }));
 
 vi.mock('@/app/useActiveGroup', () => ({ useOptionalActiveGroup: () => mocks.activeGroup() }));
+vi.mock('@/app/clientBuild', () => ({ clientVersion: '1.2.0' }));
+vi.mock('@tanstack/react-router', () => ({
+  Link: ({ children, to }: { children: ReactNode; to: string }) => <a href={to}>{children}</a>,
+}));
 vi.mock('./AccountDetailsPanel', () => ({ AccountDetailsPanel: () => <div>account-details</div> }));
 vi.mock('./ProfileImagePanel', () => ({ ProfileImagePanel: () => <div>profile-image</div> }));
 vi.mock('./AccountFinanceSection', () => ({ AccountFinanceSection: () => <div>account-finance</div> }));
@@ -25,6 +30,9 @@ describe('AccountPage group-independent shell', () => {
     expect(screen.getByText('notification-preferences')).toBeVisible();
     expect(screen.queryByText('data-export')).not.toBeInTheDocument();
     expect(screen.getByText('Verwalte dein persönliches Konto und deine Anmeldedaten.')).toBeVisible();
+    expect(screen.getByText('TeamTaler · Version 1.2.0')).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Impressum' })).toHaveAttribute('href', '/impressum');
+    expect(screen.getByRole('link', { name: 'Datenschutz' })).toHaveAttribute('href', '/datenschutz');
   });
 
   it('mounts the finance projection when a group provider is available', () => {
@@ -34,5 +42,6 @@ describe('AccountPage group-independent shell', () => {
     expect(screen.getByText('account-finance')).toBeVisible();
     expect(screen.getByText('notification-preferences')).toBeVisible();
     expect(screen.getByText('data-export')).toBeVisible();
+    expect(screen.getByText('TeamTaler · Version 1.2.0')).toBeVisible();
   });
 });

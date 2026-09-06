@@ -5,6 +5,7 @@ import { useOptionalActiveGroup } from '@/app/useActiveGroup';
 import { isSystemAdministrator, useSession } from '@/app/useSession';
 import { Page } from '@/components/layout/Page';
 import { StatePanel } from '@/components/ui/StatePanel';
+import tabStyles from '@/components/ui/WorkspaceTabs.module.css';
 import { DataExportPanel } from '@/features/exports/DataExportPanel';
 import { AuditPanel } from './AuditPanel';
 import { BehaviorSettingsPanel } from './BehaviorSettingsPanel';
@@ -73,10 +74,10 @@ export function AdminPage() {
   if (!activeTab) return <Page title={t('admin.title')}><StatePanel kind="error" title={t('admin.noAccessTitle')} message={t('admin.noAccessMessage')} /></Page>;
   return (
     <Page className={styles.page} title={t('admin.title')} wide>
-      <div aria-label={t('admin.areas')} aria-orientation="horizontal" className={styles.tabs} role="tablist">
+      <div aria-label={t('admin.areas')} aria-orientation="horizontal" className={tabStyles.tabs} role="tablist">
         {availableTabs.map((tab, index) => {
           const selected = activeTab === tab.id;
-          return <button aria-controls={`${tabGroupId}-panel-${tab.id}`} aria-selected={selected} className={selected ? styles.activeTab : ''} id={`${tabGroupId}-tab-${tab.id}`} key={tab.id} onClick={() => setRequestedTab(tab.id)} onKeyDown={(event) => handleTabKeyDown(event, index)} ref={(element) => { tabRefs.current[tab.id] = element; }} role="tab" tabIndex={selected ? 0 : -1} type="button">{t(tab.labelKey)}</button>;
+          return <button aria-controls={`${tabGroupId}-panel-${tab.id}`} aria-selected={selected} className={selected ? tabStyles.activeTab : ''} id={`${tabGroupId}-tab-${tab.id}`} key={tab.id} onClick={() => setRequestedTab(tab.id)} onKeyDown={(event) => handleTabKeyDown(event, index)} ref={(element) => { tabRefs.current[tab.id] = element; }} role="tab" tabIndex={selected ? 0 : -1} type="button">{t(tab.labelKey)}</button>;
         })}
       </div>
       <section aria-labelledby={`${tabGroupId}-tab-${activeTab}`} className={styles.panel} id={`${tabGroupId}-panel-${activeTab}`} role="tabpanel" tabIndex={0}>

@@ -9,17 +9,23 @@ import {
   adaptCategories,
   adaptDashboard,
   adaptGroupSettings,
-  adaptGroupNotificationSettings,
   adaptInstanceCapabilities,
   adaptTransactionSettings,
   adaptLedger,
   adaptMembership,
   adaptMemberships,
+  adaptStatisticsDashboard,
   adaptNotification,
   adaptNotificationDestination,
   adaptNotificationPreferences,
   adaptPermissionDefinition,
   adaptPayment,
+  adaptPlanningEvent,
+  adaptPlanningEventPage,
+  adaptPlanningParticipantPage,
+  adaptPlanningSeries,
+  adaptPlanningSeriesResult,
+  adaptPlanningSettings,
   adaptPeriod,
   adaptProduct,
   adaptPushSubscriptions,
@@ -52,6 +58,7 @@ import type {
   BookingBulkCommand,
   BookingCommand,
   BookingContext,
+  BuildInformation,
   CatalogOrderCommand,
   Category,
   CategoryCreateCommand,
@@ -72,9 +79,8 @@ import type {
   InvitationPreview,
   LedgerEntry,
   LoginCommand,
+  LegalDocumentKey,
   GroupPreference,
-  GroupNotificationSettings,
-  GroupNotificationSettingsUpdate,
   GroupSettings,
   GroupSettingsUpdateInput,
   InstanceCapabilities,
@@ -91,6 +97,17 @@ import type {
   Payment,
   PaymentCollectionQuery,
   PaymentCommand,
+  PlanningEvent,
+  PlanningEventInput,
+  PlanningEventPage,
+  PlanningParticipantPage,
+  PlanningParticipationStatus,
+  PlanningSeries,
+  PlanningSeriesCreateInput,
+  PlanningSeriesResult,
+  PlanningSeriesScope,
+  PlanningSeriesUpdateInput,
+  PlanningSettings,
   SelfPaymentCommand,
   Period,
   PermissionDefinition,
@@ -106,11 +123,14 @@ import type {
   PublicJoinLinkUpdate,
   PublicJoinPreview,
   PublicJoinRegistrationInput,
+  PublicLegalDocuments,
   Role,
   RoleAssignment,
   RoleInput,
   Session,
   Settlement,
+  StatisticsQuery,
+  StatisticsDashboard,
   SystemAccount,
   SystemAuditEntry,
   SystemAuditCollectionQuery,
@@ -121,6 +141,8 @@ import type {
   SystemGroupDeletionImpact,
   ResettableSystemSettingKey,
   SystemSettings,
+  SystemLegalDocuments,
+  SystemLegalDocumentsUpdate,
   SystemSettingsUpdate,
   SystemSmtpSettingsUpdate,
   SystemWebPushSettingsUpdate,
@@ -248,6 +270,16 @@ const groupRootPath = (groupId: string) => `/groups/${encodeURIComponent(groupId
 const systemGroupPath = (groupId: string, resource = '') => `/system/groups/${encodeURIComponent(groupId)}${resource ? `/${resource}` : ''}`;
 const json = (value: unknown) => JSON.stringify(value);
 
+function planningEventPayload(input: PlanningEventInput): Omit<PlanningEventInput, 'audience'> & { audienceType: PlanningEventInput['audience']['type']; targetRoleIds: string[]; targetMembershipIds: string[] } {
+  const { audience, ...fields } = input;
+  return {
+    ...fields,
+    audienceType: audience.type,
+    targetRoleIds: audience.roleIds,
+    targetMembershipIds: audience.memberIds,
+  };
+}
+
 async function fileSha256(file: File): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -315,6 +347,7 @@ function collectionPage<Item>(items: Item[], headers: Headers, requestedLimit?: 
 const systemSettingKeys: Record<ResettableSystemSettingKey, string> = {
   instanceName: 'instance.name',
   defaultCurrency: 'instance.default_currency',
+  timeZone: 'instance.timezone',
   mediaUploadMaxBytes: 'media.upload_max_bytes',
   attachmentUploadMaxBytes: 'attachment.upload_max_bytes',
   publicJoinEnabled: 'access.public_join_enabled',
@@ -421,13 +454,26 @@ async function idempotentRequest<T>(groupId: string, operation: string, path: st
  */
 export const api = {
   getSession: async (): Promise<Session> => setSessionActor(adaptSession(await request<unknown>('/session'))),
+  getBuildInformation: async (): Promise<BuildInformation> => request<BuildInformation>('/instance/build', { cache: 'no-store' }),
   getInstanceCapabilities: async (): Promise<InstanceCapabilities> => adaptInstanceCapabilities(await request<unknown>('/instance/capabilities')),
+  getPublicLegalDocuments: async (): Promise<PublicLegalDocuments> => request<PublicLegalDocuments>('/legal-documents'),
   getAuthenticationCapabilities: async (): Promise<AuthenticationCapabilities> => request<AuthenticationCapabilities>('/auth/capabilities'),
   /**
    * Reads the direct or `{ settings }` system document from `GET /system/settings`.
    * Mutations below send camelCase JSON and require `If-Match: "v{revision}"`.
    */
   getSystemSettings: async (): Promise<SystemSettings> => adaptSystemSettings(await request<unknown>('/system/settings')),
+  getSystemLegalDocuments: async (): Promise<SystemLegalDocuments> => request<SystemLegalDocuments>('/system/legal-documents'),
+  updateSystemLegalDocuments: async (update: SystemLegalDocumentsUpdate, revision: number): Promise<SystemLegalDocuments> => request<SystemLegalDocuments>('/system/legal-documents', {
+    method: 'PUT',
+    headers: versionHeaders(revision),
+    body: json(update),
+  }),
+  resetSystemLegalDocuments: async (keys: LegalDocumentKey[], revision: number): Promise<SystemLegalDocuments> => request<SystemLegalDocuments>('/system/legal-documents/reset', {
+    method: 'POST',
+    headers: versionHeaders(revision),
+    body: json({ keys }),
+  }),
   updateSystemSettings: async (update: SystemSettingsUpdate, revision: number): Promise<SystemSettings> => adaptSystemSettings(await request<unknown>('/system/settings', {
     method: 'PATCH',
     headers: versionHeaders(revision),
@@ -619,17 +665,6 @@ export const api = {
   },
   updateGroupName: async (groupId: string, name: string): Promise<{ name: string }> => request<{ name: string }>(groupRootPath(groupId), { method: 'PATCH', body: json({ name }) }),
   getGroupSettings: async (groupId: string): Promise<GroupSettings> => adaptGroupSettings(await request<unknown>(groupPath(groupId, 'settings'))),
-  getGroupNotificationSettings: async (groupId: string): Promise<GroupNotificationSettings> => adaptGroupNotificationSettings(await request<unknown>(groupPath(groupId, 'notification-settings'))),
-  updateGroupNotificationSettings: async (groupId: string, settings: GroupNotificationSettingsUpdate): Promise<GroupNotificationSettings> => adaptGroupNotificationSettings(await request<unknown>(groupPath(groupId, 'notification-settings'), {
-    method: 'PUT',
-    headers: versionHeaders(settings.version),
-    body: json({
-      timezone: settings.timezone,
-      dueSoonLeadDays: settings.dueSoonLeadDays,
-      overdueRepeatDays: settings.overdueRepeatDays,
-      events: settings.events.map((event) => ({ type: event.eventType, enabled: event.enabled })),
-    }),
-  })),
   getNotificationPreferences: async (groupId: string): Promise<NotificationPreferences> => adaptNotificationPreferences(await request<unknown>(groupPath(groupId, 'notification-preferences'))),
   updateNotificationPreferences: async (groupId: string, preferences: NotificationPreferencesUpdate): Promise<NotificationPreferences> => adaptNotificationPreferences(await request<unknown>(groupPath(groupId, 'notification-preferences'), {
     method: 'PUT',
@@ -645,6 +680,54 @@ export const api = {
     method: 'PATCH',
     body: json(settings),
   })),
+  getPlanningSettings: async (groupId: string): Promise<PlanningSettings> => adaptPlanningSettings(await request<unknown>(groupPath(groupId, 'planning/settings'))),
+  updatePlanningSettings: async (groupId: string, enabled: boolean, version: number): Promise<PlanningSettings> => adaptPlanningSettings(await request<unknown>(groupPath(groupId, 'planning/settings'), {
+    method: 'PUT',
+    headers: versionHeaders(version),
+    body: json({ enabled }),
+  })),
+  getPlanningEvents: async (groupId: string, query: { from?: string; fromDate?: string; to?: string; toDateExclusive?: string; cursor?: string; status?: string; limit?: number } = {}): Promise<PlanningEventPage> => {
+    const path = collectionPath(groupPath(groupId, 'planning/events'), query);
+    return adaptPlanningEventPage(await request<unknown>(path));
+  },
+  getPlanningEvent: async (groupId: string, eventId: string): Promise<PlanningEvent> => adaptPlanningEvent(await request<unknown>(groupPath(groupId, `planning/events/${encodeURIComponent(eventId)}`))),
+  createPlanningEvent: async (groupId: string, input: PlanningEventInput): Promise<PlanningEvent> => {
+    const path = groupPath(groupId, 'planning/events');
+    const payload = planningEventPayload(input);
+    return adaptPlanningEvent(await idempotentRequest<unknown>(groupId, 'planning.event.create', path, payload, { method: 'POST', body: json(payload) }));
+  },
+  updatePlanningEvent: async (groupId: string, eventId: string, input: PlanningEventInput, version: number): Promise<PlanningEvent> => adaptPlanningEvent(await request<unknown>(groupPath(groupId, `planning/events/${encodeURIComponent(eventId)}`), {
+    method: 'PUT',
+    headers: versionHeaders(version),
+    body: json(planningEventPayload(input)),
+  })),
+  transitionPlanningEvent: async (groupId: string, eventId: string, transition: 'close' | 'complete' | 'cancel', version: number): Promise<PlanningEvent> => adaptPlanningEvent(await request<unknown>(groupPath(groupId, `planning/events/${encodeURIComponent(eventId)}/${transition}`), {
+    method: 'POST',
+    headers: versionHeaders(version),
+  })),
+  updatePlanningParticipation: async (groupId: string, eventId: string, eventType: PlanningEvent['eventType'], status: PlanningParticipationStatus | 'WITHDRAWN'): Promise<PlanningEvent> => {
+    const wireStatus = status === 'ATTENDING' ? eventType === 'APPOINTMENT_REGISTRATION' ? 'REGISTERED' : 'YES' : status === 'DECLINED' ? 'NO' : status;
+    return adaptPlanningEvent(await request<unknown>(groupPath(groupId, `planning/events/${encodeURIComponent(eventId)}/participation`), { method: 'PUT', body: json({ status: wireStatus }) }));
+  },
+  getPlanningParticipants: async (groupId: string, eventId: string, cursor?: string, limit?: number): Promise<PlanningParticipantPage> => adaptPlanningParticipantPage(await request<unknown>(collectionPath(groupPath(groupId, `planning/events/${encodeURIComponent(eventId)}/participants`), { cursor, limit }))),
+  createPlanningSeries: async (groupId: string, input: PlanningSeriesCreateInput): Promise<PlanningSeriesResult> => {
+    const path = groupPath(groupId, 'planning/series');
+    const { recurrence, ...eventInput } = input;
+    const payload = { ...planningEventPayload(eventInput), recurrence };
+    return adaptPlanningSeriesResult(await idempotentRequest<unknown>(groupId, 'planning.series.create', path, payload, { method: 'POST', body: json(payload) }));
+  },
+  getPlanningSeries: async (groupId: string, seriesId: string): Promise<PlanningSeries> => adaptPlanningSeries(await request<unknown>(groupPath(groupId, `planning/series/${encodeURIComponent(seriesId)}`))),
+  updatePlanningSeries: async (groupId: string, seriesId: string, input: PlanningSeriesUpdateInput, version: number): Promise<PlanningSeries> => {
+    const path = groupPath(groupId, `planning/series/${encodeURIComponent(seriesId)}`);
+    const { recurrence, scope, fromOriginalStartAt, ...eventInput } = input;
+    const payload = { ...planningEventPayload(eventInput), recurrence, scope, fromOriginalStartAt };
+    return adaptPlanningSeries(await idempotentRequest<unknown>(groupId, 'planning.series.update', path, payload, { method: 'PUT', headers: versionHeaders(version), body: json(payload) }));
+  },
+  cancelPlanningSeries: async (groupId: string, seriesId: string, scope: Exclude<PlanningSeriesScope, 'THIS'>, fromOriginalStartAt: string | undefined, version: number): Promise<void> => {
+    const path = groupPath(groupId, `planning/series/${encodeURIComponent(seriesId)}/cancel`);
+    const payload = { scope, ...(fromOriginalStartAt ? { fromOriginalStartAt } : {}) };
+    await idempotentRequest<void>(groupId, 'planning.series.cancel', path, payload, { method: 'POST', headers: versionHeaders(version), body: json(payload) });
+  },
   updateThemePreference: async (groupId: string, themeOverride: ThemeId | null): Promise<ThemePreference> => adaptThemePreference(await request<unknown>(groupPath(groupId, 'theme-preference'), {
     method: 'PUT',
     body: json({ themeOverride }),
@@ -666,6 +749,7 @@ export const api = {
   },
   removeGroupLogo: async (groupId: string): Promise<void> => request<void>(groupPath(groupId, 'logo'), { method: 'DELETE' }),
   getDashboard: async (groupId: string): Promise<Dashboard> => adaptDashboard(await request<unknown>(groupPath(groupId, 'dashboard'))),
+  getStatistics: async (groupId: string, query: StatisticsQuery): Promise<StatisticsDashboard> => adaptStatisticsDashboard(await request<unknown>(collectionPath(groupPath(groupId, 'statistics'), query))),
   exportGroupTable: (groupId: string, command: TableExportCommand): Promise<Blob> => requestBlob(groupPath(groupId, 'table-exports'), { method: 'POST', body: json(command) }),
   createGroupDataExport: (groupId: string, currentPassword: string, idempotencyKey: string = crypto.randomUUID()): Promise<DataExportJob> => request<DataExportJob>(groupPath(groupId, 'exports'), {
     method: 'POST',

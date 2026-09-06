@@ -27,7 +27,7 @@ func TestNotificationDispatcherSendsLocalizedEventAndMarksJobSent(t *testing.T) 
 		`INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('usr_notice','member@example.test','Alex Member','hash','2026-08-04T12:00:00Z','2026-08-04T12:00:00Z')`,
 		`INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES('grp_notice','Example Team','EUR','2026-08-04T12:00:00Z','2026-08-04T12:00:00Z')`,
 		`INSERT INTO memberships(id,group_id,user_id,joined_at) VALUES('mem_notice','grp_notice','usr_notice','2026-08-04T12:00:00Z')`,
-		`INSERT INTO group_settings(group_id,members_can_view_all_bookings,notification_emails_enabled,updated_at) VALUES('grp_notice',0,1,'2026-08-04T12:00:00Z')`,
+		`INSERT INTO group_settings(group_id,members_can_view_all_bookings,updated_at) VALUES('grp_notice',0,'2026-08-04T12:00:00Z')`,
 		`INSERT INTO membership_notification_channels(group_id,membership_id,event_type,channel,enabled_at,updated_at) VALUES('grp_notice','mem_notice','BOOKING_ASSIGNED','EMAIL','2026-08-04T12:00:00Z','2026-08-04T12:00:00Z')`,
 	} {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
@@ -148,5 +148,24 @@ func TestRenderNotificationCopyFormatsSettlementDueDateInGerman(t *testing.T) {
 	})
 	if body != "Die Abrechnung „August“ ist bereit. Offener Betrag: 32,00 EUR. Fällig am 07.09.2026." {
 		t.Fatalf("notification body=%q", body)
+	}
+}
+
+func TestRenderNotificationCopyUsesBundledSeriesContext(t *testing.T) {
+	for _, test := range []struct {
+		eventType appnotifications.EventType
+		wantTitle string
+		wantBody  string
+	}{
+		{eventType: appnotifications.TypePlanningSeriesPublished, wantTitle: "Neue Terminserie", wantBody: "„Mittagessen Team“ wurde als Terminserie veröffentlicht."},
+		{eventType: appnotifications.TypePlanningSeriesUpdated, wantTitle: "Terminserie geändert", wantBody: "„Mittagessen Team“ wurde als Terminserie geändert."},
+		{eventType: appnotifications.TypePlanningSeriesCancelled, wantTitle: "Terminserie abgesagt", wantBody: "„Mittagessen Team“ wurde als Terminserie abgesagt."},
+	} {
+		t.Run(string(test.eventType), func(t *testing.T) {
+			title, body := renderNotificationCopy(test.eventType, appnotifications.EventContext{PlanningSeriesTitle: "Mittagessen\n Team"})
+			if title != test.wantTitle || body != test.wantBody {
+				t.Fatalf("series email copy=%q/%q", title, body)
+			}
+		})
 	}
 }

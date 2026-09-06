@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -108,6 +109,7 @@ func TestSettingsUseTypedOverridesOptimisticConcurrencyAndReset(t *testing.T) {
 	}
 	name := "Runtime TeamTaler"
 	currency := "usd"
+	timeZone := "America/New_York"
 	uploadLimit := int64(24 << 20)
 	attachmentLimit := int64(40 << 20)
 	publicJoin := false
@@ -116,6 +118,7 @@ func TestSettingsUseTypedOverridesOptimisticConcurrencyAndReset(t *testing.T) {
 	updated, err := service.UpdateSettings(ctx, "admin", initial.Revision, SettingsPatch{
 		InstanceName:             &name,
 		DefaultCurrency:          &currency,
+		TimeZone:                 &timeZone,
 		MediaUploadMaxBytes:      &uploadLimit,
 		AttachmentUploadMaxBytes: &attachmentLimit,
 		PublicJoinEnabled:        &publicJoin,
@@ -128,7 +131,7 @@ func TestSettingsUseTypedOverridesOptimisticConcurrencyAndReset(t *testing.T) {
 	if updated.Revision != 2 || updated.InstanceName.Value != name || updated.InstanceName.Source != SettingSourceDatabase || updated.InstanceName.OverrideVersion != 1 {
 		t.Fatalf("unexpected updated instance setting: %#v", updated.InstanceName)
 	}
-	if updated.DefaultCurrency.Value != "USD" || updated.MediaUploadMaxBytes.Value != uploadLimit || updated.AttachmentUploadMaxBytes.Value != attachmentLimit || updated.PublicJoinEnabled.Value || !updated.MaintenanceMode.Value {
+	if updated.DefaultCurrency.Value != "USD" || updated.TimeZone.Value != timeZone || updated.MediaUploadMaxBytes.Value != uploadLimit || updated.AttachmentUploadMaxBytes.Value != attachmentLimit || updated.PublicJoinEnabled.Value || !updated.MaintenanceMode.Value {
 		t.Fatalf("unexpected typed settings snapshot: %#v", updated)
 	}
 	if updated.MediaUploadHardLimitBytes != MaximumMediaUploadBytes {
@@ -151,13 +154,93 @@ func TestSettingsUseTypedOverridesOptimisticConcurrencyAndReset(t *testing.T) {
 	if _, err := service.UpdateSettings(ctx, "admin", updated.Revision, SettingsPatch{MediaUploadMaxBytes: &fractionalMiB}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("fractional-MiB update error=%v, want validation", err)
 	}
+	invalidTimeZone := "Mars/Olympus"
+	if _, err := service.UpdateSettings(ctx, "admin", updated.Revision, SettingsPatch{TimeZone: &invalidTimeZone}); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("invalid time-zone update error=%v, want validation", err)
+	}
 
-	reset, err := service.ResetSettings(ctx, "admin", updated.Revision, []SettingKey{SettingInstanceName, SettingDefaultCurrency})
+	reset, err := service.ResetSettings(ctx, "admin", updated.Revision, []SettingKey{SettingInstanceName, SettingDefaultCurrency, SettingTimeZone})
 	if err != nil {
 		t.Fatalf("reset settings: %v", err)
 	}
-	if reset.Revision != 3 || reset.InstanceName.Value != "Host TeamTaler" || reset.InstanceName.Source != SettingSourceEnvironment || reset.DefaultCurrency.Value != "EUR" {
+	if reset.Revision != 3 || reset.InstanceName.Value != "Host TeamTaler" || reset.InstanceName.Source != SettingSourceEnvironment || reset.DefaultCurrency.Value != "EUR" || reset.TimeZone.Value != "Europe/Berlin" {
 		t.Fatalf("unexpected reset snapshot: %#v", reset)
+	}
+}
+
+func TestLegalDocumentsUseLiveHostFilesVersionedOverridesAndReset(t *testing.T) {
+	ctx := context.Background()
+	db, baseService := openSystemService(t)
+	defer db.Close()
+	insertSystemTestUser(t, db, "admin", "admin@example.test", true)
+	insertSystemTestUser(t, db, "member", "member@example.test", true)
+	if _, err := baseService.GrantAdministrator(ctx, "admin", ""); err != nil {
+		t.Fatalf("grant administrator: %v", err)
+	}
+	directory := t.TempDir()
+	imprintPath := filepath.Join(directory, "IMPRESSUN.md")
+	privacyPath := filepath.Join(directory, "PRIVACY.md")
+	if err := os.WriteFile(imprintPath, []byte("# Operator\n\nHost operator"), 0o600); err != nil {
+		t.Fatalf("write imprint fixture: %v", err)
+	}
+	if err := os.WriteFile(privacyPath, []byte("# Controller\n\nHost controller"), 0o600); err != nil {
+		t.Fatalf("write privacy fixture: %v", err)
+	}
+	service, err := NewService(
+		db,
+		baseService.defaults,
+		baseService.passwordCipher,
+		WithLegalDocumentFiles(imprintPath, privacyPath),
+	)
+	if err != nil {
+		t.Fatalf("create legal-document service: %v", err)
+	}
+
+	initial, err := service.GetLegalDocuments(ctx)
+	if err != nil {
+		t.Fatalf("get host legal documents: %v", err)
+	}
+	if initial.Revision != 1 || initial.Imprint.Source != LegalDocumentSourceFile || initial.Imprint.Content != "# Operator\n\nHost operator" || initial.PrivacyPolicy.Source != LegalDocumentSourceFile {
+		t.Fatalf("unexpected host legal documents: %#v", initial)
+	}
+	updatedImprint := "# Operator\n\nDatabase operator"
+	updated, err := service.UpdateLegalDocuments(ctx, "admin", initial.Revision, LegalDocumentsPatch{Imprint: &updatedImprint})
+	if err != nil {
+		t.Fatalf("update legal documents: %v", err)
+	}
+	if updated.Revision != 2 || updated.Imprint.Source != LegalDocumentSourceDatabase || updated.Imprint.OverrideVersion != 1 || updated.Imprint.Content != updatedImprint {
+		t.Fatalf("unexpected persisted legal document: %#v", updated.Imprint)
+	}
+	if _, err := service.UpdateLegalDocuments(ctx, "admin", initial.Revision, LegalDocumentsPatch{Imprint: &updatedImprint}); !errors.Is(err, domain.ErrPrecondition) {
+		t.Fatalf("stale legal-document update error=%v, want precondition", err)
+	}
+	if _, err := service.UpdateLegalDocuments(ctx, "member", updated.Revision, LegalDocumentsPatch{Imprint: &updatedImprint}); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("non-administrator legal-document update error=%v, want forbidden", err)
+	}
+
+	if err := os.WriteFile(imprintPath, []byte("# Operator\n\nChanged host operator"), 0o600); err != nil {
+		t.Fatalf("replace imprint fixture: %v", err)
+	}
+	if err := os.WriteFile(privacyPath, []byte("# Controller\n\nChanged host controller"), 0o600); err != nil {
+		t.Fatalf("replace privacy fixture: %v", err)
+	}
+	live, err := service.GetLegalDocuments(ctx)
+	if err != nil {
+		t.Fatalf("get live legal documents: %v", err)
+	}
+	if live.Imprint.Content != updatedImprint || live.PrivacyPolicy.Content != "# Controller\n\nChanged host controller" {
+		t.Fatalf("override precedence or live file refresh failed: %#v", live)
+	}
+	reset, err := service.ResetLegalDocuments(ctx, "admin", live.Revision, []LegalDocumentKey{LegalDocumentImprint})
+	if err != nil {
+		t.Fatalf("reset legal document: %v", err)
+	}
+	if reset.Revision != 3 || reset.Imprint.Source != LegalDocumentSourceFile || reset.Imprint.Content != "# Operator\n\nChanged host operator" {
+		t.Fatalf("unexpected reset legal document: %#v", reset.Imprint)
+	}
+	public, err := service.GetPublicLegalDocuments(ctx)
+	if err != nil || public.Imprint != reset.Imprint.Content || public.PrivacyPolicy != reset.PrivacyPolicy.Content {
+		t.Fatalf("unexpected public legal documents=%#v err=%v", public, err)
 	}
 }
 
@@ -336,7 +419,7 @@ func TestWebPushFailsClosedWithoutIndependentStorageEncryption(t *testing.T) {
 
 func TestDefaultsFromConfigTracksEnvironmentSources(t *testing.T) {
 	for _, variable := range []string{
-		"TEAMTALER_INSTANCE_NAME", "TEAMTALER_DEFAULT_CURRENCY", "TEAMTALER_MEDIA_UPLOAD_MAX_BYTES",
+		"TEAMTALER_INSTANCE_NAME", "TEAMTALER_DEFAULT_CURRENCY", "TEAMTALER_TIMEZONE", "TEAMTALER_MEDIA_UPLOAD_MAX_BYTES",
 		"TEAMTALER_PUBLIC_JOIN_ENABLED", "TEAMTALER_MAINTENANCE_MODE", "TEAMTALER_MAINTENANCE_MESSAGE",
 		"TEAMTALER_SMTP_HOST", "TEAMTALER_SMTP_PORT", "TEAMTALER_SMTP_TLS_MODE",
 		"TEAMTALER_SMTP_USERNAME", "TEAMTALER_SMTP_PASSWORD", "TEAMTALER_SMTP_FROM_ADDRESS",
@@ -345,6 +428,7 @@ func TestDefaultsFromConfigTracksEnvironmentSources(t *testing.T) {
 		t.Setenv(variable, "")
 	}
 	t.Setenv("TEAMTALER_INSTANCE_NAME", "Environment TeamTaler")
+	t.Setenv("TEAMTALER_TIMEZONE", "Europe/Paris")
 	t.Setenv("TEAMTALER_PUBLIC_JOIN_ENABLED", "false")
 	t.Setenv("TEAMTALER_SMTP_HOST", "smtp.example.test")
 	configuration := config.Config{
@@ -352,13 +436,14 @@ func TestDefaultsFromConfigTracksEnvironmentSources(t *testing.T) {
 		InstanceDefaults: config.InstanceDefaults{
 			InstanceName:        "Environment TeamTaler",
 			DefaultCurrency:     "EUR",
+			TimeZone:            "Europe/Paris",
 			MediaUploadMaxBytes: 5 << 20,
 			PublicJoinEnabled:   false,
 		},
 		SMTP: config.SMTPConfig{Enabled: true, Host: "smtp.example.test"},
 	}
 	defaults := DefaultsFromConfig(configuration)
-	if defaults.Sources[SettingInstanceName] != SettingSourceEnvironment || defaults.Sources[SettingPublicJoinEnabled] != SettingSourceEnvironment || defaults.Sources[SettingSMTPHost] != SettingSourceEnvironment || defaults.Sources[SettingSMTPEnabled] != SettingSourceEnvironment {
+	if defaults.Sources[SettingInstanceName] != SettingSourceEnvironment || defaults.Sources[SettingTimeZone] != SettingSourceEnvironment || defaults.Sources[SettingPublicJoinEnabled] != SettingSourceEnvironment || defaults.Sources[SettingSMTPHost] != SettingSourceEnvironment || defaults.Sources[SettingSMTPEnabled] != SettingSourceEnvironment {
 		t.Fatalf("unexpected environment sources: %#v", defaults.Sources)
 	}
 	if _, found := defaults.Sources[SettingDefaultCurrency]; found {

@@ -504,7 +504,7 @@ func (s Service) markSMTPTestFailed(ctx context.Context, actorUserID string, req
 }
 
 func (s Service) patchMutations(patch SettingsPatch) ([]settingMutation, bool, bool, error) {
-	mutations := make([]settingMutation, 0, 17)
+	mutations := make([]settingMutation, 0, 18)
 	if patch.InstanceName != nil {
 		value := strings.TrimSpace(*patch.InstanceName)
 		if err := validateInstanceName(value); err != nil {
@@ -518,6 +518,13 @@ func (s Service) patchMutations(patch SettingsPatch) ([]settingMutation, bool, b
 			return nil, false, false, err
 		}
 		mutations = append(mutations, textMutation(SettingDefaultCurrency, value))
+	}
+	if patch.TimeZone != nil {
+		value := strings.TrimSpace(*patch.TimeZone)
+		if err := validateTimeZone(value); err != nil {
+			return nil, false, false, domain.ValidationError{Field: "timeZone", Message: err.Error()}
+		}
+		mutations = append(mutations, textMutation(SettingTimeZone, value))
 	}
 	if patch.MediaUploadMaxBytes != nil {
 		if err := validateMediaUploadLimit(*patch.MediaUploadMaxBytes, MaximumMediaUploadBytes); err != nil {
@@ -665,6 +672,7 @@ func (s Service) loadSettings(ctx context.Context, queryer settingsQueryer) (loa
 		Revision:                       state.revision,
 		InstanceName:                   stringSetting(s.defaults, overrides, SettingInstanceName, s.defaults.InstanceName),
 		DefaultCurrency:                stringSetting(s.defaults, overrides, SettingDefaultCurrency, s.defaults.DefaultCurrency),
+		TimeZone:                       stringSetting(s.defaults, overrides, SettingTimeZone, s.defaults.TimeZone),
 		MediaUploadMaxBytes:            int64Setting(s.defaults, overrides, SettingMediaUploadMaxBytes, s.defaults.MediaUploadMaxBytes),
 		MediaUploadHardLimitBytes:      MaximumMediaUploadBytes,
 		AttachmentUploadMaxBytes:       int64Setting(s.defaults, overrides, SettingAttachmentUploadMaxBytes, s.defaults.AttachmentUploadMaxBytes),

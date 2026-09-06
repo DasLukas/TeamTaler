@@ -22,6 +22,8 @@ const (
 	SettingInstanceName SettingKey = "instance.name"
 	// SettingDefaultCurrency controls the currency assigned to new groups.
 	SettingDefaultCurrency SettingKey = "instance.default_currency"
+	// SettingTimeZone controls the installation-wide IANA scheduling time zone.
+	SettingTimeZone SettingKey = "instance.timezone"
 	// SettingMediaUploadMaxBytes controls the maximum accepted source-media size.
 	SettingMediaUploadMaxBytes SettingKey = "media.upload_max_bytes"
 	// SettingAttachmentUploadMaxBytes controls the maximum payment receipt size.
@@ -65,6 +67,7 @@ func AllSettingKeys() []SettingKey {
 var allSettingKeys = []SettingKey{
 	SettingInstanceName,
 	SettingDefaultCurrency,
+	SettingTimeZone,
 	SettingMediaUploadMaxBytes,
 	SettingAttachmentUploadMaxBytes,
 	SettingPublicJoinEnabled,
@@ -94,6 +97,63 @@ const (
 	// SettingSourceDatabase means a runtime database override is effective.
 	SettingSourceDatabase SettingSource = "DATABASE"
 )
+
+// LegalDocumentKey identifies one public legal document managed by the
+// instance operator.
+type LegalDocumentKey string
+
+const (
+	// LegalDocumentImprint identifies the public operator imprint.
+	LegalDocumentImprint LegalDocumentKey = "IMPRINT"
+	// LegalDocumentPrivacyPolicy identifies the public privacy notice.
+	LegalDocumentPrivacyPolicy LegalDocumentKey = "PRIVACY_POLICY"
+)
+
+// LegalDocumentSource identifies the layer supplying a legal document.
+type LegalDocumentSource string
+
+const (
+	// LegalDocumentSourceCode means no host file or database override supplies
+	// the document, so the built-in empty value is effective.
+	LegalDocumentSourceCode LegalDocumentSource = "CODE"
+	// LegalDocumentSourceFile means the current host file is effective.
+	LegalDocumentSourceFile LegalDocumentSource = "FILE"
+	// LegalDocumentSourceDatabase means an administrator override is effective.
+	LegalDocumentSourceDatabase LegalDocumentSource = "DATABASE"
+)
+
+// LegalDocument is one effective administrator-facing legal document. Content
+// is Markdown source; rendering remains responsible for rejecting raw HTML.
+type LegalDocument struct {
+	Content         string              `json:"content"`
+	Source          LegalDocumentSource `json:"source"`
+	Configured      bool                `json:"configured"`
+	OverrideVersion int64               `json:"overrideVersion,omitempty"`
+	UpdatedAt       string              `json:"updatedAt,omitempty"`
+}
+
+// LegalDocuments is the versioned administrator projection of every public
+// legal document.
+type LegalDocuments struct {
+	Revision        int64         `json:"revision"`
+	Imprint         LegalDocument `json:"imprint"`
+	PrivacyPolicy   LegalDocument `json:"privacyPolicy"`
+	UpdatedAt       string        `json:"updatedAt"`
+	UpdatedByUserID *string       `json:"updatedByUserId,omitempty"`
+}
+
+// PublicLegalDocuments is the metadata-free projection exposed without an
+// authenticated session.
+type PublicLegalDocuments struct {
+	Imprint       string `json:"imprint"`
+	PrivacyPolicy string `json:"privacyPolicy"`
+}
+
+// LegalDocumentsPatch contains optional complete Markdown replacements.
+type LegalDocumentsPatch struct {
+	Imprint       *string `json:"imprint,omitempty"`
+	PrivacyPolicy *string `json:"privacyPolicy,omitempty"`
+}
 
 // SMTPTLSMode identifies the required SMTP transport-security negotiation.
 type SMTPTLSMode string
@@ -208,6 +268,7 @@ type WebPushSettings struct {
 type Defaults struct {
 	InstanceName             string
 	DefaultCurrency          string
+	TimeZone                 string
 	MediaUploadMaxBytes      int64
 	AttachmentUploadMaxBytes int64
 	PublicJoinEnabled        bool
@@ -225,6 +286,7 @@ type Settings struct {
 	Revision                       int64           `json:"revision"`
 	InstanceName                   Setting[string] `json:"instanceName"`
 	DefaultCurrency                Setting[string] `json:"defaultCurrency"`
+	TimeZone                       Setting[string] `json:"timeZone"`
 	MediaUploadMaxBytes            Setting[int64]  `json:"mediaUploadMaxBytes"`
 	MediaUploadHardLimitBytes      int64           `json:"mediaUploadHardLimitBytes"`
 	AttachmentUploadMaxBytes       Setting[int64]  `json:"attachmentUploadMaxBytes"`
@@ -264,6 +326,7 @@ type WebPushPatch struct {
 type SettingsPatch struct {
 	InstanceName             *string       `json:"instanceName,omitempty"`
 	DefaultCurrency          *string       `json:"defaultCurrency,omitempty"`
+	TimeZone                 *string       `json:"timeZone,omitempty"`
 	MediaUploadMaxBytes      *int64        `json:"mediaUploadMaxBytes,omitempty"`
 	AttachmentUploadMaxBytes *int64        `json:"attachmentUploadMaxBytes,omitempty"`
 	PublicJoinEnabled        *bool         `json:"publicJoinEnabled,omitempty"`
@@ -319,4 +382,5 @@ type Service struct {
 	defaults       Defaults
 	passwordCipher PasswordCipher
 	webPushCipher  WebPushSecretCipher
+	legalFiles     map[LegalDocumentKey]string
 }

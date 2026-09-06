@@ -9,10 +9,11 @@ info:
     State-changing authenticated requests require the `X-CSRF-Token` header.
     Product creation, invitation CSV imports, raw-data export creation, and financial mutations that
     create or reverse bookings, payments, or periods additionally require an
-    `Idempotency-Key`. A batch-booking idempotency scope includes every managed
+    `Idempotency-Key`. Planning-event and planning-series creation also require this key. A batch-booking idempotency scope includes every managed
     guest created by that command. Versioned role and assignment replacement
     or deletion, public join-link updates, system-setting and SMTP revision
-    mutations, provisioning-invitation replacement, and global group lifecycle
+    mutations, planning settings, planning events and recurring series,
+    provisioning-invitation replacement, and global group lifecycle
     commands require a strong `If-Match` ETag where they target an existing
     versioned resource.
   license:
@@ -27,10 +28,12 @@ tags:
   - name: Authorization
   - name: System
   - name: Groups
+  - name: Planning
   - name: Catalog
   - name: Activities
   - name: Bookings
   - name: Finance
+  - name: Statistics
   - name: Periods
   - name: Exports
   - name: Operations
@@ -92,6 +95,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/InstanceCapabilities'
+  /instance/build:
+    get:
+      tags: [System]
+      summary: Read the deployed application build identifier
+      description: |
+        Returns the immutable identifier shared by the running server and the
+        compiled web client. Clients compare it with their embedded identifier
+        to detect that a newer client deployment is available. The endpoint
+        contains no configuration, account, or authorization data.
+      security: []
+      responses:
+        '200':
+          description: Current deployed application build
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildInformation'
   /auth/password-reset/request:
     post:
       tags: [Authentication]
@@ -691,6 +711,92 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /legal-documents:
+    get:
+      tags: [System]
+      summary: Read public legal documents
+      description: |
+        Returns only the effective Markdown source for the imprint and privacy
+        policy. Database, actor, revision, source, and host-file metadata are
+        deliberately omitted. Raw HTML is not part of the rendering contract.
+      security: []
+      responses:
+        '200':
+          description: Current public legal content
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublicLegalDocuments' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /system/legal-documents:
+    get:
+      tags: [System]
+      summary: Read effective legal documents
+      description: Requires a current `SYSTEM_ADMINISTRATOR` database assignment.
+      responses:
+        '200':
+          description: Effective legal documents, sources, and aggregate version
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SystemLegalDocuments' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+    put:
+      tags: [System]
+      summary: Persist legal-document overrides
+      description: |
+        Replaces each supplied document with a versioned database override.
+        Authorization and the aggregate ETag are revalidated in the write
+        transaction. Database content takes precedence over live host files.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SystemLegalDocumentsUpdate' }
+      responses:
+        '200':
+          description: Updated effective legal documents
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SystemLegalDocuments' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /system/legal-documents/reset:
+    post:
+      tags: [System]
+      summary: Remove selected legal-document overrides
+      description: The current live host file becomes effective immediately; a missing file reveals the built-in empty value.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SystemLegalDocumentsReset' }
+      responses:
+        '200':
+          description: Effective legal documents after reset
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SystemLegalDocuments' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
   /system/settings:
     get:
@@ -1583,9 +1689,8 @@ paths:
       tags: [Groups]
       summary: Partially update group or membership settings
       description: |
-        `defaultTheme` requires `GROUP_ADMINISTRATION`. `defaultRoleId` requires `ROLE_MANAGEMENT` or
-        `GROUP_ADMINISTRATION`. The deprecated `notificationEmailsEnabled`
-        compatibility field requires `GROUP_ADMINISTRATION`. Finance and booking fields require
+        `defaultTheme` and `statisticsEnabled` require `GROUP_ADMINISTRATION`. `defaultRoleId` requires `ROLE_MANAGEMENT` or
+        `GROUP_ADMINISTRATION`. Finance, settlement-reminder, and booking fields require
         `GROUP_ADMINISTRATION` or `FINANCE_MANAGEMENT`.
       parameters:
         - $ref: '#/components/parameters/GroupId'
@@ -1628,43 +1733,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
-  /groups/{groupId}/notification-settings:
-    get:
-      tags: [Groups]
-      summary: Read the group notification event policy
-      description: Requires `GROUP_ADMINISTRATION` and returns a strong version ETag.
-      parameters:
-        - $ref: '#/components/parameters/GroupId'
-      responses:
-        '200':
-          description: Versioned event policy and reminder schedule
-          headers: { ETag: { schema: { type: string } } }
-          content: { application/json: { schema: { $ref: '#/components/schemas/GroupNotificationSettings' } } }
-        '401': { $ref: '#/components/responses/Problem' }
-        '403': { $ref: '#/components/responses/Problem' }
-        '404': { $ref: '#/components/responses/Problem' }
-    put:
-      tags: [Groups]
-      summary: Replace the group notification event policy
-      parameters:
-        - $ref: '#/components/parameters/GroupId'
-        - $ref: '#/components/parameters/CSRFToken'
-        - $ref: '#/components/parameters/RequiredIfMatch'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/GroupNotificationSettingsUpdate' }
-      responses:
-        '200':
-          description: Updated policy
-          headers: { ETag: { schema: { type: string } } }
-          content: { application/json: { schema: { $ref: '#/components/schemas/GroupNotificationSettings' } } }
-        '401': { $ref: '#/components/responses/Problem' }
-        '403': { $ref: '#/components/responses/Problem' }
-        '404': { $ref: '#/components/responses/Problem' }
-        '412': { $ref: '#/components/responses/Problem' }
-        '422': { $ref: '#/components/responses/Problem' }
+
   /groups/{groupId}/notification-preferences:
     get:
       tags: [Groups]
@@ -1673,7 +1742,7 @@ paths:
         - $ref: '#/components/parameters/GroupId'
       responses:
         '200':
-          description: Group-enabled events with effective channel availability
+          description: Events exposed by enabled modules, including effective channel availability
           headers: { ETag: { schema: { type: string } } }
           content: { application/json: { schema: { $ref: '#/components/schemas/NotificationPreferences' } } }
         '401': { $ref: '#/components/responses/Problem' }
@@ -1682,7 +1751,7 @@ paths:
     put:
       tags: [Groups]
       summary: Update independent email and push choices
-      description: Disabled group events and unavailable system channels are immutable; retained hidden choices are not deleted.
+      description: Disabled optional-module events and unavailable system channels are immutable; retained hidden choices are not deleted.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/CSRFToken'
@@ -1722,9 +1791,10 @@ paths:
       summary: Read the active member dashboard
       description: |
         Returns the authenticated membership's personal account data.
-        `groupOutstandingMinor` requires `VIEW_GROUP_STATISTICS`; its omission
-        must not be interpreted as a zero group balance. The amount spans the
-        complete ledger and is independent of settlement periods.
+        `groupOutstandingMinor` requires both the enabled statistics feature
+        and `VIEW_STATISTICS`; its omission must not be interpreted as a zero
+        group balance. The amount spans the complete ledger and is independent
+        of settlement periods.
       parameters:
         - $ref: '#/components/parameters/GroupId'
       responses:
@@ -1734,6 +1804,355 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Dashboard' }
         '403': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/statistics:
+    get:
+      tags: [Statistics]
+      summary: Read the complete group statistics dashboard
+      description: |
+        Requires an enabled group statistics feature and effective
+        `VIEW_STATISTICS`. The member and finance sections use one authorization
+        decision, range resolution, generation time, and read-only database
+        snapshot. Member category and product breakdowns are suppressed when
+        only one or two distinct memberships contribute valid booked units;
+        `VIEW_ALL_BOOKING_ACTIVITY` bypasses only that suppression and never
+        grants statistics access. A zero-contributor cohort returns empty
+        breakdowns. Each visible top-six category and product, plus an optional
+        `Other` remainder, includes a series over the same adaptive buckets as
+        member activity. For callers without `VIEW_ALL_BOOKING_ACTIVITY`, every
+        category and product point in a bucket with only one or two distinct
+        valid contributors is returned as a protected null. Empty buckets remain
+        visible zeroes, and `isPartial` identifies range-clipped buckets. Ranking
+        order, item totals, top-six selection, and the `Other` remainder use only
+        visible buckets. Items without any visible contribution are omitted, so
+        protected bucket values cannot be reconstructed from ranking totals.
+
+        Financial flows use ledger creation timestamps and reconcile as closing
+        = opening + booking charges - payments + adjustments. Reversal entries
+        retain their original flow classification and use the reversal entry's
+        creation bucket. Overdue exposure is null while settlements are
+        disabled; otherwise it is a current `generatedAt` snapshot and does not
+        rewind with a historical chart range. At most 60 server-selected
+        calendar buckets are returned for each series.
+
+        When `range` is omitted, the server selects `CURRENT_PERIOD` if it is
+        available and `LAST_30_DAYS` otherwise; the canonical selection is in
+        response metadata.
+        For `CUSTOM`, `from` and `to` are local `YYYY-MM-DD` dates in the group
+        timezone and `to` is inclusive at the wire. The effective exclusive end
+        is capped at `generatedAt`, so current or future end dates never expose
+        a future snapshot. A range that starts in the future is rejected.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - name: range
+          in: query
+          schema: { $ref: '#/components/schemas/StatisticsRangePreset' }
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Complete member-activity and finance statistics
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatisticsDashboard' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/planning/settings:
+    get:
+      tags: [Planning]
+      summary: Read the optional planning module state
+      description: Requires `USE_PLANNING` or `GROUP_ADMINISTRATION`. The installation-wide system time zone is pinned when a new event or series is created.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Current versioned planning settings
+          headers: { ETag: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlanningSettings' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+    put:
+      tags: [Planning]
+      summary: Enable or disable planning for the group
+      description: Requires `GROUP_ADMINISTRATION`. Disabling planning cancels pending planning tasks and unsent external deliveries without deleting planning data.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [enabled]
+              properties: { enabled: { type: boolean } }
+      responses:
+        '200':
+          description: Updated planning settings
+          headers: { ETag: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlanningSettings' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/planning/series:
+    post:
+      tags: [Planning]
+      summary: Create a recurring planning series
+      description: Requires `CREATE_PLANNING_EVENTS`. The recurrence rule is structured and materialized idempotently in the installation-wide time zone; optional publication commits atomically with creation.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PlanningSeriesCreateInput' } } }
+      responses:
+        '201':
+          description: Created series and its first materialized occurrence
+          headers: { ETag: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlanningSeriesCreateResult' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/planning/series/{seriesId}:
+    get:
+      tags: [Planning]
+      summary: Read a recurring planning series
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/PlanningSeriesId'
+      responses:
+        '200':
+          description: Series details
+          headers: { ETag: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlanningSeries' } } }
+        '404': { $ref: '#/components/responses/Problem' }
+    put:
+      tags: [Planning]
+      summary: Replace a complete series or its selected future segment
+      description: Owners may change their own series; `MANAGE_PLANNING_EVENTS` may change every series. `ALL` affects future, non-final occurrences in the complete series. `THIS_AND_FOLLOWING` starts at the required original occurrence timestamp. Individually changed or cancelled occurrences remain exceptions and are not silently overwritten.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/PlanningSeriesId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PlanningSeriesUpdateInput' } } }
+      responses:
+        '200':
+          description: Updated series revision
+          headers: { ETag: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlanningSeries' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/planning/series/{seriesId}/cancel:
+    post:
+      tags: [Planning]
+      summary: Cancel a complete series or its selected future segment
+      description: >-
+        `ALL` cancels every unfinished occurrence in the series.
+        `THIS_AND_FOLLOWING` cancels every unfinished occurrence from the required
+        original occurrence timestamp onward. Both scopes include future manually
+        changed or cancelled exceptions in their selected range. Affected rows are
+        retained as auditable cancellations; past and completed occurrences are
+        immutable. Recipients receive one bundled series notification rather than
+        one notification per occurrence.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/PlanningSeriesId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PlanningSeriesMutationInput' } } }
+      responses:
+        '204': { description: Series or future series segment cancelled }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/planning/events:
+    get:
+      tags: [Planning]
+      summary: List visible planning events in a bounded calendar interval
+      description: |
+        Events require membership in the snapshotted audience unless the
+        requester owns or manages them. `from` and `to` are the backwards-
+        compatible instant bounds and use half-open overlap semantics. The
+        optional `fromDate` and `toDateExclusive` pair applies civil-date
+        overlap semantics to all-day events. Calendar clients may send both
+        pairs so timed and all-day rows are filtered in their native domains.
+        Each complete range is limited to 366 days.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - name: from
+          in: query
+          description: Inclusive RFC 3339 instant lower bound for timed events and legacy all-event queries.
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          description: Exclusive RFC 3339 instant upper bound for timed events and legacy all-event queries.
+          schema: { type: string, format: date-time }
+        - name: fromDate
+          in: query
+          description: Inclusive ISO civil-date lower bound for all-day events. Requires `toDateExclusive`.
+          schema: { type: string, format: date }
+        - name: toDateExclusive
+          in: query
+          description: Exclusive ISO civil-date upper bound for all-day events. Requires `fromDate` and may be at most 366 days later.
+          schema: { type: string, format: date }
+        - name: status
+          in: query
+          description: Optional exact lifecycle-state filter applied before cursor pagination.
+          schema: { $ref: '#/components/schemas/PlanningEventStatus' }
+        - $ref: '#/components/parameters/PlanningCursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Chronological visible event page
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlanningEventPage' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Planning]
+      summary: Create a planning event
+      description: Requires `CREATE_PLANNING_EVENTS`. This endpoint publishes a single occurrence and snapshots its audience atomically; use the series endpoint for recurrence.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PlanningEventInput' } } }
+      responses:
+        '201':
+          description: Published event
+          headers: { ETag: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlanningEvent' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/planning/events/{eventId}:
+    get:
+      tags: [Planning]
+      summary: Read one visible planning event
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/PlanningEventId'
+      responses:
+        '200':
+          description: Privacy-filtered event read model
+          headers: { ETag: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlanningEvent' } } }
+        '404': { $ref: '#/components/responses/Problem' }
+    put:
+      tags: [Planning]
+      summary: Replace one planning occurrence
+      description: Owners may edit their own event; `MANAGE_PLANNING_EVENTS` may edit every event. For a recurring event this always creates or updates an exception for only this occurrence. Published audiences are add-only. Existing responses and registrations remain effective, and affected members receive an update notification.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/PlanningEventId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PlanningEventInput' } } }
+      responses:
+        '200':
+          description: Updated event
+          headers: { ETag: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlanningEvent' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/planning/events/{eventId}/close:
+    post:
+      tags: [Planning]
+      summary: Close event participation
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/PlanningEventId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      responses:
+        '200': { description: Closed event, content: { application/json: { schema: { $ref: '#/components/schemas/PlanningEvent' } } } }
+        '412': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/planning/events/{eventId}/complete:
+    post:
+      tags: [Planning]
+      summary: Complete an ended event
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/PlanningEventId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      responses:
+        '200': { description: Completed event, content: { application/json: { schema: { $ref: '#/components/schemas/PlanningEvent' } } } }
+        '412': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/planning/events/{eventId}/cancel:
+    post:
+      tags: [Planning]
+      summary: Cancel one event occurrence
+      description: For a recurring event this cancels only this occurrence and retains an auditable series exception.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/PlanningEventId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      responses:
+        '200': { description: Cancelled event, content: { application/json: { schema: { $ref: '#/components/schemas/PlanningEvent' } } } }
+        '412': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/planning/events/{eventId}/participation:
+    put:
+      tags: [Planning]
+      summary: Set the current membership response or registration
+      description: Appointment polls accept `YES`, `MAYBE`, or `NO`; appointment registration accepts `REGISTERED` or `WITHDRAWN`. Capacity and FIFO waitlist assignment are transactional.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/PlanningEventId'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [status]
+              properties:
+                status: { type: string, enum: [YES, MAYBE, NO, REGISTERED, WITHDRAWN] }
+      responses:
+        '200':
+          description: Event with updated own participation and aggregates
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlanningEvent' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/planning/events/{eventId}/participants:
+    get:
+      tags: [Planning]
+      summary: List identified event participants
+      description: Requires event ownership, `VIEW_PLANNING_PARTICIPANTS`, or `MANAGE_PLANNING_EVENTS`. Results use stable case-insensitive display-name and membership-ID keyset pagination.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/PlanningEventId'
+        - $ref: '#/components/parameters/PlanningCursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Authorized participant page
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlanningParticipantPage' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/logo:
     post:
       tags: [Groups]
@@ -3737,6 +4156,16 @@ components:
       in: path
       required: true
       schema: { type: string }
+    PlanningEventId:
+      name: eventId
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
+    PlanningSeriesId:
+      name: seriesId
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
     ExportId:
       name: exportId
       in: path
@@ -3770,6 +4199,11 @@ components:
       name: limit
       in: query
       schema: { type: integer, minimum: 1, maximum: 200, default: 100 }
+    PlanningCursor:
+      name: cursor
+      in: query
+      description: Continuation token returned as `nextCursor` by the preceding planning page. Reuse it only with the same event collection, interval, and lifecycle filter.
+      schema: { type: string, maxLength: 2048 }
     TableSearch:
       name: q
       in: query
@@ -3797,6 +4231,380 @@ components:
         application/problem+json:
           schema: { $ref: '#/components/schemas/RoleConflictProblem' }
   schemas:
+    PlanningEventType:
+      type: string
+      enum: [APPOINTMENT, APPOINTMENT_POLL, APPOINTMENT_REGISTRATION]
+      description: Stable behavior contract for a plain appointment, an appointment poll, or appointment registration with optional capacity.
+    PlanningEventStatus:
+      type: string
+      enum: [PUBLISHED, CLOSED, COMPLETED, CANCELLED]
+    PlanningAudienceType:
+      type: string
+      enum: [ALL_ACTIVE_MEMBERS, SELECTED_ROLES, SELECTED_MEMBERS, SELECTED_TARGETS]
+      description: "`SELECTED_TARGETS` resolves the union of selected roles and individual memberships. The legacy single-source values remain readable for compatibility."
+    PlanningSettings:
+      type: object
+      additionalProperties: false
+      required: [enabled, version, updatedAt, timeZone]
+      properties:
+        enabled: { type: boolean }
+        version: { type: integer, minimum: 1 }
+        updatedAt: { type: string, format: date-time }
+        timeZone:
+          type: string
+          minLength: 1
+          description: IANA time zone selected from the installation-wide system setting.
+    PlanningAudienceFields:
+      type: object
+      properties:
+        audienceType: { $ref: '#/components/schemas/PlanningAudienceType' }
+        targetRoleIds:
+          type: array
+          uniqueItems: true
+          description: Role targets. May be combined with targetMembershipIds when audienceType is SELECTED_TARGETS.
+          items: { type: string }
+        targetMembershipIds:
+          type: array
+          uniqueItems: true
+          description: Individual membership targets. May be combined with targetRoleIds when audienceType is SELECTED_TARGETS.
+          items: { type: string }
+    PlanningEventContentInput:
+      type: object
+      required: [eventType, audienceType, title]
+      properties:
+        eventType: { $ref: '#/components/schemas/PlanningEventType' }
+        audienceType: { $ref: '#/components/schemas/PlanningAudienceType' }
+        targetRoleIds:
+          type: array
+          uniqueItems: true
+          items: { type: string }
+        targetMembershipIds:
+          type: array
+          uniqueItems: true
+          items: { type: string }
+        title: { type: string, minLength: 1, maxLength: 160 }
+        description: { type: string, maxLength: 4000, default: '' }
+        location: { type: string, maxLength: 240, default: '' }
+        responseDeadlineMinutesBefore:
+          type: [integer, 'null']
+          minimum: 0
+          maximum: 525600
+          description: Optional for polls and registrations. When present, the server derives each occurrence's absolute deadline from its start; omission leaves responses open until the event ends or is closed manually.
+        capacity: { type: [integer, 'null'], minimum: 1, maximum: 100000 }
+        waitlistEnabled: { type: boolean, default: false }
+    PlanningTimedEventScheduleInput:
+      type: object
+      required: [startsAt]
+      properties:
+        allDay: { type: boolean, const: false, default: false }
+        startsAt: { type: string, format: date-time }
+        endsAt: { type: [string, 'null'], format: date-time }
+      not:
+        anyOf:
+          - required: [timeZone]
+          - required: [startDate]
+          - required: [endDateExclusive]
+    PlanningAllDayEventScheduleInput:
+      type: object
+      required: [allDay, startDate, endDateExclusive]
+      properties:
+        allDay: { type: boolean, const: true }
+        timeZone:
+          type: string
+          minLength: 1
+          description: Optional client assertion. When present it must match the server-selected installation or pinned series time zone.
+        startDate: { type: string, format: date }
+        endDateExclusive:
+          type: string
+          format: date
+          description: Exclusive local calendar end date. Standalone events support 1 to 366 calendar days.
+      not:
+        anyOf:
+          - required: [startsAt]
+          - required: [endsAt]
+    PlanningEventInput:
+      allOf:
+        - $ref: '#/components/schemas/PlanningEventContentInput'
+        - oneOf:
+            - $ref: '#/components/schemas/PlanningTimedEventScheduleInput'
+            - $ref: '#/components/schemas/PlanningAllDayEventScheduleInput'
+    PlanningParticipationCounts:
+      type: object
+      additionalProperties: false
+      required: [invited, yes, maybe, no, pending, registered, waitlisted, reconfirmationRequired]
+      properties:
+        invited: { type: integer, minimum: 0 }
+        yes: { type: integer, minimum: 0 }
+        maybe: { type: integer, minimum: 0 }
+        no: { type: integer, minimum: 0 }
+        pending: { type: integer, minimum: 0 }
+        registered: { type: integer, minimum: 0 }
+        waitlisted: { type: integer, minimum: 0 }
+        reconfirmationRequired:
+          type: integer
+          minimum: 0
+          maximum: 0
+          deprecated: true
+          description: Compatibility field retained for older clients; always zero.
+    PlanningParticipation:
+      type: object
+      additionalProperties: false
+      required: [status, effectiveStatus, confirmedRevision, version]
+      properties:
+        membershipId: { type: string }
+        displayName: { type: string }
+        status: { type: string, enum: [YES, MAYBE, NO, REGISTERED, WAITLISTED, WITHDRAWN] }
+        effectiveStatus: { type: string, enum: [YES, MAYBE, NO, REGISTERED, WAITLISTED, WITHDRAWN, PENDING] }
+        confirmedRevision: { type: integer, minimum: 0 }
+        version: { type: integer, minimum: 0 }
+        respondedAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    PlanningEvent:
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/PlanningEventContentInput'
+        - type: object
+          required: [id, eventType, status, audienceType, title, allDay, timeZone, startsAt, waitlistEnabled, confirmationRevision, version, counts, createdAt, updatedAt, canEdit, canCancel, canRespond, canViewParticipants]
+          properties:
+            id: { type: string }
+            seriesId: { type: string }
+            originalStartAt:
+              type: string
+              format: date-time
+              description: Immutable generated start used to address this occurrence even when it is moved.
+            originalStartDate:
+              type: string
+              format: date
+              description: Immutable generated local date retained by all-day series occurrences, including manual exceptions.
+            isSeriesException: { type: boolean }
+            allDay: { type: boolean }
+            timeZone:
+              type: string
+              minLength: 1
+              description: IANA time zone pinned to the event at creation for stable rendering and later mode changes.
+            startDate: { type: string, format: date }
+            endDateExclusive: { type: string, format: date }
+            startsAt:
+              type: string
+              format: date-time
+              description: Canonical start instant. For all-day events this is derived from startDate and timeZone for compatibility and ordering.
+            endsAt:
+              type: [string, 'null']
+              format: date-time
+              description: Canonical exclusive end instant when present. All-day events always provide the boundary derived from endDateExclusive.
+            responseDeadline:
+              type: [string, 'null']
+              format: date-time
+              description: Optional absolute occurrence deadline derived by the server from responseDeadlineMinutesBefore.
+            status: { $ref: '#/components/schemas/PlanningEventStatus' }
+            confirmationRevision:
+              type: integer
+              minimum: 1
+              deprecated: true
+              description: Legacy compatibility marker that no longer changes when an event is edited.
+            version: { type: integer, minimum: 1 }
+            counts: { $ref: '#/components/schemas/PlanningParticipationCounts' }
+            myParticipation: { $ref: '#/components/schemas/PlanningParticipation' }
+            createdByName: { type: string }
+            canEdit: { type: boolean }
+            canCancel: { type: boolean }
+            canRespond: { type: boolean }
+            canViewParticipants: { type: boolean }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
+          oneOf:
+            - properties:
+                allDay: { const: false }
+              not:
+                anyOf:
+                  - required: [startDate]
+                  - required: [endDateExclusive]
+                  - required: [originalStartDate]
+            - required: [startDate, endDateExclusive, endsAt]
+              properties:
+                allDay: { const: true }
+    DashboardPlanningEventSummary:
+      type: object
+      additionalProperties: false
+      required: [id, title, description, location, eventType, allDay, timeZone, startsAt, status, counts, actionRequired, canRespond]
+      properties:
+        id: { type: string }
+        seriesId:
+          type: string
+          description: Stable series identifier when the dashboard event is a recurring occurrence.
+        title: { type: string }
+        description:
+          type: string
+          description: Event description used by the shared agenda presentation.
+        location:
+          type: string
+          description: Event location used by the shared agenda presentation.
+        eventType: { $ref: '#/components/schemas/PlanningEventType' }
+        allDay: { type: boolean }
+        timeZone:
+          type: string
+          minLength: 1
+          description: IANA time zone pinned to the event at creation.
+        startDate: { type: string, format: date }
+        endDateExclusive: { type: string, format: date }
+        startsAt: { type: string, format: date-time }
+        endsAt:
+          type: string
+          format: date-time
+          description: Optional event end used by the shared Agenda schedule presentation.
+        status: { $ref: '#/components/schemas/PlanningEventStatus' }
+        counts: { $ref: '#/components/schemas/PlanningParticipationCounts' }
+        myEffectiveStatus:
+          type: string
+          enum: [YES, MAYBE, NO, REGISTERED, WAITLISTED, WITHDRAWN, PENDING]
+        myParticipationStatus:
+          type: string
+          enum: [YES, MAYBE, NO, REGISTERED, WAITLISTED, WITHDRAWN]
+        actionRequired: { type: boolean }
+        canRespond: { type: boolean }
+    PlanningEventPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/PlanningEvent' }
+        nextCursor: { type: string }
+    PlanningRecurrenceFrequency:
+      type: string
+      enum: [DAILY, WEEKLY, MONTHLY, YEARLY]
+    PlanningRecurrenceRange:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type: { type: string, enum: [COUNT, UNTIL, NEVER] }
+        count: { type: [integer, 'null'], minimum: 2, maximum: 500 }
+        until: { type: [string, 'null'], format: date }
+    PlanningRecurrenceInput:
+      type: object
+      additionalProperties: false
+      required: [frequency, interval, range]
+      properties:
+        frequency: { $ref: '#/components/schemas/PlanningRecurrenceFrequency' }
+        interval: { type: integer, minimum: 1, maximum: 99 }
+        weekdays:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [MO, TU, WE, TH, FR, SA, SU] }
+        monthlyMode: { type: string, enum: [DAY_OF_MONTH, NTH_WEEKDAY, LAST_DAY] }
+        range: { $ref: '#/components/schemas/PlanningRecurrenceRange' }
+    PlanningSeriesMutationScope:
+      type: string
+      enum: [ALL, THIS_AND_FOLLOWING]
+    PlanningSeriesMutationInput:
+      type: object
+      additionalProperties: false
+      required: [scope]
+      properties:
+        scope: { $ref: '#/components/schemas/PlanningSeriesMutationScope' }
+        fromOriginalStartAt:
+          type: [string, 'null']
+          format: date-time
+          description: Required only for THIS_AND_FOLLOWING and must identify a generated occurrence in the series. Cancellation includes future manual exceptions at or after this boundary; updates preserve them.
+    PlanningSeriesCreateInput:
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/PlanningEventContentInput'
+        - type: object
+          required: [recurrence]
+          properties:
+            recurrence: { $ref: '#/components/schemas/PlanningRecurrenceInput' }
+        - oneOf:
+            - allOf:
+                - $ref: '#/components/schemas/PlanningTimedEventScheduleInput'
+                - required: [endsAt]
+            - $ref: '#/components/schemas/PlanningAllDayEventScheduleInput'
+    PlanningSeriesUpdateInput:
+      unevaluatedProperties: false
+      allOf:
+        - $ref: '#/components/schemas/PlanningEventContentInput'
+        - type: object
+          required: [recurrence, scope]
+          properties:
+            recurrence: { $ref: '#/components/schemas/PlanningRecurrenceInput' }
+            scope: { $ref: '#/components/schemas/PlanningSeriesMutationScope' }
+            fromOriginalStartAt:
+              type: [string, 'null']
+              format: date-time
+              description: Required only for THIS_AND_FOLLOWING.
+        - oneOf:
+            - allOf:
+                - $ref: '#/components/schemas/PlanningTimedEventScheduleInput'
+                - required: [endsAt]
+            - $ref: '#/components/schemas/PlanningAllDayEventScheduleInput'
+    PlanningSeries:
+      type: object
+      additionalProperties: false
+      required: [id, status, timeZone, eventType, title, description, location, allDay, waitlistEnabled, audienceType, targetRoleIds, targetMembershipIds, recurrence, version, createdAt, updatedAt, canEdit, canCancel]
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [PUBLISHED, CANCELLED] }
+        timeZone:
+          type: string
+          minLength: 1
+          description: IANA time zone used to resolve every local recurrence date.
+        eventType: { $ref: '#/components/schemas/PlanningEventType' }
+        title: { type: string, minLength: 1, maxLength: 160 }
+        description: { type: string, maxLength: 4000 }
+        location: { type: string, maxLength: 240 }
+        allDay: { type: boolean }
+        startDate: { type: string, format: date }
+        durationDays: { type: integer, minimum: 1, maximum: 7 }
+        durationMinutes: { type: integer, minimum: 1, maximum: 10080 }
+        responseDeadlineMinutesBefore: { type: integer, minimum: 0, maximum: 525600 }
+        capacity: { type: integer, minimum: 1, maximum: 100000 }
+        waitlistEnabled: { type: boolean }
+        audienceType: { $ref: '#/components/schemas/PlanningAudienceType' }
+        targetRoleIds:
+          type: array
+          uniqueItems: true
+          items: { type: string }
+        targetMembershipIds:
+          type: array
+          uniqueItems: true
+          items: { type: string }
+        recurrence: { $ref: '#/components/schemas/PlanningRecurrenceInput' }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        canEdit: { type: boolean }
+        canCancel: { type: boolean }
+      oneOf:
+        - required: [durationMinutes]
+          properties:
+            allDay: { const: false }
+          not:
+            anyOf:
+              - required: [startDate]
+              - required: [durationDays]
+        - required: [startDate, durationDays]
+          properties:
+            allDay: { const: true }
+          not:
+            required: [durationMinutes]
+    PlanningSeriesCreateResult:
+      type: object
+      additionalProperties: false
+      required: [series, firstOccurrence]
+      properties:
+        series: { $ref: '#/components/schemas/PlanningSeries' }
+        firstOccurrence: { $ref: '#/components/schemas/PlanningEvent' }
+    PlanningParticipantPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/PlanningParticipation' }
+        nextCursor: { type: string }
     MinorUnits:
       type: string
       pattern: '^-?[0-9]+$'
@@ -4114,6 +4922,16 @@ components:
           type: boolean
           readOnly: true
           description: Whether verified email-address changes are currently configured.
+    BuildInformation:
+      type: object
+      additionalProperties: false
+      required: [buildId]
+      properties:
+        buildId:
+          type: string
+          minLength: 1
+          readOnly: true
+          description: Identifier embedded into both server and compiled web client.
     InstanceCapabilities:
       type: object
       additionalProperties: false
@@ -4181,6 +4999,66 @@ components:
     SystemRole:
       type: string
       enum: [SYSTEM_ADMINISTRATOR]
+    LegalDocumentSource:
+      type: string
+      enum: [DATABASE, FILE, CODE]
+    LegalDocument:
+      type: object
+      additionalProperties: false
+      required: [content, source, configured]
+      properties:
+        content:
+          type: string
+          maxLength: 65536
+          description: Effective UTF-8 Markdown source. Raw HTML is not supported by the web renderer.
+        source: { $ref: '#/components/schemas/LegalDocumentSource' }
+        configured: { type: boolean }
+        overrideVersion:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Present only for a database override.
+        updatedAt:
+          type: string
+          format: date-time
+          description: Override timestamp or host-file modification time.
+    PublicLegalDocuments:
+      type: object
+      additionalProperties: false
+      required: [imprint, privacyPolicy]
+      properties:
+        imprint: { type: string, maxLength: 65536 }
+        privacyPolicy: { type: string, maxLength: 65536 }
+    SystemLegalDocuments:
+      type: object
+      additionalProperties: false
+      required: [revision, imprint, privacyPolicy, updatedAt]
+      properties:
+        revision: { type: integer, format: int64, minimum: 1 }
+        imprint: { $ref: '#/components/schemas/LegalDocument' }
+        privacyPolicy: { $ref: '#/components/schemas/LegalDocument' }
+        updatedAt: { type: string, format: date-time }
+        updatedByUserId: { type: string }
+    SystemLegalDocumentsUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        imprint: { type: string, minLength: 1, maxLength: 65536 }
+        privacyPolicy: { type: string, minLength: 1, maxLength: 65536 }
+    LegalDocumentKey:
+      type: string
+      enum: [IMPRINT, PRIVACY_POLICY]
+    SystemLegalDocumentsReset:
+      type: object
+      additionalProperties: false
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/LegalDocumentKey' }
     SystemSettingSource:
       type: string
       enum: [DATABASE, ENVIRONMENT, CODE]
@@ -4302,7 +5180,7 @@ components:
     SystemSettings:
       type: object
       additionalProperties: false
-      required: [revision, instanceName, defaultCurrency, mediaUploadMaxBytes, mediaUploadHardLimitBytes, attachmentUploadMaxBytes, attachmentUploadHardLimitBytes, publicJoinEnabled, maintenanceMode, maintenanceMessage, smtp, webPush, updatedAt]
+      required: [revision, instanceName, defaultCurrency, timeZone, mediaUploadMaxBytes, mediaUploadHardLimitBytes, attachmentUploadMaxBytes, attachmentUploadHardLimitBytes, publicJoinEnabled, maintenanceMode, maintenanceMessage, smtp, webPush, updatedAt]
       properties:
         revision:
           type: integer
@@ -4310,6 +5188,10 @@ components:
           minimum: 1
         instanceName: { $ref: '#/components/schemas/EffectiveStringSetting' }
         defaultCurrency: { $ref: '#/components/schemas/EffectiveStringSetting' }
+        timeZone:
+          allOf:
+            - $ref: '#/components/schemas/EffectiveStringSetting'
+          description: Installation-wide IANA time zone used for reminders and newly created planning records.
         mediaUploadMaxBytes: { $ref: '#/components/schemas/EffectiveIntegerSetting' }
         mediaUploadHardLimitBytes:
           type: integer
@@ -4336,6 +5218,7 @@ components:
       properties:
         instanceName: { type: string, minLength: 1, maxLength: 120 }
         defaultCurrency: { type: string, pattern: '^[A-Z]{3}$' }
+        timeZone: { type: string, minLength: 1, maxLength: 120, example: Europe/Berlin }
         mediaUploadMaxBytes: { type: integer, format: int64, minimum: 1048576, maximum: 26214400, multipleOf: 1048576 }
         attachmentUploadMaxBytes: { type: integer, format: int64, minimum: 1048576, maximum: 52428800, multipleOf: 1048576 }
         publicJoinEnabled: { type: boolean }
@@ -4346,6 +5229,7 @@ components:
       enum:
         - instance.name
         - instance.default_currency
+        - instance.timezone
         - media.upload_max_bytes
         - attachment.upload_max_bytes
         - access.public_join_enabled
@@ -4857,31 +5741,42 @@ components:
         avatarUrl: { type: string }
     Group:
       type: object
-      required: [id, name, currency, defaultTheme, membership]
+      required: [id, name, currency, defaultTheme, statisticsEnabled, planningEnabled, membership]
       properties:
         id: { type: string }
         name: { type: string }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         logoUrl: { type: string }
         defaultTheme: { $ref: '#/components/schemas/ThemeId' }
+        statisticsEnabled:
+          type: boolean
+          description: Whether the unified group statistics feature is enabled.
+        planningEnabled:
+          type: boolean
+          description: Effective group feature switch used to hide planning navigation and routes when disabled.
         membership: { $ref: '#/components/schemas/Membership' }
     GroupSettings:
       type: object
       additionalProperties: false
-      required: [defaultTheme, notificationEmailsEnabled, notificationEmailDeliveryAvailable, settlementsEnabled, defaultRoleId, ownBookingReasonMode, foreignBookingReasonMode, ownPaymentReasonMode, otherPaymentReasonMode, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
+      required: [defaultTheme, statisticsEnabled, settlementsEnabled, settlementDueSoonDays, settlementOverdueRepeatDays, defaultRoleId, ownBookingReasonMode, foreignBookingReasonMode, ownPaymentReasonMode, otherPaymentReasonMode, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
       properties:
         defaultTheme: { $ref: '#/components/schemas/ThemeId' }
-        notificationEmailsEnabled:
+        statisticsEnabled:
           type: boolean
-          deprecated: true
-          description: Legacy migration source retained for compatibility; new delivery policy uses `/notification-settings` and `/notification-preferences`.
-        notificationEmailDeliveryAvailable:
-          type: boolean
-          readOnly: true
-          description: Whether the running server has complete SMTP delivery configuration.
+          description: Master switch for every group-wide statistics projection.
         settlementsEnabled:
           type: boolean
           description: Whether administrators may close the unchanged technical open period and create settlement statements.
+        settlementDueSoonDays:
+          type: integer
+          minimum: 1
+          maximum: 30
+          description: Calendar days before a settlement due date when its personal reminder is first created.
+        settlementOverdueRepeatDays:
+          type: integer
+          minimum: 0
+          maximum: 90
+          description: Calendar-day interval for repeated overdue reminders; zero creates only the first reminder.
         defaultRoleId:
           type: [string, 'null']
           description: Group-owned non-administrative role preselected for new invitations and used by CSV rows without roles.
@@ -4924,13 +5819,14 @@ components:
       minProperties: 1
       properties:
         defaultTheme: { $ref: '#/components/schemas/ThemeId' }
-        notificationEmailsEnabled:
+        statisticsEnabled:
           type: boolean
-          deprecated: true
-          description: Legacy compatibility field; new clients must use the dedicated notification policy endpoints.
+          description: Enables or disables the statistics endpoints; requires GROUP_ADMINISTRATION.
         settlementsEnabled:
           type: boolean
           description: Enables or disables period closing without changing periods, ledger entries, balances, or settlement history.
+        settlementDueSoonDays: { type: integer, minimum: 1, maximum: 30 }
+        settlementOverdueRepeatDays: { type: integer, minimum: 0, maximum: 90 }
         defaultRoleId:
           type: string
           minLength: 1
@@ -4970,7 +5866,7 @@ components:
       properties:
         type:
           type: string
-          enum: [BOOKING_ASSIGNED, BOOKING_REVERSED, PAYMENT_RECORDED, PAYMENT_REVERSED, SETTLEMENT_CREATED, SETTLEMENT_DUE_SOON, SETTLEMENT_OVERDUE]
+          enum: [BOOKING_ASSIGNED, BOOKING_REVERSED, PAYMENT_RECORDED, PAYMENT_REVERSED, SETTLEMENT_CREATED, SETTLEMENT_DUE_SOON, SETTLEMENT_OVERDUE, PLANNING_EVENT_PUBLISHED, PLANNING_EVENT_UPDATED, PLANNING_EVENT_CANCELLED, PLANNING_WAITLIST_PROMOTED, PLANNING_SERIES_PUBLISHED, PLANNING_SERIES_UPDATED, PLANNING_SERIES_CANCELLED]
         category: { type: string }
         label: { type: string }
         description: { type: string }
@@ -4988,50 +5884,13 @@ components:
         defaultEnabled: { type: boolean }
         reminder: { type: boolean }
         supportedChannels: { type: array, items: { $ref: '#/components/schemas/NotificationChannel' } }
-    GroupNotificationEventSetting:
-      allOf:
-        - $ref: '#/components/schemas/NotificationEventDefinition'
-        - type: object
-          required: [enabled]
-          properties: { enabled: { type: boolean } }
-    GroupNotificationSettings:
-      type: object
-      additionalProperties: false
-      required: [version, timezone, dueSoonLeadDays, overdueRepeatDays, availableChannels, events, updatedAt]
-      properties:
-        version: { type: integer, format: int64, minimum: 1 }
-        timezone: { type: string, default: Europe/Berlin }
-        dueSoonLeadDays: { type: integer, minimum: 1, maximum: 30, default: 3 }
-        overdueRepeatDays: { type: integer, minimum: 0, maximum: 90, default: 7 }
-        availableChannels: { type: array, items: { $ref: '#/components/schemas/NotificationChannel' } }
-        events: { type: array, minItems: 7, maxItems: 7, items: { $ref: '#/components/schemas/GroupNotificationEventSetting' } }
-        updatedAt: { type: string, format: date-time }
-    GroupNotificationSettingsUpdate:
-      type: object
-      additionalProperties: false
-      required: [timezone, dueSoonLeadDays, overdueRepeatDays, events]
-      properties:
-        timezone: { type: string }
-        dueSoonLeadDays: { type: integer, minimum: 1, maximum: 30 }
-        overdueRepeatDays: { type: integer, minimum: 0, maximum: 90 }
-        events:
-          type: array
-          minItems: 7
-          maxItems: 7
-          items:
-            type: object
-            additionalProperties: false
-            required: [type, enabled]
-            properties:
-              type: { $ref: '#/components/schemas/NotificationEventDefinition/properties/type' }
-              enabled: { type: boolean }
+
     NotificationEventPreference:
       allOf:
         - $ref: '#/components/schemas/NotificationEventDefinition'
         - type: object
-          required: [enabled, email, push, emailAvailable, pushAvailable]
+          required: [email, push, emailAvailable, pushAvailable]
           properties:
-            enabled: { type: boolean }
             email: { type: boolean }
             push: { type: boolean }
             emailAvailable: { type: boolean }
@@ -5043,7 +5902,7 @@ components:
       properties:
         version: { type: integer, format: int64, minimum: 1 }
         availableChannels: { type: array, items: { $ref: '#/components/schemas/NotificationChannel' } }
-        events: { type: array, minItems: 7, maxItems: 7, items: { $ref: '#/components/schemas/NotificationEventPreference' } }
+        events: { type: array, minItems: 4, maxItems: 14, items: { $ref: '#/components/schemas/NotificationEventPreference' } }
     NotificationPreferencesUpdate:
       type: object
       additionalProperties: false
@@ -5052,7 +5911,7 @@ components:
         events:
           type: array
           minItems: 1
-          maxItems: 7
+          maxItems: 14
           items:
             type: object
             additionalProperties: false
@@ -5287,7 +6146,7 @@ components:
         - FINANCE_MANAGEMENT
         - CATALOG_MANAGEMENT
         - VIEW_MEMBER_DIRECTORY
-        - VIEW_GROUP_STATISTICS
+        - VIEW_STATISTICS
         - VIEW_ALL_BOOKING_ACTIVITY
         - RECORD_OWN_PAYMENT
         - CREATE_OWN_BOOKING
@@ -5295,6 +6154,10 @@ components:
         - VOID_ANY_BOOKING
         - BOOK_FOR_OTHERS
         - BOOK_FOR_GUESTS
+        - USE_PLANNING
+        - CREATE_PLANNING_EVENTS
+        - VIEW_PLANNING_PARTICIPANTS
+        - MANAGE_PLANNING_EVENTS
     PermissionScopeType:
       type: string
       enum: [GROUP, CATEGORY, PRODUCT]
@@ -6101,15 +6964,241 @@ components:
           items: { $ref: '#/components/schemas/CategoryStatistic' }
         groupCategoryStatistics:
           type: array
-          description: Anonymous category totals across the group for the open period when settlements are enabled, otherwise across all periods; an empty array without VIEW_GROUP_STATISTICS.
+          description: Anonymous category totals across the group for the open period when settlements are enabled, otherwise across all periods; an empty array unless statistics are enabled and VIEW_STATISTICS is effective.
           items: { $ref: '#/components/schemas/CategoryStatistic' }
         recentEntries:
           type: array
           maxItems: 50
           items: { $ref: '#/components/schemas/LedgerEntry' }
+    StatisticsRangePreset:
+      type: string
+      enum: [CURRENT_PERIOD, LAST_30_DAYS, LAST_90_DAYS, LAST_12_MONTHS, ALL_TIME, CUSTOM]
+    StatisticsBucket:
+      type: string
+      enum: [DAY, WEEK, MONTH, YEAR]
+    StatisticsMeta:
+      type: object
+      additionalProperties: false
+      required: [generatedAt, timezone, preset, fromInclusive, toExclusive, bucket, currentPeriodAvailable, privacyThresholdApplied]
+      properties:
+        generatedAt: { type: string, format: date-time }
+        timezone: { type: string }
+        preset: { $ref: '#/components/schemas/StatisticsRangePreset' }
+        fromInclusive: { type: string, format: date-time }
+        toExclusive: { type: string, format: date-time }
+        bucket: { $ref: '#/components/schemas/StatisticsBucket' }
+        currentPeriodAvailable:
+          type: boolean
+          description: Whether settlements are enabled and the group currently has an open period.
+        privacyThresholdApplied:
+          type: boolean
+          description: True when small-cohort suppression removed complete breakdowns or protected one or more demand-series buckets.
+    MemberStatisticsSnapshot:
+      type: object
+      additionalProperties: false
+      description: Current anonymous membership composition at generatedAt; it is independent of the selected range.
+      required: [regularMembers, temporaryGuests, asOf]
+      properties:
+        regularMembers: { type: integer, format: int64, minimum: 0 }
+        temporaryGuests: { type: integer, format: int64, minimum: 0 }
+        asOf: { type: string, format: date-time }
+    MemberStatisticsSummary:
+      type: object
+      additionalProperties: false
+      required: [activeParticipants, bookingCount, validBookedUnits, cancellationRate]
+      properties:
+        activeParticipants: { type: integer, format: int64, minimum: 0 }
+        bookingCount: { type: integer, format: int64, minimum: 0 }
+        validBookedUnits: { type: integer, format: int64, minimum: 0 }
+        cancellationRate:
+          type: [number, 'null']
+          format: double
+          minimum: 0
+          maximum: 1
+          description: Null when bookingCount is zero.
+    MemberStatisticsActivityPoint:
+      type: object
+      additionalProperties: false
+      required: [periodStart, postedUnits, reversedUnits]
+      properties:
+        periodStart: { type: string, format: date-time }
+        postedUnits: { type: integer, format: int64, minimum: 0 }
+        reversedUnits: { type: integer, format: int64, minimum: 0 }
+    MemberStatisticsCategoryItem:
+      type: object
+      additionalProperties: false
+      required: [categoryId, categoryName, icon, validBookedUnits, isOther, series]
+      properties:
+        categoryId: { type: string }
+        categoryName: { type: string }
+        icon: { $ref: '#/components/schemas/CategoryIcon' }
+        validBookedUnits:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Sum of visible series points only; protected buckets neither contribute nor affect ranking order.
+        isOther: { type: boolean }
+        series:
+          type: array
+          maxItems: 60
+          description: Privacy-aware valid booked units for every bucket described by the shared statistics metadata.
+          items: { $ref: '#/components/schemas/MemberStatisticsBreakdownPoint' }
+    MemberStatisticsProductItem:
+      type: object
+      additionalProperties: false
+      required: [productId, productName, categoryId, categoryName, validBookedUnits, isOther, series]
+      properties:
+        productId: { type: string }
+        productName: { type: string }
+        categoryId: { type: string }
+        categoryName: { type: string }
+        validBookedUnits:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Sum of visible series points only; protected buckets neither contribute nor affect ranking order.
+        isOther: { type: boolean }
+        series:
+          type: array
+          maxItems: 60
+          description: Privacy-aware valid booked units for every bucket described by the shared statistics metadata.
+          items: { $ref: '#/components/schemas/MemberStatisticsBreakdownPoint' }
+    MemberStatisticsBreakdownPoint:
+      type: object
+      additionalProperties: false
+      required: [periodStart, validBookedUnits, privacySuppressed, isPartial]
+      properties:
+        periodStart: { type: string, format: date-time }
+        validBookedUnits:
+          description: Exact units, including zero, or null when privacySuppressed is true.
+          oneOf:
+            - { type: integer, format: int64, minimum: 0 }
+            - { type: 'null' }
+        privacySuppressed:
+          type: boolean
+          description: Whether all category and product values in this bucket are hidden because only one or two memberships contributed valid bookings.
+        isPartial:
+          type: boolean
+          description: Whether the first or last bucket was clipped by the effective statistics range and therefore does not cover its full calendar interval.
+    MemberStatisticsCategoryBreakdown:
+      type: object
+      additionalProperties: false
+      required: [suppressed, items]
+      properties:
+        suppressed: { type: boolean }
+        items:
+          type: array
+          maxItems: 7
+          description: Top six visible category totals plus an optional Other remainder; categories without a visible contribution are omitted.
+          items: { $ref: '#/components/schemas/MemberStatisticsCategoryItem' }
+    MemberStatisticsProductBreakdown:
+      type: object
+      additionalProperties: false
+      required: [suppressed, items]
+      properties:
+        suppressed: { type: boolean }
+        items:
+          type: array
+          maxItems: 7
+          description: Top six visible product totals plus an optional Other remainder; products without a visible contribution are omitted.
+          items: { $ref: '#/components/schemas/MemberStatisticsProductItem' }
+    MemberStatisticsSection:
+      type: object
+      additionalProperties: false
+      required: [memberSnapshot, summary, activity, topCategories, topProducts]
+      properties:
+        memberSnapshot: { $ref: '#/components/schemas/MemberStatisticsSnapshot' }
+        summary: { $ref: '#/components/schemas/MemberStatisticsSummary' }
+        activity:
+          type: array
+          maxItems: 60
+          items: { $ref: '#/components/schemas/MemberStatisticsActivityPoint' }
+        topCategories: { $ref: '#/components/schemas/MemberStatisticsCategoryBreakdown' }
+        topProducts: { $ref: '#/components/schemas/MemberStatisticsProductBreakdown' }
+    ReceivableStatisticsSnapshot:
+      type: object
+      additionalProperties: false
+      description: Complete-ledger account-state distribution as of meta.toExclusive.
+      required: [grossReceivableMinor, memberCreditMinor, netReceivableMinor, openAccountCount, balancedAccountCount, creditAccountCount, asOf]
+      properties:
+        grossReceivableMinor: { $ref: '#/components/schemas/MinorUnits' }
+        memberCreditMinor: { $ref: '#/components/schemas/MinorUnits' }
+        netReceivableMinor: { $ref: '#/components/schemas/MinorUnits' }
+        openAccountCount: { type: integer, format: int64, minimum: 0 }
+        balancedAccountCount: { type: integer, format: int64, minimum: 0 }
+        creditAccountCount: { type: integer, format: int64, minimum: 0 }
+        asOf: { type: string, format: date-time }
+    FinancialStatisticsFlows:
+      type: object
+      additionalProperties: false
+      required: [openingNetReceivableMinor, netBookingChargesMinor, netPaymentsMinor, netAdjustmentsMinor, closingNetReceivableMinor]
+      properties:
+        openingNetReceivableMinor: { $ref: '#/components/schemas/MinorUnits' }
+        netBookingChargesMinor: { $ref: '#/components/schemas/MinorUnits' }
+        netPaymentsMinor: { $ref: '#/components/schemas/MinorUnits' }
+        netAdjustmentsMinor: { $ref: '#/components/schemas/MinorUnits' }
+        closingNetReceivableMinor: { $ref: '#/components/schemas/MinorUnits' }
+    FinanceStatisticsActivityPoint:
+      type: object
+      additionalProperties: false
+      required: [periodStart, netBookingChargesMinor, netPaymentsMinor, netAdjustmentsMinor, closingNetReceivableMinor]
+      properties:
+        periodStart: { type: string, format: date-time }
+        netBookingChargesMinor: { $ref: '#/components/schemas/MinorUnits' }
+        netPaymentsMinor: { $ref: '#/components/schemas/MinorUnits' }
+        netAdjustmentsMinor: { $ref: '#/components/schemas/MinorUnits' }
+        closingNetReceivableMinor: { $ref: '#/components/schemas/MinorUnits' }
+    FinanceStatisticsCategoryItem:
+      type: object
+      additionalProperties: false
+      required: [categoryId, categoryName, icon, netBookingChargesMinor, isOther]
+      properties:
+        categoryId: { type: string }
+        categoryName: { type: string }
+        icon: { $ref: '#/components/schemas/CategoryIcon' }
+        netBookingChargesMinor: { $ref: '#/components/schemas/MinorUnits' }
+        isOther: { type: boolean }
+    OverdueStatisticsSnapshot:
+      type: object
+      additionalProperties: false
+      description: Current settlement debt already due before the installation-local date at generatedAt; this is not a historical range-end projection.
+      required: [amountMinor, accountCount, periodCount, asOf]
+      properties:
+        amountMinor: { $ref: '#/components/schemas/MinorUnits' }
+        accountCount: { type: integer, format: int64, minimum: 0 }
+        periodCount: { type: integer, format: int64, minimum: 0 }
+        asOf: { type: string, format: date-time }
+    FinanceStatisticsSection:
+      type: object
+      additionalProperties: false
+      required: [currency, receivableSnapshot, flows, series, categories, overdue]
+      properties:
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        receivableSnapshot: { $ref: '#/components/schemas/ReceivableStatisticsSnapshot' }
+        flows: { $ref: '#/components/schemas/FinancialStatisticsFlows' }
+        series:
+          type: array
+          maxItems: 60
+          items: { $ref: '#/components/schemas/FinanceStatisticsActivityPoint' }
+        categories:
+          type: array
+          maxItems: 7
+          items: { $ref: '#/components/schemas/FinanceStatisticsCategoryItem' }
+        overdue:
+          oneOf:
+            - $ref: '#/components/schemas/OverdueStatisticsSnapshot'
+            - type: 'null'
+    StatisticsDashboard:
+      type: object
+      additionalProperties: false
+      required: [meta, members, finance]
+      properties:
+        meta: { $ref: '#/components/schemas/StatisticsMeta' }
+        members: { $ref: '#/components/schemas/MemberStatisticsSection' }
+        finance: { $ref: '#/components/schemas/FinanceStatisticsSection' }
     Dashboard:
       type: object
-      required: [account, openPeriod, recentBookings, unreadNotificationCount]
+      required: [account, openPeriod, recentBookings, unreadNotificationCount, planningEnabled]
       properties:
         account: { $ref: '#/components/schemas/Account' }
         openPeriod: { $ref: '#/components/schemas/Period' }
@@ -6117,9 +7206,17 @@ components:
           type: array
           items: { $ref: '#/components/schemas/Booking' }
         unreadNotificationCount: { type: integer, format: int64 }
+        planningEnabled: { type: boolean }
+        openPlanningActionCount:
+          type: integer
+          minimum: 0
+          description: Visible unanswered attendance-poll actions currently required from the authenticated membership.
+        nextPlanningEvent:
+          $ref: '#/components/schemas/DashboardPlanningEventSummary'
+          description: Next visible event for the authenticated membership; omitted when no future event is available.
         groupOutstandingMinor:
           $ref: '#/components/schemas/MinorUnits'
-          description: Signed complete-ledger net receivable across all member accounts; omitted without VIEW_GROUP_STATISTICS. Positive values are owed to the group and negative values are member credit.
+          description: Signed complete-ledger net receivable across all member accounts; omitted unless statistics are enabled and VIEW_STATISTICS is effective. Positive values are owed to the group and negative values are member credit.
     PaymentCommand:
       type: object
       additionalProperties: false
@@ -6255,7 +7352,7 @@ components:
         groupId: { type: string }
         type:
           type: string
-          enum: [BOOKING_ASSIGNED, BOOKING_REVERSED, PAYMENT_RECORDED, PAYMENT_REVERSED, SETTLEMENT_CREATED, SETTLEMENT_DUE_SOON, SETTLEMENT_OVERDUE, DATA_EXPORT_READY, DATA_EXPORT_FAILED]
+          enum: [BOOKING_ASSIGNED, BOOKING_REVERSED, PAYMENT_RECORDED, PAYMENT_REVERSED, SETTLEMENT_CREATED, SETTLEMENT_DUE_SOON, SETTLEMENT_OVERDUE, PLANNING_EVENT_PUBLISHED, PLANNING_EVENT_UPDATED, PLANNING_EVENT_CANCELLED, PLANNING_WAITLIST_PROMOTED, PLANNING_SERIES_PUBLISHED, PLANNING_SERIES_UPDATED, PLANNING_SERIES_CANCELLED, DATA_EXPORT_READY, DATA_EXPORT_FAILED]
         title: { type: string }
         body: { type: string }
         resourceType: { type: string }
@@ -6276,6 +7373,12 @@ components:
         dueAt: { type: string, format: date }
         exportId: { type: string }
         exportScope: { $ref: '#/components/schemas/DataExportScope' }
+        planningEventId: { type: string }
+        planningEventTitle: { type: string }
+        planningSeriesId: { type: string }
+        planningSeriesTitle: { type: string }
+        planningStartsAt: { type: string, format: date-time }
+        planningStatus: { type: string }
     NotificationSummary:
       type: object
       additionalProperties: false

@@ -18,7 +18,7 @@ const session: Session = {
   activeGroupId: 'group-a',
   defaultGroupId: null,
   colorMode: 'SYSTEM',
-  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', defaultTheme: 'TEAMTALER', membership: { id: 'member-a', roles: ['ADMIN'], groupPermissions: [], themeOverride: null } }],
+  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', defaultTheme: 'TEAMTALER', statisticsEnabled: false, membership: { id: 'member-a', roles: ['ADMIN'], groupPermissions: [], themeOverride: null } }],
   systemRoles: [],
   user: { id: 'user-a', displayName: 'Ada Admin', email: 'ada@example.test' },
 };

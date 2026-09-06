@@ -29,8 +29,8 @@ func TestMemberManagementSeparatesGroupMembershipAndRoleResponsibilities(t *test
 	if _, err := f.groups.ListRoles(f.ctx, groupMember); err != nil {
 		t.Fatalf("group manager lists default-role candidates: %v", err)
 	}
-	notificationEmails := true
-	if _, err := f.groups.UpdateSettings(f.ctx, groupPrincipal, groupMember, groups.SettingsUpdate{NotificationEmailsEnabled: &notificationEmails}); err != nil {
+	dueSoonDays := 5
+	if _, err := f.groups.UpdateSettings(f.ctx, groupPrincipal, groupMember, groups.SettingsUpdate{SettlementDueSoonDays: &dueSoonDays}); err != nil {
 		t.Fatalf("group manager updates configuration: %v", err)
 	}
 	if _, err := f.groups.CreateInvitationWithRoles(f.ctx, groupPrincipal, groupMember, "blocked-member@example.test", "Blocked", []string{authorization.TemplateRoleID(f.group.ID, domain.RoleTemplateMember)}); !errors.Is(err, domain.ErrForbidden) {
@@ -64,12 +64,12 @@ func TestMemberManagementSeparatesGroupMembershipAndRoleResponsibilities(t *test
 	if _, err := f.groups.UpdateSettings(f.ctx, memberPrincipal, memberManager, groups.SettingsUpdate{DefaultRoleID: &defaultRoleID}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("member manager default role error=%v, want forbidden", err)
 	}
-	notificationEmails = false
-	if _, err := f.groups.UpdateSettings(f.ctx, memberPrincipal, memberManager, groups.SettingsUpdate{NotificationEmailsEnabled: &notificationEmails}); !errors.Is(err, domain.ErrForbidden) {
+	dueSoonDays = 3
+	if _, err := f.groups.UpdateSettings(f.ctx, memberPrincipal, memberManager, groups.SettingsUpdate{SettlementDueSoonDays: &dueSoonDays}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("member manager group configuration error=%v, want forbidden", err)
 	}
 	mixedDefaultRoleID := authorization.TemplateRoleID(f.group.ID, domain.RoleTemplateMember)
-	mixedUpdate := groups.SettingsUpdate{DefaultRoleID: &mixedDefaultRoleID, NotificationEmailsEnabled: &notificationEmails}
+	mixedUpdate := groups.SettingsUpdate{DefaultRoleID: &mixedDefaultRoleID, SettlementDueSoonDays: &dueSoonDays}
 	if _, err := f.groups.UpdateSettings(f.ctx, groupPrincipal, groupMember, mixedUpdate); err != nil {
 		t.Fatalf("group manager mixed settings update: %v", err)
 	}

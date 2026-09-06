@@ -76,7 +76,7 @@ func (w *ReminderWorker) Run(ctx context.Context) error {
 }
 
 // ProcessDue creates at most one catch-up reminder per outstanding statement at
-// now. It uses each group's IANA time zone and 09:00 local schedule, re-checks
+// now. It uses the installation-wide IANA time zone and 09:00 local schedule, re-checks
 // current outstanding amounts transactionally, and returns the created count.
 // Invalid persisted dates or time zones and database failures are returned.
 func (w *ReminderWorker) ProcessDue(ctx context.Context, now time.Time) (int, error) {
@@ -96,9 +96,6 @@ func (w *ReminderWorker) ProcessDue(ctx context.Context, now time.Time) (int, er
 		WHERE period.due_at IS NOT NULL AND period.due_at<=?
 		  AND membership.status='ACTIVE' AND membership.deleted_at IS NULL
 		  AND user.active=1 AND group_row.status='ACTIVE'
-		  AND EXISTS(SELECT 1 FROM group_notification_events event
-		      WHERE event.group_id=statement.group_id
-		        AND event.event_type IN ('SETTLEMENT_DUE_SOON','SETTLEMENT_OVERDUE'))
 		ORDER BY period.due_at,statement.id`, horizon)
 	if err != nil {
 		return 0, err
@@ -139,8 +136,6 @@ type reminderStatement struct {
 	currency, timezone        string
 	dueSoonDays, repeatDays   int
 	amountDue                 int64
-	dueSoonEnabled            bool
-	overdueEnabled            bool
 }
 
 func (w *ReminderWorker) processStatementTx(ctx context.Context, tx *sql.Tx, statementID string, now time.Time) (bool, error) {
@@ -154,15 +149,19 @@ func (w *ReminderWorker) processStatementTx(ctx context.Context, tx *sql.Tx, sta
 	if item.amountDue <= 0 {
 		return false, nil
 	}
+	item.timezone, err = w.notifications.timeZone(ctx, tx)
+	if err != nil {
+		return false, fmt.Errorf("resolve installation time zone: %w", err)
+	}
 	location, err := time.LoadLocation(item.timezone)
 	if err != nil {
-		return false, fmt.Errorf("load group time zone: %w", err)
+		return false, fmt.Errorf("load installation time zone: %w", err)
 	}
 	dueDate, err := time.ParseInLocation("2006-01-02", item.dueAt, location)
 	if err != nil {
 		return false, fmt.Errorf("parse settlement due date: %w", err)
 	}
-	eventType, occurrenceDate, scheduled := reminderOccurrence(now.In(location), dueDate, item.dueSoonDays, item.repeatDays, item.dueSoonEnabled, item.overdueEnabled)
+	eventType, occurrenceDate, scheduled := reminderOccurrence(now.In(location), dueDate, item.dueSoonDays, item.repeatDays)
 	if !scheduled {
 		return false, nil
 	}
@@ -210,31 +209,29 @@ func (w *ReminderWorker) processStatementTx(ctx context.Context, tx *sql.Tx, sta
 func loadReminderStatement(ctx context.Context, tx *sql.Tx, statementID string) (reminderStatement, error) {
 	var item reminderStatement
 	err := tx.QueryRowContext(ctx, `SELECT statement.id,statement.group_id,statement.membership_id,period.label,period.due_at,
-		group_row.currency,settings.timezone,settings.settlement_due_soon_days,settings.settlement_overdue_repeat_days,
+		group_row.currency,settings.settlement_due_soon_days,settings.settlement_overdue_repeat_days,
 		statement.charges_minor
 		  + coalesce((SELECT sum(adjustment.amount_minor) FROM period_adjustment_allocations adjustment WHERE adjustment.source_period_id=statement.period_id AND adjustment.membership_id=statement.membership_id),0)
 		  - coalesce((SELECT sum(allocation.amount_minor) FROM payment_allocations allocation JOIN payments payment ON payment.id=allocation.payment_id WHERE allocation.period_id=statement.period_id AND payment.membership_id=statement.membership_id AND payment.reversed_at IS NULL),0)
-		  - coalesce((SELECT sum(adjustment.amount_minor) FROM period_adjustment_allocations adjustment WHERE adjustment.target_period_id=statement.period_id AND adjustment.membership_id=statement.membership_id),0),
-		EXISTS(SELECT 1 FROM group_notification_events event WHERE event.group_id=statement.group_id AND event.event_type='SETTLEMENT_DUE_SOON'),
-		EXISTS(SELECT 1 FROM group_notification_events event WHERE event.group_id=statement.group_id AND event.event_type='SETTLEMENT_OVERDUE')
+		  - coalesce((SELECT sum(adjustment.amount_minor) FROM period_adjustment_allocations adjustment WHERE adjustment.target_period_id=statement.period_id AND adjustment.membership_id=statement.membership_id),0)
 		FROM period_statements statement
 		JOIN periods period ON period.id=statement.period_id AND period.group_id=statement.group_id
 		JOIN groups group_row ON group_row.id=statement.group_id AND group_row.status='ACTIVE'
-		JOIN group_notification_settings settings ON settings.group_id=statement.group_id
+		JOIN group_settings settings ON settings.group_id=statement.group_id
 		JOIN memberships membership ON membership.id=statement.membership_id AND membership.group_id=statement.group_id
 		JOIN users user ON user.id=membership.user_id
 		WHERE statement.id=? AND period.due_at IS NOT NULL AND membership.status='ACTIVE'
 		  AND membership.deleted_at IS NULL AND user.active=1`, statementID).
-		Scan(&item.id, &item.groupID, &item.membershipID, &item.periodLabel, &item.dueAt, &item.currency, &item.timezone,
-			&item.dueSoonDays, &item.repeatDays, &item.amountDue, &item.dueSoonEnabled, &item.overdueEnabled)
+		Scan(&item.id, &item.groupID, &item.membershipID, &item.periodLabel, &item.dueAt, &item.currency,
+			&item.dueSoonDays, &item.repeatDays, &item.amountDue)
 	return item, err
 }
 
-func reminderOccurrence(now, dueDate time.Time, dueSoonDays, repeatDays int, dueSoonEnabled, overdueEnabled bool) (EventType, string, bool) {
+func reminderOccurrence(now, dueDate time.Time, dueSoonDays, repeatDays int) (EventType, string, bool) {
 	today := dateOnly(now)
 	due := dateOnly(dueDate)
 	firstOverdue := due.AddDate(0, 0, 1)
-	if overdueEnabled && !today.Before(firstOverdue) {
+	if !today.Before(firstOverdue) {
 		occurrence := firstOverdue
 		if repeatDays > 0 {
 			elapsed := calendarDaysBetween(firstOverdue, today)
@@ -251,7 +248,7 @@ func reminderOccurrence(now, dueDate time.Time, dueSoonDays, repeatDays int, due
 		}
 	}
 	dueSoon := due.AddDate(0, 0, -dueSoonDays)
-	if dueSoonEnabled && !today.Before(dueSoon) && !today.After(due) && !now.Before(atNineLocal(dueSoon)) {
+	if !today.Before(dueSoon) && !today.After(due) && !now.Before(atNineLocal(dueSoon)) {
 		return TypeSettlementDueSoon, dueSoon.Format("2006-01-02"), true
 	}
 	return "", "", false

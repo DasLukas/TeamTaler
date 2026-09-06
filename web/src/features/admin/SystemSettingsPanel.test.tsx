@@ -9,6 +9,9 @@ import { SystemSettingsPanel } from './SystemSettingsPanel';
 
 const apiMock = vi.hoisted(() => ({
   getSystemSettings: vi.fn(),
+  getSystemLegalDocuments: vi.fn(),
+  updateSystemLegalDocuments: vi.fn(),
+  resetSystemLegalDocuments: vi.fn(),
   updateSystemSettings: vi.fn(),
   resetSystemSettings: vi.fn(),
   updateSystemSmtp: vi.fn(),
@@ -32,6 +35,7 @@ const apiMock = vi.hoisted(() => ({
 }));
 
 vi.mock('@/api/client', () => ({ api: apiMock }));
+vi.mock('@tanstack/react-router', () => ({ Link: ({ children, to, ...props }: { children: ReactNode; to: string }) => <a href={to} {...props}>{children}</a> }));
 vi.mock('@/app/useSession', () => ({ useSession: () => ({ user: { id: 'system-user' } }) }));
 vi.mock('@/features/push/webPush', () => ({ currentWebPushDeviceId: () => 'device-a' }));
 
@@ -41,6 +45,7 @@ const settings: SystemSettings = {
   revision: 4,
   instanceName: value('TeamTaler'),
   defaultCurrency: value('EUR'),
+  timeZone: value('Europe/Berlin'),
   mediaUploadMaxBytes: value(5 * 1024 * 1024),
   mediaUploadHardLimitBytes: 25 * 1024 * 1024,
   attachmentUploadMaxBytes: value(15 * 1024 * 1024),
@@ -84,6 +89,13 @@ const settings: SystemSettings = {
   updatedByUserId: 'system-user',
 };
 
+const legalDocuments = {
+  revision: 1,
+  imprint: { content: '# Operator\n\nHost operator', source: 'FILE' as const, configured: true, updatedAt: '2026-08-15T10:00:00Z' },
+  privacyPolicy: { content: '# Controller\n\nHost controller', source: 'FILE' as const, configured: true, updatedAt: '2026-08-15T10:00:00Z' },
+  updatedAt: '2026-08-15T10:00:00Z',
+};
+
 const archivedGroup = {
   id: 'group-a',
   name: 'Group A',
@@ -124,6 +136,9 @@ describe('SystemSettingsPanel', () => {
     vi.clearAllMocks();
     window.history.replaceState({}, '', '/system');
     apiMock.getSystemSettings.mockResolvedValue(settings);
+    apiMock.getSystemLegalDocuments.mockResolvedValue(legalDocuments);
+    apiMock.updateSystemLegalDocuments.mockResolvedValue({ ...legalDocuments, revision: 2, imprint: { ...legalDocuments.imprint, source: 'DATABASE', overrideVersion: 1 } });
+    apiMock.resetSystemLegalDocuments.mockResolvedValue({ ...legalDocuments, revision: 2 });
     apiMock.updateSystemSettings.mockResolvedValue(settings);
     apiMock.resetSystemSettings.mockResolvedValue(settings);
     apiMock.updateSystemSmtp.mockResolvedValue(settings);
@@ -150,10 +165,10 @@ describe('SystemSettingsPanel', () => {
     });
   });
 
-  it('loads all six instance-administration areas in parallel', async () => {
+  it('loads all seven instance-administration areas in parallel', async () => {
     renderPanel();
 
-    for (const name of ['Allgemein', 'E-Mail', 'Push-Benachrichtigungen', 'Zugriff und Wartung', 'Gruppenverwaltung', 'Systemaktivität']) {
+    for (const name of ['Allgemein', 'Rechtliche Inhalte', 'E-Mail', 'Push-Benachrichtigungen', 'Zugriff und Wartung', 'Gruppenverwaltung', 'Systemaktivität']) {
       expect(await screen.findByRole('heading', { name })).toBeVisible();
     }
     expect(screen.getByText(i18n.t('systemSettings.smtp.intro'))).toBeVisible();
@@ -166,8 +181,10 @@ describe('SystemSettingsPanel', () => {
     expect(within(groupCard).queryByText(/EUR/)).not.toBeInTheDocument();
     expect(screen.queryByText('Lege die Identität und die Standardwerte dieser TeamTaler-Instanz fest.')).not.toBeInTheDocument();
     expect(screen.queryByText('Bestehende Konten werden direkt zugewiesen; neue Adressen erhalten eine Einladung.')).not.toBeInTheDocument();
-    expect(screen.queryByText(/Quelle:/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Geändert:/)).not.toBeInTheDocument();
+    const generalSection = screen.getByRole('heading', { name: 'Allgemein' }).closest('section');
+    if (!generalSection) throw new Error('Missing general settings section.');
+    expect(within(generalSection).queryByText(/Quelle:/)).not.toBeInTheDocument();
+    expect(within(generalSection).queryByText(/Geändert:/)).not.toBeInTheDocument();
   });
 
   it('requires explicit confirmation before generating VAPID key material', async () => {
@@ -179,6 +196,21 @@ describe('SystemSettingsPanel', () => {
     await user.click(within(dialog).getByRole('button', { name: i18n.t('systemSettings.webPush.generateKey') }));
 
     await waitFor(() => expect(apiMock.generateSystemWebPushKey).toHaveBeenCalledWith(4));
+  });
+
+  it('persists an edited imprint as a versioned database override', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    const heading = await screen.findByRole('heading', { name: i18n.t('systemSettings.legal.imprint.title') });
+    const editor = heading.closest('article');
+    if (!editor) throw new Error('Missing imprint editor.');
+    const input = within(editor).getByRole('textbox');
+    await user.clear(input);
+    await user.type(input, '# Operator\n\nDatabase operator');
+    await user.click(within(editor).getByRole('button', { name: i18n.t('common.save') }));
+
+    await waitFor(() => expect(apiMock.updateSystemLegalDocuments).toHaveBeenCalledWith({ imprint: '# Operator\n\nDatabase operator' }, 1));
   });
 
   it('renders active Web Push details as three accessible status rows', async () => {
@@ -321,12 +353,25 @@ describe('SystemSettingsPanel', () => {
     await waitFor(() => expect(apiMock.updateSystemSettings).toHaveBeenCalledWith({ instanceName: 'Club Cloud' }, 4));
   });
 
+  it('persists the installation time zone from general system settings', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    const section = (await screen.findByRole('heading', { name: 'Allgemein' })).closest('section');
+    if (!section) throw new Error('Missing general settings section.');
+
+    await user.selectOptions(within(section).getByLabelText('Zentrale Zeitzone'), 'America/New_York');
+    await user.click(within(section).getByRole('button', { name: 'Speichern' }));
+
+    await waitFor(() => expect(apiMock.updateSystemSettings).toHaveBeenCalledWith({ timeZone: 'America/New_York' }, 4));
+  });
+
   it('places one confirmed reset action directly before save in every settings section', async () => {
     const user = userEvent.setup();
     const overriddenSettings: SystemSettings = {
       ...settings,
       instanceName: value('Club Cloud', 'DATABASE'),
       defaultCurrency: value('USD', 'DATABASE'),
+      timeZone: value('America/New_York', 'DATABASE'),
       mediaUploadMaxBytes: value(12 * 1024 * 1024, 'DATABASE'),
       publicJoinEnabled: value(false, 'DATABASE'),
       maintenanceMode: value(true, 'DATABASE'),
@@ -360,7 +405,7 @@ describe('SystemSettingsPanel', () => {
     await user.click(within(screen.getByRole('dialog', { name: 'Allgemein zurücksetzen?' })).getByRole('button', { name: 'Zurücksetzen' }));
 
     await waitFor(() => expect(apiMock.resetSystemSettings).toHaveBeenCalledWith(
-      ['instanceName', 'defaultCurrency', 'mediaUploadMaxBytes'],
+      ['instanceName', 'defaultCurrency', 'timeZone', 'mediaUploadMaxBytes'],
       4,
     ));
     expect(within(generalSection).getByLabelText('Instanzname')).toHaveValue('TeamTaler');

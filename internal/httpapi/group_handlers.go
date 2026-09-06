@@ -3,8 +3,10 @@ package httpapi
 import (
 	"bytes"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -14,6 +16,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/finance"
 	"github.com/DasLukas/TeamTaler/internal/groups"
+	"github.com/DasLukas/TeamTaler/internal/platform"
 )
 
 type paymentMethodUpdateRequest struct {
@@ -136,23 +139,23 @@ func (s *Server) handleGetGroupSettings(response http.ResponseWriter, request *h
 		writeProblem(response, request, err)
 		return
 	}
-	runtimeSettings, _ := effectiveSystemSettings(request)
 	writeJSON(response, http.StatusOK, map[string]any{
-		"defaultTheme":                       settings.DefaultTheme,
-		"notificationEmailsEnabled":          settings.NotificationEmailsEnabled,
-		"notificationEmailDeliveryAvailable": runtimeSettings.SMTP.Active,
-		"settlementsEnabled":                 settings.SettlementsEnabled,
-		"defaultRoleId":                      settings.DefaultRoleID,
-		"ownBookingReasonMode":               settings.OwnBookingReasonMode,
-		"foreignBookingReasonMode":           settings.ForeignBookingReasonMode,
-		"ownPaymentReasonMode":               settings.OwnPaymentReasonMode,
-		"otherPaymentReasonMode":             settings.OtherPaymentReasonMode,
-		"foreignBookingReasonRequired":       settings.ForeignBookingReasonRequired,
-		"ownPaymentReasonRequired":           settings.OwnPaymentReasonRequired,
-		"otherPaymentReasonRequired":         settings.OtherPaymentReasonRequired,
-		"paymentMethods":                     settings.PaymentMethods,
-		"bookingReasons":                     settings.BookingReasons,
-		"paymentReasons":                     settings.PaymentReasons,
+		"defaultTheme":                 settings.DefaultTheme,
+		"statisticsEnabled":            settings.StatisticsEnabled,
+		"settlementsEnabled":           settings.SettlementsEnabled,
+		"settlementDueSoonDays":        settings.SettlementDueSoonDays,
+		"settlementOverdueRepeatDays":  settings.SettlementOverdueRepeatDays,
+		"defaultRoleId":                settings.DefaultRoleID,
+		"ownBookingReasonMode":         settings.OwnBookingReasonMode,
+		"foreignBookingReasonMode":     settings.ForeignBookingReasonMode,
+		"ownPaymentReasonMode":         settings.OwnPaymentReasonMode,
+		"otherPaymentReasonMode":       settings.OtherPaymentReasonMode,
+		"foreignBookingReasonRequired": settings.ForeignBookingReasonRequired,
+		"ownPaymentReasonRequired":     settings.OwnPaymentReasonRequired,
+		"otherPaymentReasonRequired":   settings.OtherPaymentReasonRequired,
+		"paymentMethods":               settings.PaymentMethods,
+		"bookingReasons":               settings.BookingReasons,
+		"paymentReasons":               settings.PaymentReasons,
 	})
 }
 
@@ -184,8 +187,10 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 	}
 	var input struct {
 		DefaultTheme                 *domain.ThemeID               `json:"defaultTheme"`
-		NotificationEmailsEnabled    *bool                         `json:"notificationEmailsEnabled"`
+		StatisticsEnabled            *bool                         `json:"statisticsEnabled"`
 		SettlementsEnabled           *bool                         `json:"settlementsEnabled"`
+		SettlementDueSoonDays        *int                          `json:"settlementDueSoonDays"`
+		SettlementOverdueRepeatDays  *int                          `json:"settlementOverdueRepeatDays"`
 		DefaultRoleID                *string                       `json:"defaultRoleId"`
 		OwnBookingReasonMode         *domain.ReasonMode            `json:"ownBookingReasonMode"`
 		ForeignBookingReasonMode     *domain.ReasonMode            `json:"foreignBookingReasonMode"`
@@ -202,17 +207,12 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		writeProblem(response, request, err)
 		return
 	}
-	if input.DefaultTheme == nil && input.NotificationEmailsEnabled == nil && input.SettlementsEnabled == nil && input.DefaultRoleID == nil &&
+	if input.DefaultTheme == nil && input.StatisticsEnabled == nil && input.SettlementsEnabled == nil && input.SettlementDueSoonDays == nil && input.SettlementOverdueRepeatDays == nil && input.DefaultRoleID == nil &&
 		input.OwnBookingReasonMode == nil && input.ForeignBookingReasonMode == nil && input.OwnPaymentReasonMode == nil && input.OtherPaymentReasonMode == nil &&
 		input.ForeignBookingReasonRequired == nil &&
 		input.OwnPaymentReasonRequired == nil && input.OtherPaymentReasonRequired == nil && input.PaymentMethods == nil &&
 		input.BookingReasons == nil && input.PaymentReasons == nil {
 		writeProblem(response, request, domain.ValidationError{Field: "settings", Message: "must contain at least one supported field"})
-		return
-	}
-	runtimeSettings, _ := effectiveSystemSettings(request)
-	if input.NotificationEmailsEnabled != nil && *input.NotificationEmailsEnabled && !runtimeSettings.SMTP.Active {
-		writeProblem(response, request, domain.ValidationError{Field: "notificationEmailsEnabled", Message: "requires configured SMTP delivery"})
 		return
 	}
 	var paymentMethods *[]domain.PaymentMethod
@@ -233,8 +233,10 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 	}
 	settings, err := s.groups.UpdateSettings(request.Context(), principal, membership, groups.SettingsUpdate{
 		DefaultTheme:                 input.DefaultTheme,
-		NotificationEmailsEnabled:    input.NotificationEmailsEnabled,
+		StatisticsEnabled:            input.StatisticsEnabled,
 		SettlementsEnabled:           input.SettlementsEnabled,
+		SettlementDueSoonDays:        input.SettlementDueSoonDays,
+		SettlementOverdueRepeatDays:  input.SettlementOverdueRepeatDays,
 		DefaultRoleID:                input.DefaultRoleID,
 		OwnBookingReasonMode:         input.OwnBookingReasonMode,
 		ForeignBookingReasonMode:     input.ForeignBookingReasonMode,
@@ -253,21 +255,22 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		return
 	}
 	writeJSON(response, http.StatusOK, map[string]any{
-		"defaultTheme":                       settings.DefaultTheme,
-		"notificationEmailsEnabled":          settings.NotificationEmailsEnabled,
-		"notificationEmailDeliveryAvailable": runtimeSettings.SMTP.Active,
-		"settlementsEnabled":                 settings.SettlementsEnabled,
-		"defaultRoleId":                      settings.DefaultRoleID,
-		"ownBookingReasonMode":               settings.OwnBookingReasonMode,
-		"foreignBookingReasonMode":           settings.ForeignBookingReasonMode,
-		"ownPaymentReasonMode":               settings.OwnPaymentReasonMode,
-		"otherPaymentReasonMode":             settings.OtherPaymentReasonMode,
-		"foreignBookingReasonRequired":       settings.ForeignBookingReasonRequired,
-		"ownPaymentReasonRequired":           settings.OwnPaymentReasonRequired,
-		"otherPaymentReasonRequired":         settings.OtherPaymentReasonRequired,
-		"paymentMethods":                     settings.PaymentMethods,
-		"bookingReasons":                     settings.BookingReasons,
-		"paymentReasons":                     settings.PaymentReasons,
+		"defaultTheme":                 settings.DefaultTheme,
+		"statisticsEnabled":            settings.StatisticsEnabled,
+		"settlementsEnabled":           settings.SettlementsEnabled,
+		"settlementDueSoonDays":        settings.SettlementDueSoonDays,
+		"settlementOverdueRepeatDays":  settings.SettlementOverdueRepeatDays,
+		"defaultRoleId":                settings.DefaultRoleID,
+		"ownBookingReasonMode":         settings.OwnBookingReasonMode,
+		"foreignBookingReasonMode":     settings.ForeignBookingReasonMode,
+		"ownPaymentReasonMode":         settings.OwnPaymentReasonMode,
+		"otherPaymentReasonMode":       settings.OtherPaymentReasonMode,
+		"foreignBookingReasonRequired": settings.ForeignBookingReasonRequired,
+		"ownPaymentReasonRequired":     settings.OwnPaymentReasonRequired,
+		"otherPaymentReasonRequired":   settings.OtherPaymentReasonRequired,
+		"paymentMethods":               settings.PaymentMethods,
+		"bookingReasons":               settings.BookingReasons,
+		"paymentReasons":               settings.PaymentReasons,
 	})
 }
 
@@ -583,7 +586,48 @@ func (s *Server) handleDashboard(response http.ResponseWriter, request *http.Req
 		writeProblem(response, request, err)
 		return
 	}
-	dashboard := finance.Dashboard{Account: account, OpenPeriod: openPeriod, RecentBookings: recent, UnreadCount: unread, GroupOutstanding: groupOutstanding}
+	var planningEnabled bool
+	_ = s.db.QueryRowContext(request.Context(), `SELECT enabled FROM group_planning_settings WHERE group_id=?`, membership.GroupID).Scan(&planningEnabled)
+	var nextPlanning *finance.PlanningEventSummary
+	var openPlanningActions int64
+	canUsePlanning, _ := authorization.NewPolicy(s.db).Can(request.Context(), membership.GroupID, membership.ID, domain.PermissionUsePlanning, authorization.GroupResource(membership.GroupID))
+	if planningEnabled && canUsePlanning {
+		nowMicros := platform.Now().UnixMicro()
+		var item finance.PlanningEventSummary
+		var participationStatus string
+		var responseDeadline sql.NullInt64
+		var effectiveEnd int64
+		err := s.db.QueryRowContext(request.Context(), `SELECT event.id,coalesce(event.series_id,''),event.title,event.description,event.location,event.event_type,event.all_day,coalesce(event.timezone,''),coalesce(event.start_date,''),coalesce(event.end_date_exclusive,''),event.starts_at,coalesce(event.ends_at,''),coalesce(event.ends_at_us,event.starts_at_us),event.status,event.response_deadline_us,coalesce(participation.status,'') FROM planning_events event JOIN planning_event_audience audience ON audience.event_id=event.id AND audience.membership_id=? LEFT JOIN planning_participations participation ON participation.event_id=event.id AND participation.membership_id=audience.membership_id WHERE event.group_id=? AND event.status IN ('PUBLISHED','CLOSED') AND ((event.all_day=0 AND event.starts_at_us>=?) OR (event.all_day=1 AND event.ends_at_us>?)) ORDER BY event.starts_at_us,event.id LIMIT 1`, membership.ID, membership.GroupID, nowMicros, nowMicros).Scan(&item.ID, &item.SeriesID, &item.Title, &item.Description, &item.Location, &item.EventType, &item.AllDay, &item.TimeZone, &item.StartDate, &item.EndDateExclusive, &item.StartsAt, &item.EndsAt, &effectiveEnd, &item.Status, &responseDeadline, &participationStatus)
+		if err == nil {
+			if err := s.db.QueryRowContext(request.Context(), `SELECT count(*),
+				coalesce(sum(participation.status='YES'),0),coalesce(sum(participation.status='MAYBE'),0),
+				coalesce(sum(participation.status='NO'),0),coalesce(sum(participation.status='REGISTERED'),0),
+				coalesce(sum(participation.status='WAITLISTED'),0),
+				0
+				FROM planning_event_audience audience
+				JOIN memberships member ON member.id=audience.membership_id AND member.status='ACTIVE' AND member.deleted_at IS NULL
+				JOIN users recipient ON recipient.id=member.user_id AND recipient.active=1 AND recipient.email IS NOT NULL AND recipient.password_hash IS NOT NULL
+				LEFT JOIN planning_participations participation ON participation.event_id=audience.event_id AND participation.membership_id=audience.membership_id
+				WHERE audience.event_id=?`, item.ID).Scan(&item.Counts.Invited, &item.Counts.Yes, &item.Counts.Maybe, &item.Counts.No, &item.Counts.Registered, &item.Counts.Waitlisted, &item.Counts.ReconfirmationRequired); err != nil {
+				writeProblem(response, request, err)
+				return
+			}
+			if item.EventType == "APPOINTMENT_POLL" {
+				item.Counts.Pending = item.Counts.Invited - item.Counts.Yes - item.Counts.Maybe - item.Counts.No
+			}
+			item.MyParticipationStatus = participationStatus
+			item.MyEffectiveStatus = participationStatus
+			deadlineOpen := !responseDeadline.Valid || responseDeadline.Int64 > nowMicros
+			item.CanRespond = item.Status == "PUBLISHED" && item.EventType != "APPOINTMENT" && deadlineOpen && effectiveEnd > nowMicros
+			item.ActionRequired = item.CanRespond && item.EventType == "APPOINTMENT_POLL" && participationStatus == ""
+			nextPlanning = &item
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			writeProblem(response, request, err)
+			return
+		}
+		_ = s.db.QueryRowContext(request.Context(), `SELECT count(*) FROM planning_events event JOIN planning_event_audience audience ON audience.event_id=event.id AND audience.membership_id=? LEFT JOIN planning_participations participation ON participation.event_id=event.id AND participation.membership_id=audience.membership_id WHERE event.group_id=? AND event.status='PUBLISHED' AND event.event_type='APPOINTMENT_POLL' AND participation.membership_id IS NULL AND (event.response_deadline_us IS NULL OR event.response_deadline_us>?) AND coalesce(event.ends_at_us,event.starts_at_us)>?`, membership.ID, membership.GroupID, nowMicros, nowMicros).Scan(&openPlanningActions)
+	}
+	dashboard := finance.Dashboard{Account: account, OpenPeriod: openPeriod, RecentBookings: recent, UnreadCount: unread, GroupOutstanding: groupOutstanding, PlanningEnabled: planningEnabled && canUsePlanning, NextPlanningEvent: nextPlanning, OpenPlanningActionCount: openPlanningActions}
 	writeJSON(response, http.StatusOK, dashboard)
 }
 

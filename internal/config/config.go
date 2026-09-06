@@ -93,6 +93,16 @@ type WebPushConfig struct {
 	VAPIDPrivateKey string
 }
 
+// LegalDocumentsConfig contains trusted host paths for public legal-document
+// fallbacks. The files are read on demand so an atomic host-side replacement is
+// visible without restarting TeamTaler.
+type LegalDocumentsConfig struct {
+	// ImprintFile is the optional UTF-8 Markdown imprint path.
+	ImprintFile string
+	// PrivacyPolicyFile is the optional UTF-8 Markdown privacy-policy path.
+	PrivacyPolicyFile string
+}
+
 // InstanceDefaults contains mutable instance-setting defaults supplied by the
 // process environment. Persisted settings may override these values without a
 // restart, while clearing an override restores the corresponding value here.
@@ -101,6 +111,8 @@ type InstanceDefaults struct {
 	InstanceName string
 	// DefaultCurrency is preselected when a system administrator creates a group.
 	DefaultCurrency string
+	// TimeZone is the installation-wide IANA time zone used by schedules.
+	TimeZone string
 	// MediaUploadMaxBytes limits raw image input before decoding.
 	MediaUploadMaxBytes int64
 	// AttachmentUploadMaxBytes limits payment receipt input before normalization.
@@ -140,6 +152,8 @@ type Config struct {
 	// PushStorageKey is optional decoded 32-byte key material used exclusively
 	// for Web Push configuration and subscription envelopes.
 	PushStorageKey []byte
+	// LegalDocuments contains optional live host-file fallbacks.
+	LegalDocuments LegalDocumentsConfig
 }
 
 // Load reads TEAMTALER_* environment variables and applies secure local defaults.
@@ -209,6 +223,10 @@ func Load() (Config, error) {
 	if webPushConfig.Enabled && len(pushStorageKey) == 0 {
 		return Config{}, fmt.Errorf("TEAMTALER_PUSH_STORAGE_KEY is required when Web Push delivery is enabled")
 	}
+	legalDocuments, err := loadLegalDocumentsConfig()
+	if err != nil {
+		return Config{}, err
+	}
 
 	return Config{
 		ListenAddress:     env("TEAMTALER_LISTEN", "127.0.0.1:8080"),
@@ -226,7 +244,34 @@ func Load() (Config, error) {
 		EmailTokenKey:     emailTokenKey,
 		WebPush:           webPushConfig,
 		PushStorageKey:    pushStorageKey,
+		LegalDocuments:    legalDocuments,
 	}, nil
+}
+
+// loadLegalDocumentsConfig reads optional Markdown document paths. Relative
+// paths are retained relative to the process working directory, matching other
+// path-based TeamTaler configuration.
+func loadLegalDocumentsConfig() (LegalDocumentsConfig, error) {
+	imprintFile, err := cleanOptionalPath("TEAMTALER_IMPRINT_FILE")
+	if err != nil {
+		return LegalDocumentsConfig{}, err
+	}
+	privacyPolicyFile, err := cleanOptionalPath("TEAMTALER_PRIVACY_POLICY_FILE")
+	if err != nil {
+		return LegalDocumentsConfig{}, err
+	}
+	return LegalDocumentsConfig{ImprintFile: imprintFile, PrivacyPolicyFile: privacyPolicyFile}, nil
+}
+
+func cleanOptionalPath(name string) (string, error) {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return "", nil
+	}
+	if strings.ContainsRune(value, '\x00') {
+		return "", fmt.Errorf("%s must be a valid file path", name)
+	}
+	return filepath.Clean(value), nil
 }
 
 func loadInstanceDefaults() (InstanceDefaults, error) {
@@ -237,6 +282,13 @@ func loadInstanceDefaults() (InstanceDefaults, error) {
 	defaultCurrency := strings.ToUpper(env("TEAMTALER_DEFAULT_CURRENCY", "EUR"))
 	if !isCurrencyCode(defaultCurrency) {
 		return InstanceDefaults{}, fmt.Errorf("TEAMTALER_DEFAULT_CURRENCY must be a three-letter uppercase currency code")
+	}
+	timeZone := strings.TrimSpace(env("TEAMTALER_TIMEZONE", "Europe/Berlin"))
+	if timeZone == "" || timeZone == "Local" || len(timeZone) > 120 {
+		return InstanceDefaults{}, fmt.Errorf("TEAMTALER_TIMEZONE must be a valid IANA time zone")
+	}
+	if _, err := time.LoadLocation(timeZone); err != nil {
+		return InstanceDefaults{}, fmt.Errorf("TEAMTALER_TIMEZONE must be a valid IANA time zone")
 	}
 	mediaUploadMaxBytes, err := strconv.ParseInt(env("TEAMTALER_MEDIA_UPLOAD_MAX_BYTES", strconv.FormatInt(DefaultMediaUploadBytes, 10)), 10, 64)
 	if err != nil || mediaUploadMaxBytes < MinimumMediaUploadBytes || mediaUploadMaxBytes > MaximumMediaUploadBytes || mediaUploadMaxBytes%MediaUploadUnitBytes != 0 {
@@ -261,6 +313,7 @@ func loadInstanceDefaults() (InstanceDefaults, error) {
 	return InstanceDefaults{
 		InstanceName:             instanceName,
 		DefaultCurrency:          defaultCurrency,
+		TimeZone:                 timeZone,
 		MediaUploadMaxBytes:      mediaUploadMaxBytes,
 		AttachmentUploadMaxBytes: attachmentUploadMaxBytes,
 		PublicJoinEnabled:        publicJoinEnabled,

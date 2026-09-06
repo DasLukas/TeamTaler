@@ -200,6 +200,7 @@ fi
 
 echo
 echo "TeamTaler-Testserver ist bereit: http://127.0.0.1:5173"
+echo "Planung ist in beiden Gruppen mit Testterminen vor, an und nach dem heutigen Tag aktiviert."
 echo
 printf '| Gruppe | Nutzer | Passwort |\n'
 printf '|---|---|---|\n'

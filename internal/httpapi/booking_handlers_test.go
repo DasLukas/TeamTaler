@@ -83,7 +83,7 @@ func TestBookingBulkRouteCreatesMultiProductCart(t *testing.T) {
 		PublicURL:       publicURL,
 		SessionLifetime: 24 * time.Hour,
 		MaxRequestBytes: 1 << 20,
-	}, db, logger)
+	}, db, NewBuildInformation("test", "booking-handlers"), logger)
 	request := httptest.NewRequest(http.MethodPost, publicURL.String()+"/api/v1/groups/"+group.ID+"/bookings/bulk", bytes.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Idempotency-Key", "bulk-route-request-one")

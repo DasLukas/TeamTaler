@@ -42,7 +42,7 @@ const importResult: InvitationImportResult = {
 function session(userId: string): Session {
   return {
     user: { id: userId, displayName: userId, email: `${userId}@example.test` },
-    groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', defaultTheme: 'TEAMTALER', membership: { id: `member-${userId}`, roles: ['MEMBER'], groupPermissions: [], themeOverride: null } }],
+    groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', defaultTheme: 'TEAMTALER', statisticsEnabled: false, membership: { id: `member-${userId}`, roles: ['MEMBER'], groupPermissions: [], themeOverride: null } }],
     activeGroupId: 'group-a',
     defaultGroupId: null,
     colorMode: 'SYSTEM',
@@ -79,6 +79,120 @@ describe('high-risk API idempotency', () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
+  it('creates and publishes a planning event as one idempotent command', async () => {
+    const response = {
+      id: 'event-a', eventType: 'APPOINTMENT', status: 'PUBLISHED', title: 'Shift meal', startsAt: '2026-09-01T12:00:00Z',
+      audienceType: 'SELECTED_ROLES', targetRoleIds: ['role-cook'], targetMembershipIds: [], confirmationRevision: 1, version: 1,
+      counts: { invited: 2, yes: 0, maybe: 0, no: 0, pending: 0, registered: 0, waitlisted: 0, reconfirmationRequired: 0 },
+      canEdit: true, canCancel: true, canRespond: false, canViewParticipants: true,
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(session('user-a')))
+      .mockResolvedValueOnce(jsonResponse(response, 201));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.getSession();
+    await api.createPlanningEvent('group-a', {
+      eventType: 'APPOINTMENT', title: 'Shift meal', startsAt: '2026-09-01T12:00:00Z',
+      audience: { type: 'SELECTED_ROLES', roleIds: ['role-cook'], memberIds: [] },
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const call = fetchMock.mock.calls[1];
+    expect(call[0]).toBe('/api/v1/groups/group-a/planning/events');
+    expect(idempotencyKey(call)).toBeTruthy();
+    expect(requestBody(call)).toMatchObject({
+      eventType: 'APPOINTMENT', title: 'Shift meal', audienceType: 'SELECTED_ROLES', targetRoleIds: ['role-cook'],
+    });
+    expect(requestBody(call)).not.toHaveProperty('publish');
+    expect(requestBody(call)).not.toHaveProperty('saveTemplate');
+  });
+
+  it('serializes all-day planning commands without timestamp fields', async () => {
+    const response = {
+      id: 'event-all-day', eventType: 'APPOINTMENT', status: 'PUBLISHED', title: 'Team weekend', allDay: true, startDate: '2026-09-05', endDateExclusive: '2026-09-08', timeZone: 'Europe/Berlin', startsAt: '2026-09-04T22:00:00Z', endsAt: '2026-09-07T22:00:00Z',
+      audienceType: 'ALL_ACTIVE_MEMBERS', targetRoleIds: [], targetMembershipIds: [], confirmationRevision: 1, version: 1,
+      counts: { invited: 2, yes: 0, maybe: 0, no: 0, pending: 0, registered: 0, waitlisted: 0, reconfirmationRequired: 0 },
+      canEdit: true, canCancel: true, canRespond: false, canViewParticipants: true,
+    };
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(response, 201));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const event = await api.createPlanningEvent('group-a', {
+      eventType: 'APPOINTMENT', title: 'Team weekend', allDay: true, startDate: '2026-09-05', endDateExclusive: '2026-09-08',
+      audience: { type: 'ALL_ACTIVE_MEMBERS', roleIds: [], memberIds: [] },
+    });
+
+    expect(event).toMatchObject({ allDay: true, startDate: '2026-09-05', endDateExclusive: '2026-09-08' });
+    expect(requestBody(fetchMock.mock.calls[0])).toMatchObject({ allDay: true, startDate: '2026-09-05', endDateExclusive: '2026-09-08' });
+    expect(requestBody(fetchMock.mock.calls[0])).not.toHaveProperty('startsAt');
+    expect(requestBody(fetchMock.mock.calls[0])).not.toHaveProperty('endsAt');
+  });
+
+  it('serializes both instant and civil planning event range boundaries', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse([]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.getPlanningEvents('group-a', {
+      from: '2026-08-30T22:00:00.000Z',
+      fromDate: '2026-08-31',
+      to: '2026-09-06T22:00:00.000Z',
+      toDateExclusive: '2026-09-07',
+      limit: 200,
+    });
+
+    const url = new URL(String(fetchMock.mock.calls[0][0]), 'https://teamtaler.example');
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({
+      from: '2026-08-30T22:00:00.000Z',
+      fromDate: '2026-08-31',
+      to: '2026-09-06T22:00:00.000Z',
+      toDateExclusive: '2026-09-07',
+      limit: '200',
+    });
+  });
+
+  it('creates a structured planning series without accepting raw recurrence text', async () => {
+    const occurrence = {
+      id: 'event-a', eventType: 'APPOINTMENT_POLL', status: 'PUBLISHED', title: 'Lunch', startsAt: '2026-09-01T10:00:00Z', seriesId: 'series-a', originalStartAt: '2026-09-01T10:00:00Z',
+      audienceType: 'ALL_ACTIVE_MEMBERS', targetRoleIds: [], targetMembershipIds: [], confirmationRevision: 1, version: 1,
+      counts: { invited: 2, yes: 0, maybe: 0, no: 0, pending: 2, registered: 0, waitlisted: 0, reconfirmationRequired: 0 },
+    };
+    const series = { id: 'series-a', version: 1, status: 'PUBLISHED', timeZone: 'Europe/Berlin', eventType: 'APPOINTMENT_POLL', title: 'Lunch', durationMinutes: 60, audienceType: 'ALL_ACTIVE_MEMBERS', recurrence: { frequency: 'WEEKLY', interval: 1, weekdays: ['MO', 'WE', 'FR'], range: { type: 'NEVER' } } };
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ series, firstOccurrence: occurrence }, 201));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await api.createPlanningSeries('group-a', {
+      eventType: 'APPOINTMENT_POLL', title: 'Lunch', startsAt: '2026-09-01T10:00:00Z', responseDeadlineMinutesBefore: 180,
+      audience: { type: 'ALL_ACTIVE_MEMBERS', roleIds: [], memberIds: [] },
+      recurrence: { frequency: 'WEEKLY', interval: 1, weekdays: ['MO', 'WE', 'FR'], range: { type: 'NEVER' } },
+    });
+
+    expect(result.series.id).toBe('series-a');
+    expect(result.firstOccurrence?.seriesId).toBe('series-a');
+    expect(requestBody(fetchMock.mock.calls[0])).toMatchObject({
+      audienceType: 'ALL_ACTIVE_MEMBERS', responseDeadlineMinutesBefore: 180,
+      recurrence: { frequency: 'WEEKLY', interval: 1, weekdays: ['MO', 'WE', 'FR'], range: { type: 'NEVER' } },
+    });
+    expect(requestBody(fetchMock.mock.calls[0])).not.toHaveProperty('publish');
+  });
+
+  it('creates an all-day series from calendar dates without timestamp input', async () => {
+    const occurrence = { id: 'event-all-day-series', eventType: 'APPOINTMENT', status: 'PUBLISHED', title: 'Camp', allDay: true, startDate: '2026-09-05', endDateExclusive: '2026-09-08', timeZone: 'Europe/Berlin', startsAt: '2026-09-04T22:00:00Z', endsAt: '2026-09-07T22:00:00Z', seriesId: 'series-all-day', audienceType: 'ALL_ACTIVE_MEMBERS', targetRoleIds: [], targetMembershipIds: [], confirmationRevision: 1, version: 1, counts: {} };
+    const series = { id: 'series-all-day', version: 1, status: 'PUBLISHED', timeZone: 'Europe/Berlin', eventType: 'APPOINTMENT', title: 'Camp', allDay: true, startDate: '2026-09-05', durationDays: 3, audienceType: 'ALL_ACTIVE_MEMBERS', recurrence: { frequency: 'YEARLY', interval: 1, range: { type: 'NEVER' } } };
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ series, firstOccurrence: occurrence }, 201));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.createPlanningSeries('group-a', {
+      eventType: 'APPOINTMENT', title: 'Camp', allDay: true, startDate: '2026-09-05', endDateExclusive: '2026-09-08', audience: { type: 'ALL_ACTIVE_MEMBERS', roleIds: [], memberIds: [] },
+      recurrence: { frequency: 'YEARLY', interval: 1, range: { type: 'NEVER' } },
+    });
+
+    const body = requestBody(fetchMock.mock.calls[0]);
+    expect(body).toMatchObject({ allDay: true, startDate: '2026-09-05', endDateExclusive: '2026-09-08', recurrence: { frequency: 'YEARLY' } });
+    expect(body).not.toHaveProperty('startsAt');
+    expect(body).not.toHaveProperty('endsAt');
+  });
+
   it('persists account color mode and a nullable group theme override through their stable endpoints', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ colorMode: 'DARK' }))
@@ -95,6 +209,24 @@ describe('high-risk API idempotency', () => {
     expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/groups/group-a/theme-preference');
     expect(requestBody(fetchMock.mock.calls[1])).toEqual({ themeOverride: 'TIEF_IM_WESTEN' });
     expect(requestBody(fetchMock.mock.calls[2])).toEqual({ themeOverride: null });
+  });
+
+  it('loads the complete statistics snapshot from one canonical endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      meta: { generatedAt: '2026-08-28T10:00:00Z', timezone: 'Europe/Berlin', preset: 'CUSTOM', fromInclusive: '2026-08-01T00:00:00Z', toExclusive: '2026-08-06T00:00:00Z', bucket: 'DAY', privacyThresholdApplied: false, currentPeriodAvailable: false },
+      members: { memberSnapshot: {}, summary: {}, activity: [], topCategories: {}, topProducts: {} },
+      finance: { currency: 'EUR', receivableSnapshot: {}, flows: {}, series: [], categories: [], overdue: null },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.getStatistics('group-a', { range: 'CUSTOM', from: '2026-08-01', to: '2026-08-05' })).resolves.toMatchObject({
+      meta: { preset: 'CUSTOM' },
+      members: { memberSnapshot: { regularMembers: 0 } },
+      finance: { currency: 'EUR' },
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group-a/statistics?range=CUSTOM&from=2026-08-01&to=2026-08-05');
   });
 
   it('reuses the same key after a lost network response', async () => {
@@ -715,14 +847,14 @@ describe('high-risk API idempotency', () => {
 
   it('reads and updates typed group behavior settings', async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ settlementsEnabled: false, notificationEmailsEnabled: false, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' }))
-      .mockResolvedValueOnce(jsonResponse({ settlementsEnabled: false, notificationEmailsEnabled: true, notificationEmailDeliveryAvailable: true, defaultRoleId: 'role-member' }));
+      .mockResolvedValueOnce(jsonResponse({ settlementsEnabled: false, settlementDueSoonDays: 3, settlementOverdueRepeatDays: 7, defaultRoleId: 'role-member' }))
+      .mockResolvedValueOnce(jsonResponse({ settlementsEnabled: false, settlementDueSoonDays: 5, settlementOverdueRepeatDays: 10, defaultRoleId: 'role-member' }));
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(api.getGroupSettings('group-a')).resolves.toMatchObject({
       settlementsEnabled: false,
-      notificationEmailsEnabled: false,
-      notificationEmailDeliveryAvailable: true,
+      settlementDueSoonDays: 3,
+      settlementOverdueRepeatDays: 7,
       defaultRoleId: 'role-member',
       paymentMethods: [
         { id: 'BANK_TRANSFER', label: 'Überweisung', attachmentMode: 'OFF' },
@@ -732,10 +864,10 @@ describe('high-risk API idempotency', () => {
         { id: 'OTHER', label: 'Sonstige', attachmentMode: 'OPTIONAL' },
       ],
     });
-    await expect(api.updateGroupSettings('group-a', { notificationEmailsEnabled: true })).resolves.toMatchObject({
+    await expect(api.updateGroupSettings('group-a', { settlementDueSoonDays: 5, settlementOverdueRepeatDays: 10 })).resolves.toMatchObject({
       settlementsEnabled: false,
-      notificationEmailsEnabled: true,
-      notificationEmailDeliveryAvailable: true,
+      settlementDueSoonDays: 5,
+      settlementOverdueRepeatDays: 10,
       defaultRoleId: 'role-member',
       paymentMethods: expect.any(Array),
     });
@@ -744,7 +876,7 @@ describe('high-risk API idempotency', () => {
     expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/groups/group-a/settings');
     expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: 'PATCH' });
     expect(new Headers((fetchMock.mock.calls[1][1] as RequestInit).headers).get('If-Match')).toBeNull();
-    expect(requestBody(fetchMock.mock.calls[1])).toEqual({ notificationEmailsEnabled: true });
+    expect(requestBody(fetchMock.mock.calls[1])).toEqual({ settlementDueSoonDays: 5, settlementOverdueRepeatDays: 10 });
   });
 
   it('always sends the assignment version for legacy member-permission updates', async () => {
@@ -1045,12 +1177,23 @@ describe('system-administration API contract', () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ revision: 8 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await api.resetSystemSettings(['instanceName', 'mediaUploadMaxBytes'], 7);
+    await api.resetSystemSettings(['instanceName', 'timeZone', 'mediaUploadMaxBytes'], 7);
 
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/system/settings/reset');
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' });
     expect(new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers).get('If-Match')).toBe('"v7"');
-    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ keys: ['instance.name', 'media.upload_max_bytes'] });
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ keys: ['instance.name', 'instance.timezone', 'media.upload_max_bytes'] });
+  });
+
+  it('updates the installation time zone with the aggregate settings revision', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ revision: 9 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.updateSystemSettings({ timeZone: 'America/New_York' }, 8);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/system/settings');
+    expect(new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers).get('If-Match')).toBe('"v8"');
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ timeZone: 'America/New_York' });
   });
 
   it('uses the TLS-only SMTP PUT and keeps a successful test revision', async () => {
@@ -1142,18 +1285,14 @@ describe('notification preference and push-device API contract', () => {
       availableChannels: ['PUSH'],
       events: [{ type: 'BOOKING_ASSIGNED', enabled: true, email: true, push: true, emailAvailable: false, pushAvailable: true, supportedChannels: ['EMAIL', 'PUSH'] }],
     };
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ version: 2, timezone: 'Europe/Berlin', dueSoonLeadDays: 3, overdueRepeatDays: 7, availableChannels: ['EMAIL'], events: [] }))
-      .mockResolvedValueOnce(jsonResponse(response));
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(response));
     vi.stubGlobal('fetch', fetchMock);
 
-    await api.updateGroupNotificationSettings('group/a', { version: 1, timezone: 'Europe/Berlin', dueSoonLeadDays: 3, overdueRepeatDays: 7, events: [{ eventType: 'BOOKING_ASSIGNED', enabled: true }] });
     await api.updateNotificationPreferences('group/a', { version: 2, events: [{ eventType: 'BOOKING_ASSIGNED', push: true }] });
 
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group%2Fa/notification-settings');
-    expect(new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers).get('If-Match')).toBe('"v1"');
-    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ timezone: 'Europe/Berlin', dueSoonLeadDays: 3, overdueRepeatDays: 7, events: [{ type: 'BOOKING_ASSIGNED', enabled: true }] });
-    expect(requestBody(fetchMock.mock.calls[1])).toEqual({ events: [{ type: 'BOOKING_ASSIGNED', push: true }] });
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group%2Fa/notification-preferences');
+    expect(new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers).get('If-Match')).toBe('"v2"');
+    expect(requestBody(fetchMock.mock.calls[0])).toEqual({ events: [{ type: 'BOOKING_ASSIGNED', push: true }] });
   });
 
   it('registers browser key material while exposing only redacted device metadata', async () => {

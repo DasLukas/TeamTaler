@@ -1,4 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import ChartNoAxesCombined from 'lucide-react/dist/esm/icons/chart-no-axes-combined';
+import ReceiptText from 'lucide-react/dist/esm/icons/receipt-text';
 import Save from 'lucide-react/dist/esm/icons/save';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -7,9 +9,11 @@ import type { GroupSettings, GroupSettingsUpdateInput, ReasonMode, Role, Session
 import { can } from '@/app/permissions';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Button } from '@/components/ui/Button';
-import { Field, SelectInput } from '@/components/ui/FormField';
+import { ConfirmationDialog } from '@/components/ui/ConfirmationDialog';
+import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { Toggle } from '@/components/ui/Toggle';
+import { notificationKeys } from '@/features/notifications/notificationQueryKeys';
 import { ThemePicker } from '@/features/appearance/ThemePicker';
 import { isPaymentTargetValid } from '@/features/finance/paymentTargets';
 import { ConfigurableListEditor } from './ConfigurableListEditor';
@@ -17,7 +21,7 @@ import { PaymentMethodEditor } from './PaymentMethodEditor';
 import { GroupSettingsPanel } from './GroupSettingsPanel';
 import { roleDisplayName } from './roleDisplayName';
 import styles from './BehaviorSettingsPanel.module.css';
-import { GroupNotificationSettingsSection } from './GroupNotificationSettingsSection';
+import { PlanningSettingsSection } from './PlanningSettingsSection';
 
 /** Properties for the editable group behavior settings form. */
 interface SettingsFormProps {
@@ -37,6 +41,11 @@ interface DefaultRoleSettingProps {
 }
 
 interface DefaultThemeSettingProps {
+  groupId: string;
+  settings: GroupSettings;
+}
+
+interface StatisticsFeatureSettingProps {
   groupId: string;
   settings: GroupSettings;
 }
@@ -161,7 +170,66 @@ function DefaultThemeSetting({ groupId, settings }: DefaultThemeSettingProps) {
 }
 
 /**
- * Renders grouped identity, notification, finance, and transaction settings for one group.
+ * Renders the group-wide master switch for the dedicated statistics workspace.
+ *
+ * @param props - Active group identifier and persisted group settings.
+ * @returns An immediate feature switch with guarded deactivation and session projection updates.
+ */
+function StatisticsFeatureSetting({ groupId, settings }: StatisticsFeatureSettingProps) {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const [confirmDisable, setConfirmDisable] = useState(false);
+  const mutation = useMutation({
+    mutationFn: (enabled: boolean) => api.updateGroupSettings(groupId, { statisticsEnabled: enabled }),
+    onSuccess: (persisted) => {
+      queryClient.setQueryData<GroupSettings>(['group-settings', groupId], persisted);
+      queryClient.setQueryData<Session>(['session'], (session) => session ? {
+        ...session,
+        groups: session.groups.map((group) => group.id === groupId ? { ...group, statisticsEnabled: persisted.statisticsEnabled } : group),
+      } : session);
+      queryClient.removeQueries({ queryKey: ['statistics', groupId] });
+      void queryClient.invalidateQueries({ queryKey: ['dashboard', groupId] });
+      setConfirmDisable(false);
+    },
+    onError: () => void queryClient.invalidateQueries({ queryKey: ['group-settings', groupId] }),
+  });
+
+  return (
+    <section aria-labelledby="statistics-feature-setting-title" className={styles.card}>
+      <div className={styles.settingRow}>
+        <div>
+          <h4 id="statistics-feature-setting-title">{t('behaviorSettings.statisticsTitle')}</h4>
+          <p>{t('behaviorSettings.statisticsDescription')}</p>
+        </div>
+        <Toggle checked={settings.statisticsEnabled} disabled={mutation.isPending} label={t('behaviorSettings.statisticsToggle')} onChange={(enabled) => {
+          mutation.reset();
+          if (enabled) mutation.mutate(true);
+          else setConfirmDisable(true);
+        }} />
+      </div>
+      <p className={styles.notice}>{t(settings.statisticsEnabled ? 'behaviorSettings.statisticsEnabledNotice' : 'behaviorSettings.statisticsDisabledNotice')}</p>
+      {mutation.isError && !confirmDisable ? <p className={styles.error} role="alert">{t('behaviorSettings.statisticsSaveError')}</p> : null}
+      <ConfirmationDialog
+        confirmIcon={<ChartNoAxesCombined size={17} />}
+        confirmLabel={t('behaviorSettings.statisticsDisable')}
+        errorMessage={mutation.isError ? t('behaviorSettings.statisticsSaveError') : undefined}
+        message={t('behaviorSettings.statisticsDisableImpact')}
+        onClose={() => {
+          mutation.reset();
+          setConfirmDisable(false);
+        }}
+        onConfirm={() => mutation.mutate(false)}
+        open={confirmDisable}
+        pending={mutation.isPending}
+        title={t('behaviorSettings.statisticsDisableTitle')}
+        tone="danger"
+      />
+    </section>
+  );
+}
+
+/**
+ * Renders grouped identity, statistics, finance, planning, and transaction settings for one group.
  *
  * @param props - Group identifier and persisted settings.
  * @returns An accessible settings form with explicit save feedback.
@@ -170,6 +238,9 @@ function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canMan
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [settlementsEnabled, setSettlementsEnabled] = useState(settings.settlementsEnabled);
+  const [settlementDueSoonDays, setSettlementDueSoonDays] = useState(settings.settlementDueSoonDays);
+  const [settlementOverdueRepeatDays, setSettlementOverdueRepeatDays] = useState(settings.settlementOverdueRepeatDays);
+  const [confirmDisableSettlements, setConfirmDisableSettlements] = useState(false);
   const [ownBookingReasonMode, setOwnBookingReasonMode] = useState(settings.ownBookingReasonMode);
   const [foreignBookingReasonMode, setForeignBookingReasonMode] = useState(settings.foreignBookingReasonMode);
   const [ownPaymentReasonMode, setOwnPaymentReasonMode] = useState(settings.ownPaymentReasonMode);
@@ -178,11 +249,15 @@ function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canMan
   const [bookingReasons, setBookingReasons] = useState(settings.bookingReasons);
   const [paymentReasons, setPaymentReasons] = useState(settings.paymentReasons);
   const configurableCollections = [paymentMethods, bookingReasons, paymentReasons];
-  const configurationInvalid = paymentMethods.length === 0 || configurableCollections.some((items) => {
+  const reminderConfigurationInvalid = !Number.isInteger(settlementDueSoonDays) || settlementDueSoonDays < 1 || settlementDueSoonDays > 30
+    || !Number.isInteger(settlementOverdueRepeatDays) || settlementOverdueRepeatDays < 0 || settlementOverdueRepeatDays > 90;
+  const configurationInvalid = reminderConfigurationInvalid || paymentMethods.length === 0 || configurableCollections.some((items) => {
     const labels = items.map((item) => item.label.trim().toLocaleLowerCase());
     return labels.some((label) => !label) || new Set(labels).size !== labels.length;
   }) || paymentMethods.some((method) => !isPaymentTargetValid(method.paymentTarget, currency));
   const changed = settlementsEnabled !== settings.settlementsEnabled
+    || settlementDueSoonDays !== settings.settlementDueSoonDays
+    || settlementOverdueRepeatDays !== settings.settlementOverdueRepeatDays
     || ownBookingReasonMode !== settings.ownBookingReasonMode
     || foreignBookingReasonMode !== settings.foreignBookingReasonMode
     || ownPaymentReasonMode !== settings.ownPaymentReasonMode
@@ -195,6 +270,8 @@ function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canMan
     mutationFn: () => {
       const update: GroupSettingsUpdateInput = {
         ...(settlementsEnabled !== settings.settlementsEnabled ? { settlementsEnabled } : {}),
+        ...(settlementDueSoonDays !== settings.settlementDueSoonDays ? { settlementDueSoonDays } : {}),
+        ...(settlementOverdueRepeatDays !== settings.settlementOverdueRepeatDays ? { settlementOverdueRepeatDays } : {}),
         ...(ownBookingReasonMode !== settings.ownBookingReasonMode ? { ownBookingReasonMode } : {}),
         ...(foreignBookingReasonMode !== settings.foreignBookingReasonMode ? { foreignBookingReasonMode } : {}),
         ...(ownPaymentReasonMode !== settings.ownPaymentReasonMode ? { ownPaymentReasonMode } : {}),
@@ -207,6 +284,7 @@ function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canMan
     },
     onSuccess: async (persisted) => {
       queryClient.setQueryData<GroupSettings>(['group-settings', groupId], persisted);
+      queryClient.removeQueries({ queryKey: notificationKeys.preferences(groupId) });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['booking-context', groupId] }),
         queryClient.invalidateQueries({ queryKey: ['transaction-settings', groupId] }),
@@ -215,6 +293,7 @@ function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canMan
         queryClient.invalidateQueries({ queryKey: ['settlements', groupId] }),
         queryClient.invalidateQueries({ queryKey: ['roles', groupId] }),
         queryClient.invalidateQueries({ queryKey: ['members', groupId] }),
+        queryClient.invalidateQueries({ queryKey: ['statistics', groupId] }),
       ]);
     },
     onError: async () => {
@@ -228,8 +307,8 @@ function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canMan
         <header><h3 id="group-settings-section-title">{t('behaviorSettings.groupSectionTitle')}</h3></header>
         {canManageGroup ? <GroupSettingsPanel embedded /> : null}
         {canManageGroup ? <DefaultThemeSetting groupId={groupId} key={`${groupId}:${settings.defaultTheme}`} settings={settings} /> : null}
-        {canManageGroup ? <GroupNotificationSettingsSection groupId={groupId} /> : null}
         {canManageDefaultRole && roles ? <DefaultRoleSetting groupId={groupId} key={`${groupId}:${settings.defaultRoleId ?? ''}`} roles={roles} settings={settings} /> : null}
+        {canManageGroup ? <PlanningSettingsSection groupId={groupId} /> : null}
       </section>
 
       {canManageFinancialSettings ? <section aria-labelledby="finance-settings-title" className={styles.settingsSection}>
@@ -240,10 +319,37 @@ function SettingsForm({ canManageDefaultRole, canManageFinancialSettings, canMan
               <h4 id="settlements-setting-title">{t('behaviorSettings.settlementsTitle')}</h4>
               <p>{t('behaviorSettings.settlementsDescription')}</p>
             </div>
-            <Toggle checked={settlementsEnabled} disabled={mutation.isPending} label={t('behaviorSettings.settlementsToggle')} onChange={(checked) => { setSettlementsEnabled(checked); mutation.reset(); }} />
+            <Toggle checked={settlementsEnabled} disabled={mutation.isPending} label={t('behaviorSettings.settlementsToggle')} onChange={(checked) => {
+              mutation.reset();
+              if (checked) setSettlementsEnabled(true);
+              else setConfirmDisableSettlements(true);
+            }} />
           </div>
           <p className={styles.notice}>{t(settlementsEnabled ? 'behaviorSettings.settlementsEnabledNotice' : 'behaviorSettings.settlementsDisabledNotice')}</p>
+          <div className={styles.settlementReminderGrid}>
+            <Field hint={t('behaviorSettings.settlementDueSoonDaysHint')} htmlFor="settlement-due-soon-days" label={t('behaviorSettings.settlementDueSoonDays')}>
+              <TextInput disabled={!settlementsEnabled || mutation.isPending} id="settlement-due-soon-days" max={30} min={1} onChange={(event) => { setSettlementDueSoonDays(event.target.valueAsNumber); mutation.reset(); }} required step={1} type="number" value={settlementDueSoonDays} />
+            </Field>
+            <Field hint={t('behaviorSettings.settlementOverdueRepeatDaysHint')} htmlFor="settlement-overdue-repeat-days" label={t('behaviorSettings.settlementOverdueRepeatDays')}>
+              <TextInput disabled={!settlementsEnabled || mutation.isPending} id="settlement-overdue-repeat-days" max={90} min={0} onChange={(event) => { setSettlementOverdueRepeatDays(event.target.valueAsNumber); mutation.reset(); }} required step={1} type="number" value={settlementOverdueRepeatDays} />
+            </Field>
+          </div>
+          <ConfirmationDialog
+            confirmIcon={<ReceiptText size={17} />}
+            confirmLabel={t('behaviorSettings.settlementsDisable')}
+            message={t('behaviorSettings.settlementsDisableImpact')}
+            onClose={() => setConfirmDisableSettlements(false)}
+            onConfirm={() => {
+              setSettlementsEnabled(false);
+              setConfirmDisableSettlements(false);
+            }}
+            open={confirmDisableSettlements}
+            pending={mutation.isPending}
+            title={t('behaviorSettings.settlementsDisableTitle')}
+            tone="danger"
+          />
         </section>
+        {canManageGroup ? <StatisticsFeatureSetting groupId={groupId} key={`${groupId}:${settings.statisticsEnabled}`} settings={settings} /> : null}
       </section> : null}
 
       {canManageFinancialSettings ? <section aria-labelledby="booking-settings-title" className={styles.bookingSection}>

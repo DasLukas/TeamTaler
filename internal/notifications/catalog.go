@@ -20,6 +20,20 @@ const (
 	TypeSettlementDueSoon EventType = "SETTLEMENT_DUE_SOON"
 	// TypeSettlementOverdue identifies a statement that remains unpaid after its due date.
 	TypeSettlementOverdue EventType = "SETTLEMENT_OVERDUE"
+	// TypePlanningEventPublished identifies a planning event newly visible to a recipient.
+	TypePlanningEventPublished EventType = "PLANNING_EVENT_PUBLISHED"
+	// TypePlanningEventUpdated identifies a material change to a visible planning event.
+	TypePlanningEventUpdated EventType = "PLANNING_EVENT_UPDATED"
+	// TypePlanningEventCancelled identifies a cancelled planning event.
+	TypePlanningEventCancelled EventType = "PLANNING_EVENT_CANCELLED"
+	// TypePlanningWaitlistPromoted identifies a member promoted from a waitlist.
+	TypePlanningWaitlistPromoted EventType = "PLANNING_WAITLIST_PROMOTED"
+	// TypePlanningSeriesPublished identifies a recurring planning series newly visible to a recipient.
+	TypePlanningSeriesPublished EventType = "PLANNING_SERIES_PUBLISHED"
+	// TypePlanningSeriesUpdated identifies a material change applied to a recurring planning series.
+	TypePlanningSeriesUpdated EventType = "PLANNING_SERIES_UPDATED"
+	// TypePlanningSeriesCancelled identifies a cancelled recurring planning series or future segment.
+	TypePlanningSeriesCancelled EventType = "PLANNING_SERIES_CANCELLED"
 )
 
 // Channel identifies an optional external delivery mechanism. In-app delivery
@@ -80,6 +94,46 @@ var eventCatalog = map[EventType]EventDefinition{
 		Type: TypeSettlementOverdue, Category: "SETTLEMENTS", Label: "Abrechnung überfällig",
 		Description: "Eine offene Abrechnung ist überfällig.", Route: "/notifications", PushTitle: "Abrechnung überfällig", PushBody: "Eine offene Abrechnung in deiner Gruppe ist überfällig.", PushTTLSeconds: 86400, PushUrgency: "high", Reminder: true, DefaultEnabled: true,
 	},
+	TypePlanningEventPublished: {
+		Type: TypePlanningEventPublished, Category: "PLANNING", Label: "Neue Planung",
+		Description: "Ein neuer Termin ist für das Mitglied sichtbar.", Route: "/notifications", PushTitle: "Neue Planung", PushBody: "In deiner Gruppe wurde ein neuer Termin veröffentlicht.", PushTTLSeconds: 86400, PushUrgency: "normal", DefaultEnabled: true,
+	},
+	TypePlanningEventUpdated: {
+		Type: TypePlanningEventUpdated, Category: "PLANNING", Label: "Planung geändert",
+		Description: "Ein relevanter Termin wurde geändert.", Route: "/notifications", PushTitle: "Planung geändert", PushBody: "Ein Termin in deiner Gruppe wurde geändert.", PushTTLSeconds: 86400, PushUrgency: "normal", DefaultEnabled: true,
+	},
+	TypePlanningEventCancelled: {
+		Type: TypePlanningEventCancelled, Category: "PLANNING", Label: "Planung abgesagt",
+		Description: "Ein relevanter Termin wurde abgesagt.", Route: "/notifications", PushTitle: "Planung abgesagt", PushBody: "Ein Termin in deiner Gruppe wurde abgesagt.", PushTTLSeconds: 86400, PushUrgency: "high", DefaultEnabled: true,
+	},
+	TypePlanningWaitlistPromoted: {
+		Type: TypePlanningWaitlistPromoted, Category: "PLANNING", Label: "Von der Warteliste nachgerückt",
+		Description: "Das Mitglied ist von der Warteliste nachgerückt.", Route: "/notifications", PushTitle: "Platz verfügbar", PushBody: "Du bist bei einem Termin in deiner Gruppe nachgerückt.", PushTTLSeconds: 86400, PushUrgency: "high", DefaultEnabled: true,
+	},
+	TypePlanningSeriesPublished: {
+		Type: TypePlanningSeriesPublished, Category: "PLANNING", Label: "Neue Terminserie",
+		Description: "Eine neue Terminserie ist für das Mitglied sichtbar.", Route: "/notifications", PushTitle: "Neue Terminserie", PushBody: "In deiner Gruppe wurde eine neue Terminserie veröffentlicht.", PushTTLSeconds: 86400, PushUrgency: "normal", DefaultEnabled: true,
+	},
+	TypePlanningSeriesUpdated: {
+		Type: TypePlanningSeriesUpdated, Category: "PLANNING", Label: "Terminserie geändert",
+		Description: "Eine relevante Terminserie wurde geändert.", Route: "/notifications", PushTitle: "Terminserie geändert", PushBody: "Eine Terminserie in deiner Gruppe wurde geändert.", PushTTLSeconds: 86400, PushUrgency: "normal", DefaultEnabled: true,
+	},
+	TypePlanningSeriesCancelled: {
+		Type: TypePlanningSeriesCancelled, Category: "PLANNING", Label: "Terminserie abgesagt",
+		Description: "Eine relevante Terminserie wurde abgesagt.", Route: "/notifications", PushTitle: "Terminserie abgesagt", PushBody: "Eine Terminserie in deiner Gruppe wurde abgesagt.", PushTTLSeconds: 86400, PushUrgency: "high", DefaultEnabled: true,
+	},
+}
+
+// IsPlanningEvent reports whether eventType belongs to the optional planning module.
+func IsPlanningEvent(eventType EventType) bool {
+	switch eventType {
+	case TypePlanningEventPublished, TypePlanningEventUpdated,
+		TypePlanningEventCancelled, TypePlanningWaitlistPromoted, TypePlanningSeriesPublished,
+		TypePlanningSeriesUpdated, TypePlanningSeriesCancelled:
+		return true
+	default:
+		return false
+	}
 }
 
 func init() {

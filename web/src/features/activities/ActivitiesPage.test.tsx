@@ -24,7 +24,7 @@ const scrollIntoViewMock = vi.fn();
 
 const session: Session = {
   user: { id: 'user-viewer', displayName: 'Viewer', email: 'viewer@example.test' },
-  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', defaultTheme: 'TEAMTALER', membership: { id: 'member-viewer', roles: ['MEMBER'], groupPermissions: [], themeOverride: null } }],
+  groups: [{ id: 'group-a', name: 'Group A', currency: 'EUR', defaultTheme: 'TEAMTALER', statisticsEnabled: false, membership: { id: 'member-viewer', roles: ['MEMBER'], groupPermissions: [], themeOverride: null } }],
   activeGroupId: 'group-a',
   defaultGroupId: null,
   colorMode: 'SYSTEM',
@@ -195,6 +195,19 @@ describe('ActivitiesPage unified feed', () => {
     expect(within(table).getByText(/-20,00/)).toBeVisible();
     expect(within(table).getByLabelText(i18n.t('activities.actorUnavailable'))).toBeVisible();
     expect(apiMock.getActivitiesPage).toHaveBeenCalledWith('group-a', expect.objectContaining({ limit: 50, sort: 'occurredAt', direction: 'desc' }));
+  });
+
+  it('reserves enough table width to keep receipt and reversal actions inline', async () => {
+    renderActivities();
+
+    const table = await screen.findByRole('table', { name: i18n.t('activities.title') });
+    const viewport = table.parentElement;
+    const receiptAction = await within(table).findByRole('button', { name: i18n.t('paymentAttachment.action') });
+    const paymentRow = receiptAction.closest('tr');
+
+    expect(viewport?.style.getPropertyValue('--data-table-min-width')).toBe('1680px');
+    expect(paymentRow).not.toBeNull();
+    expect(within(paymentRow as HTMLElement).getByRole('button', { name: i18n.t('activities.reverse') })).toBeVisible();
   });
 
   it('renders audited reversals and links both entries without refetching loaded targets', async () => {

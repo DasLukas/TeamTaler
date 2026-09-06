@@ -11,6 +11,7 @@ var (
 	ErrNotFound             = errors.New("resource not found")
 	ErrForbidden            = errors.New("operation is not permitted")
 	ErrConflict             = errors.New("resource conflict")
+	ErrPlanningDisabled     = errors.New("planning is disabled")
 	ErrValidation           = errors.New("validation failed")
 	ErrUnauthenticated      = errors.New("authentication required")
 	ErrPrecondition         = errors.New("precondition failed")
@@ -91,8 +92,8 @@ const (
 	PermissionCatalogManagement PermissionKey = "CATALOG_MANAGEMENT"
 	// PermissionViewMemberDirectory permits reading the group's member directory.
 	PermissionViewMemberDirectory PermissionKey = "VIEW_MEMBER_DIRECTORY"
-	// PermissionViewGroupStatistics permits reading the consolidated group balance.
-	PermissionViewGroupStatistics PermissionKey = "VIEW_GROUP_STATISTICS"
+	// PermissionViewStatistics permits reading all group member, activity, and financial statistics.
+	PermissionViewStatistics PermissionKey = "VIEW_STATISTICS"
 	// PermissionViewAllBookingActivity permits viewing every identified group booking in the activity feed.
 	PermissionViewAllBookingActivity PermissionKey = "VIEW_ALL_BOOKING_ACTIVITY"
 	// PermissionRecordOwnPayment permits self-service payment recording for the current member.
@@ -108,6 +109,14 @@ const (
 	PermissionBookForOthers PermissionKey = "BOOK_FOR_OTHERS"
 	// PermissionBookForGuests permits bookings for credentialless temporary guests.
 	PermissionBookForGuests PermissionKey = "BOOK_FOR_GUESTS"
+	// PermissionUsePlanning permits access to published planning events and own participation.
+	PermissionUsePlanning PermissionKey = "USE_PLANNING"
+	// PermissionCreatePlanningEvents permits members to create and manage their own events.
+	PermissionCreatePlanningEvents PermissionKey = "CREATE_PLANNING_EVENTS"
+	// PermissionViewPlanningParticipants permits identified participant reads.
+	PermissionViewPlanningParticipants PermissionKey = "VIEW_PLANNING_PARTICIPANTS"
+	// PermissionManagePlanningEvents permits management of all events and recurring series.
+	PermissionManagePlanningEvents PermissionKey = "MANAGE_PLANNING_EVENTS"
 )
 
 // PermissionScopeType identifies the resource boundary attached to a permission grant.
@@ -304,12 +313,14 @@ const (
 
 // Group is the top-level isolation and accounting boundary.
 type Group struct {
-	ID           string     `json:"id"`
-	Name         string     `json:"name"`
-	Currency     string     `json:"currency"`
-	LogoURL      string     `json:"logoUrl,omitempty"`
-	DefaultTheme ThemeID    `json:"defaultTheme"`
-	Membership   Membership `json:"membership"`
+	ID                string     `json:"id"`
+	Name              string     `json:"name"`
+	Currency          string     `json:"currency"`
+	LogoURL           string     `json:"logoUrl,omitempty"`
+	DefaultTheme      ThemeID    `json:"defaultTheme"`
+	StatisticsEnabled bool       `json:"statisticsEnabled"`
+	PlanningEnabled   bool       `json:"planningEnabled"`
+	Membership        Membership `json:"membership"`
 }
 
 // ReasonMode controls whether a transaction reason is hidden, optional, or
@@ -375,8 +386,10 @@ func (mode AttachmentMode) Required() bool { return mode == AttachmentModeRequir
 // of one group.
 type GroupSettings struct {
 	DefaultTheme                 ThemeID            `json:"defaultTheme"`
-	NotificationEmailsEnabled    bool               `json:"notificationEmailsEnabled"`
+	StatisticsEnabled            bool               `json:"statisticsEnabled"`
 	SettlementsEnabled           bool               `json:"settlementsEnabled"`
+	SettlementDueSoonDays        int                `json:"settlementDueSoonDays"`
+	SettlementOverdueRepeatDays  int                `json:"settlementOverdueRepeatDays"`
 	DefaultRoleID                *string            `json:"defaultRoleId"`
 	OwnBookingReasonMode         ReasonMode         `json:"ownBookingReasonMode"`
 	ForeignBookingReasonMode     ReasonMode         `json:"foreignBookingReasonMode"`

@@ -43,6 +43,41 @@ function contrastRatio(first: string, second: string): number {
 
 describe('semantic theme tokens', () => {
   it.each(themes.flatMap((theme) => schemes.map((scheme) => [theme, scheme] as const)))(
+    'defines the complete statistics chart palette for %s %s',
+    (theme, scheme) => {
+      const tokens = resolveHexTokens(theme, scheme);
+      [
+        '--chart-primary', '--chart-secondary', '--chart-tertiary', '--chart-positive', '--chart-negative',
+        '--chart-due', '--chart-neutral', '--chart-credit', '--chart-grid', '--chart-axis', '--chart-hover',
+        '--chart-label-on-primary', '--chart-label-on-secondary', '--chart-label-on-due',
+        '--chart-label-on-neutral', '--chart-label-on-credit',
+      ].forEach((token) => expect(tokens[token], `${theme}/${scheme}: ${token}`).toMatch(/^#[\da-f]{6}$/));
+    },
+  );
+
+  it.each(themes.flatMap((theme) => schemes.map((scheme) => [theme, scheme] as const)))(
+    'keeps chart marks and direct labels legible for %s %s',
+    (theme, scheme) => {
+      const tokens = resolveHexTokens(theme, scheme);
+      const surface = tokens['--color-surface'];
+      ['--chart-primary', '--chart-secondary', '--chart-due', '--chart-neutral', '--chart-credit'].forEach((mark) => {
+        expect(contrastRatio(tokens[mark], surface), `${theme}/${scheme}: ${mark} against surface`).toBeGreaterThanOrEqual(3);
+      });
+      [
+        ['--chart-label-on-primary', '--chart-primary'],
+        ['--chart-label-on-secondary', '--chart-secondary'],
+        ['--chart-label-on-due', '--chart-due'],
+        ['--chart-label-on-neutral', '--chart-neutral'],
+        ['--chart-label-on-credit', '--chart-credit'],
+      ].forEach(([label, fill]) => {
+        expect(contrastRatio(tokens[label], tokens[fill]), `${theme}/${scheme}: ${label} on ${fill}`).toBeGreaterThanOrEqual(4.5);
+      });
+      expect(contrastRatio(tokens['--chart-axis'], surface), `${theme}/${scheme}: axis against surface`).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(tokens['--chart-grid'], surface), `${theme}/${scheme}: grid against surface`).toBeGreaterThanOrEqual(1.25);
+    },
+  );
+
+  it.each(themes.flatMap((theme) => schemes.map((scheme) => [theme, scheme] as const)))(
     'keeps critical %s %s text pairs at WCAG AA contrast',
     (theme, scheme) => {
       const tokens = resolveHexTokens(theme, scheme);

@@ -1,11 +1,14 @@
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down';
 import Search from 'lucide-react/dist/esm/icons/search';
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import styles from './MultiSelectMenu.module.css';
 
 /** One value, label, and optional leading visual offered by a {@link MultiSelectMenu}. */
 export interface MultiSelectMenuOption<Value extends string = string> {
+  /** Clears every other selection when this option is selected. */
+  exclusive?: boolean;
+  groupLabel?: string;
   label: string;
   value: Value;
   visual?: ReactNode;
@@ -14,13 +17,17 @@ export interface MultiSelectMenuOption<Value extends string = string> {
 /** Properties accepted by the anchored multiple-value selection menu. */
 export interface MultiSelectMenuProps<Value extends string = string> {
   allLabel: string;
+  disabled?: boolean;
   emptyLabel: string;
   id: string;
   label: string;
+  lockedValues?: readonly Value[];
   noResultsLabel?: string;
   onChange: (values: Value[]) => void;
   options: readonly MultiSelectMenuOption<Value>[];
   searchLabel?: string;
+  /** Replaces the default comma-separated trigger summary. */
+  summary?: ReactNode;
   values: readonly Value[];
 }
 
@@ -36,7 +43,7 @@ export interface MultiSelectMenuProps<Value extends string = string> {
  * @example
  * <MultiSelectMenu id="categories" label="Categories" allLabel="All" emptyLabel="No categories" options={options} values={selected} onChange={setSelected} />
  */
-export function MultiSelectMenu<Value extends string>({ allLabel, emptyLabel, id, label, noResultsLabel = emptyLabel, onChange, options, searchLabel, values }: MultiSelectMenuProps<Value>) {
+export function MultiSelectMenu<Value extends string>({ allLabel, disabled = false, emptyLabel, id, label, lockedValues = [], noResultsLabel = emptyLabel, onChange, options, searchLabel, summary: summaryContent, values }: MultiSelectMenuProps<Value>) {
   const panelId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -45,6 +52,8 @@ export function MultiSelectMenu<Value extends string>({ allLabel, emptyLabel, id
   const [portalTarget, setPortalTarget] = useState<Element | null>(null);
   const [panelStyle, setPanelStyle] = useState<CSSProperties>({ position: 'fixed', visibility: 'hidden' });
   const selectedValues = useMemo(() => new Set(values), [values]);
+  const lockedValueSet = useMemo(() => new Set(lockedValues), [lockedValues]);
+  const exclusiveValueSet = useMemo(() => new Set(options.filter((option) => option.exclusive).map((option) => option.value)), [options]);
   const normalizedSearch = searchValue.trim().toLocaleLowerCase();
   const visibleOptions = normalizedSearch
     ? options.filter((option) => option.label.toLocaleLowerCase().includes(normalizedSearch) || option.value.toLocaleLowerCase().includes(normalizedSearch))
@@ -67,9 +76,16 @@ export function MultiSelectMenu<Value extends string>({ allLabel, emptyLabel, id
     setOpen(true);
   };
   const toggle = (value: Value, checked: boolean) => {
+    if (disabled || lockedValueSet.has(value)) return;
     const nextValues = new Set(selectedValues);
-    if (checked) nextValues.add(value);
-    else nextValues.delete(value);
+    if (!checked) nextValues.delete(value);
+    else if (exclusiveValueSet.has(value)) {
+      nextValues.clear();
+      nextValues.add(value);
+    } else {
+      exclusiveValueSet.forEach((exclusiveValue) => nextValues.delete(exclusiveValue));
+      nextValues.add(value);
+    }
     onChange(options.filter((option) => nextValues.has(option.value)).map((option) => option.value));
   };
 
@@ -130,13 +146,14 @@ export function MultiSelectMenu<Value extends string>({ allLabel, emptyLabel, id
         aria-expanded={open}
         aria-haspopup="dialog"
         className={styles.trigger}
+        disabled={disabled}
         id={id}
         onClick={() => { if (open) close(); else show(); }}
         ref={triggerRef}
         type="button"
       >
-        <span>{summary}</span>
-        <ChevronDown aria-hidden="true" size={18} />
+        <span className={styles.triggerSummary}>{summaryContent ?? summary}</span>
+        <ChevronDown aria-hidden="true" className={styles.chevron} size={18} />
       </button>
       {open && portalTarget ? createPortal(
         <div aria-label={label} className={styles.menu} id={panelId} ref={panelRef} role="dialog" style={panelStyle}>
@@ -145,12 +162,15 @@ export function MultiSelectMenu<Value extends string>({ allLabel, emptyLabel, id
             <Search aria-hidden="true" size={17} />
             <input aria-label={searchLabel} onChange={(event) => setSearchValue(event.target.value)} placeholder={searchLabel} type="search" value={searchValue} />
           </label> : null}
-          {visibleOptions.length > 0 ? visibleOptions.map((option) => (
-            <label className={styles.option} key={option.value}>
-              <input checked={selectedValues.has(option.value)} onChange={(event) => toggle(option.value, event.target.checked)} type="checkbox" />
-              {option.visual ? <span aria-hidden="true" className={styles.visual}>{option.visual}</span> : null}
-              <span className={styles.optionName}>{option.label}</span>
-            </label>
+          {visibleOptions.length > 0 ? visibleOptions.map((option, index) => (
+            <Fragment key={option.value}>
+              {option.groupLabel && option.groupLabel !== visibleOptions[index - 1]?.groupLabel ? <p className={styles.groupLabel}>{option.groupLabel}</p> : null}
+              <label className={styles.option} data-exclusive={option.exclusive || undefined}>
+                <input checked={selectedValues.has(option.value)} disabled={disabled || lockedValueSet.has(option.value)} onChange={(event) => toggle(option.value, event.target.checked)} type="checkbox" />
+                {option.visual ? <span aria-hidden="true" className={styles.visual}>{option.visual}</span> : null}
+                <span className={styles.optionName}>{option.label}</span>
+              </label>
+            </Fragment>
           )) : <p className={styles.empty}>{options.length > 0 ? noResultsLabel : emptyLabel}</p>}
         </div>,
         portalTarget,

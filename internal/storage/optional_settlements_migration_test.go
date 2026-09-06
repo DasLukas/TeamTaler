@@ -44,7 +44,7 @@ func TestOptionalSettlementsMigrationDisablesExistingAndNewGroupsByDefault(t *te
 	if _, err := db.ExecContext(ctx, `INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES('group-new','New Group','EUR',?,?)`, now, now); err != nil {
 		t.Fatalf("insert new group: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO group_settings(group_id,members_can_view_all_bookings,notification_emails_enabled,updated_at) VALUES('group-new',0,0,?)`, now); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO group_settings(group_id,members_can_view_all_bookings,updated_at) VALUES('group-new',0,?)`, now); err != nil {
 		t.Fatalf("insert new group settings: %v", err)
 	}
 	var newEnabled bool

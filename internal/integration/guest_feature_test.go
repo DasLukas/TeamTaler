@@ -258,9 +258,6 @@ func TestMemberManagementCanChooseOrdinaryClaimRoles(t *testing.T) {
 func TestTemporaryGuestPaymentReversalPeriodCloseAndArchivePreserveHistory(t *testing.T) {
 	f := newFixture(t)
 	f.setSettlementsEnabled(true)
-	if _, err := f.db.ExecContext(f.ctx, `UPDATE group_settings SET notification_emails_enabled=1 WHERE group_id=?`, f.membership.GroupID); err != nil {
-		t.Fatalf("enable notification emails: %v", err)
-	}
 	notifier := notifications.Service{DB: f.db, EmailDeliveryAvailable: true}
 	f.bookings.Notifications = notifier
 	f.finance.Notifications = notifier

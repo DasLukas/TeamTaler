@@ -28,6 +28,9 @@ type Service struct {
 	// ResolveChannelAvailability resolves the effective system channel gates in
 	// the caller's business transaction. A nil resolver uses the static fields.
 	ResolveChannelAvailability ChannelAvailabilityResolver
+	// ResolveTimeZone resolves the installation-wide IANA time zone in the
+	// caller's business transaction. A nil resolver uses Europe/Berlin.
+	ResolveTimeZone TimeZoneResolver
 }
 
 // ChannelAvailability is the effective instance-wide external delivery state.
@@ -42,18 +45,37 @@ type ChannelAvailability struct {
 // event policy and job creation can share one consistent transaction.
 type ChannelAvailabilityResolver func(context.Context, *sql.Tx) (ChannelAvailability, error)
 
+// TimeZoneResolver returns the effective installation-wide IANA time zone in
+// the caller's current business transaction.
+type TimeZoneResolver func(context.Context, *sql.Tx) (string, error)
+
+const (
+	// DeliveryCodeRecipientUnavailable identifies an inactive or inaccessible recipient.
+	DeliveryCodeRecipientUnavailable = "recipient_unavailable"
+	// DeliveryCodePreferenceDisabled identifies a channel disabled by the recipient.
+	DeliveryCodePreferenceDisabled = "preference_disabled"
+	// DeliveryCodePlanningDisabled identifies a disabled group planning module.
+	DeliveryCodePlanningDisabled = "planning_disabled"
+)
+
 // EventContext contains safe, structured presentation data for one notification.
 // Fields are optional because each event type requires only a relevant subset.
 type EventContext struct {
-	ActorName   string `json:"actorName,omitempty"`
-	ItemName    string `json:"itemName,omitempty"`
-	Quantity    int    `json:"quantity,omitempty"`
-	AmountMinor int64  `json:"amountMinor,string"`
-	Currency    string `json:"currency,omitempty"`
-	PeriodLabel string `json:"periodLabel,omitempty"`
-	DueAt       string `json:"dueAt,omitempty"`
-	ExportID    string `json:"exportId,omitempty"`
-	ExportScope string `json:"exportScope,omitempty"`
+	ActorName           string `json:"actorName,omitempty"`
+	ItemName            string `json:"itemName,omitempty"`
+	Quantity            int    `json:"quantity,omitempty"`
+	AmountMinor         int64  `json:"amountMinor,string"`
+	Currency            string `json:"currency,omitempty"`
+	PeriodLabel         string `json:"periodLabel,omitempty"`
+	DueAt               string `json:"dueAt,omitempty"`
+	ExportID            string `json:"exportId,omitempty"`
+	ExportScope         string `json:"exportScope,omitempty"`
+	PlanningEventID     string `json:"planningEventId,omitempty"`
+	PlanningEventTitle  string `json:"planningEventTitle,omitempty"`
+	PlanningSeriesID    string `json:"planningSeriesId,omitempty"`
+	PlanningSeriesTitle string `json:"planningSeriesTitle,omitempty"`
+	PlanningStartsAt    string `json:"planningStartsAt,omitempty"`
+	PlanningStatus      string `json:"planningStatus,omitempty"`
 }
 
 // CreateInput describes one member-visible event created inside an existing
@@ -105,8 +127,8 @@ type Destination struct {
 }
 
 // CreateTx inserts the canonical in-app notification and independently queues
-// eligible email and Web Push jobs in the same transaction. Group policy,
-// member preferences, effective system gates, recipient state, and current
+// eligible email and Web Push jobs in the same transaction. Member preferences,
+// effective system gates, recipient state, and current
 // subscriptions are evaluated before each external-channel job is inserted.
 // The caller owns tx and therefore controls commit or rollback.
 func (s Service) CreateTx(ctx context.Context, tx *sql.Tx, input CreateInput) (Notification, error) {
@@ -131,14 +153,14 @@ func (s Service) CreateTx(ctx context.Context, tx *sql.Tx, input CreateInput) (N
 	if err != nil {
 		return Notification{}, domain.ValidationError{Field: "createdAt", Message: "must be an RFC 3339 timestamp"}
 	}
-	var groupEnabled bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(
-		SELECT 1 FROM group_notification_events WHERE group_id=? AND event_type=?
-	)`, input.GroupID, input.Type).Scan(&groupEnabled); err != nil {
-		return Notification{}, err
-	}
-	if !groupEnabled {
-		return Notification{}, nil
+	if IsPlanningEvent(input.Type) {
+		var planningEnabled bool
+		if err := tx.QueryRowContext(ctx, `SELECT enabled FROM group_planning_settings WHERE group_id=?`, input.GroupID).Scan(&planningEnabled); err != nil {
+			return Notification{}, err
+		}
+		if !planningEnabled {
+			return Notification{}, nil
+		}
 	}
 	contextJSON, err := json.Marshal(input.Context)
 	if err != nil {
@@ -205,6 +227,76 @@ func (s Service) CreateTx(ctx context.Context, tx *sql.Tx, input CreateInput) (N
 		item.ResourceID = &input.ResourceID
 	}
 	return item, nil
+}
+
+// CheckDeliveryPolicy re-evaluates mutable module and member gates for one
+// already queued external delivery. An empty code permits delivery; a non-empty
+// safe code requires the dispatcher to terminate the job without external I/O.
+func CheckDeliveryPolicy(ctx context.Context, db *sql.DB, jobID string, channel Channel) (string, error) {
+	if db == nil || strings.TrimSpace(jobID) == "" {
+		return "", errors.New("check notification delivery policy: database and job identifier are required")
+	}
+	if channel != ChannelEmail && channel != ChannelPush {
+		return "", domain.ValidationError{Field: "channel", Message: "must be EMAIL or PUSH"}
+	}
+	var eventType EventType
+	var recipientActive, groupActive, preferenceEnabled bool
+	err := db.QueryRowContext(ctx, `SELECT notification.type,
+		membership.status='ACTIVE' AND membership.deleted_at IS NULL AND recipient.active=1
+			AND (?!='EMAIL' OR recipient.email IS NOT NULL),
+		group_row.status='ACTIVE',
+		EXISTS(SELECT 1 FROM membership_notification_channels preference
+			WHERE preference.group_id=job.group_id AND preference.membership_id=notification.membership_id
+			  AND preference.event_type=notification.type AND preference.channel=?)
+		FROM notification_delivery_jobs job
+		JOIN notifications notification ON notification.id=job.notification_id AND notification.group_id=job.group_id
+		JOIN memberships membership ON membership.id=notification.membership_id AND membership.group_id=job.group_id
+		JOIN users recipient ON recipient.id=membership.user_id
+		JOIN groups group_row ON group_row.id=job.group_id
+		WHERE job.id=? AND job.channel=?`, channel, channel, jobID, channel).
+		Scan(&eventType, &recipientActive, &groupActive, &preferenceEnabled)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DeliveryCodeRecipientUnavailable, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if !recipientActive || !groupActive {
+		return DeliveryCodeRecipientUnavailable, nil
+	}
+	if !preferenceEnabled {
+		return DeliveryCodePreferenceDisabled, nil
+	}
+	if IsPlanningEvent(eventType) {
+		var enabled bool
+		if err := db.QueryRowContext(ctx, `SELECT enabled FROM group_planning_settings settings
+			JOIN notification_delivery_jobs job ON job.group_id=settings.group_id
+			WHERE job.id=?`, jobID).Scan(&enabled); errors.Is(err, sql.ErrNoRows) {
+			return DeliveryCodePlanningDisabled, nil
+		} else if err != nil {
+			return "", err
+		}
+		if !enabled {
+			return DeliveryCodePlanningDisabled, nil
+		}
+	}
+	return "", nil
+}
+
+func (s Service) timeZone(ctx context.Context, tx *sql.Tx) (string, error) {
+	zone := "Europe/Berlin"
+	var err error
+	if s.ResolveTimeZone != nil {
+		zone, err = s.ResolveTimeZone(ctx, tx)
+		if err != nil {
+			return "", err
+		}
+	}
+	zone = strings.TrimSpace(zone)
+	if _, err := time.LoadLocation(zone); err != nil || zone == "" {
+		return "", domain.ValidationError{Field: "timeZone", Message: "must be a valid IANA time zone"}
+	}
+	return zone, nil
 }
 
 // List returns at most limit notifications newest first for membership only.

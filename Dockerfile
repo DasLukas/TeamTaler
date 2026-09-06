@@ -1,11 +1,13 @@
 # syntax=docker/dockerfile:1.7
 
 FROM node:24-alpine AS web-builder
+ARG VERSION=dev
+ARG REVISION=unknown
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./
-RUN npm run build
+RUN VITE_BUILD_ID="${VERSION}@${REVISION}" npm run build
 
 FROM golang:1.26-alpine AS go-builder
 WORKDIR /src
