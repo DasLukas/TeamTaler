@@ -477,7 +477,7 @@ docker compose exec app teamtaler healthcheck \
 - `GET /health/ready` confirms that startup and a database ping succeed.
 - Compose rotates application logs at 10 MiB and retains three files by default.
 
-Application request logs do not include request or response bodies, and payment-method audit metadata records only destination counts and types. Recipient names, PayPal.Me handles, IBANs, and BICs remain present in persisted settings, database backups, and complete group raw-data exports even though they are excluded from those logging and audit fields.
+Application request logs include the final response status but not request or response bodies. Payment-method audit metadata records only destination counts and types. Recipient names, PayPal.Me handles, IBANs, and BICs remain present in persisted settings, database backups, and complete group raw-data exports even though they are excluded from those logging and audit fields.
 
 Monitor container restarts, readiness, reverse-proxy TLS expiry, data-volume disk usage, backup results, and the host backup directory with external tooling. TeamTaler does not expose Prometheus metrics or built-in alert delivery.
 

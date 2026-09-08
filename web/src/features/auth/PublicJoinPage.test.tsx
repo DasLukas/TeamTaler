@@ -45,6 +45,13 @@ describe('PublicJoinPage', () => {
     mocks.navigate.mockResolvedValue(undefined);
   });
 
+  it('identifies existing-account credentials correctly to password managers', async () => {
+    renderPage();
+
+    expect(await screen.findByLabelText(i18n.t('auth.email'))).toHaveAttribute('autocomplete', 'username');
+    expect(screen.getByLabelText(i18n.t('auth.password'))).toHaveAttribute('autocomplete', 'current-password');
+  });
+
   it('starts a neutral email-verification flow for a new account', async () => {
     const user = userEvent.setup();
     renderPage();

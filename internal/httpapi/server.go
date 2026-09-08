@@ -546,16 +546,6 @@ func isMediaUploadRequest(request *http.Request) bool {
 		segments[4] == "products" && segments[6] == "image"
 }
 
-func (s *Server) requestContext(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		requestID, _ := platform.NewID("req")
-		response.Header().Set("X-Request-ID", requestID)
-		started := time.Now()
-		next.ServeHTTP(response, request)
-		s.logger.Info("http request", "method", request.Method, "path", request.URL.Path, "request_id", requestID, "duration_ms", time.Since(started).Milliseconds())
-	})
-}
-
 func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if strings.HasPrefix(request.URL.Path, "/api/") {

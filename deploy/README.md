@@ -225,6 +225,6 @@ Automatic unreviewed container updates are not recommended for financial data.
 - `GET /health/live` returns `{"status":"ok"}` when the HTTP process responds.
 - `GET /health/ready` returns `{"status":"ready"}` after a successful database ping. Startup has already applied or validated migrations before the server begins listening.
 - The Compose health check calls the readiness URL through `teamtaler healthcheck`.
-- Application logs contain structured key-value request metadata. Compose rotates `json-file` logs at 10 MiB and retains three files by default.
+- Application logs contain structured key-value request metadata including the final response status. Request and response bodies are excluded. Compose rotates `json-file` logs at 10 MiB and retains three files by default.
 
 TeamTaler does not expose Prometheus metrics, distributed traces, or built-in alert delivery. Monitor container restarts, readiness, disk usage for the data volume and host backup directory, failed-copy archives left in the volume, backup job results, and reverse-proxy TLS expiry with external tooling.

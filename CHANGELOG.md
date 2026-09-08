@@ -4,6 +4,11 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+### Changed
+
+- Login forms now identify email addresses as usernames for more reliable browser password-manager integration after an origin change.
+- Structured request logs now include the final response status.
+
 ## [1.3.0] - 2026-09-06
 
 ### Added

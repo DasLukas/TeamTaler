@@ -103,7 +103,7 @@ export function PublicJoinPage() {
               {mode === 'existing' ? (
                 <form className={formStyles.form} onSubmit={loginForm.handleSubmit((values) => loginMutation.mutate(values))}>
                   <p className={styles.hint}>{t('publicJoin.loginHint')}</p>
-                  <Field error={loginForm.formState.errors.email?.message} htmlFor="join-login-email" label={t('auth.email')}><TextInput autoComplete="email" id="join-login-email" type="email" {...loginForm.register('email', { required: t('auth.emailRequired') })} /></Field>
+                  <Field error={loginForm.formState.errors.email?.message} htmlFor="join-login-email" label={t('auth.email')}><TextInput autoComplete="username" id="join-login-email" type="email" {...loginForm.register('email', { required: t('auth.emailRequired') })} /></Field>
                   <Field error={loginForm.formState.errors.password?.message} htmlFor="join-login-password" label={t('auth.password')}><TextInput autoComplete="current-password" id="join-login-password" type="password" {...loginForm.register('password', { required: t('auth.passwordRequired'), maxLength: { value: 1024, message: t('auth.passwordMax') } })} /></Field>
                   <Button disabled={loginMutation.isPending} fullWidth leadingIcon={<LogIn size={19} />} size="large" type="submit">{t('auth.loginAction')}</Button>
                 </form>

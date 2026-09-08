@@ -73,6 +73,13 @@ describe('authentication form policies', () => {
     expect(screen.getByText('TeamTaler macht gemeinsame Finanzen einfach, transparent und fair.')).toBeVisible();
   });
 
+  it('identifies the login fields correctly to browser password managers', () => {
+    renderPage(<LoginPage />);
+
+    expect(screen.getByLabelText(i18n.t('auth.email'))).toHaveAttribute('autocomplete', 'username');
+    expect(screen.getByLabelText(i18n.t('auth.password'))).toHaveAttribute('autocomplete', 'current-password');
+  });
+
   it('does not enforce a local minimum length during login', async () => {
     const user = userEvent.setup();
     renderPage(<LoginPage />);
