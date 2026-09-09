@@ -51,8 +51,17 @@ export function planningRecurrenceEndIsValid(recurrence: PlanningRecurrenceInput
   return startsAt !== undefined && endsAt !== undefined && new Date(endsAt).getTime() > new Date(startsAt).getTime();
 }
 
-/** Returns a localized, human-readable summary for a structured recurrence rule. */
-export function planningRecurrenceSummary(recurrence: PlanningRecurrenceInput, t: (key: string, values?: Record<string, unknown>) => string): string {
+/**
+ * Builds localized recurrence text as separate pattern and range parts.
+ *
+ * @param recurrence - Structured recurrence rule returned by the planning API.
+ * @param t - Translation function used to localize recurrence labels.
+ * @returns The recurrence pattern and range as independently renderable strings.
+ * @example
+ * `planningRecurrenceSummaryParts(recurrence, t)` returns a pattern such as
+ * `Wöchentlich am Mi` and a range such as `endet nach 5 Terminen`.
+ */
+export function planningRecurrenceSummaryParts(recurrence: PlanningRecurrenceInput, t: (key: string, values?: Record<string, unknown>) => string): { pattern: string; range: string } {
   const frequency = t(`planning.recurrence.frequencySummary.${recurrence.frequency}`, { count: recurrence.interval });
   const weekdaySummary = recurrence.frequency === 'WEEKLY' && recurrence.weekdays?.length
     ? ` ${t('planning.recurrence.onWeekdays', { weekdays: recurrence.weekdays.map((day) => t(`planning.recurrence.weekdays.${day}.short`)).join(', ') })}`
@@ -65,5 +74,17 @@ export function planningRecurrenceSummary(recurrence: PlanningRecurrenceInput, t
     : recurrence.range.type === 'UNTIL'
       ? t('planning.recurrence.rangeSummary.until', { date: new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(`${recurrence.range.until}T00:00:00Z`)) })
       : t('planning.recurrence.rangeSummary.never');
-  return `${frequency}${weekdaySummary}${monthlySummary} · ${rangeSummary}`;
+  return { pattern: `${frequency}${weekdaySummary}${monthlySummary}`, range: rangeSummary };
+}
+
+/**
+ * Returns a localized, human-readable summary for a structured recurrence rule.
+ *
+ * @param recurrence - Structured recurrence rule returned by the planning API.
+ * @param t - Translation function used to localize recurrence labels.
+ * @returns A single-line recurrence summary suitable for compact form previews.
+ */
+export function planningRecurrenceSummary(recurrence: PlanningRecurrenceInput, t: (key: string, values?: Record<string, unknown>) => string): string {
+  const summary = planningRecurrenceSummaryParts(recurrence, t);
+  return `${summary.pattern} · ${summary.range}`;
 }
