@@ -2096,7 +2096,8 @@ paths:
   /groups/{groupId}/planning/events/{eventId}/close:
     post:
       tags: [Planning]
-      summary: Close event participation
+      summary: Close poll or registration participation
+      description: Only appointment polls and appointment registrations may be closed manually. Calendar-only appointments complete automatically after ending.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/PlanningEventId'
@@ -2105,6 +2106,7 @@ paths:
       responses:
         '200': { description: Closed event, content: { application/json: { schema: { $ref: '#/components/schemas/PlanningEvent' } } } }
         '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/planning/events/{eventId}/complete:
     post:
       tags: [Planning]

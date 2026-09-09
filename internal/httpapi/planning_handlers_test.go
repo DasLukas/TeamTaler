@@ -181,6 +181,54 @@ func TestPlanningSeriesHandlersEnforcePreconditionsScopesAndBundledNotifications
 	assertHTTPPlanningCount(t, server, `SELECT count(*) FROM planning_series_notification_tasks WHERE series_id=? AND status='PENDING'`, []any{created.Series.ID}, 0)
 }
 
+func TestPlanningEventCloseHandlerRejectsAppointment(t *testing.T) {
+	server, principal, administrator := invitationImportServer(t, false)
+	server.planning = planning.Service{DB: server.db}
+	ctx := context.Background()
+	settings, err := server.planning.GetSettings(ctx, administrator)
+	if err != nil {
+		t.Fatalf("get planning settings: %v", err)
+	}
+	if _, err := server.planning.UpdateSettings(ctx, principal, administrator, true, settings.Version); err != nil {
+		t.Fatalf("enable planning: %v", err)
+	}
+
+	startsAt := time.Now().UTC().Add(4 * time.Hour).Truncate(time.Minute).Format(time.RFC3339)
+	event, err := server.planning.CreateEvent(ctx, principal, administrator, "http-appointment-close", planning.EventInput{
+		Title:        "Informational appointment",
+		EventType:    planning.EventAppointment,
+		AudienceType: planning.AudienceAllActive,
+		StartsAt:     startsAt,
+	})
+	if err != nil {
+		t.Fatalf("create appointment: %v", err)
+	}
+
+	request := roleHandlerRequest(principal, administrator.GroupID, http.MethodPost, "")
+	request.SetPathValue("eventID", event.ID)
+	request.Header.Set("If-Match", versionETag(event.Version))
+	response := httptest.NewRecorder()
+	server.handleClosePlanningEvent(response, request)
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("close appointment status=%d body=%s", response.Code, response.Body.String())
+	}
+	var responseProblem problem
+	if err := json.Unmarshal(response.Body.Bytes(), &responseProblem); err != nil {
+		t.Fatalf("decode close appointment problem: %v", err)
+	}
+	if responseProblem.Detail != "status: closing is only supported for polls and registrations" {
+		t.Fatalf("close appointment detail=%q", responseProblem.Detail)
+	}
+
+	unchanged, err := server.planning.GetEvent(ctx, administrator, event.ID)
+	if err != nil {
+		t.Fatalf("read appointment after rejected close: %v", err)
+	}
+	if unchanged.Status != "PUBLISHED" || unchanged.Version != event.Version {
+		t.Fatalf("appointment after rejected close status=%s version=%d", unchanged.Status, unchanged.Version)
+	}
+}
+
 func assertHTTPPlanningCount(t *testing.T, server *Server, query string, args []any, want int) {
 	t.Helper()
 	var got int

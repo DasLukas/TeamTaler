@@ -173,7 +173,7 @@ func TestEventOwnerCannotMutateAfterCreatePermissionRevocation(t *testing.T) {
 	}
 }
 
-func TestManualClosePreservesRegistrationAndEarlyCompletionIsRejected(t *testing.T) {
+func TestManualClosePreservesRegistrationRejectsAppointmentAndEarlyCompletion(t *testing.T) {
 	fixture := openPlanningServiceFixture(t)
 	ctx := context.Background()
 	firstPrincipal, firstMember := fixture.addMember(t, "registered", "Registered member")
@@ -220,6 +220,16 @@ func TestManualClosePreservesRegistrationAndEarlyCompletionIsRejected(t *testing
 	futureEvent, err := fixture.Service.CreateEvent(ctx, fixture.Principal, fixture.Membership, "planning-early-complete-0001", information)
 	if err != nil {
 		t.Fatalf("create future information: %v", err)
+	}
+	if _, err := fixture.Service.Transition(ctx, fixture.Principal, fixture.Membership, futureEvent.ID, "CLOSED", futureEvent.Version); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("close appointment error=%v, want validation", err)
+	}
+	unchanged, err := fixture.Service.GetEvent(ctx, fixture.Membership, futureEvent.ID)
+	if err != nil {
+		t.Fatalf("read appointment after rejected close: %v", err)
+	}
+	if unchanged.Status != "PUBLISHED" || unchanged.Version != futureEvent.Version {
+		t.Fatalf("appointment after rejected close status=%s version=%d", unchanged.Status, unchanged.Version)
 	}
 	if _, err := fixture.Service.Transition(ctx, fixture.Principal, fixture.Membership, futureEvent.ID, "COMPLETED", futureEvent.Version); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("early completion error=%v, want conflict", err)

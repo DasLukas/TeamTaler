@@ -21,12 +21,12 @@ function isTextEntryElement(element: Element | null): boolean {
 }
 
 /** Returns the current visual viewport height, falling back to the layout viewport. */
-function readVisibleViewportHeight(): number {
+export function readVisibleViewportHeight(): number {
   return window.visualViewport?.height ?? window.innerHeight;
 }
 
 /** Returns the largest currently observable layout viewport height. */
-function readLayoutViewportHeight(): number {
+export function readLayoutViewportHeight(): number {
   return Math.max(
     window.innerHeight,
     document.documentElement.clientHeight,

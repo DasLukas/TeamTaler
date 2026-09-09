@@ -127,7 +127,7 @@
 }
 
 @media (max-width: 767px) {
-  .inspector { bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom)); }
+  .inspector { bottom: var(--shell-mobile-navigation-offset); }
 
   .content {
     width: 100%;

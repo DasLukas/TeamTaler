@@ -2,6 +2,7 @@ import X from 'lucide-react/dist/esm/icons/x';
 import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject, type TouchEvent as ReactTouchEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
+import { readLayoutViewportHeight } from '@/hooks/useSoftwareKeyboardVisibility';
 import { IconButton } from './IconButton';
 import styles from './Modal.module.css';
 
@@ -264,9 +265,17 @@ export function Modal({ open, title, onClose, children, footer, size = 'standard
     const dialog = dialogRef.current;
     const visualViewport = window.visualViewport;
     if (!open || variant !== 'sheet' || !dialog || !visualViewport) return undefined;
+    let layoutViewportHeight = readLayoutViewportHeight();
+    let layoutViewportWidth = window.innerWidth;
 
     const synchronizeVisualViewport = () => {
-      const obscuredBottom = Math.max(0, window.innerHeight - visualViewport.offsetTop - visualViewport.height);
+      if (window.innerWidth !== layoutViewportWidth) {
+        layoutViewportWidth = window.innerWidth;
+        layoutViewportHeight = readLayoutViewportHeight();
+      } else {
+        layoutViewportHeight = Math.max(layoutViewportHeight, readLayoutViewportHeight());
+      }
+      const obscuredBottom = Math.max(0, layoutViewportHeight - visualViewport.height);
       dialog.style.setProperty('--modal-visual-viewport-height', `${visualViewport.height}px`);
       dialog.style.setProperty('--modal-visual-viewport-bottom', `${obscuredBottom}px`);
     };

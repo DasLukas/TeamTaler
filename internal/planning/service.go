@@ -1160,9 +1160,10 @@ func tasksForAudience(ctx context.Context, tx *sql.Tx, g, id, eventType, at stri
 	return rows.Err()
 }
 
-// Transition moves an event to a supported CLOSED or CANCELLED state under
-// optimistic concurrency. Closing reconciles registrations; cancelling a
-// series occurrence preserves it as a manual exception.
+// Transition moves an event to a supported CLOSED, COMPLETED, or CANCELLED
+// state under optimistic concurrency. Closing is limited to polls and
+// registrations and reconciles registrations; cancelling a series occurrence
+// preserves it as a manual exception.
 //
 // a and m identify the actor and tenant, id selects the event, target is the
 // requested lifecycle state, and version must match the stored event version.
@@ -1178,12 +1179,15 @@ func (s Service) Transition(ctx context.Context, a domain.Principal, m domain.Me
 		if err := enabled(ctx, tx, m.GroupID); err != nil {
 			return err
 		}
-		var owner, currentStatus, effectiveEnd string
-		if err := tx.QueryRowContext(ctx, `SELECT created_by_membership_id,status,coalesce(ends_at,starts_at) FROM planning_events WHERE group_id=? AND id=? AND version=? AND status IN ('PUBLISHED','CLOSED')`, m.GroupID, id, version).Scan(&owner, &currentStatus, &effectiveEnd); err != nil {
+		var owner, currentStatus, eventType, effectiveEnd string
+		if err := tx.QueryRowContext(ctx, `SELECT created_by_membership_id,status,event_type,coalesce(ends_at,starts_at) FROM planning_events WHERE group_id=? AND id=? AND version=? AND status IN ('PUBLISHED','CLOSED')`, m.GroupID, id, version).Scan(&owner, &currentStatus, &eventType, &effectiveEnd); err != nil {
 			return domain.ErrPrecondition
 		}
 		if err := requireEventMutation(ctx, tx, m, owner); err != nil {
 			return err
+		}
+		if target == "CLOSED" && eventType != EventAppointmentPoll && eventType != EventAppointmentRegistration {
+			return domain.ValidationError{Field: "status", Message: "closing is only supported for polls and registrations"}
 		}
 		if target == "CLOSED" && currentStatus != "PUBLISHED" {
 			return domain.ErrPrecondition

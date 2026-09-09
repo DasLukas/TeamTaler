@@ -102,15 +102,20 @@ export function PlanningEventDetailPage() {
     }
     else setConfirmation('cancel');
   };
-  const actions = <div className={styles.detailActions}>
-    {canEdit ? <Link className={styles.buttonLink} params={{ eventId }} search={search} to="/planning/events/$eventId/edit"><Edit size={16} />{t('common.edit')}</Link> : null}
-    {canEdit && event.status === 'PUBLISHED' ? <Button leadingIcon={<CheckCircle size={16} />} onClick={() => setConfirmation('close')} variant="secondary">{t('planning.actions.close')}</Button> : null}
-    {(event.canCancel || manageAll) && event.status === 'PUBLISHED' ? <Button leadingIcon={<Ban size={16} />} onClick={openCancellation} variant="danger">{t('planning.actions.cancel')}</Button> : null}
-  </div>;
+  const canClose = canEdit && event.status === 'PUBLISHED'
+    && (event.eventType === 'APPOINTMENT_POLL' || event.eventType === 'APPOINTMENT_REGISTRATION');
+  const canCancel = (event.canCancel || manageAll) && event.status === 'PUBLISHED';
+  const managementActions = canClose || canCancel ? <div className={`${styles.detailActions} ${styles.detailManagementActions}`}>
+    {canClose ? <Button leadingIcon={<CheckCircle size={16} />} onClick={() => setConfirmation('close')} variant="secondary">{t('planning.actions.close')}</Button> : null}
+    {canCancel ? <Button leadingIcon={<Ban size={16} />} onClick={openCancellation} variant="danger">{t('planning.actions.cancel')}</Button> : null}
+  </div> : null;
   const transitionError = transition.error instanceof ApiError && (transition.error.problem.status === 409 || transition.error.problem.status === 412) ? t('planning.form.conflictError') : transition.isError ? t('planning.transitionError') : undefined;
   const cancelError = cancelSeries.error instanceof ApiError && (cancelSeries.error.problem.status === 409 || cancelSeries.error.problem.status === 412) ? t('planning.form.conflictError') : cancelSeries.isError ? t('planning.transitionError') : undefined;
-  return <Page actions={actions} className={styles.page} title={event.title} wide>
-    <Link className={styles.backLink} search={search} to="/planning"><ArrowLeft aria-hidden="true" size={17} />{t('planning.backToCalendar')}</Link>
+  return <Page className={styles.page} title={event.title} wide>
+    <div className={styles.detailNavigation}>
+      <Link className={styles.backLink} search={search} to="/planning"><ArrowLeft aria-hidden="true" size={17} />{t('planning.backToCalendar')}</Link>
+      {canEdit ? <Link aria-label={t('common.edit')} className={`${styles.buttonLink} ${styles.detailEditLink}`} params={{ eventId }} search={search} title={t('common.edit')} to="/planning/events/$eventId/edit"><Edit aria-hidden="true" size={16} /><span className={styles.detailEditLabel}>{t('common.edit')}</span></Link> : null}
+    </div>
     <div className={styles.detailLayout}>
       <div>
         <section className={styles.detailCard}>
@@ -126,6 +131,7 @@ export function PlanningEventDetailPage() {
           </dl>
           {event.description ? <p>{event.description}</p> : null}
         </section>
+        {managementActions}
         {event.eventType !== 'APPOINTMENT' ? <section className={styles.detailCard} aria-labelledby="participation-title"><h2 id="participation-title">{t('planning.participation.title')}</h2><ParticipationAction event={event} /></section> : null}
       </div>
       {event.eventType !== 'APPOINTMENT' ? <aside>

@@ -28,7 +28,8 @@ func closePublishedEventTx(ctx context.Context, tx *sql.Tx, eventID string, opti
 		FROM planning_events event
 		JOIN group_planning_settings settings ON settings.group_id=event.group_id AND settings.enabled=1
 		JOIN groups group_row ON group_row.id=event.group_id AND group_row.status='ACTIVE'
-		WHERE event.id=? AND event.status='PUBLISHED'`
+		WHERE event.id=? AND event.status='PUBLISHED'
+		  AND event.event_type IN ('APPOINTMENT_POLL','APPOINTMENT_REGISTRATION')`
 	args := []any{eventID}
 	if options.GroupID != "" {
 		query += ` AND event.group_id=?`
@@ -39,7 +40,7 @@ func closePublishedEventTx(ctx context.Context, tx *sql.Tx, eventID string, opti
 		args = append(args, *options.ExpectedVersion)
 	}
 	if options.RequireDue {
-		query += ` AND event.event_type!='APPOINTMENT' AND event.response_deadline_us IS NOT NULL AND event.response_deadline_us<=?`
+		query += ` AND event.response_deadline_us IS NOT NULL AND event.response_deadline_us<=?`
 		args = append(args, options.Now.UTC().UnixMicro())
 	}
 

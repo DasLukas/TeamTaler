@@ -6,6 +6,7 @@
   --shell-sidebar-width: var(--sidebar-width);
   --shell-navigation-width: calc(var(--shell-sidebar-width) + var(--shell-safe-area-left));
   --shell-content-offset: var(--shell-navigation-width);
+  --shell-mobile-navigation-offset: 0px;
 
   width: 100%;
   max-width: 100%;
@@ -82,6 +83,8 @@
 
 @media (max-width: 767px) {
   .shell {
+    --shell-mobile-navigation-offset: calc(var(--bottom-nav-height) + var(--shell-safe-area-bottom));
+
     display: flex;
     min-height: 100dvh;
     flex-direction: column;
@@ -92,12 +95,12 @@
     flex: 1 0 auto;
     margin-left: 0;
     padding-right: var(--shell-safe-area-right);
-    padding-bottom: calc(var(--bottom-nav-height) + var(--shell-safe-area-bottom));
+    padding-bottom: var(--shell-mobile-navigation-offset);
     padding-left: var(--shell-safe-area-left);
   }
 
-  .shell[data-software-keyboard-visible='true'] .main {
-    padding-bottom: 0;
+  .shell[data-software-keyboard-visible='true'] {
+    --shell-mobile-navigation-offset: 0px;
   }
 }
 

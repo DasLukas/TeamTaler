@@ -8,6 +8,11 @@
 .floatingCreateButton:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 3px; }
 .backLink { display: inline-flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-5); color: var(--color-text-brand); font-weight: 700; }
 .backLink:hover { text-decoration: underline; }
+.detailNavigation { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-5); }
+.detailNavigation .backLink { min-width: 0; margin-bottom: 0; }
+.detailEditLink { flex: 0 0 auto; }
+.detailManagementActions { justify-content: flex-end; flex-wrap: wrap; margin-top: var(--space-4); }
+.detailManagementActions + .detailCard { margin-top: var(--space-5); }
 .workspace { display: grid; grid-template-columns: minmax(430px, 1.25fr) minmax(var(--planning-card-min), .75fr); gap: var(--space-6); align-items: start; }
 .agendaOnly { grid-template-columns: minmax(0, 780px); }
 .calendar, .agenda, .detailCard, .formSection, .planningCard { border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-sm); }
@@ -201,6 +206,10 @@
   .viewSwitch { display: grid; width: 100%; grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .viewSwitch > * { width: 100%; min-width: 0; }
 }
+@container (max-width: 440px) {
+  .detailEditLink { width: 44px; min-width: 44px; padding-inline: 0; gap: 0; }
+  .detailEditLabel { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+}
 @media (max-width: 767px) {
   .calendar { padding: var(--space-2); }
   .monthGrid button { min-height: 52px; padding: 5px; }
@@ -219,6 +228,7 @@
   .dialogActions > * { width: 100%; }
   .formActions { align-items: stretch; flex-direction: column-reverse; }
   .formActions > * { width: 100%; }
+  .detailManagementActions > * { flex: 1 1 140px; }
   .timeGridCard { margin-inline: calc(-1 * var(--space-2)); }
   .weekTimeGridCanvas { min-width: 980px; }
   .floatingCreateButton { right: max(var(--space-3), var(--shell-safe-area-right, 0px)); bottom: calc(var(--bottom-nav-height) + var(--shell-safe-area-bottom, 0px) + var(--space-3)); width: 52px; height: 52px; }
