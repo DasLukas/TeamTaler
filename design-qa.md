@@ -163,3 +163,75 @@ No actionable P0, P1, or P2 visual differences remain.
 The Dashboard planning preview now uses the Agenda card component and receives the complete privacy-safe presentation data required by it. Mobile and desktop layouts, accessibility content, navigation, API tests, component tests, lint, and type checking were verified.
 
 final result: passed
+
+---
+
+# Planning Event Detail Design QA
+
+## Comparison Target
+
+- Source visual truth: the annotated desktop event-detail state supplied in the task, reproduced at `/tmp/teamtaler-event-detail-desktop-before-centering.png`, plus the existing compact composition at `/tmp/teamtaler-event-detail-mobile.png`.
+- Implementation screenshots: `/tmp/teamtaler-event-detail-desktop-centered.png` and `/tmp/teamtaler-event-detail-mobile-centered.png`.
+- Route: `/planning/events/pev_e13e49dea3a515cd7fd5b801bf598f2d?date=2026-09-09&view=week`.
+- State: authenticated, published recurring calendar-only appointment, desktop sidebar expanded, no close action.
+
+## Capture Normalization
+
+| Capture | Screenshot pixels | CSS viewport | Output density |
+| --- | ---: | ---: | ---: |
+| Desktop source | 1024 × 768 | 1024 × 768 | 1 screenshot pixel per CSS pixel |
+| Desktop implementation | 1024 × 768 | 1024 × 768 | 1 screenshot pixel per CSS pixel |
+| Mobile source | 393 × 852 | 393 × 852 | 1 screenshot pixel per CSS pixel |
+| Mobile implementation | 393 × 852 | 393 × 852 | 1 screenshot pixel per CSS pixel |
+
+The desktop captures use the same route, data, theme, viewport, and sidebar state. The mobile source predates the separately approved removal of the close action; that content difference is intentional and not a layout regression.
+
+## Full-View Comparison
+
+- The desktop navigation, event card, and lifecycle action now share one 400 px column centered within the available main content.
+- The 400 px desktop column preserves the mobile information hierarchy: one metadata column, the same text wrapping behavior, and vertically stacked sections.
+- The mobile implementation remains edge-aligned to the existing 20 px content gutters, has no horizontal overflow, and keeps its full-width destructive action.
+- The calendar-only constraint is scoped to this event type; response-based event detail layouts retain their two-column desktop composition.
+
+## Focused Region Comparison
+
+A focused comparison was required for the navigation row, card, and lifecycle action because these were the annotated elements.
+
+- Desktop main-content center: `637 px`.
+- Desktop wrapper, card, and cancel-action center: `637 px`.
+- Desktop wrapper and card width: `400 px`.
+- Desktop metadata columns: `1`.
+- Mobile card and cancel-action center: `196.5 px`, matching the 393 px viewport center.
+- Mobile card and action width: `353 px`; edit control remains a 44 px icon-only target.
+
+## Fidelity Surfaces
+
+- Fonts and typography: existing product typography, weights, line heights, and wrapping are unchanged; the narrower desktop column intentionally preserves the mobile hierarchy.
+- Spacing and layout rhythm: the previously unused right grid track is removed for calendar-only appointments; navigation, card, and action now form one centered rhythm.
+- Colors and visual tokens: all existing semantic surface, brand, border, and danger tokens are unchanged.
+- Image quality and asset fidelity: the existing logo and Lucide interface icons are unchanged; no raster asset or replacement artwork was introduced.
+- Copy and content: all event copy is unchanged. The missing close action is the separately approved calendar-only behavior.
+
+## Comparison History
+
+1. Initial finding — P2: the compact card occupied the left track of a two-column grid while the second track was empty, leaving the desktop screen visibly unbalanced.
+2. First fix — P2 remained: a centered 560 px column balanced the screen but changed metadata to two columns and no longer matched the mobile information hierarchy.
+3. Final fix: the centered column was reduced to 400 px. The card returned to a single metadata column while retaining desktop spacing and a centered action. Desktop and mobile post-fix captures show no remaining P0, P1, or P2 mismatch.
+
+## Browser Verification
+
+- Page identity and meaningful content passed.
+- No framework error overlay was present.
+- Browser console contained no warnings or errors.
+- Edit interaction passed: selecting `Bearbeiten` opened the populated event-edit route; browser Back restored the centered detail view.
+- Mobile responsive check passed with no clipping or horizontal overflow.
+
+## Findings
+
+No actionable P0, P1, or P2 findings remain.
+
+## Follow-up Polish
+
+No P3 follow-up is required for the annotated region.
+
+final result: passed

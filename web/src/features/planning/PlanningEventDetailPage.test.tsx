@@ -110,6 +110,9 @@ describe('PlanningEventDetailPage', () => {
     const cancelButton = screen.getByRole('button', { name: i18n.t('planning.actions.cancel') });
     const lifecycleActions = cancelButton.parentElement;
     const eventCard = screen.getByText('Clubhouse').closest('section');
+    const detailContent = backLink.parentElement?.parentElement;
+    expect(detailContent).toHaveClass(styles.calendarOnlyDetail);
+    expect(detailContent).toContainElement(eventCard);
     expect(lifecycleActions).toContainElement(cancelButton);
     expect(lifecycleActions).toHaveClass(styles.detailManagementActions);
     expect(eventCard?.nextElementSibling).toBe(lifecycleActions);

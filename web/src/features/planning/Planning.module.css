@@ -11,6 +11,9 @@
 .detailNavigation { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-5); }
 .detailNavigation .backLink { min-width: 0; margin-bottom: 0; }
 .detailEditLink { flex: 0 0 auto; }
+.calendarOnlyDetail { width: min(100%, 400px); margin-inline: auto; }
+.calendarOnlyDetail .detailLayout { grid-template-columns: minmax(0, 1fr); }
+.calendarOnlyDetail .detailManagementActions { justify-content: center; }
 .detailManagementActions { justify-content: flex-end; flex-wrap: wrap; margin-top: var(--space-4); }
 .detailManagementActions + .detailCard { margin-top: var(--space-5); }
 .workspace { display: grid; grid-template-columns: minmax(430px, 1.25fr) minmax(var(--planning-card-min), .75fr); gap: var(--space-6); align-items: start; }

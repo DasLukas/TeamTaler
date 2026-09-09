@@ -112,32 +112,34 @@ export function PlanningEventDetailPage() {
   const transitionError = transition.error instanceof ApiError && (transition.error.problem.status === 409 || transition.error.problem.status === 412) ? t('planning.form.conflictError') : transition.isError ? t('planning.transitionError') : undefined;
   const cancelError = cancelSeries.error instanceof ApiError && (cancelSeries.error.problem.status === 409 || cancelSeries.error.problem.status === 412) ? t('planning.form.conflictError') : cancelSeries.isError ? t('planning.transitionError') : undefined;
   return <Page className={styles.page} title={event.title} wide>
-    <div className={styles.detailNavigation}>
-      <Link className={styles.backLink} search={search} to="/planning"><ArrowLeft aria-hidden="true" size={17} />{t('planning.backToCalendar')}</Link>
-      {canEdit ? <Link aria-label={t('common.edit')} className={`${styles.buttonLink} ${styles.detailEditLink}`} params={{ eventId }} search={search} title={t('common.edit')} to="/planning/events/$eventId/edit"><Edit aria-hidden="true" size={16} /><span className={styles.detailEditLabel}>{t('common.edit')}</span></Link> : null}
-    </div>
-    <div className={styles.detailLayout}>
-      <div>
-        <section className={styles.detailCard}>
-          <div className={styles.detailBadges}><PlanningEventTypeBadge type={event.eventType} /><span className={styles.statusBadge}>{t(`planning.status.${event.status}`)}</span></div>
-          {seriesQuery.data ? <div className={styles.seriesSummary}><Repeat2 aria-hidden="true" size={18} /><span><strong>{t('planning.recurrence.series')}</strong>{planningRecurrenceSummary(seriesQuery.data.recurrence, t)}</span>{event.isSeriesException ? <small>{t('planning.recurrence.exception')}</small> : null}</div> : null}
-          <dl className={styles.detailMeta}>
-            {event.allDay ? <div><dt>{t(event.endDateExclusive === planningEndDateExclusive(event.startDate) ? 'planning.fields.date' : 'planning.fields.period')}</dt><dd><time dateTime={event.startDate}>{formatPlanningAllDayRange(event.startDate, event.endDateExclusive)}</time> · {t('planning.allDay')}</dd></div> : <>
-              <div><dt>{t('planning.fields.start')}</dt><dd><time dateTime={event.startsAt}>{formatPlanningDateTime(event.startsAt, timeZone)}</time></dd></div>
-              {event.endsAt ? <div><dt>{t('planning.fields.end')}</dt><dd><time dateTime={event.endsAt}>{formatPlanningDateTime(event.endsAt, timeZone)}</time></dd></div> : null}
-            </>}
-            {event.location ? <div><dt>{t('planning.fields.location')}</dt><dd>{event.location}</dd></div> : null}
-            {event.responseDeadline ? <div><dt>{t('planning.fields.deadline')}</dt><dd><time dateTime={event.responseDeadline}>{formatPlanningDateTime(event.responseDeadline, timeZone)}</time></dd></div> : null}
-          </dl>
-          {event.description ? <p>{event.description}</p> : null}
-        </section>
-        {managementActions}
-        {event.eventType !== 'APPOINTMENT' ? <section className={styles.detailCard} aria-labelledby="participation-title"><h2 id="participation-title">{t('planning.participation.title')}</h2><ParticipationAction event={event} /></section> : null}
+    <div className={event.eventType === 'APPOINTMENT' ? styles.calendarOnlyDetail : undefined}>
+      <div className={styles.detailNavigation}>
+        <Link className={styles.backLink} search={search} to="/planning"><ArrowLeft aria-hidden="true" size={17} />{t('planning.backToCalendar')}</Link>
+        {canEdit ? <Link aria-label={t('common.edit')} className={`${styles.buttonLink} ${styles.detailEditLink}`} params={{ eventId }} search={search} title={t('common.edit')} to="/planning/events/$eventId/edit"><Edit aria-hidden="true" size={16} /><span className={styles.detailEditLabel}>{t('common.edit')}</span></Link> : null}
       </div>
-      {event.eventType !== 'APPOINTMENT' ? <aside>
-        <section className={styles.detailCard}><h2>{t('planning.counts.title')}</h2><EventCounts event={event} /></section>
-        {event.canViewParticipants || manageAll ? <section className={styles.detailCard}><h2>{t('planning.participants')}</h2>{participantsQuery.isLoading ? <StatePanel kind="loading" /> : participantsQuery.isError ? <StatePanel actionLabel={t('common.retry')} kind="error" message={t('planning.participantsError')} onAction={() => void participantsQuery.refetch()} /> : <><ul className={styles.participantList}>{participants.map((participant) => <li key={participant.membershipId}><span><Avatar name={participant.displayName} size="small" src={participant.avatarUrl} /> {participant.displayName}</span><small>{participant.effectiveStatus ? t(`planning.participation.${participant.effectiveStatus.toLowerCase()}`) : t('planning.counts.unanswered')}</small></li>)}</ul>{participantsQuery.hasNextPage ? <Button disabled={participantsQuery.isFetchingNextPage} leadingIcon={<UsersRound size={17} />} onClick={() => void participantsQuery.fetchNextPage()} variant="secondary">{t(participantsQuery.isFetchingNextPage ? 'planning.participantsLoadingMore' : 'planning.participantsLoadMore')}</Button> : null}</>}</section> : null}
-      </aside> : null}
+      <div className={styles.detailLayout}>
+        <div>
+          <section className={styles.detailCard}>
+            <div className={styles.detailBadges}><PlanningEventTypeBadge type={event.eventType} /><span className={styles.statusBadge}>{t(`planning.status.${event.status}`)}</span></div>
+            {seriesQuery.data ? <div className={styles.seriesSummary}><Repeat2 aria-hidden="true" size={18} /><span><strong>{t('planning.recurrence.series')}</strong>{planningRecurrenceSummary(seriesQuery.data.recurrence, t)}</span>{event.isSeriesException ? <small>{t('planning.recurrence.exception')}</small> : null}</div> : null}
+            <dl className={styles.detailMeta}>
+              {event.allDay ? <div><dt>{t(event.endDateExclusive === planningEndDateExclusive(event.startDate) ? 'planning.fields.date' : 'planning.fields.period')}</dt><dd><time dateTime={event.startDate}>{formatPlanningAllDayRange(event.startDate, event.endDateExclusive)}</time> · {t('planning.allDay')}</dd></div> : <>
+                <div><dt>{t('planning.fields.start')}</dt><dd><time dateTime={event.startsAt}>{formatPlanningDateTime(event.startsAt, timeZone)}</time></dd></div>
+                {event.endsAt ? <div><dt>{t('planning.fields.end')}</dt><dd><time dateTime={event.endsAt}>{formatPlanningDateTime(event.endsAt, timeZone)}</time></dd></div> : null}
+              </>}
+              {event.location ? <div><dt>{t('planning.fields.location')}</dt><dd>{event.location}</dd></div> : null}
+              {event.responseDeadline ? <div><dt>{t('planning.fields.deadline')}</dt><dd><time dateTime={event.responseDeadline}>{formatPlanningDateTime(event.responseDeadline, timeZone)}</time></dd></div> : null}
+            </dl>
+            {event.description ? <p>{event.description}</p> : null}
+          </section>
+          {managementActions}
+          {event.eventType !== 'APPOINTMENT' ? <section className={styles.detailCard} aria-labelledby="participation-title"><h2 id="participation-title">{t('planning.participation.title')}</h2><ParticipationAction event={event} /></section> : null}
+        </div>
+        {event.eventType !== 'APPOINTMENT' ? <aside>
+          <section className={styles.detailCard}><h2>{t('planning.counts.title')}</h2><EventCounts event={event} /></section>
+          {event.canViewParticipants || manageAll ? <section className={styles.detailCard}><h2>{t('planning.participants')}</h2>{participantsQuery.isLoading ? <StatePanel kind="loading" /> : participantsQuery.isError ? <StatePanel actionLabel={t('common.retry')} kind="error" message={t('planning.participantsError')} onAction={() => void participantsQuery.refetch()} /> : <><ul className={styles.participantList}>{participants.map((participant) => <li key={participant.membershipId}><span><Avatar name={participant.displayName} size="small" src={participant.avatarUrl} /> {participant.displayName}</span><small>{participant.effectiveStatus ? t(`planning.participation.${participant.effectiveStatus.toLowerCase()}`) : t('planning.counts.unanswered')}</small></li>)}</ul>{participantsQuery.hasNextPage ? <Button disabled={participantsQuery.isFetchingNextPage} leadingIcon={<UsersRound size={17} />} onClick={() => void participantsQuery.fetchNextPage()} variant="secondary">{t(participantsQuery.isFetchingNextPage ? 'planning.participantsLoadingMore' : 'planning.participantsLoadMore')}</Button> : null}</>}</section> : null}
+        </aside> : null}
+      </div>
     </div>
     <ConfirmationDialog confirmIcon={confirmation === 'cancel' ? <Ban size={17} /> : <CheckCircle size={17} />} confirmLabel={confirmation ? t(`planning.actions.${confirmation}`) : ''} errorMessage={transitionError} message={confirmation ? t(`planning.confirm.${confirmation}`) : ''} onClose={() => setConfirmation(null)} onConfirm={() => confirmation && transition.mutate(confirmation)} open={confirmation !== null} pending={transition.isPending} title={t('planning.confirm.title')} tone={confirmation === 'cancel' ? 'danger' : 'default'} />
     <PlanningSeriesScopeDialog action="cancel" errorMessage={cancelError} onClose={() => setCancelScopeOpen(false)} onConfirm={(scope) => cancelSeries.mutate(scope)} onScopeChange={setCancelScope} open={cancelScopeOpen} pending={cancelSeries.isPending} scope={cancelScope} />
