@@ -3,12 +3,12 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { AnchorHTMLAttributes, ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PlanningEvent, PlanningEventBase, PlanningTimedEventTiming } from '@/api/types';
+import type { PlanningEvent, PlanningEventBase, PlanningParticipant, PlanningTimedEventTiming } from '@/api/types';
 import i18n from '@/i18n';
 import { PlanningEventDetailPage } from './PlanningEventDetailPage';
 import styles from './Planning.module.css';
 
-const mocks = vi.hoisted(() => ({ getPlanningEvent: vi.fn(), getPlanningSeries: vi.fn(), getPlanningSettings: vi.fn(), updatePlanningParticipation: vi.fn() }));
+const mocks = vi.hoisted(() => ({ getPlanningEvent: vi.fn(), getPlanningParticipants: vi.fn(), getPlanningSeries: vi.fn(), getPlanningSettings: vi.fn(), updatePlanningParticipation: vi.fn() }));
 
 /**
  * Creates a complete planning-event projection for detail-page tests.
@@ -41,7 +41,7 @@ function planningEvent(overrides: Partial<PlanningEventBase & PlanningTimedEvent
   };
 }
 
-vi.mock('@/api/client', () => ({ ApiError: class ApiError extends Error {}, api: { getPlanningEvent: mocks.getPlanningEvent, getPlanningSeries: mocks.getPlanningSeries, getPlanningSettings: mocks.getPlanningSettings, updatePlanningParticipation: mocks.updatePlanningParticipation } }));
+vi.mock('@/api/client', () => ({ ApiError: class ApiError extends Error {}, api: { getPlanningEvent: mocks.getPlanningEvent, getPlanningParticipants: mocks.getPlanningParticipants, getPlanningSeries: mocks.getPlanningSeries, getPlanningSettings: mocks.getPlanningSettings, updatePlanningParticipation: mocks.updatePlanningParticipation } }));
 vi.mock('@/app/useActiveGroup', () => ({ useActiveGroup: () => ({ activeGroupId: 'group-1', activeGroup: { membership: { effectiveGrants: [] } } }) }));
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, params, search, to, ...props }: AnchorHTMLAttributes<HTMLAnchorElement> & { children: ReactNode; params?: unknown; search?: unknown; to: string }) => {
@@ -56,6 +56,7 @@ vi.mock('@tanstack/react-router', () => ({
 describe('PlanningEventDetailPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getPlanningParticipants.mockResolvedValue({ items: [] });
     mocks.getPlanningSettings.mockResolvedValue({ enabled: true, version: 1, timeZone: 'Europe/Berlin' });
     mocks.getPlanningSeries.mockResolvedValue({
       id: 'series-1', version: 1, status: 'PUBLISHED', timeZone: 'Europe/Berlin', eventType: 'APPOINTMENT_REGISTRATION', title: 'Team evening', description: 'Weekly planning', location: 'Clubhouse', allDay: false, durationMinutes: 60, waitlistEnabled: true, audience: { type: 'ALL_ACTIVE_MEMBERS', roleIds: [], memberIds: [] }, recurrence: { frequency: 'WEEKLY', interval: 1, weekdays: ['WE'], range: { type: 'COUNT', count: 5 } },
@@ -134,6 +135,7 @@ describe('PlanningEventDetailPage', () => {
     expect(closeButton.parentElement).toHaveClass(styles.detailCountsActions);
     expect(responseSummary).toContainElement(attendingChoice);
     expect(responseSummary).toContainElement(closeButton);
+    expect(responseSummary?.querySelector('fieldset > p')).toBeNull();
     expect(screen.queryByRole('heading', { name: i18n.t('planning.participation.title') })).not.toBeInTheDocument();
     expect(attendingChoice.closest('label')).toHaveClass(styles.countChoice);
     expect(document.querySelectorAll(`section.${styles.detailCard}`)).toHaveLength(2);
@@ -217,6 +219,141 @@ describe('PlanningEventDetailPage', () => {
     });
   });
 
+  it('shows registration availability, occupancy, and waitlist status', async () => {
+    mocks.getPlanningEvent.mockResolvedValue(planningEvent({
+      canRespond: true,
+      eventType: 'APPOINTMENT_REGISTRATION',
+      capacity: 8,
+      waitlistEnabled: true,
+      participation: { invited: 9, attending: 3, maybe: 0, declined: 0, unanswered: 5, waitlisted: 1, reconfirmationRequired: 0 },
+    }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    render(<QueryClientProvider client={client}><PlanningEventDetailPage /></QueryClientProvider>);
+
+    expect(await screen.findByText('5 frei')).toBeVisible();
+    expect(screen.getByText('3 von 8 belegt')).toBeVisible();
+    expect(screen.getByText('Warteliste · 1')).toBeVisible();
+    const progress = screen.getByRole('progressbar', { name: '3 von 8 Plätzen belegt' });
+    expect(progress).toHaveAttribute('value', '3');
+    expect(progress).toHaveAttribute('max', '8');
+    expect(progress).toHaveAttribute('data-tone', 'low');
+  });
+
+  it('replaces an unavailable waitlist count with unlimited capacity', async () => {
+    mocks.getPlanningEvent.mockResolvedValue(planningEvent({ canRespond: true, eventType: 'APPOINTMENT_REGISTRATION' }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    render(<QueryClientProvider client={client}><PlanningEventDetailPage /></QueryClientProvider>);
+
+    expect(await screen.findByText(i18n.t('planning.participation.unlimitedCapacity'))).toBeVisible();
+    expect(screen.getByText(i18n.t('planning.participation.places'))).toBeVisible();
+    expect(screen.queryByText(i18n.t('planning.counts.waitlisted'))).not.toBeInTheDocument();
+  });
+
+  it('uses the waitlist tile as the registration action when capacity is full', async () => {
+    const event = planningEvent({
+      canRespond: true,
+      eventType: 'APPOINTMENT_REGISTRATION',
+      capacity: 2,
+      waitlistEnabled: true,
+      participation: { invited: 3, attending: 2, maybe: 0, declined: 0, unanswered: 1, waitlisted: 0, reconfirmationRequired: 0 },
+    });
+    mocks.getPlanningEvent.mockResolvedValue(event);
+    mocks.updatePlanningParticipation.mockResolvedValue({
+      ...event,
+      participation: { ...event.participation, waitlisted: 1 },
+      viewerParticipation: { status: 'WAITLISTED' },
+    } satisfies PlanningEvent);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const user = userEvent.setup();
+
+    render(<QueryClientProvider client={client}><PlanningEventDetailPage /></QueryClientProvider>);
+
+    expect(await screen.findByText('0 frei')).toBeVisible();
+    expect(screen.getByText('2 von 2 belegt')).toBeVisible();
+    expect(screen.getByText('Warteliste · 0')).toBeVisible();
+    expect(screen.getByRole('progressbar')).toHaveAttribute('data-tone', 'high');
+    const waitlistChoice = screen.getByRole('checkbox', { name: i18n.t('planning.participation.joinWaitlist') });
+    expect(screen.queryByRole('checkbox', { name: new RegExp(i18n.t('planning.participation.attending')) })).not.toBeInTheDocument();
+    await user.click(waitlistChoice.closest('label') as HTMLElement);
+
+    expect(mocks.updatePlanningParticipation).toHaveBeenCalledWith('group-1', event.id, 'APPOINTMENT_REGISTRATION', 'ATTENDING');
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: i18n.t('planning.participation.leaveWaitlist') })).toBeChecked());
+  });
+
+  it('keeps a full registration without a waitlist informational', async () => {
+    mocks.getPlanningEvent.mockResolvedValue(planningEvent({
+      canRespond: true,
+      eventType: 'APPOINTMENT_REGISTRATION',
+      capacity: 2,
+      waitlistEnabled: false,
+      participation: { invited: 2, attending: 2, maybe: 0, declined: 0, unanswered: 0, waitlisted: 0, reconfirmationRequired: 0 },
+    }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    render(<QueryClientProvider client={client}><PlanningEventDetailPage /></QueryClientProvider>);
+
+    expect(await screen.findByText('0 frei')).toBeVisible();
+    expect(screen.getByText('2 von 2 belegt')).toBeVisible();
+    expect(screen.getByText(i18n.t('planning.participation.noWaitlist'))).toBeVisible();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+  });
+
+  it('uses a warning progress tone as registration capacity fills', async () => {
+    mocks.getPlanningEvent.mockResolvedValue(planningEvent({
+      canRespond: true,
+      eventType: 'APPOINTMENT_REGISTRATION',
+      capacity: 10,
+      waitlistEnabled: true,
+      participation: { invited: 10, attending: 7, maybe: 0, declined: 0, unanswered: 3, waitlisted: 0, reconfirmationRequired: 0 },
+    }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    render(<QueryClientProvider client={client}><PlanningEventDetailPage /></QueryClientProvider>);
+
+    expect(await screen.findByText('3 frei')).toBeVisible();
+    expect(screen.getByText('7 von 10 belegt')).toBeVisible();
+    expect(screen.getByRole('progressbar')).toHaveAttribute('data-tone', 'medium');
+  });
+
+  it('sorts participants by response and alphabetically within each response', async () => {
+    const participant = (membershipId: string, displayName: string, effectiveStatus?: PlanningParticipant['effectiveStatus']): PlanningParticipant => ({ membershipId, displayName, effectiveStatus, confirmedRevision: 1, version: 1 });
+    mocks.getPlanningEvent.mockResolvedValue(planningEvent({ canViewParticipants: true, eventType: 'APPOINTMENT_REGISTRATION' }));
+    mocks.getPlanningParticipants.mockResolvedValue({ items: [
+      participant('open', 'Otto Offen'),
+      participant('attending-z', 'Zora Zusage', 'ATTENDING'),
+      participant('withdrawn', 'Ava Abgemeldet', 'WITHDRAWN'),
+      participant('waitlisted', 'Wanda Warteliste', 'WAITLISTED'),
+      participant('attending-a', 'Anton Zusage', 'ATTENDING'),
+      participant('declined', 'Nora Absage', 'DECLINED'),
+      participant('maybe', 'Mia Vielleicht', 'MAYBE'),
+    ] });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    render(<QueryClientProvider client={client}><PlanningEventDetailPage /></QueryClientProvider>);
+
+    const responseHeadings = await screen.findAllByRole('heading', { level: 3 });
+    const responseGroups = responseHeadings.map((heading) => heading.closest('section')).filter((group): group is HTMLElement => group !== null);
+    expect(responseHeadings.map((heading) => heading.textContent)).toEqual([
+      'Dabei2',
+      'Vielleicht1',
+      'Warteliste1',
+      'Nicht dabei1',
+      'Offen1',
+      'Abgemeldet1',
+    ]);
+    expect(responseGroups.flatMap((group) => within(group).getAllByRole('img')).map((image) => image.getAttribute('aria-label'))).toEqual([
+      'Anton Zusage',
+      'Zora Zusage',
+      'Mia Vielleicht',
+      'Wanda Warteliste',
+      'Nora Absage',
+      'Otto Offen',
+      'Ava Abgemeldet',
+    ]);
+  });
+
   it('keeps the event-detail order and places the response deadline in the response footer', async () => {
     const description = 'Registration with capacity and waitlist.';
     mocks.getPlanningEvent.mockResolvedValue(planningEvent({
@@ -238,7 +375,7 @@ describe('PlanningEventDetailPage', () => {
     const responseSummary = screen.getByRole('heading', { name: i18n.t('planning.counts.title') }).closest('section');
     const recurrencePattern = screen.getByText('Wöchentlich am Mi');
     const recurrenceRange = screen.getByText('endet nach 5 Terminen');
-    const recurrenceSeparator = screen.getByText('·');
+    const recurrenceSeparator = recurrencePattern.parentElement?.querySelector(`.${styles.seriesSummarySeparator}`);
     expect(locationLabel.compareDocumentPosition(descriptionText) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(descriptionText.compareDocumentPosition(startLabel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(startLabel.compareDocumentPosition(recurrencePattern) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -252,6 +389,25 @@ describe('PlanningEventDetailPage', () => {
     expect(recurrenceRange.tagName).toBe('SPAN');
     expect(recurrencePattern.nextElementSibling).toBe(recurrenceSeparator);
     expect(recurrenceSeparator).toHaveAttribute('aria-hidden', 'true');
-    expect(recurrenceSeparator.nextElementSibling).toBe(recurrenceRange);
+    expect(recurrenceSeparator?.nextElementSibling).toBe(recurrenceRange);
+  });
+
+  it('keeps a completed event deadline as the leftmost response-footer item', async () => {
+    mocks.getPlanningEvent.mockResolvedValue(planningEvent({
+      eventType: 'APPOINTMENT_REGISTRATION',
+      status: 'COMPLETED',
+      responseDeadline: '2026-09-08T22:00:00+02:00',
+    }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    render(<QueryClientProvider client={client}><PlanningEventDetailPage /></QueryClientProvider>);
+
+    const deadlineLabel = await screen.findByText(i18n.t('planning.fields.deadline'));
+    const deadlineList = deadlineLabel.closest('dl');
+    const footer = deadlineList?.parentElement;
+    expect(footer).toHaveClass(styles.detailCountsActions);
+    expect(footer?.children).toHaveLength(1);
+    expect(footer?.firstElementChild).toBe(deadlineList);
+    expect(screen.queryByRole('button', { name: i18n.t('planning.actions.close') })).not.toBeInTheDocument();
   });
 });

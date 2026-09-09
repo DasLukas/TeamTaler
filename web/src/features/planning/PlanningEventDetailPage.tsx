@@ -6,10 +6,10 @@ import CheckCircle from 'lucide-react/dist/esm/icons/check-circle';
 import Edit from 'lucide-react/dist/esm/icons/edit';
 import Repeat2 from 'lucide-react/dist/esm/icons/repeat-2';
 import UsersRound from 'lucide-react/dist/esm/icons/users-round';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ApiError, api } from '@/api/client';
-import type { PlanningEvent, PlanningParticipantPage, PlanningSeriesScope } from '@/api/types';
+import type { PlanningEvent, PlanningParticipant, PlanningParticipantPage, PlanningParticipationStatus, PlanningSeriesScope } from '@/api/types';
 import { can } from '@/app/permissions';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Page } from '@/components/layout/Page';
@@ -28,6 +28,62 @@ import { formatPlanningAllDayRange, planningEndDateExclusive } from './planningT
 import styles from './Planning.module.css';
 
 type Transition = 'close' | 'complete' | 'cancel';
+type ParticipantGroupStatus = PlanningParticipationStatus | 'WITHDRAWN' | 'UNANSWERED';
+
+interface ParticipantGroup {
+  status: ParticipantGroupStatus;
+  participants: PlanningParticipant[];
+}
+
+const PARTICIPANT_STATUS_ORDER: Record<ParticipantGroupStatus, number> = {
+  ATTENDING: 0,
+  MAYBE: 1,
+  WAITLISTED: 2,
+  DECLINED: 3,
+  UNANSWERED: 4,
+  WITHDRAWN: 5,
+};
+const PARTICIPANT_NAME_COLLATOR = new Intl.Collator('de', { numeric: true, sensitivity: 'base' });
+
+/**
+ * Resolves the visible response group for one participant.
+ *
+ * @param participant - Participant projection returned by the planning API.
+ * @returns The effective response or the explicit unanswered group.
+ */
+function getParticipantGroupStatus(participant: PlanningParticipant): ParticipantGroupStatus {
+  return participant.effectiveStatus ?? 'UNANSWERED';
+}
+
+/**
+ * Sorts event participants by their displayed response and then by name.
+ *
+ * @param participants - Participant projections loaded for the event.
+ * @returns A new array ordered by response priority and German alphabetical rules.
+ */
+function sortPlanningParticipants(participants: PlanningParticipant[]): PlanningParticipant[] {
+  return [...participants].sort((left, right) => {
+    const leftOrder = PARTICIPANT_STATUS_ORDER[getParticipantGroupStatus(left)];
+    const rightOrder = PARTICIPANT_STATUS_ORDER[getParticipantGroupStatus(right)];
+    return leftOrder - rightOrder || PARTICIPANT_NAME_COLLATOR.compare(left.displayName, right.displayName);
+  });
+}
+
+/**
+ * Groups sorted participants into response sections without repeating status copy on every row.
+ *
+ * @param participants - Participant projections loaded for the event.
+ * @returns Response groups in display priority, with names sorted alphabetically inside each group.
+ */
+function groupPlanningParticipants(participants: PlanningParticipant[]): ParticipantGroup[] {
+  return sortPlanningParticipants(participants).reduce<ParticipantGroup[]>((groups, participant) => {
+    const status = getParticipantGroupStatus(participant);
+    const currentGroup = groups.at(-1);
+    if (currentGroup?.status === status) currentGroup.participants.push(participant);
+    else groups.push({ status, participants: [participant] });
+    return groups;
+  }, []);
+}
 
 /** Renders one planning event, including series-aware management controls. */
 export function PlanningEventDetailPage() {
@@ -54,7 +110,7 @@ export function PlanningEventDetailPage() {
     queryFn: ({ pageParam }): Promise<PlanningParticipantPage> => api.getPlanningParticipants(activeGroupId, eventId, pageParam, 100),
     enabled: Boolean(event?.canViewParticipants || manageAll),
   });
-  const participants = participantsQuery.data?.pages.flatMap((page) => page.items) ?? [];
+  const participantGroups = useMemo(() => groupPlanningParticipants(participantsQuery.data?.pages.flatMap((page) => page.items) ?? []), [participantsQuery.data?.pages]);
   const invalidatePlanning = async () => Promise.all([
     queryClient.invalidateQueries({ queryKey: planningKeys.events(activeGroupId) }),
     queryClient.invalidateQueries({ queryKey: ['dashboard', activeGroupId] }),
@@ -135,7 +191,11 @@ export function PlanningEventDetailPage() {
               {canClose ? <Button leadingIcon={<CheckCircle size={16} />} onClick={() => setConfirmation('close')} size="small" variant="ghost">{t('planning.actions.close')}</Button> : null}
             </div> : null}
           </section>
-          {event.canViewParticipants || manageAll ? <section className={styles.detailCard}><h2>{t('planning.participants')}</h2>{participantsQuery.isLoading ? <StatePanel kind="loading" /> : participantsQuery.isError ? <StatePanel actionLabel={t('common.retry')} kind="error" message={t('planning.participantsError')} onAction={() => void participantsQuery.refetch()} /> : <><ul className={styles.participantList}>{participants.map((participant) => <li key={participant.membershipId}><span><Avatar name={participant.displayName} size="small" src={participant.avatarUrl} /> {participant.displayName}</span><small>{participant.effectiveStatus ? t(`planning.participation.${participant.effectiveStatus.toLowerCase()}`) : t('planning.counts.unanswered')}</small></li>)}</ul>{participantsQuery.hasNextPage ? <Button disabled={participantsQuery.isFetchingNextPage} leadingIcon={<UsersRound size={17} />} onClick={() => void participantsQuery.fetchNextPage()} variant="secondary">{t(participantsQuery.isFetchingNextPage ? 'planning.participantsLoadingMore' : 'planning.participantsLoadMore')}</Button> : null}</>}</section> : null}
+          {event.canViewParticipants || manageAll ? <section className={styles.detailCard}><h2>{t('planning.participants')}</h2>{participantsQuery.isLoading ? <StatePanel kind="loading" /> : participantsQuery.isError ? <StatePanel actionLabel={t('common.retry')} kind="error" message={t('planning.participantsError')} onAction={() => void participantsQuery.refetch()} /> : <><div className={styles.participantGroups}>{participantGroups.map((group) => {
+            const groupId = `participant-group-${event.id}-${group.status.toLowerCase()}`;
+            const groupLabel = group.status === 'UNANSWERED' ? t('planning.counts.unanswered') : t(`planning.participation.${group.status.toLowerCase()}`);
+            return <section aria-labelledby={groupId} className={styles.participantGroup} key={group.status}><h3 id={groupId}><span>{groupLabel}</span><small>{group.participants.length}</small></h3><ul className={styles.participantList}>{group.participants.map((participant) => <li key={participant.membershipId}><Avatar name={participant.displayName} size="small" src={participant.avatarUrl} /><span>{participant.displayName}</span></li>)}</ul></section>;
+          })}</div>{participantsQuery.hasNextPage ? <Button disabled={participantsQuery.isFetchingNextPage} leadingIcon={<UsersRound size={17} />} onClick={() => void participantsQuery.fetchNextPage()} variant="secondary">{t(participantsQuery.isFetchingNextPage ? 'planning.participantsLoadingMore' : 'planning.participantsLoadMore')}</Button> : null}</>}</section> : null}
         </aside> : null}
       </div>
     </div>

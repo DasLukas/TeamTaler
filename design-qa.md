@@ -63,8 +63,6 @@ The final unified-feed build was rechecked on 2026-08-24 against the real local 
 
 final result: passed
 
----
-
 # Semantic Planning Response Choices Design QA
 
 ## Comparison Target
@@ -777,5 +775,366 @@ The response deadline is removed from the event timing grid and added to the res
 ## Final Result
 
 The deadline and close action now form one coherent response-management footer across desktop and mobile.
+
+final result: passed
+
+---
+
+# Completed Response Deadline Alignment Design QA
+
+## Comparison Target
+
+- Source visual truth: `/tmp/teamtaler-response-deadline-completed-before-1094.png`.
+- Implementation screenshots: `/tmp/teamtaler-response-deadline-completed-after-1094.png`, `/tmp/teamtaler-response-deadline-published-after-1094.png`, and `/tmp/teamtaler-response-deadline-completed-after-mobile-393.png`.
+- Routes: completed registration `/planning/events/pev_14a4c09aef365c82918808e6887eee64?date=2026-09-09&view=week`; published poll `/planning/events/pev_3d4b83c01dbc9b6b116d067284bf5fc5?date=2026-09-16&view=week`.
+- State: authenticated; completed registration without a close action, plus a published poll with a close action as the control case.
+
+## Capture Normalization
+
+| Capture | CSS viewport | Pixel dimensions | Density |
+| --- | ---: | ---: | ---: |
+| Wide source | 1094 × 617 | 1094 × 617 | 1 screenshot pixel per CSS pixel |
+| Wide implementation | 1094 × 617 | 1094 × 617 | 1 screenshot pixel per CSS pixel |
+| Mobile implementation | 393 × 852 | 393 × 852 | 1 screenshot pixel per CSS pixel |
+
+The wide source and implementation use the same completed event, theme, viewport, scroll region, and one-to-one density. The published and mobile captures verify the conditional footer states.
+
+## Full-View Comparison Evidence
+
+The completed-event response deadline now remains at the left edge of the response footer instead of inheriting the absent close action's right alignment. The surrounding event, response totals, participant list, and navigation are unchanged.
+
+## Focused Region Comparison Evidence
+
+- In the completed registration, the deadline is the footer's only child and aligns with the response-card content inset.
+- In the published poll, the deadline stays left while `Schließen` stays right in the same footer row.
+- At 393 px, the completed-event deadline remains left-aligned with no clipping or unintended wrapping.
+
+## Required Fidelity Surfaces
+
+- Typography and hierarchy: passed. Existing deadline label and value styles are unchanged.
+- Spacing and layout rhythm: passed. Only the conditional horizontal alignment changes; card padding, divider, and gaps remain consistent.
+- Colors and visual tokens: passed. No token or color changes were introduced.
+- Image quality and asset fidelity: passed. Existing brand and icon assets are unchanged.
+- Copy and content: passed. The localized deadline label and value remain intact.
+
+## Interaction And Responsive Evidence
+
+- DOM inspection confirms the completed footer has one deadline child and no close action.
+- The published control state contains two footer children, with the deadline left and the close action right.
+- Browser page identity, meaningful DOM content, framework-overlay absence, and console health passed.
+- No clipping, overlap, horizontal overflow, or unintended wrapping was visible at 1094 × 617 or 393 × 852.
+
+## Comparison History
+
+1. Initial finding — P2: a generic last-child auto margin pushed the deadline to the right whenever the optional close action was absent.
+2. Fix: scoped the auto margin to footer buttons only and added a completed-event regression test.
+3. Post-fix evidence: normalized wide comparison, published-state control, and mobile capture show no remaining P0, P1, or P2 issue.
+
+## Final Result
+
+The response deadline now stays left-aligned in every event status while optional management actions retain their intended right alignment.
+
+final result: passed
+
+---
+
+# Registration Capacity And Waitlist Design QA
+
+Superseded by the compact waitlist-tile iteration documented below.
+
+## Comparison Target
+
+- Source visual truth: `/tmp/teamtaler-registration-capacity-before-1094.png`.
+- Implementation screenshots: `/tmp/teamtaler-registration-capacity-after-1094.png`, `/tmp/teamtaler-registration-capacity-joined-1094.png`, and `/tmp/teamtaler-registration-capacity-after-mobile-393.png`.
+- Source route: `/planning/events/pev_44ecdd17e84c556a2374c656feea1ffa?date=2026-09-16&view=week`.
+- Capacity-state route: `/planning/events/pev_802957a129f227863ec131de1cdd571f?date=2026-09-16&view=week`.
+- State: authenticated, published registration events; one unlimited without a waitlist and one limited to three places with an active waitlist.
+
+## Capture Normalization
+
+| Capture | CSS viewport | Pixel dimensions | Density |
+| --- | ---: | ---: | ---: |
+| Wide source | 1094 × 617 | 1094 × 617 | 1 screenshot pixel per CSS pixel |
+| Wide implementation | 1094 × 617 | 1094 × 617 | 1 screenshot pixel per CSS pixel |
+| Wide selected state | 1094 × 617 | 1094 × 617 | 1 screenshot pixel per CSS pixel |
+| Mobile implementation | 393 × 852 | 393 × 852 | 1 screenshot pixel per CSS pixel |
+
+The source and first implementation capture use the same route, state, theme, viewport, scroll region, and one-to-one density. The limited-capacity route supplies the additional occupancy, waitlist, and interaction evidence.
+
+## Full-View Comparison Evidence
+
+The response card now exposes registration availability before the response choices. Unlimited registrations state `Unbegrenzte Plätze` and `Keine Warteliste`; limited registrations state free places, occupied places, and whether the waitlist is active without disturbing the event-detail layout.
+
+## Focused Region Comparison Evidence
+
+- The availability panel is visually grouped within `Rückmeldungen` and remains subordinate to the section heading.
+- A limited event shows `3 Plätze frei`, `0 von 3 Plätzen belegt`, `Warteliste aktiv`, and the number waiting.
+- After selecting `Dabei`, the same panel updates to `2 Plätze frei` and `1 von 3 Plätzen belegt`; the selected aggregate tile is visibly marked.
+- At 393 px, the availability headline, waitlist badge, occupancy, response choices, and bottom navigation remain readable without horizontal overflow.
+
+## Required Fidelity Surfaces
+
+- Typography and hierarchy: passed. Availability uses the existing metadata and heading scale, while current free capacity receives the strongest weight.
+- Spacing and layout rhythm: passed. The panel follows the response-card inset, radius, and spacing system; desktop and mobile content remain balanced.
+- Colors and visual tokens: passed. Existing brand-subtle, surface, border, muted-text, and selected-state tokens communicate the new status.
+- Image quality and asset fidelity: passed. No new imagery or substitute assets were introduced.
+- Copy and content: passed. Capacity, occupancy, and waitlist availability are explicit for limited and unlimited registrations.
+
+## Interaction And Responsive Evidence
+
+- Selecting `Dabei` changed the rendered totals from 0/3 occupied and 3 free to 1/3 occupied and 2 free; selecting it again restored the original test data.
+- Full-capacity logic is covered for an active waitlist and for registrations without a waitlist: the waitlist tile becomes the action only when entry is possible.
+- Browser page identity, meaningful DOM content, framework-overlay absence, console health, and responsive overflow checks passed.
+- No clipping, overlap, or unintended horizontal scrolling was visible at 1094 × 617 or 393 × 852.
+
+## Comparison History
+
+1. Initial finding — P2: aggregate totals did not reveal the registration capacity, remaining availability, or whether a waitlist existed.
+2. Fix: added a semantic availability panel, native occupancy progress, explicit waitlist status, and capacity-aware response actions and hints.
+3. Post-fix evidence: normalized source comparison, a real limited-capacity interaction, and the mobile capture show no remaining P0, P1, or P2 issue.
+
+## Final Result
+
+Registration events now communicate capacity and waitlist behavior before members commit to a response, including full and unlimited states.
+
+final result: passed
+
+---
+
+# Compact Registration Capacity Tile Design QA
+
+Superseded by the unlimited-capacity refinement documented below.
+
+## Comparison Target
+
+- Source visual truth: `/tmp/teamtaler-capacity-tile-before-1024.png`.
+- Implementation screenshots: `/tmp/teamtaler-capacity-tile-after-1024.png`, `/tmp/teamtaler-capacity-tile-limited-after-1024.png`, `/tmp/teamtaler-capacity-tile-joined-1024.png`, and `/tmp/teamtaler-capacity-tile-after-mobile-393.png`.
+- Unlimited route: `/planning/events/pev_44ecdd17e84c556a2374c656feea1ffa?date=2026-09-16&view=week`.
+- Limited route: `/planning/events/pev_802957a129f227863ec131de1cdd571f?date=2026-09-16&view=week`.
+- State: authenticated, published registration events with unlimited and limited capacity, including an active selected response.
+
+## Capture Normalization
+
+| Capture | CSS viewport | Pixel dimensions | Density |
+| --- | ---: | ---: | ---: |
+| Wide source | 1024 × 768 | 1024 × 768 | 1 screenshot pixel per CSS pixel |
+| Wide implementation | 1024 × 768 | 1024 × 768 | 1 screenshot pixel per CSS pixel |
+| Wide limited and selected states | 1024 × 768 | 1024 × 768 | 1 screenshot pixel per CSS pixel |
+| Mobile implementation | 393 × 852 | 393 × 852 | 1 screenshot pixel per CSS pixel |
+
+The source and primary implementation capture use the same route, state, dark theme, viewport, scroll region, and one-to-one density. The limited-capacity captures verify the alternate data and selected states.
+
+## Full-View Comparison Evidence
+
+The standalone availability panel is removed. Capacity and waitlist status now live inside the existing `Warteliste` aggregate tile, restoring the compact two-tile composition and reducing response-card height.
+
+## Focused Region Comparison Evidence
+
+- An unlimited event shows `0 Warteliste` with `Nicht aktiv · Unbegrenzt` inside the same tile.
+- A limited event shows `Aktiv · 3 von 3 frei` without adding another visual container.
+- After selecting `Dabei`, the waitlist tile updates to `Aktiv · 2 von 3 frei` while the selected registration tile remains visually explicit.
+- At 393 px, both tiles retain equal height, readable metadata, and the existing touch targets without horizontal overflow.
+
+## Required Fidelity Surfaces
+
+- Typography and hierarchy: passed. Count and label retain their hierarchy; status and capacity use the existing small metadata scale.
+- Spacing and layout rhythm: passed. The original two-column response grid is restored and the card is materially shorter.
+- Colors and visual tokens: passed. Existing passive and selected count-tile tokens are retained without introducing another surface.
+- Image quality and asset fidelity: passed. No image or icon changes were introduced.
+- Copy and content: passed. `Aktiv` or `Nicht aktiv` states whether the waitlist exists, while remaining or unlimited capacity is explicit in the same tile.
+
+## Interaction And Responsive Evidence
+
+- Selecting `Dabei` updated the compact capacity text from `3 von 3 frei` to `2 von 3 frei`; selecting it again restored the original test data.
+- Full-capacity behavior with and without a waitlist remains covered by component tests.
+- Browser page identity, meaningful DOM content, framework-overlay absence, console health, and horizontal-overflow checks passed.
+- No clipping, overlap, or unintended horizontal scrolling was visible at 1024 × 768 or 393 × 852. The annotation marker visible in the mobile evidence belongs to the browser review layer, not the app UI.
+
+## Comparison History
+
+1. Initial finding — P2: the standalone availability surface duplicated information and made the response card visually heavier than its two aggregate controls.
+2. Fix: removed the separate surface and placed waitlist status plus compact capacity text directly in the waitlist tile.
+3. Post-fix evidence: normalized source comparison, limited and selected states, and mobile evidence show no remaining P0, P1, or P2 issue.
+
+## Final Result
+
+Capacity and waitlist information are now compact, contextual, and available within the existing aggregate tile.
+
+final result: passed
+
+---
+
+# Unlimited Registration Tile Design QA
+
+## Comparison Target
+
+- Source visual truth: `/tmp/teamtaler-unlimited-tile-before-1024.png`.
+- Implementation screenshots: `/tmp/teamtaler-unlimited-tile-after-1024.png`, `/tmp/teamtaler-limited-waitlist-tile-after-1024.png`, and `/tmp/teamtaler-unlimited-tile-after-mobile-393.png`.
+- Unlimited route: `/planning/events/pev_44ecdd17e84c556a2374c656feea1ffa?date=2026-09-16&view=week`.
+- Limited control route: `/planning/events/pev_802957a129f227863ec131de1cdd571f?date=2026-09-16&view=week`.
+- State: authenticated, published registration events with unlimited capacity and with three configured places plus an active waitlist.
+
+## Capture Normalization
+
+| Capture | CSS viewport | Pixel dimensions | Density |
+| --- | ---: | ---: | ---: |
+| Desktop source | 1024 × 768 | 1024 × 768 | 1 screenshot pixel per CSS pixel |
+| Desktop implementation | 1024 × 768 | 1024 × 768 | 1 screenshot pixel per CSS pixel |
+| Desktop limited-capacity control | 1024 × 768 | 1024 × 768 | 1 screenshot pixel per CSS pixel |
+| Mobile implementation | 393 × 852 | 393 × 852 | 1 screenshot pixel per CSS pixel |
+
+The source and primary implementation use the same route, authenticated state, dark theme, viewport, scroll region, and one-to-one density. The limited route is a control state for preserving capacity-aware waitlist behavior.
+
+## Full-View Comparison Evidence
+
+The unlimited registration no longer presents a zero-value waitlist or an inactive waitlist status. Its second aggregate tile is now a passive `Unbegrenzt` / `Plätze` information tile, while the limited registration retains the existing `Warteliste` count, active status, and remaining-capacity copy.
+
+## Focused Region Comparison Evidence
+
+The aggregate tiles are fully readable in the full-view captures, so an additional crop was not needed. At both 1024 × 768 and 393 × 852, the neutral unlimited tile matches the height, radius, spacing, and alignment of the adjacent interactive `Dabei` tile without displaying a checkbox or suggesting a waitlist action.
+
+## Required Fidelity Surfaces
+
+- Typography and hierarchy: passed. `Unbegrenzt` is the primary value and `Plätze` is the muted category label, mirroring the neighboring aggregate hierarchy without forcing a numeric count.
+- Spacing and layout rhythm: passed. The two-column response grid, tile height, inset, and responsive card rhythm are unchanged.
+- Colors and visual tokens: passed. The passive tile keeps the existing muted-surface and text tokens; the actionable attendance tile retains its border and native checkbox affordance.
+- Image quality and asset fidelity: passed. No imagery, logos, icons, or substitute assets were changed.
+- Copy and content: passed. The irrelevant `0 Warteliste` and `Nicht aktiv` strings are absent only when no capacity limit exists; limited registrations keep explicit waitlist and availability details.
+
+## Interaction And Responsive Evidence
+
+- The unlimited tile is intentionally informational and exposes no focusable selection control; the adjacent `Dabei` tile remains the only registration action.
+- The limited-capacity control route still renders `Warteliste`, `Aktiv`, and `3 von 3 frei`, and component tests cover the selected, full-with-waitlist, and full-without-waitlist interaction branches.
+- Browser page identity, meaningful DOM content, framework-overlay absence, and console health passed. Direct pointer actions were intercepted by the active browser annotation layer, so interaction mutation evidence comes from the focused component tests rather than the annotated browser surface.
+- No clipping, overlap, or unintended wrapping is visible at 1024 × 768 or 393 × 852. The blue numbered marker belongs to the browser review layer, not the application UI.
+
+## Comparison History
+
+1. Initial finding — P2: an unlimited registration displayed `0 Warteliste` and `Nicht aktiv`, implying a capacity constraint and waitlist feature that do not exist.
+2. Fix: replaced that entire aggregate state with a passive `Unbegrenzt` / `Plätze` tile and removed the unavailable waitlist count and status from the rendered accessibility tree.
+3. Post-fix evidence: normalized desktop comparison, the limited-capacity control, the mobile capture, and the regression test show no remaining P0, P1, or P2 issue.
+
+## Final Result
+
+Unlimited registrations now communicate their actual availability without exposing a meaningless waitlist total or suggesting an unavailable interaction.
+
+final result: passed
+
+---
+
+# Response Capacity Hierarchy And Participant Sorting Design QA
+
+## Comparison Target
+
+- Source visual truth: `/tmp/teamtaler-response-hierarchy-before-1094.png` and `/tmp/teamtaler-response-hint-before-1024.png`.
+- Implementation screenshots: `/tmp/teamtaler-response-hierarchy-after-1094.png`, `/tmp/teamtaler-response-hint-after-1024.png`, and `/tmp/teamtaler-response-hierarchy-after-mobile-393.png`.
+- Limited-capacity route: `/planning/events/pev_6e2749598b3e358346446b617bedcb57?date=2026-09-16&view=week`.
+- Unlimited-capacity route: `/planning/events/pev_44ecdd17e84c556a2374c656feea1ffa?date=2026-09-16&view=week`.
+- State: authenticated, published registration events; the limited event has one of three places occupied and no member waiting.
+
+## Capture Normalization
+
+| Capture | CSS viewport | Pixel dimensions | Density |
+| --- | ---: | ---: | ---: |
+| Limited source and implementation | 1094 × 617 | 1094 × 617 | 1 screenshot pixel per CSS pixel |
+| Unlimited source and implementation | 1024 × 768 | 1024 × 768 | 1 screenshot pixel per CSS pixel |
+| Limited mobile implementation | 393 × 852 | 393 × 852 | 1 screenshot pixel per CSS pixel |
+
+Each before-and-after pair uses the same route, group, authenticated state, theme, viewport, scroll region, and one-to-one density.
+
+## Full-View Comparison Evidence
+
+The redundant response instruction is removed. In the limited state, `2 frei` and `1 von 3 belegt` now form the primary capacity hierarchy, followed by a low-utilization green progress indicator. `Warteliste · 0` is visually reduced to secondary metadata. The unlimited state remains a compact `Unbegrenzt` / `Plätze` information tile without introducing a progress control.
+
+## Focused Region Comparison Evidence
+
+- The limited response card is shorter despite carrying more useful capacity information because the instructional paragraph is gone.
+- The native progress element is labelled `1 von 3 Plätzen belegt`, exposes `value=1` and `max=3`, and uses a green low-utilization tone. Medium and high utilization tones are covered by focused component tests and use the existing warning and danger tokens.
+- The attendance checkbox remains the dominant interactive choice. A full event with an enabled waitlist uses an explicit `Auf Warteliste eintragen` accessible label.
+- At 393 px, both tiles remain on one row, their values stay readable, and the progress track does not overflow the response card.
+
+## Required Fidelity Surfaces
+
+- Typography and hierarchy: passed. Available places receive the strongest weight, occupancy is supporting copy, and waitlist count is the smallest text.
+- Spacing and layout rhythm: passed. Removing the hint tightens the response card while the two-tile grid, footer, and responsive rhythm remain aligned.
+- Colors and visual tokens: passed. Utilization uses existing success, warning, and danger tokens as a supplemental signal; absolute numbers remain the primary information.
+- Image quality and asset fidelity: passed. No imagery, logos, icons, or substitute assets were introduced or changed.
+- Copy and content: passed. The card now communicates absolute available and occupied counts directly, with the waitlist clearly demoted to secondary context.
+
+## Interaction, Sorting, And Responsive Evidence
+
+- Selecting the `Dabei` checkbox changed the browser-rendered count from zero to one; selecting it again restored zero without console warnings or errors.
+- Participant ordering is covered with mixed response fixtures: `Dabei`, `Vielleicht`, `Warteliste`, `Nicht dabei`, `Offen`, and `Abgemeldet`, with German alphabetical ordering inside each response group.
+- Browser page identity, meaningful DOM content, framework-overlay absence, console health, progress semantics, and responsive rendering passed.
+- No clipping, overlap, or horizontal overflow is visible at 1094 × 617, 1024 × 768, or 393 × 852.
+
+## Comparison History
+
+1. Initial findings — P2: redundant instructional copy consumed space; waitlist count visually competed with more important capacity data; participant ordering depended on API order.
+2. Fixes: removed routine response hints, replaced the waitlist-led tile with absolute availability and occupancy plus a semantic utilization bar, demoted the waitlist to small metadata, and added deterministic status/name sorting.
+3. Post-fix evidence: normalized desktop and mobile comparisons, browser interaction evidence, semantic progress inspection, and mixed-status regression tests show no remaining P0, P1, or P2 issue.
+
+## Final Result
+
+The response card now prioritizes the decision-relevant capacity state, keeps waitlist information appropriately secondary, and presents participants in a predictable response-first order.
+
+final result: passed
+
+---
+
+# Participant Response Dividers Design QA
+
+## Comparison Target
+
+- Source visual truth: `/tmp/teamtaler-account-reference.jpg`, specifically the divider-led account settings rows requested as the established TeamTaler pattern.
+- Implementation screenshots: `/tmp/teamtaler-participant-groups-after-desktop-focused.jpg` and `/tmp/teamtaler-participant-groups-after-mobile-rows.jpg`.
+- Route: `/planning/events/pev_6e2749598b3e358346446b617bedcb57?date=2026-09-16&view=week`.
+- State: authenticated, dark theme, published registration event with one attending and two unanswered participants.
+
+## Capture Normalization
+
+| Capture | CSS viewport | Pixel dimensions | Density |
+| --- | ---: | ---: | ---: |
+| Account divider reference | 1094 × 617 | 1094 × 617 | 1 screenshot pixel per CSS pixel |
+| Participant groups, desktop | 1094 × 617 | 1094 × 617 | 1 screenshot pixel per CSS pixel |
+| Participant groups, mobile | 393 × 852 | 393 × 852 | 1 screenshot pixel per CSS pixel |
+
+The desktop comparison uses the same application theme, viewport, browser density, and authenticated group. The mobile capture keeps the same event and data state while exercising the responsive shell.
+
+## Full-View Comparison Evidence
+
+The participant card now uses the same quiet hierarchy as TeamTaler account settings: the card heading is followed by a hairline, subsequent response sections are separated by another hairline, and no nested cards or colored status badges compete with the member names. `Dabei` and `Offen` act as compact section labels with their totals aligned to the opposite edge.
+
+## Focused Region Comparison Evidence
+
+- Desktop: the response sections align to the participant card's content column, the first divider starts directly below the card heading, and the second divider separates `Offen` from `Dabei` without adding excess vertical space.
+- Mobile: the 393 px capture shows the complete card without horizontal overflow. Long-name capacity is preserved by the flexible text column, while avatars, group counts, and section dividers retain their alignment.
+- Accessibility: each response section has a labelled level-three heading and its own semantic list. The status is stated once by the group heading instead of being redundantly repeated on every participant row.
+
+## Required Fidelity Surfaces
+
+- Typography and hierarchy: passed. Group labels reuse the existing compact uppercase brand treatment; member names retain normal reading weight and the counts are visually secondary.
+- Spacing and layout rhythm: passed. Divider spacing follows the account reference, removes redundant row-by-row status copy, and remains compact on desktop and mobile.
+- Colors and visual tokens: passed. Borders, muted counts, branded labels, surfaces, and text use existing TeamTaler tokens in both themes.
+- Image quality and asset fidelity: passed. Existing avatar and brand assets remain unchanged; no generated, placeholder, or substitute imagery was introduced.
+- Copy and content: passed. Visible groups are named from the existing participation translations, empty groups are omitted, and participant names remain alphabetically sorted inside their response state.
+
+## Interaction And Browser Evidence
+
+- Page identity matched the requested event URL and the document title remained `TeamTaler`.
+- The browser DOM contained meaningful event, response, and participant content with labelled `DABEI 1` and `OFFEN 2` sections; no framework overlay was present.
+- Keyboard interaction changed the selected `Dabei` response from one to zero and then restored it to one, updating the grouped participant state accordingly.
+- Browser warnings and errors: none.
+- Focused component tests cover all six possible response groups and German alphabetical ordering within a group.
+
+## Comparison History
+
+1. Initial finding — P2: sorting by response was behaviorally correct, but the flat list only repeated a status on each row and did not expose the group structure the user requested.
+2. Fix: introduced semantic response sections, subtle divider lines, compact section labels and counts, and removed duplicated per-row status text.
+3. Post-fix evidence: the desktop/account comparison, complete 393 px mobile capture, accessibility tree, restored keyboard interaction, and mixed-status regression test show no remaining P0, P1, or P2 issue.
+
+## Final Result
+
+The participant list now communicates response grouping through the same divider-led visual language used elsewhere in TeamTaler, with less repetition and clearer scan order.
 
 final result: passed

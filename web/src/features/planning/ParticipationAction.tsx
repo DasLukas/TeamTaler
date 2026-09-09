@@ -40,6 +40,17 @@ function participationCountItems(event: PlanningEvent): ReadonlyArray<readonly [
     : [['attending', event.participation.attending], ['maybe', event.participation.maybe], ['declined', event.participation.declined], ['unanswered', event.participation.unanswered]];
 }
 
+/** Returns the configured registration capacity, including the compatibility summary field. */
+function registrationCapacity(event: PlanningEvent): number | undefined {
+  return event.capacity ?? event.participation.capacity;
+}
+
+/** Reports whether every configured registration place is currently occupied. */
+function registrationIsFull(event: PlanningEvent): boolean {
+  const capacity = registrationCapacity(event);
+  return capacity !== undefined && event.participation.attending >= capacity;
+}
+
 /**
  * Resolves the mutation triggered by an interactive count tile.
  *
@@ -54,7 +65,16 @@ function summaryTileAction(event: PlanningEvent, countKey: ParticipationCountKey
   if (event.eventType === 'APPOINTMENT_POLL') return countStatus === 'ATTENDING' || countStatus === 'MAYBE' || countStatus === 'DECLINED' ? countStatus : undefined;
   if (event.eventType !== 'APPOINTMENT_REGISTRATION') return undefined;
   if (selected && countStatus === selected) return 'WITHDRAWN';
-  return selected === undefined && countStatus === 'ATTENDING' ? 'ATTENDING' : undefined;
+  if (selected !== undefined) return undefined;
+  if (!registrationIsFull(event)) return countStatus === 'ATTENDING' ? 'ATTENDING' : undefined;
+  return event.waitlistEnabled && countStatus === 'WAITLISTED' ? 'ATTENDING' : undefined;
+}
+
+/** Returns the semantic utilization tone for a capacity-constrained registration. */
+function registrationCapacityTone(event: PlanningEvent): 'low' | 'medium' | 'high' {
+  const capacity = registrationCapacity(event);
+  if (capacity === undefined || event.participation.attending / capacity < 0.6) return 'low';
+  return event.participation.attending / capacity < 0.85 ? 'medium' : 'high';
 }
 
 /** Lets the current member answer an appointment poll or manage appointment registration using buttons or semantic choice controls. */
@@ -77,21 +97,37 @@ export function ParticipationAction({ event, compact = false, mode = 'controls' 
   const selected = effectiveStatus === 'WITHDRAWN' ? undefined : effectiveStatus;
   const canRespond = event.canRespond && event.status === 'PUBLISHED' && event.eventType !== 'APPOINTMENT';
   if (mode === 'summary') {
-    const hintId = `participation-hint-${event.id}`;
     const choiceName = `participation-${event.id}`;
     const choiceType = event.eventType === 'APPOINTMENT_POLL' ? 'radio' : 'checkbox';
-    const hint = event.eventType === 'APPOINTMENT_REGISTRATION'
-      ? selected ? t('planning.participation.registrationWithdrawHint') : t('planning.participation.registrationSelectHint')
-      : t('planning.participation.pollSelectHint');
-    return <fieldset aria-describedby={canRespond ? hintId : undefined} className={styles.countsFieldset}>
+    return <fieldset className={styles.countsFieldset}>
       <legend className={styles.srOnly}>{t('planning.participation.title')}</legend>
-      {canRespond ? <p className={styles.countsHint} id={hintId}>{hint}</p> : null}
       <div aria-busy={mutation.isPending} className={styles.counts}>
         {participationCountItems(event).map(([key, value]) => {
           const countStatus = COUNT_STATUS[key];
           const isSelected = countStatus !== undefined && countStatus === selected;
           const nextStatus = summaryTileAction(event, key, selected);
           const label = t(`planning.counts.${key}`);
+          if (event.eventType === 'APPOINTMENT_REGISTRATION' && key === 'waitlisted' && registrationCapacity(event) === undefined) {
+            return <div className={`${styles.count} ${styles.unlimitedCapacityCount}`} key={key}>
+              <strong>{t('planning.participation.unlimitedCapacity')}</strong>
+              <span>{t('planning.participation.places')}</span>
+            </div>;
+          }
+          if (event.eventType === 'APPOINTMENT_REGISTRATION' && key === 'waitlisted') {
+            const capacity = registrationCapacity(event) as number;
+            const available = Math.max(0, capacity - event.participation.attending);
+            const capacityContent = <>
+              <strong>{t('planning.participation.availablePlaces', { available })}</strong>
+              <span>{t('planning.participation.occupiedCapacity', { occupied: event.participation.attending, capacity })}</span>
+              <progress aria-label={t('planning.participation.capacityProgress', { occupied: event.participation.attending, capacity })} className={styles.registrationCapacityProgress} data-tone={registrationCapacityTone(event)} max={capacity} value={Math.min(event.participation.attending, capacity)} />
+              <small className={styles.registrationWaitlistMeta}>{event.waitlistEnabled ? t('planning.participation.waitlistCount', { count: value }) : t('planning.participation.noWaitlist')}</small>
+            </>;
+            if (nextStatus === undefined) return <div className={`${styles.count} ${styles.registrationCapacityCount}`} key={key}>{capacityContent}</div>;
+            return <label className={`${styles.count} ${styles.countChoice} ${styles.registrationCapacityCount}`} data-selected={isSelected} key={key}>
+              <input aria-label={t(isSelected ? 'planning.participation.leaveWaitlist' : 'planning.participation.joinWaitlist')} checked={isSelected} className={styles.countChoiceInput} disabled={mutation.isPending} onChange={() => mutation.mutate(nextStatus)} type="checkbox" />
+              {capacityContent}
+            </label>;
+          }
           if (nextStatus === undefined) return <div className={styles.count} key={key}><strong>{value}</strong><span>{label}</span></div>;
           return <label className={`${styles.count} ${styles.countChoice}`} data-selected={isSelected} key={key}>
             <input checked={isSelected} className={styles.countChoiceInput} disabled={mutation.isPending} name={choiceType === 'radio' ? choiceName : undefined} onChange={() => mutation.mutate(nextStatus)} type={choiceType} />
