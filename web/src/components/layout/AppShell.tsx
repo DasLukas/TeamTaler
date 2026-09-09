@@ -12,6 +12,7 @@ import { LegalFooter } from '@/components/legal/LegalLinks';
 import { NotificationSummaryProvider } from '@/features/notifications/NotificationSummaryProvider';
 import { preservePendingNotificationFromHref } from '@/features/notifications/notificationDeepLink';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
+import { useSoftwareKeyboardVisibility } from '@/hooks/useSoftwareKeyboardVisibility';
 import { BottomNavigation } from './BottomNavigation';
 import { MobileHeader } from './MobileHeader';
 import { Sidebar } from './Sidebar';
@@ -73,6 +74,7 @@ export function AppShell() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsedPreference);
   const [overlaySidebarExpanded, setOverlaySidebarExpanded] = useState(false);
   const usesOverlaySidebar = useMediaQuery('(min-width: 768px) and (max-width: 959px)');
+  const softwareKeyboardVisible = useSoftwareKeyboardVisibility();
   const sessionQuery = useQuery({ queryKey: ['session'], queryFn: api.getSession });
   const instanceCapabilitiesQuery = useQuery({
     queryKey: ['instance-capabilities'],
@@ -144,7 +146,11 @@ export function AppShell() {
   if (sessionQuery.data.groups.length === 0) {
     return (
       <SessionProvider instanceCapabilities={instanceCapabilities} session={sessionQuery.data}>
-        <div className={shellClassName} data-sidebar-collapsed={displayedSidebarCollapsed}>
+        <div
+          className={shellClassName}
+          data-sidebar-collapsed={displayedSidebarCollapsed}
+          data-software-keyboard-visible={softwareKeyboardVisible || undefined}
+        >
           <SystemNavigation {...navigationProps} />
           {sharedContent}
         </div>
@@ -156,7 +162,11 @@ export function AppShell() {
     <SessionProvider instanceCapabilities={instanceCapabilities} session={sessionQuery.data}>
       <GroupProvider session={sessionQuery.data}>
         <NotificationSummaryProvider>
-          <div className={shellClassName} data-sidebar-collapsed={displayedSidebarCollapsed}>
+          <div
+            className={shellClassName}
+            data-sidebar-collapsed={displayedSidebarCollapsed}
+            data-software-keyboard-visible={softwareKeyboardVisible || undefined}
+          >
             <Sidebar {...navigationProps} />
             <MobileHeader />
             {sharedContent}

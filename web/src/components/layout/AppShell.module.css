@@ -95,6 +95,10 @@
     padding-bottom: calc(var(--bottom-nav-height) + var(--shell-safe-area-bottom));
     padding-left: var(--shell-safe-area-left);
   }
+
+  .shell[data-software-keyboard-visible='true'] .main {
+    padding-bottom: 0;
+  }
 }
 
 @media (min-width: 768px) and (max-width: 1279px) {

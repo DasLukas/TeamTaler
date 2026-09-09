@@ -14,6 +14,10 @@
     backdrop-filter: blur(14px);
   }
 
+  [data-software-keyboard-visible='true'] .nav {
+    display: none;
+  }
+
   .link {
     position: relative;
     display: flex;
