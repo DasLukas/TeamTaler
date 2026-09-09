@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/DasLukas/TeamTaler/internal/domain"
@@ -99,17 +100,46 @@ func (s *Server) handleUserAvatar(response http.ResponseWriter, request *http.Re
 // serveStoredImage resolves and serves one normalized image from the private
 // data directory. Missing or invalid keys intentionally produce a generic 404.
 func (s *Server) serveStoredImage(response http.ResponseWriter, request *http.Request, imageKey string) {
-	path, err := media.ResolveImage(s.config.DataDirectory, imageKey)
+	path, mediaType, etag, err := s.resolveStoredImage(request, imageKey)
 	if err != nil {
-		http.NotFound(response, request)
+		if errors.Is(err, os.ErrNotExist) {
+			http.NotFound(response, request)
+			return
+		}
+		writeProblem(response, request, err)
 		return
 	}
 	if _, err := os.Stat(path); err != nil {
 		http.NotFound(response, request)
 		return
 	}
-	response.Header().Set("Content-Type", "image/png")
-	response.Header().Set("Cache-Control", "private, no-store")
-	response.Header().Set("ETag", `"`+strings.TrimSuffix(imageKey, ".png")+`"`)
+	response.Header().Set("Content-Type", mediaType)
+	response.Header().Set("Cache-Control", "private, no-cache")
+	response.Header().Set("ETag", etag)
 	http.ServeFile(response, request, path)
+}
+
+// resolveStoredImage selects the canonical PNG or one of the bounded derived
+// WebP display variants requested through the width query parameter. It returns
+// a path, media type, strong validator, or a client-safe validation/storage
+// error without bypassing the authorization already performed by the handler.
+func (s *Server) resolveStoredImage(request *http.Request, imageKey string) (string, string, string, error) {
+	values, requested := request.URL.Query()["width"]
+	if !requested {
+		path, err := media.ResolveImage(s.config.DataDirectory, imageKey)
+		return path, "image/png", `"` + strings.TrimSuffix(imageKey, ".png") + `"`, err
+	}
+	if len(values) != 1 {
+		return "", "", "", domain.ValidationError{Field: "width", Message: "must be one supported image width"}
+	}
+	width, err := strconv.Atoi(values[0])
+	if err != nil || !media.ValidImageVariantWidth(width) {
+		return "", "", "", domain.ValidationError{Field: "width", Message: "must be 128, 256, or 384"}
+	}
+	path, err := media.EnsureImageVariant(s.config.DataDirectory, imageKey, width)
+	if err != nil {
+		return "", "", "", err
+	}
+	etag, err := media.ImageVariantETag(imageKey, width)
+	return path, "image/webp", etag, err
 }

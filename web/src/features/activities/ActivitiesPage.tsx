@@ -18,6 +18,7 @@ import { Page } from '@/components/layout/Page';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
+import { ManagedImage } from '@/components/ui/ManagedImage';
 import { SelectMenu, type SelectMenuOption } from '@/components/ui/SelectMenu';
 import { CategoryIcon } from '@/features/shared/CategoryIcon';
 import { DataTable, type DataTableCardView, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange, type DataTableRowFocus } from '@/features/shared/DataTable';
@@ -148,7 +149,7 @@ export function ActivitiesPage() {
         parentValues: [product.categoryId],
         value: product.productId,
         visual: product.imageUrl
-          ? <img alt="" decoding="async" loading="lazy" src={product.imageUrl} />
+          ? <ManagedImage alt="" sizes="32px" src={product.imageUrl} />
           : <CategoryIcon icon={categoryIcons.get(product.categoryId) ?? 'other'} size={21} />,
       })),
     },

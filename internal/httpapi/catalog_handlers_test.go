@@ -1,9 +1,12 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"image"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -90,8 +93,44 @@ func TestImageRequiresMembershipAndGroupReference(t *testing.T) {
 	positive := imageRequest(t, groupItems[0].ID, imageKey, session.Principal)
 	positiveResponse := httptest.NewRecorder()
 	server.handleImage(positiveResponse, positive)
-	if positiveResponse.Code != http.StatusOK || positiveResponse.Header().Get("Cache-Control") != "private, no-store" {
+	if positiveResponse.Code != http.StatusOK || positiveResponse.Header().Get("Cache-Control") != "private, no-cache" {
 		t.Fatalf("authorized image response: status=%d cache=%q", positiveResponse.Code, positiveResponse.Header().Get("Cache-Control"))
+	}
+
+	validImage := image.NewRGBA(image.Rect(0, 0, 512, 512))
+	var validImageBody bytes.Buffer
+	if err := png.Encode(&validImageBody, validImage); err != nil {
+		t.Fatalf("encode variant fixture: %v", err)
+	}
+	validDigest := sha256.Sum256(validImageBody.Bytes())
+	validImageKey := hex.EncodeToString(validDigest[:]) + ".png"
+	if err := os.WriteFile(filepath.Join(dataDirectory, "images", validImageKey), validImageBody.Bytes(), 0o640); err != nil {
+		t.Fatalf("write variant fixture: %v", err)
+	}
+	if _, _, err := catalogService.SetProductImage(ctx, session.Principal, groupItems[0].Membership, product.ID, validImageKey); err != nil {
+		t.Fatalf("set variant fixture: %v", err)
+	}
+	variant := imageRequest(t, groupItems[0].ID, validImageKey, session.Principal)
+	variant.URL.RawQuery = "width=256"
+	variantResponse := httptest.NewRecorder()
+	server.handleImage(variantResponse, variant)
+	if variantResponse.Code != http.StatusOK || variantResponse.Header().Get("Content-Type") != "image/webp" || variantResponse.Header().Get("ETag") == "" {
+		t.Fatalf("image variant response: status=%d type=%q etag=%q", variantResponse.Code, variantResponse.Header().Get("Content-Type"), variantResponse.Header().Get("ETag"))
+	}
+	conditional := imageRequest(t, groupItems[0].ID, validImageKey, session.Principal)
+	conditional.URL.RawQuery = "width=256"
+	conditional.Header.Set("If-None-Match", variantResponse.Header().Get("ETag"))
+	conditionalResponse := httptest.NewRecorder()
+	server.handleImage(conditionalResponse, conditional)
+	if conditionalResponse.Code != http.StatusNotModified || conditionalResponse.Body.Len() != 0 {
+		t.Fatalf("conditional image response: status=%d bytes=%d", conditionalResponse.Code, conditionalResponse.Body.Len())
+	}
+	invalidVariant := imageRequest(t, groupItems[0].ID, validImageKey, session.Principal)
+	invalidVariant.URL.RawQuery = "width=200"
+	invalidVariantResponse := httptest.NewRecorder()
+	server.handleImage(invalidVariantResponse, invalidVariant)
+	if invalidVariantResponse.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid image variant status=%d, want 422", invalidVariantResponse.Code)
 	}
 
 	crossTenant := imageRequest(t, secondGroup.ID, imageKey, session.Principal)

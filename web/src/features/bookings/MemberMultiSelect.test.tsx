@@ -44,7 +44,7 @@ describe('MemberMultiSelect', () => {
     const dialog = screen.getByRole('dialog', { name: label });
     expect(dialog).toHaveTextContent('Regular Member');
     expect(dialog).toHaveTextContent('Pending Guest');
-    expect(dialog.querySelector('img[src="/avatars/regular-member.png"]')).toBeVisible();
+    expect(dialog.querySelector('img[src="/avatars/regular-member.png"]')).toBeInTheDocument();
     expect(within(dialog).getByText('EG', { selector: 'span' })).toBeVisible();
     expect(within(dialog).getByText('PG', { selector: 'span' })).toBeVisible();
   });

@@ -3,6 +3,7 @@ module github.com/DasLukas/TeamTaler
 go 1.26.0
 
 require (
+	github.com/deepteams/webp v1.2.7
 	github.com/go-pdf/fpdf v0.9.0
 	github.com/marknefedov/go-webpush/v2 v2.0.0
 	golang.org/x/crypto v0.54.0

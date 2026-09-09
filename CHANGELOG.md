@@ -8,6 +8,7 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 - Login forms now identify email addresses as usernames for more reliable browser password-manager integration after an origin change.
 - Structured request logs now include the final response status.
+- Managed product, group, and profile images now use responsive WebP display variants, authorization-preserving ETag revalidation, lazy offscreen loading, and decode-complete fallback replacement instead of repeatedly transferring and progressively painting full PNG masters.
 
 ## [1.3.0] - 2026-09-06
 

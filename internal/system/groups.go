@@ -806,12 +806,9 @@ func (s Service) RunMediaGarbageCollection(ctx context.Context, dataDirectory st
 			}
 			continue
 		}
-		path, err := media.ResolveImage(dataDirectory, key)
-		if err == nil {
-			err = os.Remove(path)
-		}
+		err := media.RemoveImageArtifacts(dataDirectory, key)
 		releaseImages()
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err != nil {
 			now := platform.Now()
 			if _, updateErr := s.db.ExecContext(ctx, `UPDATE system_media_delete_jobs SET attempt_count=attempt_count+1,next_attempt_at=?,last_error_code='io_error',updated_at=? WHERE image_key=?`, platform.Timestamp(now.Add(5*time.Minute)), platform.Timestamp(now), key); updateErr != nil {
 				return completed, errors.Join(err, updateErr)

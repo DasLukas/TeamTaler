@@ -1,5 +1,6 @@
 import { useState, type HTMLAttributes } from 'react';
 import styles from './GroupMark.module.css';
+import { ManagedImage } from './ManagedImage';
 
 /** Properties accepted by the reusable group-logo mark. */
 export interface GroupMarkProps extends Omit<HTMLAttributes<HTMLSpanElement>, 'children'> {
@@ -18,7 +19,7 @@ export interface GroupMarkProps extends Omit<HTMLAttributes<HTMLSpanElement>, 'c
 export function GroupMark({ className = '', decorative = false, imageUrl, name, ...rest }: GroupMarkProps) {
   const [failedImageUrl, setFailedImageUrl] = useState<string>();
   const initial = name.trim().slice(0, 1).toLocaleUpperCase() || '?';
-  const showImage = Boolean(imageUrl && failedImageUrl !== imageUrl);
+  const showImage = imageUrl !== undefined && failedImageUrl !== imageUrl;
 
   return (
     <span
@@ -29,7 +30,7 @@ export function GroupMark({ className = '', decorative = false, imageUrl, name, 
       role={decorative ? undefined : 'img'}
     >
       <span>{initial}</span>
-      {showImage ? <img alt="" onError={() => setFailedImageUrl(imageUrl)} src={imageUrl} /> : null}
+      {showImage ? <ManagedImage alt="" onError={() => setFailedImageUrl(imageUrl)} sizes="64px" src={imageUrl} /> : null}
     </span>
   );
 }

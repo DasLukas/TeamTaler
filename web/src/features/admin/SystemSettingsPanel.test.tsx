@@ -530,7 +530,7 @@ describe('SystemSettingsPanel', () => {
     renderPanel();
 
     const logoMark = await screen.findByTestId('system-group-mark-group-a');
-    expect(logoMark.querySelector('img')).toHaveAttribute('src', '/api/v1/system/groups/group-a/logo');
+    expect(logoMark.querySelector('img')).toHaveAttribute('src', '/api/v1/system/groups/group-a/logo?width=384');
     const fallbackMark = screen.getByTestId('system-group-mark-group-b');
     expect(fallbackMark).toHaveTextContent('G');
     expect(fallbackMark.querySelector('img')).not.toBeInTheDocument();

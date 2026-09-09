@@ -4,6 +4,7 @@ import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
 import type { Category, Product } from '@/api/types';
 import { formatMoney } from '@/api/money';
 import { IconButton } from '@/components/ui/IconButton';
+import { ManagedImageFrame } from '@/components/ui/ManagedImage';
 import { CategoryIcon } from '@/features/shared/CategoryIcon';
 import { useTranslation } from 'react-i18next';
 import { getBookableCategories } from './bookable';
@@ -45,14 +46,24 @@ export function ProductPicker({ categories, selectedCategoryId, onCategoryChange
         })}
       </div>
       <div className={`${styles.products} ${styles[layout]}`} role="tabpanel">
-        {activeCategory?.products.map((product) => {
+        {activeCategory?.products.map((product, index) => {
           const selected = product.id === selectedProductId || selectedProductIds.includes(product.id);
           const quantity = productQuantities[product.id] ?? 0;
           const priceLabel = product.pricingMode === 'FIXED' && product.price ? formatMoney(product.price) : t('booking.enterPrice');
           return (
             <div className={`${styles.product} ${selected ? styles.selectedProduct : ''}`} key={product.id}>
               <button aria-label={t(quantity > 0 ? 'booking.increaseProductAccessible' : 'booking.addProductAccessible', { name: product.name, price: priceLabel, count: quantity })} className={styles.productAction} onClick={() => onProductSelect(product)} type="button">
-                {product.imageUrl ? <img alt="" src={product.imageUrl} /> : <span className={styles.fallback}>{product.name.slice(0, 1)}</span>}
+                {product.imageUrl ? (
+                  <ManagedImageFrame
+                    alt=""
+                    fallback={product.name.slice(0, 1)}
+                    fetchPriority={index === 0 ? 'high' : 'auto'}
+                    frameClassName={styles.productImage}
+                    loading={index < 3 ? 'eager' : 'lazy'}
+                    sizes="(max-width: 420px) 78px, (max-width: 767px) 108px, 33vw"
+                    src={product.imageUrl}
+                  />
+                ) : <span className={styles.fallback}>{product.name.slice(0, 1)}</span>}
                 <span className={styles.name}>{product.name}</span>
                 <span className={styles.price}>{priceLabel}</span>
                 <span className={styles.check}>{quantity > 0 ? <strong aria-hidden="true">{quantity}×</strong> : <Plus aria-hidden="true" size={21} strokeWidth={2.3} />}</span>
