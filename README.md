@@ -73,7 +73,7 @@ At minimum, edit these values:
 
 ```dotenv
 TEAMTALER_PUBLIC_URL=https://teamtaler.example.com
-TEAMTALER_VERSION=1.3.0
+TEAMTALER_VERSION=1.3.1
 TEAMTALER_HOST_PORT=8080
 TEAMTALER_TRUSTED_PROXY_CIDRS=
 ```

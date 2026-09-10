@@ -4,6 +4,8 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-09-10
+
 ### Fixed
 
 - Automatic document detection now uses a CSP-safe portable worker instead of an OpenCV runtime that required forbidden dynamic JavaScript execution, restoring detection on production iPhone/Safari clients while reducing camera-frame and worker resource costs.
@@ -386,7 +388,8 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Explicit acting and charged membership display for every booking, including searchable third-party-assignment cues.
 - Canonical backup-entry allowlisting, target-width Argon2 parameter parsing, and directory-confined SPA asset serving with traversal regression coverage.
 
-[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/DasLukas/TeamTaler/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/DasLukas/TeamTaler/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/DasLukas/TeamTaler/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/DasLukas/TeamTaler/compare/v1.0.1...v1.1.0
