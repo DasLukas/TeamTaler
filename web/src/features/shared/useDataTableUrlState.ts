@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { OnChangeFn, SortingState, Updater } from '@tanstack/react-table';
+import { useRouter, type AnyRouter } from '@tanstack/react-router';
 import {
   type DataTableDateRange,
   type DataTableFilterDefinition,
@@ -140,7 +141,7 @@ function readUrlState<FilterId extends string>(options: UseDataTableUrlStateOpti
 }
 
 /** Writes one table namespace without modifying parameters owned by the page or other tables. */
-function writeUrlState<FilterId extends string>(namespace: string, historyMode: DataTableUrlHistoryMode, state: InternalUrlState<FilterId>): void {
+function writeUrlState<FilterId extends string>(namespace: string, historyMode: DataTableUrlHistoryMode, state: InternalUrlState<FilterId>, router?: AnyRouter): void {
   if (typeof window === 'undefined') return;
   const url = new URL(window.location.href);
   const names = createParameterNames(namespace);
@@ -152,6 +153,10 @@ function writeUrlState<FilterId extends string>(namespace: string, historyMode: 
   if (state.sorting.length > 0) url.searchParams.set(names.sorting, JSON.stringify(state.sorting.slice(0, 1)));
   else url.searchParams.delete(names.sorting);
   const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+  if (router) {
+    void router.navigate({ href: nextUrl, replace: historyMode === 'replace', resetScroll: false });
+    return;
+  }
   if (historyMode === 'push') window.history.pushState(window.history.state, '', nextUrl);
   else window.history.replaceState(window.history.state, '', nextUrl);
 }
@@ -184,6 +189,7 @@ function tableStatesMatch<FilterId extends string>(left: InternalUrlState<Filter
  */
 export function useDataTableUrlState<FilterId extends string = string>(options: UseDataTableUrlStateOptions<FilterId>): DataTableUrlState<FilterId> {
   if (!options.namespace.trim()) throw new Error('Data table URL state requires a non-empty namespace.');
+  const router = useRouter({ warn: false });
   const optionsRef = useRef(options);
   const initializedHistoryRef = useRef(false);
   const skipNextHistoryWriteRef = useRef(false);
@@ -196,9 +202,9 @@ export function useDataTableUrlState<FilterId extends string = string>(options: 
       skipNextHistoryWriteRef.current = false;
       return;
     }
-    writeUrlState(namespace, initializedHistoryRef.current ? historyMode : 'replace', state);
+    writeUrlState(namespace, initializedHistoryRef.current ? historyMode : 'replace', state, router);
     initializedHistoryRef.current = true;
-  }, [historyMode, namespace, state]);
+  }, [historyMode, namespace, router, state]);
 
   useEffect(() => {
     optionsRef.current = options;

@@ -1,7 +1,14 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DataTableFilterDefinition } from './DataTable';
 import { useDataTableUrlState } from './useDataTableUrlState';
+
+const routerMocks = vi.hoisted(() => ({ enabled: false, navigate: vi.fn() }));
+
+vi.mock('@tanstack/react-router', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@tanstack/react-router')>();
+  return { ...original, useRouter: () => routerMocks.enabled ? { navigate: routerMocks.navigate } : undefined };
+});
 
 type FilterId = 'status' | 'period';
 type DependentFilterId = 'categoryId' | 'productId';
@@ -18,7 +25,11 @@ const definitions: readonly DataTableFilterDefinition<FilterId>[] = [
 ];
 
 describe('useDataTableUrlState', () => {
-  beforeEach(() => window.history.replaceState({}, '', '/finance?tab=payments'));
+  beforeEach(() => {
+    routerMocks.enabled = false;
+    routerMocks.navigate.mockReset();
+    window.history.replaceState({}, '', '/finance?tab=payments');
+  });
   afterEach(() => vi.restoreAllMocks());
 
   it('persists controlled state in a table-specific namespace without removing page parameters', () => {
@@ -128,5 +139,22 @@ describe('useDataTableUrlState', () => {
 
     expect(result.current.searchValue).toBe('Previous');
     expect(pushState).not.toHaveBeenCalled();
+  });
+
+  it('preserves scroll when router navigation synchronizes search state', async () => {
+    routerMocks.enabled = true;
+    routerMocks.navigate.mockResolvedValue(undefined);
+    const { result } = renderHook(() => useDataTableUrlState({
+      filterDefinitions: definitions,
+      namespace: 'payments',
+    }));
+
+    act(() => result.current.onSearchChange('Ada'));
+
+    await waitFor(() => expect(routerMocks.navigate).toHaveBeenLastCalledWith(expect.objectContaining({
+      href: '/finance?tab=payments&tt.payments.search=Ada',
+      replace: true,
+      resetScroll: false,
+    })));
   });
 });

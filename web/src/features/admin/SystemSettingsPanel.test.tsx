@@ -35,7 +35,10 @@ const apiMock = vi.hoisted(() => ({
 }));
 
 vi.mock('@/api/client', () => ({ api: apiMock }));
-vi.mock('@tanstack/react-router', () => ({ Link: ({ children, to, ...props }: { children: ReactNode; to: string }) => <a href={to} {...props}>{children}</a> }));
+vi.mock('@tanstack/react-router', () => ({
+  Link: ({ children, to, ...props }: { children: ReactNode; to: string }) => <a href={to} {...props}>{children}</a>,
+  useRouter: () => undefined,
+}));
 vi.mock('@/app/useSession', () => ({ useSession: () => ({ user: { id: 'system-user' } }) }));
 vi.mock('@/features/push/webPush', () => ({ currentWebPushDeviceId: () => 'device-a' }));
 
