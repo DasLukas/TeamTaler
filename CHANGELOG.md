@@ -4,6 +4,10 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+### Fixed
+
+- Automatic document detection now uses a CSP-safe portable worker instead of an OpenCV runtime that required forbidden dynamic JavaScript execution, restoring detection on production iPhone/Safari clients while reducing camera-frame and worker resource costs.
+
 ### Changed
 
 - Login forms now identify email addresses as usernames for more reliable browser password-manager integration after an origin change.

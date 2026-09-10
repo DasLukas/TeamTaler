@@ -219,7 +219,7 @@ describe('DocumentCamera', () => {
 
   it('transfers bounded RGBA frames only after the detector reports ready', async () => {
     const owned = mediaStream();
-    const frame = { data: new Uint8ClampedArray(8 * 8 * 4), height: 8, width: 8 } as ImageData;
+    const frame = { data: new Uint8ClampedArray(8 * 8 * 4), height: 8, width: 8 };
     vi.mocked(createDetectionFrame).mockReturnValue(frame);
     Object.defineProperty(navigator, 'mediaDevices', {
       configurable: true,
@@ -240,7 +240,7 @@ describe('DocumentCamera', () => {
 
     await waitFor(() => expect(createDetectionFrame).toHaveBeenCalled(), { timeout: 1_000 });
     expect(workers[0].postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ imageData: frame, requestId: 1, type: 'detect' }),
+      expect.objectContaining({ frame, requestId: 1, type: 'detect' }),
       [frame.data.buffer],
     );
   });

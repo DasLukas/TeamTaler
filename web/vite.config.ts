@@ -10,7 +10,7 @@ export default defineConfig({
     // Lazy feature chunks import individual Lucide icon modules. Pre-bundle
     // their complete dependency frontier once so first use cannot invalidate
     // an in-flight scanner import or reload a document that is being edited.
-    include: ['@opencvjs/web', 'pdf-lib', 'lucide-react/dist/esm/icons/**'],
+    include: ['pdf-lib', 'lucide-react/dist/esm/icons/**'],
   },
   resolve: {
     alias: {

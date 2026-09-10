@@ -1,4 +1,4 @@
-import { detectDocumentWithOpenCv, type OpenCvRuntime } from './openCvDocumentDetection';
+import { detectDocumentPortable } from './portableDocumentDetection';
 import type { DetectionRequest, DetectionResult, DetectionWorkerRequest } from './types';
 
 interface DetectionWorkerScope {
@@ -7,29 +7,11 @@ interface DetectionWorkerScope {
 }
 
 const workerScope = globalThis as unknown as DetectionWorkerScope;
-let openCvPromise: Promise<OpenCvRuntime> | undefined;
 
-function loadOpenCv(): Promise<OpenCvRuntime> {
-  openCvPromise ??= import('@opencvjs/web').then(({ loadOpenCV }) => loadOpenCV());
-  return openCvPromise;
-}
-
-async function detect(request: DetectionRequest): Promise<void> {
-  const { imageData, requestId } = request;
+function detect(request: DetectionRequest): void {
+  const { frame, requestId } = request;
   try {
-    let runtime: OpenCvRuntime;
-    try {
-      runtime = await loadOpenCv();
-    } catch {
-      workerScope.postMessage({ confidence: 0, requestId, status: 'unavailable' });
-      return;
-    }
-    let candidate: ReturnType<typeof detectDocumentWithOpenCv>;
-    try {
-      candidate = detectDocumentWithOpenCv(imageData, runtime);
-    } catch {
-      candidate = undefined;
-    }
+    const candidate = detectDocumentPortable(frame);
     workerScope.postMessage({
       confidence: candidate?.confidence ?? 0,
       corners: candidate?.corners,
@@ -41,18 +23,13 @@ async function detect(request: DetectionRequest): Promise<void> {
   }
 }
 
-async function initialize(): Promise<void> {
-  try {
-    await loadOpenCv();
-    workerScope.postMessage({ confidence: 0, requestId: 0, status: 'ready' });
-  } catch {
-    workerScope.postMessage({ confidence: 0, requestId: 0, status: 'unavailable' });
-  }
+function initialize(): void {
+  workerScope.postMessage({ confidence: 0, requestId: 0, status: 'ready' });
 }
 
 workerScope.onmessage = (event) => {
-  if (event.data.type === 'initialize') void initialize();
-  else void detect(event.data);
+  if (event.data.type === 'initialize') initialize();
+  else detect(event.data);
 };
 
 export {};

@@ -53,6 +53,16 @@ export interface DetectionInitializeRequest {
   type: 'initialize';
 }
 
+/** Portable RGBA surface accepted by the document detection worker. */
+export interface DetectionFrame {
+  /** Contiguous RGBA pixels transferred to the worker. */
+  data: Uint8ClampedArray;
+  /** Frame height in pixels. */
+  height: number;
+  /** Frame width in pixels. */
+  width: number;
+}
+
 /** Message accepted by the document detection worker. */
 export interface DetectionRequest {
   /** Discriminator used for safe worker-message parsing. */
@@ -60,7 +70,7 @@ export interface DetectionRequest {
   /** Monotonically increasing request identifier. */
   requestId: number;
   /** Bounded RGBA camera preview copied into a transferable buffer. */
-  imageData: ImageData;
+  frame: DetectionFrame;
 }
 
 /** Complete request protocol accepted by the document detection worker. */

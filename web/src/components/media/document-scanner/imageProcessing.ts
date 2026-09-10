@@ -178,7 +178,7 @@ export async function renderDocumentFilterPreview(page: DocumentFilterPreviewSou
  *
  * An inverse homography samples every output pixel exactly once, preventing
  * browser-dependent seams between independently clipped mesh triangles.
- * OpenCV remains isolated to the document-detection worker.
+ * Live document detection remains isolated to its worker.
  *
  * @param page - Local source page and its non-destructive edit state.
  * @param maximumEdge - Maximum decoded source edge; defaults to 3000 pixels.

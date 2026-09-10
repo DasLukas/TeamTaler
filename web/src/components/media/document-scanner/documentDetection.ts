@@ -16,7 +16,7 @@ export const DOCUMENT_REARM_DISTANCE = 0.065;
 /** Maximum age of a validated contour accepted by a manual capture. */
 export const DOCUMENT_DETECTION_MAX_AGE_MS = 1_200;
 
-/** A geometrically assessed quadrilateral returned by the OpenCV detector. */
+/** A geometrically assessed quadrilateral returned by a document detector. */
 export interface DocumentCandidate {
   /** Corners normalized to the camera frame. */
   corners: DocumentCorners;
@@ -65,7 +65,7 @@ export function orderDocumentCorners(points: readonly NormalizedPoint[]): Docume
 }
 
 /**
- * Scores an OpenCV quadrilateral by document-like geometry instead of area alone.
+ * Scores a detected quadrilateral by document-like geometry instead of area alone.
  *
  * Candidates touching multiple frame edges, implausibly small or large shapes,
  * non-document angles, and heavily unbalanced opposite edges are rejected or
@@ -75,7 +75,7 @@ export function orderDocumentCorners(points: readonly NormalizedPoint[]): Docume
  * @param points - Four candidate corners in source-frame pixels.
  * @param frameWidth - Source-frame width in pixels.
  * @param frameHeight - Source-frame height in pixels.
- * @param contourArea - OpenCV contour area in pixels.
+ * @param contourArea - Candidate contour area in pixels.
  * @returns A normalized candidate and confidence, or `undefined` for invalid geometry.
  *
  * @example
