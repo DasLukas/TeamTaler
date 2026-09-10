@@ -501,6 +501,8 @@ export const de = {
     selectedDayLabel: '{{date}}, {{count}} Termine. Erneut auswählen, um einen Termin zu erstellen.',
     summary: '{{attending}} dabei · {{open}} offen',
     participants: 'Teilnehmende',
+    participantsInvited: 'Eingeladen',
+    participantsEmpty: 'Keine eingeladenen Teilnehmenden.',
     participantsError: 'Die Teilnehmenden konnten nicht geladen werden.',
     participantsLoadMore: 'Weitere Teilnehmende laden',
     participantsLoadingMore: 'Weitere werden geladen …',

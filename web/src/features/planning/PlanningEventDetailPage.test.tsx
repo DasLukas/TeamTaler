@@ -118,6 +118,32 @@ describe('PlanningEventDetailPage', () => {
     expect(navigationActions).toContainElement(cancelButton);
     expect(cancelButton.nextElementSibling).toBe(editLink);
     expect(cancelButton).toHaveAttribute('title', i18n.t('planning.actions.cancel'));
+    expect(document.querySelector(`.${styles.detailLayout}`)).toHaveClass(styles.detailLayoutSingle);
+  });
+
+  it('uses the shared detail layout and lists appointment invitees alphabetically', async () => {
+    mocks.getPlanningEvent.mockResolvedValue(planningEvent({ canViewParticipants: true }));
+    mocks.getPlanningParticipants.mockResolvedValue({ items: [
+      { membershipId: 'zora', displayName: 'Zora Zusage', confirmedRevision: 0, version: 1 },
+      { membershipId: 'anton', displayName: 'Anton Einladung', confirmedRevision: 0, version: 1 },
+    ] satisfies PlanningParticipant[] });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    render(<QueryClientProvider client={client}><PlanningEventDetailPage /></QueryClientProvider>);
+
+    const participantsHeading = await screen.findByRole('heading', { name: i18n.t('planning.participants') });
+    const participantsCard = participantsHeading.closest('section') as HTMLElement;
+    const invitedHeading = await within(participantsCard).findByRole('heading', { level: 3 });
+    const detailLayout = participantsCard.parentElement?.parentElement;
+    expect(detailLayout).toHaveClass(styles.detailLayout);
+    expect(detailLayout).not.toHaveClass(styles.detailLayoutSingle);
+    expect(invitedHeading).toHaveTextContent(`${i18n.t('planning.participantsInvited')}2`);
+    expect(within(participantsCard).getAllByRole('img').map((image) => image.getAttribute('aria-label'))).toEqual([
+      'Anton Einladung',
+      'Zora Zusage',
+    ]);
+    expect(screen.queryByRole('heading', { name: i18n.t('planning.counts.title') })).not.toBeInTheDocument();
+    expect(mocks.getPlanningParticipants).toHaveBeenCalledWith('group-1', 'all-day-event', undefined, 100);
   });
 
   it.each(['APPOINTMENT_POLL', 'APPOINTMENT_REGISTRATION'] as const)('keeps closing available for %s events', async (eventType) => {

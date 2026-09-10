@@ -12,8 +12,6 @@
 .detailNavigation .backLink { min-width: 0; margin-bottom: 0; }
 .detailNavigationActions { display: flex; flex: 0 0 auto; align-items: center; gap: var(--space-3); }
 .detailEditLink { flex: 0 0 auto; }
-.calendarOnlyDetail { width: min(100%, 400px); margin-inline: auto; }
-.calendarOnlyDetail .detailLayout { grid-template-columns: minmax(0, 1fr); }
 .detailCountsActions { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-3); padding-top: var(--space-3); margin-top: var(--space-3); border-top: 1px solid var(--color-border); }
 .detailCountsActions > button { margin-left: auto; }
 .responseDeadline { margin: 0; }
@@ -75,6 +73,7 @@
 .error { color: var(--color-status-danger); font-size: var(--font-size-sm); }
 .srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .detailLayout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 360px); gap: var(--space-6); align-items: start; }
+.detailLayoutSingle { grid-template-columns: minmax(0, 780px); justify-content: center; }
 .detailCard, .formSection { padding: var(--space-6); }
 .detailCard + .detailCard, .formSection + .formSection { margin-top: var(--space-5); }
 .detailBadges { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
@@ -114,6 +113,7 @@
 .countChoiceInput { position: absolute; top: var(--space-3); right: var(--space-3); width: 18px; height: 18px; margin: 0; accent-color: var(--color-brand); cursor: pointer; }
 .countChoiceInput:disabled { cursor: wait; }
 .participantGroups { display: grid; margin-top: var(--space-3); }
+.participantsEmpty { margin: var(--space-4) 0 0; color: var(--color-text-muted); }
 .participantGroup { padding-block: var(--space-4); border-top: 1px solid var(--color-border); }
 .participantGroup:last-child { padding-bottom: 0; }
 .participantGroup h3 { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); margin: 0 0 var(--space-2); color: var(--color-text-brand); font-size: var(--font-size-xs); font-weight: 750; letter-spacing: .04em; text-transform: uppercase; }

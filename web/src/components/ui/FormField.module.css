@@ -29,6 +29,15 @@
 }
 
 /*
+ * iOS Safari can render native select, date, time, and number controls below
+ * their declared minimum height. Pin all single-line field primitives to the
+ * same touch target as custom selects while keeping textareas resizable.
+ */
+.control:not(textarea) {
+  height: 48px;
+}
+
+/*
  * iOS WebKit overflows percentage-sized native date/time controls when they
  * also have inline padding. Let the field grid stretch an auto-sized control
  * instead, so its border box stays inside the available grid track.
