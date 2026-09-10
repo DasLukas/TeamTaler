@@ -12,7 +12,7 @@
   gap: var(--space-5);
 }
 
-.product img,
+.productImage,
 .imageFallback {
   width: 136px;
   height: 128px;
@@ -145,7 +145,7 @@
   padding-inline: var(--space-6);
 }
 
-.compact .product img,
+.compact .productImage,
 .compact .imageFallback {
   width: 136px;
   height: 128px;
@@ -161,7 +161,7 @@
     gap: var(--space-3);
   }
 
-  .product img,
+  .productImage,
   .imageFallback {
     width: 96px;
     height: 96px;

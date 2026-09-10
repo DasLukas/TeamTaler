@@ -18,6 +18,8 @@ const MAX_BATCH_TARGETS = 100;
 
 /** Properties accepted by the booking-target multi-select. */
 export interface MemberMultiSelectProps {
+  /** Membership pinned in the dedicated current-user group. */
+  currentMembershipId: string;
   id: string;
   label: string;
   targets: readonly BookingTarget[];
@@ -43,6 +45,7 @@ export interface MemberMultiSelectProps {
  * @returns A summary or icon trigger, grouped choices, and optional guest input.
  */
 export function MemberMultiSelect({
+  currentMembershipId,
   id,
   label,
   targets,
@@ -69,14 +72,19 @@ export function MemberMultiSelect({
   const selectedTargets = targets.filter((target) => selected.has(target.membershipId));
   const regularTargets = targets.filter((target) => !target.isTemporaryGuest);
   const guestTargets = targets.filter((target) => target.isTemporaryGuest);
+  const currentTarget = regularTargets.find((target) => target.membershipId === currentMembershipId);
+  const otherRegularTargets = currentTarget
+    ? regularTargets.filter((target) => target.membershipId !== currentMembershipId)
+    : regularTargets;
   const normalizedSearch = searchValue.trim().toLocaleLowerCase();
   const matchesSearch = (name: string) => !normalizedSearch || name.toLocaleLowerCase().includes(normalizedSearch);
-  const visibleRegularTargets = regularTargets.filter((target) => matchesSearch(target.displayName));
+  const visibleCurrentTarget = currentTarget && matchesSearch(currentTarget.displayName) ? currentTarget : undefined;
+  const visibleRegularTargets = otherRegularTargets.filter((target) => matchesSearch(target.displayName));
   const visibleGuestTargets = guestTargets.filter((target) => matchesSearch(target.displayName));
   const visiblePendingGuests = pendingGuestNames
     .map((name, index) => ({ index, name }))
     .filter(({ name }) => matchesSearch(name));
-  const hasVisibleTargets = visibleRegularTargets.length + visibleGuestTargets.length + visiblePendingGuests.length > 0;
+  const hasVisibleTargets = (visibleCurrentTarget ? 1 : 0) + visibleRegularTargets.length + visibleGuestTargets.length + visiblePendingGuests.length > 0;
   const totalTargetCount = selectedIds.length + pendingGuestNames.length;
   const useSheet = overlayOnMobile && compact;
   const closePicker = useCallback(() => {
@@ -178,11 +186,15 @@ export function MemberMultiSelect({
           value={searchValue}
         />
       </label>
-      {visibleRegularTargets.length > 0 ? <div aria-labelledby={`${id}-regular-members-label`} className={styles.group} role="group">
+      {visibleCurrentTarget ? <div aria-labelledby={`${id}-current-member-label`} className={styles.group} role="group">
+        <p className={styles.groupLabel} id={`${id}-current-member-label`}>{t('booking.yourself')}</p>
+        {renderTarget(visibleCurrentTarget)}
+      </div> : null}
+      {visibleRegularTargets.length > 0 ? <div aria-labelledby={`${id}-regular-members-label`} className={`${styles.group} ${visibleCurrentTarget ? styles.separatedGroup : ''}`} role="group">
         <p className={styles.groupLabel} id={`${id}-regular-members-label`}>{t('booking.regularMembers')}</p>
         {visibleRegularTargets.map(renderTarget)}
       </div> : null}
-      {visibleGuestTargets.length > 0 || visiblePendingGuests.length > 0 || canBookForGuests ? <div aria-labelledby={`${id}-guests-label`} className={`${styles.group} ${visibleRegularTargets.length > 0 ? styles.guestGroup : ''}`} role="group">
+      {visibleGuestTargets.length > 0 || visiblePendingGuests.length > 0 || canBookForGuests ? <div aria-labelledby={`${id}-guests-label`} className={`${styles.group} ${visibleCurrentTarget || visibleRegularTargets.length > 0 ? styles.separatedGroup : ''}`} role="group">
         <p className={styles.groupLabel} id={`${id}-guests-label`}>{t('booking.guests')}</p>
         {visibleGuestTargets.map(renderTarget)}
         {visiblePendingGuests.map(({ index, name }) => (

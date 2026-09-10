@@ -286,20 +286,20 @@ export function DocumentCamera({ active, onCapture }: DocumentCameraProps) {
       if (disposed || !initialized || !video || detectionPendingRef.current) return;
       detectionPendingRef.current = true;
       try {
-        const imageData = createDetectionFrame(video);
+        const frame = createDetectionFrame(video);
         if (disposed || workerRef.current !== worker) {
           detectionPendingRef.current = false;
           return;
         }
-        if (!imageData) {
+        if (!frame) {
           detectionPendingRef.current = false;
           frameFailures += 1;
           if (frameFailures >= DETECTION_FRAME_FAILURE_LIMIT) stopDetection(true);
           return;
         }
-        const request: DetectionRequest = { imageData, requestId: ++requestIdRef.current, type: 'detect' };
+        const request: DetectionRequest = { frame, requestId: ++requestIdRef.current, type: 'detect' };
         try {
-          worker.postMessage(request, [imageData.data.buffer as ArrayBuffer]);
+          worker.postMessage(request, [frame.data.buffer as ArrayBuffer]);
         } catch {
           try {
             worker.postMessage(request);

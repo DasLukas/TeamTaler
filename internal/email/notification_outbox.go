@@ -25,6 +25,7 @@ import (
 type NotificationDispatcher struct {
 	db            *sql.DB
 	sender        Sender
+	branding      *BrandingResolver
 	publicURL     string
 	logger        *slog.Logger
 	now           func() time.Time
@@ -33,17 +34,17 @@ type NotificationDispatcher struct {
 	leaseDuration time.Duration
 }
 
-// NewNotificationDispatcher validates db, sender, publicURL, and logger without
-// performing network or database I/O. publicURL must be an absolute root HTTP(S)
-// URL. A nil logger selects slog.Default. It returns a configured dispatcher or
-// a validation error.
+// NewNotificationDispatcher validates db, sender, branding, publicURL, and
+// logger without performing network, filesystem, or database I/O. publicURL
+// must be an absolute root HTTP(S) URL. A nil logger selects slog.Default. It
+// returns a configured dispatcher or a validation error.
 //
 // Example:
 //
-//	dispatcher, err := email.NewNotificationDispatcher(db, sender, publicURL, logger)
-func NewNotificationDispatcher(db *sql.DB, sender Sender, publicURL *url.URL, logger *slog.Logger) (*NotificationDispatcher, error) {
-	if db == nil || sender == nil {
-		return nil, errors.New("create notification email dispatcher: database and sender are required")
+//	dispatcher, err := email.NewNotificationDispatcher(db, sender, branding, publicURL, logger)
+func NewNotificationDispatcher(db *sql.DB, sender Sender, branding *BrandingResolver, publicURL *url.URL, logger *slog.Logger) (*NotificationDispatcher, error) {
+	if db == nil || sender == nil || branding == nil {
+		return nil, errors.New("create notification email dispatcher: database, sender, and branding resolver are required")
 	}
 	if publicURL == nil || publicURL.Host == "" || (publicURL.Scheme != "http" && publicURL.Scheme != "https") || publicURL.User != nil || publicURL.RawQuery != "" || publicURL.Fragment != "" || (publicURL.Path != "" && publicURL.Path != "/") {
 		return nil, errors.New("create notification email dispatcher: public URL must be an absolute root HTTP(S) URL")
@@ -52,7 +53,7 @@ func NewNotificationDispatcher(db *sql.DB, sender Sender, publicURL *url.URL, lo
 		logger = slog.Default()
 	}
 	return &NotificationDispatcher{
-		db: db, sender: sender, publicURL: strings.TrimSuffix(publicURL.String(), "/"), logger: logger,
+		db: db, sender: sender, branding: branding, publicURL: strings.TrimSuffix(publicURL.String(), "/"), logger: logger,
 		now: func() time.Time { return time.Now().UTC() }, workerCount: defaultWorkerCount,
 		pollInterval: defaultPollInterval, leaseDuration: defaultLeaseDuration,
 	}, nil
@@ -66,7 +67,7 @@ func (d *NotificationDispatcher) Run(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("run notification email dispatcher: context is required")
 	}
-	if d == nil || d.db == nil || d.sender == nil || d.now == nil || d.workerCount < 1 || d.workerCount > defaultWorkerCount || d.pollInterval <= 0 || d.leaseDuration <= 0 {
+	if d == nil || d.db == nil || d.sender == nil || d.branding == nil || d.now == nil || d.workerCount < 1 || d.workerCount > defaultWorkerCount || d.pollInterval <= 0 || d.leaseDuration <= 0 {
 		return errors.New("run notification email dispatcher: dispatcher is not fully configured")
 	}
 	var workers sync.WaitGroup
@@ -89,11 +90,13 @@ type claimedNotification struct {
 }
 
 type notificationDelivery struct {
-	toAddress string
-	toName    string
-	groupName string
-	eventType notifications.EventType
-	context   notifications.EventContext
+	toAddress    string
+	toName       string
+	groupID      string
+	groupName    string
+	membershipID string
+	eventType    notifications.EventType
+	context      notifications.EventContext
 }
 
 func (d *NotificationDispatcher) runWorker(ctx context.Context) {
@@ -154,6 +157,11 @@ func (d *NotificationDispatcher) processOne(ctx context.Context) (bool, error) {
 			return d.recordFailure(completionContext, job, FailureCodeDeliveryFailed)
 		})
 	}
+	branding, err := d.branding.Group(ctx, delivery.groupID, delivery.membershipID)
+	if err != nil {
+		d.releaseAfterCancellation(job)
+		return true, err
+	}
 	title, body := renderNotificationCopy(delivery.eventType, delivery.context)
 	actionRoute := "/notifications"
 	if definition, found := notifications.Definition(delivery.eventType); found {
@@ -162,6 +170,7 @@ func (d *NotificationDispatcher) processOne(ctx context.Context) (bool, error) {
 	message := NotificationMessage{
 		ToAddress: delivery.toAddress, ToName: delivery.toName, GroupName: delivery.groupName,
 		Title: title, Body: body, ActionURL: d.publicURL + actionRoute + "?notification=" + url.QueryEscape(job.notificationID),
+		Branding: branding,
 	}
 	policyCode, err = notifications.CheckDeliveryPolicy(ctx, d.db, job.jobID, notifications.ChannelEmail)
 	if err != nil {
@@ -233,14 +242,14 @@ func (d *NotificationDispatcher) claimNext(ctx context.Context) (claimedNotifica
 func (d *NotificationDispatcher) loadDelivery(ctx context.Context, jobID string) (notificationDelivery, error) {
 	var delivery notificationDelivery
 	var contextJSON string
-	err := d.db.QueryRowContext(ctx, `SELECT u.email,u.display_name,g.name,n.type,n.context_json
+	err := d.db.QueryRowContext(ctx, `SELECT u.email,u.display_name,g.id,g.name,m.id,n.type,n.context_json
 		FROM notification_delivery_jobs job
 		JOIN notifications n ON n.id=job.notification_id AND n.group_id=job.group_id
 		JOIN memberships m ON m.id=job.target_membership_id AND m.group_id=job.group_id AND m.id=n.membership_id
 		JOIN users u ON u.id=m.user_id
 		JOIN groups g ON g.id=n.group_id
 		WHERE job.id=? AND job.channel='EMAIL' AND u.email IS NOT NULL AND u.active=1
-		  AND m.status='ACTIVE' AND m.deleted_at IS NULL`, jobID).Scan(&delivery.toAddress, &delivery.toName, &delivery.groupName, &delivery.eventType, &contextJSON)
+		  AND m.status='ACTIVE' AND m.deleted_at IS NULL`, jobID).Scan(&delivery.toAddress, &delivery.toName, &delivery.groupID, &delivery.groupName, &delivery.membershipID, &delivery.eventType, &contextJSON)
 	if err != nil {
 		return notificationDelivery{}, err
 	}

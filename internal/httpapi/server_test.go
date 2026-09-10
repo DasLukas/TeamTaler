@@ -123,7 +123,7 @@ func TestSPAHandlerDoesNotEscapeStaticRoot(t *testing.T) {
 	}
 }
 
-func TestSecurityHeadersAllowBlobURLsOnlyForImagePreviews(t *testing.T) {
+func TestSecurityHeadersAllowBlobURLsAndCSPCompatibleWorkers(t *testing.T) {
 	handler := (&Server{}).securityHeaders(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		response.WriteHeader(http.StatusNoContent)
 	}))
@@ -139,8 +139,8 @@ func TestSecurityHeadersAllowBlobURLsOnlyForImagePreviews(t *testing.T) {
 	if strings.Contains(policy, "script-src 'self' blob:") {
 		t.Fatalf("Content-Security-Policy unexpectedly permits blob scripts: %q", policy)
 	}
-	if !strings.Contains(policy, "script-src 'self' 'wasm-unsafe-eval'") || strings.Contains(policy, "'unsafe-eval'") {
-		t.Fatalf("Content-Security-Policy does not narrowly permit scanner WASM: %q", policy)
+	if !strings.Contains(policy, "script-src 'self'") || strings.Contains(policy, "'unsafe-eval'") || strings.Contains(policy, "'wasm-unsafe-eval'") {
+		t.Fatalf("Content-Security-Policy permits dynamic code execution: %q", policy)
 	}
 	if permissions := response.Header().Get("Permissions-Policy"); !strings.Contains(permissions, "camera=(self)") || !strings.Contains(permissions, "microphone=()") {
 		t.Fatalf("Permissions-Policy does not restrict scanner camera access: %q", permissions)

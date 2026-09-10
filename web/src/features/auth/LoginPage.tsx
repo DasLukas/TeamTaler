@@ -41,7 +41,7 @@ export function LoginPage() {
     <AuthLayout footer={<Link to="/invite">{t('auth.inviteLink')}</Link>} intro={t('auth.loginIntro')} title={t('auth.loginTitle')}>
       <form className={styles.form} onSubmit={handleSubmit((values) => loginMutation.mutate(values))}>
         <Field error={errors.email?.message} htmlFor="login-email" label={t('auth.email')}>
-          <TextInput autoComplete="email" id="login-email" type="email" {...register('email', { required: t('auth.emailRequired') })} />
+          <TextInput autoComplete="username" id="login-email" type="email" {...register('email', { required: t('auth.emailRequired') })} />
         </Field>
         <Field error={errors.password?.message} htmlFor="login-password" label={t('auth.password')}>
           <TextInput autoComplete="current-password" id="login-password" type="password" {...register('password', { required: t('auth.passwordRequired'), maxLength: { value: PASSWORD_MAX_LENGTH, message: t('auth.passwordMax') } })} />

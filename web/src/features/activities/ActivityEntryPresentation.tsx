@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 import { formatMoney } from '@/api/money';
 import type { ActivityEntry, MembershipStatus } from '@/api/types';
 import { Avatar } from '@/components/ui/Avatar';
+import { ManagedImage } from '@/components/ui/ManagedImage';
 import { Button } from '@/components/ui/Button';
 import { PaymentAttachmentAction } from '@/features/finance/PaymentAttachmentAction';
 import { formatGermanDateTime } from '@/features/shared/dateFormat';
@@ -126,7 +127,7 @@ export function ActivityState({ kind, status }: Pick<ActivityEntry, 'kind' | 'st
 export function ActivityDetails({ activity, productImageUrl }: ActivityDetailsProps) {
   return (
     <span className={styles.activityDetails}>
-      {productImageUrl ? <img alt="" decoding="async" loading="lazy" src={productImageUrl} /> : null}
+      {productImageUrl ? <ManagedImage alt="" sizes="40px" src={productImageUrl} /> : null}
       <span>
         <strong>{activity.detailName}</strong>
         {activity.quantity && activity.quantity > 1 ? ` × ${activity.quantity}` : ''}

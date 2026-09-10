@@ -23,6 +23,7 @@ import { useTranslation } from 'react-i18next';
 import { formatMoney } from '@/api/money';
 import type { Category, Product } from '@/api/types';
 import { IconButton } from '@/components/ui/IconButton';
+import { ManagedImageFrame } from '@/components/ui/ManagedImage';
 import { CategoryIcon } from '@/features/shared/CategoryIcon';
 import { categorySortableId, moveCatalogItem, productSortableId } from './catalogOrder';
 import styles from './CatalogPanel.module.css';
@@ -48,7 +49,9 @@ function SortableProduct({ disabled, product, onEdit }: SortableProductProps) {
       style={{ transform: CSS.Transform.toString(transform), transition }}
     >
       <span className={styles.productImage}>
-        {product.imageUrl ? <img alt="" src={product.imageUrl} /> : product.active ? <span className={styles.imageFallback}>{product.name.slice(0, 1)}</span> : null}
+        {product.imageUrl
+          ? <ManagedImageFrame alt="" fallback={product.name.slice(0, 1)} frameClassName={styles.imageFrame} sizes="72px" src={product.imageUrl} />
+          : product.active ? <span className={styles.imageFallback}>{product.name.slice(0, 1)}</span> : null}
         {!product.active ? <span aria-label={t('common.archived')} className={styles.archivedMarker} role="img"><Archive aria-hidden="true" size={24} /></span> : null}
       </span>
       <div><strong title={product.name}>{product.name}</strong><span>{product.pricingMode === 'FIXED' && product.price ? formatMoney(product.price) : t('catalog.userDefinedPrice')}</span></div>

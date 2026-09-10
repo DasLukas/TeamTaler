@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { StrictMode, useState, type FormEvent } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -227,17 +227,12 @@ describe('Modal lifecycle and focus restoration', () => {
     expect(onSubmit).toHaveBeenCalledOnce();
   });
 
-  it('keeps sheets above the software keyboard visual viewport', () => {
+  it('keeps every sheet above the software keyboard while the visual viewport scrolls', () => {
     const originalViewport = Object.getOwnPropertyDescriptor(window, 'visualViewport');
     const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
-    const addEventListener = vi.fn();
-    const removeEventListener = vi.fn();
-    const visualViewport = {
-      addEventListener,
-      height: 540,
-      offsetTop: 0,
-      removeEventListener,
-    } as unknown as VisualViewport;
+    const visualViewport = Object.assign(new EventTarget(), { height: 540, offsetTop: 0 });
+    const addEventListener = vi.spyOn(visualViewport, 'addEventListener');
+    const removeEventListener = vi.spyOn(visualViewport, 'removeEventListener');
 
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 915 });
     Object.defineProperty(window, 'visualViewport', { configurable: true, value: visualViewport });
@@ -248,6 +243,14 @@ describe('Modal lifecycle and focus restoration', () => {
       expect(dialog).toHaveStyle({ '--modal-visual-viewport-height': '540px', '--modal-visual-viewport-bottom': '375px' });
       expect(addEventListener).toHaveBeenCalledWith('resize', expect.any(Function));
       expect(addEventListener).toHaveBeenCalledWith('scroll', expect.any(Function));
+
+      visualViewport.offsetTop = 240;
+      act(() => visualViewport.dispatchEvent(new Event('scroll')));
+      expect(dialog).toHaveStyle({ '--modal-visual-viewport-height': '540px', '--modal-visual-viewport-bottom': '375px' });
+
+      visualViewport.height = 915;
+      act(() => visualViewport.dispatchEvent(new Event('resize')));
+      expect(dialog).toHaveStyle({ '--modal-visual-viewport-height': '915px', '--modal-visual-viewport-bottom': '0px' });
     } finally {
       rendered.unmount();
       if (originalViewport) Object.defineProperty(window, 'visualViewport', originalViewport);

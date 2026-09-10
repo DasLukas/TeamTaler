@@ -1,3 +1,5 @@
+import type { DetectionFrame } from './types';
+
 /**
  * Reports whether secure live-camera capture can be requested.
  *
@@ -49,17 +51,18 @@ export function captureDocumentFrame(video: HTMLVideoElement, capturedAt = Date.
  * Creates a small RGBA frame for background edge detection.
  *
  * @param video - Playing camera preview.
- * @returns An image whose longest edge is at most 720 pixels, or `undefined` before video readiness.
+ * @returns An image whose longest edge is at most 480 pixels, or `undefined` before video readiness.
  * @throws {DOMException} When the browser cannot read pixels from the camera canvas.
  */
-export function createDetectionFrame(video: HTMLVideoElement): ImageData | undefined {
+export function createDetectionFrame(video: HTMLVideoElement): DetectionFrame | undefined {
   if (video.videoWidth <= 0 || video.videoHeight <= 0) return undefined;
-  const scale = Math.min(1, 720 / Math.max(video.videoWidth, video.videoHeight));
+  const scale = Math.min(1, 480 / Math.max(video.videoWidth, video.videoHeight));
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
   canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
   const context = canvas.getContext('2d', { willReadFrequently: true });
   if (!context) return undefined;
   context.drawImage(video, 0, 0, canvas.width, canvas.height);
-  return context.getImageData(0, 0, canvas.width, canvas.height);
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  return { data: imageData.data, height: imageData.height, width: imageData.width };
 }

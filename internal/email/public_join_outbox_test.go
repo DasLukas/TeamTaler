@@ -33,6 +33,9 @@ func TestPublicJoinDispatcherSendsProofAndClearsCiphertext(t *testing.T) {
 	if err := authService.Bootstrap(ctx, "admin@example.test", "Admin", "correct-horse-battery-staple", "Email Join Group", "EUR"); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
+	if _, err := db.ExecContext(ctx, `UPDATE group_settings SET default_theme='TIEF_IM_WESTEN'`); err != nil {
+		t.Fatalf("set public join email theme: %v", err)
+	}
 	adminSession, err := authService.Login(ctx, "admin@example.test", "correct-horse-battery-staple")
 	if err != nil {
 		t.Fatalf("login: %v", err)
@@ -57,7 +60,7 @@ func TestPublicJoinDispatcherSendsProofAndClearsCiphertext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse public URL: %v", err)
 	}
-	dispatcher, err := NewPublicJoinDispatcher(db, sender, box, publicURL, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	dispatcher, err := NewPublicJoinDispatcher(db, sender, box, newTestBrandingResolver(t, db), publicURL, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatalf("create dispatcher: %v", err)
 	}
@@ -71,6 +74,9 @@ func TestPublicJoinDispatcherSendsProofAndClearsCiphertext(t *testing.T) {
 	sender.mu.Unlock()
 	if len(messages) != 1 || messages[0].ToAddress != "new@example.test" || messages[0].GroupName != "Email Join Group" {
 		t.Fatalf("verification messages=%#v", messages)
+	}
+	if messages[0].Branding.Scope != BrandingScopeGroup || messages[0].Branding.Name != "Email Join Group" || messages[0].Branding.Theme != "TIEF_IM_WESTEN" {
+		t.Fatalf("verification branding=%#v", messages[0].Branding)
 	}
 	verificationURL, err := url.Parse(messages[0].VerifyURL)
 	if err != nil || verificationURL.Path != "/join/verify" || verificationURL.Fragment == "" {

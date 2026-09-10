@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/url"
 	"os"
 	"strconv"
@@ -422,10 +423,15 @@ func systemSMTPCommand(ctx context.Context, runtime *localSystemRuntime, argumen
 		configuration.Enabled = true
 		sender, err := email.NewSMTP(cliSMTPConfig(configuration))
 		if err == nil {
+			branding, brandingErr := email.NewBrandingResolver(runtime.database, runtime.configuration.DataDirectory, runtime.configuration.WebDirectory, slog.Default())
+			if brandingErr != nil {
+				return brandingErr
+			}
 			err = sender.SendNotification(ctx, email.NotificationMessage{
 				ToAddress: administrator.Email, GroupName: settings.InstanceName.Value,
-				Title: "SMTP configuration test", Body: "This message confirms the current TeamTaler SMTP configuration.",
+				Title: "SMTP-Konfigurationstest", Body: "Diese Nachricht bestätigt die aktuelle TeamTaler-SMTP-Konfiguration.",
 				ActionURL: strings.TrimSuffix(runtime.configuration.PublicURL.String(), "/") + "/admin",
+				Branding:  branding.System(),
 			})
 		}
 		if err != nil {

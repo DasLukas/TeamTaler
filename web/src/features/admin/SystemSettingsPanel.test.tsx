@@ -35,7 +35,10 @@ const apiMock = vi.hoisted(() => ({
 }));
 
 vi.mock('@/api/client', () => ({ api: apiMock }));
-vi.mock('@tanstack/react-router', () => ({ Link: ({ children, to, ...props }: { children: ReactNode; to: string }) => <a href={to} {...props}>{children}</a> }));
+vi.mock('@tanstack/react-router', () => ({
+  Link: ({ children, to, ...props }: { children: ReactNode; to: string }) => <a href={to} {...props}>{children}</a>,
+  useRouter: () => undefined,
+}));
 vi.mock('@/app/useSession', () => ({ useSession: () => ({ user: { id: 'system-user' } }) }));
 vi.mock('@/features/push/webPush', () => ({ currentWebPushDeviceId: () => 'device-a' }));
 
@@ -530,7 +533,7 @@ describe('SystemSettingsPanel', () => {
     renderPanel();
 
     const logoMark = await screen.findByTestId('system-group-mark-group-a');
-    expect(logoMark.querySelector('img')).toHaveAttribute('src', '/api/v1/system/groups/group-a/logo');
+    expect(logoMark.querySelector('img')).toHaveAttribute('src', '/api/v1/system/groups/group-a/logo?width=384');
     const fallbackMark = screen.getByTestId('system-group-mark-group-b');
     expect(fallbackMark).toHaveTextContent('G');
     expect(fallbackMark.querySelector('img')).not.toBeInTheDocument();

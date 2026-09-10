@@ -6,10 +6,10 @@ import CheckCircle from 'lucide-react/dist/esm/icons/check-circle';
 import Edit from 'lucide-react/dist/esm/icons/edit';
 import Repeat2 from 'lucide-react/dist/esm/icons/repeat-2';
 import UsersRound from 'lucide-react/dist/esm/icons/users-round';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ApiError, api } from '@/api/client';
-import type { PlanningEvent, PlanningParticipantPage, PlanningSeriesScope } from '@/api/types';
+import type { PlanningEvent, PlanningParticipant, PlanningParticipantPage, PlanningParticipationStatus, PlanningSeriesScope } from '@/api/types';
 import { can } from '@/app/permissions';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Page } from '@/components/layout/Page';
@@ -19,7 +19,7 @@ import { ConfirmationDialog } from '@/components/ui/ConfirmationDialog';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { ParticipationAction } from './ParticipationAction';
 import { PlanningEventTypeBadge } from './PlanningEventType';
-import { planningRecurrenceSummary } from './planningRecurrence';
+import { planningRecurrenceSummaryParts } from './planningRecurrence';
 import { PlanningSeriesScopeDialog } from './PlanningSeriesScopeDialog';
 import { formatPlanningDateTime } from './planningDate';
 import { planningKeys } from './planningQueryKeys';
@@ -28,13 +28,70 @@ import { formatPlanningAllDayRange, planningEndDateExclusive } from './planningT
 import styles from './Planning.module.css';
 
 type Transition = 'close' | 'complete' | 'cancel';
+type ParticipantResponseGroupStatus = PlanningParticipationStatus | 'WITHDRAWN' | 'UNANSWERED';
+type ParticipantGroupStatus = ParticipantResponseGroupStatus | 'INVITED';
 
-function EventCounts({ event }: { event: PlanningEvent }) {
-  const { t } = useTranslation();
-  const values = event.eventType === 'APPOINTMENT_REGISTRATION'
-    ? [['attending', event.participation.attending], ['waitlisted', event.participation.waitlisted]] as const
-    : [['attending', event.participation.attending], ['maybe', event.participation.maybe], ['declined', event.participation.declined], ['unanswered', event.participation.unanswered]] as const;
-  return <div className={styles.counts}>{values.map(([key, value]) => <div className={styles.count} key={key}><strong>{value}</strong><span>{t(`planning.counts.${key}`)}</span></div>)}</div>;
+interface ParticipantGroup {
+  status: ParticipantGroupStatus;
+  participants: PlanningParticipant[];
+}
+
+const PARTICIPANT_STATUS_ORDER: Record<ParticipantResponseGroupStatus, number> = {
+  ATTENDING: 0,
+  MAYBE: 1,
+  WAITLISTED: 2,
+  DECLINED: 3,
+  UNANSWERED: 4,
+  WITHDRAWN: 5,
+};
+const PARTICIPANT_NAME_COLLATOR = new Intl.Collator('de', { numeric: true, sensitivity: 'base' });
+
+/**
+ * Resolves the visible response group for one participant.
+ *
+ * @param participant - Participant projection returned by the planning API.
+ * @returns The effective response or the explicit unanswered group.
+ */
+function getParticipantGroupStatus(participant: PlanningParticipant): ParticipantResponseGroupStatus {
+  return participant.effectiveStatus ?? 'UNANSWERED';
+}
+
+/**
+ * Sorts event participants by their displayed response and then by name.
+ *
+ * @param participants - Participant projections loaded for the event.
+ * @returns A new array ordered by response priority and German alphabetical rules.
+ */
+function sortPlanningParticipants(participants: PlanningParticipant[]): PlanningParticipant[] {
+  return [...participants].sort((left, right) => {
+    const leftOrder = PARTICIPANT_STATUS_ORDER[getParticipantGroupStatus(left)];
+    const rightOrder = PARTICIPANT_STATUS_ORDER[getParticipantGroupStatus(right)];
+    return leftOrder - rightOrder || PARTICIPANT_NAME_COLLATOR.compare(left.displayName, right.displayName);
+  });
+}
+
+/**
+ * Groups participants into response sections or one alphabetical invitation section.
+ *
+ * @param participants - Participant projections loaded for the event.
+ * @param invitationsOnly - Whether the event has no response workflow.
+ * @returns Display groups with names sorted alphabetically inside each group.
+ */
+function groupPlanningParticipants(participants: PlanningParticipant[], invitationsOnly: boolean): ParticipantGroup[] {
+  if (invitationsOnly) {
+    if (participants.length === 0) return [];
+    return [{
+      status: 'INVITED',
+      participants: [...participants].sort((left, right) => PARTICIPANT_NAME_COLLATOR.compare(left.displayName, right.displayName)),
+    }];
+  }
+  return sortPlanningParticipants(participants).reduce<ParticipantGroup[]>((groups, participant) => {
+    const status = getParticipantGroupStatus(participant);
+    const currentGroup = groups.at(-1);
+    if (currentGroup?.status === status) currentGroup.participants.push(participant);
+    else groups.push({ status, participants: [participant] });
+    return groups;
+  }, []);
 }
 
 /** Renders one planning event, including series-aware management controls. */
@@ -62,7 +119,10 @@ export function PlanningEventDetailPage() {
     queryFn: ({ pageParam }): Promise<PlanningParticipantPage> => api.getPlanningParticipants(activeGroupId, eventId, pageParam, 100),
     enabled: Boolean(event?.canViewParticipants || manageAll),
   });
-  const participants = participantsQuery.data?.pages.flatMap((page) => page.items) ?? [];
+  const participantGroups = useMemo(
+    () => groupPlanningParticipants(participantsQuery.data?.pages.flatMap((page) => page.items) ?? [], event?.eventType === 'APPOINTMENT'),
+    [event?.eventType, participantsQuery.data?.pages],
+  );
   const invalidatePlanning = async () => Promise.all([
     queryClient.invalidateQueries({ queryKey: planningKeys.events(activeGroupId) }),
     queryClient.invalidateQueries({ queryKey: ['dashboard', activeGroupId] }),
@@ -102,36 +162,57 @@ export function PlanningEventDetailPage() {
     }
     else setConfirmation('cancel');
   };
-  const actions = <div className={styles.detailActions}>
-    {canEdit ? <Link className={styles.buttonLink} params={{ eventId }} search={search} to="/planning/events/$eventId/edit"><Edit size={16} />{t('common.edit')}</Link> : null}
-    {canEdit && event.status === 'PUBLISHED' ? <Button leadingIcon={<CheckCircle size={16} />} onClick={() => setConfirmation('close')} variant="secondary">{t('planning.actions.close')}</Button> : null}
-    {(event.canCancel || manageAll) && event.status === 'PUBLISHED' ? <Button leadingIcon={<Ban size={16} />} onClick={openCancellation} variant="danger">{t('planning.actions.cancel')}</Button> : null}
-  </div>;
+  const canClose = canEdit && event.status === 'PUBLISHED'
+    && (event.eventType === 'APPOINTMENT_POLL' || event.eventType === 'APPOINTMENT_REGISTRATION');
+  const canCancel = (event.canCancel || manageAll) && event.status === 'PUBLISHED';
+  const canViewParticipants = event.canViewParticipants || manageAll;
+  const hasResponseSummary = event.eventType !== 'APPOINTMENT';
+  const hasDetailSidebar = hasResponseSummary || canViewParticipants;
+  const recurrenceSummary = seriesQuery.data ? planningRecurrenceSummaryParts(seriesQuery.data.recurrence, t) : null;
   const transitionError = transition.error instanceof ApiError && (transition.error.problem.status === 409 || transition.error.problem.status === 412) ? t('planning.form.conflictError') : transition.isError ? t('planning.transitionError') : undefined;
   const cancelError = cancelSeries.error instanceof ApiError && (cancelSeries.error.problem.status === 409 || cancelSeries.error.problem.status === 412) ? t('planning.form.conflictError') : cancelSeries.isError ? t('planning.transitionError') : undefined;
-  return <Page actions={actions} className={styles.page} title={event.title} wide>
-    <Link className={styles.backLink} search={search} to="/planning"><ArrowLeft aria-hidden="true" size={17} />{t('planning.backToCalendar')}</Link>
-    <div className={styles.detailLayout}>
-      <div>
-        <section className={styles.detailCard}>
-          <div className={styles.detailBadges}><PlanningEventTypeBadge type={event.eventType} /><span className={styles.statusBadge}>{t(`planning.status.${event.status}`)}</span></div>
-          {seriesQuery.data ? <div className={styles.seriesSummary}><Repeat2 aria-hidden="true" size={18} /><span><strong>{t('planning.recurrence.series')}</strong>{planningRecurrenceSummary(seriesQuery.data.recurrence, t)}</span>{event.isSeriesException ? <small>{t('planning.recurrence.exception')}</small> : null}</div> : null}
-          <dl className={styles.detailMeta}>
-            {event.allDay ? <div><dt>{t(event.endDateExclusive === planningEndDateExclusive(event.startDate) ? 'planning.fields.date' : 'planning.fields.period')}</dt><dd><time dateTime={event.startDate}>{formatPlanningAllDayRange(event.startDate, event.endDateExclusive)}</time> · {t('planning.allDay')}</dd></div> : <>
-              <div><dt>{t('planning.fields.start')}</dt><dd><time dateTime={event.startsAt}>{formatPlanningDateTime(event.startsAt, timeZone)}</time></dd></div>
-              {event.endsAt ? <div><dt>{t('planning.fields.end')}</dt><dd><time dateTime={event.endsAt}>{formatPlanningDateTime(event.endsAt, timeZone)}</time></dd></div> : null}
-            </>}
-            {event.location ? <div><dt>{t('planning.fields.location')}</dt><dd>{event.location}</dd></div> : null}
-            {event.responseDeadline ? <div><dt>{t('planning.fields.deadline')}</dt><dd><time dateTime={event.responseDeadline}>{formatPlanningDateTime(event.responseDeadline, timeZone)}</time></dd></div> : null}
-          </dl>
-          {event.description ? <p>{event.description}</p> : null}
-        </section>
-        {event.eventType !== 'APPOINTMENT' ? <section className={styles.detailCard} aria-labelledby="participation-title"><h2 id="participation-title">{t('planning.participation.title')}</h2><ParticipationAction event={event} /></section> : null}
+  return <Page className={styles.page} title={event.title} wide>
+    <div>
+      <div className={styles.detailNavigation}>
+        <Link className={styles.backLink} search={search} to="/planning"><ArrowLeft aria-hidden="true" size={17} />{t('planning.backToCalendar')}</Link>
+        {canCancel || canEdit ? <div className={styles.detailNavigationActions}>
+          {canCancel ? <Button aria-label={t('planning.actions.cancel')} collapseLabelAt="narrow" leadingIcon={<Ban size={16} />} onClick={openCancellation} title={t('planning.actions.cancel')} variant="danger">{t('planning.actions.cancel')}</Button> : null}
+          {canEdit ? <Link aria-label={t('common.edit')} className={`${styles.buttonLink} ${styles.detailEditLink}`} params={{ eventId }} search={search} title={t('common.edit')} to="/planning/events/$eventId/edit"><Edit aria-hidden="true" size={16} /><span className={styles.detailEditLabel}>{t('common.edit')}</span></Link> : null}
+        </div> : null}
       </div>
-      {event.eventType !== 'APPOINTMENT' ? <aside>
-        <section className={styles.detailCard}><h2>{t('planning.counts.title')}</h2><EventCounts event={event} /></section>
-        {event.canViewParticipants || manageAll ? <section className={styles.detailCard}><h2>{t('planning.participants')}</h2>{participantsQuery.isLoading ? <StatePanel kind="loading" /> : participantsQuery.isError ? <StatePanel actionLabel={t('common.retry')} kind="error" message={t('planning.participantsError')} onAction={() => void participantsQuery.refetch()} /> : <><ul className={styles.participantList}>{participants.map((participant) => <li key={participant.membershipId}><span><Avatar name={participant.displayName} size="small" src={participant.avatarUrl} /> {participant.displayName}</span><small>{participant.effectiveStatus ? t(`planning.participation.${participant.effectiveStatus.toLowerCase()}`) : t('planning.counts.unanswered')}</small></li>)}</ul>{participantsQuery.hasNextPage ? <Button disabled={participantsQuery.isFetchingNextPage} leadingIcon={<UsersRound size={17} />} onClick={() => void participantsQuery.fetchNextPage()} variant="secondary">{t(participantsQuery.isFetchingNextPage ? 'planning.participantsLoadingMore' : 'planning.participantsLoadMore')}</Button> : null}</>}</section> : null}
-      </aside> : null}
+      <div className={`${styles.detailLayout} ${hasDetailSidebar ? '' : styles.detailLayoutSingle}`}>
+        <div>
+          <section className={styles.detailCard}>
+            <div className={styles.detailBadges}><PlanningEventTypeBadge type={event.eventType} /><span className={styles.statusBadge}>{t(`planning.status.${event.status}`)}</span></div>
+            <div className={styles.detailSections}>
+              {event.location ? <dl className={styles.detailMeta}><div><dt>{t('planning.fields.location')}</dt><dd>{event.location}</dd></div></dl> : null}
+              {event.description ? <p className={styles.detailDescription}>{event.description}</p> : null}
+              <dl className={styles.detailMeta}>
+                {event.allDay ? <div><dt>{t(event.endDateExclusive === planningEndDateExclusive(event.startDate) ? 'planning.fields.date' : 'planning.fields.period')}</dt><dd><time dateTime={event.startDate}>{formatPlanningAllDayRange(event.startDate, event.endDateExclusive)}</time> · {t('planning.allDay')}</dd></div> : <>
+                  <div><dt>{t('planning.fields.start')}</dt><dd><time dateTime={event.startsAt}>{formatPlanningDateTime(event.startsAt, timeZone)}</time></dd></div>
+                  {event.endsAt ? <div><dt>{t('planning.fields.end')}</dt><dd><time dateTime={event.endsAt}>{formatPlanningDateTime(event.endsAt, timeZone)}</time></dd></div> : null}
+                </>}
+              </dl>
+              {recurrenceSummary ? <div className={styles.seriesSummary}><Repeat2 aria-hidden="true" size={18} /><span className={styles.seriesSummaryText}><span>{recurrenceSummary.pattern}</span><span aria-hidden="true" className={styles.seriesSummarySeparator}>·</span><span>{recurrenceSummary.range}</span></span>{event.isSeriesException ? <small>{t('planning.recurrence.exception')}</small> : null}</div> : null}
+            </div>
+          </section>
+        </div>
+        {hasDetailSidebar ? <aside>
+          {hasResponseSummary ? <section aria-labelledby="response-summary-title" className={styles.detailCard}>
+            <h2 id="response-summary-title">{t('planning.counts.title')}</h2>
+            <ParticipationAction event={event} mode="summary" />
+            {event.responseDeadline || canClose ? <div className={styles.detailCountsActions}>
+              {event.responseDeadline ? <dl className={styles.responseDeadline}><div><dt>{t('planning.fields.deadline')}</dt><dd><time dateTime={event.responseDeadline}>{formatPlanningDateTime(event.responseDeadline, timeZone)}</time></dd></div></dl> : null}
+              {canClose ? <Button leadingIcon={<CheckCircle size={16} />} onClick={() => setConfirmation('close')} size="small" variant="ghost">{t('planning.actions.close')}</Button> : null}
+            </div> : null}
+          </section> : null}
+          {canViewParticipants ? <section className={styles.detailCard}><h2>{t('planning.participants')}</h2>{participantsQuery.isLoading ? <StatePanel kind="loading" /> : participantsQuery.isError ? <StatePanel actionLabel={t('common.retry')} kind="error" message={t('planning.participantsError')} onAction={() => void participantsQuery.refetch()} /> : participantGroups.length === 0 ? <p className={styles.participantsEmpty}>{t('planning.participantsEmpty')}</p> : <><div className={styles.participantGroups}>{participantGroups.map((group) => {
+            const groupId = `participant-group-${event.id}-${group.status.toLowerCase()}`;
+            const groupLabel = group.status === 'INVITED' ? t('planning.participantsInvited') : group.status === 'UNANSWERED' ? t('planning.counts.unanswered') : t(`planning.participation.${group.status.toLowerCase()}`);
+            return <section aria-labelledby={groupId} className={styles.participantGroup} key={group.status}><h3 id={groupId}><span>{groupLabel}</span><small>{group.participants.length}</small></h3><ul className={styles.participantList}>{group.participants.map((participant) => <li key={participant.membershipId}><Avatar name={participant.displayName} size="small" src={participant.avatarUrl} /><span>{participant.displayName}</span></li>)}</ul></section>;
+          })}</div>{participantsQuery.hasNextPage ? <Button disabled={participantsQuery.isFetchingNextPage} leadingIcon={<UsersRound size={17} />} onClick={() => void participantsQuery.fetchNextPage()} variant="secondary">{t(participantsQuery.isFetchingNextPage ? 'planning.participantsLoadingMore' : 'planning.participantsLoadMore')}</Button> : null}</>}</section> : null}
+        </aside> : null}
+      </div>
     </div>
     <ConfirmationDialog confirmIcon={confirmation === 'cancel' ? <Ban size={17} /> : <CheckCircle size={17} />} confirmLabel={confirmation ? t(`planning.actions.${confirmation}`) : ''} errorMessage={transitionError} message={confirmation ? t(`planning.confirm.${confirmation}`) : ''} onClose={() => setConfirmation(null)} onConfirm={() => confirmation && transition.mutate(confirmation)} open={confirmation !== null} pending={transition.isPending} title={t('planning.confirm.title')} tone={confirmation === 'cancel' ? 'danger' : 'default'} />
     <PlanningSeriesScopeDialog action="cancel" errorMessage={cancelError} onClose={() => setCancelScopeOpen(false)} onConfirm={(scope) => cancelSeries.mutate(scope)} onScopeChange={setCancelScope} open={cancelScopeOpen} pending={cancelSeries.isPending} scope={cancelScope} />

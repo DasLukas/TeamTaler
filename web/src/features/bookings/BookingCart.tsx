@@ -14,6 +14,7 @@ import type { ConfigurableItem, ReasonMode } from '@/api/types';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
 import { IconButton } from '@/components/ui/IconButton';
+import { ManagedImageFrame } from '@/components/ui/ManagedImage';
 import { calculateCartTotal, resolveCartLinePrice, type BookingCartLine } from './bookingCartModel';
 import styles from './BookingCart.module.css';
 
@@ -233,7 +234,7 @@ export function BookingCart({
                   }}
                 >
                   <div className={styles.product}>
-                    {line.product.imageUrl ? <img alt="" src={line.product.imageUrl} /> : <span className={styles.imageFallback}>{line.product.name.slice(0, 1)}</span>}
+                    {line.product.imageUrl ? <ManagedImageFrame alt="" fallback={line.product.name.slice(0, 1)} frameClassName={styles.productImage} sizes="56px" src={line.product.imageUrl} /> : <span className={styles.imageFallback}>{line.product.name.slice(0, 1)}</span>}
                     <div><strong>{line.product.name}</strong><span>{userDefinesPrice ? t('booking.enterPrice') : line.product.price ? formatMoney(line.product.price) : '—'}</span></div>
                     <IconButton label={t('booking.removeProduct', { name: line.product.name })} onClick={() => onRemove(line.product.id)}><Trash2 size={19} /></IconButton>
                   </div>

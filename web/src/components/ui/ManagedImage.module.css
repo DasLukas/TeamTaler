@@ -1,0 +1,33 @@
+.image {
+  opacity: 0;
+  transition: opacity var(--motion-fast);
+}
+
+.image[data-managed-image-state='ready'] {
+  opacity: 1;
+}
+
+.frame {
+  position: relative;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: var(--color-surface-muted);
+}
+
+.frame > .image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.fallback {
+  color: var(--color-brand);
+  font-weight: 700;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .image { transition: none; }
+}

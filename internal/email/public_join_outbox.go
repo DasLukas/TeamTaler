@@ -29,6 +29,7 @@ type PublicJoinDispatcher struct {
 	db            *sql.DB
 	sender        JoinVerificationSender
 	tokenOpener   TokenOpener
+	branding      *BrandingResolver
 	publicURL     string
 	logger        *slog.Logger
 	now           func() time.Time
@@ -37,12 +38,13 @@ type PublicJoinDispatcher struct {
 	leaseDuration time.Duration
 }
 
-// NewPublicJoinDispatcher validates the dependencies used for verified public
-// registration email delivery. It performs no network or database I/O and
-// returns a configured dispatcher or a validation error.
-func NewPublicJoinDispatcher(db *sql.DB, sender JoinVerificationSender, tokenOpener TokenOpener, publicURL *url.URL, logger *slog.Logger) (*PublicJoinDispatcher, error) {
-	if db == nil || sender == nil || tokenOpener == nil {
-		return nil, errors.New("create public join dispatcher: database, sender, and token opener are required")
+// NewPublicJoinDispatcher validates the database, sender, token opener,
+// branding resolver, public URL, and logger used for verified public
+// registration email delivery. It performs no network, filesystem, or database
+// I/O and returns a configured dispatcher or a validation error.
+func NewPublicJoinDispatcher(db *sql.DB, sender JoinVerificationSender, tokenOpener TokenOpener, branding *BrandingResolver, publicURL *url.URL, logger *slog.Logger) (*PublicJoinDispatcher, error) {
+	if db == nil || sender == nil || tokenOpener == nil || branding == nil {
+		return nil, errors.New("create public join dispatcher: database, sender, token opener, and branding resolver are required")
 	}
 	if publicURL == nil || publicURL.Host == "" || (publicURL.Scheme != "http" && publicURL.Scheme != "https") || publicURL.User != nil || publicURL.RawQuery != "" || publicURL.Fragment != "" || (publicURL.Path != "" && publicURL.Path != "/") {
 		return nil, errors.New("create public join dispatcher: public URL must be an absolute root HTTP(S) URL")
@@ -51,7 +53,7 @@ func NewPublicJoinDispatcher(db *sql.DB, sender JoinVerificationSender, tokenOpe
 		logger = slog.Default()
 	}
 	return &PublicJoinDispatcher{
-		db: db, sender: sender, tokenOpener: tokenOpener, publicURL: strings.TrimSuffix(publicURL.String(), "/"), logger: logger,
+		db: db, sender: sender, tokenOpener: tokenOpener, branding: branding, publicURL: strings.TrimSuffix(publicURL.String(), "/"), logger: logger,
 		now: func() time.Time { return time.Now().UTC() }, workerCount: defaultWorkerCount,
 		pollInterval: defaultPollInterval, leaseDuration: defaultLeaseDuration,
 	}, nil
@@ -64,7 +66,7 @@ func (d *PublicJoinDispatcher) Run(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("run public join dispatcher: context is required")
 	}
-	if d == nil || d.db == nil || d.sender == nil || d.tokenOpener == nil || d.now == nil || d.workerCount < 1 || d.workerCount > defaultWorkerCount || d.pollInterval <= 0 || d.leaseDuration <= 0 {
+	if d == nil || d.db == nil || d.sender == nil || d.tokenOpener == nil || d.branding == nil || d.now == nil || d.workerCount < 1 || d.workerCount > defaultWorkerCount || d.pollInterval <= 0 || d.leaseDuration <= 0 {
 		return errors.New("run public join dispatcher: dispatcher is not fully configured")
 	}
 	var workers sync.WaitGroup
@@ -89,6 +91,7 @@ type claimedPublicJoin struct {
 type publicJoinDelivery struct {
 	toAddress string
 	toName    string
+	groupID   string
 	groupName string
 	expiresAt time.Time
 }
@@ -139,6 +142,11 @@ func (d *PublicJoinDispatcher) processOne(ctx context.Context) (bool, error) {
 			return d.cancelClaim(completionContext, job, cancellation)
 		})
 	}
+	branding, err := d.branding.Group(ctx, delivery.groupID, "")
+	if err != nil {
+		d.releaseAfterCancellation(job)
+		return true, err
+	}
 	token, err := d.tokenOpener.Open(job.tokenCiphertext)
 	if err != nil || strings.TrimSpace(token) == "" {
 		return true, withCompletionContext(func(completionContext context.Context) error {
@@ -151,6 +159,7 @@ func (d *PublicJoinDispatcher) processOne(ctx context.Context) (bool, error) {
 		GroupName: delivery.groupName,
 		VerifyURL: d.publicURL + "/join/verify#token=" + url.QueryEscape(token),
 		ExpiresAt: delivery.expiresAt,
+		Branding:  branding,
 	}
 	token = ""
 	err = d.sender.SendJoinVerification(ctx, message)
@@ -212,8 +221,8 @@ func (d *PublicJoinDispatcher) loadDelivery(ctx context.Context, registrationID 
 	var consumedAt, invalidatedAt sql.NullString
 	var linkEnabled bool
 	var registrationVersion, linkVersion int64
-	err := d.db.QueryRowContext(ctx, `SELECT r.email,r.display_name,g.name,r.expires_at,r.consumed_at,r.invalidated_at,r.join_link_version,l.version,l.enabled,l.expires_at FROM public_join_registrations r JOIN groups g ON g.id=r.group_id JOIN public_join_links l ON l.group_id=r.group_id WHERE r.id=?`, registrationID).
-		Scan(&delivery.toAddress, &delivery.toName, &delivery.groupName, &registrationExpires, &consumedAt, &invalidatedAt, &registrationVersion, &linkVersion, &linkEnabled, &linkExpires)
+	err := d.db.QueryRowContext(ctx, `SELECT r.email,r.display_name,g.id,g.name,r.expires_at,r.consumed_at,r.invalidated_at,r.join_link_version,l.version,l.enabled,l.expires_at FROM public_join_registrations r JOIN groups g ON g.id=r.group_id JOIN public_join_links l ON l.group_id=r.group_id WHERE r.id=?`, registrationID).
+		Scan(&delivery.toAddress, &delivery.toName, &delivery.groupID, &delivery.groupName, &registrationExpires, &consumedAt, &invalidatedAt, &registrationVersion, &linkVersion, &linkEnabled, &linkExpires)
 	if errors.Is(err, sql.ErrNoRows) {
 		return publicJoinDelivery{}, FailureCodePublicJoinInvalidated, nil
 	}

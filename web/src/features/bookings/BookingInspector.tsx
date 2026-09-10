@@ -13,6 +13,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
 import { IconButton } from '@/components/ui/IconButton';
+import { ManagedImageFrame } from '@/components/ui/ManagedImage';
 import { SelectMenu } from '@/components/ui/SelectMenu';
 import { MemberMultiSelect } from './MemberMultiSelect';
 import styles from './BookingInspector.module.css';
@@ -176,7 +177,7 @@ export function BookingInspector({
   return (
     <form className={`${styles.form} ${compact ? styles.compact : ''}`} onSubmit={(event) => { event.preventDefault(); bookingMutation.mutate(); }}>
       <div className={styles.product}>
-        {product.imageUrl ? <img alt="" src={product.imageUrl} /> : <span className={styles.imageFallback}>{product.name.slice(0, 1)}</span>}
+        {product.imageUrl ? <ManagedImageFrame alt="" fallback={product.name.slice(0, 1)} frameClassName={styles.productImage} loading="eager" sizes="136px" src={product.imageUrl} /> : <span className={styles.imageFallback}>{product.name.slice(0, 1)}</span>}
         <div><strong>{product.name}</strong><span>{product.pricingMode === 'FIXED' && product.price ? formatMoney(product.price) : t('booking.enterPrice')}</span></div>
       </div>
 
@@ -184,6 +185,7 @@ export function BookingInspector({
         {canAssignOthers ? (
           <MemberMultiSelect
             canBookForGuests={canBookForGuests}
+            currentMembershipId={currentMembershipId}
             disabled={targets.length === 0 && !canBookForGuests}
             id="booking-member"
             label={t('booking.forMember')}

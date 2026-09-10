@@ -29,6 +29,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/catalog"
 	"github.com/DasLukas/TeamTaler/internal/config"
 	"github.com/DasLukas/TeamTaler/internal/domain"
+	"github.com/DasLukas/TeamTaler/internal/email"
 	"github.com/DasLukas/TeamTaler/internal/exporting"
 	"github.com/DasLukas/TeamTaler/internal/exportnotifications"
 	"github.com/DasLukas/TeamTaler/internal/finance"
@@ -72,6 +73,7 @@ type Server struct {
 	planning           planning.Service
 	notifications      notifications.Service
 	systemAdmin        systemadmin.Service
+	emailBranding      *email.BrandingResolver
 	pushSubscriptions  *webpushservice.SubscriptionService
 	pushSender         *webpushservice.Sender
 	systemConfigured   bool
@@ -100,6 +102,10 @@ type Server struct {
 func New(cfg config.Config, db *sql.DB, buildInformation BuildInformation, logger *slog.Logger) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
+	}
+	emailBranding, err := email.NewBrandingResolver(db, cfg.DataDirectory, cfg.WebDirectory, logger)
+	if err != nil {
+		panic(fmt.Sprintf("configure email branding: %v", err))
 	}
 	var tokenSealer groups.TokenSealer
 	var tokenOpener groups.TokenOpener
@@ -190,6 +196,7 @@ func New(cfg config.Config, db *sql.DB, buildInformation BuildInformation, logge
 		planning:           planning.Service{DB: db, ResolveTimeZone: systemService.ResolveTimeZoneTx},
 		notifications:      notificationService,
 		systemAdmin:        systemService,
+		emailBranding:      emailBranding,
 		pushSubscriptions:  pushSubscriptions,
 		pushSender:         pushSender,
 		systemConfigured:   true,
@@ -546,23 +553,13 @@ func isMediaUploadRequest(request *http.Request) bool {
 		segments[4] == "products" && segments[6] == "image"
 }
 
-func (s *Server) requestContext(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		requestID, _ := platform.NewID("req")
-		response.Header().Set("X-Request-ID", requestID)
-		started := time.Now()
-		next.ServeHTTP(response, request)
-		s.logger.Info("http request", "method", request.Method, "path", request.URL.Path, "request_id", requestID, "duration_ms", time.Since(started).Milliseconds())
-	})
-}
-
 func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if strings.HasPrefix(request.URL.Path, "/api/") {
 			response.Header().Set("Cache-Control", "no-store")
 			response.Header().Add("Vary", "Cookie")
 		}
-		response.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")
+		response.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")
 		response.Header().Set("Referrer-Policy", "no-referrer")
 		response.Header().Set("X-Content-Type-Options", "nosniff")
 		response.Header().Set("X-Frame-Options", "DENY")

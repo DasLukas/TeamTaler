@@ -95,18 +95,31 @@ func newOutboxFixture(t *testing.T) *outboxFixture {
 	if _, err := db.Exec(`INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES('grp_email','Example Team','EUR',?,?)`, nowText, nowText); err != nil {
 		t.Fatalf("insert test group: %v", err)
 	}
+	if _, err := db.Exec(`INSERT INTO group_settings(group_id,members_can_view_all_bookings,default_theme,updated_at) VALUES('grp_email',0,'NRW',?)`, nowText); err != nil {
+		t.Fatalf("set test group theme: %v", err)
+	}
 	sender := &recordingSender{available: true}
 	opener := &recordingOpener{plaintext: "plain-invitation-token"}
 	publicURL, err := url.Parse("https://teamtaler.example.test/")
 	if err != nil {
 		t.Fatalf("parse public URL: %v", err)
 	}
-	dispatcher, err := NewDispatcher(db, sender, opener, publicURL, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	dispatcher, err := NewDispatcher(db, sender, opener, newTestBrandingResolver(t, db), publicURL, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatalf("create dispatcher: %v", err)
 	}
 	dispatcher.now = func() time.Time { return now }
 	return &outboxFixture{t: t, db: db, now: now, sender: sender, opener: opener, dispatcher: dispatcher}
+}
+
+func newTestBrandingResolver(t *testing.T, db *sql.DB) *BrandingResolver {
+	t.Helper()
+	directory := t.TempDir()
+	resolver, err := NewBrandingResolver(db, directory, directory, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("create test branding resolver: %v", err)
+	}
+	return resolver
 }
 
 func (f *outboxFixture) insertPending(invitationID string) {
@@ -149,6 +162,9 @@ func TestDispatcherSendsInvitationAndClearsCiphertext(t *testing.T) {
 	}
 	if message.AcceptURL != "https://teamtaler.example.test/invite#token=plain-invitation-token" {
 		t.Fatalf("accept URL = %q", message.AcceptURL)
+	}
+	if message.Branding.Scope != BrandingScopeGroup || message.Branding.Name != "Example Team" || message.Branding.Theme != "NRW" || len(message.Branding.LogoPNG) == 0 {
+		t.Fatalf("invitation branding=%#v", message.Branding)
 	}
 
 	var status string

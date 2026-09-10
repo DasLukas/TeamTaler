@@ -8,6 +8,8 @@ import styles from './SelectMenu.module.css';
 export interface SelectMenuOption<Value extends string = string> {
   value: Value;
   label: string;
+  /** Whether the choice remains visible but cannot currently be selected. */
+  disabled?: boolean;
   /** Optional visible group heading shared by adjacent related options. */
   group?: string;
   /** Decorative visual rendered before the option label and selected value. */
@@ -16,6 +18,8 @@ export interface SelectMenuOption<Value extends string = string> {
 
 /** Properties accepted by the anchored single-value selection menu. */
 export interface SelectMenuProps<Value extends string = string> {
+  /** Whether assistive technology should announce that the available choices are resolving. */
+  ariaBusy?: boolean;
   ariaDescribedBy?: string;
   ariaLabel?: string;
   className?: string;
@@ -38,7 +42,7 @@ export interface SelectMenuProps<Value extends string = string> {
  * and optional disabled state.
  * @returns A keyboard-operable combobox trigger and anchored listbox.
  */
-export function SelectMenu<Value extends string>({ ariaDescribedBy, ariaLabel, className = '', id, menuMinWidth = 0, value, options, onChange, disabled = false, renderOption, renderValue, title }: SelectMenuProps<Value>) {
+export function SelectMenu<Value extends string>({ ariaBusy, ariaDescribedBy, ariaLabel, className = '', id, menuMinWidth = 0, value, options, onChange, disabled = false, renderOption, renderValue, title }: SelectMenuProps<Value>) {
   const listboxId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLUListElement>(null);
@@ -61,7 +65,7 @@ export function SelectMenu<Value extends string>({ ariaDescribedBy, ariaLabel, c
   };
   const choose = (index: number) => {
     const option = options[index];
-    if (!option) return;
+    if (!option || option.disabled) return;
     onChange(option.value);
     close(true);
   };
@@ -71,6 +75,14 @@ export function SelectMenu<Value extends string>({ ariaDescribedBy, ariaLabel, c
     setActiveIndex(selectedIndex);
     setPanelStyle({ position: 'fixed', visibility: 'hidden' });
     setOpen(true);
+  };
+
+  const moveActiveIndex = (current: number, direction: 1 | -1) => {
+    for (let step = 1; step <= options.length; step += 1) {
+      const candidate = (current + direction * step + options.length) % options.length;
+      if (!options[candidate]?.disabled) return candidate;
+    }
+    return current;
   };
 
   useLayoutEffect(() => {
@@ -142,10 +154,11 @@ export function SelectMenu<Value extends string>({ ariaDescribedBy, ariaLabel, c
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
       const direction = event.key === 'ArrowDown' ? 1 : -1;
-      setActiveIndex((current) => (current + direction + options.length) % options.length);
+      setActiveIndex((current) => moveActiveIndex(current, direction));
     } else if (event.key === 'Home' || event.key === 'End') {
       event.preventDefault();
-      setActiveIndex(event.key === 'Home' ? 0 : options.length - 1);
+      const edgeIndex = event.key === 'Home' ? -1 : 0;
+      setActiveIndex(moveActiveIndex(edgeIndex, event.key === 'Home' ? 1 : -1));
     } else if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       choose(activeIndex);
@@ -161,6 +174,7 @@ export function SelectMenu<Value extends string>({ ariaDescribedBy, ariaLabel, c
     <div className={`${styles.root} ${className}`}>
       <button
         aria-activedescendant={open ? `${listboxId}-${activeIndex}` : undefined}
+        aria-busy={ariaBusy}
         aria-controls={open ? listboxId : undefined}
         aria-describedby={ariaDescribedBy}
         aria-expanded={open}
@@ -185,11 +199,12 @@ export function SelectMenu<Value extends string>({ ariaDescribedBy, ariaLabel, c
             <Fragment key={option.value}>
               {option.group && option.group !== options[index - 1]?.group ? <li className={styles.groupLabel} role="presentation">{option.group}</li> : null}
               <li
+                aria-disabled={option.disabled || undefined}
                 aria-selected={option.value === value}
-                className={`${styles.option} ${index === activeIndex ? styles.active : ''}`}
+                className={`${styles.option} ${index === activeIndex ? styles.active : ''} ${option.disabled ? styles.optionDisabled : ''}`}
                 id={`${listboxId}-${index}`}
                 onClick={() => choose(index)}
-                onPointerEnter={() => setActiveIndex(index)}
+                onPointerEnter={() => { if (!option.disabled) setActiveIndex(index); }}
                 role="option"
               >
                 <span>{renderOption?.(option) ?? defaultChoice(option)}</span>

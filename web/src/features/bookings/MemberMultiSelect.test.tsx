@@ -25,6 +25,7 @@ describe('MemberMultiSelect', () => {
     const label = 'Empfänger auswählen. 2 Personen ausgewählt.';
     render(<MemberMultiSelect
       canBookForGuests={false}
+      currentMembershipId="member-regular"
       iconOnly
       id="target-picker"
       label={label}
@@ -44,15 +45,48 @@ describe('MemberMultiSelect', () => {
     const dialog = screen.getByRole('dialog', { name: label });
     expect(dialog).toHaveTextContent('Regular Member');
     expect(dialog).toHaveTextContent('Pending Guest');
-    expect(dialog.querySelector('img[src="/avatars/regular-member.png"]')).toBeVisible();
+    expect(dialog.querySelector('img[src="/avatars/regular-member.png"]')).toBeInTheDocument();
     expect(within(dialog).getByText('EG', { selector: 'span' })).toBeVisible();
     expect(within(dialog).getByText('PG', { selector: 'span' })).toBeVisible();
+  });
+
+  it('pins the current member above a separated list of other recipients', async () => {
+    const user = userEvent.setup();
+    render(<MemberMultiSelect
+      canBookForGuests={false}
+      currentMembershipId="member-current"
+      id="target-picker"
+      label={i18n.t('booking.forMember')}
+      onAddGuest={vi.fn()}
+      onChange={vi.fn()}
+      onRemoveGuest={vi.fn()}
+      pendingGuestNames={[]}
+      placeholder={i18n.t('booking.selectMembers')}
+      selectedIds={['member-current']}
+      targets={[
+        { membershipId: 'member-aaron', displayName: 'Aaron Member', isTemporaryGuest: false },
+        { membershipId: 'member-current', displayName: 'Zoe Current', isTemporaryGuest: false },
+        { membershipId: 'member-bea', displayName: 'Bea Member', isTemporaryGuest: false },
+      ]}
+    />);
+
+    await user.click(screen.getByRole('button', { name: i18n.t('booking.forMember') }));
+
+    const currentMemberGroup = screen.getByRole('group', { name: i18n.t('booking.yourself') });
+    const otherMembersGroup = screen.getByRole('group', { name: i18n.t('booking.regularMembers') });
+    expect(within(currentMemberGroup).getByRole('checkbox', { name: 'Zoe Current' })).toBeChecked();
+    expect(within(otherMembersGroup).queryByText('Zoe Current')).not.toBeInTheDocument();
+    const otherMemberCheckboxes = within(otherMembersGroup).getAllByRole('checkbox');
+    expect(otherMemberCheckboxes[0]).toHaveAccessibleName('Aaron Member');
+    expect(otherMemberCheckboxes[1]).toHaveAccessibleName('Bea Member');
+    expect(currentMemberGroup.nextElementSibling).toBe(otherMembersGroup);
   });
 
   it('exposes named member groups and enforces the shared 100-target limit', async () => {
     const user = userEvent.setup();
     render(<MemberMultiSelect
       canBookForGuests
+      currentMembershipId="member-regular"
       id="target-picker"
       label={i18n.t('booking.forMember')}
       onAddGuest={vi.fn()}
@@ -66,7 +100,7 @@ describe('MemberMultiSelect', () => {
 
     await user.click(screen.getByRole('button', { name: i18n.t('booking.forMember') }));
 
-    expect(screen.getByRole('group', { name: i18n.t('booking.regularMembers') })).toBeVisible();
+    expect(screen.getByRole('group', { name: i18n.t('booking.yourself') })).toBeVisible();
     expect(screen.getByRole('group', { name: i18n.t('booking.guests') })).toBeVisible();
     expect(screen.getByRole('checkbox', { name: /Regular Member/ })).toBeEnabled();
     expect(screen.getByRole('checkbox', { name: 'Existing Guest' })).toBeDisabled();
@@ -81,6 +115,7 @@ describe('MemberMultiSelect', () => {
     mediaQuery.compact = true;
     render(<MemberMultiSelect
       canBookForGuests
+      currentMembershipId="member-regular"
       iconOnly
       id="target-picker"
       label="Empfänger auswählen. 1 Person ausgewählt."
@@ -116,6 +151,7 @@ describe('MemberMultiSelect', () => {
     const label = 'Empfänger auswählen. 1 Person ausgewählt.';
     render(<MemberMultiSelect
       canBookForGuests
+      currentMembershipId="member-regular"
       iconOnly
       id="target-picker"
       label={label}
@@ -141,6 +177,7 @@ describe('MemberMultiSelect', () => {
     const user = userEvent.setup();
     render(<MemberMultiSelect
       canBookForGuests
+      currentMembershipId="member-regular"
       id="target-picker"
       label={i18n.t('booking.forMember')}
       onAddGuest={vi.fn()}
@@ -184,6 +221,7 @@ describe('MemberMultiSelect', () => {
     const onAddGuest = vi.fn();
     render(<MemberMultiSelect
       canBookForGuests
+      currentMembershipId="member-regular"
       id="target-picker"
       label={i18n.t('booking.forMember')}
       onAddGuest={onAddGuest}

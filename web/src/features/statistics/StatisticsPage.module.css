@@ -24,11 +24,11 @@
   font-weight: 700;
 }
 
-.rangeField { min-width: min(100%, 240px); }
+.rangeField { width: min(100%, 320px); min-width: min(100%, 240px); }
 
-.rangeField select,
 .customDates input {
-  min-height: 40px;
+  height: 48px;
+  min-height: 48px;
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-md);
   color: var(--color-text);
@@ -36,18 +36,11 @@
   font: inherit;
 }
 
-.rangeField select { padding: 0 var(--space-10) 0 var(--space-3); }
 .customDates input { padding: 0 var(--space-3); }
 
-.rangeField select:focus-visible,
 .customDates input:focus-visible {
   border-color: var(--color-focus-ring);
   outline: 3px solid color-mix(in srgb, var(--color-focus-ring) 28%, transparent);
-}
-
-.rangeField select:disabled {
-  cursor: progress;
-  opacity: 0.72;
 }
 
 .customDates {
@@ -131,5 +124,9 @@
   }
 
   .customDates label { min-width: 0; }
-  .customDates input { width: 100%; min-width: 0; }
+  .customDates input { width: 100%; min-width: 0; max-width: 100%; }
+}
+
+@media (max-width: 560px) {
+  .customDates { grid-template-columns: minmax(0, 1fr); }
 }

@@ -8,26 +8,34 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/draw"
 	"image/png"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
+	"strings"
 	"sync"
 
+	"github.com/deepteams/webp"
+	xdraw "golang.org/x/image/draw"
 	_ "golang.org/x/image/webp"
 	_ "image/jpeg"
 )
 
 const (
-	defaultImageBytes  = 5 << 20
-	maxImagePixels     = 8_000_000
-	maxImageDimension  = 4096
-	maxNormalizedBytes = 10 << 20
+	defaultImageBytes   = 5 << 20
+	maxImagePixels      = 8_000_000
+	maxImageDimension   = 4096
+	maxNormalizedBytes  = 10 << 20
+	imageVariantVersion = 1
+	imageVariantQuality = 82
 )
 
 var (
-	imageKeyPattern = regexp.MustCompile(`\A[0-9a-f]{64}\.png\z`)
+	imageKeyPattern    = regexp.MustCompile(`\A[0-9a-f]{64}\.png\z`)
+	imageVariantWidths = [...]int{128, 256, 384}
 	// ErrImageTooLarge identifies a raw upload that exceeded the caller-supplied
 	// byte limit. HTTP callers should translate this error to status 413.
 	ErrImageTooLarge = errors.New("image upload exceeds the configured size limit")
@@ -102,31 +110,204 @@ func NormalizeAndStoreImageWithLimitLeased(dataDirectory string, source io.Reade
 		return "", false, nil, fmt.Errorf("create image directory: %w", err)
 	}
 	path := filepath.Join(directory, key)
-	if _, err := os.Stat(path); err == nil {
-		return key, false, release, nil
-	}
-	temporary, err := os.CreateTemp(directory, ".upload-*.png")
+	created, err := publishFile(directory, ".upload-*.png", path, normalized.Bytes())
 	if err != nil {
 		release()
-		return "", false, nil, fmt.Errorf("create temporary image: %w", err)
+		return "", false, nil, fmt.Errorf("publish normalized image: %w", err)
+	}
+	if err := storeImageVariants(dataDirectory, key, decoded); err != nil {
+		release()
+		return "", false, nil, err
+	}
+	return key, created, release, nil
+}
+
+// ValidImageVariantWidth reports whether width is one of the bounded display
+// variants generated for managed images. It performs no I/O and cannot fail.
+func ValidImageVariantWidth(width int) bool {
+	for _, candidate := range imageVariantWidths {
+		if candidate == width {
+			return true
+		}
+	}
+	return false
+}
+
+// EnsureImageVariant resolves or atomically creates a metadata-free WebP
+// display variant for a canonical managed image. The original PNG remains the
+// authoritative backup and export source. Invalid keys or widths and missing
+// or malformed masters return an error.
+func EnsureImageVariant(dataDirectory, key string, width int) (string, error) {
+	path, err := resolveImageVariant(dataDirectory, key, width)
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(path); err == nil {
+		return path, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("inspect image variant: %w", err)
+	}
+
+	release := LockManagedImages()
+	defer release()
+	if _, err := os.Stat(path); err == nil {
+		return path, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("inspect image variant: %w", err)
+	}
+	masterPath, err := ResolveImage(dataDirectory, key)
+	if err != nil {
+		return "", err
+	}
+	master, err := os.Open(masterPath)
+	if err != nil {
+		return "", fmt.Errorf("open managed image: %w", err)
+	}
+	defer master.Close()
+	decoded, _, err := image.Decode(master)
+	if err != nil {
+		return "", fmt.Errorf("decode managed image: %w", err)
+	}
+	if err := storeImageVariant(dataDirectory, key, width, decoded); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// ImageVariantETag returns the strong validator for a deterministic display
+// variant. Bumping the internal encoder version invalidates existing browser
+// and filesystem variants without changing database image keys.
+func ImageVariantETag(key string, width int) (string, error) {
+	if !ValidImageKey(key) || !ValidImageVariantWidth(width) {
+		return "", errors.New("invalid image variant")
+	}
+	return `"` + strings.TrimSuffix(key, ".png") + "-w" + strconv.Itoa(width) + "-webp-v" + strconv.Itoa(imageVariantVersion) + `"`, nil
+}
+
+// RemoveImageArtifacts removes a managed master and every derived display
+// variant. The caller must hold the managed-image lease across its final
+// database reference check and this operation. Missing artifacts are ignored;
+// other filesystem failures are joined and returned.
+func RemoveImageArtifacts(dataDirectory, key string) error {
+	masterPath, err := ResolveImage(dataDirectory, key)
+	if err != nil {
+		return err
+	}
+	paths := []string{masterPath}
+	for _, width := range imageVariantWidths {
+		variantPath, variantErr := resolveImageVariant(dataDirectory, key, width)
+		if variantErr != nil {
+			return variantErr
+		}
+		paths = append(paths, variantPath)
+	}
+	var failures []error
+	for _, path := range paths {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
+}
+
+func storeImageVariants(dataDirectory, key string, source image.Image) error {
+	for _, width := range imageVariantWidths {
+		if err := storeImageVariant(dataDirectory, key, width, source); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func storeImageVariant(dataDirectory, key string, width int, source image.Image) error {
+	path, err := resolveImageVariant(dataDirectory, key, width)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect image variant: %w", err)
+	}
+	body, err := encodeImageVariant(source, width)
+	if err != nil {
+		return err
+	}
+	directory := filepath.Dir(path)
+	if err := os.MkdirAll(directory, 0o750); err != nil {
+		return fmt.Errorf("create image variant directory: %w", err)
+	}
+	if _, err := publishFile(directory, ".variant-*.webp", path, body); err != nil {
+		return fmt.Errorf("publish image variant: %w", err)
+	}
+	return nil
+}
+
+func encodeImageVariant(source image.Image, maximumDimension int) ([]byte, error) {
+	bounds := source.Bounds()
+	width, height := bounds.Dx(), bounds.Dy()
+	if width < 1 || height < 1 {
+		return nil, errors.New("managed image dimensions must be positive")
+	}
+	if width >= height && width > maximumDimension {
+		height = max(1, height*maximumDimension/width)
+		width = maximumDimension
+	} else if height > maximumDimension {
+		width = max(1, width*maximumDimension/height)
+		height = maximumDimension
+	}
+	resized := image.NewNRGBA(image.Rect(0, 0, width, height))
+	xdraw.CatmullRom.Scale(resized, resized.Bounds(), source, bounds, draw.Src, nil)
+	options := webp.DefaultOptions()
+	options.Quality = imageVariantQuality
+	options.Method = 4
+	options.UseSharpYUV = true
+	options.AlphaQuality = 100
+	options.AlphaFiltering = 2
+	if !resized.Opaque() {
+		options.Lossless = true
+		options.UseSharpYUV = false
+	}
+	var encoded bytes.Buffer
+	if err := webp.Encode(&encoded, resized, options); err != nil {
+		return nil, fmt.Errorf("encode image variant: %w", err)
+	}
+	return encoded.Bytes(), nil
+}
+
+func resolveImageVariant(dataDirectory, key string, width int) (string, error) {
+	if !ValidImageKey(key) || !ValidImageVariantWidth(width) {
+		return "", errors.New("invalid image variant")
+	}
+	name := strings.TrimSuffix(key, ".png") + "-w" + strconv.Itoa(width) + "-v" + strconv.Itoa(imageVariantVersion) + ".webp"
+	return filepath.Join(dataDirectory, "image-variants", name), nil
+}
+
+func publishFile(directory, pattern, destination string, body []byte) (bool, error) {
+	if _, err := os.Stat(destination); err == nil {
+		return false, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	temporary, err := os.CreateTemp(directory, pattern)
+	if err != nil {
+		return false, err
 	}
 	temporaryPath := temporary.Name()
 	defer os.Remove(temporaryPath)
 	if err := temporary.Chmod(0o640); err == nil {
-		_, err = temporary.Write(normalized.Bytes())
+		_, err = temporary.Write(body)
 	}
 	if closeErr := temporary.Close(); err == nil {
 		err = closeErr
 	}
 	if err != nil {
-		release()
-		return "", false, nil, fmt.Errorf("write normalized image: %w", err)
+		return false, err
 	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		release()
-		return "", false, nil, fmt.Errorf("publish normalized image: %w", err)
+	if err := os.Rename(temporaryPath, destination); err != nil {
+		return false, err
 	}
-	return key, true, release, nil
+	return true, nil
 }
 
 // LockManagedImages acquires the process-wide coordination lease shared by

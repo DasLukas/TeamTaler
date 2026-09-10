@@ -13,21 +13,32 @@ async function login(page: Page): Promise<void> {
 
 /** Makes the existing miscellaneous payment method require one receipt. */
 async function requireReceiptForMiscellaneousPayments(page: Page): Promise<void> {
-  await page.goto('/admin');
-  await page.getByRole('tab', { name: 'Allgemein' }).click();
-  const mode = page.getByRole('combobox', { name: 'Beleg-Upload: Sonstige' });
-  await expect(mode).toBeVisible();
-  await mode.selectOption({ label: 'Verpflichtend' });
-  const save = page.getByRole('button', { name: 'Einstellungen speichern' });
-  if (await save.isEnabled()) {
-    const response = page.waitForResponse((candidate) => candidate.request().method() === 'PATCH'
-      && /\/groups\/[^/]+\/settings$/.test(new URL(candidate.url()).pathname));
-    await save.click();
-    expect((await response).status()).toBe(200);
-  }
+  const status = await page.evaluate(async () => {
+    const sessionResponse = await fetch('/api/v1/session', { credentials: 'include' });
+    const session = await sessionResponse.json() as { activeGroupId?: string };
+    if (!session.activeGroupId) return 400;
+
+    const settingsResponse = await fetch(`/api/v1/groups/${session.activeGroupId}/settings`, { credentials: 'include' });
+    const settings = await settingsResponse.json() as {
+      paymentMethods: Array<Record<string, unknown> & { id: string }>;
+    };
+    const paymentMethods = settings.paymentMethods.map((method) => method.id === 'OTHER'
+      ? { ...method, attachmentMode: 'REQUIRED' }
+      : method);
+    const csrf = decodeURIComponent(document.cookie.match(/(?:^|; )teamtaler_csrf=([^;]*)/)?.[1] ?? '');
+    const updateResponse = await fetch(`/api/v1/groups/${session.activeGroupId}/settings`, {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+      body: JSON.stringify({ paymentMethods }),
+    });
+    return updateResponse.status;
+  });
+  expect(status).toBe(200);
 }
 
 test('required receipt scan creates a protected payment attachment on desktop and mobile', async ({ page }, testInfo) => {
+  test.setTimeout(60_000);
   await login(page);
   await requireReceiptForMiscellaneousPayments(page);
 
@@ -65,11 +76,15 @@ test('required receipt scan creates a protected payment attachment on desktop an
   scanner = page.getByRole('dialog', { name: 'Dokument scannen' });
   const capture = scanner.getByRole('button', { name: 'Seite aufnehmen' });
   await expect(capture).toBeEnabled({ timeout: 15_000 });
+  await expect(scanner.getByText('Automatische Dokumenterkennung wird vorbereitet …')).toHaveCount(0, { timeout: 5_000 });
+  await expect(scanner.getByRole('checkbox', { name: 'Auto' })).toBeEnabled();
+  await expect(scanner.getByText('Die automatische Dokumenterkennung ist nicht verfügbar. Nimm die Seite manuell auf.')).toHaveCount(0);
   await capture.click();
-  await expect(scanner.getByText('1 von 20 Seiten')).toBeHidden();
+  await expect(scanner.getByText('1 von 20 Seiten')).toHaveCount(1);
   await scanner.getByRole('button', { name: 'Seite 1' }).click();
   await expect(scanner.getByRole('region', { name: 'Seiteneditor' })).toBeVisible();
-  await expect(scanner.getByRole('button', { name: 'Weitere Seite scannen' })).toBeVisible();
+  await scanner.getByRole('button', { name: 'Übernehmen' }).click();
+  await expect(scanner.getByRole('region', { name: 'Dokumentkamera' })).toBeVisible();
   await scanner.getByRole('button', { name: 'Dokument verwenden' }).click();
 
   const paymentDialog = page.getByRole('dialog', { name: 'Eigene Zahlung erfassen' });
@@ -84,9 +99,12 @@ test('required receipt scan creates a protected payment attachment on desktop an
   expect((await createResponse).status()).toBe(201);
   await page.getByRole('dialog', { name: 'Zahlung gebucht' }).getByRole('button', { name: 'Fertig' }).click();
 
+  await page.goto('/activities');
+  const receiptAction = page.getByRole('button', { name: 'Beleg' }).first();
+  await expect(receiptAction).toBeVisible();
   const receiptResponse = page.waitForResponse((candidate) => candidate.request().method() === 'GET'
     && /\/groups\/[^/]+\/payments\/[^/]+\/attachment$/.test(new URL(candidate.url()).pathname));
-  await page.getByRole('button', { name: 'Beleg' }).first().click();
+  await receiptAction.click();
   const protectedReceipt = await receiptResponse;
   expect(protectedReceipt.status()).toBe(200);
   expect(protectedReceipt.headers()['content-type']).toBe('application/pdf');

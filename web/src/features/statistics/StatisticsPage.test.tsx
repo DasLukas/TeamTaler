@@ -108,7 +108,9 @@ describe('StatisticsPage', () => {
     expect(apiMock.getStatistics).toHaveBeenCalledWith('group-a', {});
     expect(screen.queryByRole('button', { name: 'Aktualisieren' })).not.toBeInTheDocument();
     expect(screen.queryByText(/Erstellt am/)).not.toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Aktueller Abrechnungszeitraum' })).toBeDisabled();
+    await user.click(screen.getByRole('combobox', { name: 'Zeitraum' }));
+    expect(screen.getByRole('option', { name: 'Aktueller Abrechnungszeitraum' })).toHaveAttribute('aria-disabled', 'true');
+    await user.keyboard('{Escape}');
     await waitFor(() => expect(new URLSearchParams(window.location.search).get('range')).toBe('LAST_30_DAYS'));
     expect(new URLSearchParams(window.location.search).has('view')).toBe(false);
   });
@@ -147,8 +149,9 @@ describe('StatisticsPage', () => {
     render(<Harness activeGroup={activeGroup} client={client} />);
 
     expect(await screen.findByLabelText('Member projection')).toHaveTextContent('3');
-    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Zeitraum' })).toHaveValue('LAST_30_DAYS'));
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Zeitraum' }), 'LAST_90_DAYS');
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Zeitraum' })).toHaveTextContent('Letzte 30 Tage'));
+    await user.click(screen.getByRole('combobox', { name: 'Zeitraum' }));
+    await user.click(screen.getByRole('option', { name: 'Letzte 90 Tage' }));
 
     await waitFor(() => expect(apiMock.getStatistics).toHaveBeenCalledWith('group-a', { range: 'LAST_90_DAYS' }));
     expect(apiMock.getStatistics).toHaveBeenCalledTimes(2);
@@ -211,7 +214,7 @@ describe('StatisticsPage', () => {
     expect(await screen.findByLabelText('Member projection')).toHaveTextContent('9');
     expect(screen.getByRole('tab', { name: 'Buchungen' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.queryByLabelText('Finance projection')).not.toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Zeitraum' })).toHaveValue('CURRENT_PERIOD'));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Zeitraum' })).toHaveTextContent('Aktueller Abrechnungszeitraum'));
     expect(new URLSearchParams(window.location.search).get('range')).toBe('CURRENT_PERIOD');
   });
 });

@@ -166,6 +166,10 @@ func serve(arguments []string) error {
 	)
 
 	if len(cfg.EmailTokenKey) == 32 {
+		branding, err := email.NewBrandingResolver(db, cfg.DataDirectory, cfg.WebDirectory, slog.Default())
+		if err != nil {
+			return fmt.Errorf("configure email branding: %w", err)
+		}
 		sender, err := email.NewDynamicSender(func(ctx context.Context) (config.SMTPConfig, bool, error) {
 			settings, resolved, err := systemService.ResolveRuntime(ctx)
 			if err != nil {
@@ -181,19 +185,19 @@ func serve(arguments []string) error {
 		if err != nil {
 			return fmt.Errorf("configure invitation token encryption: %w", err)
 		}
-		dispatcher, err := email.NewDispatcher(db, sender, tokenBox, cfg.PublicURL, slog.Default())
+		dispatcher, err := email.NewDispatcher(db, sender, tokenBox, branding, cfg.PublicURL, slog.Default())
 		if err != nil {
 			return err
 		}
-		notificationDispatcher, err := email.NewNotificationDispatcher(db, sender, cfg.PublicURL, slog.Default())
+		notificationDispatcher, err := email.NewNotificationDispatcher(db, sender, branding, cfg.PublicURL, slog.Default())
 		if err != nil {
 			return err
 		}
-		publicJoinDispatcher, err := email.NewPublicJoinDispatcher(db, sender, tokenBox, cfg.PublicURL, slog.Default())
+		publicJoinDispatcher, err := email.NewPublicJoinDispatcher(db, sender, tokenBox, branding, cfg.PublicURL, slog.Default())
 		if err != nil {
 			return err
 		}
-		accountSecurityDispatcher, err := email.NewAccountSecurityDispatcher(db, sender, tokenBox, cfg.PublicURL, slog.Default())
+		accountSecurityDispatcher, err := email.NewAccountSecurityDispatcher(db, sender, tokenBox, branding, cfg.PublicURL, slog.Default())
 		if err != nil {
 			return err
 		}

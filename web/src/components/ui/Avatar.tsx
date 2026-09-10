@@ -1,4 +1,5 @@
 import styles from './Avatar.module.css';
+import { ManagedImage } from './ManagedImage';
 
 /** Properties accepted by the avatar component. */
 export interface AvatarProps {
@@ -22,9 +23,12 @@ function initialsForName(name: string): string {
  * @returns An accessible avatar element.
  */
 export function Avatar({ decorative = false, name, src, size = 'medium', className = '' }: AvatarProps) {
+  const initials = initialsForName(name);
+  const imageSize = size === 'small' ? 34 : size === 'large' ? 64 : 48;
   return (
     <span aria-hidden={decorative || undefined} aria-label={decorative ? undefined : name} className={`${styles.avatar} ${src ? styles.withImage : ''} ${styles[size]} ${className}`} role={decorative ? undefined : 'img'}>
-      {src ? <img alt="" src={src} /> : initialsForName(name)}
+      <span aria-hidden="true">{initials}</span>
+      {src ? <ManagedImage alt="" sizes={`${imageSize}px`} src={src} /> : null}
     </span>
   );
 }

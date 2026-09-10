@@ -48,7 +48,7 @@ describe('document scanner camera utilities', () => {
       videoHeight: { configurable: true, value: 1920 },
       videoWidth: { configurable: true, value: 1080 },
     });
-    const imageData = { data: new Uint8ClampedArray(720 * 405 * 4), height: 720, width: 405 } as ImageData;
+    const imageData = { data: new Uint8ClampedArray(480 * 270 * 4), height: 480, width: 270 } as ImageData;
     const getImageData = vi.fn(() => imageData);
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => ({ drawImage: vi.fn(), getImageData }) as unknown as CanvasRenderingContext2D);
     const createBitmap = vi.fn();
@@ -56,8 +56,8 @@ describe('document scanner camera utilities', () => {
 
     const frame = createDetectionFrame(video);
 
-    expect(frame).toBe(imageData);
-    expect(getImageData).toHaveBeenCalledWith(0, 0, 405, 720);
+    expect(frame).toEqual(imageData);
+    expect(getImageData).toHaveBeenCalledWith(0, 0, 270, 480);
     expect(createBitmap).not.toHaveBeenCalled();
   });
 });

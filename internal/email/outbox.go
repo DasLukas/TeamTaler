@@ -98,6 +98,7 @@ type Dispatcher struct {
 	db            *sql.DB
 	sender        Sender
 	tokenOpener   TokenOpener
+	branding      *BrandingResolver
 	publicURL     string
 	logger        *slog.Logger
 	now           func() time.Time
@@ -107,12 +108,12 @@ type Dispatcher struct {
 }
 
 // NewDispatcher validates and stores the dependencies required for invitation
-// delivery. db must be a migrated TeamTaler database, sender and tokenOpener must
-// be non-nil, and publicURL must be an absolute root HTTP(S) URL without secrets,
-// a query, or a fragment. A nil logger selects slog.Default. The function performs
-// no database or network I/O and returns a configured Dispatcher or a validation
-// error.
-func NewDispatcher(db *sql.DB, sender Sender, tokenOpener TokenOpener, publicURL *url.URL, logger *slog.Logger) (*Dispatcher, error) {
+// delivery. db must be a migrated TeamTaler database; sender, tokenOpener, and
+// branding must be non-nil; and publicURL must be an absolute root HTTP(S) URL
+// without secrets, a query, or a fragment. A nil logger selects slog.Default.
+// The function performs no database, filesystem, or network I/O and returns a
+// configured Dispatcher or a validation error.
+func NewDispatcher(db *sql.DB, sender Sender, tokenOpener TokenOpener, branding *BrandingResolver, publicURL *url.URL, logger *slog.Logger) (*Dispatcher, error) {
 	if db == nil {
 		return nil, errors.New("create email dispatcher: database is required")
 	}
@@ -121,6 +122,9 @@ func NewDispatcher(db *sql.DB, sender Sender, tokenOpener TokenOpener, publicURL
 	}
 	if tokenOpener == nil {
 		return nil, errors.New("create email dispatcher: token opener is required")
+	}
+	if branding == nil {
+		return nil, errors.New("create email dispatcher: branding resolver is required")
 	}
 	if publicURL == nil || publicURL.Host == "" || (publicURL.Scheme != "http" && publicURL.Scheme != "https") || publicURL.User != nil || publicURL.RawQuery != "" || publicURL.Fragment != "" || (publicURL.Path != "" && publicURL.Path != "/") {
 		return nil, errors.New("create email dispatcher: public URL must be an absolute root HTTP(S) URL without credentials, query, or fragment")
@@ -132,6 +136,7 @@ func NewDispatcher(db *sql.DB, sender Sender, tokenOpener TokenOpener, publicURL
 		db:            db,
 		sender:        sender,
 		tokenOpener:   tokenOpener,
+		branding:      branding,
 		publicURL:     strings.TrimSuffix(publicURL.String(), "/"),
 		logger:        logger,
 		now:           func() time.Time { return time.Now().UTC() },
@@ -152,7 +157,7 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("run email dispatcher: context is required")
 	}
-	if d == nil || d.db == nil || d.sender == nil || d.tokenOpener == nil || d.now == nil || d.workerCount < 1 || d.workerCount > defaultWorkerCount || d.pollInterval <= 0 || d.leaseDuration <= 0 {
+	if d == nil || d.db == nil || d.sender == nil || d.tokenOpener == nil || d.branding == nil || d.now == nil || d.workerCount < 1 || d.workerCount > defaultWorkerCount || d.pollInterval <= 0 || d.leaseDuration <= 0 {
 		return errors.New("run email dispatcher: dispatcher is not fully configured")
 	}
 	if ctx.Err() != nil {
@@ -180,10 +185,11 @@ type claimedInvitation struct {
 }
 
 type invitationDelivery struct {
-	toAddress string
-	toName    string
-	groupName string
-	expiresAt time.Time
+	toAddress  string
+	toName     string
+	groupName  string
+	membership string
+	expiresAt  time.Time
 }
 
 func (d *Dispatcher) runWorker(ctx context.Context) {
@@ -239,6 +245,11 @@ func (d *Dispatcher) processOne(ctx context.Context) (bool, error) {
 		}
 		return true, nil
 	}
+	branding, err := d.branding.Group(ctx, job.groupID, delivery.membership)
+	if err != nil {
+		d.releaseAfterCancellation(job)
+		return true, fmt.Errorf("resolve invitation email branding: %w", err)
+	}
 	token, err := d.tokenOpener.Open(job.tokenCiphertext)
 	if err != nil || strings.TrimSpace(token) == "" {
 		token = ""
@@ -253,6 +264,7 @@ func (d *Dispatcher) processOne(ctx context.Context) (bool, error) {
 		GroupName: delivery.groupName,
 		AcceptURL: acceptURL,
 		ExpiresAt: delivery.expiresAt,
+		Branding:  branding,
 	}
 	token = ""
 
@@ -331,10 +343,14 @@ func (d *Dispatcher) loadInvitation(ctx context.Context, job claimedInvitation) 
 	var delivery invitationDelivery
 	var expiresAt string
 	var acceptedAt, revokedAt sql.NullString
-	err := d.db.QueryRowContext(ctx, `SELECT i.email,coalesce(i.display_name,''),g.name,i.expires_at,i.accepted_at,i.revoked_at
+	err := d.db.QueryRowContext(ctx, `SELECT i.email,coalesce(i.display_name,''),g.name,
+		coalesce((SELECT m.id FROM memberships m WHERE m.group_id=i.group_id
+			AND (m.id=i.target_membership_id OR (i.target_user_id IS NOT NULL AND m.user_id=i.target_user_id))
+			AND m.status='ACTIVE' AND m.deleted_at IS NULL LIMIT 1),''),
+		i.expires_at,i.accepted_at,i.revoked_at
 		FROM invitations i JOIN groups g ON g.id=i.group_id
 		WHERE i.id=? AND i.group_id=?`, job.invitationID, job.groupID).
-		Scan(&delivery.toAddress, &delivery.toName, &delivery.groupName, &expiresAt, &acceptedAt, &revokedAt)
+		Scan(&delivery.toAddress, &delivery.toName, &delivery.groupName, &delivery.membership, &expiresAt, &acceptedAt, &revokedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return invitationDelivery{}, FailureCodeInvitationInvalid, nil
 	}

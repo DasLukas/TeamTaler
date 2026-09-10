@@ -15,7 +15,7 @@ import (
 	"io"
 	"math/big"
 	"mime"
-	"mime/quotedprintable"
+	"mime/multipart"
 	"net"
 	"net/mail"
 	"strconv"
@@ -59,7 +59,7 @@ func TestSMTPDeliversInvitationOverSecureTransports(t *testing.T) {
 				t.Fatalf("parse delivered message: %v", err)
 			}
 			subject, err := new(mime.WordDecoder).DecodeHeader(parsedMessage.Header.Get("Subject"))
-			if err != nil || subject != "Invitation to Alpha Team" {
+			if err != nil || subject != "Alpha Team · Einladung" {
 				t.Fatalf("subject = %q err=%v", subject, err)
 			}
 			from, err := mail.ParseAddress(parsedMessage.Header.Get("From"))
@@ -70,17 +70,68 @@ func TestSMTPDeliversInvitationOverSecureTransports(t *testing.T) {
 			if err != nil || to.Name != "Alex Member" || to.Address != "member@example.test" {
 				t.Fatalf("To = %#v, err = %v", to, err)
 			}
-			body, err := io.ReadAll(quotedprintable.NewReader(parsedMessage.Body))
-			if err != nil {
-				t.Fatalf("decode delivered body: %v", err)
-			}
-			for _, expected := range []string{"Hello Alex Member,", "join Alpha Team", "https://teamtaler.example.test/invite#token=one-time-token", "11.08.2026, 12:00 UTC"} {
-				if !bytes.Contains(body, []byte(expected)) {
-					t.Fatalf("delivered body does not contain %q: %q", expected, body)
+			plainBody, htmlBody, logo := parseVisualEmail(t, parsedMessage)
+			for _, expected := range []string{"Hallo Alex Member,", "Einladung zu Alpha Team", "https://teamtaler.example.test/invite#token=one-time-token", "11.08.2026, 12:00 UTC"} {
+				if !strings.Contains(plainBody, expected) {
+					t.Fatalf("plain body does not contain %q: %q", expected, plainBody)
 				}
+			}
+			for _, expected := range []string{"cid:" + emailLogoContentID, "@media (prefers-color-scheme: dark)", "Einladung annehmen", "Alpha Team"} {
+				if !strings.Contains(htmlBody, expected) {
+					t.Fatalf("HTML body does not contain %q", expected)
+				}
+			}
+			if !bytes.HasPrefix(logo, []byte("\x89PNG\r\n\x1a\n")) {
+				t.Fatalf("inline logo is not PNG: %x", logo[:min(8, len(logo))])
 			}
 		})
 	}
+}
+
+func parseVisualEmail(t *testing.T, message *mail.Message) (string, string, []byte) {
+	t.Helper()
+	mediaType, parameters, err := mime.ParseMediaType(message.Header.Get("Content-Type"))
+	if err != nil || mediaType != "multipart/related" {
+		t.Fatalf("top-level Content-Type=%q params=%#v err=%v", mediaType, parameters, err)
+	}
+	related := multipart.NewReader(message.Body, parameters["boundary"])
+	alternativesPart, err := related.NextPart()
+	if err != nil {
+		t.Fatalf("read alternatives part: %v", err)
+	}
+	alternativeType, alternativeParameters, err := mime.ParseMediaType(alternativesPart.Header.Get("Content-Type"))
+	if err != nil || alternativeType != "multipart/alternative" {
+		t.Fatalf("alternative Content-Type=%q params=%#v err=%v", alternativeType, alternativeParameters, err)
+	}
+	alternatives := multipart.NewReader(alternativesPart, alternativeParameters["boundary"])
+	plainPart, err := alternatives.NextPart()
+	if err != nil {
+		t.Fatalf("read plain part: %v", err)
+	}
+	plain, err := io.ReadAll(plainPart)
+	if err != nil {
+		t.Fatalf("read plain body: %v", err)
+	}
+	htmlPart, err := alternatives.NextPart()
+	if err != nil {
+		t.Fatalf("read HTML part: %v", err)
+	}
+	html, err := io.ReadAll(htmlPart)
+	if err != nil {
+		t.Fatalf("read HTML body: %v", err)
+	}
+	logoPart, err := related.NextPart()
+	if err != nil {
+		t.Fatalf("read logo part: %v", err)
+	}
+	if logoPart.Header.Get("Content-ID") != "<"+emailLogoContentID+">" {
+		t.Fatalf("logo Content-ID=%q", logoPart.Header.Get("Content-ID"))
+	}
+	logo, err := io.ReadAll(base64.NewDecoder(base64.StdEncoding, logoPart))
+	if err != nil {
+		t.Fatalf("decode logo: %v", err)
+	}
+	return string(plain), string(html), logo
 }
 
 func TestSendInvitationRejectsHeaderInjectionBeforeDialing(t *testing.T) {

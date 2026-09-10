@@ -514,6 +514,8 @@ paths:
       summary: Read the current profile image of a user sharing a group
       parameters:
         - $ref: '#/components/parameters/UserId'
+        - $ref: '#/components/parameters/ImageWidth'
+        - $ref: '#/components/parameters/IfNoneMatch'
         - name: imageKey
           in: path
           required: true
@@ -522,12 +524,20 @@ paths:
             pattern: '^[0-9a-f]{64}\.png$'
       responses:
         '200':
-          description: Normalized profile image
+          description: Normalized PNG master or responsive WebP display variant
+          headers:
+            ETag:
+              schema: { type: string }
+            Cache-Control:
+              schema: { type: string, example: 'private, no-cache' }
           content:
             image/png:
               schema: { type: string, format: binary }
+            image/webp:
+              schema: { type: string, format: binary }
         '401': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /invitations/preview:
     post:
       tags: [Authentication]
@@ -1164,15 +1174,25 @@ paths:
       description: This resource exposes only the group logo and grants no access to other group-scoped data.
       parameters:
         - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/ImageWidth'
+        - $ref: '#/components/parameters/IfNoneMatch'
       responses:
         '200':
-          description: Normalized PNG group logo
+          description: Normalized PNG group-logo master or responsive WebP display variant
+          headers:
+            ETag:
+              schema: { type: string }
+            Cache-Control:
+              schema: { type: string, example: 'private, no-cache' }
           content:
             image/png:
+              schema: { type: string, format: binary }
+            image/webp:
               schema: { type: string, format: binary }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /system/groups/{groupId}/restore:
     post:
       tags: [System]
@@ -2076,7 +2096,8 @@ paths:
   /groups/{groupId}/planning/events/{eventId}/close:
     post:
       tags: [Planning]
-      summary: Close event participation
+      summary: Close poll or registration participation
+      description: Only appointment polls and appointment registrations may be closed manually. Calendar-only appointments complete automatically after ending.
       parameters:
         - $ref: '#/components/parameters/GroupId'
         - $ref: '#/components/parameters/PlanningEventId'
@@ -2085,6 +2106,7 @@ paths:
       responses:
         '200': { description: Closed event, content: { application/json: { schema: { $ref: '#/components/schemas/PlanningEvent' } } } }
         '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/planning/events/{eventId}/complete:
     post:
       tags: [Planning]
@@ -3092,6 +3114,8 @@ paths:
       summary: Read a group-referenced immutable product image or group logo
       parameters:
         - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/ImageWidth'
+        - $ref: '#/components/parameters/IfNoneMatch'
         - name: imageKey
           in: path
           required: true
@@ -3100,18 +3124,21 @@ paths:
             pattern: '^[0-9a-f]{64}\.png$'
       responses:
         '200':
-          description: Normalized PNG image
+          description: Normalized PNG master or responsive WebP display variant
           headers:
             ETag:
               schema: { type: string }
             Cache-Control:
-              schema: { type: string }
+              schema: { type: string, example: 'private, no-cache' }
           content:
             image/png:
+              schema: { type: string, format: binary }
+            image/webp:
               schema: { type: string, format: binary }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { description: Image not found }
+        '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/activities:
     get:
       tags: [Activities]
@@ -4106,6 +4133,20 @@ components:
       in: cookie
       name: teamtaler_session
   parameters:
+    ImageWidth:
+      name: width
+      in: query
+      required: false
+      description: Optional bounded display width. Omit to retrieve the canonical PNG master.
+      schema:
+        type: integer
+        enum: [128, 256, 384]
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      description: Strong image validator used for authorization-preserving conditional retrieval.
+      schema: { type: string }
     GroupId:
       name: groupId
       in: path

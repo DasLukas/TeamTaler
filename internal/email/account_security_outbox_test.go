@@ -121,6 +121,9 @@ func TestAccountSecurityDispatcherDeliversBothMailKindsWithFragmentTokens(t *tes
 			if message.ToAddress != test.wantAddress || message.ToName != "Admin" {
 				t.Fatalf("unexpected message recipient: %#v", message)
 			}
+			if message.Branding.Scope != BrandingScopeSystem || message.Branding.Name != "TeamTaler" || message.Branding.Theme != "TEAMTALER" || len(message.Branding.LogoPNG) == 0 {
+				t.Fatalf("account-security branding=%#v", message.Branding)
+			}
 			state := readAccountSecurityOutboxState(t, fixture, test.kind)
 			if state.status != string(OutboxStatusSent) || state.attemptCount != 1 || state.ciphertext.Valid || !state.sentAt.Valid || state.leaseToken.Valid || state.errorCode.Valid {
 				t.Fatalf("unexpected sent state: %#v", state)
@@ -310,7 +313,7 @@ func newAccountSecurityOutboxFixture(t *testing.T) *accountSecurityOutboxFixture
 		t.Fatalf("parse public URL: %v", err)
 	}
 	sender := &recordingAccountSecuritySender{}
-	dispatcher, err := NewAccountSecurityDispatcher(db, sender, box, publicURL, nil)
+	dispatcher, err := NewAccountSecurityDispatcher(db, sender, box, newTestBrandingResolver(t, db), publicURL, nil)
 	if err != nil {
 		t.Fatalf("new dispatcher: %v", err)
 	}
