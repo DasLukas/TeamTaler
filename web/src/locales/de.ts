@@ -295,6 +295,7 @@ export const de = {
     searchRecipients: 'Empfänger durchsuchen',
     searchRecipientsPlaceholder: 'Name suchen …',
     noRecipientsFound: 'Keine passenden Empfänger gefunden.',
+    yourself: 'Du',
     regularMembers: 'Mitglieder',
     guests: 'Gäste',
     newGuest: 'Neuer Gast',

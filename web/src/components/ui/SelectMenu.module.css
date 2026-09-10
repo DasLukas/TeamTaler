@@ -90,3 +90,5 @@
 .option.active { background: var(--color-surface-brand-subtle); }
 .option[aria-selected='true'] { color: var(--color-brand); font-weight: 700; }
 .option svg { flex: 0 0 auto; }
+.optionDisabled { color: var(--color-text-muted); cursor: not-allowed; opacity: .58; }
+.optionDisabled.active { background: transparent; }

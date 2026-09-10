@@ -185,6 +185,7 @@ export function BookingInspector({
         {canAssignOthers ? (
           <MemberMultiSelect
             canBookForGuests={canBookForGuests}
+            currentMembershipId={currentMembershipId}
             disabled={targets.length === 0 && !canBookForGuests}
             id="booking-member"
             label={t('booking.forMember')}

@@ -1,10 +1,17 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
+import CalendarCheck2 from 'lucide-react/dist/esm/icons/calendar-check-2';
+import CalendarClock from 'lucide-react/dist/esm/icons/calendar-clock';
+import CalendarDays from 'lucide-react/dist/esm/icons/calendar-days';
+import CalendarRange from 'lucide-react/dist/esm/icons/calendar-range';
+import History from 'lucide-react/dist/esm/icons/history';
+import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal';
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, ApiError } from '@/api/client';
-import { isStatisticsRange, type StatisticsMeta } from '@/api/types';
+import { isStatisticsRange, type StatisticsMeta, type StatisticsRange } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Page } from '@/components/layout/Page';
+import { SelectMenu, type SelectMenuOption } from '@/components/ui/SelectMenu';
 import { StatePanel } from '@/components/ui/StatePanel';
 import tabStyles from '@/components/ui/WorkspaceTabs.module.css';
 import { FinanceStatisticsView } from './FinanceStatisticsView';
@@ -16,6 +23,14 @@ import styles from './StatisticsPage.module.css';
 type StatisticsTab = 'bookings' | 'finance';
 
 const statisticsTabs: readonly StatisticsTab[] = ['bookings', 'finance'];
+const rangeIcons = {
+  CURRENT_PERIOD: CalendarCheck2,
+  LAST_30_DAYS: CalendarDays,
+  LAST_90_DAYS: CalendarRange,
+  LAST_12_MONTHS: CalendarClock,
+  ALL_TIME: History,
+  CUSTOM: SlidersHorizontal,
+} satisfies Record<StatisticsRange, typeof CalendarDays>;
 
 /** Returns whether a failed refresh invalidates access to every cached statistic. */
 function isStatisticsAccessError(error: unknown): boolean {
@@ -74,25 +89,33 @@ function StatisticsPageContent({ activeGroupId }: { activeGroupId: string }) {
   const accessInvalidated = statisticsQuery.isError && isStatisticsAccessError(statisticsQuery.error);
   const currentPeriodAvailable = meta?.currentPeriodAvailable ?? null;
   const rangeResolving = urlState.range === null;
+  const rangeOptions = useMemo<readonly SelectMenuOption[]>(() => rangeResolving
+    ? [{ disabled: true, label: t('statistics.filters.resolvingRange'), value: '' }]
+    : statisticsRangeOptions.map((range) => {
+      const RangeIcon = rangeIcons[range];
+      return {
+        disabled: range === 'CURRENT_PERIOD' && currentPeriodAvailable === false,
+        label: t(`statistics.filters.ranges.${range}`),
+        value: range,
+        visual: <RangeIcon size={18} />,
+      };
+    }), [currentPeriodAvailable, rangeResolving, t]);
 
   return (
     <Page className={styles.page} intro={t('statistics.intro')} title={t('statistics.title')} wide>
       <section aria-label={t('statistics.filters.label')} className={styles.filters}>
         <label className={styles.rangeField}>
           <span>{t('statistics.filters.range')}</span>
-          <select
-            aria-busy={rangeResolving}
+          <SelectMenu
+            ariaLabel={t('statistics.filters.range')}
+            ariaBusy={rangeResolving}
             disabled={rangeResolving}
-            onChange={(event) => changeRange(event.target.value)}
+            id="statistics-range"
+            menuMinWidth={280}
+            onChange={changeRange}
+            options={rangeOptions}
             value={urlState.range ?? ''}
-          >
-            {rangeResolving ? <option value="">{t('statistics.filters.resolvingRange')}</option> : null}
-            {statisticsRangeOptions.map((range) => (
-              <option disabled={range === 'CURRENT_PERIOD' && currentPeriodAvailable === false} key={range} value={range}>
-                {t(`statistics.filters.ranges.${range}`)}
-              </option>
-            ))}
-          </select>
+          />
         </label>
         {urlState.range === 'CUSTOM' ? (
           <div className={styles.customDates}>

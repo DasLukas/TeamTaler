@@ -34,4 +34,29 @@ describe('SelectMenu scrolling', () => {
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByRole('listbox', { name: 'Member' })).not.toBeInTheDocument();
   });
+
+  it('keeps unavailable options visible while skipping them for keyboard selection', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <SelectMenu
+        ariaLabel="Range"
+        id="range"
+        onChange={onChange}
+        options={[
+          { disabled: true, label: 'Current period', value: 'current' },
+          { label: 'Last 30 days', value: '30-days' },
+          { label: 'Custom', value: 'custom' },
+        ]}
+        value="30-days"
+      />,
+    );
+
+    const trigger = screen.getByRole('combobox', { name: 'Range' });
+    await user.click(trigger);
+    expect(screen.getByRole('option', { name: 'Current period' })).toHaveAttribute('aria-disabled', 'true');
+    await user.keyboard('{Home}{Enter}');
+
+    expect(onChange).toHaveBeenCalledWith('30-days');
+  });
 });

@@ -1138,3 +1138,122 @@ The participant card now uses the same quiet hierarchy as TeamTaler account sett
 The participant list now communicates response grouping through the same divider-led visual language used elsewhere in TeamTaler, with less repetition and clearer scan order.
 
 final result: passed
+
+---
+
+# Statistics Range Picker And Custom Dates Design QA
+
+## Comparison Target
+
+- Source visual truth: `/private/var/folders/w1/jd59d9291l7cssnvy5fh56sh0000gn/T/TemporaryItems/com.apple.Photos.NSItemProvider/uuid=B904E2BA-1DFC-41DA-9501-42B582BC5BF7&code=001&library=1&type=1&mode=1&loc=true&cap=true.png/IMG_0043.png` and `/tmp/teamtaler-statistics-range-before-440.jpg`.
+- Implementation screenshots: `/tmp/teamtaler-statistics-range-after-mobile-closed.jpg`, `/tmp/teamtaler-statistics-range-after-mobile-open.jpg`, and `/tmp/teamtaler-statistics-range-after-desktop.jpg`.
+- Route: `/statistics?range=CUSTOM&from=2026-08-09&to=2026-09-07`.
+- State: authenticated, custom range selected, bookings tab active.
+
+## Capture Normalization
+
+| Capture | CSS viewport | Pixel dimensions | Density |
+| --- | ---: | ---: | ---: |
+| User iPhone reference | 440 × 956 | 1320 × 2868 | 3 screenshot pixels per CSS pixel |
+| Mobile implementation | 440 × 956 | 440 × 956 | 1 screenshot pixel per CSS pixel |
+| Desktop implementation | 1094 × 617 | 1094 × 617 | 1 screenshot pixel per CSS pixel |
+
+The iPhone reference is normalized to its 440 × 956 CSS viewport before comparison. The implementation captures use the same route, selected custom range, dates, active tab, and responsive application shell.
+
+## Full-View Comparison Evidence
+
+The native range select is replaced by the established TeamTaler anchored selection menu. Its selected value and every option use a distinct Lucide calendar, history, or adjustment icon. At the iPhone 16 Pro Max width, the two native date inputs now form a single-column stack inside the filter card instead of competing for horizontal space or crossing the container edge.
+
+## Focused Region Comparison Evidence
+
+- The closed mobile state keeps the trigger, both labels, both complete date values, and calendar affordances within the filter boundary.
+- The open mobile state anchors to the trigger, remains inside the viewport, scrolls when necessary, exposes all six ranges, and marks the current choice.
+- The desktop state preserves the compact horizontal filter layout without stretching the custom menu or date controls unnecessarily.
+- Unavailable ranges remain discoverable but are semantically disabled and skipped by keyboard navigation.
+
+## Required Fidelity Surfaces
+
+- Typography and hierarchy: passed. The custom trigger follows existing label and control weights, while option icons remain supporting visuals.
+- Spacing and layout rhythm: passed. The 440 px layout uses one full-width date field per row; desktop retains a concise inline arrangement.
+- Colors and visual tokens: passed. Trigger, focus, selected option, menu surface, and disabled treatment use existing TeamTaler tokens in the active theme.
+- Image quality and asset fidelity: passed. The implementation uses direct imports from the existing Lucide icon dependency; no generated or substitute imagery was introduced.
+- Copy and content: passed. Existing translated range names and inclusive end-date wording remain unchanged.
+
+## Interaction, Accessibility, And Responsive Evidence
+
+- Browser interaction changed `Eigener Zeitraum` to `Letzte 90 Tage`, updated the URL to `range=LAST_90_DAYS`, removed the custom date controls, and restored the original custom range and dates on reselection.
+- The trigger exposes combobox semantics, expanded state, busy state, active option, and a labelled listbox. Disabled options expose `aria-disabled` and are skipped by Home, End, and arrow-key movement.
+- Browser page identity and meaningful DOM content passed; browser warnings and errors: none.
+- No clipping, overlap, or horizontal overflow is visible at 440 × 956 or 1094 × 617.
+
+## Comparison History
+
+1. Initial findings — P1: the iPhone date inputs overlapped and extended beyond the filter card; P2: the native range select did not match the product's custom control language or provide visual range cues.
+2. Fixes: reused the shared anchored selection menu, added semantically appropriate icons, added unavailable-option support, and introduced a 560 px single-column breakpoint for custom dates.
+3. Post-fix evidence: normalized source-and-implementation comparison, closed and open mobile captures, desktop capture, live range switching, accessibility inspection, targeted regression tests, and a clean browser console show no remaining P0, P1, or P2 issue.
+
+## Final Result
+
+The statistics filter now uses a consistent, icon-supported custom menu and keeps custom dates reliably usable on iPhone-sized screens without degrading the desktop layout.
+
+final result: passed
+
+---
+
+# Booking Recipient Self-Pinning Design QA
+
+## Comparison Target
+
+- Source visual truth: `/tmp/teamtaler-recipient-self-before-393.jpg`, captured from the annotated `/book` recipient sheet before the change.
+- Implementation screenshots: `/tmp/teamtaler-recipient-self-after-393.jpg` and `/tmp/teamtaler-recipient-self-after-1024.jpg`.
+- Route: `/book`.
+- State: authenticated, one current user selected, recipient picker open, no search query.
+
+## Capture Normalization
+
+| Capture | CSS viewport | Pixel dimensions | Density |
+| --- | ---: | ---: | ---: |
+| Mobile source | 393 × 852 | 393 × 852 | 1 screenshot pixel per CSS pixel |
+| Mobile implementation | 393 × 852 | 393 × 852 | 1 screenshot pixel per CSS pixel |
+| Desktop implementation | 1024 × 768 | 1024 × 768 | 1 screenshot pixel per CSS pixel |
+
+The mobile comparison uses the same route, group, theme, selected recipient, open-sheet state, viewport, and one-to-one density.
+
+## Full-View Comparison Evidence
+
+The previous flat `Mitglieder` list placed the current user wherever the API supplied that membership. The revised picker introduces a compact `Du` group directly below search, pins the current membership there, and starts the remaining `Mitglieder` group after one existing-token hairline divider. The bottom sheet grows only enough to accommodate the group label and separation.
+
+## Focused Region Comparison Evidence
+
+- The current user's avatar, name, checkbox, and selected checkmark retain their original row styling and interaction target.
+- The divider aligns with the list content and uses the existing border token instead of adding another card, badge, or accent color.
+- Other members retain their original order and checkbox behavior. The current user is removed from that group, so the identity is never duplicated.
+- The same hierarchy renders inside the 1024 px anchored popover without clipping, overlap, or layout shift.
+
+## Required Fidelity Surfaces
+
+- Typography and hierarchy: passed. `Du` and `Mitglieder` share the established compact uppercase group-label treatment.
+- Spacing and layout rhythm: passed. A single padded hairline separates self from other recipients without inflating individual rows.
+- Colors and visual tokens: passed. Divider, labels, selection state, avatars, and surfaces reuse existing TeamTaler tokens.
+- Image quality and asset fidelity: passed. Existing member avatars and fallback initials remain unchanged; no new imagery was introduced.
+- Copy and content: passed. The concise `Du` label identifies the pinned row without repeating the member name or adding explanatory copy.
+
+## Interaction, Accessibility, And Responsive Evidence
+
+- Selecting `Lena Spielerin` changed the trigger from one to two selected recipients and marked the checkbox; selecting it again restored the original state.
+- Semantic groups are exposed as `Du` and `Mitglieder`, each with its existing labelled checkbox rows.
+- A regression fixture supplies the current membership between other members and verifies that it still renders first and only once.
+- Page identity, meaningful DOM content, framework-overlay absence, and browser console health passed; warnings and errors: none.
+- No clipping or horizontal overflow is visible at 393 × 852 or 1024 × 768.
+
+## Comparison History
+
+1. Initial finding — P2: the current user was visually indistinguishable from ordinary recipients and depended on the server list position.
+2. Fix: pass the current membership identity into the shared picker, render it in a dedicated `Du` group, exclude it from the ordinary member group, and reuse the existing group divider.
+3. Post-fix evidence: normalized before-and-after mobile comparison, desktop popover capture, semantic DOM inspection, real checkbox interaction, focused regression tests, and a clean browser console show no remaining P0, P1, or P2 issue.
+
+## Final Result
+
+The recipient picker now keeps the user's own booking target predictably first and visually separate while preserving the established selection behavior on mobile and desktop.
+
+final result: passed

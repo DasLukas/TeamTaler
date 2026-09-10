@@ -183,6 +183,7 @@ function BookingWorkspace({ groupId, categories, context, compact }: BookingWork
           {canAssignOthers ? <div className={styles.targetControl}>
               <MemberMultiSelect
                 canBookForGuests={context.canBookForGuests}
+                currentMembershipId={context.currentMembership.id}
                 disabled={context.targets.length === 0 && !context.canBookForGuests}
                 id="booking-member"
                 iconOnly
