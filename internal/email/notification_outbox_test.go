@@ -26,8 +26,8 @@ func TestNotificationDispatcherSendsLocalizedEventAndMarksJobSent(t *testing.T) 
 	for _, statement := range []string{
 		`INSERT INTO users(id,email,display_name,password_hash,created_at,updated_at) VALUES('usr_notice','member@example.test','Alex Member','hash','2026-08-04T12:00:00Z','2026-08-04T12:00:00Z')`,
 		`INSERT INTO groups(id,name,currency,created_at,updated_at) VALUES('grp_notice','Example Team','EUR','2026-08-04T12:00:00Z','2026-08-04T12:00:00Z')`,
-		`INSERT INTO memberships(id,group_id,user_id,joined_at) VALUES('mem_notice','grp_notice','usr_notice','2026-08-04T12:00:00Z')`,
-		`INSERT INTO group_settings(group_id,members_can_view_all_bookings,updated_at) VALUES('grp_notice',0,'2026-08-04T12:00:00Z')`,
+		`INSERT INTO memberships(id,group_id,user_id,theme_override,joined_at) VALUES('mem_notice','grp_notice','usr_notice','FIRE','2026-08-04T12:00:00Z')`,
+		`INSERT INTO group_settings(group_id,members_can_view_all_bookings,default_theme,updated_at) VALUES('grp_notice',0,'NRW','2026-08-04T12:00:00Z')`,
 		`INSERT INTO membership_notification_channels(group_id,membership_id,event_type,channel,enabled_at,updated_at) VALUES('grp_notice','mem_notice','BOOKING_ASSIGNED','EMAIL','2026-08-04T12:00:00Z','2026-08-04T12:00:00Z')`,
 	} {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
@@ -47,7 +47,7 @@ func TestNotificationDispatcherSendsLocalizedEventAndMarksJobSent(t *testing.T) 
 	}
 	sender := &recordingSender{available: true}
 	publicURL, _ := url.Parse("https://teamtaler.example.test/")
-	dispatcher, err := NewNotificationDispatcher(db, sender, publicURL, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	dispatcher, err := NewNotificationDispatcher(db, sender, newTestBrandingResolver(t, db), publicURL, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatalf("create dispatcher: %v", err)
 	}
@@ -72,6 +72,9 @@ func TestNotificationDispatcherSendsLocalizedEventAndMarksJobSent(t *testing.T) 
 	}
 	if messages[0].Body != "Sam Admin hat 1 × „Training fine“ im Wert von 5,00 EUR auf dein Konto gebucht." {
 		t.Fatalf("notification body=%q", messages[0].Body)
+	}
+	if messages[0].Branding.Scope != BrandingScopeGroup || messages[0].Branding.Name != "Example Team" || messages[0].Branding.Theme != "FIRE" {
+		t.Fatalf("notification branding=%#v", messages[0].Branding)
 	}
 	var status string
 	if err := db.QueryRowContext(ctx, `SELECT status FROM notification_delivery_jobs WHERE channel='EMAIL'`).Scan(&status); err != nil || status != "SENT" {
@@ -102,7 +105,7 @@ func TestNotificationDispatcherTerminatesLegacyJobWithoutRecipientEmail(t *testi
 	}
 	sender := &recordingSender{available: true}
 	publicURL, _ := url.Parse("https://teamtaler.example.test/")
-	dispatcher, err := NewNotificationDispatcher(db, sender, publicURL, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	dispatcher, err := NewNotificationDispatcher(db, sender, newTestBrandingResolver(t, db), publicURL, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatalf("create dispatcher: %v", err)
 	}

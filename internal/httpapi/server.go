@@ -29,6 +29,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/catalog"
 	"github.com/DasLukas/TeamTaler/internal/config"
 	"github.com/DasLukas/TeamTaler/internal/domain"
+	"github.com/DasLukas/TeamTaler/internal/email"
 	"github.com/DasLukas/TeamTaler/internal/exporting"
 	"github.com/DasLukas/TeamTaler/internal/exportnotifications"
 	"github.com/DasLukas/TeamTaler/internal/finance"
@@ -72,6 +73,7 @@ type Server struct {
 	planning           planning.Service
 	notifications      notifications.Service
 	systemAdmin        systemadmin.Service
+	emailBranding      *email.BrandingResolver
 	pushSubscriptions  *webpushservice.SubscriptionService
 	pushSender         *webpushservice.Sender
 	systemConfigured   bool
@@ -100,6 +102,10 @@ type Server struct {
 func New(cfg config.Config, db *sql.DB, buildInformation BuildInformation, logger *slog.Logger) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
+	}
+	emailBranding, err := email.NewBrandingResolver(db, cfg.DataDirectory, cfg.WebDirectory, logger)
+	if err != nil {
+		panic(fmt.Sprintf("configure email branding: %v", err))
 	}
 	var tokenSealer groups.TokenSealer
 	var tokenOpener groups.TokenOpener
@@ -190,6 +196,7 @@ func New(cfg config.Config, db *sql.DB, buildInformation BuildInformation, logge
 		planning:           planning.Service{DB: db, ResolveTimeZone: systemService.ResolveTimeZoneTx},
 		notifications:      notificationService,
 		systemAdmin:        systemService,
+		emailBranding:      emailBranding,
 		pushSubscriptions:  pushSubscriptions,
 		pushSender:         pushSender,
 		systemConfigured:   true,

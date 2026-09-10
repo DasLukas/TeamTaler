@@ -29,6 +29,14 @@ Normal text and controls meet WCAG AA contrast in all eight theme and color-sche
 
 The account appearance controls apply and persist each selection immediately. A failed write restores both the previous rendered appearance and session cache. The current group default appears once in the personal picker with a visible `Gruppenstandard` badge; choosing it stores the durable null override instead of copying the current theme value, so later administrator changes continue to propagate. The group-administration default requires the standard explicit Save action because it changes every inheriting membership.
 
+## Transactional email
+
+Transactional email extends the same color-only theme system into a deliberately conservative, 600-pixel table layout that remains readable in clients with limited CSS support. Every message provides German plain text and HTML alternatives. The HTML uses inline light colors as its baseline, a `prefers-color-scheme` dark palette for supporting clients, system fonts, one clear heading, short paragraphs, one primary action, a visible fallback URL, and a restrained automatic-delivery footer. It never depends on external fonts, stylesheets, images, scripts, or remote tracking resources.
+
+Group-related email pairs the current group name with its managed logo and uses the recipient membership override followed by the group default theme. A recipient who has not joined yet receives the group default. A missing or unreadable group image falls back to the TeamTaler mark while retaining the group name. System email always uses TeamTaler identity and colors, regardless of group membership. The inbox subject repeats the same identity as the visual header: `{group name} · {message title}` for group email and `TeamTaler · {message title}` for system email.
+
+The inline logo is a bounded metadata-free PNG referenced by Content-ID. Dynamic names, copy, and URLs are escaped for their HTML contexts, and the plain-text alternative retains the complete action URL. Core text, header, and action color pairs meet WCAG AA in the light and dark variants of every theme.
+
 ## Action buttons
 
 `web/src/components/ui/Button.tsx` is the only standard component for labelled actions. Feature code must not recreate its spacing, variants, or responsive behavior.

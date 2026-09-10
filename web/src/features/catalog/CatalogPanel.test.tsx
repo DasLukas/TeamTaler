@@ -96,6 +96,17 @@ describe('CatalogPanel', () => {
     expect(screen.getByText(createdProduct.name)).toHaveAttribute('title', createdProduct.name);
   });
 
+  it('keeps product images inside a stable frame', async () => {
+    const productWithImage = { ...createdProduct, imageUrl: '/api/v1/groups/group-a/products/product-created/image' };
+    apiMock.getCategories.mockResolvedValue([{ ...category, products: [productWithImage] }]);
+    renderCatalog();
+
+    const card = (await screen.findByText(productWithImage.name)).closest('article');
+    const image = card?.querySelector('img[data-managed-image-state]');
+    expect(image).not.toBeNull();
+    expect(image?.parentElement?.querySelector('[aria-hidden="true"]')).toHaveTextContent('W');
+  });
+
   it('marks only archived products with an image overlay instead of status labels', async () => {
     const archivedProduct = { ...createdProduct, id: 'product-archived', name: 'Archived water', active: false };
     apiMock.getCategories.mockResolvedValue([{ ...category, products: [createdProduct, archivedProduct] }]);

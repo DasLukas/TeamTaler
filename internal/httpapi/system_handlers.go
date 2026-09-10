@@ -256,9 +256,10 @@ func (s *Server) handleTestSystemSMTP(response http.ResponseWriter, request *htt
 	if err == nil {
 		err = sender.SendNotification(request.Context(), email.NotificationMessage{
 			ToAddress: testRecipient, ToName: testRecipientName,
-			GroupName: settings.InstanceName.Value, Title: "SMTP configuration test",
-			Body:      "This message confirms that the current TeamTaler SMTP configuration can deliver email.",
+			GroupName: settings.InstanceName.Value, Title: "SMTP-Konfigurationstest",
+			Body:      "Diese Nachricht bestätigt, dass die aktuelle TeamTaler-SMTP-Konfiguration E-Mails zustellen kann.",
 			ActionURL: strings.TrimSuffix(s.config.PublicURL.String(), "/") + "/admin",
+			Branding:  s.emailBranding.System(),
 		})
 	}
 	if err != nil {

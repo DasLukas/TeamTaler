@@ -32,6 +32,7 @@ type AccountSecurityDispatcher struct {
 	db            *sql.DB
 	sender        AccountSecuritySender
 	tokenOpener   TokenOpener
+	branding      *BrandingResolver
 	publicURL     string
 	logger        *slog.Logger
 	now           func() time.Time
@@ -40,11 +41,12 @@ type AccountSecurityDispatcher struct {
 	leaseDuration time.Duration
 }
 
-// NewAccountSecurityDispatcher validates its dependencies and returns a ready
-// dispatcher without performing database or network I/O.
-func NewAccountSecurityDispatcher(db *sql.DB, sender AccountSecuritySender, tokenOpener TokenOpener, publicURL *url.URL, logger *slog.Logger) (*AccountSecurityDispatcher, error) {
-	if db == nil || sender == nil || tokenOpener == nil {
-		return nil, errors.New("create account security dispatcher: database, sender, and token opener are required")
+// NewAccountSecurityDispatcher validates its database, sender, token opener,
+// branding resolver, public URL, and logger and returns a ready dispatcher
+// without performing database, filesystem, or network I/O.
+func NewAccountSecurityDispatcher(db *sql.DB, sender AccountSecuritySender, tokenOpener TokenOpener, branding *BrandingResolver, publicURL *url.URL, logger *slog.Logger) (*AccountSecurityDispatcher, error) {
+	if db == nil || sender == nil || tokenOpener == nil || branding == nil {
+		return nil, errors.New("create account security dispatcher: database, sender, token opener, and branding resolver are required")
 	}
 	if publicURL == nil || publicURL.Host == "" || (publicURL.Scheme != "http" && publicURL.Scheme != "https") || publicURL.User != nil || publicURL.RawQuery != "" || publicURL.Fragment != "" || (publicURL.Path != "" && publicURL.Path != "/") {
 		return nil, errors.New("create account security dispatcher: public URL must be an absolute root HTTP(S) URL")
@@ -53,7 +55,7 @@ func NewAccountSecurityDispatcher(db *sql.DB, sender AccountSecuritySender, toke
 		logger = slog.Default()
 	}
 	return &AccountSecurityDispatcher{
-		db: db, sender: sender, tokenOpener: tokenOpener,
+		db: db, sender: sender, tokenOpener: tokenOpener, branding: branding,
 		publicURL: strings.TrimSuffix(publicURL.String(), "/"), logger: logger,
 		now: func() time.Time { return time.Now().UTC() }, workerCount: defaultWorkerCount,
 		pollInterval: defaultPollInterval, leaseDuration: defaultLeaseDuration,
@@ -66,7 +68,7 @@ func (d *AccountSecurityDispatcher) Run(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("run account security dispatcher: context is required")
 	}
-	if d == nil || d.db == nil || d.sender == nil || d.tokenOpener == nil || d.now == nil || d.workerCount < 1 || d.workerCount > defaultWorkerCount || d.pollInterval <= 0 || d.leaseDuration <= 0 {
+	if d == nil || d.db == nil || d.sender == nil || d.tokenOpener == nil || d.branding == nil || d.now == nil || d.workerCount < 1 || d.workerCount > defaultWorkerCount || d.pollInterval <= 0 || d.leaseDuration <= 0 {
 		return errors.New("run account security dispatcher: dispatcher is not fully configured")
 	}
 	var workers sync.WaitGroup
@@ -143,7 +145,7 @@ func (d *AccountSecurityDispatcher) processOne(ctx context.Context) (bool, error
 			return d.recordFailure(completionContext, job, FailureCodeTokenOpenFailed)
 		})
 	}
-	message := AccountSecurityMessage{ToAddress: delivery.toAddress, ToName: delivery.toName, ExpiresAt: delivery.expiresAt}
+	message := AccountSecurityMessage{ToAddress: delivery.toAddress, ToName: delivery.toName, ExpiresAt: delivery.expiresAt, Branding: d.branding.System()}
 	switch delivery.kind {
 	case "PASSWORD_RESET":
 		message.ActionURL = d.publicURL + "/reset-password#token=" + url.QueryEscape(token)
