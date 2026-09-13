@@ -27,12 +27,14 @@ import type {
 } from '@/api/types';
 import { Button } from '@/components/ui/Button';
 import { ConfirmationDialog } from '@/components/ui/ConfirmationDialog';
-import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
+import { Field, TextInput } from '@/components/ui/FormField';
 import { GroupMark } from '@/components/ui/GroupMark';
 import { InvitationReady, InvitationReadyFooter } from '@/components/ui/InvitationReady';
 import { ItemAction } from '@/components/ui/ItemAction';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
+import { SelectMenu } from '@/components/ui/SelectMenu';
 import { StatePanel } from '@/components/ui/StatePanel';
+import { SuggestionInput } from '@/components/ui/SuggestionInput';
 import { Toggle } from '@/components/ui/Toggle';
 import { AuditEventTable } from '@/features/shared/AuditEventTable';
 import { createAuditFilterDefinitions, mergeAuditFilterOptions, type AuditEventFilterId } from '@/features/shared/auditFilters';
@@ -195,17 +197,15 @@ function GeneralSettingsSection({ settings }: { settings: SystemSettings }) {
         </div>
         <div className={styles.fieldBlock}>
           <Field htmlFor="system-default-currency" label={t('systemSettings.general.defaultCurrency')}>
-            <SelectInput id="system-default-currency" onChange={(event) => setDefaultCurrency(event.target.value)} required value={defaultCurrency}>
-              {!COMMON_CURRENCIES.some((currency) => currency === defaultCurrency) ? <option value={defaultCurrency}>{currencyOptionLabel(defaultCurrency)}</option> : null}
-              {COMMON_CURRENCIES.map((currency) => <option key={currency} value={currency}>{currencyOptionLabel(currency)}</option>)}
-            </SelectInput>
+            <SelectMenu ariaLabel={t('systemSettings.general.defaultCurrency')} id="system-default-currency" onChange={setDefaultCurrency} options={[
+              ...(!COMMON_CURRENCIES.some((currency) => currency === defaultCurrency) ? [{ label: currencyOptionLabel(defaultCurrency), value: defaultCurrency }] : []),
+              ...COMMON_CURRENCIES.map((currency) => ({ label: currencyOptionLabel(currency), value: currency })),
+            ]} value={defaultCurrency} />
           </Field>
         </div>
         <div className={styles.fieldBlock}>
           <Field hint={t('systemSettings.general.timeZoneHint')} htmlFor="system-time-zone" label={t('systemSettings.general.timeZone')}>
-            <SelectInput id="system-time-zone" onChange={(event) => setTimeZone(event.target.value)} required value={timeZone}>
-              {timeZones.map((zone) => <option key={zone} value={zone}>{zone}</option>)}
-            </SelectInput>
+            <SelectMenu ariaLabel={t('systemSettings.general.timeZone')} id="system-time-zone" onChange={setTimeZone} options={timeZones.map((zone) => ({ label: zone, value: zone }))} value={timeZone} />
           </Field>
         </div>
         <div className={styles.fieldBlock}>
@@ -298,7 +298,7 @@ function SmtpSettingsSection({ settings }: { settings: SystemSettings }) {
         <fieldset className={`${styles.gridTwo} ${styles.smtpFields}`} disabled={pending || !form.enabled}>
           <div className={styles.fieldBlock}><Field htmlFor="system-smtp-host" label={t('systemSettings.smtp.host')}><TextInput id="system-smtp-host" onChange={(event) => setValue('host', event.target.value)} required value={form.host} /></Field></div>
           <div className={styles.fieldBlock}><Field htmlFor="system-smtp-port" label={t('systemSettings.smtp.port')}><TextInput id="system-smtp-port" max={65535} min={1} onChange={(event) => setValue('port', event.target.value === '' ? '' : event.target.valueAsNumber)} required type="number" value={form.port} /></Field></div>
-          <div className={styles.fieldBlock}><Field htmlFor="system-smtp-tls" label={t('systemSettings.smtp.tlsMode')}><SelectInput id="system-smtp-tls" onChange={(event) => setValue('tlsMode', event.target.value as SmtpForm['tlsMode'])} value={form.tlsMode}><option value="starttls">STARTTLS</option><option value="tls">TLS</option></SelectInput></Field></div>
+          <div className={styles.fieldBlock}><Field htmlFor="system-smtp-tls" label={t('systemSettings.smtp.tlsMode')}><SelectMenu<SmtpForm['tlsMode']> ariaLabel={t('systemSettings.smtp.tlsMode')} id="system-smtp-tls" onChange={(tlsMode) => setValue('tlsMode', tlsMode)} options={[{ label: 'STARTTLS', value: 'starttls' }, { label: 'TLS', value: 'tls' }]} value={form.tlsMode} /></Field></div>
           <div className={styles.fieldBlock}><Field htmlFor="system-smtp-username" label={t('systemSettings.smtp.username')}><TextInput autoComplete="username" id="system-smtp-username" onChange={(event) => setValue('username', event.target.value)} value={form.username} /></Field></div>
           <div className={styles.fieldBlock}><Field htmlFor="system-smtp-password" label={t('systemSettings.smtp.password')}><TextInput autoComplete="new-password" id="system-smtp-password" onChange={(event) => setPassword(event.target.value)} placeholder={smtp.passwordConfigured ? SMTP_PASSWORD_MASK : undefined} type="password" value={password} /></Field></div>
           <div className={styles.fieldBlock}><Field htmlFor="system-smtp-from-address" label={t('systemSettings.smtp.fromAddress')}><TextInput id="system-smtp-from-address" onChange={(event) => setValue('fromAddress', event.target.value)} required type="email" value={form.fromAddress} /></Field></div>
@@ -497,7 +497,7 @@ function GroupsSettingsSection({ defaultCurrency }: { defaultCurrency: string })
       <header><h3 id="system-groups-title">{t('systemSettings.groups.title')}</h3><p>{t('systemSettings.groups.intro')}</p></header>
       <form className={styles.createGroup} onSubmit={(event) => { event.preventDefault(); createMutation.mutate({ name: name.trim(), currency: defaultCurrency, administratorEmail: administratorEmail.trim() }); }}>
         <Field htmlFor="system-group-name" label={t('systemSettings.groups.name')}><TextInput disabled={createMutation.isPending} id="system-group-name" maxLength={120} onChange={(event) => { if (createMutation.isError) createMutation.reset(); setName(event.target.value); }} required value={name} /></Field>
-        <Field htmlFor="system-group-administrator" label={t('systemSettings.groups.administratorEmail')}><TextInput autoComplete="email" disabled={createMutation.isPending} id="system-group-administrator" list="system-account-suggestions" onChange={(event) => { if (createMutation.isError) createMutation.reset(); setAdministratorEmail(event.target.value); }} required type="email" value={administratorEmail} /><datalist id="system-account-suggestions">{accounts.data?.map((account) => <option key={account.id} value={account.email}>{account.displayName}</option>)}</datalist></Field>
+        <Field htmlFor="system-group-administrator" label={t('systemSettings.groups.administratorEmail')}><SuggestionInput autoComplete="email" disabled={createMutation.isPending} id="system-group-administrator" onChange={(email) => { if (createMutation.isError) createMutation.reset(); setAdministratorEmail(email); }} options={(accounts.data ?? []).map((account) => ({ label: account.displayName, value: account.email }))} required type="email" value={administratorEmail} /></Field>
         <Button disabled={createMutation.isPending || !name.trim() || !administratorEmail.trim()} leadingIcon={<Plus size={17} />} type="submit">{createMutation.isPending ? t('systemSettings.groups.creating') : t('systemSettings.groups.create')}</Button>
       </form>
       {groups.isError ? <p className={styles.error} role="alert">{t('systemSettings.groups.loadError')}</p> : null}

@@ -10,7 +10,8 @@ import { can } from '@/app/permissions';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Button } from '@/components/ui/Button';
 import { ConfirmationDialog } from '@/components/ui/ConfirmationDialog';
-import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
+import { Field, TextInput } from '@/components/ui/FormField';
+import { SelectMenu } from '@/components/ui/SelectMenu';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { Toggle } from '@/components/ui/Toggle';
 import { notificationKeys } from '@/features/notifications/notificationQueryKeys';
@@ -109,10 +110,7 @@ function DefaultRoleSetting({ groupId, roles, settings }: DefaultRoleSettingProp
       <div>
         <h4 id="default-role-setting-title">{t('behaviorSettings.defaultRoleTitle')}</h4>
         <Field hint={!settings.defaultRoleId ? t('behaviorSettings.defaultRoleMissing') : undefined} htmlFor="default-membership-role" label={t('behaviorSettings.defaultRoleFieldLabel')}>
-          <SelectInput id="default-membership-role" onChange={(event) => { setRoleId(event.target.value); mutation.reset(); }} value={roleId}>
-            <option disabled value="">{t('behaviorSettings.defaultRolePlaceholder')}</option>
-            {candidates.map((role) => <option key={role.id} value={role.id}>{roleDisplayName(role)}</option>)}
-          </SelectInput>
+          <SelectMenu ariaLabel={t('behaviorSettings.defaultRoleFieldLabel')} id="default-membership-role" onChange={(nextRoleId) => { setRoleId(nextRoleId); mutation.reset(); }} options={[{ disabled: true, label: t('behaviorSettings.defaultRolePlaceholder'), value: '' }, ...candidates.map((role) => ({ label: roleDisplayName(role), value: role.id }))]} value={roleId} />
         </Field>
       </div>
       <div className={styles.defaultRoleActions}>

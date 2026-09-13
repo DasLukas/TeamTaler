@@ -14,10 +14,11 @@ import { useActiveGroup } from '@/app/useActiveGroup';
 import { useInstanceCapabilities } from '@/app/useSession';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
-import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
+import { Field, TextInput } from '@/components/ui/FormField';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { SelectMenu, type SelectMenuOption } from '@/components/ui/SelectMenu';
 import { StatePanel } from '@/components/ui/StatePanel';
+import { SuggestionInput } from '@/components/ui/SuggestionInput';
 import { DataTable, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange } from '@/features/shared/DataTable';
 import { formatGermanDate } from '@/features/shared/dateFormat';
 import { createMemberFilterOption } from '@/features/shared/memberFilterOption';
@@ -329,8 +330,8 @@ export function PaymentsPanel() {
               <SelectMenu ariaLabel={t('common.member')} id="payment-member" onChange={setMembershipId} options={paymentMemberOptions} value={selectedMembershipId} />
             </Field>
             <div className={styles.formRow}><Field error={amountError || undefined} htmlFor="payment-amount" label={`${t('finance.amountIn', { currency: activeGroup.currency })} *`}><TextInput id="payment-amount" inputMode="decimal" onChange={(event) => { setAmount(event.target.value); setAmountError(''); }} pattern={majorUnitsInputPattern(activeGroup.currency)} placeholder={majorUnitsPlaceholder(activeGroup.currency)} required type="text" value={amount} /></Field><Field htmlFor="payment-date" label={t('finance.receivedDate')}><TextInput id="payment-date" onChange={(event) => setReceivedAt(event.target.value)} required type="date" value={receivedAt} /></Field></div>
-            <Field htmlFor="payment-method" label={t('finance.paymentType')}><SelectInput id="payment-method" onChange={(event) => { const nextMethod = event.target.value; setMethod(nextMethod); if (transactionSettingsQuery.data.paymentMethods.find((item) => item.id === nextMethod)?.attachmentMode === 'OFF') setAttachment(null); }} required value={method}>{transactionSettingsQuery.data.paymentMethods.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</SelectInput></Field>
-            {reasonEnabled ? <Field error={referenceError || undefined} htmlFor="payment-reference" label={`${t('finance.reason')}${reasonRequired ? ' *' : ''}`}><TextInput id="payment-reference" list="payment-reason-suggestions" maxLength={120} onChange={(event) => { setReference(event.target.value); setReferenceError(''); }} required={reasonRequired} value={reference} /><datalist id="payment-reason-suggestions">{transactionSettingsQuery.data.paymentReasons.map((item) => <option key={item.id} value={item.label} />)}</datalist></Field> : null}
+            <Field htmlFor="payment-method" label={t('finance.paymentType')}><SelectMenu ariaLabel={t('finance.paymentType')} id="payment-method" onChange={(nextMethod) => { setMethod(nextMethod); if (transactionSettingsQuery.data.paymentMethods.find((item) => item.id === nextMethod)?.attachmentMode === 'OFF') setAttachment(null); }} options={transactionSettingsQuery.data.paymentMethods.map((option) => ({ label: option.label, value: option.id }))} value={method} /></Field>
+            {reasonEnabled ? <Field error={referenceError || undefined} htmlFor="payment-reference" label={`${t('finance.reason')}${reasonRequired ? ' *' : ''}`}><SuggestionInput id="payment-reference" maxLength={120} onChange={(nextReference) => { setReference(nextReference); setReferenceError(''); }} options={transactionSettingsQuery.data.paymentReasons.map((item) => ({ value: item.label }))} required={reasonRequired} value={reference} /></Field> : null}
             <PaymentAttachmentField attachmentMode={attachmentMode} file={attachment} maxBytes={attachmentUploadMaxBytes} onChange={setAttachment} />
             <ModalFooter><div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeRecordDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!amount || !selectedMembershipId || !method || (reasonRequired && !reference.trim()) || (attachmentMode === 'REQUIRED' && !attachment)} form={paymentFormId} leadingIcon={<CircleCheck size={17} />} type="submit">{t('finance.reviewPayment')}</Button></div></ModalFooter>
           </form>

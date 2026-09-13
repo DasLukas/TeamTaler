@@ -25,7 +25,7 @@ import {
 } from '@/components/media/imageUpload';
 import { Button } from '@/components/ui/Button';
 import { ConfirmationDialog } from '@/components/ui/ConfirmationDialog';
-import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
+import { Field, TextInput } from '@/components/ui/FormField';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { SelectMenu } from '@/components/ui/SelectMenu';
 import { StatePanel } from '@/components/ui/StatePanel';
@@ -364,7 +364,7 @@ export function CatalogPanel() {
         <form className={styles.form} id={categoryFormId} onSubmit={(event) => { event.preventDefault(); categoryMutation.mutate(); }}>
           <Field htmlFor="category-name" label={t('common.name')}><TextInput id="category-name" onChange={(event) => setCategoryName(event.target.value)} required value={categoryName} /></Field>
           <CategoryIconPicker onChange={setCategoryIcon} value={categoryIcon} />
-          {editingCategory ? <Field htmlFor="category-status" label={t('common.status')}><SelectInput id="category-status" onChange={(event) => setCategoryActive(event.target.value === 'active')} value={categoryActive ? 'active' : 'archived'}><option value="active">{t('common.active')}</option><option value="archived">{t('common.archived')}</option></SelectInput></Field> : null}
+          {editingCategory ? <Field htmlFor="category-status" label={t('common.status')}><SelectMenu ariaLabel={t('common.status')} id="category-status" onChange={(status) => setCategoryActive(status === 'active')} options={[{ label: t('common.active'), value: 'active' }, { label: t('common.archived'), value: 'archived' }]} value={categoryActive ? 'active' : 'archived'} /></Field> : null}
           {categoryMutation.isError ? <p className={styles.error} role="alert">{categoryMutation.error.message}</p> : null}
           <ModalFooter><div className={styles.actions}>
             {editingCategory && !editingCategory.active ? <Button className={styles.deleteAction} disabled={categoryMutation.isPending} leadingIcon={<Trash2 size={16} />} onClick={() => openCategoryDeletion(editingCategory)} variant="danger">{t('catalog.deletePermanently')}</Button> : null}
@@ -394,9 +394,9 @@ export function CatalogPanel() {
             />
           </Field>
           <Field htmlFor="product-name" label={t('catalog.productName')}><TextInput disabled={metadataLocked} id="product-name" onChange={(event) => setProductName(event.target.value)} required value={productName} /></Field>
-          <Field htmlFor="product-pricing-mode" label={t('catalog.pricingMode')}><SelectInput disabled={metadataLocked} id="product-pricing-mode" onChange={(event) => { setProductPricingMode(event.target.value as ProductPricingMode); setProductPrice(''); setProductPriceTouched(false); }} value={productPricingMode}><option value="FIXED">{t('catalog.fixedPrice')}</option><option value="USER_DEFINED">{t('catalog.userDefinedPrice')}</option></SelectInput></Field>
+          <Field htmlFor="product-pricing-mode" label={t('catalog.pricingMode')}><SelectMenu<ProductPricingMode> ariaLabel={t('catalog.pricingMode')} disabled={metadataLocked} id="product-pricing-mode" onChange={(pricingMode) => { setProductPricingMode(pricingMode); setProductPrice(''); setProductPriceTouched(false); }} options={[{ label: t('catalog.fixedPrice'), value: 'FIXED' }, { label: t('catalog.userDefinedPrice'), value: 'USER_DEFINED' }]} value={productPricingMode} /></Field>
           {productPricingMode === 'FIXED' ? <Field error={productPriceTouched ? productPriceValidation.error : undefined} htmlFor="product-price" label={t('catalog.price', { currency: activeGroup.currency })}><TextInput disabled={metadataLocked} id="product-price" inputMode="decimal" onBlur={() => setProductPriceTouched(true)} onChange={(event) => setProductPrice(event.target.value)} pattern={majorUnitsInputPattern(activeGroup.currency)} placeholder={majorUnitsPlaceholder(activeGroup.currency)} required type="text" value={productPrice} /></Field> : null}
-          {editingProduct ? <Field htmlFor="product-status" label={t('common.status')}><SelectInput disabled={metadataLocked} id="product-status" onChange={(event) => setProductActive(event.target.value === 'active')} value={productActive ? 'active' : 'archived'}><option value="active">{t('common.active')}</option><option value="archived">{t('common.archived')}</option></SelectInput></Field> : null}
+          {editingProduct ? <Field htmlFor="product-status" label={t('common.status')}><SelectMenu ariaLabel={t('common.status')} disabled={metadataLocked} id="product-status" onChange={(status) => setProductActive(status === 'active')} options={[{ label: t('common.active'), value: 'active' }, { label: t('common.archived'), value: 'archived' }]} value={productActive ? 'active' : 'archived'} /></Field> : null}
           <Field error={productImageError || undefined} hint={editingProduct || persistedProduct ? t('catalog.replaceImage', { limit: uploadLimit }) : t('catalog.imageHint', { limit: uploadLimit })} htmlFor="product-image" label={t('catalog.image')}>
             <div className={`${styles.imageSelection} ${productImage ? styles.imageSelectionWithPreview : ''}`}>
               {productImage ? (

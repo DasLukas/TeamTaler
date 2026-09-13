@@ -122,7 +122,7 @@ describe('BehaviorSettingsPanel', () => {
     const planningRegion = screen.getByRole('region', { name: i18n.t('behaviorSettings.planning.title') });
     expect(defaultRoleRegion).toBeVisible();
     expect(defaultRoleRegion.compareDocumentPosition(planningRegion) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByLabelText(i18n.t('behaviorSettings.defaultRoleFieldLabel'))).toHaveValue('role-member');
+    expect(screen.getByRole('combobox', { name: i18n.t('behaviorSettings.defaultRoleFieldLabel') })).toHaveTextContent('Member');
     expect(screen.getByLabelText(i18n.t('groupSettings.nameLabel'))).toHaveValue('Group A');
     expect(screen.getByLabelText(i18n.t('groupSettings.imageLabel'))).toBeVisible();
   });
@@ -274,7 +274,8 @@ describe('BehaviorSettingsPanel', () => {
     renderPanel();
 
     const defaultRoleRegion = await screen.findByRole('region', { name: i18n.t('behaviorSettings.defaultRoleTitle') });
-    await user.selectOptions(within(defaultRoleRegion).getByLabelText(i18n.t('behaviorSettings.defaultRoleFieldLabel')), 'role-finance');
+    await user.click(within(defaultRoleRegion).getByRole('combobox', { name: i18n.t('behaviorSettings.defaultRoleFieldLabel') }));
+    await user.click(screen.getByRole('option', { name: 'Finance' }));
     await user.click(within(defaultRoleRegion).getByRole('button', { name: i18n.t('common.save') }));
 
     await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { defaultRoleId: 'role-finance' }));
@@ -399,7 +400,8 @@ describe('BehaviorSettingsPanel', () => {
     renderPanel();
 
     const targets = await screen.findAllByLabelText(i18n.t('behaviorSettings.paymentTargetLabel'));
-    await user.selectOptions(targets[2], 'PAYPAL_ME');
+    await user.click(targets[2]);
+    await user.click(screen.getByRole('option', { name: i18n.t('behaviorSettings.paymentTargetPaypal') }));
     const handle = screen.getByLabelText(i18n.t('behaviorSettings.paypalMeHandle'));
     await user.type(handle, 'https://paypal.me/TeamTaler42');
     expect(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') })).toBeEnabled();
@@ -421,7 +423,8 @@ describe('BehaviorSettingsPanel', () => {
     renderPanel();
 
     const targets = await screen.findAllByLabelText(i18n.t('behaviorSettings.paymentTargetLabel'));
-    await user.selectOptions(targets[0], 'SEPA_TRANSFER');
+    await user.click(targets[0]);
+    await user.click(screen.getByRole('option', { name: i18n.t('behaviorSettings.paymentTargetSepa') }));
     const save = screen.getByRole('button', { name: i18n.t('behaviorSettings.save') });
     expect(save).toBeDisabled();
     await user.type(screen.getByLabelText(i18n.t('behaviorSettings.sepaRecipient')), 'TeamTaler Club');

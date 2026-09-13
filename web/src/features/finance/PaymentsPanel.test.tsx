@@ -159,7 +159,7 @@ describe('PaymentsPanel', () => {
     expect(amountInput).toHaveAttribute('type', 'text');
     expect(screen.getByLabelText(i18n.t('finance.reason'))).not.toBeRequired();
     expect(screen.queryByLabelText(`${i18n.t('finance.reason')} *`)).not.toBeInTheDocument();
-    expect(screen.getByLabelText(i18n.t('finance.paymentType'))).toHaveValue('CASH');
+    expect(screen.getByRole('combobox', { name: i18n.t('finance.paymentType') })).toHaveTextContent('Bar');
   });
 
   it('reviews a managed payment before creation, preserves its draft on back, and submits only after confirmation', async () => {
@@ -182,7 +182,8 @@ describe('PaymentsPanel', () => {
     await user.type(screen.getByLabelText(`${i18n.t('finance.amountIn', { currency: 'EUR' })} *`), '12,50');
     await user.clear(screen.getByLabelText(i18n.t('finance.receivedDate')));
     await user.type(screen.getByLabelText(i18n.t('finance.receivedDate')), '2026-08-31');
-    await user.selectOptions(screen.getByLabelText(i18n.t('finance.paymentType')), 'PAYPAL');
+    await user.click(screen.getByRole('combobox', { name: i18n.t('finance.paymentType') }));
+    await user.click(screen.getByRole('option', { name: 'PayPal' }));
     await user.type(screen.getByLabelText(i18n.t('finance.reason')), 'Monthly dues');
 
     await user.click(screen.getByRole('button', { name: i18n.t('finance.reviewPayment') }));
@@ -201,7 +202,7 @@ describe('PaymentsPanel', () => {
     expect(within(entryDialog).getByRole('combobox', { name: i18n.t('common.member') })).toHaveTextContent('Active Account');
     expect(within(entryDialog).getByLabelText(`${i18n.t('finance.amountIn', { currency: 'EUR' })} *`)).toHaveValue('12,50');
     expect(within(entryDialog).getByLabelText(i18n.t('finance.receivedDate'))).toHaveValue('2026-08-31');
-    expect(within(entryDialog).getByLabelText(i18n.t('finance.paymentType'))).toHaveValue('PAYPAL');
+    expect(within(entryDialog).getByRole('combobox', { name: i18n.t('finance.paymentType') })).toHaveTextContent('PayPal');
     expect(within(entryDialog).getByLabelText(i18n.t('finance.reason'))).toHaveValue('Monthly dues');
     expect(apiMock.createPayment).not.toHaveBeenCalled();
 
@@ -233,7 +234,9 @@ describe('PaymentsPanel', () => {
 
     const reason = screen.getByLabelText(`${i18n.t('finance.reason')} *`);
     expect(reason).toBeRequired();
-    expect(reason).toHaveAttribute('list', 'payment-reason-suggestions');
+    await user.click(reason);
+    expect(screen.getByRole('option', { name: 'Korrektur' })).toBeVisible();
+    expect(document.querySelector('datalist')).not.toBeInTheDocument();
   });
 
   it('hides the managed-payment reason when its mode is off', async () => {

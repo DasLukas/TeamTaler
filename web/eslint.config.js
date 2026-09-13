@@ -19,6 +19,17 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "JSXOpeningElement[name.name='select']",
+          message: 'Use the shared SelectMenu instead of a browser-native select.',
+        },
+        {
+          selector: "JSXOpeningElement[name.name='datalist']",
+          message: 'Use the shared SuggestionInput instead of a browser-native datalist.',
+        },
+      ],
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
     },
   },

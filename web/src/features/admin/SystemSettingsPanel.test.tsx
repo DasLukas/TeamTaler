@@ -362,7 +362,8 @@ describe('SystemSettingsPanel', () => {
     const section = (await screen.findByRole('heading', { name: 'Allgemein' })).closest('section');
     if (!section) throw new Error('Missing general settings section.');
 
-    await user.selectOptions(within(section).getByLabelText('Zentrale Zeitzone'), 'America/New_York');
+    await user.click(within(section).getByRole('combobox', { name: 'Zentrale Zeitzone' }));
+    await user.click(screen.getByRole('option', { name: 'America/New_York' }));
     await user.click(within(section).getByRole('button', { name: 'Speichern' }));
 
     await waitFor(() => expect(apiMock.updateSystemSettings).toHaveBeenCalledWith({ timeZone: 'America/New_York' }, 4));
@@ -438,8 +439,9 @@ describe('SystemSettingsPanel', () => {
 
     const currency = within(section).getByLabelText('Standardwährung für neue Gruppen');
     expect(currency).toHaveRole('combobox');
-    expect(within(currency).getByRole('option', { name: 'EUR - €' })).toBeVisible();
-    expect(within(currency).getByRole('option', { name: 'USD - $' })).toBeVisible();
+    await user.click(currency);
+    expect(screen.getByRole('option', { name: 'EUR - €' })).toBeVisible();
+    expect(screen.getByRole('option', { name: 'USD - $' })).toBeVisible();
     const mediaLimit = within(section).getByLabelText('Maximale Medien-Uploadgröße in MiB');
     expect(mediaLimit).toHaveAttribute('min', '1');
     expect(mediaLimit).toHaveAttribute('max', '25');
@@ -450,7 +452,7 @@ describe('SystemSettingsPanel', () => {
     expect(attachmentLimit).toHaveAttribute('max', '50');
     expect(attachmentLimit).toHaveAttribute('step', '1');
 
-    await user.selectOptions(currency, 'USD');
+    await user.click(screen.getByRole('option', { name: 'USD - $' }));
     await user.click(within(section).getByRole('button', { name: 'Speichern' }));
 
     await waitFor(() => expect(apiMock.updateSystemSettings).toHaveBeenCalledWith({ defaultCurrency: 'USD' }, 4));

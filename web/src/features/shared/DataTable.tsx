@@ -26,7 +26,7 @@ import {
   type ReactNode,
 } from 'react';
 import { Button } from '@/components/ui/Button';
-import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
+import { Field, TextInput } from '@/components/ui/FormField';
 import { Modal } from '@/components/ui/Modal';
 import { MultiSelectMenu } from '@/components/ui/MultiSelectMenu';
 import { SelectMenu } from '@/components/ui/SelectMenu';
@@ -435,26 +435,16 @@ function FilterEditor<FilterId extends string>({ definition, filters, onChange, 
   }
 
   if (definition.kind === 'select') {
-    if (definition.options.some((option) => option.visual)) {
-      const options = [{ label: definition.allLabel, value: '' }, ...definition.options];
-      return (
-        <Field htmlFor={controlId} label={definition.label}>
-          <SelectMenu
-            ariaLabel={definition.label}
-            id={controlId}
-            onChange={(nextValue) => onChange(nextValue || undefined)}
-            options={options}
-            value={typeof value === 'string' ? value : ''}
-          />
-        </Field>
-      );
-    }
+    const options = [{ label: definition.allLabel, value: '' }, ...definition.options];
     return (
       <Field htmlFor={controlId} label={definition.label}>
-        <SelectInput id={controlId} onChange={(event) => onChange(event.target.value || undefined)} value={typeof value === 'string' ? value : ''}>
-          <option value="">{definition.allLabel}</option>
-          {definition.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </SelectInput>
+        <SelectMenu
+          ariaLabel={definition.label}
+          id={controlId}
+          onChange={(nextValue) => onChange(nextValue || undefined)}
+          options={options}
+          value={typeof value === 'string' ? value : ''}
+        />
       </Field>
     );
   }
