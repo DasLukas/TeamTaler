@@ -12,8 +12,10 @@ import type { Dashboard, Money, Payment, SelfPaymentCommand } from '@/api/types'
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { useInstanceCapabilities } from '@/app/useSession';
 import { Button } from '@/components/ui/Button';
-import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
+import { Field, TextInput } from '@/components/ui/FormField';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
+import { SelectMenu } from '@/components/ui/SelectMenu';
+import { SuggestionInput } from '@/components/ui/SuggestionInput';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { PaymentReviewSummary } from './PaymentReviewSummary';
 import styles from './SelfPaymentDialog.module.css';
@@ -167,9 +169,9 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
             {BigInt(openBalance.minorUnits) > 0n ? <Button fullWidth leadingIcon={<CircleDollarSign size={17} />} onClick={() => { setAmount(majorUnitsInputValue(openBalance)); setAmountError(''); }} variant="secondary">{t('selfPayment.useOpenBalance', { amount: formatMoney(openBalance) })}</Button> : null}
             <div className={styles.formRow}>
               <Field htmlFor="self-payment-date" label={t('finance.receivedDate')}><TextInput id="self-payment-date" onChange={(event) => setReceivedAt(event.target.value)} required type="date" value={receivedAt} /></Field>
-              <Field htmlFor="self-payment-method" label={t('finance.paymentType')}><SelectInput id="self-payment-method" onChange={(event) => { const nextMethod = event.target.value; setMethod(nextMethod); if (transactionSettingsQuery.data?.paymentMethods.find((item) => item.id === nextMethod)?.attachmentMode === 'OFF') setAttachment(null); }} required value={method}>{transactionSettingsQuery.data?.paymentMethods.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</SelectInput></Field>
+              <Field htmlFor="self-payment-method" label={t('finance.paymentType')}><SelectMenu ariaLabel={t('finance.paymentType')} id="self-payment-method" onChange={(nextMethod) => { setMethod(nextMethod); if (transactionSettingsQuery.data?.paymentMethods.find((item) => item.id === nextMethod)?.attachmentMode === 'OFF') setAttachment(null); }} options={(transactionSettingsQuery.data?.paymentMethods ?? []).map((option) => ({ label: option.label, value: option.id }))} value={method} /></Field>
             </div>
-            {reasonEnabled ? <Field error={referenceError || undefined} htmlFor="self-payment-reference" label={`${t('finance.reason')}${reasonRequired ? ' *' : ''}`}><TextInput id="self-payment-reference" list="self-payment-reason-suggestions" maxLength={120} onChange={(event) => { setReference(event.target.value); setReferenceError(''); }} required={reasonRequired} value={reference} /><datalist id="self-payment-reason-suggestions">{transactionSettingsQuery.data?.paymentReasons.map((item) => <option key={item.id} value={item.label} />)}</datalist></Field> : null}
+            {reasonEnabled ? <Field error={referenceError || undefined} htmlFor="self-payment-reference" label={`${t('finance.reason')}${reasonRequired ? ' *' : ''}`}><SuggestionInput id="self-payment-reference" maxLength={120} onChange={(nextReference) => { setReference(nextReference); setReferenceError(''); }} options={(transactionSettingsQuery.data?.paymentReasons ?? []).map((item) => ({ value: item.label }))} required={reasonRequired} value={reference} /></Field> : null}
             <PaymentInstructionPanel amount={instructionAmount} paymentTarget={selectedPaymentMethod?.paymentTarget} reference={reasonEnabled ? reference : ''} />
             <PaymentAttachmentField attachmentMode={attachmentMode} file={attachment} maxBytes={attachmentUploadMaxBytes} onChange={setAttachment} />
             <ModalFooter><div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={attachmentMode === 'REQUIRED' && !attachment} form={entryFormId} leadingIcon={<CircleCheck size={17} />} type="submit">{t('selfPayment.review')}</Button></div></ModalFooter>

@@ -29,9 +29,9 @@
 }
 
 /*
- * iOS Safari can render native select, date, time, and number controls below
- * their declared minimum height. Pin all single-line field primitives to the
- * same touch target as custom selects while keeping textareas resizable.
+ * iOS Safari can render native date, time, and number controls below their
+ * declared minimum height. Pin all single-line field primitives to the same
+ * touch target as custom selects while keeping textareas resizable.
  */
 .control:not(textarea) {
   height: 48px;
@@ -46,6 +46,22 @@
   width: auto;
   max-width: none;
   justify-self: stretch;
+}
+
+/*
+ * Mobile Safari top-aligns temporal values when their input uses block layout.
+ * Matching the line height to the fixed control height restores the visual
+ * center without replacing the native date picker.
+ */
+@supports (-webkit-touch-callout: none) {
+  .control:is([type='date'], [type='datetime-local'], [type='month'], [type='time'], [type='week']) {
+    line-height: 48px;
+  }
+}
+
+.control[type='date'],
+.control[type='date']::-webkit-date-and-time-value {
+  text-align: center;
 }
 
 .control[type='file'] {

@@ -11,6 +11,7 @@ import { api, ApiError } from '@/api/client';
 import { isStatisticsRange, type StatisticsMeta, type StatisticsRange } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Page } from '@/components/layout/Page';
+import { TextInput } from '@/components/ui/FormField';
 import { SelectMenu, type SelectMenuOption } from '@/components/ui/SelectMenu';
 import { StatePanel } from '@/components/ui/StatePanel';
 import tabStyles from '@/components/ui/WorkspaceTabs.module.css';
@@ -119,8 +120,8 @@ function StatisticsPageContent({ activeGroupId }: { activeGroupId: string }) {
         </label>
         {urlState.range === 'CUSTOM' ? (
           <div className={styles.customDates}>
-            <label><span>{t('statistics.filters.from')}</span><input onChange={(event) => urlState.setCustomDates(event.target.value, urlState.to)} type="date" value={urlState.from} /></label>
-            <label><span>{t('statistics.filters.toInclusive')}</span><input min={urlState.from || undefined} onChange={(event) => urlState.setCustomDates(urlState.from, event.target.value)} type="date" value={urlState.to} /></label>
+            <label><span>{t('statistics.filters.from')}</span><TextInput onChange={(event) => urlState.setCustomDates(event.target.value, urlState.to)} type="date" value={urlState.from} /></label>
+            <label><span>{t('statistics.filters.toInclusive')}</span><TextInput min={urlState.from || undefined} onChange={(event) => urlState.setCustomDates(urlState.from, event.target.value)} type="date" value={urlState.to} /></label>
           </div>
         ) : null}
       </section>

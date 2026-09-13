@@ -44,7 +44,8 @@ test('required receipt scan creates a protected payment attachment on desktop an
 
   await page.goto('/account');
   await page.getByRole('button', { name: 'Zahlung erfassen' }).click();
-  await page.getByRole('combobox', { name: 'Zahlungsart' }).selectOption({ label: 'Sonstige' });
+  await page.getByRole('combobox', { name: 'Zahlungsart' }).click();
+  await page.getByRole('option', { name: 'Sonstige' }).click();
   await expect(page.getByRole('group', { name: 'Beleg *' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Zahlung prüfen' })).toBeDisabled();
 

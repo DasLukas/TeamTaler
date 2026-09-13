@@ -39,14 +39,12 @@ html[data-modal-scroll-lock='true'] body {
 
 button,
 input,
-select,
 textarea {
   color: inherit;
   font: inherit;
 }
 
 input,
-select,
 textarea {
   min-width: 0;
   max-width: 100%;

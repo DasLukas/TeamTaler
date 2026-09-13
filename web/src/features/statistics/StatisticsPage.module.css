@@ -26,23 +26,6 @@
 
 .rangeField { width: min(100%, 320px); min-width: min(100%, 240px); }
 
-.customDates input {
-  height: 48px;
-  min-height: 48px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-md);
-  color: var(--color-text);
-  background: var(--color-surface);
-  font: inherit;
-}
-
-.customDates input { padding: 0 var(--space-3); }
-
-.customDates input:focus-visible {
-  border-color: var(--color-focus-ring);
-  outline: 3px solid color-mix(in srgb, var(--color-focus-ring) 28%, transparent);
-}
-
 .customDates {
   display: flex;
   align-items: end;

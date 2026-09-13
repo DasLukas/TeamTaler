@@ -153,7 +153,7 @@ describe('BookingCart booking expansion limits', () => {
     renderCart({ compact: true, view: 'details', reasonMode: 'REQUIRED', targetCount: 2 });
 
     const reasonInput = screen.getByLabelText(`${i18n.t('booking.reason')} *`);
-    const reasonField = reasonInput.parentElement;
+    const reasonField = reasonInput.parentElement?.parentElement;
     const submit = screen.getByRole('button', { name: i18n.t('booking.submitBookings') });
     const scope = screen.getByText(i18n.t('booking.bookingScope', {
       products: i18n.t('booking.productCount', { count: 1 }),
