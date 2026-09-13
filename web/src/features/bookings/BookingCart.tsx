@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
 import { IconButton } from '@/components/ui/IconButton';
 import { ManagedImageFrame } from '@/components/ui/ManagedImage';
+import { SuggestionInput } from '@/components/ui/SuggestionInput';
 import { calculateCartTotal, resolveCartLinePrice, type BookingCartLine } from './bookingCartModel';
 import styles from './BookingCart.module.css';
 
@@ -263,19 +264,18 @@ export function BookingCart({
         {exceedsBookingLimit ? <p className={styles.error} role="alert">{t('booking.tooManyBookings')}</p> : error ? <p className={styles.error} role="alert">{error}</p> : null}
         {showReason ? (
           <div className={styles.reasonField}>
-            <TextInput
+            <SuggestionInput
               aria-describedby={!reason.trim() && error && reasonRequired ? 'booking-reason-error' : undefined}
               aria-invalid={!reason.trim() && error && reasonRequired ? true : undefined}
               aria-label={`${t('booking.reason')}${reasonRequired ? ' *' : ''}`}
               id="booking-reason"
-              list="booking-reason-suggestions"
               maxLength={500}
-              onChange={(event) => onReasonChange(event.target.value)}
+              onChange={onReasonChange}
+              options={bookingReasons.map((item) => ({ value: item.label }))}
               placeholder={`${t('booking.reason')}${reasonRequired ? ' *' : ''}`}
               required={reasonRequired}
               value={reason}
             />
-            <datalist id="booking-reason-suggestions">{bookingReasons.map((item) => <option key={item.id} value={item.label} />)}</datalist>
             {!reason.trim() && error && reasonRequired ? <span className={styles.reasonError} id="booking-reason-error" role="alert">{t('booking.reasonRequired')}</span> : null}
           </div>
         ) : null}

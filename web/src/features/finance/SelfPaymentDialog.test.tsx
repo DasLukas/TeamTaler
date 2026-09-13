@@ -74,7 +74,8 @@ describe('SelfPaymentDialog', () => {
     expect(await navigator.clipboard.readText()).toBe('https://paypal.me/TeamTaler42/12.50EUR');
     expect(apiMock.createOwnPayment).not.toHaveBeenCalled();
 
-    await user.selectOptions(screen.getByLabelText(i18n.t('finance.paymentType')), 'CASH');
+    await user.click(screen.getByRole('combobox', { name: i18n.t('finance.paymentType') }));
+    await user.click(screen.getByRole('option', { name: 'Bar' }));
     expect(screen.queryByText(i18n.t('paymentInstructions.openPaypal'))).not.toBeInTheDocument();
   });
 
@@ -99,10 +100,11 @@ describe('SelfPaymentDialog', () => {
     expect(entryDialog).toBeVisible();
     expect(within(entryDialog).queryByText(i18n.t('selfPayment.account'))).not.toBeInTheDocument();
     expect(within(entryDialog).queryByText('Group A')).not.toBeInTheDocument();
-    expect(screen.getByLabelText(i18n.t('finance.paymentType'))).toHaveValue('PAYPAL');
+    expect(screen.getByRole('combobox', { name: i18n.t('finance.paymentType') })).toHaveTextContent('PayPal');
     await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.useOpenBalance', { amount: '23,40 €' }) }));
     expect(screen.getByLabelText(i18n.t('finance.amountIn', { currency: 'EUR' }))).toHaveValue('23,40');
-    await user.selectOptions(screen.getByLabelText(i18n.t('finance.paymentType')), 'PAYPAL');
+    await user.click(screen.getByRole('combobox', { name: i18n.t('finance.paymentType') }));
+    await user.click(screen.getByRole('option', { name: 'PayPal' }));
     await user.type(screen.getByLabelText(`${i18n.t('finance.reason')} *`), 'Membership fee August');
     await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.review') }));
 
@@ -177,8 +179,9 @@ describe('SelfPaymentDialog', () => {
 
     const reason = screen.getByLabelText(i18n.t('finance.reason'));
     expect(reason).not.toBeRequired();
-    expect(reason).toHaveAttribute('list', 'self-payment-reason-suggestions');
-    expect(document.querySelector('option[value="Monatsausgleich"]')).toBeInTheDocument();
+    await user.click(reason);
+    expect(screen.getByRole('option', { name: 'Monatsausgleich' })).toBeVisible();
+    expect(document.querySelector('datalist')).not.toBeInTheDocument();
   });
 
   it('hides the own-payment reason when its mode is off', async () => {

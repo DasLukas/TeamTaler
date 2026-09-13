@@ -15,6 +15,7 @@ import { Field, TextInput } from '@/components/ui/FormField';
 import { IconButton } from '@/components/ui/IconButton';
 import { ManagedImageFrame } from '@/components/ui/ManagedImage';
 import { SelectMenu } from '@/components/ui/SelectMenu';
+import { SuggestionInput } from '@/components/ui/SuggestionInput';
 import { MemberMultiSelect } from './MemberMultiSelect';
 import styles from './BookingInspector.module.css';
 
@@ -220,8 +221,7 @@ export function BookingInspector({
 
       {reasonEnabled ? (
         <Field error={needsReason && !reason.trim() && bookingMutation.isError ? t('booking.reasonRequired') : undefined} htmlFor="booking-reason" label={`${t('booking.reason')}${needsReason ? ' *' : ''}`}>
-          <TextInput id="booking-reason" list="booking-reason-suggestions" maxLength={500} onChange={(event) => setReason(event.target.value)} required={needsReason} value={reason} />
-          <datalist id="booking-reason-suggestions">{bookingReasons.map((item) => <option key={item.id} value={item.label} />)}</datalist>
+          <SuggestionInput id="booking-reason" maxLength={500} onChange={setReason} options={bookingReasons.map((item) => ({ value: item.label }))} required={needsReason} value={reason} />
         </Field>
       ) : null}
 

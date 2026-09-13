@@ -8,7 +8,7 @@ import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
 import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AttachmentMode, PaymentMethod, PaymentTarget } from '@/api/types';
-import { Field, SelectInput, TextInput } from '@/components/ui/FormField';
+import { Field, TextInput } from '@/components/ui/FormField';
 import { IconButton } from '@/components/ui/IconButton';
 import { SelectMenu, type SelectMenuOption } from '@/components/ui/SelectMenu';
 import { isBicRequiredForIban, isValidBic, isValidIban, normalizeBic, normalizeIban, normalizePaypalMeHandle } from '@/features/finance/paymentTargets';
@@ -142,9 +142,7 @@ export function PaymentMethodEditor({ items, label, addLabel, emptyLabel, curren
           </div>
           <div aria-label={`${item.label}: ${targetLabel}`} className={styles.targetPanel} role="group">
             <Field hint={currency !== 'EUR' ? t('behaviorSettings.sepaEuroOnly') : undefined} htmlFor={`${prefix}-target`} label={targetLabel} messageId={`${prefix}-target-description`}>
-              <SelectInput aria-describedby={`${targetDescriptionId}${currency !== 'EUR' ? ` ${prefix}-target-description` : ''}`} id={`${prefix}-target`} onChange={(event) => changeTargetType(index, event.target.value as PaymentTargetChoice)} value={targetChoice}>
-                {targetOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </SelectInput>
+              <SelectMenu<PaymentTargetChoice> ariaDescribedBy={`${targetDescriptionId}${currency !== 'EUR' ? ` ${prefix}-target-description` : ''}`} ariaLabel={targetLabel} id={`${prefix}-target`} onChange={(choice) => changeTargetType(index, choice)} options={targetOptions} value={targetChoice} />
             </Field>
             {item.paymentTarget?.type === 'PAYPAL_ME' ? <div className={styles.targetFields}>
               <Field error={paypalError || undefined} htmlFor={`${prefix}-paypal`} label={t('behaviorSettings.paypalMeHandle')} messageId={`${prefix}-paypal-error`}>

@@ -372,7 +372,8 @@ describe('CatalogPanel', () => {
     await screen.findByRole('button', { name: i18n.t('catalog.categoryAction') });
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.productAction') }));
     await user.type(screen.getByLabelText(i18n.t('catalog.productName')), 'Donation');
-    await user.selectOptions(screen.getByLabelText(i18n.t('catalog.pricingMode')), 'USER_DEFINED');
+    await user.click(screen.getByRole('combobox', { name: i18n.t('catalog.pricingMode') }));
+    await user.click(screen.getByRole('option', { name: i18n.t('catalog.userDefinedPrice') }));
 
     expect(screen.queryByLabelText(i18n.t('catalog.price', { currency: 'EUR' }))).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.createProductAction') }));
@@ -397,7 +398,8 @@ describe('CatalogPanel', () => {
     await user.clear(name);
     await user.type(name, 'Team drinks');
     await user.click(within(dialog).getByRole('button', { name: i18n.t('catalog.categoryIcons.sport') }));
-    await user.selectOptions(within(dialog).getByLabelText(i18n.t('common.status')), 'archived');
+    await user.click(within(dialog).getByRole('combobox', { name: i18n.t('common.status') }));
+    await user.click(screen.getByRole('option', { name: i18n.t('common.archived') }));
     await user.click(within(dialog).getByRole('button', { name: i18n.t('common.save') }));
 
     await waitFor(() => expect(apiMock.updateCategory).toHaveBeenCalledWith('group-a', category.id, {

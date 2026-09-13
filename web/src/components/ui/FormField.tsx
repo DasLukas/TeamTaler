@@ -1,4 +1,4 @@
-import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
+import { forwardRef, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react';
 import styles from './FormField.module.css';
 
 /** Properties accepted by the form-field wrapper. */
@@ -34,19 +34,9 @@ export function Field({ label, htmlFor, hint, error, messageId, required = false
  * @param props - Native input attributes.
  * @returns A styled native input.
  */
-export function TextInput(props: InputHTMLAttributes<HTMLInputElement>) {
-  return <input className={styles.control} {...props} />;
-}
-
-/**
- * Renders the TeamTaler select-input primitive.
- *
- * @param props - Native select attributes.
- * @returns A styled native select.
- */
-export function SelectInput(props: SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select className={styles.control} {...props} />;
-}
+export const TextInput = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(function TextInput(props, ref) {
+  return <input className={styles.control} ref={ref} {...props} />;
+});
 
 /**
  * Renders the TeamTaler multiline text-input primitive.

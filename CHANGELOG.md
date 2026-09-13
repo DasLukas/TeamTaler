@@ -4,6 +4,18 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-09-13
+
+### Changed
+
+- All single-choice dropdowns now use the shared application-owned menu, and editable completion fields use the shared suggestion listbox instead of browser-native select and datalist popups.
+- Single-line form controls now share a consistent 48-pixel touch target across supported browsers.
+
+### Fixed
+
+- Date and time controls now remain correctly sized and aligned in Mobile Safari, including the self-payment dialog.
+- Custom statistics date ranges now stay inside their responsive filter card on narrow screens.
+
 ## [1.3.1] - 2026-09-10
 
 ### Fixed
@@ -388,7 +400,8 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Explicit acting and charged membership display for every booking, including searchable third-party-assignment cues.
 - Canonical backup-entry allowlisting, target-width Argon2 parameter parsing, and directory-confined SPA asset serving with traversal regression coverage.
 
-[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v1.3.2...HEAD
+[1.3.2]: https://github.com/DasLukas/TeamTaler/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/DasLukas/TeamTaler/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/DasLukas/TeamTaler/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/DasLukas/TeamTaler/compare/v1.1.0...v1.2.0
