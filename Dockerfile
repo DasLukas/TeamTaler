@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:24-alpine AS web-builder
+FROM node:25-alpine AS web-builder
 ARG VERSION=dev
 ARG REVISION=unknown
 WORKDIR /src/web
