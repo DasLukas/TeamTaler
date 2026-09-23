@@ -8,18 +8,19 @@ import (
 
 // Stable sentinel errors allow the transport layer to produce consistent problem responses.
 var (
-	ErrNotFound             = errors.New("resource not found")
-	ErrForbidden            = errors.New("operation is not permitted")
-	ErrConflict             = errors.New("resource conflict")
-	ErrPlanningDisabled     = errors.New("planning is disabled")
-	ErrValidation           = errors.New("validation failed")
-	ErrUnauthenticated      = errors.New("authentication required")
-	ErrPrecondition         = errors.New("precondition failed")
-	ErrIdempotencyReuse     = errors.New("idempotency key was reused with a different request")
-	ErrRateLimited          = errors.New("request rate limit exceeded")
-	ErrServiceUnavailable   = errors.New("required service is unavailable")
-	ErrUnsupportedMediaType = errors.New("unsupported media type")
-	ErrPayloadTooLarge      = errors.New("request payload is too large")
+	ErrNotFound                 = errors.New("resource not found")
+	ErrForbidden                = errors.New("operation is not permitted")
+	ErrConflict                 = errors.New("resource conflict")
+	ErrPlanningDisabled         = errors.New("planning is disabled")
+	ErrExternalAccountsDisabled = errors.New("external accounts are disabled")
+	ErrValidation               = errors.New("validation failed")
+	ErrUnauthenticated          = errors.New("authentication required")
+	ErrPrecondition             = errors.New("precondition failed")
+	ErrIdempotencyReuse         = errors.New("idempotency key was reused with a different request")
+	ErrRateLimited              = errors.New("request rate limit exceeded")
+	ErrServiceUnavailable       = errors.New("required service is unavailable")
+	ErrUnsupportedMediaType     = errors.New("unsupported media type")
+	ErrPayloadTooLarge          = errors.New("request payload is too large")
 )
 
 const (
@@ -88,6 +89,12 @@ const (
 	PermissionRoleManagement PermissionKey = "ROLE_MANAGEMENT"
 	// PermissionFinanceManagement permits access to group financial management functions.
 	PermissionFinanceManagement PermissionKey = "FINANCE_MANAGEMENT"
+	// PermissionViewExternalAccounts permits reading external account balances,
+	// payment-method links, and transaction history.
+	PermissionViewExternalAccounts PermissionKey = "VIEW_EXTERNAL_ACCOUNTS"
+	// PermissionManageExternalAccounts permits maintaining external accounts and
+	// posting, correcting, or reversing their manual transactions.
+	PermissionManageExternalAccounts PermissionKey = "MANAGE_EXTERNAL_ACCOUNTS"
 	// PermissionCatalogManagement permits category and product management.
 	PermissionCatalogManagement PermissionKey = "CATALOG_MANAGEMENT"
 	// PermissionViewMemberDirectory permits reading the group's member directory.
@@ -313,14 +320,15 @@ const (
 
 // Group is the top-level isolation and accounting boundary.
 type Group struct {
-	ID                string     `json:"id"`
-	Name              string     `json:"name"`
-	Currency          string     `json:"currency"`
-	LogoURL           string     `json:"logoUrl,omitempty"`
-	DefaultTheme      ThemeID    `json:"defaultTheme"`
-	StatisticsEnabled bool       `json:"statisticsEnabled"`
-	PlanningEnabled   bool       `json:"planningEnabled"`
-	Membership        Membership `json:"membership"`
+	ID                      string     `json:"id"`
+	Name                    string     `json:"name"`
+	Currency                string     `json:"currency"`
+	LogoURL                 string     `json:"logoUrl,omitempty"`
+	DefaultTheme            ThemeID    `json:"defaultTheme"`
+	StatisticsEnabled       bool       `json:"statisticsEnabled"`
+	ExternalAccountsEnabled bool       `json:"externalAccountsEnabled"`
+	PlanningEnabled         bool       `json:"planningEnabled"`
+	Membership              Membership `json:"membership"`
 }
 
 // ReasonMode controls whether a transaction reason is hidden, optional, or
@@ -387,6 +395,8 @@ func (mode AttachmentMode) Required() bool { return mode == AttachmentModeRequir
 type GroupSettings struct {
 	DefaultTheme                 ThemeID            `json:"defaultTheme"`
 	StatisticsEnabled            bool               `json:"statisticsEnabled"`
+	ExternalAccountsEnabled      bool               `json:"externalAccountsEnabled"`
+	ExternalAccountsVersion      int64              `json:"externalAccountsVersion"`
 	SettlementsEnabled           bool               `json:"settlementsEnabled"`
 	SettlementDueSoonDays        int                `json:"settlementDueSoonDays"`
 	SettlementOverdueRepeatDays  int                `json:"settlementOverdueRepeatDays"`
@@ -445,14 +455,15 @@ type PaymentTarget struct {
 	BIC            string            `json:"bic,omitempty"`
 }
 
-// PaymentMethod is one administrator-managed payment option. AttachmentMode
-// determines whether callers may or must include a receipt when posting it;
-// PaymentTarget optionally supplies member-visible external payment details.
+// PaymentMethod is one administrator-managed payment option. ExternalAccountID
+// is the single stored account relationship; PaymentTarget is a compatibility
+// projection of that account's member-visible payment details.
 type PaymentMethod struct {
-	ID             string         `json:"id"`
-	Label          string         `json:"label"`
-	AttachmentMode AttachmentMode `json:"attachmentMode"`
-	PaymentTarget  *PaymentTarget `json:"paymentTarget"`
+	ID                string         `json:"id"`
+	Label             string         `json:"label"`
+	AttachmentMode    AttachmentMode `json:"attachmentMode"`
+	ExternalAccountID *string        `json:"externalAccountId"`
+	PaymentTarget     *PaymentTarget `json:"paymentTarget"`
 }
 
 // TransactionSettings contains operational behavior and explicitly
@@ -460,6 +471,7 @@ type PaymentMethod struct {
 // render finance, booking, and payment surfaces.
 type TransactionSettings struct {
 	SettlementsEnabled           bool               `json:"settlementsEnabled"`
+	ExternalAccountsEnabled      bool               `json:"externalAccountsEnabled"`
 	OwnBookingReasonMode         ReasonMode         `json:"ownBookingReasonMode"`
 	ForeignBookingReasonMode     ReasonMode         `json:"foreignBookingReasonMode"`
 	OwnPaymentReasonMode         ReasonMode         `json:"ownPaymentReasonMode"`
@@ -470,6 +482,131 @@ type TransactionSettings struct {
 	PaymentMethods               []PaymentMethod    `json:"paymentMethods"`
 	BookingReasons               []ConfigurableItem `json:"bookingReasons"`
 	PaymentReasons               []ConfigurableItem `json:"paymentReasons"`
+}
+
+// ExternalAccountType identifies the locally modelled kind of an external
+// financial account. It does not imply a live provider connection.
+type ExternalAccountType string
+
+const (
+	// ExternalAccountCash identifies a physical cash account.
+	ExternalAccountCash ExternalAccountType = "CASH"
+	// ExternalAccountBank identifies an account addressed by an IBAN.
+	ExternalAccountBank ExternalAccountType = "BANK"
+	// ExternalAccountPayPal identifies an account addressed by PayPal.Me.
+	ExternalAccountPayPal ExternalAccountType = "PAYPAL"
+	// ExternalAccountOther identifies a provider-neutral external account.
+	ExternalAccountOther ExternalAccountType = "OTHER"
+)
+
+// Valid reports whether accountType is supported by the persistence and API
+// contracts. It takes no additional parameters and cannot fail.
+func (accountType ExternalAccountType) Valid() bool {
+	switch accountType {
+	case ExternalAccountCash, ExternalAccountBank, ExternalAccountPayPal, ExternalAccountOther:
+		return true
+	default:
+		return false
+	}
+}
+
+// ExternalAccountStatus identifies whether an account accepts new links and
+// ordinary manual postings. Archived accounts remain visible in history.
+type ExternalAccountStatus string
+
+const (
+	// ExternalAccountActive identifies an account available for current use.
+	ExternalAccountActive ExternalAccountStatus = "ACTIVE"
+	// ExternalAccountArchived identifies a history-only account.
+	ExternalAccountArchived ExternalAccountStatus = "ARCHIVED"
+)
+
+// Valid reports whether status is accepted by the external-account contract.
+// It takes no additional parameters and cannot fail.
+func (status ExternalAccountStatus) Valid() bool {
+	return status == ExternalAccountActive || status == ExternalAccountArchived
+}
+
+// ExternalAccount is one group-owned account and its current ledger-derived
+// balance. Provider fields are populated only for the matching account type.
+type ExternalAccount struct {
+	ID                     string                `json:"id"`
+	GroupID                string                `json:"groupId"`
+	Name                   string                `json:"name"`
+	Type                   ExternalAccountType   `json:"type"`
+	Status                 ExternalAccountStatus `json:"status"`
+	SortOrder              int                   `json:"sortOrder"`
+	PayPalMeHandle         string                `json:"paypalMeHandle,omitempty"`
+	SEPARecipientName      string                `json:"sepaRecipientName,omitempty"`
+	SEPAIBAN               string                `json:"sepaIban,omitempty"`
+	SEPABIC                string                `json:"sepaBic,omitempty"`
+	BalanceMinor           int64                 `json:"balanceMinor,string"`
+	Currency               string                `json:"currency"`
+	LinkedPaymentMethodIDs []string              `json:"linkedPaymentMethodIds"`
+	HasTransactions        bool                  `json:"hasTransactions"`
+	CanChangeType          bool                  `json:"canChangeType"`
+	CanDelete              bool                  `json:"canDelete"`
+	CanArchive             bool                  `json:"canArchive"`
+	CanReactivate          bool                  `json:"canReactivate"`
+	Version                int64                 `json:"version"`
+	CreatedAt              string                `json:"createdAt"`
+	UpdatedAt              string                `json:"updatedAt"`
+}
+
+// ExternalAccountTransactionKind identifies the business event represented by
+// an immutable external-account transaction header.
+type ExternalAccountTransactionKind string
+
+const (
+	// ExternalAccountTransactionPayment links a member payment to an account.
+	ExternalAccountTransactionPayment ExternalAccountTransactionKind = "PAYMENT"
+	// ExternalAccountTransactionOpeningBalance establishes an initial balance.
+	ExternalAccountTransactionOpeningBalance ExternalAccountTransactionKind = "OPENING_BALANCE"
+	// ExternalAccountTransactionIncome records a manual inflow.
+	ExternalAccountTransactionIncome ExternalAccountTransactionKind = "INCOME"
+	// ExternalAccountTransactionExpense records a manual outflow.
+	ExternalAccountTransactionExpense ExternalAccountTransactionKind = "EXPENSE"
+	// ExternalAccountTransactionTransfer moves funds between two accounts.
+	ExternalAccountTransactionTransfer ExternalAccountTransactionKind = "TRANSFER"
+	// ExternalAccountTransactionAdjustment reconciles a locally known balance.
+	ExternalAccountTransactionAdjustment ExternalAccountTransactionKind = "ADJUSTMENT"
+	// ExternalAccountTransactionReversal negates one prior transaction.
+	ExternalAccountTransactionReversal ExternalAccountTransactionKind = "REVERSAL"
+)
+
+// Valid reports whether kind is supported by the external-account ledger. It
+// takes no additional parameters and cannot fail.
+func (kind ExternalAccountTransactionKind) Valid() bool {
+	switch kind {
+	case ExternalAccountTransactionPayment, ExternalAccountTransactionOpeningBalance,
+		ExternalAccountTransactionIncome, ExternalAccountTransactionExpense,
+		ExternalAccountTransactionTransfer, ExternalAccountTransactionAdjustment,
+		ExternalAccountTransactionReversal:
+		return true
+	default:
+		return false
+	}
+}
+
+// ExternalAccountTransaction is one immutable, auditable business transaction.
+// AmountMinor is signed from the primary account's perspective.
+type ExternalAccountTransaction struct {
+	ID                    string                         `json:"id"`
+	GroupID               string                         `json:"groupId"`
+	Kind                  ExternalAccountTransactionKind `json:"kind"`
+	PrimaryAccountID      string                         `json:"primaryAccountId"`
+	CounterpartyAccountID string                         `json:"counterpartyAccountId,omitempty"`
+	PaymentID             string                         `json:"paymentId,omitempty"`
+	AmountMinor           int64                          `json:"amountMinor,string"`
+	Currency              string                         `json:"currency"`
+	BookedAt              string                         `json:"bookedAt"`
+	Reason                string                         `json:"reason,omitempty"`
+	Reference             string                         `json:"reference,omitempty"`
+	Note                  string                         `json:"note,omitempty"`
+	ReversalOf            string                         `json:"reversalOf,omitempty"`
+	CorrectionOf          string                         `json:"correctionOf,omitempty"`
+	CreatedByMembershipID string                         `json:"createdByMembershipId"`
+	CreatedAt             string                         `json:"createdAt"`
 }
 
 // CategoryIcon identifies one supported visual category marker.

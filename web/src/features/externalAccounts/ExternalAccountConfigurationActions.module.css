@@ -1,0 +1,63 @@
+.configuration { display: grid; gap: var(--space-4); }
+.heading { align-items: center; display: flex; gap: var(--space-5); justify-content: space-between; }
+.heading h4, .heading p { margin: 0; }
+.heading p { color: var(--color-text-muted); font-size: var(--font-size-sm); margin-top: var(--space-2); }
+.actions { display: flex; flex-wrap: wrap; gap: var(--space-3); justify-content: flex-end; }
+.accountOverview { border-top: 1px solid var(--color-border); display: grid; gap: var(--space-4); padding-top: var(--space-5); }
+.accountOverviewHeading { align-items: baseline; display: flex; gap: var(--space-3); justify-content: space-between; }
+.accountOverviewHeading h5 { margin: 0; }
+.accountOverviewHeading h5 { font-size: var(--font-size-md); }
+.accountGroups { display: grid; gap: var(--space-5); }
+.accountGroup { display: grid; gap: var(--space-3); }
+.accountGroup[data-status='ARCHIVED'] { border-top: 1px solid var(--color-border); padding-top: var(--space-5); }
+.accountGroupHeading { align-items: center; display: flex; gap: var(--space-3); justify-content: space-between; }
+.accountGroupHeading h6 { font-size: var(--font-size-sm); margin: 0; }
+.accountGroupHeading > span { align-items: center; background: color-mix(in srgb, var(--color-status-success) 12%, transparent); border-radius: 999px; color: var(--color-status-success); display: inline-flex; font-size: var(--font-size-xs); font-weight: 700; justify-content: center; min-width: 1.75rem; padding: 0.2rem 0.55rem; }
+.accountGroup[data-status='ARCHIVED'] .accountGroupHeading h6 { color: var(--color-text-muted); }
+.accountGroup[data-status='ARCHIVED'] .accountGroupHeading > span { background: var(--color-surface-muted); color: var(--color-text-muted); }
+.accountList { display: grid; gap: var(--space-3); list-style: none; margin: 0; padding: 0; }
+.accountRow { align-items: center; background: var(--color-surface-muted); border: 1px solid var(--color-border); border-radius: var(--radius-md); display: grid; gap: var(--space-4); grid-template-areas: 'identity balance actions'; grid-template-columns: minmax(0, 1fr) 8rem 9.5rem; padding: var(--space-4); }
+.accountRow[data-status='ARCHIVED'] { background: color-mix(in srgb, var(--color-surface-muted) 65%, transparent); }
+.accountIdentity { display: grid; gap: var(--space-2); grid-area: identity; min-width: 0; }
+.accountName { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.accountName > strong { overflow-wrap: anywhere; }
+.accountName > span { background: color-mix(in srgb, var(--color-status-success) 12%, transparent); border-radius: 999px; color: var(--color-status-success); font-size: var(--font-size-xs); font-weight: 700; padding: 0.2rem 0.55rem; }
+.accountName > span[data-status='ARCHIVED'] { background: var(--color-surface); color: var(--color-text-muted); }
+.accountMeta { color: var(--color-text-muted); display: flex; flex-wrap: wrap; font-size: var(--font-size-sm); gap: var(--space-2); }
+.accountMeta strong { color: var(--color-text); }
+.accountMeta span + span::before { content: '·'; margin-right: var(--space-2); }
+.accountMethods { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-1); }
+.accountMethods > span, .accountMethods > small { color: var(--color-text-muted); font-size: var(--font-size-xs); }
+.accountMethods > span { font-weight: 700; }
+.methodChips { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.methodChips > span { background: var(--color-surface); border-radius: 999px; color: var(--color-text); font-size: var(--font-size-xs); padding: 0.3rem 0.65rem; }
+.accountBalance { display: grid; gap: var(--space-1); grid-area: balance; min-width: 0; text-align: right; }
+.accountBalance span { color: var(--color-text-muted); font-size: var(--font-size-xs); }
+.accountBalance strong { font-size: var(--font-size-lg); white-space: nowrap; }
+.accountBalance[data-negative='true'] strong { color: var(--color-status-danger); }
+.accountActions { align-items: start; display: flex; flex-direction: column; gap: var(--space-1); grid-area: actions; justify-content: center; }
+.emptyAccounts { background: var(--color-surface-muted); border: 1px dashed var(--color-border); border-radius: var(--radius-md); display: grid; gap: var(--space-2); padding: var(--space-5); }
+.emptyAccounts span { color: var(--color-text-muted); font-size: var(--font-size-sm); }
+.emptyAccountGroup { color: var(--color-text-muted); font-size: var(--font-size-sm); margin: 0; }
+.unlinkedMethodsRow { align-items: center; background: var(--color-surface-brand-subtle); border: 1px solid color-mix(in srgb, var(--color-brand-hover) 52%, var(--color-border)); border-left: 4px solid var(--color-brand); border-radius: var(--radius-md); display: grid; gap: var(--space-4); grid-template-columns: auto minmax(0, 1fr) auto; padding: var(--space-4); }
+.unlinkedMethodsIcon { align-items: center; align-self: stretch; background: var(--color-surface); border-radius: var(--radius-md); color: var(--color-brand); display: inline-flex; justify-content: center; min-height: 2.75rem; width: 2.75rem; }
+.unlinkedMethodsCopy { display: grid; gap: var(--space-1); }
+.unlinkedMethodsCopy > strong { color: var(--color-text); }
+.unlinkedMethodsCopy > span { color: var(--color-text-muted); font-size: var(--font-size-xs); }
+.unlinkedMethodsRow .methodChips > span { color: var(--color-brand); }
+.error { color: var(--color-status-danger); margin: 0; }
+
+@media (max-width: 680px) {
+  .heading { align-items: stretch; flex-direction: column; }
+  .actions { display: grid; }
+  .accountRow { align-items: start; grid-template-areas: 'identity' 'balance' 'actions'; grid-template-columns: minmax(0, 1fr); }
+  .accountBalance { text-align: left; }
+  .accountActions { align-items: center; border-top: 1px solid var(--color-border); flex-direction: row; flex-wrap: wrap; justify-content: flex-start; padding-top: var(--space-3); width: 100%; }
+  .unlinkedMethodsRow { align-items: start; grid-template-columns: auto minmax(0, 1fr); }
+  .unlinkedMethodsRow .methodChips { grid-column: 1 / -1; }
+}
+
+@media (max-width: 600px) {
+  .heading .actions { display: block; width: 100%; }
+  .heading .actions > * { width: 100%; }
+}

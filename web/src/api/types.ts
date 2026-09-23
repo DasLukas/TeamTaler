@@ -35,6 +35,7 @@ export type TableExportId =
   | 'ACTIVE_MEMBERS'
   | 'ARCHIVED_MEMBERS'
   | 'GROUP_AUDIT'
+  | 'EXTERNAL_ACCOUNT_TRANSACTIONS'
   | 'SYSTEM_AUDIT';
 
 /** File formats supported by the synchronous table-export endpoint. */
@@ -149,6 +150,8 @@ export interface ActivityFilterOptions {
 
 /** Server-backed incoming-payment search, filter, and sort options. */
 export interface PaymentCollectionQuery extends CollectionQuery<'receivedAt' | 'amount' | 'memberName' | 'actorName' | 'method' | 'status'> {
+  /** Exact group-scoped payment identifier used by focused links. */
+  paymentId?: string;
   membershipId?: string;
   method?: string;
   status?: 'POSTED' | 'REVERSED';
@@ -198,6 +201,8 @@ export type PermissionKey =
   | 'MEMBER_MANAGEMENT'
   | 'ROLE_MANAGEMENT'
   | 'FINANCE_MANAGEMENT'
+  | 'VIEW_EXTERNAL_ACCOUNTS'
+  | 'MANAGE_EXTERNAL_ACCOUNTS'
   | 'CATALOG_MANAGEMENT'
   | 'VIEW_MEMBER_DIRECTORY'
   | 'VIEW_STATISTICS'
@@ -219,6 +224,8 @@ export const PERMISSION_KEYS = [
   'MEMBER_MANAGEMENT',
   'ROLE_MANAGEMENT',
   'FINANCE_MANAGEMENT',
+  'VIEW_EXTERNAL_ACCOUNTS',
+  'MANAGE_EXTERNAL_ACCOUNTS',
   'CATALOG_MANAGEMENT',
   'VIEW_MEMBER_DIRECTORY',
   'VIEW_STATISTICS',
@@ -431,6 +438,7 @@ export interface Group {
   logoUrl?: string;
   defaultTheme: ThemeId;
   statisticsEnabled: boolean;
+  externalAccountsEnabled?: boolean;
   planningEnabled?: boolean;
   membership?: SessionMembership;
 }
@@ -713,12 +721,14 @@ export type PaymentTarget = PaypalMePaymentTarget | SepaTransferPaymentTarget;
 /** One stable, ordered payment method, receipt policy, and optional external destination. */
 export interface PaymentMethod extends ConfigurableItem {
   attachmentMode: AttachmentMode;
+  externalAccountId?: string | null;
   paymentTarget: PaymentTarget | null;
 }
 
 /** One payment-method update with tri-state external-destination semantics. */
 export interface PaymentMethodUpdate extends ConfigurableItem {
   attachmentMode: AttachmentMode;
+  externalAccountId?: string | null;
   paymentTarget?: PaymentTarget | null;
 }
 
@@ -728,6 +738,7 @@ export type ReasonMode = 'OFF' | 'OPTIONAL' | 'REQUIRED';
 /** Member-visible operational behavior and payment destinations used by transaction surfaces. */
 export interface TransactionSettings {
   settlementsEnabled: boolean;
+  externalAccountsEnabled?: boolean;
   ownBookingReasonMode: ReasonMode;
   foreignBookingReasonMode: ReasonMode;
   ownPaymentReasonMode: ReasonMode;
@@ -744,6 +755,7 @@ export interface TransactionSettings {
 export interface GroupSettings {
   defaultTheme: ThemeId;
   statisticsEnabled: boolean;
+  externalAccountsEnabled?: boolean;
   settlementsEnabled: boolean;
   settlementDueSoonDays: number;
   settlementOverdueRepeatDays: number;
@@ -766,6 +778,7 @@ export interface GroupSettings {
 export interface GroupSettingsUpdateInput {
   defaultTheme?: ThemeId;
   statisticsEnabled?: boolean;
+  externalAccountsEnabled?: boolean;
   settlementsEnabled?: boolean;
   settlementDueSoonDays?: number;
   settlementOverdueRepeatDays?: number;
@@ -780,6 +793,156 @@ export interface GroupSettingsUpdateInput {
   paymentMethods?: PaymentMethodUpdate[];
   bookingReasons?: ConfigurableItem[];
   paymentReasons?: ConfigurableItem[];
+}
+
+/** Supported representations of a group-owned external financial account. */
+export type ExternalAccountType = 'CASH' | 'BANK' | 'PAYPAL' | 'OTHER';
+
+/** Lifecycle state of an external financial account. */
+export type ExternalAccountStatus = 'ACTIVE' | 'ARCHIVED';
+
+/** Provider data stored for a bank account. */
+export interface ExternalBankAccountDetails {
+  type: 'BANK';
+  recipientName: string;
+  iban: string;
+  bic?: string;
+}
+
+/** Provider data stored for a PayPal account. */
+export interface ExternalPaypalAccountDetails {
+  type: 'PAYPAL';
+  paypalMeHandle: string;
+}
+
+/** Provider-specific external-account data. */
+export type ExternalAccountDetails = ExternalBankAccountDetails | ExternalPaypalAccountDetails | null;
+
+/** One group-owned external account including its ledger-derived balance. */
+export interface ExternalAccount {
+  id: string;
+  name: string;
+  type: ExternalAccountType;
+  status: ExternalAccountStatus;
+  currency: string;
+  balance: Money;
+  details: ExternalAccountDetails;
+  linkedPaymentMethodIds: string[];
+  sortOrder: number;
+  version: number;
+  hasTransactions: boolean;
+  canChangeType: boolean;
+  canDelete: boolean;
+  canArchive: boolean;
+  canReactivate: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Versioned external-account configuration snapshot. */
+export interface ExternalAccountCollection {
+  items: ExternalAccount[];
+  version: number;
+}
+
+/** Optional opening movement created atomically with a new account. */
+export interface ExternalAccountOpeningBalanceInput {
+  amountMinor: number;
+  occurredAt: string;
+  reason: string;
+  reference?: string;
+  note?: string;
+}
+
+/** Fields accepted when an external account is created. */
+export interface ExternalAccountCreateInput {
+  name: string;
+  type: ExternalAccountType;
+  details: ExternalAccountDetails;
+  openingBalance?: ExternalAccountOpeningBalanceInput;
+}
+
+/** Editable fields of an existing external account. */
+export interface ExternalAccountUpdateInput {
+  name: string;
+  type: ExternalAccountType;
+  details: ExternalAccountDetails;
+}
+
+/** Versioned, complete mapping between payment methods and external accounts. */
+export interface ExternalAccountLinkCollection {
+  links: Array<{ paymentMethodId: string; externalAccountId: string | null }>;
+  version: number;
+}
+
+/** External-account transaction types exposed in the group history. */
+export type ExternalAccountTransactionKind = 'PAYMENT' | 'OPENING_BALANCE' | 'INCOME' | 'EXPENSE' | 'TRANSFER' | 'ADJUSTMENT' | 'REVERSAL';
+
+/** Origin of an external-account transaction. */
+export type ExternalAccountTransactionSource = 'MANUAL' | 'PAYMENT';
+
+/** One signed account impact belonging to an immutable transaction. */
+export interface ExternalAccountImpact {
+  account: Pick<ExternalAccount, 'id' | 'name' | 'type'>;
+  amount: Money;
+}
+
+/** Actor projection safe for external-account history. */
+export interface ExternalAccountActor {
+  id: string;
+  displayName: string;
+  avatarUrl?: string;
+}
+
+/** One immutable transaction rendered in external-account history. */
+export interface ExternalAccountTransaction {
+  id: string;
+  kind: ExternalAccountTransactionKind;
+  source: ExternalAccountTransactionSource;
+  occurredAt: string;
+  createdAt: string;
+  reason: string;
+  reference?: string;
+  note?: string;
+  attachment?: PaymentAttachmentSummary;
+  amount: Money;
+  primaryAccountId: string;
+  counterpartyAccountId?: string;
+  sourceAccount?: Pick<ExternalAccount, 'id' | 'name' | 'type'>;
+  destinationAccount?: Pick<ExternalAccount, 'id' | 'name' | 'type'>;
+  impacts: ExternalAccountImpact[];
+  actor: ExternalAccountActor;
+  status: 'POSTED' | 'REVERSED';
+  reversalOfId?: string;
+  replacementForId?: string;
+  reversedById?: string;
+  replacementId?: string;
+  paymentId?: string;
+  canReverse: boolean;
+}
+
+/** Server-backed external-account transaction search and sort options. */
+export interface ExternalAccountTransactionQuery extends CollectionQuery<'occurredAt' | 'amount' | 'kind' | 'actorName' | 'status'> {
+  accountId?: string | readonly string[];
+  kind?: ExternalAccountTransactionKind | readonly ExternalAccountTransactionKind[];
+  source?: ExternalAccountTransactionSource;
+  status?: 'POSTED' | 'REVERSED';
+  occurredFrom?: string;
+  occurredTo?: string;
+  amountMin?: string;
+  amountMax?: string;
+}
+
+/** Manual external-account flow command. */
+export interface ExternalAccountTransactionInput {
+  kind: 'INCOME' | 'EXPENSE' | 'TRANSFER';
+  occurredAt: string;
+  amountMinor: number;
+  sourceAccountId?: string;
+  destinationAccountId?: string;
+  reason: string;
+  reference?: string;
+  note?: string;
 }
 
 /** Administrator-visible state of the group's single public join link. */
@@ -1390,11 +1553,35 @@ export interface FinanceStatistics {
   overdue: FinanceStatisticsOverdue | null;
 }
 
+/** Exact closing balance for one external-account statistics bucket. */
+export interface ExternalAccountStatisticsPoint {
+  periodStart: string;
+  closingBalance: Money;
+}
+
+/** One external account and its balance history in the selected range. */
+export interface ExternalAccountStatisticsAccount {
+  id: string;
+  name: string;
+  type: ExternalAccountType;
+  status: ExternalAccountStatus;
+  openingBalance: Money;
+  closingBalance: Money;
+  series: ExternalAccountStatisticsPoint[];
+}
+
+/** Permission-gated external-account section of the statistics dashboard. */
+export interface ExternalAccountsStatistics {
+  currency: string;
+  accounts: ExternalAccountStatisticsAccount[];
+}
+
 /** Complete group statistics dashboard returned as one authorized snapshot. */
 export interface StatisticsDashboard {
   meta: StatisticsMeta;
   members: MemberStatistics;
   finance: FinanceStatistics;
+  externalAccounts: ExternalAccountsStatistics | null;
 }
 
 /** Dashboard data for the active group and member. */

@@ -79,6 +79,7 @@ Do not force-push shared branches or commit generated runtime data, local config
 - Preserve keyboard operation, accessible names, visible focus, semantic markup, and WCAG AA contrast.
 - Preserve the accepted true-white/navy/teal TeamTaler design system. New component families require a documented product need.
 - Use the shared action components and follow the icon, text-label, responsive-compaction, and accessibility rules in `DESIGN.md`.
+- Use the shared `SelectMenu` and `MultiSelectMenu` components for every new or materially changed product-facing dropdown. Do not introduce, copy, or extend native HTML `select` elements or feature-owned dropdown implementations; migrate a native dropdown when touching it.
 - Treat regular-member workflows as mobile-first: design and verify narrow phone layouts before adding desktop enhancements.
 - Preserve the standard fixed-price self-booking interaction budget: after a product is visible, selection and confirmation are the only required actions unless the command requires additional data.
 - Document the product, accounting, security, or safety reason for every new step, dialog, or confirmation added to the standard booking path.

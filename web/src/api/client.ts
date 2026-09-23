@@ -8,6 +8,8 @@ import {
   adaptBookingContext,
   adaptCategories,
   adaptDashboard,
+  adaptExternalAccountCollection,
+  adaptExternalAccountTransaction,
   adaptGroupSettings,
   adaptInstanceCapabilities,
   adaptTransactionSettings,
@@ -69,6 +71,13 @@ import type {
   DataExportJob,
   EmailDeliveryStatus,
   EmailChangeRequestResult,
+  ExternalAccountCollection,
+  ExternalAccountCreateInput,
+  ExternalAccountLinkCollection,
+  ExternalAccountTransaction,
+  ExternalAccountTransactionInput,
+  ExternalAccountTransactionQuery,
+  ExternalAccountUpdateInput,
   InvitationEmailRetryResult,
   InvitationEmailResendResult,
   InvitationCommand,
@@ -840,6 +849,66 @@ export const api = {
   },
   getLedger: async (groupId: string): Promise<LedgerEntry[]> => adaptLedger(await request<unknown>(groupPath(groupId, 'accounts/me'))),
   getAccountSummaries: async (groupId: string): Promise<AccountSummary[]> => adaptAccountSummaries(await request<unknown>(groupPath(groupId, 'accounts'))),
+  getExternalAccounts: async (groupId: string): Promise<ExternalAccountCollection> => adaptExternalAccountCollection(await request<unknown>(groupPath(groupId, 'external-accounts'))),
+  createExternalAccount: async (groupId: string, input: ExternalAccountCreateInput, collectionVersion: number): Promise<ExternalAccountCollection> => {
+    const path = groupPath(groupId, 'external-accounts');
+    const provider = input.details?.type === 'BANK'
+      ? { sepaRecipientName: input.details.recipientName, sepaIban: input.details.iban, ...(input.details.bic ? { sepaBic: input.details.bic } : {}) }
+      : input.details?.type === 'PAYPAL' ? { paypalMeHandle: input.details.paypalMeHandle } : {};
+    const payload = { name: input.name, type: input.type, ...provider, ...(input.openingBalance ? { openingBalance: input.openingBalance } : {}) };
+    return adaptExternalAccountCollection(await idempotentRequest<unknown>(groupId, 'external-account.create', path, payload, { method: 'POST', headers: versionHeaders(collectionVersion), body: json(payload) }));
+  },
+  updateExternalAccount: async (groupId: string, accountId: string, input: ExternalAccountUpdateInput, collectionVersion: number): Promise<ExternalAccountCollection> => {
+    const provider = input.details?.type === 'BANK'
+      ? { sepaRecipientName: input.details.recipientName, sepaIban: input.details.iban, ...(input.details.bic ? { sepaBic: input.details.bic } : {}) }
+      : input.details?.type === 'PAYPAL' ? { paypalMeHandle: input.details.paypalMeHandle } : {};
+    return adaptExternalAccountCollection(await request<unknown>(groupPath(groupId, `external-accounts/${encodeURIComponent(accountId)}`), {
+    method: 'PATCH',
+    headers: versionHeaders(collectionVersion),
+    body: json({ name: input.name, type: input.type, ...provider }),
+  }));
+  },
+  archiveExternalAccount: async (groupId: string, accountId: string, collectionVersion: number): Promise<ExternalAccountCollection> => adaptExternalAccountCollection(await request<unknown>(groupPath(groupId, `external-accounts/${encodeURIComponent(accountId)}/archive`), {
+    method: 'POST',
+    headers: versionHeaders(collectionVersion),
+  })),
+  reactivateExternalAccount: async (groupId: string, accountId: string, collectionVersion: number): Promise<ExternalAccountCollection> => adaptExternalAccountCollection(await request<unknown>(groupPath(groupId, `external-accounts/${encodeURIComponent(accountId)}/reactivate`), {
+    method: 'POST',
+    headers: versionHeaders(collectionVersion),
+  })),
+  deleteExternalAccount: async (groupId: string, accountId: string, collectionVersion: number): Promise<ExternalAccountCollection> => adaptExternalAccountCollection(await request<unknown>(groupPath(groupId, `external-accounts/${encodeURIComponent(accountId)}`), {
+    method: 'DELETE',
+    headers: versionHeaders(collectionVersion),
+  })),
+  reorderExternalAccounts: async (groupId: string, accountIds: string[], collectionVersion: number): Promise<ExternalAccountCollection> => adaptExternalAccountCollection(await request<unknown>(groupPath(groupId, 'external-accounts/order'), {
+    method: 'PUT',
+    headers: versionHeaders(collectionVersion),
+    body: json({ accountIds }),
+  })),
+  getExternalAccountLinks: async (groupId: string): Promise<ExternalAccountLinkCollection> => {
+    const source = await request<ExternalAccountLinkCollection>(groupPath(groupId, 'external-account-links'));
+    return { links: Array.isArray(source.links) ? source.links : [], version: Number(source.version ?? 1) };
+  },
+  updateExternalAccountLinks: async (groupId: string, links: ExternalAccountLinkCollection): Promise<ExternalAccountLinkCollection> => request<ExternalAccountLinkCollection>(groupPath(groupId, 'external-account-links'), {
+    method: 'PUT',
+    headers: versionHeaders(links.version),
+    body: json({ links: links.links }),
+  }),
+  getExternalAccountTransactionsPage: async (groupId: string, query: ExternalAccountTransactionQuery = {}): Promise<CollectionPage<ExternalAccountTransaction>> => {
+    const response = await requestWithMetadata<unknown[]>(collectionPath(groupPath(groupId, 'external-account-transactions'), query));
+    return collectionPage(response.data.map(adaptExternalAccountTransaction), response.headers, query.limit);
+  },
+  createExternalAccountTransaction: async (groupId: string, input: ExternalAccountTransactionInput, attachment?: File): Promise<ExternalAccountTransaction> => {
+    const path = groupPath(groupId, 'external-account-transactions');
+    const fingerprint = attachment ? { command: input, attachmentSha256: await fileSha256(attachment) } : input;
+    return adaptExternalAccountTransaction(await idempotentRequest<unknown>(groupId, 'external-account-transaction.create', path, fingerprint, { method: 'POST', body: attachment ? paymentMultipart(input, attachment) : json(input) }));
+  },
+  getExternalAccountTransactionAttachment: (groupId: string, transactionId: string): Promise<Blob> => requestBlob(groupPath(groupId, `external-account-transactions/${encodeURIComponent(transactionId)}/attachment`)),
+  reverseExternalAccountTransaction: async (groupId: string, transactionId: string, reason: string): Promise<ExternalAccountTransaction> => {
+    const path = groupPath(groupId, `external-account-transactions/${encodeURIComponent(transactionId)}/reverse`);
+    const payload = { reason };
+    return adaptExternalAccountTransaction(await idempotentRequest<unknown>(groupId, 'external-account-transaction.reverse', path, payload, { method: 'POST', body: json(payload) }));
+  },
   getPayments: async (groupId: string): Promise<Payment[]> => (await request<unknown[]>(groupPath(groupId, 'payments'))).map(adaptPayment),
   getPaymentsPage: async (groupId: string, query: PaymentCollectionQuery = {}): Promise<CollectionPage<Payment>> => {
     const response = await requestWithMetadata<unknown[]>(collectionPath(groupPath(groupId, 'payments'), query));

@@ -16,8 +16,8 @@ import (
 
 func TestDefinitionsAndPermissionImplications(t *testing.T) {
 	definitions := authorization.Definitions()
-	if len(definitions) != 18 {
-		t.Fatalf("definition count = %d, want 18", len(definitions))
+	if len(definitions) != 20 {
+		t.Fatalf("definition count = %d, want 20", len(definitions))
 	}
 	if definitions[0].ImpliedPermissions == nil {
 		t.Fatal("permission implications are nil, want an empty API array")
@@ -63,6 +63,15 @@ func TestDefinitionsAndPermissionImplications(t *testing.T) {
 	memberManagement := authorization.ExpandPermissions([]domain.PermissionKey{domain.PermissionMemberManagement})
 	if !containsPermission(memberManagement, domain.PermissionViewMemberDirectory) || len(memberManagement) != 2 {
 		t.Fatalf("MEMBER_MANAGEMENT expansion = %#v, want management plus directory read", memberManagement)
+	}
+	financeManagement := authorization.ExpandPermissions([]domain.PermissionKey{domain.PermissionFinanceManagement})
+	for _, permission := range []domain.PermissionKey{domain.PermissionFinanceManagement, domain.PermissionManageExternalAccounts, domain.PermissionViewExternalAccounts} {
+		if !containsPermission(financeManagement, permission) {
+			t.Fatalf("FINANCE_MANAGEMENT expansion = %#v, want %s", financeManagement, permission)
+		}
+	}
+	if len(financeManagement) != 3 {
+		t.Fatalf("FINANCE_MANAGEMENT expansion = %#v, want three unique keys", financeManagement)
 	}
 }
 

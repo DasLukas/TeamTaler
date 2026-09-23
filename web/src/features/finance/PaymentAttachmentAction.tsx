@@ -6,17 +6,19 @@ import type { PaymentAttachmentSummary } from '@/api/types';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { openPdfPreviewWindow, showPdfInPreviewWindow } from '@/features/shared/exportDownload';
+import { ReceiptImageViewer } from './ReceiptImageViewer';
 import styles from './PaymentAttachmentAction.module.css';
 
-/** Properties for one protected receipt preview action. */
+/** Properties for one protected financial-evidence preview action. */
 interface PaymentAttachmentActionProps {
   attachment: PaymentAttachmentSummary;
   groupId: string;
+  loadAttachment?: () => Promise<Blob>;
   paymentId: string;
 }
 
-/** Fetches and previews a protected payment receipt only after an explicit user action. */
-export function PaymentAttachmentAction({ attachment, groupId, paymentId }: PaymentAttachmentActionProps) {
+/** Fetches and previews protected financial evidence only after an explicit user action. */
+export function PaymentAttachmentAction({ attachment, groupId, loadAttachment, paymentId }: PaymentAttachmentActionProps) {
   const { t } = useTranslation();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
@@ -28,7 +30,7 @@ export function PaymentAttachmentAction({ attachment, groupId, paymentId }: Paym
   const loadPreview = async (previewWindow?: Window) => {
     setPending(true);
     try {
-      const blob = await api.getPaymentAttachment(groupId, paymentId);
+      const blob = await (loadAttachment ? loadAttachment() : api.getPaymentAttachment(groupId, paymentId));
       if (isImage) {
         setPreviewUrl(URL.createObjectURL(blob));
       } else if (!previewWindow || !showPdfInPreviewWindow(previewWindow, blob, attachment.fileName)) {
@@ -65,7 +67,7 @@ export function PaymentAttachmentAction({ attachment, groupId, paymentId }: Paym
       {error ? <small role="alert">{error}</small> : null}
     </span>
     <Modal onClose={() => setPreviewUrl('')} open={Boolean(previewUrl)} size="workspace" title={attachment.fileName}>
-      {previewUrl ? <div className={styles.preview}><img alt={attachment.fileName} src={previewUrl} /></div> : null}
+      {previewUrl ? <ReceiptImageViewer fileName={attachment.fileName} src={previewUrl} /> : null}
     </Modal>
   </>;
 }

@@ -19,6 +19,7 @@ import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { SelectMenu, type SelectMenuOption } from '@/components/ui/SelectMenu';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { SuggestionInput } from '@/components/ui/SuggestionInput';
+import { externalAccountKeys } from '@/features/externalAccounts/externalAccountQueryKeys';
 import { DataTable, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange } from '@/features/shared/DataTable';
 import { formatGermanDate } from '@/features/shared/dateFormat';
 import { createMemberFilterOption } from '@/features/shared/memberFilterOption';
@@ -30,6 +31,7 @@ import { useMediaQuery } from '@/hooks/useMediaQuery';
 import styles from './PaymentsPanel.module.css';
 import { PaymentAttachmentAction } from './PaymentAttachmentAction';
 import { PaymentAttachmentField } from './PaymentAttachmentField';
+import { PaymentMethodSelect } from './PaymentMethodSelect';
 import { PaymentReviewSummary } from './PaymentReviewSummary';
 
 const paymentPageSize = 50;
@@ -68,6 +70,7 @@ export function PaymentsPanel() {
   const accountsQuery = useQuery({ queryKey: ['account-summaries', activeGroupId], queryFn: () => api.getAccountSummaries(activeGroupId) });
   const transactionSettingsQuery = useQuery({ queryKey: ['transaction-settings', activeGroupId], queryFn: () => api.getTransactionSettings(activeGroupId) });
   const labels = useDataTableLabels();
+  const [focusedPaymentId, setFocusedPaymentId] = useState(() => new URLSearchParams(window.location.search).get('paymentId')?.trim() ?? '');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [paymentStep, setPaymentStep] = useState<PaymentDialogStep>('entry');
   const [membershipId, setMembershipId] = useState('');
@@ -81,6 +84,7 @@ export function PaymentsPanel() {
   const [paymentCommand, setPaymentCommand] = useState<PaymentCommand | null>(null);
   const [paymentToReverse, setPaymentToReverse] = useState<Payment | null>(null);
   const [reversalReason, setReversalReason] = useState('');
+  const selectedPaymentMethod = transactionSettingsQuery.data?.paymentMethods.find((item) => item.id === method);
   const filterDefinitions = useMemo<readonly DataTableFilterDefinition<PaymentFilterId>[]>(() => [
     {
       allLabel: t('dataTable.allValues'),
@@ -139,13 +143,26 @@ export function PaymentsPanel() {
       status: tableState.filters.status as PaymentCollectionQuery['status'],
     };
   }, [activeGroup.currency, deferredSearch, tableState.filters, tableState.sorting]);
+  const activeCollectionQuery = useMemo<PaymentCollectionQuery>(() => focusedPaymentId
+    ? { paymentId: focusedPaymentId, limit: 1, sort: 'receivedAt', direction: 'desc' }
+    : collectionQuery, [collectionQuery, focusedPaymentId]);
   const paymentsQuery = useInfiniteQuery({
     getNextPageParam: (lastPage: CollectionPage<Payment>) => lastPage.nextCursor,
     initialPageParam: undefined as string | undefined,
-    queryFn: ({ pageParam }): Promise<CollectionPage<Payment>> => api.getPaymentsPage(activeGroupId, { ...collectionQuery, cursor: pageParam }),
-    queryKey: ['payments', activeGroupId, 'collection', collectionQuery],
+    queryFn: ({ pageParam }): Promise<CollectionPage<Payment>> => api.getPaymentsPage(activeGroupId, { ...activeCollectionQuery, cursor: pageParam }),
+    queryKey: ['payments', activeGroupId, 'collection', activeCollectionQuery],
   });
   const payments = useMemo(() => paymentsQuery.data?.pages.flatMap((page) => page.items) ?? [], [paymentsQuery.data]);
+  const clearFocusedPayment = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('paymentId');
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+    setFocusedPaymentId('');
+  };
+  const changeSorting = (updater: Parameters<typeof tableState.onSortingChange>[0]) => {
+    if (focusedPaymentId) clearFocusedPayment();
+    tableState.onSortingChange(updater);
+  };
   const accountAvatarUrls = useMemo(() => new Map((accountsQuery.data ?? []).map((account) => [account.membershipId, account.avatarUrl])), [accountsQuery.data]);
   const activeAccounts = accountsQuery.data?.filter((account) => account.status === 'ACTIVE') ?? [];
   const regularAccounts = activeAccounts.filter((account) => !account.isTemporaryGuest);
@@ -164,7 +181,6 @@ export function PaymentsPanel() {
     ?? (transactionSettingsQuery.data?.otherPaymentReasonRequired ? 'REQUIRED' : 'OPTIONAL');
   const reasonEnabled = reasonMode !== 'OFF';
   const reasonRequired = reasonMode === 'REQUIRED';
-  const selectedPaymentMethod = transactionSettingsQuery.data?.paymentMethods.find((item) => item.id === method);
   const attachmentMode = selectedPaymentMethod?.attachmentMode ?? 'OFF';
   const invalidateFinancialReads = async () => Promise.all([
     queryClient.invalidateQueries({ queryKey: ['activities', activeGroupId] }),
@@ -174,6 +190,7 @@ export function PaymentsPanel() {
     queryClient.invalidateQueries({ queryKey: ['settlements', activeGroupId] }),
     queryClient.invalidateQueries({ queryKey: ['dashboard', activeGroupId] }),
     queryClient.invalidateQueries({ queryKey: ['statistics', activeGroupId] }),
+    queryClient.invalidateQueries({ queryKey: externalAccountKeys.all(activeGroupId) }),
   ]);
   const resetPaymentDraft = () => {
     setPaymentStep('entry');
@@ -300,13 +317,14 @@ export function PaymentsPanel() {
   return (
     <div className={styles.content}>
       <header className={styles.header}><div><h2>{t('finance.title')}</h2><p>{t('finance.intro')}</p></div><Button leadingIcon={<Plus size={18} />} onClick={openRecordDialog}>{t('finance.record')}</Button></header>
-      <section className={styles.summary}><CircleDollarSign aria-hidden="true" size={28} /><div><span>{t('finance.recorded')}</span><strong>{formatMoney({ minorUnits: total.toString(), currency: activeGroup.currency })}</strong></div><small>{t('finance.transactionCount', { count: payments.length })}</small></section>
+      {focusedPaymentId ? <div className={styles.focusBar}><strong>{t('finance.focusedPayment')}</strong><Button leadingIcon={<ArrowLeft size={16} />} onClick={clearFocusedPayment} size="small" variant="secondary">{t('finance.showAllPayments')}</Button></div>
+        : <section className={styles.summary}><CircleDollarSign aria-hidden="true" size={28} /><div><span>{t('finance.recorded')}</span><strong>{formatMoney({ minorUnits: total.toString(), currency: activeGroup.currency })}</strong></div><small>{t('finance.transactionCount', { count: payments.length })}</small></section>}
       <DataTable
         ariaLabel={t('finance.title')}
         columns={columns}
         data={payments}
-        emptyContent={paymentsQuery.isError ? t('finance.error') : t('finance.empty')}
-        exportConfig={{
+        emptyContent={paymentsQuery.isError ? t('finance.error') : focusedPaymentId ? t('finance.focusedPaymentMissing') : t('finance.empty')}
+        exportConfig={focusedPaymentId ? undefined : {
           disabled: deferredSearch !== tableState.searchValue.trim(),
           groupId: activeGroupId,
           query: { ...collectionQuery, limit: undefined },
@@ -321,7 +339,11 @@ export function PaymentsPanel() {
         labels={{ ...labels, searchLabel: t('finance.searchLabel'), searchPlaceholder: t('finance.searchPlaceholder') }}
         minTableWidth="980px"
         onLoadMore={() => void paymentsQuery.fetchNextPage()}
+        rowFocus={focusedPaymentId ? { announcement: t('finance.focusedPaymentAnnouncement'), rowId: focusedPaymentId } : undefined}
+        showControls={!focusedPaymentId}
+        showResultBar={!focusedPaymentId}
         {...tableState}
+        onSortingChange={changeSorting}
       />
       <Modal onClose={closeRecordDialog} open={dialogOpen} title={t(paymentStep === 'entry' ? 'finance.record' : 'finance.reviewTitle')} variant={compact ? 'sheet' : 'dialog'}>
         {paymentStep === 'entry' ? (
@@ -330,7 +352,7 @@ export function PaymentsPanel() {
               <SelectMenu ariaLabel={t('common.member')} id="payment-member" onChange={setMembershipId} options={paymentMemberOptions} value={selectedMembershipId} />
             </Field>
             <div className={styles.formRow}><Field error={amountError || undefined} htmlFor="payment-amount" label={`${t('finance.amountIn', { currency: activeGroup.currency })} *`}><TextInput id="payment-amount" inputMode="decimal" onChange={(event) => { setAmount(event.target.value); setAmountError(''); }} pattern={majorUnitsInputPattern(activeGroup.currency)} placeholder={majorUnitsPlaceholder(activeGroup.currency)} required type="text" value={amount} /></Field><Field htmlFor="payment-date" label={t('finance.receivedDate')}><TextInput id="payment-date" onChange={(event) => setReceivedAt(event.target.value)} required type="date" value={receivedAt} /></Field></div>
-            <Field htmlFor="payment-method" label={t('finance.paymentType')}><SelectMenu ariaLabel={t('finance.paymentType')} id="payment-method" onChange={(nextMethod) => { setMethod(nextMethod); if (transactionSettingsQuery.data.paymentMethods.find((item) => item.id === nextMethod)?.attachmentMode === 'OFF') setAttachment(null); }} options={transactionSettingsQuery.data.paymentMethods.map((option) => ({ label: option.label, value: option.id }))} value={method} /></Field>
+            <Field htmlFor="payment-method" label={t('finance.paymentType')}><PaymentMethodSelect ariaLabel={t('finance.paymentType')} id="payment-method" methods={transactionSettingsQuery.data.paymentMethods} onChange={(nextMethod) => { setMethod(nextMethod); if (transactionSettingsQuery.data.paymentMethods.find((item) => item.id === nextMethod)?.attachmentMode === 'OFF') setAttachment(null); }} value={method} /></Field>
             {reasonEnabled ? <Field error={referenceError || undefined} htmlFor="payment-reference" label={`${t('finance.reason')}${reasonRequired ? ' *' : ''}`}><SuggestionInput id="payment-reference" maxLength={120} onChange={(nextReference) => { setReference(nextReference); setReferenceError(''); }} options={transactionSettingsQuery.data.paymentReasons.map((item) => ({ value: item.label }))} required={reasonRequired} value={reference} /></Field> : null}
             <PaymentAttachmentField attachmentMode={attachmentMode} file={attachment} maxBytes={attachmentUploadMaxBytes} onChange={setAttachment} />
             <ModalFooter><div className={styles.actions}><Button leadingIcon={<X size={17} />} onClick={closeRecordDialog} variant="secondary">{t('common.cancel')}</Button><Button disabled={!amount || !selectedMembershipId || !method || (reasonRequired && !reference.trim()) || (attachmentMode === 'REQUIRED' && !attachment)} form={paymentFormId} leadingIcon={<CircleCheck size={17} />} type="submit">{t('finance.reviewPayment')}</Button></div></ModalFooter>

@@ -95,6 +95,20 @@
   font-size: var(--font-size-sm);
 }
 
+.externalAccountsCard {
+  gap: var(--space-6);
+}
+
+.externalAccountsCard > * + * {
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-6);
+}
+
+.externalAccountsFeature {
+  display: grid;
+  gap: var(--space-5);
+}
+
 .defaultRoleCard {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;

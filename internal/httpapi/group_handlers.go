@@ -20,10 +20,11 @@ import (
 )
 
 type paymentMethodUpdateRequest struct {
-	ID             string                `json:"id"`
-	Label          string                `json:"label"`
-	AttachmentMode domain.AttachmentMode `json:"attachmentMode"`
-	PaymentTarget  json.RawMessage       `json:"paymentTarget"`
+	ID                string                `json:"id"`
+	Label             string                `json:"label"`
+	AttachmentMode    domain.AttachmentMode `json:"attachmentMode"`
+	PaymentTarget     json.RawMessage       `json:"paymentTarget"`
+	ExternalAccountID json.RawMessage       `json:"externalAccountId"`
 }
 
 type paymentTargetTypeRequest struct {
@@ -46,17 +47,25 @@ type sepaTransferPaymentTargetRequest struct {
 // and reports whether paymentTarget was present. A missing value is preserved
 // later inside the settings transaction, null clears it, and an object replaces
 // it. Malformed or unknown nested fields return a validation error.
-func (input paymentMethodUpdateRequest) paymentMethod() (domain.PaymentMethod, bool, error) {
+func (input paymentMethodUpdateRequest) paymentMethod() (domain.PaymentMethod, bool, bool, error) {
 	method := domain.PaymentMethod{ID: input.ID, Label: input.Label, AttachmentMode: input.AttachmentMode}
+	accountSpecified := len(input.ExternalAccountID) != 0
+	if accountSpecified && !bytes.Equal(bytes.TrimSpace(input.ExternalAccountID), []byte("null")) {
+		var accountID string
+		if err := json.Unmarshal(input.ExternalAccountID, &accountID); err != nil {
+			return domain.PaymentMethod{}, false, false, domain.ValidationError{Field: "paymentMethods", Message: "contains an invalid externalAccountId"}
+		}
+		method.ExternalAccountID = &accountID
+	}
 	if len(input.PaymentTarget) == 0 {
-		return method, false, nil
+		return method, false, accountSpecified, nil
 	}
 	if bytes.Equal(bytes.TrimSpace(input.PaymentTarget), []byte("null")) {
-		return method, true, nil
+		return method, true, accountSpecified, nil
 	}
 	var discriminator paymentTargetTypeRequest
 	if err := json.Unmarshal(input.PaymentTarget, &discriminator); err != nil {
-		return domain.PaymentMethod{}, false, domain.ValidationError{Field: "paymentMethods", Message: "contains an invalid paymentTarget: " + err.Error()}
+		return domain.PaymentMethod{}, false, false, domain.ValidationError{Field: "paymentMethods", Message: "contains an invalid paymentTarget: " + err.Error()}
 	}
 	decoder := json.NewDecoder(bytes.NewReader(input.PaymentTarget))
 	decoder.DisallowUnknownFields()
@@ -64,19 +73,19 @@ func (input paymentMethodUpdateRequest) paymentMethod() (domain.PaymentMethod, b
 	case domain.PaymentTargetPayPalMe:
 		var target payPalMePaymentTargetRequest
 		if err := decoder.Decode(&target); err != nil {
-			return domain.PaymentMethod{}, false, domain.ValidationError{Field: "paymentMethods", Message: "contains an invalid PayPal.Me paymentTarget: " + err.Error()}
+			return domain.PaymentMethod{}, false, false, domain.ValidationError{Field: "paymentMethods", Message: "contains an invalid PayPal.Me paymentTarget: " + err.Error()}
 		}
 		method.PaymentTarget = &domain.PaymentTarget{Type: target.Type, PayPalMeHandle: target.PayPalMeHandle}
 	case domain.PaymentTargetSEPATransfer:
 		var target sepaTransferPaymentTargetRequest
 		if err := decoder.Decode(&target); err != nil {
-			return domain.PaymentMethod{}, false, domain.ValidationError{Field: "paymentMethods", Message: "contains an invalid SEPA paymentTarget: " + err.Error()}
+			return domain.PaymentMethod{}, false, false, domain.ValidationError{Field: "paymentMethods", Message: "contains an invalid SEPA paymentTarget: " + err.Error()}
 		}
 		method.PaymentTarget = &domain.PaymentTarget{Type: target.Type, RecipientName: target.RecipientName, IBAN: target.IBAN, BIC: target.BIC}
 	default:
-		return domain.PaymentMethod{}, false, domain.ValidationError{Field: "paymentMethods", Message: "contains a paymentTarget with an unsupported type"}
+		return domain.PaymentMethod{}, false, false, domain.ValidationError{Field: "paymentMethods", Message: "contains a paymentTarget with an unsupported type"}
 	}
-	return method, true, nil
+	return method, true, accountSpecified, nil
 }
 
 func (s *Server) handleListGroups(response http.ResponseWriter, request *http.Request) {
@@ -153,6 +162,8 @@ func (s *Server) handleGetGroupSettings(response http.ResponseWriter, request *h
 		"foreignBookingReasonRequired": settings.ForeignBookingReasonRequired,
 		"ownPaymentReasonRequired":     settings.OwnPaymentReasonRequired,
 		"otherPaymentReasonRequired":   settings.OtherPaymentReasonRequired,
+		"externalAccountsEnabled":      settings.ExternalAccountsEnabled,
+		"externalAccountsVersion":      settings.ExternalAccountsVersion,
 		"paymentMethods":               settings.PaymentMethods,
 		"bookingReasons":               settings.BookingReasons,
 		"paymentReasons":               settings.PaymentReasons,
@@ -199,6 +210,7 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		ForeignBookingReasonRequired *bool                         `json:"foreignBookingReasonRequired"`
 		OwnPaymentReasonRequired     *bool                         `json:"ownPaymentReasonRequired"`
 		OtherPaymentReasonRequired   *bool                         `json:"otherPaymentReasonRequired"`
+		ExternalAccountsEnabled      *bool                         `json:"externalAccountsEnabled"`
 		PaymentMethods               *[]paymentMethodUpdateRequest `json:"paymentMethods"`
 		BookingReasons               *[]domain.ConfigurableItem    `json:"bookingReasons"`
 		PaymentReasons               *[]domain.ConfigurableItem    `json:"paymentReasons"`
@@ -211,23 +223,26 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		input.OwnBookingReasonMode == nil && input.ForeignBookingReasonMode == nil && input.OwnPaymentReasonMode == nil && input.OtherPaymentReasonMode == nil &&
 		input.ForeignBookingReasonRequired == nil &&
 		input.OwnPaymentReasonRequired == nil && input.OtherPaymentReasonRequired == nil && input.PaymentMethods == nil &&
-		input.BookingReasons == nil && input.PaymentReasons == nil {
+		input.BookingReasons == nil && input.PaymentReasons == nil && input.ExternalAccountsEnabled == nil {
 		writeProblem(response, request, domain.ValidationError{Field: "settings", Message: "must contain at least one supported field"})
 		return
 	}
 	var paymentMethods *[]domain.PaymentMethod
 	var paymentTargetsSpecified []bool
+	var externalAccountIDsSpecified []bool
 	if input.PaymentMethods != nil {
 		methods := make([]domain.PaymentMethod, len(*input.PaymentMethods))
 		paymentTargetsSpecified = make([]bool, len(*input.PaymentMethods))
+		externalAccountIDsSpecified = make([]bool, len(*input.PaymentMethods))
 		for index, item := range *input.PaymentMethods {
-			method, targetSpecified, err := item.paymentMethod()
+			method, targetSpecified, accountSpecified, err := item.paymentMethod()
 			if err != nil {
 				writeProblem(response, request, err)
 				return
 			}
 			methods[index] = method
 			paymentTargetsSpecified[index] = targetSpecified
+			externalAccountIDsSpecified[index] = accountSpecified
 		}
 		paymentMethods = &methods
 	}
@@ -245,8 +260,10 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		ForeignBookingReasonRequired: input.ForeignBookingReasonRequired,
 		OwnPaymentReasonRequired:     input.OwnPaymentReasonRequired,
 		OtherPaymentReasonRequired:   input.OtherPaymentReasonRequired,
+		ExternalAccountsEnabled:      input.ExternalAccountsEnabled,
 		PaymentMethods:               paymentMethods,
 		PaymentTargetsSpecified:      paymentTargetsSpecified,
+		ExternalAccountIDsSpecified:  externalAccountIDsSpecified,
 		BookingReasons:               input.BookingReasons,
 		PaymentReasons:               input.PaymentReasons,
 	})
@@ -268,6 +285,8 @@ func (s *Server) handleUpdateGroupSettings(response http.ResponseWriter, request
 		"foreignBookingReasonRequired": settings.ForeignBookingReasonRequired,
 		"ownPaymentReasonRequired":     settings.OwnPaymentReasonRequired,
 		"otherPaymentReasonRequired":   settings.OtherPaymentReasonRequired,
+		"externalAccountsEnabled":      settings.ExternalAccountsEnabled,
+		"externalAccountsVersion":      settings.ExternalAccountsVersion,
 		"paymentMethods":               settings.PaymentMethods,
 		"bookingReasons":               settings.BookingReasons,
 		"paymentReasons":               settings.PaymentReasons,

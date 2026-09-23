@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +16,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/audit"
 	"github.com/DasLukas/TeamTaler/internal/authorization"
 	"github.com/DasLukas/TeamTaler/internal/domain"
+	"github.com/DasLukas/TeamTaler/internal/externalaccounts"
 	"github.com/DasLukas/TeamTaler/internal/idempotency"
 	"github.com/DasLukas/TeamTaler/internal/ledger"
 	"github.com/DasLukas/TeamTaler/internal/media"
@@ -598,11 +598,7 @@ type CreateOwnPaymentInput struct {
 
 // PaymentAttachmentUpload is one untrusted receipt stream supplied with a
 // payment command. MaxBytes is the effective live instance limit.
-type PaymentAttachmentUpload struct {
-	FileName string
-	Reader   io.Reader
-	MaxBytes int64
-}
+type PaymentAttachmentUpload = paymentattachments.Upload
 
 const (
 	paymentSourceFinanceWorkspace = "FINANCE_WORKSPACE"
@@ -816,8 +812,15 @@ func (s Service) createPayment(ctx context.Context, actor domain.Principal, memb
 		if err := insertLedger(ctx, tx, membership.GroupID, currentPeriod, input.MembershipID, paymentID, "", "MEMBER_RECEIVABLE", -input.AmountMinor, ledgerDescription, now); err != nil {
 			return err
 		}
-		if err := insertLedger(ctx, tx, membership.GroupID, currentPeriod, "", paymentID, "", "GROUP_CASH", input.AmountMinor, ledgerDescription, now); err != nil {
+		linked, err := externalaccounts.PostPaymentTx(ctx, tx, membership.GroupID, membership.ID, paymentID, input.Method,
+			input.AmountMinor, payment.ReceivedAt, ledgerDescription, effectiveReference, input.Note, currentPeriod, now)
+		if err != nil {
 			return err
+		}
+		if !linked {
+			if err := insertLedger(ctx, tx, membership.GroupID, currentPeriod, "", paymentID, "", "GROUP_CASH", input.AmountMinor, ledgerDescription, now); err != nil {
+				return err
+			}
 		}
 		if err := ledger.RebuildPaymentAllocations(ctx, tx, membership.GroupID, input.MembershipID); err != nil {
 			return err
@@ -942,9 +945,11 @@ func (s Service) ListPayments(ctx context.Context, membership domain.Membership,
 // PaymentQuery describes a server-side finance payment table query. ReceivedAt
 // bounds accept ISO 8601 dates or RFC 3339 timestamps; ReceivedFrom is inclusive
 // and ReceivedTo is exclusive after date-only upper-bound normalization. Amount
-// bounds are inclusive minor units.
+// bounds are inclusive minor units. PaymentID limits the authorized group
+// collection to one immutable payment for direct navigation.
 type PaymentQuery struct {
 	Search       string
+	PaymentID    string
 	MembershipID string
 	Method       string
 	Status       string
@@ -1031,6 +1036,10 @@ func (s Service) QueryPayments(ctx context.Context, membership domain.Membership
 		return PaymentPage{}, domain.ValidationError{Field: "amountMax", Message: "must be greater than or equal to amountMin"}
 	}
 	input.MembershipID = strings.TrimSpace(input.MembershipID)
+	input.PaymentID = strings.TrimSpace(input.PaymentID)
+	if len(input.PaymentID) > 120 {
+		return PaymentPage{}, domain.ValidationError{Field: "paymentId", Message: "must contain at most 120 characters"}
+	}
 	input.Method = strings.TrimSpace(input.Method)
 	input.Status = strings.ToUpper(strings.TrimSpace(input.Status))
 	if input.Status != "" && input.Status != "POSTED" && input.Status != "REVERSED" {
@@ -1040,10 +1049,10 @@ func (s Service) QueryPayments(ctx context.Context, membership domain.Membership
 		input.Limit = 100
 	}
 	fingerprint, err := tablequery.Fingerprint(struct {
-		GroupID, ViewerMembershipID                                                     string
-		Search, MembershipID, Method, Status, ReceivedFrom, ReceivedTo, Sort, Direction string
-		AmountMin, AmountMax                                                            *int64
-	}{membership.GroupID, membership.ID, input.Search, input.MembershipID, input.Method, input.Status, input.ReceivedFrom, input.ReceivedTo, input.Sort, input.Direction, input.AmountMin, input.AmountMax})
+		GroupID, ViewerMembershipID                                                                string
+		Search, PaymentID, MembershipID, Method, Status, ReceivedFrom, ReceivedTo, Sort, Direction string
+		AmountMin, AmountMax                                                                       *int64
+	}{membership.GroupID, membership.ID, input.Search, input.PaymentID, input.MembershipID, input.Method, input.Status, input.ReceivedFrom, input.ReceivedTo, input.Sort, input.Direction, input.AmountMin, input.AmountMax})
 	if err != nil {
 		return PaymentPage{}, err
 	}
@@ -1066,6 +1075,10 @@ func (s Service) QueryPayments(ctx context.Context, membership domain.Membership
 		LEFT JOIN payment_attachments attachment ON attachment.group_id=p.group_id AND attachment.payment_id=p.id
 		WHERE p.group_id=?`
 	args := []any{membership.GroupID}
+	if input.PaymentID != "" {
+		query += ` AND p.id=?`
+		args = append(args, input.PaymentID)
+	}
 	if input.MembershipID != "" {
 		query += ` AND p.membership_id=?`
 		args = append(args, input.MembershipID)
@@ -1285,6 +1298,10 @@ func (s Service) ReversePayment(ctx context.Context, actor domain.Principal, mem
 		if changed != 1 {
 			return domain.ErrConflict
 		}
+		externalReversed, err := externalaccounts.ReversePaymentTx(ctx, tx, membership.GroupID, actor.UserID, membership.ID, paymentID, currentPeriod, now, reason, now)
+		if err != nil {
+			return err
+		}
 		rows, err := tx.QueryContext(ctx, `SELECT id,membership_id,account,amount_minor,description FROM ledger_entries WHERE group_id=? AND payment_id=? AND reversal_of IS NULL`, membership.GroupID, paymentID)
 		if err != nil {
 			return err
@@ -1306,6 +1323,9 @@ func (s Service) ReversePayment(ctx context.Context, actor domain.Principal, mem
 		}
 		rows.Close()
 		for _, entry := range originals {
+			if externalReversed && entry.account == "EXTERNAL_ACCOUNT" {
+				continue
+			}
 			if err := insertLedger(ctx, tx, membership.GroupID, currentPeriod, entry.member, paymentID, entry.id, entry.account, -entry.amount, "Reversal: "+entry.description, now); err != nil {
 				return err
 			}

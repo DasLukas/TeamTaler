@@ -523,14 +523,25 @@ func validateRestoredDatabase(destination string, manifest Manifest) error {
 }
 
 func referencedAttachmentKeys(ctx context.Context, db *sql.DB) ([]string, error) {
-	var tableExists int
-	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='table' AND name='payment_attachments'`).Scan(&tableExists); err != nil {
+	var paymentTableExists, transactionTableExists int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='table' AND name='payment_attachments'`).Scan(&paymentTableExists); err != nil {
 		return nil, err
 	}
-	if tableExists == 0 {
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='table' AND name='external_account_transaction_attachments'`).Scan(&transactionTableExists); err != nil {
+		return nil, err
+	}
+	if paymentTableExists == 0 && transactionTableExists == 0 {
 		return []string{}, nil
 	}
-	rows, err := db.QueryContext(ctx, `SELECT DISTINCT storage_key FROM payment_attachments ORDER BY storage_key`)
+	query := `SELECT DISTINCT storage_key FROM payment_attachments ORDER BY storage_key`
+	if paymentTableExists == 0 {
+		query = `SELECT DISTINCT storage_key FROM external_account_transaction_attachments ORDER BY storage_key`
+	} else if transactionTableExists != 0 {
+		query = `SELECT storage_key FROM payment_attachments
+			UNION SELECT storage_key FROM external_account_transaction_attachments
+			ORDER BY storage_key`
+	}
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}

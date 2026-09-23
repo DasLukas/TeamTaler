@@ -67,6 +67,7 @@ export function defaultPaymentMethods(): PaymentMethod[] {
     id: option.value,
     label: i18n.t(option.labelKey),
     attachmentMode: option.attachmentMode,
+    externalAccountId: null,
     paymentTarget: null,
   }));
 }

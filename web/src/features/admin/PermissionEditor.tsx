@@ -23,7 +23,7 @@ const PERMISSION_GROUPS: ReadonlyArray<{ key: PermissionGroupKey; permissions: r
   },
   {
     key: 'finance',
-    permissions: ['FINANCE_MANAGEMENT', 'RECORD_OWN_PAYMENT'],
+    permissions: ['FINANCE_MANAGEMENT', 'VIEW_EXTERNAL_ACCOUNTS', 'MANAGE_EXTERNAL_ACCOUNTS', 'RECORD_OWN_PAYMENT'],
   },
   {
     key: 'catalog',

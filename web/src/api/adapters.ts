@@ -11,6 +11,10 @@ import type {
   ConfigurableNotificationEventType,
   Dashboard,
   EmailDeliveryStatus,
+  ExternalAccount,
+  ExternalAccountCollection,
+  ExternalAccountDetails,
+  ExternalAccountTransaction,
   Group,
   GroupSettings,
   GroupRole,
@@ -52,6 +56,7 @@ import type {
   Settlement,
   StatisticsBucket,
   StatisticsDashboard,
+  ExternalAccountsStatistics,
   StatisticsMeta,
   SmtpTlsMode,
   SystemAccount,
@@ -505,6 +510,7 @@ export function adaptGroupSettings(input: unknown): GroupSettings {
   return {
     defaultTheme: isThemeId(source.defaultTheme) ? source.defaultTheme : 'TEAMTALER',
     statisticsEnabled: source.statisticsEnabled === true,
+    externalAccountsEnabled: source.externalAccountsEnabled === true,
     settlementsEnabled: source.settlementsEnabled === true,
     settlementDueSoonDays: Number(source.settlementDueSoonDays ?? 3),
     settlementOverdueRepeatDays: Number(source.settlementOverdueRepeatDays ?? 7),
@@ -566,7 +572,13 @@ export function adaptPaymentMethods(input: unknown): PaymentMethod[] {
     const source = asRecord(entry);
     if (typeof source.id !== 'string' || typeof source.label !== 'string' || !source.id || !source.label) return [];
     const attachmentMode = source.attachmentMode === 'OPTIONAL' || source.attachmentMode === 'REQUIRED' ? source.attachmentMode : 'OFF';
-    return [{ id: source.id, label: localizedPaymentMethodLabel(source.id, source.label), attachmentMode, paymentTarget: adaptPaymentTarget(source.paymentTarget) }];
+    return [{
+      id: source.id,
+      label: localizedPaymentMethodLabel(source.id, source.label),
+      attachmentMode,
+      externalAccountId: typeof source.externalAccountId === 'string' && source.externalAccountId ? source.externalAccountId : null,
+      paymentTarget: adaptPaymentTarget(source.paymentTarget),
+    }];
   });
 }
 
@@ -580,6 +592,7 @@ export function adaptTransactionSettings(input: unknown): TransactionSettings {
   const otherPaymentReasonMode = reasonMode(source.otherPaymentReasonMode, source.otherPaymentReasonRequired, 'OPTIONAL');
   return {
     settlementsEnabled: source.settlementsEnabled === true,
+    externalAccountsEnabled: source.externalAccountsEnabled === true,
     ownBookingReasonMode,
     foreignBookingReasonMode,
     ownPaymentReasonMode,
@@ -590,6 +603,120 @@ export function adaptTransactionSettings(input: unknown): TransactionSettings {
     paymentMethods: paymentMethods.length > 0 ? paymentMethods : defaultPaymentMethods(),
     bookingReasons: adaptConfigurableItems(source.bookingReasons),
     paymentReasons: adaptConfigurableItems(source.paymentReasons),
+  };
+}
+
+function externalAccountDetails(source: JsonRecord): ExternalAccountDetails {
+  const nested = source.details && typeof source.details === 'object' ? asRecord(source.details) : source;
+  const type = String(source.type ?? nested.type ?? '').toUpperCase();
+  if (type === 'BANK') {
+    return {
+      type: 'BANK',
+      recipientName: String(nested.recipientName ?? nested.sepaRecipientName ?? ''),
+      iban: normalizeIban(String(nested.iban ?? nested.sepaIban ?? '')),
+      ...(typeof (nested.bic ?? nested.sepaBic) === 'string' && normalizeBic(String(nested.bic ?? nested.sepaBic)) ? { bic: normalizeBic(String(nested.bic ?? nested.sepaBic)) } : {}),
+    };
+  }
+  if (type === 'PAYPAL') return { type: 'PAYPAL', paypalMeHandle: String(nested.paypalMeHandle ?? '').trim() };
+  return null;
+}
+
+/** Adapts one external account and its ledger-derived balance. */
+export function adaptExternalAccount(input: unknown): ExternalAccount {
+  const source = asRecord(input);
+  const sourceBalance = source.balance && typeof source.balance === 'object' ? asRecord(source.balance) : undefined;
+  const currency = String(source.currency ?? sourceBalance?.currency ?? 'EUR');
+  const type = source.type === 'BANK' || source.type === 'PAYPAL' || source.type === 'OTHER' ? source.type : 'CASH';
+  const hasTransactions = source.hasTransactions === true;
+  const linkedPaymentMethodIds = Array.isArray(source.linkedPaymentMethodIds) ? source.linkedPaymentMethodIds.map(String) : [];
+  const status = source.status === 'ARCHIVED' || source.archivedAt ? 'ARCHIVED' : 'ACTIVE';
+  return {
+    id: String(source.id ?? ''),
+    name: String(source.name ?? ''),
+    type,
+    status,
+    currency,
+    balance: sourceBalance ? money(sourceBalance.minorUnits, sourceBalance.currency ?? currency) : money(source.balanceMinor, currency),
+    details: externalAccountDetails({ ...source, type }),
+    linkedPaymentMethodIds,
+    sortOrder: Number(source.sortOrder ?? 0),
+    version: Number(source.version ?? 1),
+    hasTransactions,
+    canChangeType: typeof source.canChangeType === 'boolean' ? source.canChangeType : !hasTransactions,
+    canDelete: typeof source.canDelete === 'boolean' ? source.canDelete : !hasTransactions && linkedPaymentMethodIds.length === 0,
+    canArchive: typeof source.canArchive === 'boolean' ? source.canArchive : status === 'ACTIVE' && linkedPaymentMethodIds.length === 0,
+    canReactivate: typeof source.canReactivate === 'boolean' ? source.canReactivate : status === 'ARCHIVED',
+    createdAt: String(source.createdAt ?? ''),
+    updatedAt: String(source.updatedAt ?? source.createdAt ?? ''),
+  };
+}
+
+/** Adapts an external-account list from a direct array or object envelope. */
+export function adaptExternalAccounts(input: unknown): ExternalAccount[] {
+  const source = input && typeof input === 'object' && !Array.isArray(input) ? asRecord(input) : undefined;
+  const items = Array.isArray(input) ? input : Array.isArray(source?.items) ? source.items : Array.isArray(source?.accounts) ? source.accounts : [];
+  return items.map(adaptExternalAccount);
+}
+
+/** Adapts a versioned account collection returned by every configuration mutation. */
+export function adaptExternalAccountCollection(input: unknown): ExternalAccountCollection {
+  const source = input && typeof input === 'object' && !Array.isArray(input) ? asRecord(input) : {};
+  return { items: adaptExternalAccounts(input), version: Number(source.version ?? 1) };
+}
+
+function externalAccountReference(input: unknown): ExternalAccountTransaction['sourceAccount'] {
+  if (!input || typeof input !== 'object') return undefined;
+  const source = asRecord(input);
+  if (typeof source.id !== 'string' || !source.id) return undefined;
+  const type = source.type === 'BANK' || source.type === 'PAYPAL' || source.type === 'OTHER' ? source.type : 'CASH';
+  return { id: source.id, name: String(source.name ?? ''), type };
+}
+
+/** Adapts one immutable external-account transaction. */
+export function adaptExternalAccountTransaction(input: unknown): ExternalAccountTransaction {
+  const source = asRecord(input);
+  const sourceAmount = source.amount && typeof source.amount === 'object' ? asRecord(source.amount) : undefined;
+  const currency = String(sourceAmount?.currency ?? source.currency ?? 'EUR');
+  const actorSource = source.actor && typeof source.actor === 'object' ? asRecord(source.actor) : {};
+  const attachment = paymentAttachmentSummary(source.attachment);
+  const allowedKinds: ExternalAccountTransaction['kind'][] = ['PAYMENT', 'OPENING_BALANCE', 'INCOME', 'EXPENSE', 'TRANSFER', 'ADJUSTMENT', 'REVERSAL'];
+  const kind = allowedKinds.includes(source.kind as ExternalAccountTransaction['kind']) ? source.kind as ExternalAccountTransaction['kind'] : 'ADJUSTMENT';
+  const impacts = Array.isArray(source.impacts) ? source.impacts.map((entry) => {
+    const impact = asRecord(entry);
+    const impactAmount = impact.amount && typeof impact.amount === 'object' ? asRecord(impact.amount) : undefined;
+    return {
+      account: externalAccountReference(impact.account) ?? { id: '', name: '', type: 'CASH' as const },
+      amount: impactAmount ? money(impactAmount.minorUnits, impactAmount.currency ?? currency) : money(impact.amountMinor, currency),
+    };
+  }) : [];
+  return {
+    id: String(source.id ?? ''),
+    kind,
+    source: source.source === 'PAYMENT' || source.kind === 'PAYMENT' || Boolean(source.paymentId) ? 'PAYMENT' : 'MANUAL',
+    occurredAt: String(source.occurredAt ?? source.bookedAt ?? ''),
+    createdAt: String(source.createdAt ?? ''),
+    reason: String(source.reason ?? ''),
+    ...(typeof source.reference === 'string' && source.reference ? { reference: source.reference } : {}),
+    ...(typeof source.note === 'string' && source.note ? { note: source.note } : {}),
+    ...(attachment ? { attachment } : {}),
+    amount: sourceAmount ? money(sourceAmount.minorUnits, sourceAmount.currency ?? currency) : money(source.amountMinor, currency),
+    primaryAccountId: String(source.primaryAccountId ?? source.destinationAccountId ?? source.sourceAccountId ?? ''),
+    ...(typeof source.counterpartyAccountId === 'string' && source.counterpartyAccountId ? { counterpartyAccountId: source.counterpartyAccountId } : {}),
+    ...(externalAccountReference(source.sourceAccount) ? { sourceAccount: externalAccountReference(source.sourceAccount) } : {}),
+    ...(externalAccountReference(source.destinationAccount) ? { destinationAccount: externalAccountReference(source.destinationAccount) } : {}),
+    impacts,
+    actor: {
+      id: String(actorSource.id ?? source.actorMembershipId ?? source.createdByMembershipId ?? ''),
+      displayName: String(actorSource.displayName ?? source.actorName ?? i18n.t('common.system')),
+      ...(typeof actorSource.avatarUrl === 'string' && actorSource.avatarUrl ? { avatarUrl: actorSource.avatarUrl } : {}),
+    },
+    status: source.status === 'REVERSED' ? 'REVERSED' : 'POSTED',
+    ...(typeof (source.reversalOfId ?? source.reversalOf) === 'string' && (source.reversalOfId ?? source.reversalOf) ? { reversalOfId: String(source.reversalOfId ?? source.reversalOf) } : {}),
+    ...(typeof (source.replacementForId ?? source.correctionOf) === 'string' && (source.replacementForId ?? source.correctionOf) ? { replacementForId: String(source.replacementForId ?? source.correctionOf) } : {}),
+    ...(typeof source.reversedById === 'string' && source.reversedById ? { reversedById: source.reversedById } : {}),
+    ...(typeof source.replacementId === 'string' && source.replacementId ? { replacementId: source.replacementId } : {}),
+    ...(typeof source.paymentId === 'string' && source.paymentId ? { paymentId: source.paymentId } : {}),
+    canReverse: source.canReverse === true,
   };
 }
 
@@ -749,6 +876,7 @@ export function adaptSession(input: unknown): Session {
       logoUrl: typeof group.logoUrl === 'string' ? group.logoUrl : undefined,
       defaultTheme: isThemeId(group.defaultTheme) ? group.defaultTheme : 'TEAMTALER',
       statisticsEnabled: group.statisticsEnabled === true,
+      externalAccountsEnabled: group.externalAccountsEnabled === true,
       planningEnabled: group.planningEnabled === true,
       membership: membership ? {
         id: String(membership.id),
@@ -1470,10 +1598,30 @@ function adaptFinanceStatistics(input: unknown): FinanceStatistics {
  */
 export function adaptStatisticsDashboard(input: unknown): StatisticsDashboard {
   const source = asRecord(input);
+  const externalAccounts = source.externalAccounts && typeof source.externalAccounts === 'object' ? asRecord(source.externalAccounts) : null;
+  const externalCurrency = String(externalAccounts?.currency || 'EUR');
   return {
     meta: adaptStatisticsMeta(source.meta),
     members: adaptMemberStatistics(source.members),
     finance: adaptFinanceStatistics(source.finance),
+    externalAccounts: externalAccounts ? {
+      currency: externalCurrency,
+      accounts: (Array.isArray(externalAccounts.accounts) ? externalAccounts.accounts : []).map((item): ExternalAccountsStatistics['accounts'][number] => {
+        const account = asRecord(item);
+        return {
+          id: String(account.id ?? ''),
+          name: String(account.name ?? ''),
+          type: String(account.type ?? 'OTHER') as ExternalAccountsStatistics['accounts'][number]['type'],
+          status: String(account.status ?? 'ARCHIVED') as ExternalAccountsStatistics['accounts'][number]['status'],
+          openingBalance: money(account.openingBalanceMinor, externalCurrency),
+          closingBalance: money(account.closingBalanceMinor, externalCurrency),
+          series: (Array.isArray(account.series) ? account.series : []).map((entry) => {
+            const point = asRecord(entry);
+            return { periodStart: String(point.periodStart ?? ''), closingBalance: money(point.closingBalanceMinor, externalCurrency) };
+          }),
+        };
+      }),
+    } : null,
   };
 }
 

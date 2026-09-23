@@ -38,8 +38,8 @@ var (
 	storeMu           sync.Mutex
 )
 
-// Stored describes one normalized, content-addressed receipt prepared for a
-// payment transaction. StorageKey is private persistence metadata.
+// Stored describes one normalized, content-addressed financial attachment.
+// StorageKey is private persistence metadata.
 type Stored struct {
 	StorageKey string
 	FileName   string
@@ -48,7 +48,15 @@ type Stored struct {
 	SHA256     string
 }
 
-// Store owns payment receipt files below one trusted TeamTaler data directory.
+// Upload describes one untrusted attachment stream and its effective size
+// limit before the store validates and normalizes its contents.
+type Upload struct {
+	FileName string
+	Reader   io.Reader
+	MaxBytes int64
+}
+
+// Store owns financial evidence files below one trusted TeamTaler data directory.
 type Store struct {
 	DataDirectory string
 }

@@ -88,6 +88,15 @@ describe('AdminPage workspace separation', () => {
     expect(screen.queryByText('members-panel')).not.toBeInTheDocument();
   });
 
+  it('mounts only general settings for an enabled external-account manager', () => {
+    mocks.useActiveGroup.mockReturnValue({ activeGroup: { externalAccountsEnabled: true, membership: { effectiveGrants: [{ permission: 'MANAGE_EXTERNAL_ACCOUNTS', scope: { type: 'GROUP' } }] } } });
+
+    render(<AdminPage />);
+
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Allgemein']);
+    expect(screen.getByText('settings-panel')).toBeVisible();
+  });
+
   it('keeps the legacy directory grant hidden from a role manager', () => {
     mocks.useActiveGroup.mockReturnValue({ activeGroup: { membership: { effectiveGrants: [{ permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'VIEW_MEMBER_DIRECTORY', scope: { type: 'GROUP' } }] } } });
 

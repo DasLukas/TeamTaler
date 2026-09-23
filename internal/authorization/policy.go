@@ -30,8 +30,18 @@ var permissionDefinitions = []domain.PermissionDefinition{
 		Description: "Manage roles and permission grants.",
 	},
 	{
-		Key:         domain.PermissionFinanceManagement,
-		Description: "Manage payments, payment reversals, accounts, and accounting periods.",
+		Key:                domain.PermissionFinanceManagement,
+		Description:        "Manage payments, payment reversals, accounts, and accounting periods.",
+		ImpliedPermissions: []domain.PermissionKey{domain.PermissionManageExternalAccounts},
+	},
+	{
+		Key:         domain.PermissionViewExternalAccounts,
+		Description: "View external account balances, payment-method links, and transaction history.",
+	},
+	{
+		Key:                domain.PermissionManageExternalAccounts,
+		Description:        "Manage external accounts, payment-method links, and manual account transactions.",
+		ImpliedPermissions: []domain.PermissionKey{domain.PermissionViewExternalAccounts},
 	},
 	{
 		Key:         domain.PermissionCatalogManagement,

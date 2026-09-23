@@ -1396,6 +1396,51 @@ describe('server-backed collection API contract', () => {
     expect(page).toMatchObject({ items: [{ kind: 'PAYMENT', amount: { minorUnits: '-1250', currency: 'EUR' } }], nextCursor: 'activity-cursor', hasMore: true, limit: 50 });
   });
 
+  it('serializes repeated external-account transaction filters', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse([]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.getExternalAccountTransactionsPage('group/a', {
+      accountId: ['external-cash', 'external-bank'],
+      kind: ['INCOME', 'TRANSFER'],
+      limit: 50,
+    });
+
+    const requestUrl = new URL(String(fetchMock.mock.calls[0][0]), 'https://teamtaler.example');
+    expect(requestUrl.pathname).toBe('/api/v1/groups/group%2Fa/external-account-transactions');
+    expect(requestUrl.searchParams.getAll('accountId')).toEqual(['external-cash', 'external-bank']);
+    expect(requestUrl.searchParams.getAll('kind')).toEqual(['INCOME', 'TRANSFER']);
+  });
+
+  it('uploads and downloads an external-account transaction attachment', async () => {
+    const transaction = {
+      id: 'ext-attachment', kind: 'INCOME', primaryAccountId: 'exa-cash', amountMinor: '250', currency: 'EUR',
+      bookedAt: '2026-09-13T00:00:00Z', createdAt: '2026-09-13T10:00:00Z', actor: { id: 'mem-a', displayName: 'Alex' },
+      attachment: { fileName: 'evidence.pdf', mediaType: 'application/pdf', sizeBytes: 8, url: '/api/v1/groups/group-a/external-account-transactions/ext-attachment/attachment' },
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(session('user-a')))
+      .mockResolvedValueOnce(jsonResponse(transaction, 201))
+      .mockResolvedValueOnce(new Response('evidence', { headers: { 'Content-Type': 'application/pdf' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.getSession();
+
+    const command = { kind: 'INCOME' as const, destinationAccountId: 'exa-cash', amountMinor: 250, occurredAt: '2026-09-13', reason: 'Donation' };
+    const file = new File(['evidence'], 'evidence.pdf', { type: 'application/pdf' });
+    const created = await api.createExternalAccountTransaction('group-a', command, file);
+
+    const body = (fetchMock.mock.calls[1][1] as RequestInit).body;
+    expect(body).toBeInstanceOf(FormData);
+    const form = body as FormData;
+    expect(JSON.parse(await blobText(form.get('command') as Blob))).toEqual(command);
+    expect((form.get('attachment') as File).name).toBe('evidence.pdf');
+    expect(created.attachment).toMatchObject({ fileName: 'evidence.pdf', sizeBytes: 8 });
+
+    const downloaded = await api.getExternalAccountTransactionAttachment('group-a', created.id);
+    expect(downloaded.type).toBe('application/pdf');
+    expect(fetchMock.mock.calls[2][0]).toBe('/api/v1/groups/group-a/external-account-transactions/ext-attachment/attachment');
+  });
+
   it('serializes an activity anchor for a server-side focus context', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse([]));
     vi.stubGlobal('fetch', fetchMock);
@@ -1515,5 +1560,73 @@ describe('server-backed collection API contract', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/groups/group%2Fa/me/exports');
     expect(requestBody(fetchMock.mock.calls[0])).toEqual({ currentPassword: 'current-password' });
     expect(idempotencyKey(fetchMock.mock.calls[0])).toMatch(/^[0-9a-f-]{36}$/i);
+  });
+
+  it('creates a bank account under the collection precondition with an atomic opening balance', async () => {
+    const collection = { items: [{ id: 'exa-bank', name: 'Bank', type: 'BANK', status: 'ACTIVE', balanceMinor: '1000', currency: 'EUR' }], version: 4 };
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(session('user-a'))).mockResolvedValueOnce(jsonResponse(collection, 201));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.getSession();
+
+    const result = await api.createExternalAccount('group/a', {
+      name: 'Bank',
+      type: 'BANK',
+      details: { type: 'BANK', recipientName: 'Example Club', iban: 'DE89370400440532013000' },
+      openingBalance: { amountMinor: 1000, occurredAt: '2026-09-13', reason: 'Opening' },
+    }, 3);
+
+    const call = fetchMock.mock.calls[1];
+    expect(call[0]).toBe('/api/v1/groups/group%2Fa/external-accounts');
+    expect(new Headers(call[1]?.headers).get('If-Match')).toBe('"v3"');
+    expect(idempotencyKey(call)).toBeTruthy();
+    expect(requestBody(call)).toEqual({
+      name: 'Bank', type: 'BANK', sepaRecipientName: 'Example Club', sepaIban: 'DE89370400440532013000',
+      openingBalance: { amountMinor: 1000, occurredAt: '2026-09-13', reason: 'Opening' },
+    });
+    expect(result).toMatchObject({ version: 4, items: [{ id: 'exa-bank', balance: { minorUnits: '1000', currency: 'EUR' } }] });
+  });
+
+  it('uses the canonical PayPal provider field', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(session('user-a'))).mockResolvedValueOnce(jsonResponse({ items: [], version: 2 }, 201));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.getSession();
+
+    await api.createExternalAccount('group-a', {
+      name: 'PayPal',
+      type: 'PAYPAL',
+      details: { type: 'PAYPAL', paypalMeHandle: 'example-club' },
+    }, 1);
+
+    expect(requestBody(fetchMock.mock.calls[1])).toEqual({ name: 'PayPal', type: 'PAYPAL', paypalMeHandle: 'example-club' });
+  });
+
+  it('replaces the complete nullable payment-method mapping under the collection version', async () => {
+    const links = { links: [{ paymentMethodId: 'CASH', externalAccountId: null }], version: 6 };
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ ...links, version: 7 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.updateExternalAccountLinks('group-a', links)).resolves.toEqual({ ...links, version: 7 });
+
+    const call = fetchMock.mock.calls[0];
+    expect(call[0]).toBe('/api/v1/groups/group-a/external-account-links');
+    expect(new Headers(call[1]?.headers).get('If-Match')).toBe('"v6"');
+    expect(requestBody(call)).toEqual({ links: links.links });
+  });
+
+  it('adapts the immutable reversal returned by a manual transaction reversal', async () => {
+    const transaction = {
+      id: 'ext-new', kind: 'INCOME', primaryAccountId: 'exa-cash', amountMinor: '500', currency: 'EUR',
+      bookedAt: '2026-09-13T00:00:00Z', createdAt: '2026-09-13T10:00:00Z', actor: { id: 'mem-a', displayName: 'Alex' },
+    };
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(session('user-a'))).mockResolvedValueOnce(jsonResponse({
+      ...transaction, id: 'ext-reversal', kind: 'REVERSAL', amountMinor: '-500', reversalOf: 'ext-old',
+    }, 201));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.getSession();
+
+    const result = await api.reverseExternalAccountTransaction('group-a', 'ext-old', 'Wrong amount');
+
+    expect(result).toMatchObject({ id: 'ext-reversal', amount: { minorUnits: '-500' }, reversalOfId: 'ext-old' });
+    expect(requestBody(fetchMock.mock.calls[1])).toEqual({ reason: 'Wrong amount' });
   });
 });

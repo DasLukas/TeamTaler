@@ -32,7 +32,7 @@ export function GroupProvider({ session, children }: { session: Session; childre
       .catch(() => undefined)
       .then(() => api.recordLastUsedGroup(group.id))
       .catch(() => undefined);
-    if (!options?.preserveRoute) void navigate({ to: preferredMemberPath(group.membership?.effectiveGrants) });
+    if (!options?.preserveRoute) void navigate({ to: preferredMemberPath(group.membership?.effectiveGrants, group.externalAccountsEnabled) });
   }, [navigate, session.groups]);
   const value = useMemo(() => ({ session, activeGroup, activeGroupId: activeGroup.id, setActiveGroupId: selectActiveGroup }), [activeGroup, selectActiveGroup, session]);
   return <ActiveGroupContext.Provider value={value}>{children}</ActiveGroupContext.Provider>;

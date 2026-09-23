@@ -217,6 +217,23 @@ func TestTableQueryHandlersFilterSortAndPaginateWithoutChangingArrayBodies(t *te
 	if err := json.Unmarshal(paymentResponse.Body.Bytes(), &paymentItems); err != nil || paymentResponse.Code != http.StatusOK || len(paymentItems) != 2 || paymentItems[0].AmountMinor != 300 || paymentItems[1].AmountMinor != 200 || paymentItems[0].ActorMembershipID != membership.ID || paymentItems[0].ActorDisplayName != membership.DisplayName {
 		t.Fatalf("payments status=%d items=%#v err=%v body=%s", paymentResponse.Code, paymentItems, err, paymentResponse.Body.String())
 	}
+	linkedPaymentResponse := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/payments?paymentId="+url.QueryEscape(payments[0].ID)+"&limit=1", server.handleListPayments)
+	var linkedPaymentItems []domain.Payment
+	if err := json.Unmarshal(linkedPaymentResponse.Body.Bytes(), &linkedPaymentItems); err != nil || linkedPaymentResponse.Code != http.StatusOK || len(linkedPaymentItems) != 1 || linkedPaymentItems[0].ID != payments[0].ID || linkedPaymentResponse.Header().Get("X-Has-More") != "false" {
+		t.Fatalf("linked payment status=%d items=%#v err=%v body=%s", linkedPaymentResponse.Code, linkedPaymentItems, err, linkedPaymentResponse.Body.String())
+	}
+	missingPaymentResponse := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/payments?paymentId=pay_missing", server.handleListPayments)
+	var missingPaymentItems []domain.Payment
+	if err := json.Unmarshal(missingPaymentResponse.Body.Bytes(), &missingPaymentItems); err != nil || missingPaymentResponse.Code != http.StatusOK || len(missingPaymentItems) != 0 {
+		t.Fatalf("missing linked payment status=%d items=%#v err=%v body=%s", missingPaymentResponse.Code, missingPaymentItems, err, missingPaymentResponse.Body.String())
+	}
+	invalidPaymentIDResponse := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/payments?paymentId="+strings.Repeat("x", 121), server.handleListPayments)
+	if invalidPaymentIDResponse.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid payment ID status=%d body=%s", invalidPaymentIDResponse.Code, invalidPaymentIDResponse.Body.String())
+	}
 
 	movementResponse := performTableGET(t, principal, membership.GroupID,
 		"/api/v1/groups/"+membership.GroupID+"/accounts/me/movements?type=PAYMENT&sort=amount&direction=asc&limit=2",

@@ -27,14 +27,16 @@ type Service struct {
 type statisticsQueryer interface {
 	authorization.Queryer
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
 type dashboardContext struct {
-	statisticsEnabled  bool
-	settlementsEnabled bool
-	currency           string
-	timezone           string
-	groupCreatedAt     time.Time
+	statisticsEnabled       bool
+	settlementsEnabled      bool
+	externalAccountsEnabled bool
+	currency                string
+	timezone                string
+	groupCreatedAt          time.Time
 }
 
 // Dashboard returns member, booking, and complete-ledger finance aggregates
@@ -71,23 +73,36 @@ func (s Service) Dashboard(ctx context.Context, membership domain.Membership, qu
 	if err != nil {
 		return Dashboard{}, err
 	}
+	var externalAccounts *ExternalAccountsStatistics
+	if configuration.externalAccountsEnabled {
+		allowed, permissionErr := authorization.NewPolicy(snapshot.reader).Can(ctx, membership.GroupID, membership.ID, domain.PermissionViewExternalAccounts, authorization.GroupResource(membership.GroupID))
+		if permissionErr != nil {
+			return Dashboard{}, permissionErr
+		}
+		if allowed {
+			externalAccounts, err = snapshot.externalAccountStatistics(ctx, membership.GroupID, configuration.currency, rangeValue)
+			if err != nil {
+				return Dashboard{}, err
+			}
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return Dashboard{}, err
 	}
-	return Dashboard{Meta: rangeValue.meta, Members: members, Finance: finance}, nil
+	return Dashboard{Meta: rangeValue.meta, Members: members, Finance: finance, ExternalAccounts: externalAccounts}, nil
 }
 
 func (s Service) authorize(ctx context.Context, membership domain.Membership) (dashboardContext, error) {
 	queryer := s.queryer()
 	var configuration dashboardContext
 	var createdAt string
-	err := queryer.QueryRowContext(ctx, `SELECT settings.statistics_enabled,settings.settlements_enabled,g.currency,
+	err := queryer.QueryRowContext(ctx, `SELECT settings.statistics_enabled,settings.settlements_enabled,settings.external_accounts_enabled,g.currency,
 		COALESCE((SELECT value_text FROM system_setting_overrides WHERE setting_key='instance.timezone' AND value_type='STRING'),'Europe/Berlin'),
 		g.created_at
 		FROM groups g
 		JOIN group_settings settings ON settings.group_id=g.id
 		WHERE g.id=? AND g.status='ACTIVE'`, membership.GroupID).
-		Scan(&configuration.statisticsEnabled, &configuration.settlementsEnabled, &configuration.currency, &configuration.timezone, &createdAt)
+		Scan(&configuration.statisticsEnabled, &configuration.settlementsEnabled, &configuration.externalAccountsEnabled, &configuration.currency, &configuration.timezone, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return dashboardContext{}, domain.ErrForbidden
 	}

@@ -18,6 +18,7 @@ export interface PaymentAttachmentFieldProps {
   file: File | null;
   maxBytes: number;
   onChange: (file: File | null) => void;
+  showOptionalLabel?: boolean;
 }
 
 /** Renders one selected receipt and owns the lifecycle of its image preview URL. */
@@ -33,7 +34,7 @@ function PaymentAttachmentSelection({ file, onRemove }: { file: File; onRemove: 
 }
 
 /** Selects, validates, previews, replaces, or scans one immutable payment receipt. */
-export function PaymentAttachmentField({ attachmentMode, file, maxBytes, onChange }: PaymentAttachmentFieldProps) {
+export function PaymentAttachmentField({ attachmentMode, file, maxBytes, onChange, showOptionalLabel = true }: PaymentAttachmentFieldProps) {
   const { t } = useTranslation();
   const galleryInputId = useId();
   const fileInputId = useId();
@@ -41,6 +42,9 @@ export function PaymentAttachmentField({ attachmentMode, file, maxBytes, onChang
   const [error, setError] = useState('');
 
   if (attachmentMode === 'OFF') return null;
+  const labelSuffix = attachmentMode === 'REQUIRED'
+    ? ' *'
+    : showOptionalLabel ? ` (${t('common.optional', { defaultValue: 'optional' })})` : '';
 
   const accept = (candidate: File | null) => {
     if (!candidate) return;
@@ -61,7 +65,7 @@ export function PaymentAttachmentField({ attachmentMode, file, maxBytes, onChang
   };
 
   return <fieldset className={styles.fieldset}>
-    <legend>{t('paymentAttachment.label', { defaultValue: 'Receipt' })}{attachmentMode === 'REQUIRED' ? ' *' : ''}</legend>
+    <legend>{t('paymentAttachment.label', { defaultValue: 'Receipt' })}{labelSuffix}</legend>
     <p className={styles.hint}>{t('paymentAttachment.hint', { defaultValue: 'Add one image or PDF, or scan a multi-page document.' })}</p>
     <input accept="image/jpeg,image/png,image/webp" className={styles.hiddenInput} id={galleryInputId} onChange={select} type="file" />
     <input accept="image/jpeg,image/png,image/webp,application/pdf,.jpg,.jpeg,.png,.webp,.pdf" className={styles.hiddenInput} id={fileInputId} onChange={select} type="file" />

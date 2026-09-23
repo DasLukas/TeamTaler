@@ -78,6 +78,29 @@ func TestRunSeedsDiverseGermanEnvironment(t *testing.T) {
 		assertCount(t, ctx, db, `SELECT count(*) FROM group_reason_suggestions r JOIN groups g ON g.id=r.group_id WHERE g.name=? AND r.kind='PAYMENT'`, []any{groupName}, 4)
 	}
 	assertCount(t, ctx, db, `SELECT count(*) FROM group_settings WHERE settlements_enabled=1 AND settlement_due_soon_days=7 AND settlement_overdue_repeat_days=3`, nil, 2)
+	assertCount(t, ctx, db, `SELECT count(*) FROM group_settings settings JOIN groups g ON g.id=settings.group_id WHERE g.name=? AND settings.external_accounts_enabled=1`, []any{primaryGroupName}, 1)
+	assertCount(t, ctx, db, `SELECT count(*) FROM group_settings settings JOIN groups g ON g.id=settings.group_id WHERE g.name=? AND settings.external_accounts_enabled=0`, []any{secondaryGroupName}, 1)
+	assertCount(t, ctx, db, `SELECT count(*) FROM external_accounts account JOIN groups g ON g.id=account.group_id WHERE g.name=?`, []any{primaryGroupName}, 3)
+	assertCount(t, ctx, db, `SELECT count(*) FROM external_accounts account JOIN groups g ON g.id=account.group_id WHERE g.name=?`, []any{secondaryGroupName}, 0)
+	assertCount(t, ctx, db, `SELECT count(DISTINCT account.type) FROM external_accounts account JOIN groups g ON g.id=account.group_id WHERE g.name=? AND account.type IN ('BANK','PAYPAL','CASH')`, []any{primaryGroupName}, 3)
+	assertCount(t, ctx, db, `SELECT count(*) FROM group_payment_methods method JOIN groups g ON g.id=method.group_id WHERE g.name=? AND method.external_account_id IS NOT NULL`, []any{primaryGroupName}, 4)
+	assertCount(t, ctx, db, `SELECT count(DISTINCT method.external_account_id) FROM group_payment_methods method JOIN groups g ON g.id=method.group_id WHERE g.name=? AND method.id IN ('BANK_TRANSFER','CARD')`, []any{primaryGroupName}, 1)
+	assertCount(t, ctx, db, `SELECT count(*) FROM group_payment_methods method JOIN groups g ON g.id=method.group_id WHERE g.name=? AND method.id IN ('SHOPPING','OTHER') AND method.external_account_id IS NULL`, []any{primaryGroupName}, 2)
+	assertCount(t, ctx, db, `SELECT count(*) FROM external_account_transactions transaction_row JOIN groups g ON g.id=transaction_row.group_id WHERE g.name=? AND transaction_row.kind='OPENING_BALANCE'`, []any{primaryGroupName}, 3)
+	assertCount(t, ctx, db, `SELECT count(*) FROM external_account_transactions transaction_row JOIN groups g ON g.id=transaction_row.group_id WHERE g.name=? AND transaction_row.kind='PAYMENT'`, []any{primaryGroupName}, 8)
+	assertCount(t, ctx, db, `SELECT count(*) FROM external_account_transactions transaction_row JOIN groups g ON g.id=transaction_row.group_id WHERE g.name=? AND transaction_row.kind='TRANSFER'`, []any{primaryGroupName}, 1)
+	assertCount(t, ctx, db, `SELECT count(*) FROM external_account_transactions transaction_row JOIN groups g ON g.id=transaction_row.group_id WHERE g.name=? AND transaction_row.correction_of IS NOT NULL`, []any{primaryGroupName}, 0)
+	assertCount(t, ctx, db, `SELECT count(*) FROM external_account_transactions transaction_row JOIN groups g ON g.id=transaction_row.group_id WHERE g.name=? AND transaction_row.kind='REVERSAL' AND transaction_row.payment_id IS NOT NULL`, []any{primaryGroupName}, 1)
+	assertCount(t, ctx, db, `SELECT count(*) FROM (
+		SELECT account.id
+		FROM external_accounts account
+		JOIN groups g ON g.id=account.group_id
+		LEFT JOIN ledger_entries entry ON entry.group_id=account.group_id AND entry.external_account_id=account.id
+		WHERE g.name=? AND account.type='PAYPAL'
+		GROUP BY account.id
+		HAVING coalesce(sum(entry.amount_minor),0)<0
+	)`, []any{primaryGroupName}, 1)
+	assertCount(t, ctx, db, `SELECT count(*) FROM external_account_transactions transaction_row JOIN groups g ON g.id=transaction_row.group_id WHERE g.name=? AND transaction_row.payment_id IS NULL AND coalesce((SELECT sum(entry.amount_minor) FROM ledger_entries entry WHERE entry.group_id=transaction_row.group_id AND entry.external_transaction_id=transaction_row.id),0)<>0`, []any{primaryGroupName}, 0)
 	assertCount(t, ctx, db, `SELECT count(*) FROM group_planning_settings WHERE enabled=1`, nil, 2)
 	assertCount(t, ctx, db, `SELECT count(*) FROM planning_series WHERE status='PUBLISHED'`, nil, 12)
 	for eventType := range map[string]struct{}{

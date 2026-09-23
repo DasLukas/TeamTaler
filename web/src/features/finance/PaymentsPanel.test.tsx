@@ -31,10 +31,10 @@ const accounts: AccountSummary[] = [
   { membershipId: 'member-deleted-credit', displayName: 'Deleted Credit', isTemporaryGuest: false, status: 'DELETED', currency: 'EUR', balance: { minorUnits: '-100', currency: 'EUR' } },
 ];
 
-function renderPayments(): void {
+function renderPayments(): ReturnType<typeof render> {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
-  render(<PaymentsPanel />, { wrapper });
+  return render(<PaymentsPanel />, { wrapper });
 }
 
 describe('PaymentsPanel', () => {
@@ -45,10 +45,11 @@ describe('PaymentsPanel', () => {
     apiMock.getPaymentsPage.mockResolvedValue({ hasMore: false, items: [], limit: 50 });
     apiMock.getAccountSummaries.mockResolvedValue(accounts);
     apiMock.getTransactionSettings.mockResolvedValue({
+      externalAccountsEnabled: true,
       foreignBookingReasonRequired: true,
       ownPaymentReasonRequired: true,
       otherPaymentReasonRequired: false,
-      paymentMethods: [{ id: 'CASH', label: 'Bar' }, { id: 'PAYPAL', label: 'PayPal' }],
+      paymentMethods: [{ id: 'CASH', label: 'Bar', externalAccountId: null }, { id: 'PAYPAL', label: 'PayPal', externalAccountId: 'account-paypal' }],
       bookingReasons: [],
       paymentReasons: [{ id: 'CORRECTION', label: 'Korrektur' }],
     });
@@ -110,6 +111,32 @@ describe('PaymentsPanel', () => {
     expect(member.closest('td')?.querySelector('img')).toHaveAttribute('src', '/avatars/active-account.png');
   });
 
+  it('opens an exact linked payment and returns to the full collection', async () => {
+    const user = userEvent.setup();
+    window.history.replaceState({}, '', '/finance?tab=payments&paymentId=payment-old');
+    apiMock.getPaymentsPage.mockResolvedValue({
+      hasMore: false,
+      items: [{
+        id: 'payment-old', membershipId: 'member-active', memberName: 'Active Account',
+        membershipStatus: 'ACTIVE', amount: { minorUnits: '425', currency: 'EUR' },
+        receivedAt: '2026-01-01T10:00:00Z', method: 'CASH', methodLabel: 'Bar', status: 'POSTED',
+      }],
+      limit: 1,
+    });
+    const { container } = renderPayments();
+
+    await waitFor(() => expect(apiMock.getPaymentsPage).toHaveBeenCalledWith('group-a', expect.objectContaining({ paymentId: 'payment-old', limit: 1 })));
+    await waitFor(() => expect(container.querySelector('[data-data-table-row-id="payment-old"]')).not.toBeNull());
+    const focusedRow = container.querySelector('[data-data-table-row-id="payment-old"]');
+    expect(focusedRow).toHaveAttribute('data-highlighted', 'true');
+    expect(focusedRow).toHaveFocus();
+    expect(screen.getByText(i18n.t('finance.focusedPayment'))).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: i18n.t('finance.showAllPayments') }));
+    expect(new URLSearchParams(window.location.search).has('paymentId')).toBe(false);
+    await waitFor(() => expect(apiMock.getPaymentsPage).toHaveBeenCalledWith('group-a', expect.not.objectContaining({ paymentId: 'payment-old' })));
+  });
+
   it('renders lifecycle icons for archived and deleted payment members', async () => {
     apiMock.getPaymentsPage.mockResolvedValue({
       hasMore: false,
@@ -160,6 +187,7 @@ describe('PaymentsPanel', () => {
     expect(screen.getByLabelText(i18n.t('finance.reason'))).not.toBeRequired();
     expect(screen.queryByLabelText(`${i18n.t('finance.reason')} *`)).not.toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: i18n.t('finance.paymentType') })).toHaveTextContent('Bar');
+    expect(screen.queryByText(/externes Konto/i)).not.toBeInTheDocument();
   });
 
   it('reviews a managed payment before creation, preserves its draft on back, and submits only after confirmation', async () => {
@@ -194,6 +222,7 @@ describe('PaymentsPanel', () => {
     expect(within(reviewDialog).getByText(/12,50/, { selector: 'strong[data-financial-state="payment"]' })).toBeVisible();
     expect(within(reviewDialog).getByText('31.08.2026')).toBeVisible();
     expect(within(reviewDialog).getByText('PayPal')).toBeVisible();
+    expect(within(reviewDialog).queryByText(/Buchungswirkung/i)).not.toBeInTheDocument();
     expect(within(reviewDialog).getByText('Monthly dues')).toBeVisible();
 
     await user.click(within(reviewDialog).getByRole('button', { name: i18n.t('common.back') }));

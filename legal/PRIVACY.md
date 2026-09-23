@@ -32,6 +32,8 @@ Email: [EMAIL ADDRESS TO BE ADDED]
 
 [DESCRIBE PRODUCTS, BOOKING AND PAYMENT RECORDS, REASONS, PAYMENT DESTINATIONS, RECEIPTS, BALANCES, SETTLEMENTS, ACCESS ROLES, PURPOSES, LEGAL BASES, RETENTION, AND ANY STATUTORY OBLIGATIONS.]
 
+If external accounts are enabled, disclose that TeamTaler stores group-owned cash, bank, PayPal, and other account names; clear-text PayPal.Me handles and SEPA recipient, IBAN, and optional BIC fields; immutable transaction history; reasons, references, and notes; actor memberships; and ledger-derived balances. Explain which group roles may view or manage this data, that linked payment instructions remain visible to active members who can record payments, and that disabling or unlinking the feature preserves the financial history. State clearly that TeamTaler does not connect to bank or PayPal APIs, verify account ownership or balances, receive provider webhooks, initiate payments, or reconcile external activity automatically.
+
 ## Planning, statistics, notifications, and audit records
 
 [DESCRIBE EVENTS, POLLS, REGISTRATIONS, PRIVACY-SUPPRESSED STATISTICS, IN-APP NOTIFICATIONS, ADMINISTRATIVE AUDIT RECORDS, PURPOSES, ACCESS, LEGAL BASES, AND RETENTION.]
@@ -47,6 +49,8 @@ Email: [EMAIL ADDRESS TO BE ADDED]
 ## Exports, backups, deletion, and retention
 
 [DESCRIBE USER-REQUESTED EXPORTS, THEIR EXPIRY, APPLICATION DATA RETENTION, IMMUTABLE FINANCIAL HISTORY, GROUP PURGE, BACKUP CONTENT, BACKUP LOCATION, BACKUP RETENTION, AND DELETION LIMITATIONS.]
+
+State that complete group raw-data exports and database backups include external-account configuration, transaction and ledger history, payment-method links, and clear-text provider details. Personal exports exclude group-owned external-account configuration and history. Authorized CSV and PDF table exports apply the selected transaction filters. Document the operator's retention and deletion policy for downloaded archives and backups separately from the application's group-purge behavior.
 
 ## Recipients and international transfers
 
