@@ -33,7 +33,7 @@ import styles from './ActivitiesPage.module.css';
 
 const activityPageSize = 50;
 const activityViewStorageKey = 'teamtaler:activities-view:v1';
-type ActivityFilterId = 'kind' | 'targetMembershipId' | 'productId' | 'categoryId' | 'status' | 'occurredAt' | 'amount';
+type ActivityFilterId = 'kind' | 'periodId' | 'targetMembershipId' | 'productId' | 'categoryId' | 'status' | 'occurredAt' | 'amount';
 type ActivitySortId = 'kind' | 'targetName' | 'actorName' | 'detailName' | 'categoryName' | 'occurredAt' | 'amount' | 'status';
 type MobileActivityView = 'cards' | 'table';
 
@@ -118,6 +118,13 @@ export function ActivitiesPage() {
     },
     {
       allLabel: t('dataTable.allValues'),
+      id: 'periodId',
+      kind: 'select',
+      label: t('periods.period'),
+      options: (filterOptionsQuery.data?.periods ?? []).map((period) => ({ label: period.label, value: period.periodId })),
+    },
+    {
+      allLabel: t('dataTable.allValues'),
       id: 'targetMembershipId',
       kind: 'select',
       label: t('common.member'),
@@ -173,7 +180,7 @@ export function ActivitiesPage() {
       minimumLabel: t('dataTable.minimum'),
       step: 0.01,
     },
-  ], [activeGroup.currency, categoryIcons, filterOptionsQuery.data?.categories, filterOptionsQuery.data?.kinds, filterOptionsQuery.data?.products, memberFilterOptions, t]);
+  ], [activeGroup.currency, categoryIcons, filterOptionsQuery.data?.categories, filterOptionsQuery.data?.kinds, filterOptionsQuery.data?.periods, filterOptionsQuery.data?.products, memberFilterOptions, t]);
   const sortOptions = useMemo<readonly SelectMenuOption<ActivitySortId>[]>(() => [
     { label: t('activities.transaction'), value: 'kind' },
     { label: t('common.member'), value: 'targetName' },
@@ -239,6 +246,7 @@ export function ActivitiesPage() {
       limit: activityPageSize,
       occurredFrom: dateRange?.from,
       occurredTo: dateRange?.to,
+      periodId: tableState.filters.periodId as string | undefined,
       productId: productIds,
       q: deferredSearch || undefined,
       sort: (sorting?.id ?? 'occurredAt') as ActivityCollectionQuery['sort'],

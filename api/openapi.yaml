@@ -3183,6 +3183,10 @@ paths:
             type: array
             maxItems: 200
             items: { $ref: '#/components/schemas/ActivityKind' }
+        - name: periodId
+          in: query
+          description: Exact accounting-period identifier. Entries without a period never match.
+          schema: { type: string, maxLength: 200 }
         - name: targetMembershipId
           in: query
           schema: { type: string }
@@ -5049,6 +5053,7 @@ components:
           maxItems: 200
           uniqueItems: true
           items: { type: string, enum: [BOOKING, PAYMENT, ADJUSTMENT] }
+        periodId: { type: string, maxLength: 200 }
         targetMembershipId: { type: string }
         categoryId:
           type: array
@@ -5860,12 +5865,16 @@ components:
     ActivityFilterOptions:
       type: object
       additionalProperties: false
-      required: [kinds, members, categories, products]
+      required: [kinds, periods, members, categories, products]
       properties:
         kinds:
           type: array
           description: Distinct transaction kinds present in the caller's authorized unified feed.
           items: { $ref: '#/components/schemas/ActivityKind' }
+        periods:
+          type: array
+          description: Distinct accounting periods referenced by the caller's authorized unified feed, newest first.
+          items: { $ref: '#/components/schemas/ActivityPeriodFilterOption' }
         members:
           type: array
           description: Distinct targets present in the caller's authorized unified feed.
@@ -5878,6 +5887,13 @@ components:
           type: array
           description: Distinct booking products present in the caller's authorized unified feed, including retained historical products.
           items: { $ref: '#/components/schemas/ActivityProductFilterOption' }
+    ActivityPeriodFilterOption:
+      type: object
+      additionalProperties: false
+      required: [periodId, label]
+      properties:
+        periodId: { type: string }
+        label: { type: string }
     ActivityCategoryFilterOption:
       type: object
       additionalProperties: false

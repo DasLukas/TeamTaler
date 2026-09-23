@@ -45,6 +45,37 @@ export function formatGermanDate(value: string | Date): string {
 }
 
 /**
+ * Formats an inclusive date interval for German user-facing copy.
+ *
+ * @param from - First calendar day of the interval.
+ * @param to - Last calendar day of the interval.
+ * @returns Both German dates separated by an en dash.
+ * @throws {RangeError} Either value cannot be interpreted as a valid date.
+ *
+ * @example
+ * formatGermanDateRange('2026-09-01', '2026-09-23') // '01.09.2026 – 23.09.2026'
+ */
+export function formatGermanDateRange(from: string | Date, to: string | Date): string {
+  return `${formatGermanDate(from)} – ${formatGermanDate(to)}`;
+}
+
+/**
+ * Converts a date or timestamp to a browser-local calendar key without UTC day shifts.
+ *
+ * @param value - ISO date, timestamp, or Date to convert.
+ * @returns A date-only value in YYYY-MM-DD form.
+ * @throws {RangeError} The value cannot be interpreted as a valid date.
+ */
+export function localDateKey(value: string | Date): string {
+  const date = presentationDate(value);
+  if (Number.isNaN(date.getTime())) throw new RangeError('Invalid date value.');
+  const year = String(date.getFullYear()).padStart(4, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
  * Formats a timestamp for German user-facing copy as DD.MM.YYYY, HH:mm.
  *
  * @param value - ISO timestamp or Date to format.

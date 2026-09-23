@@ -1380,6 +1380,7 @@ describe('server-backed collection API contract', () => {
 
     const page = await api.getActivitiesPage('group/a', {
       q: 'Alex', kind: ['PAYMENT', 'ADJUSTMENT'], targetMembershipId: 'member-a',
+      periodId: 'period-a',
       categoryId: ['category-a', 'category-b'], productId: ['product-a', 'product-b'],
       status: 'POSTED', occurredFrom: '2026-08-01', occurredTo: '2026-08-31',
       amountMin: '-5000', amountMax: '2500', sort: 'amount', direction: 'asc', limit: 50,
@@ -1391,7 +1392,7 @@ describe('server-backed collection API contract', () => {
     expect(requestUrl.searchParams.getAll('categoryId')).toEqual(['category-a', 'category-b']);
     expect(requestUrl.searchParams.getAll('productId')).toEqual(['product-a', 'product-b']);
     expect(Object.fromEntries(requestUrl.searchParams)).toMatchObject({
-      q: 'Alex', targetMembershipId: 'member-a', status: 'POSTED', amountMin: '-5000', amountMax: '2500', sort: 'amount', direction: 'asc', limit: '50',
+      q: 'Alex', periodId: 'period-a', targetMembershipId: 'member-a', status: 'POSTED', amountMin: '-5000', amountMax: '2500', sort: 'amount', direction: 'asc', limit: '50',
     });
     expect(page).toMatchObject({ items: [{ kind: 'PAYMENT', amount: { minorUnits: '-1250', currency: 'EUR' } }], nextCursor: 'activity-cursor', hasMore: true, limit: 50 });
   });
@@ -1513,6 +1514,7 @@ describe('server-backed collection API contract', () => {
     const activityOptions = {
       ...bookingOptions,
       kinds: ['BOOKING', 'PAYMENT', 'ADJUSTMENT'],
+      periods: [{ periodId: 'period-a', label: 'August 2026' }],
       categories: [{ categoryId: 'category-a', name: 'Penalties', icon: 'penalty' }],
       products: [{ productId: 'product-a', categoryId: 'category-a', name: 'Late arrival' }],
     };

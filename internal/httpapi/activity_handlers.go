@@ -27,7 +27,7 @@ func (s *Server) handleActivities(response http.ResponseWriter, request *http.Re
 	}
 	values := request.URL.Query()
 	query := activities.Query{
-		Search: values.Get("q"), Kinds: values["kind"], TargetMembershipID: values.Get("targetMembershipId"),
+		Search: values.Get("q"), Kinds: values["kind"], PeriodID: values.Get("periodId"), TargetMembershipID: values.Get("targetMembershipId"),
 		CategoryIDs: values["categoryId"], ProductIDs: values["productId"], Status: values.Get("status"),
 		OccurredFrom: values.Get("occurredFrom"), OccurredTo: values.Get("occurredTo"),
 		AmountMin: amountMin, AmountMax: amountMax, Sort: values.Get("sort"), Direction: values.Get("direction"),

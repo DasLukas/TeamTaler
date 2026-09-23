@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import type { Settlement, TableExportCommand } from '@/api/types';
-import { Button } from '@/components/ui/Button';
+import { ItemAction } from '@/components/ui/ItemAction';
 import { openPdfPreviewWindow, showPdfInPreviewWindow, tableExportFileName } from '@/features/shared/exportDownload';
 import styles from './SettlementPdfPreviewAction.module.css';
 
@@ -67,16 +67,14 @@ export function SettlementPdfPreviewAction({ groupId, settlement }: SettlementPd
 
   return (
     <div className={styles.action}>
-      <Button
+      <ItemAction
         aria-label={t('periods.printFor', { member: settlement.memberName, period: settlement.periodLabel })}
         disabled={mutation.isPending}
         leadingIcon={<Printer size={16} />}
         onClick={openPreview}
-        size="small"
-        variant="ghost"
       >
         {mutation.isPending ? t('periods.preparingPdf') : t('common.print')}
-      </Button>
+      </ItemAction>
       {errorMessage ? <p className={styles.error} role="alert">{errorMessage}</p> : null}
     </div>
   );

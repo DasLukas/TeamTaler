@@ -107,6 +107,17 @@ func TestTableQueryHandlersFilterSortAndPaginateWithoutChangingArrayBodies(t *te
 		reversalItems[0].CanReverse || reversalItems[0].Attachment != nil || !strings.Contains(reversalResponse.Body.String(), `"amountMinor":"100"`) {
 		t.Fatalf("unified reversal status=%d items=%#v err=%v body=%s", reversalResponse.Code, reversalItems, err, reversalResponse.Body.String())
 	}
+	periodResponse := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/activities?kind=BOOKING&periodId="+url.QueryEscape(periodID), server.handleActivities)
+	var periodItems []activities.Entry
+	if err := json.Unmarshal(periodResponse.Body.Bytes(), &periodItems); err != nil || periodResponse.Code != http.StatusOK || len(periodItems) != 3 {
+		t.Fatalf("unified period status=%d items=%#v err=%v body=%s", periodResponse.Code, periodItems, err, periodResponse.Body.String())
+	}
+	for _, item := range periodItems {
+		if item.PeriodID != periodID || item.Kind != activities.KindBooking {
+			t.Fatalf("unified period item=%#v, want period %q booking", item, periodID)
+		}
+	}
 	anchorID := firstUnified[1].ID
 	anchorResponse := performTableGET(t, principal, membership.GroupID,
 		"/api/v1/groups/"+membership.GroupID+"/activities?anchorId="+url.QueryEscape(anchorID)+"&kind=BOOKING&q=does-not-match&sort=amount&direction=asc&limit=3", server.handleActivities)

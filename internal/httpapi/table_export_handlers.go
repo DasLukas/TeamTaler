@@ -396,6 +396,7 @@ type activityExportQuery struct {
 	Sort               string   `json:"sort"`
 	Direction          string   `json:"direction"`
 	Kind               []string `json:"kind"`
+	PeriodID           string   `json:"periodId"`
 	TargetMembershipID string   `json:"targetMembershipId"`
 	CategoryID         []string `json:"categoryId"`
 	ProductID          []string `json:"productId"`
@@ -419,7 +420,7 @@ func (s *Server) activityExportRows(ctx context.Context, membership domain.Membe
 	if err != nil {
 		return nil, nil, err
 	}
-	query := activities.Query{Search: wire.Q, Sort: wire.Sort, Direction: wire.Direction, Kinds: wire.Kind, TargetMembershipID: wire.TargetMembershipID, CategoryIDs: wire.CategoryID, ProductIDs: wire.ProductID, Status: wire.Status, OccurredFrom: wire.OccurredFrom, OccurredTo: wire.OccurredTo, AmountMin: minimum, AmountMax: maximum}
+	query := activities.Query{Search: wire.Q, Sort: wire.Sort, Direction: wire.Direction, Kinds: wire.Kind, PeriodID: wire.PeriodID, TargetMembershipID: wire.TargetMembershipID, CategoryIDs: wire.CategoryID, ProductIDs: wire.ProductID, Status: wire.Status, OccurredFrom: wire.OccurredFrom, OccurredTo: wire.OccurredTo, AmountMin: minimum, AmountMax: maximum}
 	items, err := collectActivities(ctx, s.activities, membership, query, limit)
 	if err != nil {
 		return nil, nil, err

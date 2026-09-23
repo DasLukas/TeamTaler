@@ -1751,18 +1751,24 @@ export function adaptPayment(input: unknown): Payment {
 export function adaptSettlement(input: unknown, periods: Period[]): Settlement {
   const source = asRecord(input);
   const membershipStatus = source.membershipStatus === 'ARCHIVED' || source.membershipStatus === 'DELETED' ? source.membershipStatus : 'ACTIVE';
+  const period = periods.find((entry) => entry.id === source.periodId);
+  const periodStartsAt = typeof source.periodStartsAt === 'string' && source.periodStartsAt ? source.periodStartsAt : period?.startsAt ?? '';
+  const periodClosedAt = typeof source.periodClosedAt === 'string' && source.periodClosedAt ? source.periodClosedAt : period?.closedAt ?? '';
   if ('periodLabel' in source) return {
     ...source as unknown as Settlement,
     email: typeof source.email === 'string' ? source.email : null,
     membershipStatus,
+    periodStartsAt,
+    periodClosedAt,
   };
-  const period = periods.find((entry) => entry.id === source.periodId);
   const obligationMinor = (BigInt(String(source.chargesMinor ?? 0)) + BigInt(String(source.adjustmentsProvidedMinor ?? 0))).toString();
   const settledMinor = (BigInt(String(source.paymentsAllocatedMinor ?? 0)) + BigInt(String(source.adjustmentsAppliedMinor ?? 0))).toString();
   return {
     id: String(source.id),
     periodId: String(source.periodId),
     periodLabel: period?.label ?? i18n.t('common.settlementFallback'),
+    periodStartsAt,
+    periodClosedAt,
     membershipId: String(source.membershipId),
     membershipStatus,
     memberName: String(source.displayName ?? i18n.t('common.member')),

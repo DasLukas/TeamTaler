@@ -868,11 +868,14 @@ export class DemoTransport {
     if (resource === 'activities/filter-options' && method === 'GET') {
       const activities = this.listActivities(groupId, new URLSearchParams());
       const members = new Map<string, ActivityFilterOptions['members'][number]>();
+      const periods = new Map<string, ActivityFilterOptions['periods'][number]>();
       const categories = new Map<string, ActivityFilterOptions['categories'][number]>();
       const products = new Map<string, ActivityFilterOptions['products'][number]>();
       const kinds = new Set<ActivityFilterOptions['kinds'][number]>();
       for (const activity of activities) {
         kinds.add(activity.kind);
+        const period = this.periods.find((entry) => entry.id === activity.periodId);
+        if (period) periods.set(period.id, { periodId: period.id, label: period.label });
         members.set(activity.targetMembershipId, {
           membershipId: activity.targetMembershipId,
           displayName: activity.targetDisplayName,
@@ -897,6 +900,7 @@ export class DemoTransport {
       const collator = new Intl.Collator('de-DE', { numeric: true, sensitivity: 'base' });
       const options: ActivityFilterOptions = {
         kinds: (['BOOKING', 'PAYMENT', 'REVERSAL', 'ADJUSTMENT'] as const).filter((kind) => kinds.has(kind)),
+        periods: [...periods.values()],
         members: [...members.values()].sort((left, right) => collator.compare(left.displayName, right.displayName)),
         categories: [...categories.values()].sort((left, right) => collator.compare(left.name, right.name)),
         products: [...products.values()].sort((left, right) => collator.compare(left.name, right.name)),
@@ -1543,6 +1547,7 @@ export class DemoTransport {
       return {
         id: `booking:${booking.id}`,
         sourceId: booking.id,
+        periodId: this.dashboard.currentPeriod.id,
         kind: 'BOOKING',
         targetMembershipId: booking.memberId,
         targetDisplayName: booking.memberName,
@@ -1600,6 +1605,7 @@ export class DemoTransport {
       return [{
         id: `reversal:booking:${booking.id}`,
         sourceId: booking.id,
+        periodId: this.dashboard.currentPeriod.id,
         kind: 'REVERSAL',
         reversalSourceKind: 'BOOKING',
         relatedActivityId: `booking:${booking.id}`,
@@ -1656,6 +1662,7 @@ export class DemoTransport {
       .map((entry) => ({
         id: `adjustment:${entry.id}`,
         sourceId: entry.id,
+        periodId: this.dashboard.currentPeriod.id,
         kind: 'ADJUSTMENT',
         targetMembershipId: actor.id,
         targetDisplayName: actor.displayName,
@@ -1670,6 +1677,7 @@ export class DemoTransport {
       }));
     const anchorId = parameters.get('anchorId');
     const selectedKinds = new Set(parameters.getAll('kind'));
+    const periodId = parameters.get('periodId');
     const selectedCategories = new Set(parameters.getAll('categoryId'));
     const selectedProducts = new Set(parameters.getAll('productId'));
     const targetMembershipId = parameters.get('targetMembershipId');
@@ -1685,6 +1693,7 @@ export class DemoTransport {
         .filter(Boolean).join(' ').toLocaleLowerCase('de-DE');
       const amount = BigInt(activity.amount.minorUnits);
       return (selectedKinds.size === 0 || selectedKinds.has(activity.kind))
+        && (!periodId || activity.periodId === periodId)
         && (!targetMembershipId || activity.targetMembershipId === targetMembershipId)
         && (selectedCategories.size === 0 || Boolean(activity.categoryId && selectedCategories.has(activity.categoryId)))
         && (selectedProducts.size === 0 || Boolean(activity.productId && selectedProducts.has(activity.productId)))

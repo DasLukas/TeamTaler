@@ -74,6 +74,7 @@ type Entry struct {
 type Query struct {
 	Search             string
 	Kinds              []string
+	PeriodID           string
 	TargetMembershipID string
 	CategoryIDs        []string
 	ProductIDs         []string
@@ -88,6 +89,13 @@ type Query struct {
 	// AnchorID requests a centered, permission-scoped context window and pauses filters.
 	AnchorID string
 	Limit    int
+}
+
+// PeriodFilterOption identifies one accounting period referenced by the
+// caller's authorized activity feed.
+type PeriodFilterOption struct {
+	PeriodID string `json:"periodId"`
+	Label    string `json:"label"`
 }
 
 // Page is one globally sorted, stable keyset-paginated activity slice.
@@ -122,10 +130,11 @@ type ProductFilterOption struct {
 	ImageURL   string `json:"imageUrl,omitempty"`
 }
 
-// FilterOptions contains every transaction kind, member, category, and product
-// choice derived from the authorized feed.
+// FilterOptions contains every transaction kind, period, member, category, and
+// product choice derived from the authorized feed.
 type FilterOptions struct {
 	Kinds      []Kind                 `json:"kinds"`
+	Periods    []PeriodFilterOption   `json:"periods"`
 	Members    []MemberFilterOption   `json:"members"`
 	Categories []CategoryFilterOption `json:"categories"`
 	Products   []ProductFilterOption  `json:"products"`
@@ -182,7 +191,7 @@ var activitySorts = map[string]struct{}{
 
 const (
 	maxFilterValues               = 200
-	activityFeedProjectionVersion = 2
+	activityFeedProjectionVersion = 3
 	activityOccurredExpression    = `strftime('%Y-%m-%dT%H:%M:%fZ',activity.occurred_at)`
 )
 
@@ -438,6 +447,10 @@ func (s Service) QueryEntries(ctx context.Context, membership domain.Membership,
 		return Page{}, domain.ValidationError{Field: "status", Message: "must be POSTED or REVERSED"}
 	}
 	input.TargetMembershipID = strings.TrimSpace(input.TargetMembershipID)
+	input.PeriodID = strings.TrimSpace(input.PeriodID)
+	if len(input.PeriodID) > 200 {
+		return Page{}, domain.ValidationError{Field: "periodId", Message: "must contain at most 200 characters"}
+	}
 	input.AnchorID = strings.TrimSpace(input.AnchorID)
 	if len(input.AnchorID) > 500 {
 		return Page{}, domain.ValidationError{Field: "anchorId", Message: "must contain at most 500 characters"}
@@ -451,6 +464,7 @@ func (s Service) QueryEntries(ctx context.Context, membership domain.Membership,
 	if input.AnchorID != "" {
 		input.Search = ""
 		input.Kinds = []string{}
+		input.PeriodID = ""
 		input.TargetMembershipID = ""
 		input.CategoryIDs = []string{}
 		input.ProductIDs = []string{}
@@ -462,15 +476,15 @@ func (s Service) QueryEntries(ctx context.Context, membership domain.Membership,
 	}
 
 	fingerprint, err := tablequery.Fingerprint(struct {
-		ProjectionVersion                                              int
-		GroupID, ViewerMembershipID, Search, TargetMembershipID        string
-		Kinds, CategoryIDs, ProductIDs                                 []string
-		Status, OccurredFrom, OccurredTo, Sort, Direction              string
-		AmountMin, AmountMax                                           *int64
-		ViewAllBookings, ManageFinance, VoidOwnBooking, VoidAnyBooking bool
+		ProjectionVersion                                                 int
+		GroupID, ViewerMembershipID, Search, PeriodID, TargetMembershipID string
+		Kinds, CategoryIDs, ProductIDs                                    []string
+		Status, OccurredFrom, OccurredTo, Sort, Direction                 string
+		AmountMin, AmountMax                                              *int64
+		ViewAllBookings, ManageFinance, VoidOwnBooking, VoidAnyBooking    bool
 	}{
 		activityFeedProjectionVersion,
-		membership.GroupID, membership.ID, input.Search, input.TargetMembershipID,
+		membership.GroupID, membership.ID, input.Search, input.PeriodID, input.TargetMembershipID,
 		input.Kinds, input.CategoryIDs, input.ProductIDs,
 		input.Status, input.OccurredFrom, input.OccurredTo, input.Sort, input.Direction,
 		input.AmountMin, input.AmountMax,
@@ -505,6 +519,10 @@ func (s Service) QueryEntries(ctx context.Context, membership domain.Membership,
 		args = append(args, input.AnchorID, input.Limit/2, input.Limit, input.Limit+1)
 	} else {
 		query += ` SELECT activity.*,CAST(` + sortExpression + ` AS TEXT) FROM activity WHERE 1=1`
+		if input.PeriodID != "" {
+			query += ` AND activity.period_id=?`
+			args = append(args, input.PeriodID)
+		}
 		if len(input.Kinds) > 0 {
 			query += ` AND activity.kind IN (` + placeholders(len(input.Kinds)) + `)`
 			for _, kind := range input.Kinds {
@@ -666,6 +684,30 @@ func (s Service) QueryEntries(ctx context.Context, membership domain.Membership,
 	return page, nil
 }
 
+func (s Service) listPeriodFilterOptions(ctx context.Context, membership domain.Membership, access permissions) ([]PeriodFilterOption, error) {
+	query, args := visibleActivityCTE(membership, access)
+	query += ` SELECT DISTINCT activity.period_id,period.label,period.starts_at
+		FROM activity JOIN periods period ON period.group_id=? AND period.id=activity.period_id
+		WHERE activity.period_id IS NOT NULL
+		ORDER BY period.starts_at DESC,activity.period_id`
+	args = append(args, membership.GroupID)
+	rows, err := s.DB.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list unified activity period filter options: %w", err)
+	}
+	defer rows.Close()
+	options := make([]PeriodFilterOption, 0)
+	for rows.Next() {
+		var option PeriodFilterOption
+		var startsAt string
+		if err := rows.Scan(&option.PeriodID, &option.Label, &startsAt); err != nil {
+			return nil, err
+		}
+		options = append(options, option)
+	}
+	return options, rows.Err()
+}
+
 func (s Service) listMemberFilterOptions(ctx context.Context, membership domain.Membership, access permissions) ([]MemberFilterOption, error) {
 	query, args := visibleActivityCTE(membership, access)
 	query += ` SELECT DISTINCT target_membership_id,target_name,target_user_id,target_avatar_key
@@ -732,8 +774,8 @@ func (s Service) listCatalogFilterOptions(ctx context.Context, membership domain
 	return categories, products, nil
 }
 
-// ListFilterOptions returns every kind, target, category, and product reachable
-// through the same authorization boundary as QueryEntries.
+// ListFilterOptions returns every kind, period, target, category, and product
+// reachable through the same authorization boundary as QueryEntries.
 //
 // Parameters:
 //   - ctx: Request lifetime and cancellation context.
@@ -753,6 +795,10 @@ func (s Service) ListFilterOptions(ctx context.Context, membership domain.Member
 	if err != nil {
 		return FilterOptions{}, err
 	}
+	periods, err := s.listPeriodFilterOptions(ctx, membership, access)
+	if err != nil {
+		return FilterOptions{}, err
+	}
 	members, err := s.listMemberFilterOptions(ctx, membership, access)
 	if err != nil {
 		return FilterOptions{}, err
@@ -761,5 +807,5 @@ func (s Service) ListFilterOptions(ctx context.Context, membership domain.Member
 	if err != nil {
 		return FilterOptions{}, err
 	}
-	return FilterOptions{Kinds: kinds, Members: members, Categories: categories, Products: products}, nil
+	return FilterOptions{Kinds: kinds, Periods: periods, Members: members, Categories: categories, Products: products}, nil
 }

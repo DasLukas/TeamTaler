@@ -550,13 +550,15 @@ describe('API adapters', () => {
       amountDueMinor: '100',
       currency: 'EUR',
       status: 'PARTIAL',
-    }, [{ id: 'period-1', label: 'July 2026', status: 'CLOSED', startsAt: '2026-07-01', dueAt: '2026-08-15' }]);
+    }, [{ id: 'period-1', label: 'July 2026', status: 'CLOSED', startsAt: '2026-07-01T00:00:00Z', closedAt: '2026-08-01T09:00:00Z', dueAt: '2026-08-15' }]);
 
     expect(settlement.amount.minorUnits).toBe('200');
     expect(settlement.paidAmount.minorUnits).toBe('100');
     expect(settlement.openAmount?.minorUnits).toBe('100');
     expect(settlement.email).toBeNull();
     expect(settlement.membershipStatus).toBe('ARCHIVED');
+    expect(settlement.periodStartsAt).toBe('2026-07-01T00:00:00Z');
+    expect(settlement.periodClosedAt).toBe('2026-08-01T09:00:00Z');
   });
 
   it('adapts external account collections and provider fields without losing exact money', () => {

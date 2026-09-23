@@ -83,6 +83,8 @@ export interface ActivityCollectionQuery extends CollectionQuery<'kind' | 'targe
   anchorId?: string;
   /** One or more repeated transaction kinds combined with OR semantics. */
   kind?: ActivityKind | readonly ActivityKind[];
+  /** Exact accounting period associated with period-bound activities. */
+  periodId?: string;
   targetMembershipId?: string;
   /** One or more repeated category IDs; matching is booking-specific. */
   categoryId?: string | readonly string[];
@@ -140,9 +142,16 @@ export interface ActivityProductFilterOption {
   imageUrl?: string;
 }
 
-/** Complete transaction-kind, member, and booking catalog derived from the authorized unified feed. */
+/** Accounting period referenced by the authorized unified activity feed. */
+export interface ActivityPeriodFilterOption {
+  periodId: string;
+  label: string;
+}
+
+/** Complete transaction-kind, period, member, and booking catalog derived from the authorized unified feed. */
 export interface ActivityFilterOptions {
   kinds: ActivityKind[];
+  periods: ActivityPeriodFilterOption[];
   members: MemberFilterOption[];
   categories: ActivityCategoryFilterOption[];
   products: ActivityProductFilterOption[];
@@ -1750,6 +1759,8 @@ export interface Settlement {
   id: string;
   periodId: string;
   periodLabel: string;
+  periodStartsAt: string;
+  periodClosedAt: string;
   membershipId: string;
   membershipStatus: MembershipStatus;
   memberName: string;

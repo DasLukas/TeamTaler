@@ -1801,6 +1801,9 @@ export const de = {
     preparingPdf: 'PDF wird erstellt …',
     statementExportTitle: 'Abrechnung {{period}} {{member}}',
     statementPreviewError: 'Die Abrechnung konnte nicht als PDF erstellt werden.',
+    rangeAccessible: 'Zeitraum vom {{from}} bis {{to}}',
+    showBookings: 'Buchungen',
+    showBookingsFor: 'Buchungen für {{member}} aus {{period}} anzeigen',
   },
   rights: {
     noSelection: 'Kein Mitglied gewählt.',
