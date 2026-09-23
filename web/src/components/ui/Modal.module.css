@@ -63,6 +63,7 @@
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior-y: contain;
+  scroll-padding-block: var(--space-4);
 }
 
 .body > * { min-width: 0; }

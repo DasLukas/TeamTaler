@@ -227,10 +227,10 @@ describe('Modal lifecycle and focus restoration', () => {
     expect(onSubmit).toHaveBeenCalledOnce();
   });
 
-  it('keeps every sheet above the software keyboard while the visual viewport scrolls', () => {
+  it('keeps every sheet and its focused field inside a panned visual viewport', () => {
     const originalViewport = Object.getOwnPropertyDescriptor(window, 'visualViewport');
     const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
-    const visualViewport = Object.assign(new EventTarget(), { height: 540, offsetTop: 0 });
+    const visualViewport = Object.assign(new EventTarget(), { height: 540, offsetTop: 0, pageTop: 0 });
     const addEventListener = vi.spyOn(visualViewport, 'addEventListener');
     const removeEventListener = vi.spyOn(visualViewport, 'removeEventListener');
 
@@ -240,15 +240,46 @@ describe('Modal lifecycle and focus restoration', () => {
 
     try {
       const dialog = screen.getByRole('dialog', { name: 'Keyboard-safe sheet' });
+      const input = screen.getByLabelText('Guest name');
+      const body = input.parentElement;
+      expect(body).not.toBeNull();
+      if (!body) return;
+      Object.defineProperty(body, 'getBoundingClientRect', {
+        configurable: true,
+        value: () => ({ bottom: 500, height: 400, left: 0, right: 390, top: 100, width: 390, x: 0, y: 100, toJSON: () => ({}) }),
+      });
+      Object.defineProperty(input, 'getBoundingClientRect', {
+        configurable: true,
+        value: () => ({
+          bottom: 648 - body.scrollTop,
+          height: 48,
+          left: 20,
+          right: 370,
+          top: 600 - body.scrollTop,
+          width: 350,
+          x: 20,
+          y: 600 - body.scrollTop,
+          toJSON: () => ({}),
+        }),
+      });
+      input.focus();
       expect(dialog).toHaveStyle({ '--modal-visual-viewport-height': '540px', '--modal-visual-viewport-bottom': '375px' });
       expect(addEventListener).toHaveBeenCalledWith('resize', expect.any(Function));
       expect(addEventListener).toHaveBeenCalledWith('scroll', expect.any(Function));
 
-      visualViewport.offsetTop = 240;
+      visualViewport.pageTop = 240;
       act(() => visualViewport.dispatchEvent(new Event('scroll')));
-      expect(dialog).toHaveStyle({ '--modal-visual-viewport-height': '540px', '--modal-visual-viewport-bottom': '375px' });
+      expect(dialog).toHaveStyle({ '--modal-visual-viewport-height': '540px', '--modal-visual-viewport-bottom': '135px' });
+      expect(body.scrollTop).toBe(164);
 
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: 540 });
+      visualViewport.pageTop = 0;
+      act(() => visualViewport.dispatchEvent(new Event('resize')));
+      expect(dialog).toHaveStyle({ '--modal-visual-viewport-height': '540px', '--modal-visual-viewport-bottom': '0px' });
+
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: 915 });
       visualViewport.height = 915;
+      visualViewport.offsetTop = 0;
       act(() => visualViewport.dispatchEvent(new Event('resize')));
       expect(dialog).toHaveStyle({ '--modal-visual-viewport-height': '915px', '--modal-visual-viewport-bottom': '0px' });
     } finally {

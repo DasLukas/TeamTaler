@@ -11,8 +11,13 @@ const TEXT_INPUT_TYPES = new Set([
   'url',
 ]);
 
-/** Returns whether an element can summon a software keyboard for text entry. */
-function isTextEntryElement(element: Element | null): boolean {
+/**
+ * Returns whether an element can summon a software keyboard for text entry.
+ *
+ * @param element - Candidate focused element.
+ * @returns Whether the element accepts editable text and is currently enabled.
+ */
+export function isTextEntryElement(element: Element | null): boolean {
   if (element instanceof HTMLTextAreaElement) return !element.disabled && !element.readOnly;
   if (element instanceof HTMLInputElement) {
     return !element.disabled && !element.readOnly && TEXT_INPUT_TYPES.has(element.type);

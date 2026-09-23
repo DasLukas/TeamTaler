@@ -2,13 +2,57 @@ import X from 'lucide-react/dist/esm/icons/x';
 import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject, type TouchEvent as ReactTouchEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { readLayoutViewportHeight } from '@/hooks/useSoftwareKeyboardVisibility';
+import { isTextEntryElement, readLayoutViewportHeight } from '@/hooks/useSoftwareKeyboardVisibility';
 import { IconButton } from './IconButton';
 import styles from './Modal.module.css';
 
 const ModalFooterContext = createContext<HTMLElement | null>(null);
+const FOCUSED_CONTROL_SCROLL_MARGIN = 16;
 let documentScrollLockCount = 0;
 let documentScrollLockPosition: { x: number; y: number } | null = null;
+
+/**
+ * Reads the visual viewport's vertical displacement from the layout viewport.
+ *
+ * WebKit can update `pageTop` before `offsetTop` while opening its software
+ * keyboard, so the larger valid measurement keeps the sheet attached during
+ * that transition.
+ *
+ * @param visualViewport - Browser viewport currently visible to the user.
+ * @returns A non-negative offset in CSS pixels.
+ */
+function readVisualViewportOffsetTop(visualViewport: VisualViewport): number {
+  const offsetTop = Number.isFinite(visualViewport.offsetTop) ? visualViewport.offsetTop : 0;
+  const pageTopOffset = Number.isFinite(visualViewport.pageTop)
+    ? visualViewport.pageTop - window.scrollY
+    : 0;
+  return Math.max(0, offsetTop, pageTopOffset);
+}
+
+/**
+ * Scrolls only the modal body far enough to reveal its focused text control.
+ *
+ * Avoiding `scrollIntoView` is intentional: on iOS it may pan the page-level
+ * visual viewport again and move the complete sheet away from the keyboard.
+ *
+ * @param body - Independently scrollable modal content region.
+ * @returns Nothing.
+ */
+function revealFocusedTextEntry(body: HTMLElement): void {
+  const focusedElement = document.activeElement;
+  if (!(focusedElement instanceof HTMLElement) || !body.contains(focusedElement) || !isTextEntryElement(focusedElement)) return;
+
+  const bodyRect = body.getBoundingClientRect();
+  const focusedRect = focusedElement.getBoundingClientRect();
+  const visibleTop = bodyRect.top + FOCUSED_CONTROL_SCROLL_MARGIN;
+  const visibleBottom = bodyRect.bottom - FOCUSED_CONTROL_SCROLL_MARGIN;
+
+  if (focusedRect.top < visibleTop) {
+    body.scrollTop += focusedRect.top - visibleTop;
+  } else if (focusedRect.bottom > visibleBottom) {
+    body.scrollTop += focusedRect.bottom - visibleBottom;
+  }
+}
 
 /**
  * Locks the document scroll container while at least one modal is open.
@@ -106,6 +150,7 @@ export function ModalFooter({ children }: ModalFooterProps) {
  */
 export function Modal({ open, title, onClose, children, footer, size = 'standard', variant = 'dialog', headerMode = 'visible', className = '', bodyClassName = '' }: ModalProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const [footerElement, setFooterElement] = useState<HTMLElement | null>(null);
   const openingElementRef = useRef<HTMLElement | null>(null);
   const dragRef = useRef<{ pointerId: number; startY: number; startTime: number; moved: boolean } | null>(null);
@@ -263,29 +308,50 @@ export function Modal({ open, title, onClose, children, footer, size = 'standard
 
   useEffect(() => {
     const dialog = dialogRef.current;
+    const body = bodyRef.current;
     const visualViewport = window.visualViewport;
-    if (!open || variant !== 'sheet' || !dialog || !visualViewport) return undefined;
-    let layoutViewportHeight = readLayoutViewportHeight();
-    let layoutViewportWidth = window.innerWidth;
+    if (!open || variant !== 'sheet' || !dialog || !body || !visualViewport) return undefined;
+    let animationFrame: number | undefined;
+    let settlementTimer: number | undefined;
 
-    const synchronizeVisualViewport = () => {
-      if (window.innerWidth !== layoutViewportWidth) {
-        layoutViewportWidth = window.innerWidth;
-        layoutViewportHeight = readLayoutViewportHeight();
-      } else {
-        layoutViewportHeight = Math.max(layoutViewportHeight, readLayoutViewportHeight());
-      }
-      const obscuredBottom = Math.max(0, layoutViewportHeight - visualViewport.height);
+    const applyVisualViewportGeometry = () => {
+      const layoutViewportHeight = readLayoutViewportHeight();
+      const visualViewportOffsetTop = readVisualViewportOffsetTop(visualViewport);
+      const visualViewportBottom = visualViewportOffsetTop + visualViewport.height;
+      const obscuredBottom = Math.max(0, layoutViewportHeight - visualViewportBottom);
       dialog.style.setProperty('--modal-visual-viewport-height', `${visualViewport.height}px`);
       dialog.style.setProperty('--modal-visual-viewport-bottom', `${obscuredBottom}px`);
+      revealFocusedTextEntry(body);
+    };
+
+    const synchronizeVisualViewport = () => {
+      applyVisualViewportGeometry();
+      if (animationFrame !== undefined) window.cancelAnimationFrame(animationFrame);
+      animationFrame = window.requestAnimationFrame(() => {
+        animationFrame = undefined;
+        applyVisualViewportGeometry();
+      });
+      if (settlementTimer !== undefined) window.clearTimeout(settlementTimer);
+      settlementTimer = window.setTimeout(() => {
+        settlementTimer = undefined;
+        applyVisualViewportGeometry();
+      }, 80);
+    };
+
+    const synchronizeFocusedEntry = (event: FocusEvent) => {
+      if (isTextEntryElement(event.target instanceof Element ? event.target : null)) synchronizeVisualViewport();
     };
 
     synchronizeVisualViewport();
+    body.addEventListener('focusin', synchronizeFocusedEntry);
     visualViewport.addEventListener('resize', synchronizeVisualViewport);
     visualViewport.addEventListener('scroll', synchronizeVisualViewport);
     return () => {
+      body.removeEventListener('focusin', synchronizeFocusedEntry);
       visualViewport.removeEventListener('resize', synchronizeVisualViewport);
       visualViewport.removeEventListener('scroll', synchronizeVisualViewport);
+      if (animationFrame !== undefined) window.cancelAnimationFrame(animationFrame);
+      if (settlementTimer !== undefined) window.clearTimeout(settlementTimer);
       dialog.style.removeProperty('--modal-visual-viewport-height');
       dialog.style.removeProperty('--modal-visual-viewport-bottom');
     };
@@ -336,7 +402,7 @@ export function Modal({ open, title, onClose, children, footer, size = 'standard
           </div>
           )}
           <ModalFooterContext.Provider value={footerElement}>
-            <div className={`${styles.body} ${bodyClassName}`}>{children}</div>
+            <div className={`${styles.body} ${bodyClassName}`} ref={bodyRef}>{children}</div>
             <footer className={styles.footer} ref={setFooterNode}>{footer}</footer>
           </ModalFooterContext.Provider>
         </>

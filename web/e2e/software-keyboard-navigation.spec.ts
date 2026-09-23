@@ -131,10 +131,10 @@ test('shared bottom sheets keep persistent actions above the keyboard while the 
   expect(sheetBottomBeforeScroll).toBeCloseTo(keyboardTop, 0);
 
   await setVisualViewport(page, keyboardTop, 240);
-  await expect(sheet).toHaveCSS('--modal-visual-viewport-bottom', '320px');
+  await expect(sheet).toHaveCSS('--modal-visual-viewport-bottom', '80px');
   await expect(apply).toBeInViewport();
   const sheetBottomAfterScroll = await sheet.evaluate((element) => element.getBoundingClientRect().bottom);
-  expect(sheetBottomAfterScroll).toBeCloseTo(keyboardTop, 0);
+  expect(sheetBottomAfterScroll).toBeCloseTo(keyboardTop + 240, 0);
   expect(consoleErrors).toEqual([]);
 });
 
