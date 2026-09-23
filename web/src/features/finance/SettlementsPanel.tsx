@@ -47,6 +47,10 @@ function settlementActivitySearch(settlement: Settlement): Record<string, unknow
         to: localDateKey(settlement.periodClosedAt),
       },
     },
+    'tt.activities.periodOption': {
+      label: settlement.periodLabel,
+      periodId: settlement.periodId,
+    },
   };
 }
 

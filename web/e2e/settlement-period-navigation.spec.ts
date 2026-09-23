@@ -43,6 +43,7 @@ test('settlement periods expose their date range and open exact booking filters'
   expect(href).not.toBeNull();
   const linkUrl = new URL(href ?? '', 'http://127.0.0.1:5173');
   const serializedFilters = linkUrl.searchParams.get('tt.activities.filters');
+  const serializedPeriodOption = linkUrl.searchParams.get('tt.activities.periodOption');
   expect(serializedFilters).not.toBeNull();
   expect(JSON.parse(serializedFilters ?? '{}')).toEqual({
     kind: ['BOOKING'],
@@ -53,13 +54,15 @@ test('settlement periods expose their date range and open exact booking filters'
     periodId: expect.any(String),
     targetMembershipId: expect.any(String),
   });
+  const periodOption = JSON.parse(serializedPeriodOption ?? '{}') as { label?: string; periodId?: string };
+  expect(periodOption).toEqual({ label: expect.any(String), periodId: expect.any(String) });
   await bookingsLink.click();
   await expect(page).toHaveURL(/\/activities\?/);
 
   const filters = page.getByRole('list', { name: 'Ergebnisse filtern' });
   await expect(filters).toBeVisible();
   await expect(filters).toContainText('Vorgang: Buchung');
-  await expect(filters).toContainText('Periode:');
+  await expect(filters).toContainText(`Periode: ${periodOption.label}`);
   await expect(filters).toContainText('Mitglied:');
   await expect(filters).toContainText('Zeitpunkt:');
   await expect(page.getByRole('button', { name: 'Filter (4)' })).toBeVisible();

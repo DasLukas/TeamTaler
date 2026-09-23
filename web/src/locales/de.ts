@@ -651,6 +651,7 @@ export const de = {
     settlementSearchPlaceholder: 'Periode suchen',
     noSettlements: 'Für dich gibt es noch keine abgeschlossene Abrechnung.',
     period: 'Periode',
+    selectedFallback: 'Ausgewählte Periode',
     due: 'Fällig',
     claim: 'Forderung',
     paid: 'Bezahlt',

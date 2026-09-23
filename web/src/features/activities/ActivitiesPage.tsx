@@ -37,6 +37,39 @@ type ActivityFilterId = 'kind' | 'periodId' | 'targetMembershipId' | 'productId'
 type ActivitySortId = 'kind' | 'targetName' | 'actorName' | 'detailName' | 'categoryName' | 'occurredAt' | 'amount' | 'status';
 type MobileActivityView = 'cards' | 'table';
 
+interface NavigationPeriodOption {
+  label: string;
+  periodId: string;
+}
+
+/** Reads the exact period identifier from the shareable activity filter state. */
+function readNavigationPeriodId(): string | undefined {
+  const rawValue = new URLSearchParams(window.location.search).get('tt.activities.filters');
+  if (!rawValue) return undefined;
+  try {
+    const parsed = JSON.parse(rawValue) as { periodId?: unknown };
+    const periodId = typeof parsed.periodId === 'string' ? parsed.periodId.trim() : '';
+    return periodId && periodId.length <= 200 ? periodId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Reads non-authoritative period display metadata carried by a settlement link. */
+function readNavigationPeriodOption(): NavigationPeriodOption | undefined {
+  const rawValue = new URLSearchParams(window.location.search).get('tt.activities.periodOption');
+  if (!rawValue) return undefined;
+  try {
+    const parsed = JSON.parse(rawValue) as Partial<NavigationPeriodOption>;
+    const label = typeof parsed.label === 'string' ? parsed.label.trim() : '';
+    const periodId = typeof parsed.periodId === 'string' ? parsed.periodId.trim() : '';
+    if (!label || label.length > 200 || !periodId || periodId.length > 200) return undefined;
+    return { label, periodId };
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Reads the versioned mobile activity-view preference with a card-first fallback.
  *
@@ -82,6 +115,13 @@ export function ActivitiesPage() {
   const reversalFormId = useId();
   const sortFormId = useId();
   const filterOptionsQuery = useQuery({ queryKey: ['activities', activeGroupId, 'filter-options'], queryFn: () => api.getActivityFilterOptions(activeGroupId) });
+  const navigationPeriodOption = readNavigationPeriodOption();
+  const navigationPeriodId = navigationPeriodOption?.periodId ?? readNavigationPeriodId();
+  const periodsQuery = useQuery({
+    queryKey: ['periods', activeGroupId],
+    queryFn: () => api.getPeriods(activeGroupId),
+    enabled: Boolean(navigationPeriodId),
+  });
   const [reversal, setReversal] = useState<ActivityEntry | null>(null);
   const [reason, setReason] = useState('');
   const [mobileView, setMobileView] = useState<MobileActivityView>(readMobileActivityView);
@@ -93,6 +133,16 @@ export function ActivitiesPage() {
     () => (filterOptionsQuery.data?.members ?? []).map(createMemberFilterOption),
     [filterOptionsQuery.data?.members],
   );
+  const navigationPeriodLabel = navigationPeriodOption?.label;
+  const periodFilterOptions = useMemo(() => {
+    const options = (filterOptionsQuery.data?.periods ?? []).map((period) => ({ label: period.label, value: period.periodId }));
+    const authoritativePeriod = periodsQuery.data?.find((period) => period.id === navigationPeriodId);
+    const fallbackLabel = authoritativePeriod?.label ?? navigationPeriodLabel;
+    if (navigationPeriodId && fallbackLabel && !options.some((option) => option.value === navigationPeriodId)) {
+      options.unshift({ label: fallbackLabel, value: navigationPeriodId });
+    }
+    return options;
+  }, [filterOptionsQuery.data?.periods, navigationPeriodId, navigationPeriodLabel, periodsQuery.data]);
   const categoryIcons = useMemo(
     () => new Map((filterOptionsQuery.data?.categories ?? []).map((category) => [category.categoryId, category.icon] as const)),
     [filterOptionsQuery.data?.categories],
@@ -118,10 +168,11 @@ export function ActivitiesPage() {
     },
     {
       allLabel: t('dataTable.allValues'),
+      formatValue: (value) => periodFilterOptions.find((option) => option.value === value)?.label ?? t('periods.selectedFallback'),
       id: 'periodId',
       kind: 'select',
       label: t('periods.period'),
-      options: (filterOptionsQuery.data?.periods ?? []).map((period) => ({ label: period.label, value: period.periodId })),
+      options: periodFilterOptions,
     },
     {
       allLabel: t('dataTable.allValues'),
@@ -180,7 +231,7 @@ export function ActivitiesPage() {
       minimumLabel: t('dataTable.minimum'),
       step: 0.01,
     },
-  ], [activeGroup.currency, categoryIcons, filterOptionsQuery.data?.categories, filterOptionsQuery.data?.kinds, filterOptionsQuery.data?.periods, filterOptionsQuery.data?.products, memberFilterOptions, t]);
+  ], [activeGroup.currency, categoryIcons, filterOptionsQuery.data?.categories, filterOptionsQuery.data?.kinds, filterOptionsQuery.data?.products, memberFilterOptions, periodFilterOptions, t]);
   const sortOptions = useMemo<readonly SelectMenuOption<ActivitySortId>[]>(() => [
     { label: t('activities.transaction'), value: 'kind' },
     { label: t('common.member'), value: 'targetName' },

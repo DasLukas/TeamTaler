@@ -122,6 +122,10 @@ describe('SettlementsPanel feature modes', () => {
       targetMembershipId: 'member-a',
       occurredAt: { from: '2026-07-01', to: '2026-08-01' },
     });
+    expect(JSON.parse(target.searchParams.get('tt.activities.periodOption') ?? '')).toEqual({
+      label: 'Juli 2026',
+      periodId: 'period-a',
+    });
   });
 
   it('renders the period-close workflow as a bottom sheet on compact screens', async () => {

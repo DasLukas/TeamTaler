@@ -14,6 +14,7 @@ const apiMock = vi.hoisted(() => ({
   exportGroupTable: vi.fn(),
   getActivitiesPage: vi.fn(),
   getActivityFilterOptions: vi.fn(),
+  getPeriods: vi.fn(),
   getPaymentAttachment: vi.fn(),
   reverseBooking: vi.fn(),
   reversePayment: vi.fn(),
@@ -177,6 +178,7 @@ describe('ActivitiesPage unified feed', () => {
     window.localStorage.clear();
     window.history.replaceState({}, '', '/activities');
     apiMock.getActivityFilterOptions.mockResolvedValue(filterOptions);
+    apiMock.getPeriods.mockResolvedValue([]);
     apiMock.getActivitiesPage.mockResolvedValue(activityPage([adjustment, payment, booking]));
     apiMock.getPaymentAttachment.mockResolvedValue(new Blob(['receipt'], { type: 'image/jpeg' }));
     apiMock.exportGroupTable.mockResolvedValue(new Blob(['csv'], { type: 'text/csv' }));
@@ -209,7 +211,9 @@ describe('ActivitiesPage unified feed', () => {
       targetMembershipId: 'member-target',
       occurredAt: { from: '2026-08-01', to: '2026-08-20' },
     };
-    window.history.replaceState({}, '', `/activities?tt.activities.filters=${encodeURIComponent(JSON.stringify(filters))}`);
+    const periodOption = { label: 'August 2026', periodId: 'period-a' };
+    apiMock.getActivityFilterOptions.mockResolvedValue({ ...filterOptions, periods: [] });
+    window.history.replaceState({}, '', `/activities?tt.activities.filters=${encodeURIComponent(JSON.stringify(filters))}&tt.activities.periodOption=${encodeURIComponent(JSON.stringify(periodOption))}`);
 
     renderActivities();
 
@@ -243,6 +247,36 @@ describe('ActivitiesPage unified feed', () => {
       table: 'ACTIVITIES',
     })));
     downloadClick.mockRestore();
+  });
+
+  it('resolves an old period-filter URL through the authorized period collection', async () => {
+    apiMock.getActivityFilterOptions.mockResolvedValue({ ...filterOptions, periods: [] });
+    apiMock.getPeriods.mockResolvedValue([{
+      id: 'period-technical-id',
+      label: 'Legacy period name',
+      status: 'CLOSED',
+      startsAt: '2026-07-01T00:00:00Z',
+      closedAt: '2026-08-01T00:00:00Z',
+      dueAt: '2026-08-15',
+    }]);
+    window.history.replaceState({}, '', `/activities?tt.activities.filters=${encodeURIComponent(JSON.stringify({ periodId: 'period-technical-id' }))}`);
+
+    renderActivities();
+
+    const chips = await screen.findByRole('list', { name: i18n.t('dataTable.filterHeading') });
+    await waitFor(() => expect(chips).toHaveTextContent('Legacy period name'));
+    expect(chips).not.toHaveTextContent('period-technical-id');
+  });
+
+  it('never exposes a technical period identifier when every display source is unavailable', async () => {
+    apiMock.getActivityFilterOptions.mockResolvedValue({ ...filterOptions, periods: [] });
+    window.history.replaceState({}, '', `/activities?tt.activities.filters=${encodeURIComponent(JSON.stringify({ periodId: 'period-technical-id' }))}`);
+
+    renderActivities();
+
+    const chips = await screen.findByRole('list', { name: i18n.t('dataTable.filterHeading') });
+    expect(chips).toHaveTextContent(i18n.t('periods.selectedFallback'));
+    expect(chips).not.toHaveTextContent('period-technical-id');
   });
 
   it('reserves enough table width to keep receipt and reversal actions inline', async () => {
