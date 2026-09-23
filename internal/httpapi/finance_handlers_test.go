@@ -139,11 +139,11 @@ func TestDecodePaymentMultipartAcceptsBrowserJSONBlobAndRejectsUnknownParts(t *t
 	}
 	server := &Server{}
 	var input finance.CreateOwnPaymentInput
-	upload, err := server.decodePaymentCommand(httptest.NewRecorder(), build(false), &input)
+	upload, err := server.decodeAttachmentCommand(httptest.NewRecorder(), build(false), &input)
 	if err != nil || upload == nil || upload.FileName != "receipt.pdf" || input.Method != "CASH" {
 		t.Fatalf("decoded input=%#v upload=%#v err=%v", input, upload, err)
 	}
-	if _, err := server.decodePaymentCommand(httptest.NewRecorder(), build(true), &input); !errors.Is(err, domain.ErrValidation) {
+	if _, err := server.decodeAttachmentCommand(httptest.NewRecorder(), build(true), &input); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("unknown multipart part error=%v, want validation", err)
 	}
 }

@@ -12,7 +12,7 @@ const StatisticsPage = lazy(() => import('@/features/statistics/StatisticsPage')
 /** Redirects the active group to its highest-priority permitted workspace. */
 export function PreferredWorkspaceRedirect() {
   const { activeGroup } = useActiveGroup();
-  return <Navigate replace to={preferredMemberPath(activeGroup.membership?.effectiveGrants)} />;
+  return <Navigate replace to={preferredMemberPath(activeGroup.membership?.effectiveGrants, activeGroup.externalAccountsEnabled)} />;
 }
 
 /** Prevents group-scoped route components from mounting without an active group. */

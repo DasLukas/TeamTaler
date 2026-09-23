@@ -24,6 +24,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/exporting"
 	exportingtabular "github.com/DasLukas/TeamTaler/internal/exporting/tabular"
 	"github.com/DasLukas/TeamTaler/internal/exportnotifications"
+	"github.com/DasLukas/TeamTaler/internal/externalaccounts"
 	"github.com/DasLukas/TeamTaler/internal/finance"
 	"github.com/DasLukas/TeamTaler/internal/media"
 	"github.com/DasLukas/TeamTaler/internal/periods"
@@ -151,6 +152,100 @@ func TestGroupTableExportCSVUsesCanonicalServerColumnsAndRecordsAudit(t *testing
 		tableExportDefinitions["ACTIVITIES"], time.FixedZone("CEST", 2*60*60), tableExportPDFRowLimit)
 	if err != nil || document.GroupName != "Import Team" {
 		t.Fatalf("group export branding = %q, %v", document.GroupName, err)
+	}
+}
+
+func TestExternalAccountTransactionTableExportUsesHistoryQueryAndProtectsCSVFormulas(t *testing.T) {
+	server, principal, membership := invitationImportServer(t, false)
+	membership = assignTestTemplateRoles(t, context.Background(), server.groups, principal, membership, domain.RoleTemplateFinance)
+	server.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	server.config = config.Config{DataDirectory: t.TempDir()}
+	server.externalAccounts = externalaccounts.Service{DB: server.db}
+	if _, err := server.db.Exec(`UPDATE group_settings SET external_accounts_enabled=1 WHERE group_id=?`, membership.GroupID); err != nil {
+		t.Fatalf("enable external accounts: %v", err)
+	}
+	if _, err := server.db.Exec(`INSERT INTO external_accounts(
+		id,group_id,name,type,status,sort_order,version,created_at,updated_at,created_by_membership_id,updated_by_membership_id
+	) VALUES
+		('external-cash',?,'Cash box','CASH','ACTIVE',10,1,'2026-09-01T08:00:00Z','2026-09-01T08:00:00Z',?,?),
+		('external-bank',?,'Bank account','OTHER','ACTIVE',11,1,'2026-09-01T08:00:00Z','2026-09-01T08:00:00Z',?,?)`,
+		membership.GroupID, membership.ID, membership.ID, membership.GroupID, membership.ID, membership.ID); err != nil {
+		t.Fatalf("seed external accounts: %v", err)
+	}
+	if _, err := server.db.Exec(`INSERT INTO external_account_transactions(
+		id,group_id,kind,primary_account_id,counterparty_account_id,payment_id,amount_minor,booked_at,reason,reference,note,reversal_of,correction_of,created_by_membership_id,created_at
+	) VALUES
+		('external-income',?,'INCOME','external-cash',NULL,NULL,2500,'2026-09-12T10:00:00Z','=HYPERLINK("https://example.test";"invoice")','invoice-42','',NULL,NULL,?,'2026-09-12T10:00:00Z'),
+		('external-transfer',?,'TRANSFER','external-cash','external-bank',NULL,-500,'2026-09-13T10:00:00Z','Cash deposit','','',NULL,NULL,?,'2026-09-13T10:00:00Z')`,
+		membership.GroupID, membership.ID, membership.GroupID, membership.ID); err != nil {
+		t.Fatalf("seed external transactions: %v", err)
+	}
+	if _, err := server.db.Exec(`UPDATE external_accounts SET status='ARCHIVED',deleted_at='2026-09-14T10:00:00Z' WHERE group_id=? AND id='external-cash'`, membership.GroupID); err != nil {
+		t.Fatalf("hide historical external account: %v", err)
+	}
+
+	body := `{"table":"EXTERNAL_ACCOUNT_TRANSACTIONS","format":"CSV","timeZone":"Europe/Berlin","query":{"accountIds":["external-cash","external-bank"],"kind":["INCOME"],"source":"MANUAL","status":"POSTED","occurredFrom":"2026-09-01","occurredTo":"2026-09-30","amountMin":"1000","amountMax":"3000","sort":"amount","direction":"asc"}}`
+	request := authenticatedJSONRequest(http.MethodPost, "/api/v1/groups/"+membership.GroupID+"/table-exports", body, principal)
+	request.SetPathValue("groupID", membership.GroupID)
+	response := httptest.NewRecorder()
+	server.handleGroupTableExport(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("external-account CSV status=%d body=%s", response.Code, response.Body.String())
+	}
+	content := bytes.TrimPrefix(response.Body.Bytes(), []byte{0xEF, 0xBB, 0xBF})
+	reader := csv.NewReader(bytes.NewReader(content))
+	reader.Comma = ';'
+	records, err := reader.ReadAll()
+	if err != nil {
+		t.Fatalf("read external-account CSV: %v", err)
+	}
+	if len(records) != 2 || !slicesEqual(records[0], []string{"Datum", "Art", "Quellkonto", "Zielkonto", "Grund", "Betrag", "Erfasst von", "Status"}) {
+		t.Fatalf("external-account CSV records=%#v", records)
+	}
+	wantReason := `'` + `=HYPERLINK("https://example.test";"invoice")`
+	if records[1][0] != "12.09.2026" || records[1][1] != "Einzahlung" || records[1][2] != "–" || records[1][3] != "Cash box" || records[1][4] != wantReason || records[1][5] != "25,00 EUR" || records[1][6] != membership.DisplayName || records[1][7] != "Verbucht" {
+		t.Fatalf("external-account CSV row=%#v", records[1])
+	}
+	var auditCount int
+	if err := server.db.QueryRow(`SELECT count(*) FROM audit_events WHERE group_id=? AND action='table.exported' AND resource_id='external_account_transactions'`, membership.GroupID).Scan(&auditCount); err != nil || auditCount != 1 {
+		t.Fatalf("external-account export audit count=%d err=%v", auditCount, err)
+	}
+	if permission := tableExportPermission("EXTERNAL_ACCOUNT_TRANSACTIONS"); permission != domain.PermissionViewExternalAccounts {
+		t.Fatalf("external-account export permission=%q", permission)
+	}
+}
+
+func TestExternalAccountTransactionTableExportRejectsDisabledFeature(t *testing.T) {
+	server, principal, membership := invitationImportServer(t, false)
+	membership = assignTestTemplateRoles(t, context.Background(), server.groups, principal, membership, domain.RoleTemplateFinance)
+	server.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	server.config = config.Config{DataDirectory: t.TempDir()}
+	server.externalAccounts = externalaccounts.Service{DB: server.db}
+	body := `{"table":"EXTERNAL_ACCOUNT_TRANSACTIONS","format":"CSV","timeZone":"UTC","query":{}}`
+	request := authenticatedJSONRequest(http.MethodPost, "/api/v1/groups/"+membership.GroupID+"/table-exports", body, principal)
+	request.SetPathValue("groupID", membership.GroupID)
+	response := httptest.NewRecorder()
+	server.handleGroupTableExport(response, request)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("disabled external-account export status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestExternalAccountTransactionTableExportRejectsMissingViewPermission(t *testing.T) {
+	server, principal, membership := invitationImportServer(t, false)
+	server.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	server.config = config.Config{DataDirectory: t.TempDir()}
+	server.externalAccounts = externalaccounts.Service{DB: server.db}
+	if _, err := server.db.Exec(`UPDATE group_settings SET external_accounts_enabled=1 WHERE group_id=?`, membership.GroupID); err != nil {
+		t.Fatalf("enable external accounts: %v", err)
+	}
+	body := `{"table":"EXTERNAL_ACCOUNT_TRANSACTIONS","format":"CSV","timeZone":"UTC","query":{}}`
+	request := authenticatedJSONRequest(http.MethodPost, "/api/v1/groups/"+membership.GroupID+"/table-exports", body, principal)
+	request.SetPathValue("groupID", membership.GroupID)
+	response := httptest.NewRecorder()
+	server.handleGroupTableExport(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("unauthorized external-account export status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 

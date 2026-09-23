@@ -16,6 +16,7 @@ vi.mock('@/app/useActiveGroup', () => ({ useActiveGroup: () => mocks.useActiveGr
 vi.mock('./AccountBalancesPanel', () => ({ AccountBalancesPanel: () => <div>account-overview-panel</div> }));
 vi.mock('./PaymentsPanel', () => ({ PaymentsPanel: () => <div>payments-panel</div> }));
 vi.mock('./SettlementsPanel', () => ({ SettlementsPanel: ({ settlementsEnabled }: { settlementsEnabled: boolean }) => <div>settlements-panel-{String(settlementsEnabled)}</div> }));
+vi.mock('@/features/externalAccounts/ExternalAccountsPanel', () => ({ ExternalAccountsPanel: () => <div>external-accounts-panel</div> }));
 
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -70,6 +71,23 @@ describe('FinancePage', () => {
     expect(screen.queryByText('account-overview-panel')).not.toBeInTheDocument();
     expect(screen.queryByText('payments-panel')).not.toBeInTheDocument();
     expect(screen.queryByText(/settlements-panel/)).not.toBeInTheDocument();
+    expect(mocks.getTransactionSettings).not.toHaveBeenCalled();
+    expect(mocks.getSettlements).not.toHaveBeenCalled();
+  });
+
+  it('opens only external accounts for a view-only membership without issuing core finance queries', async () => {
+    window.history.replaceState({}, '', '/finance?tab=external-accounts');
+    mocks.useActiveGroup.mockReturnValue({
+      activeGroupId: 'group-a',
+      activeGroup: {
+        externalAccountsEnabled: true,
+        membership: { effectiveGrants: [{ permission: 'VIEW_EXTERNAL_ACCOUNTS', scope: { type: 'GROUP' } }] },
+      },
+    });
+    renderPage();
+
+    expect((await screen.findAllByRole('tab')).map((tab) => tab.textContent)).toEqual(['Externe Konten']);
+    expect(await screen.findByText('external-accounts-panel')).toBeVisible();
     expect(mocks.getTransactionSettings).not.toHaveBeenCalled();
     expect(mocks.getSettlements).not.toHaveBeenCalled();
   });

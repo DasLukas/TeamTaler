@@ -134,7 +134,7 @@ describe('RightsPanel role definitions', () => {
     expect(within(administration).getAllByRole('switch')).toHaveLength(3);
     expect(within(bookings).getAllByRole('switch')).toHaveLength(6);
     expect(within(statistics).getAllByRole('switch')).toHaveLength(1);
-    expect(within(finance).getAllByRole('switch')).toHaveLength(2);
+    expect(within(finance).getAllByRole('switch')).toHaveLength(4);
     expect(within(catalog).getAllByRole('switch')).toHaveLength(1);
     expect(within(planning).getAllByRole('switch')).toHaveLength(4);
     expect(screen.getAllByRole('switch')).toHaveLength(PERMISSION_KEYS.length - 1);

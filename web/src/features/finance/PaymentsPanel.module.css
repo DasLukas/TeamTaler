@@ -6,6 +6,7 @@
 .summary div { display: grid; gap: 4px; }
 .summary span, .summary small { color: var(--color-text-muted); }
 .summary strong { color: var(--color-text-strong); font-size: 2rem; }
+.focusBar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-4); }
 .form,
 .review { display: grid; gap: var(--space-5); padding: var(--space-4) var(--space-6) var(--space-6); }
 .formRow { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
@@ -18,6 +19,7 @@
 .member > strong { overflow: hidden; text-overflow: ellipsis; }
 
 @media (max-width: 600px) {
+  .focusBar { align-items: stretch; flex-direction: column; }
   .header { align-items: stretch; flex-direction: column; }
   .form,
   .review { padding: var(--space-3) var(--space-5) calc(var(--space-5) + env(safe-area-inset-bottom)); }

@@ -48,6 +48,7 @@ function statisticsDashboard(regularMembers: number): StatisticsDashboard {
       flows: { openingNetReceivable: money(), netBookingCharges: money(), netPayments: money(), netAdjustments: money(), closingNetReceivable: money() },
       series: [], categories: [], overdue: null,
     },
+    externalAccounts: null,
   };
 }
 
@@ -113,6 +114,35 @@ describe('StatisticsPage', () => {
     await user.keyboard('{Escape}');
     await waitFor(() => expect(new URLSearchParams(window.location.search).get('range')).toBe('LAST_30_DAYS'));
     expect(new URLSearchParams(window.location.search).has('view')).toBe(false);
+  });
+
+  it('shows external accounts only when the feature, permission, and authorized projection are present', async () => {
+    const user = userEvent.setup();
+    const projection = statisticsDashboard(3);
+    projection.externalAccounts = { currency: 'EUR', accounts: [] };
+    apiMock.getStatistics.mockResolvedValue(projection);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const activeGroup = { ...group('group-a', ['VIEW_STATISTICS', 'VIEW_EXTERNAL_ACCOUNTS']), externalAccountsEnabled: true };
+    render(<Harness activeGroup={activeGroup} client={client} />);
+    const tab = await screen.findByRole('tab', { name: 'Externe Konten' });
+    await user.click(tab);
+    expect(screen.getByRole('heading', { name: 'Externe Konten' })).toBeVisible();
+    expect(screen.getByText('Noch keine externen Konten vorhanden.')).toBeVisible();
+    expect(apiMock.getStatistics).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { enabled: false, permissions: ['VIEW_STATISTICS', 'VIEW_EXTERNAL_ACCOUNTS'] as PermissionKey[] },
+    { enabled: true, permissions: ['VIEW_STATISTICS'] as PermissionKey[] },
+  ])('hides external accounts when a local gate is missing: %o', async ({ enabled, permissions }) => {
+    const projection = statisticsDashboard(3);
+    projection.externalAccounts = { currency: 'EUR', accounts: [] };
+    apiMock.getStatistics.mockResolvedValue(projection);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const activeGroup = { ...group('group-a', permissions), externalAccountsEnabled: enabled };
+    render(<Harness activeGroup={activeGroup} client={client} />);
+    await screen.findByLabelText('Member projection');
+    expect(screen.queryByRole('tab', { name: 'Externe Konten' })).not.toBeInTheDocument();
   });
 
   it('supports automatic tab activation with roving keyboard focus', async () => {

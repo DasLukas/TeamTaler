@@ -212,13 +212,37 @@ type FinanceStatistics struct {
 	Overdue            *OverdueSnapshot       `json:"overdue"`
 }
 
+// ExternalAccountPoint is an account balance at the end of one statistics bucket.
+type ExternalAccountPoint struct {
+	PeriodStart         string `json:"periodStart"`
+	ClosingBalanceMinor int64  `json:"closingBalanceMinor,string"`
+}
+
+// ExternalAccountStatistics contains the selected-range balance history of one account.
+type ExternalAccountStatistics struct {
+	ID                  string                 `json:"id"`
+	Name                string                 `json:"name"`
+	Type                string                 `json:"type"`
+	Status              string                 `json:"status"`
+	OpeningBalanceMinor int64                  `json:"openingBalanceMinor,string"`
+	ClosingBalanceMinor int64                  `json:"closingBalanceMinor,string"`
+	Series              []ExternalAccountPoint `json:"series"`
+}
+
+// ExternalAccountsStatistics is emitted only when the feature and permission are active.
+type ExternalAccountsStatistics struct {
+	Currency string                      `json:"currency"`
+	Accounts []ExternalAccountStatistics `json:"accounts"`
+}
+
 // Dashboard is the complete statistics response. Meta applies to both member
 // and finance aggregates, which are produced from the same read-only database
 // snapshot and resolved range.
 type Dashboard struct {
-	Meta    Meta              `json:"meta"`
-	Members MemberStatistics  `json:"members"`
-	Finance FinanceStatistics `json:"finance"`
+	Meta             Meta                        `json:"meta"`
+	Members          MemberStatistics            `json:"members"`
+	Finance          FinanceStatistics           `json:"finance"`
+	ExternalAccounts *ExternalAccountsStatistics `json:"externalAccounts"`
 }
 
 type resolvedRange struct {

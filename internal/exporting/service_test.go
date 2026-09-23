@@ -52,9 +52,39 @@ func TestGroupExportProducesSafeCompleteArchive(t *testing.T) {
 		`{"password":"`+auditPassword+`","safe":"retained"}`, now); err != nil {
 		t.Fatalf("insert audit fixture: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE group_payment_methods SET payment_target_type='PAYPAL_ME',paypal_me_handle='Club123'
+	if _, err := db.ExecContext(ctx, `INSERT INTO external_accounts(
+		id,group_id,name,type,status,sort_order,paypal_me_handle,version,created_at,updated_at
+	) VALUES('external-export',?,'PayPal reserve','PAYPAL','ACTIVE',0,'Club123',1,?,?)`, groupID, now, now); err != nil {
+		t.Fatalf("create export external account: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE group_payment_methods SET external_account_id='external-export'
 		WHERE group_id=? AND id='PAYPAL'`, groupID); err != nil {
-		t.Fatalf("configure export payment target: %v", err)
+		t.Fatalf("link export payment method: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO external_account_transactions(
+		id,group_id,kind,primary_account_id,amount_minor,booked_at,reason,reference,note,created_by_membership_id,created_at
+	) VALUES('external-transaction-export',?,'INCOME','external-export',250,?,'Export income','EXT-001','Complete fixture',?,?)`, groupID, now, membershipID, now); err != nil {
+		t.Fatalf("create export external transaction: %v", err)
+	}
+	externalAttachmentHash := strings.Repeat("a", 64)
+	if _, err := db.ExecContext(ctx, `INSERT INTO external_account_transaction_attachments(
+		transaction_id,group_id,storage_key,original_filename,media_type,size_bytes,sha256,created_by_membership_id,created_at
+	) VALUES('external-transaction-export',?,?, 'external-evidence.pdf','application/pdf',128,?,?,?)`, groupID, externalAttachmentHash+".pdf", externalAttachmentHash, membershipID, now); err != nil {
+		t.Fatalf("create export external attachment: %v", err)
+	}
+	for _, statement := range []struct {
+		id, account, externalAccountID string
+		amount                         int64
+	}{
+		{id: "external-ledger-export", account: "EXTERNAL_ACCOUNT", externalAccountID: "external-export", amount: 250},
+		{id: "external-offset-export", account: "EXTERNAL_OFFSET", amount: -250},
+	} {
+		if _, err := db.ExecContext(ctx, `INSERT INTO ledger_entries(
+			id,group_id,period_id,external_account_id,external_transaction_id,account,amount_minor,description,created_at
+		) VALUES(?,?,(SELECT id FROM periods WHERE group_id=? AND status='OPEN'),nullif(?,''),'external-transaction-export',?,?,?,?)`,
+			statement.id, groupID, groupID, statement.externalAccountID, statement.account, statement.amount, "Export income", now); err != nil {
+			t.Fatalf("create export external ledger fixture: %v", err)
+		}
 	}
 
 	recorder := &completionRecorder{}
@@ -93,6 +123,7 @@ func TestGroupExportProducesSafeCompleteArchive(t *testing.T) {
 	}
 	for _, required := range []string{
 		"manifest.json", "schema.json", "data/group.csv", "data/audit_events.csv", "data/payment_attachments.csv",
+		"data/external_accounts.csv", "data/external_account_transactions.csv", "data/external_account_transaction_attachments.csv",
 		"data/public_join_link.csv", "data/public_join_registrations.csv", "data/notifications.csv",
 		"data/planning_series_cancelled_ranges.csv",
 		"data/legacy_membership_roles.csv", "data/legacy_membership_permissions.csv", "data/legacy_category_permissions.csv",
@@ -129,9 +160,33 @@ func TestGroupExportProducesSafeCompleteArchive(t *testing.T) {
 		}
 	}
 	paymentMethodsCSV := string(entries["data/payment_methods.csv"])
-	for _, value := range []string{"payment_target_type", "paypal_me_handle", "sepa_recipient_name", "sepa_iban", "sepa_bic", "PAYPAL_ME", "Club123", "NONE"} {
+	for _, value := range []string{"external_account_id", "external-export"} {
 		if !strings.Contains(paymentMethodsCSV, value) {
 			t.Fatalf("payment-method export lacks %q: %s", value, paymentMethodsCSV)
+		}
+	}
+	externalAccountsCSV := string(entries["data/external_accounts.csv"])
+	for _, value := range []string{"paypal_me_handle", "PayPal reserve", "Club123"} {
+		if !strings.Contains(externalAccountsCSV, value) {
+			t.Fatalf("external-account export lacks %q: %s", value, externalAccountsCSV)
+		}
+	}
+	externalTransactionsCSV := string(entries["data/external_account_transactions.csv"])
+	for _, value := range []string{"primary_account_id", "currency", "external-transaction-export", "external-export", "EXT-001"} {
+		if !strings.Contains(externalTransactionsCSV, value) {
+			t.Fatalf("external-account transaction export lacks %q: %s", value, externalTransactionsCSV)
+		}
+	}
+	externalAttachmentsCSV := string(entries["data/external_account_transaction_attachments.csv"])
+	for _, value := range []string{"transaction_id", "external-transaction-export", "external-evidence.pdf"} {
+		if !strings.Contains(externalAttachmentsCSV, value) {
+			t.Fatalf("external-account attachment export lacks %q: %s", value, externalAttachmentsCSV)
+		}
+	}
+	ledgerCSV := string(entries["data/ledger_entries.csv"])
+	for _, value := range []string{"external_account_id", "external_transaction_id", "external-ledger-export", "external-transaction-export"} {
+		if !strings.Contains(ledgerCSV, value) {
+			t.Fatalf("ledger export lacks external reference %q: %s", value, ledgerCSV)
 		}
 	}
 	if len(recorder.completions) != 1 || recorder.completions[0].Status != StatusReady {
@@ -187,6 +242,12 @@ func TestPersonalExportAuthorizationPasswordAndIdempotency(t *testing.T) {
 	}
 	if _, found := entries["data/payment_methods.csv"]; found {
 		t.Fatal("personal archive contains group payment targets")
+	}
+	if _, found := entries["data/external_accounts.csv"]; found {
+		t.Fatal("personal archive contains external accounts")
+	}
+	if _, found := entries["data/external_account_transactions.csv"]; found {
+		t.Fatal("personal archive contains external account transactions")
 	}
 }
 

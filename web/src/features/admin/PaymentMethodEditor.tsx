@@ -11,6 +11,7 @@ import type { AttachmentMode, PaymentMethod, PaymentTarget } from '@/api/types';
 import { Field, TextInput } from '@/components/ui/FormField';
 import { IconButton } from '@/components/ui/IconButton';
 import { SelectMenu, type SelectMenuOption } from '@/components/ui/SelectMenu';
+import { ExternalAccountTypeIcon } from '@/features/externalAccounts/ExternalAccountTypeIcon';
 import { isBicRequiredForIban, isValidBic, isValidIban, normalizeBic, normalizeIban, normalizePaypalMeHandle } from '@/features/finance/paymentTargets';
 import styles from './PaymentMethodEditor.module.css';
 
@@ -24,6 +25,8 @@ interface PaymentMethodEditorProps {
   emptyLabel: string;
   currency: string;
   onChange: (items: PaymentMethod[]) => void;
+  onRemove: (item: PaymentMethod) => void;
+  externalAccountsEnabled?: boolean;
 }
 
 const attachmentModeIcons = {
@@ -38,12 +41,12 @@ function renderAttachmentMode(option: SelectMenuOption<AttachmentMode>) {
 }
 
 /**
- * Edits ordered payment methods together with receipt and external-payment settings.
+ * Edits ordered payment methods together with receipt settings and legacy external-payment targets.
  *
- * @param props - Current methods, active currency, labels, and immutable update callback.
- * @returns An accessible editor whose conditional target fields travel with each method.
+ * @param props - Current methods, active currency, labels, and change and removal callbacks.
+ * @returns An accessible editor that hides legacy target controls while external accounts are active.
  */
-export function PaymentMethodEditor({ items, label, addLabel, emptyLabel, currency, onChange }: PaymentMethodEditorProps) {
+export function PaymentMethodEditor({ items, label, addLabel, emptyLabel, currency, onChange, onRemove, externalAccountsEnabled = false }: PaymentMethodEditorProps) {
   const { t } = useTranslation();
   const descriptionId = useId();
   const targetDescriptionId = useId();
@@ -51,7 +54,7 @@ export function PaymentMethodEditor({ items, label, addLabel, emptyLabel, curren
   const add = () => {
     const normalized = draft.trim();
     if (!normalized || items.some((item) => item.label.localeCompare(normalized, undefined, { sensitivity: 'accent' }) === 0)) return;
-    onChange([...items, { id: `opt_${crypto.randomUUID()}`, label: normalized, attachmentMode: 'OFF', paymentTarget: null }]);
+    onChange([...items, { id: `opt_${crypto.randomUUID()}`, label: normalized, attachmentMode: 'OFF', externalAccountId: null, paymentTarget: null }]);
     setDraft('');
   };
   const update = (index: number, change: Partial<PaymentMethod>) => {
@@ -80,12 +83,17 @@ export function PaymentMethodEditor({ items, label, addLabel, emptyLabel, curren
     { value: 'OPTIONAL', label: t('behaviorSettings.attachmentModeOptional') },
     { value: 'REQUIRED', label: t('behaviorSettings.attachmentModeRequired') },
   ];
+  const targetOptions: SelectMenuOption<PaymentTargetChoice>[] = [
+    { value: 'NONE', label: t('behaviorSettings.paymentTargetNone') },
+    { value: 'PAYPAL_ME', label: t('behaviorSettings.paymentTargetPaypal'), visual: <ExternalAccountTypeIcon size={18} type="PAYPAL" /> },
+    ...(currency === 'EUR' ? [{ value: 'SEPA_TRANSFER' as const, label: t('behaviorSettings.paymentTargetSepa'), visual: <ExternalAccountTypeIcon size={18} type="BANK" /> }] : []),
+  ];
 
   return <section aria-label={label} className={styles.editor}>
     <h4>{label}</h4>
     <div className={styles.descriptions}>
       <p className={styles.description} id={descriptionId}>{t('behaviorSettings.attachmentModeDescription')}</p>
-      <p className={styles.description} id={targetDescriptionId}>{t('behaviorSettings.paymentTargetDescription')}</p>
+      {!externalAccountsEnabled ? <p className={styles.description} id={targetDescriptionId}>{t('behaviorSettings.paymentTargetDescription')}</p> : null}
     </div>
     <div className={styles.addRow}>
       <TextInput aria-label={addLabel} maxLength={120} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); add(); } }} value={draft} />
@@ -113,11 +121,6 @@ export function PaymentMethodEditor({ items, label, addLabel, emptyLabel, curren
           : sepaTarget && ibanValid && isBicRequiredForIban(sepaTarget.iban) && !bic.trim()
             ? t('behaviorSettings.sepaBicRequired')
             : '';
-        const targetOptions: Array<{ value: PaymentTargetChoice; label: string }> = [
-          { value: 'NONE', label: t('behaviorSettings.paymentTargetNone') },
-          { value: 'PAYPAL_ME', label: t('behaviorSettings.paymentTargetPaypal') },
-          ...(currency === 'EUR' ? [{ value: 'SEPA_TRANSFER' as const, label: t('behaviorSettings.paymentTargetSepa') }] : []),
-        ];
         const prefix = `payment-method-${item.id}`;
         return <li className={styles.item} key={item.id}>
           <div className={styles.mainRow}>
@@ -137,10 +140,10 @@ export function PaymentMethodEditor({ items, label, addLabel, emptyLabel, curren
             <div className={styles.actions}>
               <IconButton disabled={index === 0} label={t('behaviorSettings.moveUp', { name: item.label })} onClick={() => move(index, -1)} type="button"><ArrowUp size={16} /></IconButton>
               <IconButton disabled={index === items.length - 1} label={t('behaviorSettings.moveDown', { name: item.label })} onClick={() => move(index, 1)} type="button"><ArrowDown size={16} /></IconButton>
-              <IconButton disabled={items.length <= 1} label={t('behaviorSettings.removeOption', { name: item.label })} onClick={() => onChange(items.filter((candidate) => candidate.id !== item.id))} type="button"><Trash2 size={16} /></IconButton>
+              <IconButton disabled={items.length <= 1} label={t('behaviorSettings.removeOption', { name: item.label })} onClick={() => onRemove(item)} type="button"><Trash2 size={16} /></IconButton>
             </div>
           </div>
-          <div aria-label={`${item.label}: ${targetLabel}`} className={styles.targetPanel} role="group">
+          {!externalAccountsEnabled ? <div aria-label={`${item.label}: ${targetLabel}`} className={styles.targetPanel} role="group">
             <Field hint={currency !== 'EUR' ? t('behaviorSettings.sepaEuroOnly') : undefined} htmlFor={`${prefix}-target`} label={targetLabel} messageId={`${prefix}-target-description`}>
               <SelectMenu<PaymentTargetChoice> ariaDescribedBy={`${targetDescriptionId}${currency !== 'EUR' ? ` ${prefix}-target-description` : ''}`} ariaLabel={targetLabel} id={`${prefix}-target`} onChange={(choice) => changeTargetType(index, choice)} options={targetOptions} value={targetChoice} />
             </Field>
@@ -161,7 +164,7 @@ export function PaymentMethodEditor({ items, label, addLabel, emptyLabel, curren
                 <TextInput aria-describedby={bicError ? `${prefix}-bic-error` : undefined} aria-invalid={Boolean(bicError)} autoCapitalize="characters" id={`${prefix}-bic`} maxLength={14} onBlur={(event) => { const bic = normalizeBic(event.target.value); update(index, { paymentTarget: { ...sepaTarget, bic: bic || undefined } }); }} onChange={(event) => update(index, { paymentTarget: { ...sepaTarget, bic: event.target.value } })} spellCheck={false} value={sepaTarget.bic ?? ''} />
               </Field>
             </div> : null}
-          </div>
+          </div> : null}
         </li>;
       })}
     </ol>}

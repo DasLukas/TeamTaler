@@ -92,6 +92,24 @@ func TestSystemGroupLifecycleAndPurge(t *testing.T) {
 		VALUES(?,?,?,?,?,?,?)`, "ledger-system-purge-impact", created.ID, initialAdministratorMembershipID, "MEMBER_RECEIVABLE", 1234, "Purge impact fixture", now); err != nil {
 		t.Fatalf("insert purge impact balance: %v", err)
 	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO external_accounts(
+		id,group_id,name,type,status,sort_order,version,created_at,updated_at,created_by_membership_id,updated_by_membership_id
+	) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, "external-system-purge", created.ID, "Purge cash", "CASH", "ACTIVE", 0, 1, now, now, initialAdministratorMembershipID, initialAdministratorMembershipID); err != nil {
+		t.Fatalf("insert purge external account: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO external_account_transactions(
+		id,group_id,kind,primary_account_id,amount_minor,booked_at,reason,created_by_membership_id,created_at
+	) VALUES(?,?,?,?,?,?,?,?,?)`, "external-transaction-system-purge", created.ID, "INCOME", "external-system-purge", 500, now, "Purge fixture", initialAdministratorMembershipID, now); err != nil {
+		t.Fatalf("insert purge external transaction: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO ledger_entries(
+		id,group_id,external_account_id,external_transaction_id,account,amount_minor,description,created_at
+	) VALUES(?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?)`,
+		"ledger-system-external", created.ID, "external-system-purge", "external-transaction-system-purge", "EXTERNAL_ACCOUNT", 500, "Purge external fixture", now,
+		"ledger-system-offset", created.ID, nil, "external-transaction-system-purge", "EXTERNAL_OFFSET", -500, "Purge external fixture", now,
+	); err != nil {
+		t.Fatalf("insert purge external ledger: %v", err)
+	}
 
 	archived, err := service.ArchiveGroup(ctx, administrator.Principal.UserID, created.ID, created.Version)
 	if err != nil {
@@ -141,7 +159,7 @@ func TestSystemGroupLifecycleAndPurge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("purge group: %v", err)
 	}
-	if impact.GroupID != created.ID || impact.MemberCount != 1 || impact.Currency != "EUR" || impact.OpenBalanceMinor != 1234 {
+	if impact.GroupID != created.ID || impact.MemberCount != 1 || impact.Currency != "EUR" || impact.OpenBalanceMinor != 1234 || impact.FinancialRecordCount != 4 {
 		t.Fatalf("purge impact = %#v", impact)
 	}
 	var remaining int

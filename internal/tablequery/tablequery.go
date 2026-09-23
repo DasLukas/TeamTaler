@@ -84,11 +84,11 @@ func NormalizeAudit(input AuditQuery, scope string, allowActorMembership bool) (
 	}
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.ActorMembershipID = strings.TrimSpace(input.ActorMembershipID)
-	input.Actions, err = normalizeStringSet("action", input.Actions)
+	input.Actions, err = NormalizeStringSet("action", input.Actions)
 	if err != nil {
 		return AuditQuery{}, "", err
 	}
-	input.ResourceTypes, err = normalizeStringSet("resourceType", input.ResourceTypes)
+	input.ResourceTypes, err = NormalizeStringSet("resourceType", input.ResourceTypes)
 	if err != nil {
 		return AuditQuery{}, "", err
 	}
@@ -119,9 +119,9 @@ func NormalizeAudit(input AuditQuery, scope string, allowActorMembership bool) (
 	return input, fingerprint, nil
 }
 
-// normalizeStringSet trims, validates, deduplicates, and sorts repeated exact
+// NormalizeStringSet trims, validates, deduplicates, and sorts repeated exact
 // filter values so equivalent URL orders share one cursor fingerprint.
-func normalizeStringSet(field string, values []string) ([]string, error) {
+func NormalizeStringSet(field string, values []string) ([]string, error) {
 	unique := make(map[string]struct{}, len(values))
 	for _, rawValue := range values {
 		value := strings.TrimSpace(rawValue)

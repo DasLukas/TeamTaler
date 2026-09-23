@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import i18n from '@/i18n';
-import { adaptAccountSummaries, adaptActivity, adaptAppearancePreference, adaptBooking, adaptCategories, adaptDashboard, adaptGroupSettings, adaptInstanceCapabilities, adaptLedger, adaptMembership, adaptNotification, adaptNotificationDestination, adaptNotificationPreferences, adaptPayment, adaptPaymentTarget, adaptPermissionDefinition, adaptPermissionGrants, adaptProduct, adaptPushSubscriptions, adaptRole, adaptSession, adaptSettlement, adaptStatisticsDashboard, adaptSystemAudit, adaptSystemGroupDeletionImpact, adaptSystemGroups, adaptSystemSettings, adaptThemePreference, adaptTransactionSettings } from './adapters';
+import { adaptAccountSummaries, adaptActivity, adaptAppearancePreference, adaptBooking, adaptCategories, adaptDashboard, adaptExternalAccountCollection, adaptExternalAccountTransaction, adaptGroupSettings, adaptInstanceCapabilities, adaptLedger, adaptMembership, adaptNotification, adaptNotificationDestination, adaptNotificationPreferences, adaptPayment, adaptPaymentTarget, adaptPermissionDefinition, adaptPermissionGrants, adaptProduct, adaptPushSubscriptions, adaptRole, adaptSession, adaptSettlement, adaptStatisticsDashboard, adaptSystemAudit, adaptSystemGroupDeletionImpact, adaptSystemGroups, adaptSystemSettings, adaptThemePreference, adaptTransactionSettings } from './adapters';
 
 describe('API adapters', () => {
   it('adapts the exact privacy-aware member section of the unified statistics contract', () => {
@@ -56,6 +56,24 @@ describe('API adapters', () => {
     expect(statistics.finance.flows.netPayments.minorUnits).toBe('2');
     expect(statistics.finance.categories[0]).toMatchObject({ isOther: true, netBookingCharges: { minorUnits: '-1', currency: 'EUR' } });
     expect(statistics.finance.overdue?.amount.minorUnits).toBe('100');
+  });
+  it('keeps optional external-account statistics exact and absent by default', () => {
+    const base = {
+      meta: {},
+      members: { memberSnapshot: {}, summary: {}, activity: [], topCategories: {}, topProducts: {} },
+      finance: { receivableSnapshot: {}, flows: {}, series: [], categories: [], overdue: null },
+    };
+    expect(adaptStatisticsDashboard(base).externalAccounts).toBeNull();
+    const statistics = adaptStatisticsDashboard({
+      ...base,
+      externalAccounts: { currency: 'EUR', accounts: [{
+        id: 'account-a', name: 'Club bank', type: 'BANK', status: 'ACTIVE',
+        openingBalanceMinor: '9223372036854775800', closingBalanceMinor: '9223372036854775807',
+        series: [{ periodStart: '2026-08-01T00:00:00Z', closingBalanceMinor: '9223372036854775807' }],
+      }] },
+    });
+    expect(statistics.externalAccounts?.accounts[0].closingBalance.minorUnits).toBe('9223372036854775807');
+    expect(statistics.externalAccounts?.accounts[0].series[0].closingBalance.minorUnits).toBe('9223372036854775807');
   });
   it('adapts signed unified activities and source action metadata', () => {
     expect(adaptActivity({
@@ -228,8 +246,8 @@ describe('API adapters', () => {
       { id: 'CASH', label: 'Cash' },
       { id: 'SHOPPING', label: 'Shopping', attachmentMode: 'REQUIRED' },
     ] }).paymentMethods).toEqual([
-      { id: 'CASH', label: 'Bar', attachmentMode: 'OFF', paymentTarget: null },
-      { id: 'SHOPPING', label: 'Einkauf', attachmentMode: 'REQUIRED', paymentTarget: null },
+      { id: 'CASH', label: 'Bar', attachmentMode: 'OFF', externalAccountId: null, paymentTarget: null },
+      { id: 'SHOPPING', label: 'Einkauf', attachmentMode: 'REQUIRED', externalAccountId: null, paymentTarget: null },
     ]);
     expect(adaptPayment({
       id: 'payment-a', membershipId: 'member-a', memberName: 'Alex', amountMinor: 1234, currency: 'EUR', receivedAt: '2026-08-20', method: 'SHOPPING', status: 'POSTED',
@@ -539,5 +557,60 @@ describe('API adapters', () => {
     expect(settlement.openAmount?.minorUnits).toBe('100');
     expect(settlement.email).toBeNull();
     expect(settlement.membershipStatus).toBe('ARCHIVED');
+  });
+
+  it('adapts external account collections and provider fields without losing exact money', () => {
+    const collection = adaptExternalAccountCollection({
+      version: 7,
+      items: [{
+        id: 'exa-bank',
+        name: 'Main bank',
+        type: 'BANK',
+        status: 'ACTIVE',
+        balanceMinor: '1234567890123',
+        currency: 'EUR',
+        sepaRecipientName: 'Example Club',
+        sepaIban: 'DE89370400440532013000',
+        linkedPaymentMethodIds: ['BANK_TRANSFER'],
+        version: 2,
+      }],
+    });
+
+    expect(collection.version).toBe(7);
+    expect(collection.items[0]).toMatchObject({
+      id: 'exa-bank',
+      balance: { minorUnits: '1234567890123', currency: 'EUR' },
+      details: { type: 'BANK', recipientName: 'Example Club', iban: 'DE89370400440532013000' },
+      linkedPaymentMethodIds: ['BANK_TRANSFER'],
+    });
+  });
+
+  it('adapts signed backend external transactions into the canonical client model', () => {
+    const transaction = adaptExternalAccountTransaction({
+      id: 'ext-expense',
+      kind: 'EXPENSE',
+      primaryAccountId: 'exa-cash',
+      amountMinor: '-1250',
+      currency: 'EUR',
+      bookedAt: '2026-09-13T10:00:00Z',
+      reason: 'Supplies',
+      createdByMembershipId: 'mem-1',
+      actor: { id: 'mem-1', displayName: 'Ada Admin', avatarUrl: '/api/v1/users/user-1/avatar/avatar.png' },
+      createdAt: '2026-09-13T10:01:00Z',
+      impacts: [{ account: { id: 'exa-cash', name: 'Cash', type: 'CASH' }, amountMinor: '-1250' }],
+	  attachment: { fileName: 'receipt.pdf', mediaType: 'application/pdf', sizeBytes: 1024, url: '/api/v1/groups/group-a/external-account-transactions/ext-expense/attachment', storageKey: 'secret' },
+      canReverse: true,
+    });
+
+    expect(transaction).toMatchObject({
+      kind: 'EXPENSE',
+      occurredAt: '2026-09-13T10:00:00Z',
+      primaryAccountId: 'exa-cash',
+      amount: { minorUnits: '-1250', currency: 'EUR' },
+      impacts: [{ account: { id: 'exa-cash', name: 'Cash', type: 'CASH' }, amount: { minorUnits: '-1250', currency: 'EUR' } }],
+      actor: { id: 'mem-1', displayName: 'Ada Admin', avatarUrl: '/api/v1/users/user-1/avatar/avatar.png' },
+	  attachment: { fileName: 'receipt.pdf', mediaType: 'application/pdf', sizeBytes: 1024, url: '/api/v1/groups/group-a/external-account-transactions/ext-expense/attachment' },
+      canReverse: true,
+    });
   });
 });

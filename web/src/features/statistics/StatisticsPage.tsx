@@ -10,20 +10,22 @@ import { useTranslation } from 'react-i18next';
 import { api, ApiError } from '@/api/client';
 import { isStatisticsRange, type StatisticsMeta, type StatisticsRange } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
+import { can } from '@/app/permissions';
 import { Page } from '@/components/layout/Page';
 import { TextInput } from '@/components/ui/FormField';
 import { SelectMenu, type SelectMenuOption } from '@/components/ui/SelectMenu';
 import { StatePanel } from '@/components/ui/StatePanel';
 import tabStyles from '@/components/ui/WorkspaceTabs.module.css';
 import { FinanceStatisticsView } from './FinanceStatisticsView';
+import { ExternalAccountsStatisticsView } from './ExternalAccountsStatisticsView';
 import { MemberStatisticsView } from './MemberStatisticsView';
 import { statisticsQueryKeys, statisticsRangeOptions } from './statisticsQueries';
 import { useStatisticsUrlState } from './statisticsUrlState';
 import styles from './StatisticsPage.module.css';
 
-type StatisticsTab = 'bookings' | 'finance';
+type StatisticsTab = 'bookings' | 'finance' | 'externalAccounts';
 
-const statisticsTabs: readonly StatisticsTab[] = ['bookings', 'finance'];
+const coreStatisticsTabs: readonly StatisticsTab[] = ['bookings', 'finance'];
 const rangeIcons = {
   CURRENT_PERIOD: CalendarCheck2,
   LAST_30_DAYS: CalendarDays,
@@ -47,7 +49,7 @@ function isStatisticsAccessError(error: unknown): boolean {
  * @param props - Active group identity used for query and cache isolation.
  * @returns The single-request statistics dashboard with shareable range filters.
  */
-function StatisticsPageContent({ activeGroupId }: { activeGroupId: string }) {
+function StatisticsPageContent({ activeGroupId, canViewExternalAccounts }: { activeGroupId: string; canViewExternalAccounts: boolean }) {
   const { t } = useTranslation();
   const urlState = useStatisticsUrlState(activeGroupId);
   const tabGroupId = useId();
@@ -62,6 +64,9 @@ function StatisticsPageContent({ activeGroupId }: { activeGroupId: string }) {
     staleTime: 0,
     refetchInterval: false,
   });
+  const statisticsTabs: readonly StatisticsTab[] = canViewExternalAccounts && statisticsQuery.data?.externalAccounts
+    ? [...coreStatisticsTabs, 'externalAccounts'] : coreStatisticsTabs;
+  const visibleActiveTab = statisticsTabs.includes(activeTab) ? activeTab : 'bookings';
 
   const resolvedPreset = statisticsQuery.data?.meta.preset;
   const normalizeResolvedRange = urlState.normalizeResolvedRange;
@@ -138,7 +143,7 @@ function StatisticsPageContent({ activeGroupId }: { activeGroupId: string }) {
             {statisticsQuery.isError ? <p className={styles.staleWarning} role="alert">{t('statistics.refreshError')}</p> : null}
             <div aria-label={t('statistics.tabs.label')} aria-orientation="horizontal" className={tabStyles.tabs} role="tablist">
               {statisticsTabs.map((tab, index) => {
-                const selected = activeTab === tab;
+                const selected = visibleActiveTab === tab;
                 return (
                   <button
                     aria-controls={`${tabGroupId}-panel-${tab}`}
@@ -162,12 +167,12 @@ function StatisticsPageContent({ activeGroupId }: { activeGroupId: string }) {
               <section
                 aria-labelledby={`${tabGroupId}-tab-bookings`}
                 className={`${styles.dashboardSection} ${styles.tabPanel}`}
-                hidden={activeTab !== 'bookings'}
+                hidden={visibleActiveTab !== 'bookings'}
                 id={`${tabGroupId}-panel-bookings`}
                 role="tabpanel"
-                tabIndex={activeTab === 'bookings' ? 0 : -1}
+                tabIndex={visibleActiveTab === 'bookings' ? 0 : -1}
               >
-                {activeTab === 'bookings' ? (
+                {visibleActiveTab === 'bookings' ? (
                   <>
                     <header className={styles.sectionHeading}>
                       <h2>{t('statistics.sections.members')}</h2>
@@ -180,12 +185,12 @@ function StatisticsPageContent({ activeGroupId }: { activeGroupId: string }) {
               <section
                 aria-labelledby={`${tabGroupId}-tab-finance`}
                 className={`${styles.dashboardSection} ${styles.tabPanel}`}
-                hidden={activeTab !== 'finance'}
+                hidden={visibleActiveTab !== 'finance'}
                 id={`${tabGroupId}-panel-finance`}
                 role="tabpanel"
-                tabIndex={activeTab === 'finance' ? 0 : -1}
+                tabIndex={visibleActiveTab === 'finance' ? 0 : -1}
               >
-                {activeTab === 'finance' ? (
+                {visibleActiveTab === 'finance' ? (
                   <>
                     <header className={styles.sectionHeading}>
                       <h2>{t('statistics.sections.finance')}</h2>
@@ -195,6 +200,26 @@ function StatisticsPageContent({ activeGroupId }: { activeGroupId: string }) {
                   </>
                 ) : null}
               </section>
+              {statisticsQuery.data.externalAccounts && canViewExternalAccounts ? (
+                <section
+                  aria-labelledby={`${tabGroupId}-tab-externalAccounts`}
+                  className={`${styles.dashboardSection} ${styles.tabPanel}`}
+                  hidden={visibleActiveTab !== 'externalAccounts'}
+                  id={`${tabGroupId}-panel-externalAccounts`}
+                  role="tabpanel"
+                  tabIndex={visibleActiveTab === 'externalAccounts' ? 0 : -1}
+                >
+                  {visibleActiveTab === 'externalAccounts' ? (
+                    <>
+                      <header className={styles.sectionHeading}>
+                        <h2>{t('statistics.sections.externalAccounts')}</h2>
+                        <p>{t('statistics.sections.externalAccountsDescription')}</p>
+                      </header>
+                      <ExternalAccountsStatisticsView data={statisticsQuery.data.externalAccounts} meta={statisticsQuery.data.meta} />
+                    </>
+                  ) : null}
+                </section>
+              ) : null}
             </div>
           </div>
         )}
@@ -209,6 +234,7 @@ function StatisticsPageContent({ activeGroupId }: { activeGroupId: string }) {
  * @returns The statistics workspace scoped to the current active group.
  */
 export function StatisticsPage() {
-  const { activeGroupId } = useActiveGroup();
-  return <StatisticsPageContent activeGroupId={activeGroupId} key={activeGroupId} />;
+  const { activeGroup, activeGroupId } = useActiveGroup();
+  const canViewExternalAccounts = Boolean(activeGroup.externalAccountsEnabled && can(activeGroup.membership?.effectiveGrants, 'VIEW_EXTERNAL_ACCOUNTS'));
+  return <StatisticsPageContent activeGroupId={activeGroupId} canViewExternalAccounts={canViewExternalAccounts} key={activeGroupId} />;
 }

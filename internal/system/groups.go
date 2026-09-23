@@ -226,12 +226,15 @@ const managedGroupQuery = `SELECT g.id,g.name,g.currency,g.status,g.version,g.ar
 	(SELECT count(*) FROM payment_attachments attachment WHERE attachment.group_id=g.id) +
 	(SELECT count(*) FROM payment_allocations a WHERE a.group_id=g.id) +
 	(SELECT count(*) FROM period_adjustment_allocations a WHERE a.group_id=g.id) +
+	(SELECT count(*) FROM external_account_transactions transaction_record WHERE transaction_record.group_id=g.id) +
+	(SELECT count(*) FROM external_account_transaction_attachments attachment WHERE attachment.group_id=g.id) +
 	(SELECT count(*) FROM period_statements statement WHERE statement.group_id=g.id),
 	(SELECT count(*) FROM audit_events a WHERE a.group_id=g.id),
 	(SELECT count(DISTINCT image_key) FROM (
 		SELECT logo_key AS image_key FROM groups WHERE id=g.id AND logo_key IS NOT NULL
 		UNION ALL SELECT image_key FROM products WHERE group_id=g.id AND image_key IS NOT NULL
 		UNION ALL SELECT storage_key FROM payment_attachments WHERE group_id=g.id
+		UNION ALL SELECT storage_key FROM external_account_transaction_attachments WHERE group_id=g.id
 	)),
 	(SELECT coalesce(sum(l.amount_minor),0) FROM ledger_entries l
 		WHERE l.group_id=g.id AND l.account='MEMBER_RECEIVABLE')
@@ -663,8 +666,11 @@ func (s Service) purgeGroup(ctx context.Context, actorUserID, groupID string, in
 		return DeletionImpact{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO system_attachment_delete_jobs(storage_key,next_attempt_at,created_at,updated_at)
-		SELECT DISTINCT storage_key,?,?,? FROM payment_attachments WHERE group_id=?
-		ON CONFLICT(storage_key) DO UPDATE SET status='PENDING',next_attempt_at=excluded.next_attempt_at,updated_at=excluded.updated_at`, now, now, now, groupID); err != nil {
+		SELECT DISTINCT storage_key,?,?,? FROM (
+			SELECT storage_key FROM payment_attachments WHERE group_id=?
+			UNION SELECT storage_key FROM external_account_transaction_attachments WHERE group_id=?
+		) WHERE true
+		ON CONFLICT(storage_key) DO UPDATE SET status='PENDING',next_attempt_at=excluded.next_attempt_at,updated_at=excluded.updated_at`, now, now, now, groupID, groupID); err != nil {
 		return DeletionImpact{}, err
 	}
 	deleteOrder := []string{
@@ -674,11 +680,11 @@ func (s Service) purgeGroup(ctx context.Context, actorUserID, groupID string, in
 		"planning_series_cancelled_ranges", "planning_series_revisions", "planning_series", "group_planning_settings",
 		"notification_reminder_runs", "notification_delivery_jobs", "invitation_email_outbox", "public_join_email_outbox",
 		"notifications", "invitation_role_assignments", "invitations",
-		"public_join_registrations", "public_join_links", "ledger_entries", "period_statements",
+		"public_join_registrations", "public_join_links", "ledger_entries", "external_account_transaction_attachments", "external_account_transactions", "period_statements",
 		"payment_allocations", "period_adjustment_allocations", "bookings", "payment_attachments", "payments",
 		"audit_events", "idempotency_results", "category_permissions", "membership_permissions",
 		"membership_notification_channels", "membership_role_assignments", "membership_roles", "group_reason_suggestions",
-		"group_payment_methods", "group_settings", "role_permission_grants", "roles",
+		"group_payment_methods", "external_accounts", "group_settings", "role_permission_grants", "roles",
 		"products", "categories", "periods", "memberships",
 	}
 	for _, table := range deleteOrder {
@@ -855,7 +861,9 @@ func (s Service) RunAttachmentGarbageCollection(ctx context.Context, dataDirecto
 	for _, key := range keys {
 		release := paymentattachments.LockStore()
 		var references int64
-		if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM payment_attachments WHERE storage_key=?`, key).Scan(&references); err != nil {
+		if err := s.db.QueryRowContext(ctx, `SELECT
+			(SELECT count(*) FROM payment_attachments WHERE storage_key=?) +
+			(SELECT count(*) FROM external_account_transaction_attachments WHERE storage_key=?)`, key, key).Scan(&references); err != nil {
 			release()
 			return completed, err
 		}
@@ -912,7 +920,9 @@ func (s Service) sweepUnreferencedAttachments(ctx context.Context, dataDirectory
 		}
 		release := paymentattachments.LockStore()
 		var references int64
-		err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM payment_attachments WHERE storage_key=?`, key).Scan(&references)
+		err := s.db.QueryRowContext(ctx, `SELECT
+			(SELECT count(*) FROM payment_attachments WHERE storage_key=?) +
+			(SELECT count(*) FROM external_account_transaction_attachments WHERE storage_key=?)`, key, key).Scan(&references)
 		if err == nil && references == 0 {
 			err = store.Remove(key)
 		}

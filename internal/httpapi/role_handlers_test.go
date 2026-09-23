@@ -32,13 +32,18 @@ func TestHandlePermissionDefinitionsReturnsStableArrayMetadata(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &definitions); err != nil {
 		t.Fatalf("decode permission definitions: %v", err)
 	}
-	if len(definitions) != 18 {
-		t.Fatalf("permission definition count = %d, want 18", len(definitions))
+	if len(definitions) != 20 {
+		t.Fatalf("permission definition count = %d, want 20", len(definitions))
 	}
+	keys := make([]domain.PermissionKey, 0, len(definitions))
 	for _, definition := range definitions {
+		keys = append(keys, definition.Key)
 		if definition.Implies == nil || len(definition.AllowedScopes) != 1 || definition.AllowedScopes[0] != domain.PermissionScopeGroup {
 			t.Fatalf("permission definition metadata = %#v", definition)
 		}
+	}
+	if !slices.Contains(keys, domain.PermissionViewExternalAccounts) || !slices.Contains(keys, domain.PermissionManageExternalAccounts) {
+		t.Fatalf("external account permissions missing: %v", keys)
 	}
 }
 

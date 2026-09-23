@@ -19,6 +19,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/catalog"
 	"github.com/DasLukas/TeamTaler/internal/config"
 	"github.com/DasLukas/TeamTaler/internal/domain"
+	"github.com/DasLukas/TeamTaler/internal/externalaccounts"
 	"github.com/DasLukas/TeamTaler/internal/finance"
 	"github.com/DasLukas/TeamTaler/internal/groups"
 	"github.com/DasLukas/TeamTaler/internal/media"
@@ -71,6 +72,12 @@ type primaryCatalog struct {
 type paymentSeed struct {
 	key, membershipID, method, reference, note string
 	amountMinor                                int64
+}
+
+type externalAccountSeeds struct {
+	bank   domain.ExternalAccount
+	payPal domain.ExternalAccount
+	cash   domain.ExternalAccount
 }
 
 var bookingReasonSeeds = []domain.ConfigurableItem{
@@ -127,6 +134,7 @@ func run() error {
 	catalogService := catalog.Service{DB: db}
 	bookingService := bookings.Service{DB: db, Groups: groupService, Notifications: notificationService}
 	financeService := finance.Service{DB: db, Notifications: notificationService}
+	externalAccountService := externalaccounts.Service{DB: db}
 	periodService := periods.Service{DB: db, Notifications: notificationService}
 	planningService := planning.Service{DB: db}
 
@@ -148,7 +156,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if err := configureGroup(ctx, groupService, adminSession.Principal, adminGroup.Membership); err != nil {
+	if err := configureGroup(ctx, groupService, adminSession.Principal, adminGroup.Membership, true); err != nil {
+		return err
+	}
+	externalAccountFixtures, err := seedExternalAccounts(ctx, externalAccountService, adminSession.Principal, adminGroup.Membership, platform.Timestamp(baseNow))
+	if err != nil {
 		return err
 	}
 	products, err := seedPrimaryCatalog(ctx, catalogService, adminSession.Principal, adminGroup.Membership)
@@ -300,6 +312,10 @@ func run() error {
 		if paymentErr := financeService.ReversePayment(ctx, adminSession.Principal, adminGroup.Membership, "seed-current-payment-reversal", reversedPayment.ID, "Doppelte Testzahlung"); paymentErr != nil {
 			return fmt.Errorf("reverse payment fixture: %w", paymentErr)
 		}
+		seedNow = baseNow.AddDate(0, 0, 4).Add(2 * time.Hour)
+		if transactionErr := seedExternalAccountTransactions(ctx, externalAccountService, adminSession.Principal, adminGroup.Membership, externalAccountFixtures, seedNow); transactionErr != nil {
+			return transactionErr
+		}
 		return nil
 	}); err != nil {
 		return err
@@ -377,6 +393,112 @@ func seedPayments(ctx context.Context, service finance.Service, actor domain.Pri
 	return nil
 }
 
+// seedExternalAccounts creates the enabled primary group's account topology,
+// opening balances, and complete payment-method mapping.
+func seedExternalAccounts(ctx context.Context, service externalaccounts.Service, actor domain.Principal, membership domain.Membership, occurredAt string) (externalAccountSeeds, error) {
+	initial, err := service.ListAccounts(ctx, membership)
+	if err != nil {
+		return externalAccountSeeds{}, fmt.Errorf("read initial external account fixture version: %w", err)
+	}
+	version := initial.Version
+	create := func(key string, input externalaccounts.CreateAccountInput) (domain.ExternalAccount, error) {
+		collection, err := service.CreateAccount(ctx, actor, membership, key, version, input)
+		if err != nil {
+			return domain.ExternalAccount{}, err
+		}
+		version = collection.Version
+		for _, account := range collection.Items {
+			if account.Name == input.Name {
+				return account, nil
+			}
+		}
+		return domain.ExternalAccount{}, fmt.Errorf("created external account %q is missing from its collection", input.Name)
+	}
+	bank, err := create("seed-external-account-bank", externalaccounts.CreateAccountInput{
+		AccountInput: externalaccounts.AccountInput{
+			Name:              "Vereinskonto",
+			Type:              string(domain.ExternalAccountBank),
+			SEPARecipientName: "TSV Sonnenberg",
+			SEPAIBAN:          "DE89370400440532013000",
+			SEPABIC:           "COBADEFFXXX",
+		},
+		OpeningBalance: &externalaccounts.OpeningBalanceInput{AmountMinor: 125000, OccurredAt: occurredAt, Reason: "Übertrag aus Vorjahr"},
+	})
+	if err != nil {
+		return externalAccountSeeds{}, fmt.Errorf("create bank account fixture: %w", err)
+	}
+	payPal, err := create("seed-external-account-paypal", externalaccounts.CreateAccountInput{
+		AccountInput:   externalaccounts.AccountInput{Name: "PayPal Mannschaft", Type: string(domain.ExternalAccountPayPal), PayPalMeHandle: "TeamTalerTest"},
+		OpeningBalance: &externalaccounts.OpeningBalanceInput{AmountMinor: 2000, OccurredAt: occurredAt, Reason: "Übertrag aus Vorjahr"},
+	})
+	if err != nil {
+		return externalAccountSeeds{}, fmt.Errorf("create PayPal account fixture: %w", err)
+	}
+	cash, err := create("seed-external-account-cash", externalaccounts.CreateAccountInput{
+		AccountInput:   externalaccounts.AccountInput{Name: "Barkasse Vereinsheim", Type: string(domain.ExternalAccountCash)},
+		OpeningBalance: &externalaccounts.OpeningBalanceInput{AmountMinor: 5000, OccurredAt: occurredAt, Reason: "Kassenübertrag"},
+	})
+	if err != nil {
+		return externalAccountSeeds{}, fmt.Errorf("create cash account fixture: %w", err)
+	}
+	collection, err := service.ListAccounts(ctx, membership)
+	if err != nil {
+		return externalAccountSeeds{}, fmt.Errorf("read external account fixture version: %w", err)
+	}
+	links := externalaccounts.ReplaceLinksInput{Links: []externalaccounts.PaymentMethodLink{
+		{PaymentMethodID: "BANK_TRANSFER", ExternalAccountID: &bank.ID},
+		{PaymentMethodID: "CARD", ExternalAccountID: &bank.ID},
+		{PaymentMethodID: "SHOPPING"},
+		{PaymentMethodID: "CASH", ExternalAccountID: &cash.ID},
+		{PaymentMethodID: "PAYPAL", ExternalAccountID: &payPal.ID},
+		{PaymentMethodID: "OTHER"},
+	}}
+	if _, err := service.ReplacePaymentMethodLinks(ctx, actor, membership, links, collection.Version); err != nil {
+		return externalAccountSeeds{}, fmt.Errorf("link external account fixtures: %w", err)
+	}
+	return externalAccountSeeds{bank: bank, payPal: payPal, cash: cash}, nil
+}
+
+// seedExternalAccountTransactions creates representative inflow, outflow,
+// transfer, negative-balance, independent reposting, and manual-reversal scenarios.
+func seedExternalAccountTransactions(ctx context.Context, service externalaccounts.Service, actor domain.Principal, membership domain.Membership, accounts externalAccountSeeds, occurredAt time.Time) error {
+	create := func(key string, input externalaccounts.CreateTransactionInput) (domain.ExternalAccountTransaction, error) {
+		transaction, err := service.CreateTransaction(ctx, actor, membership, key, input)
+		if err != nil {
+			return domain.ExternalAccountTransaction{}, fmt.Errorf("create external transaction %q: %w", key, err)
+		}
+		return transaction.ExternalAccountTransaction, nil
+	}
+	timestamp := platform.Timestamp(occurredAt)
+	if _, err := create("seed-external-income", externalaccounts.CreateTransactionInput{Kind: "INCOME", DestinationAccountID: accounts.bank.ID, AmountMinor: 7500, OccurredAt: timestamp, Reason: "Sponsorenzuschuss", Reference: "Saisonstart"}); err != nil {
+		return err
+	}
+	if _, err := create("seed-external-negative-balance", externalaccounts.CreateTransactionInput{Kind: "EXPENSE", SourceAccountID: accounts.payPal.ID, AmountMinor: 6000, OccurredAt: timestamp, Reason: "Turniergebühr", Note: "Demonstriert einen negativen Kontostand"}); err != nil {
+		return err
+	}
+	if _, err := create("seed-external-transfer", externalaccounts.CreateTransactionInput{Kind: "TRANSFER", SourceAccountID: accounts.cash.ID, DestinationAccountID: accounts.bank.ID, AmountMinor: 1000, OccurredAt: timestamp, Reason: "Bareinnahmen eingezahlt"}); err != nil {
+		return err
+	}
+	incorrect, err := create("seed-external-wrong-income", externalaccounts.CreateTransactionInput{Kind: "INCOME", DestinationAccountID: accounts.bank.ID, AmountMinor: 1234, OccurredAt: timestamp, Reason: "Erstattung mit Zahlendreher"})
+	if err != nil {
+		return err
+	}
+	if _, err := service.ReverseTransaction(ctx, actor, membership, "seed-external-wrong-income-reversal", incorrect.ID, externalaccounts.ReverseInput{Reason: "Zahlendreher storniert"}); err != nil {
+		return fmt.Errorf("reverse wrong external transaction fixture: %w", err)
+	}
+	if _, err := create("seed-external-new-income", externalaccounts.CreateTransactionInput{Kind: "INCOME", DestinationAccountID: accounts.bank.ID, AmountMinor: 1500, OccurredAt: timestamp, Reason: "Erstattung neu erfasst", Reference: "NEU-2026"}); err != nil {
+		return err
+	}
+	reversed, err := create("seed-external-manual-reversal-original", externalaccounts.CreateTransactionInput{Kind: "EXPENSE", SourceAccountID: accounts.cash.ID, AmountMinor: 750, OccurredAt: timestamp, Reason: "Doppelt erfasster Einkauf"})
+	if err != nil {
+		return err
+	}
+	if _, err := service.ReverseTransaction(ctx, actor, membership, "seed-external-manual-reversal", reversed.ID, externalaccounts.ReverseInput{Reason: "Doppelte Buchung storniert"}); err != nil {
+		return fmt.Errorf("reverse external transaction fixture: %w", err)
+	}
+	return nil
+}
+
 // seedSystemOnlyAdministrator creates one global administrator without a group.
 func seedSystemOnlyAdministrator(ctx context.Context, db *sql.DB, grantingUserID string) error {
 	passwordHash, err := auth.HashPassword(testPassword)
@@ -409,7 +531,7 @@ func seedSecondaryGroup(ctx context.Context, authService auth.Service, groupServ
 	if err != nil {
 		return err
 	}
-	if err := configureGroup(ctx, groupService, administrator, group.Membership); err != nil {
+	if err := configureGroup(ctx, groupService, administrator, group.Membership, false); err != nil {
 		return err
 	}
 	category, err := catalogService.CreateCategory(ctx, administrator, group.Membership, catalog.CreateCategoryInput{Name: secondaryCategory, Icon: domain.CategoryIconDrink, SortOrder: 10})
@@ -1010,21 +1132,23 @@ func withTemporaryBookingGrants(ctx context.Context, db *sql.DB, groupID string,
 	return errors.Join(seedErr, cleanupErr)
 }
 
-// configureGroup enables all group features and German transaction choices.
-func configureGroup(ctx context.Context, service groups.Service, actor domain.Principal, membership domain.Membership) error {
+// configureGroup enables the shared group features and German transaction
+// choices while selecting the external-account fixture state explicitly.
+func configureGroup(ctx context.Context, service groups.Service, actor domain.Principal, membership domain.Membership, externalAccountsEnabled bool) error {
 	enabled := true
 	dueSoonDays, overdueRepeatDays := 7, 3
 	optional, required := domain.ReasonModeOptional, domain.ReasonModeRequired
 	methods := []domain.PaymentMethod{
 		{ID: "BANK_TRANSFER", Label: "Überweisung", AttachmentMode: domain.AttachmentModeOff},
 		{ID: "CARD", Label: "Karte", AttachmentMode: domain.AttachmentModeOff},
+		{ID: "SHOPPING", Label: "Einkauf", AttachmentMode: domain.AttachmentModeRequired},
 		{ID: "CASH", Label: "Bar", AttachmentMode: domain.AttachmentModeOff},
 		{ID: "PAYPAL", Label: "PayPal", AttachmentMode: domain.AttachmentModeOff},
 		{ID: "OTHER", Label: "Sonstige", AttachmentMode: domain.AttachmentModeOptional},
 	}
 	bookingReasons := append([]domain.ConfigurableItem(nil), bookingReasonSeeds...)
 	paymentReasons := append([]domain.ConfigurableItem(nil), paymentReasonSeeds...)
-	if _, err := service.UpdateSettings(ctx, actor, membership, groups.SettingsUpdate{StatisticsEnabled: &enabled, SettlementsEnabled: &enabled, SettlementDueSoonDays: &dueSoonDays, SettlementOverdueRepeatDays: &overdueRepeatDays, OwnBookingReasonMode: &optional, ForeignBookingReasonMode: &required, OwnPaymentReasonMode: &required, OtherPaymentReasonMode: &required, PaymentMethods: &methods, BookingReasons: &bookingReasons, PaymentReasons: &paymentReasons}); err != nil {
+	if _, err := service.UpdateSettings(ctx, actor, membership, groups.SettingsUpdate{StatisticsEnabled: &enabled, ExternalAccountsEnabled: &externalAccountsEnabled, SettlementsEnabled: &enabled, SettlementDueSoonDays: &dueSoonDays, SettlementOverdueRepeatDays: &overdueRepeatDays, OwnBookingReasonMode: &optional, ForeignBookingReasonMode: &required, OwnPaymentReasonMode: &required, OtherPaymentReasonMode: &required, PaymentMethods: &methods, BookingReasons: &bookingReasons, PaymentReasons: &paymentReasons}); err != nil {
 		return fmt.Errorf("configure features for group %q: %w", membership.GroupID, err)
 	}
 	return nil

@@ -1,0 +1,23 @@
+.kind {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  padding: 0 10px;
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.kindPositive { border-color: color-mix(in srgb, var(--color-status-success) 46%, transparent); color: var(--color-status-success); background: var(--color-status-success-subtle); }
+.kindNegative { border-color: color-mix(in srgb, var(--color-status-danger) 46%, transparent); color: var(--color-status-danger); background: var(--color-status-danger-subtle); }
+.kindInfo { border-color: color-mix(in srgb, var(--color-status-info) 46%, transparent); color: var(--color-status-info); background: var(--color-status-info-subtle); }
+.kindWarning { border-color: var(--color-status-warning-border); color: var(--color-status-warning); background: var(--color-status-warning-subtle); }
+.amount { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.amountPositive { color: var(--color-status-success); }
+.amountNegative { color: var(--color-status-danger); }
+.amountReversed { color: var(--color-text-muted); text-decoration: line-through; text-decoration-thickness: 1px; }
+.actor { display: inline-flex; min-width: 0; align-items: center; gap: var(--space-2); }
+.actor > span:last-child { min-width: 0; }
+.status { gap: 5px; white-space: nowrap; }

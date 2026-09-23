@@ -18,6 +18,21 @@ export function hasGroupCapability(grants: readonly PermissionGrant[] | undefine
   return can(grants, 'GROUP_ADMINISTRATION') || can(grants, 'MEMBER_MANAGEMENT') || can(grants, 'ROLE_MANAGEMENT');
 }
 
+/** Determines whether the external-account feature and its view grant are effective. */
+export function canViewExternalAccounts(group: Pick<Group, 'externalAccountsEnabled' | 'membership'>): boolean {
+  return group.externalAccountsEnabled === true && can(group.membership?.effectiveGrants, 'VIEW_EXTERNAL_ACCOUNTS');
+}
+
+/** Determines whether the current membership may mutate enabled external accounts. */
+export function canManageExternalAccounts(group: Pick<Group, 'externalAccountsEnabled' | 'membership'>): boolean {
+  return group.externalAccountsEnabled === true && can(group.membership?.effectiveGrants, 'MANAGE_EXTERNAL_ACCOUNTS');
+}
+
+/** Determines whether either core finance or external accounts opens the finance workspace. */
+export function canOpenFinance(group: Pick<Group, 'externalAccountsEnabled' | 'membership'>): boolean {
+  return can(group.membership?.effectiveGrants, 'FINANCE_MANAGEMENT') || canViewExternalAccounts(group);
+}
+
 /**
  * Determines whether a membership may use the own-account payment shortcut.
  *
@@ -59,9 +74,9 @@ export function canOpenStatistics(group: Pick<Group, 'statisticsEnabled' | 'memb
  * @param grants - Effective grants returned for the active group membership.
  * @returns Booking, finance, catalog, administration, or the overview fallback.
  */
-export function preferredMemberPath(grants: readonly PermissionGrant[] | undefined): string {
+export function preferredMemberPath(grants: readonly PermissionGrant[] | undefined, externalAccountsEnabled = false): string {
   if (canOpenBooking(grants)) return memberPaths.booking;
-  if (hasGroupCapability(grants, 'finance')) return memberPaths.finance;
+  if (hasGroupCapability(grants, 'finance') || externalAccountsEnabled && can(grants, 'VIEW_EXTERNAL_ACCOUNTS')) return memberPaths.finance;
   if (hasGroupCapability(grants, 'catalog')) return memberPaths.catalog;
   if (hasGroupCapability(grants, 'administration')) return '/admin';
   return memberPaths.overview;
@@ -77,5 +92,5 @@ export function preferredMemberPath(grants: readonly PermissionGrant[] | undefin
 export function preferredAuthenticatedPath(session: Session): string {
   const group = session.groups.find((candidate) => candidate.id === session.activeGroupId) ?? session.groups[0];
   if (!group && session.systemRoles.includes('SYSTEM_ADMINISTRATOR')) return '/admin';
-  return preferredMemberPath(group?.membership?.effectiveGrants);
+  return preferredMemberPath(group?.membership?.effectiveGrants, group?.externalAccountsEnabled);
 }

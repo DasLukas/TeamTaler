@@ -97,11 +97,20 @@ var groupDatasets = []dataset{
 	{name: "group_settings", query: `SELECT group_id,members_can_view_all_bookings,default_role_id,
 		foreign_booking_reason_required,own_payment_reason_required,other_payment_reason_required,settlements_enabled,
 		own_booking_reason_mode,foreign_booking_reason_mode,own_payment_reason_mode,other_payment_reason_mode,default_theme,
-		settlement_due_soon_days,settlement_overdue_repeat_days,statistics_enabled,updated_at
+		settlement_due_soon_days,settlement_overdue_repeat_days,statistics_enabled,external_accounts_enabled,
+		external_accounts_version,updated_at
 		FROM group_settings WHERE group_id=?`, args: groupArg},
-	{name: "payment_methods", query: `SELECT group_id,id,label,sort_order,attachment_mode,payment_target_type,paypal_me_handle,
-		sepa_recipient_name,sepa_iban,sepa_bic,created_at FROM group_payment_methods
+	{name: "payment_methods", query: `SELECT group_id,id,label,sort_order,attachment_mode,external_account_id,created_at FROM group_payment_methods
 		WHERE group_id=? ORDER BY sort_order,id`, args: groupArg},
+	{name: "external_accounts", query: `SELECT id,group_id,name,type,status,sort_order,paypal_me_handle,sepa_recipient_name,sepa_iban,sepa_bic,
+		version,created_at,updated_at,created_by_membership_id,updated_by_membership_id,deleted_at
+		FROM external_accounts WHERE group_id=? ORDER BY sort_order,id`, args: groupArg},
+	{name: "external_account_transactions", query: `SELECT id,group_id,kind,primary_account_id,counterparty_account_id,payment_id,
+		amount_minor,(SELECT currency FROM groups WHERE id=external_account_transactions.group_id) AS currency,booked_at,reason,reference,note,
+		reversal_of,correction_of,created_by_membership_id,created_at
+		FROM external_account_transactions WHERE group_id=? ORDER BY booked_at,id`, args: groupArg},
+	{name: "external_account_transaction_attachments", query: `SELECT transaction_id,group_id,original_filename,media_type,size_bytes,sha256,created_by_membership_id,created_at
+		FROM external_account_transaction_attachments WHERE group_id=? ORDER BY created_at,transaction_id`, args: groupArg},
 	{name: "reason_suggestions", query: `SELECT group_id,id,kind,label,sort_order,created_at FROM group_reason_suggestions
 		WHERE group_id=? ORDER BY kind,sort_order,id`, args: groupArg},
 	{name: "memberships", query: `SELECT membership.id,membership.group_id,membership.user_id,user.email,user.display_name,user.active,
@@ -151,7 +160,8 @@ var groupDatasets = []dataset{
 		WHERE group_id=? ORDER BY payment_id,period_id`, args: groupArg},
 	{name: "period_adjustment_allocations", query: `SELECT group_id,membership_id,source_period_id,target_period_id,amount_minor,(SELECT currency FROM groups WHERE id=period_adjustment_allocations.group_id) AS currency
 		FROM period_adjustment_allocations WHERE group_id=? ORDER BY membership_id,source_period_id,target_period_id`, args: groupArg},
-	{name: "ledger_entries", query: `SELECT id,group_id,period_id,membership_id,category_id,booking_id,payment_id,reversal_of,account,
+	{name: "ledger_entries", query: `SELECT id,group_id,period_id,membership_id,category_id,booking_id,payment_id,external_account_id,
+		external_transaction_id,reversal_of,account,
 		amount_minor,(SELECT currency FROM groups WHERE id=ledger_entries.group_id) AS currency,description,created_at FROM ledger_entries WHERE group_id=? ORDER BY created_at,id`, args: groupArg},
 	{name: "period_statements", query: `SELECT id,group_id,period_id,membership_id,display_name,email,charges_minor,payments_allocated_minor,
 		adjustments_applied_minor,adjustments_provided_minor,amount_due_minor,(SELECT currency FROM groups WHERE id=period_statements.group_id) AS currency,status,created_at

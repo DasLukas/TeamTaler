@@ -14,13 +14,14 @@ import { useInstanceCapabilities } from '@/app/useSession';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
-import { SelectMenu } from '@/components/ui/SelectMenu';
 import { SuggestionInput } from '@/components/ui/SuggestionInput';
+import { externalAccountKeys } from '@/features/externalAccounts/externalAccountQueryKeys';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { PaymentReviewSummary } from './PaymentReviewSummary';
 import styles from './SelfPaymentDialog.module.css';
 import { PaymentAttachmentField } from './PaymentAttachmentField';
 import { PaymentInstructionPanel } from './PaymentInstructionPanel';
+import { PaymentMethodSelect } from './PaymentMethodSelect';
 
 type SelfPaymentStep = 'entry' | 'review' | 'success';
 
@@ -107,6 +108,7 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
         queryClient.invalidateQueries({ queryKey: ['account-summaries', activeGroupId] }),
         queryClient.invalidateQueries({ queryKey: ['settlements', activeGroupId] }),
         queryClient.invalidateQueries({ queryKey: ['statistics', activeGroupId] }),
+        queryClient.invalidateQueries({ queryKey: externalAccountKeys.all(activeGroupId) }),
       ]);
       const dashboard = queryClient.getQueryData<Dashboard>(['dashboard', activeGroupId]);
       setUpdatedBalance(dashboard?.openBalance ?? {
@@ -169,7 +171,7 @@ export function SelfPaymentDialog({ openBalance, className, fullWidth = false }:
             {BigInt(openBalance.minorUnits) > 0n ? <Button fullWidth leadingIcon={<CircleDollarSign size={17} />} onClick={() => { setAmount(majorUnitsInputValue(openBalance)); setAmountError(''); }} variant="secondary">{t('selfPayment.useOpenBalance', { amount: formatMoney(openBalance) })}</Button> : null}
             <div className={styles.formRow}>
               <Field htmlFor="self-payment-date" label={t('finance.receivedDate')}><TextInput id="self-payment-date" onChange={(event) => setReceivedAt(event.target.value)} required type="date" value={receivedAt} /></Field>
-              <Field htmlFor="self-payment-method" label={t('finance.paymentType')}><SelectMenu ariaLabel={t('finance.paymentType')} id="self-payment-method" onChange={(nextMethod) => { setMethod(nextMethod); if (transactionSettingsQuery.data?.paymentMethods.find((item) => item.id === nextMethod)?.attachmentMode === 'OFF') setAttachment(null); }} options={(transactionSettingsQuery.data?.paymentMethods ?? []).map((option) => ({ label: option.label, value: option.id }))} value={method} /></Field>
+              <Field htmlFor="self-payment-method" label={t('finance.paymentType')}><PaymentMethodSelect ariaLabel={t('finance.paymentType')} id="self-payment-method" methods={transactionSettingsQuery.data?.paymentMethods ?? []} onChange={(nextMethod) => { setMethod(nextMethod); if (transactionSettingsQuery.data?.paymentMethods.find((item) => item.id === nextMethod)?.attachmentMode === 'OFF') setAttachment(null); }} value={method} /></Field>
             </div>
             {reasonEnabled ? <Field error={referenceError || undefined} htmlFor="self-payment-reference" label={`${t('finance.reason')}${reasonRequired ? ' *' : ''}`}><SuggestionInput id="self-payment-reference" maxLength={120} onChange={(nextReference) => { setReference(nextReference); setReferenceError(''); }} options={(transactionSettingsQuery.data?.paymentReasons ?? []).map((item) => ({ value: item.label }))} required={reasonRequired} value={reference} /></Field> : null}
             <PaymentInstructionPanel amount={instructionAmount} paymentTarget={selectedPaymentMethod?.paymentTarget} reference={reasonEnabled ? reference : ''} />

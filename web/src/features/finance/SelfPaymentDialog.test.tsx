@@ -51,10 +51,11 @@ describe('SelfPaymentDialog', () => {
     vi.clearAllMocks();
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } });
     apiMock.getTransactionSettings.mockResolvedValue({
+      externalAccountsEnabled: true,
       foreignBookingReasonRequired: true,
       ownPaymentReasonRequired: true,
       otherPaymentReasonRequired: false,
-      paymentMethods: [{ id: 'PAYPAL', label: 'PayPal', attachmentMode: 'OFF', paymentTarget: { type: 'PAYPAL_ME', paypalMeHandle: 'TeamTaler42' } }, { id: 'CASH', label: 'Bar', attachmentMode: 'OFF', paymentTarget: null }],
+      paymentMethods: [{ id: 'PAYPAL', label: 'PayPal', attachmentMode: 'OFF', externalAccountId: 'account-paypal', paymentTarget: { type: 'PAYPAL_ME', paypalMeHandle: 'TeamTaler42' } }, { id: 'CASH', label: 'Bar', attachmentMode: 'OFF', externalAccountId: null, paymentTarget: null }],
       bookingReasons: [],
       paymentReasons: [{ id: 'MEMBERSHIP', label: 'Membership fee August' }],
     });
@@ -77,6 +78,22 @@ describe('SelfPaymentDialog', () => {
     await user.click(screen.getByRole('combobox', { name: i18n.t('finance.paymentType') }));
     await user.click(screen.getByRole('option', { name: 'Bar' }));
     expect(screen.queryByText(i18n.t('paymentInstructions.openPaypal'))).not.toBeInTheDocument();
+  });
+
+  it('selects payment methods through the custom selector without exposing accounting effects', async () => {
+    const user = userEvent.setup();
+    renderDialog();
+
+    await user.click(await screen.findByRole('button', { name: i18n.t('selfPayment.action') }));
+    const methodSelect = screen.getByRole('combobox', { name: i18n.t('finance.paymentType') });
+    expect(methodSelect).toHaveTextContent('PayPal');
+
+    methodSelect.focus();
+    await user.keyboard('{Enter}{ArrowDown}{Enter}');
+
+    expect(methodSelect).toHaveFocus();
+    expect(methodSelect).toHaveTextContent('Bar');
+    expect(screen.queryByText(/externes Konto/i)).not.toBeInTheDocument();
   });
 
   it('reviews and records the open balance without a membership identifier', async () => {
@@ -111,6 +128,7 @@ describe('SelfPaymentDialog', () => {
     expect(screen.getByRole('dialog', { name: i18n.t('selfPayment.reviewTitle') })).toBeVisible();
     expect(screen.getByText(/23,40/, { selector: 'strong[data-financial-state="payment"]' })).toBeVisible();
     expect(screen.getByText(i18n.t('finance.paypal'))).toBeVisible();
+    expect(screen.queryByText(/Buchungswirkung/i)).not.toBeInTheDocument();
     expect(screen.getByText('Membership fee August')).toBeVisible();
     queryClient.setQueryData(['dashboard', 'group-a'], { openBalance: { minorUnits: '-250', currency: 'EUR' } });
     await user.click(screen.getByRole('button', { name: i18n.t('selfPayment.confirm', { amount: '23,40 €' }) }));
@@ -128,6 +146,7 @@ describe('SelfPaymentDialog', () => {
     expect(invalidations).toHaveBeenCalledWith({ queryKey: ['ledger', 'group-a'] });
     expect(invalidations).toHaveBeenCalledWith({ queryKey: ['settlements', 'group-a'] });
     expect(invalidations).toHaveBeenCalledWith({ queryKey: ['statistics', 'group-a'] });
+    expect(invalidations).toHaveBeenCalledWith({ queryKey: ['external-accounts', 'group-a'] });
   });
 
   it('keeps reviewed values available after a network error', async () => {
