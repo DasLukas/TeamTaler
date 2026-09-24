@@ -20,6 +20,10 @@
   background: var(--color-brand);
 }
 
+.muted.checked {
+  background: var(--color-border-strong);
+}
+
 .thumb {
   display: block;
   width: 26px;

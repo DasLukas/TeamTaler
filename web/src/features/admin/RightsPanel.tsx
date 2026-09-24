@@ -10,7 +10,7 @@ import X from 'lucide-react/dist/esm/icons/x';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
-import type { PermissionDefinition, PermissionKey, Role, RoleInput } from '@/api/types';
+import type { Group, PermissionDefinition, PermissionKey, Role, RoleInput } from '@/api/types';
 import { can } from '@/app/permissions';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Button } from '@/components/ui/Button';
@@ -22,6 +22,7 @@ import styles from './RightsPanel.module.css';
 
 interface RoleEditorProps {
   groupId: string;
+  featureAvailability: Group;
   definitions: PermissionDefinition[];
   role?: Role;
   initial?: RoleInput;
@@ -34,7 +35,7 @@ interface RoleEditorProps {
 
 const ADMIN_CORE_PERMISSIONS: readonly PermissionKey[] = ['GROUP_ADMINISTRATION', 'MEMBER_MANAGEMENT', 'ROLE_MANAGEMENT'];
 
-function RoleEditor({ groupId, definitions, role, initial, canManageProtectedRoles, onDuplicate, onSaved, onDeleted, isDefaultRole = false }: RoleEditorProps) {
+function RoleEditor({ groupId, featureAvailability, definitions, role, initial, canManageProtectedRoles, onDuplicate, onSaved, onDeleted, isDefaultRole = false }: RoleEditorProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [name, setName] = useState(initial?.name ?? role?.name ?? '');
@@ -100,7 +101,7 @@ function RoleEditor({ groupId, definitions, role, initial, canManageProtectedRol
         </Field>
       </div>
       {protectedChangeBlocked ? <p className={styles.warning} role="note">{t('roleManagement.protectedChangeBlocked')}</p> : null}
-      <PermissionEditor definitions={definitions} disabled={protectedChangeBlocked} onChange={setGrants} protectedPermissions={protectedPermissions} value={grants} />
+      <PermissionEditor definitions={definitions} disabled={protectedChangeBlocked} featureAvailability={featureAvailability} onChange={setGrants} protectedPermissions={protectedPermissions} value={grants} />
       {saveMutation.isError ? <p className={styles.error} role="alert">{saveMutation.error.message}</p> : null}
       {deleteMutation.isError ? <p className={styles.error} role="alert">{deleteMutation.error.message}</p> : null}
       {confirmingDelete ? <p className={styles.warning} role="alert">{t('roleManagement.deleteConfirmation', { name: role?.name })}</p> : null}
@@ -168,9 +169,9 @@ export function RightsPanel() {
         </aside>
         <div className={styles.roleDetail}>
           {newRoleSeed ? (
-            <RoleEditor canManageProtectedRoles={canManageGroup} definitions={definitionsQuery.data ?? []} groupId={activeGroupId} initial={newRoleSeed} key={`new-${newRoleSeed.name}`} onDeleted={() => undefined} onSaved={(saved) => { setNewRoleSeed(null); setSelectedRoleId(saved.id); }} />
+            <RoleEditor canManageProtectedRoles={canManageGroup} definitions={definitionsQuery.data ?? []} featureAvailability={activeGroup} groupId={activeGroupId} initial={newRoleSeed} key={`new-${newRoleSeed.name}`} onDeleted={() => undefined} onSaved={(saved) => { setNewRoleSeed(null); setSelectedRoleId(saved.id); }} />
           ) : selectedRole ? (
-            <RoleEditor canManageProtectedRoles={canManageGroup} definitions={definitionsQuery.data ?? []} groupId={activeGroupId} isDefaultRole={settingsQuery.data?.defaultRoleId === selectedRole.id} key={`${selectedRole.id}-${selectedRole.version}`} onDeleted={() => setSelectedRoleId('')} onDuplicate={() => startCreate(selectedRole)} onSaved={(saved) => setSelectedRoleId(saved.id)} role={selectedRole} />
+            <RoleEditor canManageProtectedRoles={canManageGroup} definitions={definitionsQuery.data ?? []} featureAvailability={activeGroup} groupId={activeGroupId} isDefaultRole={settingsQuery.data?.defaultRoleId === selectedRole.id} key={`${selectedRole.id}-${selectedRole.version}`} onDeleted={() => setSelectedRoleId('')} onDuplicate={() => startCreate(selectedRole)} onSaved={(saved) => setSelectedRoleId(saved.id)} role={selectedRole} />
           ) : <StatePanel actionLabel={t('roleManagement.create')} kind="empty" message={t('roleManagement.noRoles')} onAction={() => startCreate()} />}
         </div>
       </section>

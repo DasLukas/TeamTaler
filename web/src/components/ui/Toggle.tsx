@@ -7,21 +7,22 @@ export interface ToggleProps {
   label: string;
   descriptionId?: string;
   disabled?: boolean;
+  muted?: boolean;
 }
 
 /**
  * Renders an accessible switch for role and permission assignments.
  *
- * @param props - Checked state, change callback, accessible label, supporting-copy association, and disabled state.
+ * @param props - Checked state, change callback, accessible label, supporting-copy association, disabled state, and optional muted styling.
  * @returns A button exposing native switch semantics.
  */
-export function Toggle({ checked, onChange, label, descriptionId, disabled = false }: ToggleProps) {
+export function Toggle({ checked, onChange, label, descriptionId, disabled = false, muted = false }: ToggleProps) {
   return (
     <button
       aria-checked={checked}
       aria-describedby={descriptionId}
       aria-label={label}
-      className={`${styles.toggle} ${checked ? styles.checked : ''}`}
+      className={`${styles.toggle} ${checked ? styles.checked : ''} ${muted ? styles.muted : ''}`}
       disabled={disabled}
       onClick={() => onChange(!checked)}
       role="switch"

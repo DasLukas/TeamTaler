@@ -111,6 +111,9 @@ func (s Service) PDF(ctx context.Context, membership domain.Membership, posterID
 	return renderPoster(ctx, document, s.DataDirectory)
 }
 
+// renderPoster draws the current group and product snapshot on print-safe A4 pages.
+// document supplies display data and HTTPS QR targets, while dataDirectory locates
+// managed images. It returns complete PDF bytes or a context/rendering error.
 func renderPoster(ctx context.Context, document posterDocument, dataDirectory string) ([]byte, error) {
 	pdf := fpdf.NewCustom(&fpdf.InitType{OrientationStr: "P", UnitStr: "mm", SizeStr: "A4"})
 	if err := tabular.RegisterNotoSans(pdf); err != nil {
@@ -148,17 +151,15 @@ func renderPoster(ctx context.Context, document posterDocument, dataDirectory st
 		return nil, err
 	}
 	if len(document.Products) == 0 {
-		if err := drawQR(pdf, document.BookingURL, 69, 81, 72); err != nil {
+		if err := drawBookingPoster(pdf, document.BookingURL); err != nil {
 			return nil, err
 		}
-		pdf.SetFont("NotoSans", "", 11)
-		pdf.SetTextColor(26, 40, 58)
-		pdf.SetXY(14, 159)
-		pdf.CellFormat(182, 8, "QR-Code scannen und Buchungsseite öffnen", "", 0, "C", false, 0, "")
-		if err := drawPosterText(ctx, pdf, document.Poster.Text, 177, addPage); err != nil {
+		if err := drawPosterText(ctx, pdf, document.Poster.Text, 215, addPage); err != nil {
 			return nil, err
 		}
 	} else {
+		featured := len(document.Products) <= 4
+		const featuredRowPitch = 48.0
 		for index, product := range document.Products {
 			if err := ctx.Err(); err != nil {
 				return nil, err
@@ -170,15 +171,25 @@ func renderPoster(ctx context.Context, document posterDocument, dataDirectory st
 			}
 			position := index % 10
 			x := 14.0 + float64(position%2)*93
-			y := 55.0 + float64(position/2)*43
+			y := 66.0 + float64(position/2)*38
+			if featured {
+				y = 68 + float64(position/2)*featuredRowPitch
+				if len(document.Products) == 1 {
+					x = 60.5
+				}
+			}
 			productURL := document.BookingURL + "&product=" + url.QueryEscape(product.ID) + "&scan=1"
-			if err := drawProductCard(pdf, product, productImages[product.ID], productURL, x, y); err != nil {
+			if err := drawProductCard(pdf, product, productImages[product.ID], productURL, x, y, featured); err != nil {
 				return nil, err
 			}
 		}
-		textY := 55.0 + float64((len(document.Products)%10+1)/2)*43
-		if len(document.Products)%10 == 0 {
-			textY = 270
+		lastPageProducts := len(document.Products) % 10
+		if lastPageProducts == 0 {
+			lastPageProducts = 10
+		}
+		textY := 66.0 + float64((lastPageProducts+1)/2)*38
+		if featured {
+			textY = 72 + float64((len(document.Products)+1)/2)*featuredRowPitch
 		}
 		if err := drawPosterText(ctx, pdf, document.Poster.Text, textY, addPage); err != nil {
 			return nil, err
@@ -194,87 +205,188 @@ func renderPoster(ctx context.Context, document posterDocument, dataDirectory st
 	return output.Bytes(), nil
 }
 
+// drawPosterHeader repeats group identity, booking instructions, and the booking
+// QR on each page. logoName is an optional registered image; rendering errors
+// are returned to the caller.
 func drawPosterHeader(pdf *fpdf.Fpdf, document posterDocument, logoName string) error {
-	pdf.SetFillColor(250, 252, 253)
-	pdf.Rect(0, 0, 210, 49, "F")
+	pdf.SetFillColor(236, 248, 247)
+	pdf.RoundedRect(14, 11, 24, 24, 3, "1234", "F")
 	if logoName != "" {
-		drawImageFit(pdf, logoName, 14, 12, 17, 17)
+		drawImageFit(pdf, logoName, 16, 13, 20, 20)
 	} else {
-		drawImageFit(pdf, "teamtaler-mark", 14, 12, 17, 17)
+		drawImageFit(pdf, "teamtaler-mark", 16, 13, 20, 20)
 	}
 	pdf.SetTextColor(6, 21, 45)
 	pdf.SetFont("NotoSans", "B", 17)
-	pdf.SetXY(35, 14)
-	pdf.CellFormat(117, 8, fitText(pdf, document.GroupName, 117), "", 0, "L", false, 0, "")
-	pdf.SetFont("NotoSans", "", 9)
-	pdf.SetXY(35, 24)
-	pdf.CellFormat(117, 6, "Scan & Go · "+fitText(pdf, document.Poster.Name, 96), "", 0, "L", false, 0, "")
+	nameWidth := 108.0
+	if len(document.Products) == 0 {
+		nameWidth = 153
+	}
+	pdf.SetXY(43, 18.5)
+	pdf.CellFormat(nameWidth, 9, fitText(pdf, document.GroupName, nameWidth), "", 0, "L", false, 0, "")
 	if len(document.Products) > 0 {
-		if err := drawQR(pdf, document.BookingURL, 165, 6, 31); err != nil {
+		if err := drawQR(pdf, document.BookingURL, 166, 9, 29); err != nil {
 			return err
 		}
-		pdf.SetFont("NotoSans", "", 7)
-		pdf.SetXY(155, 38)
-		pdf.CellFormat(51, 5, "Zur Buchungsseite", "", 0, "C", false, 0, "")
+		pdf.SetFont("NotoSans", "", 7.5)
+		pdf.SetTextColor(62, 77, 88)
+		pdf.SetXY(157, 39)
+		pdf.CellFormat(47, 5, "Buchungsseite", "", 0, "C", false, 0, "")
 	}
-	pdf.SetDrawColor(0, 124, 115)
-	pdf.SetLineWidth(0.5)
-	pdf.Line(14, 48, 196, 48)
+	pdf.SetFillColor(235, 247, 246)
+	pdf.RoundedRect(14, 49, 182, 14, 2.5, "1234", "F")
+	pdf.SetTextColor(6, 21, 45)
+	pdf.SetFont("NotoSans", "B", 9.5)
+	pdf.SetXY(19, 51)
+	title := "Produkte auswählen und direkt buchen"
+	description := "Produkt scannen · Warenkorb prüfen · Buchung bestätigen"
+	if len(document.Products) == 0 {
+		title = "In wenigen Schritten zur Buchung"
+		description = "QR-Code scannen · Produkte wählen · Buchung bestätigen"
+	}
+	pdf.CellFormat(172, 5, title, "", 0, "L", false, 0, "")
+	pdf.SetTextColor(62, 77, 88)
+	pdf.SetFont("NotoSans", "", 7.5)
+	pdf.SetXY(19, 56.5)
+	pdf.CellFormat(172, 4, description, "", 0, "L", false, 0, "")
 	return pdf.Error()
 }
 
-func drawProductCard(pdf *fpdf.Fpdf, product posterProduct, imageName, productURL string, x, y float64) error {
+// drawBookingPoster gives a product-free template one dominant, centered QR.
+// bookingURL points to the ordinary booking page; QR encoding can fail.
+func drawBookingPoster(pdf *fpdf.Fpdf, bookingURL string) error {
 	pdf.SetFillColor(255, 255, 255)
 	pdf.SetDrawColor(214, 223, 228)
 	pdf.SetLineWidth(0.25)
-	pdf.RoundedRect(x, y, 89, 38, 2.2, "1234", "DF")
-	if imageName != "" {
-		drawImageFit(pdf, imageName, x+3, y+5, 20, 20)
-	} else {
-		pdf.SetFillColor(241, 246, 246)
-		pdf.Rect(x+3, y+5, 20, 20, "F")
-		pdf.SetFont("NotoSans", "B", 8)
-		pdf.SetTextColor(98, 113, 124)
-		pdf.SetXY(x+3, y+11)
-		pdf.CellFormat(20, 5, "Produkt", "", 0, "C", false, 0, "")
-	}
+	pdf.RoundedRect(28, 71, 154, 137, 4, "1234", "DF")
+	pdf.SetTextColor(0, 124, 115)
+	pdf.SetFont("NotoSans", "B", 8)
+	pdf.SetXY(42, 80)
+	pdf.CellFormat(126, 5, "JETZT BUCHEN", "", 0, "C", false, 0, "")
 	pdf.SetTextColor(6, 21, 45)
-	pdf.SetFont("NotoSans", "B", 8.2)
-	lines := pdf.SplitText(product.Name, 34)
-	if len(lines) > 2 {
-		lines = lines[:2]
-		lines[1] = fitText(pdf, lines[1]+"…", 34)
-	}
-	for index, line := range lines {
-		pdf.SetXY(x+26, y+5+float64(index)*4.8)
-		pdf.CellFormat(34, 4.8, line, "", 0, "L", false, 0, "")
-	}
-	pdf.SetFont("NotoSans", "", 8)
-	pdf.SetTextColor(62, 77, 88)
-	price := "Preis frei wählbar"
-	if product.PriceMinor.Valid {
-		price = formatPrice(product.PriceMinor.Int64, product.Currency)
-	}
-	pdf.SetXY(x+26, y+25)
-	pdf.CellFormat(35, 5, fitText(pdf, price, 35), "", 0, "L", false, 0, "")
-	return drawQR(pdf, productURL, x+62, y+6, 24)
-}
-
-func drawPosterText(ctx context.Context, pdf *fpdf.Fpdf, value string, startY float64, addPage func() error) error {
-	if value == "" {
-		return nil
-	}
-	const left, width, bottom = 18.0, 174.0, 271.0
-	if startY > bottom-18 {
-		if err := addPage(); err != nil {
-			return err
-		}
-		startY = 57
+	pdf.SetFont("NotoSans", "B", 15)
+	pdf.SetXY(33, 89)
+	pdf.CellFormat(144, 8, "Einfach scannen und loslegen", "", 0, "C", false, 0, "")
+	if err := drawQR(pdf, bookingURL, 70, 105, 70); err != nil {
+		return err
 	}
 	pdf.SetFont("NotoSans", "B", 10)
+	pdf.SetXY(39, 180)
+	pdf.CellFormat(132, 7, "QR-Code mit der Kamera scannen", "", 0, "C", false, 0, "")
+	pdf.SetTextColor(62, 77, 88)
+	pdf.SetFont("NotoSans", "", 8.5)
+	pdf.SetXY(39, 190)
+	pdf.CellFormat(132, 5, "Die Buchungsseite öffnet sich direkt.", "", 0, "C", false, 0, "")
+	return pdf.Error()
+}
+
+// drawProductCard prints one bookable product at the given millimeter position.
+// featured selects the roomier tile for short posters; imageName is optional.
+// The returned error covers QR encoding and PDF drawing failures.
+func drawProductCard(pdf *fpdf.Fpdf, product posterProduct, imageName, productURL string, x, y float64, featured bool) error {
+	pdf.SetFillColor(255, 255, 255)
+	pdf.SetDrawColor(214, 223, 228)
+	pdf.SetLineWidth(0.25)
+	if featured {
+		const imageAndQRSize = 27.0
+		pdf.RoundedRect(x, y, 89, 35, 2.6, "1234", "DF")
+		drawPosterProductImage(pdf, product.Name, imageName, x+3, y+4, imageAndQRSize)
+		if err := drawQR(pdf, productURL, x+59, y+4, imageAndQRSize); err != nil {
+			return err
+		}
+		pdf.SetTextColor(6, 21, 45)
+		pdf.SetFont("NotoSans", "B", 8.8)
+		lines := pdf.SplitText(product.Name, 24)
+		if len(lines) > 2 {
+			lines = lines[:2]
+			lines[1] = fitText(pdf, lines[1]+"…", 24)
+		}
+		nameY, priceY := y+11, y+19
+		if len(lines) > 1 {
+			nameY, priceY = y+8, y+22
+		}
+		for index, line := range lines {
+			pdf.SetXY(x+33, nameY+float64(index)*5.2)
+			pdf.CellFormat(24, 5.2, fitText(pdf, line, 24), "", 0, "L", false, 0, "")
+		}
+		pdf.SetFont("NotoSans", "B", 9.2)
+		pdf.SetTextColor(0, 124, 115)
+		pdf.SetXY(x+33, priceY)
+		pdf.CellFormat(24, 5, fitText(pdf, posterPrice(product), 24), "", 0, "L", false, 0, "")
+		return pdf.Error()
+	}
+	pdf.RoundedRect(x, y, 89, 31.5, 2.6, "1234", "DF")
+	drawPosterProductImage(pdf, product.Name, imageName, x+3, y+4, 23.5)
 	pdf.SetTextColor(6, 21, 45)
-	pdf.SetXY(left, startY)
-	pdf.CellFormat(width, 7, "Hinweis", "", 0, "L", false, 0, "")
+	pdf.SetFont("NotoSans", "B", 8.5)
+	lines := pdf.SplitText(product.Name, 30)
+	if len(lines) > 2 {
+		lines = lines[:2]
+		lines[1] = fitText(pdf, lines[1]+"…", 30)
+	}
+	for index, line := range lines {
+		pdf.SetXY(x+30, y+4+float64(index)*5.2)
+		pdf.CellFormat(30, 5.2, fitText(pdf, line, 30), "", 0, "L", false, 0, "")
+	}
+	pdf.SetFont("NotoSans", "B", 9)
+	pdf.SetTextColor(0, 124, 115)
+	pdf.SetXY(x+30, y+22)
+	pdf.CellFormat(30, 5, fitText(pdf, posterPrice(product), 30), "", 0, "L", false, 0, "")
+	pdf.SetDrawColor(226, 232, 236)
+	pdf.Line(x+62, y+4, x+62, y+27.5)
+	if err := drawQR(pdf, productURL, x+63.5, y+4, 23.5); err != nil {
+		return err
+	}
+	return pdf.Error()
+}
+
+// drawPosterProductImage paints a photo or branded initial at the visual size of
+// the QR modules beside it, leaving the same quiet margin in its square slot.
+// The image must already be registered; x, y, and size are millimeters.
+func drawPosterProductImage(pdf *fpdf.Fpdf, productName, imageName string, x, y, size float64) {
+	inset := size * 0.065
+	x += inset
+	y += inset
+	size -= 2 * inset
+	pdf.SetFillColor(235, 247, 246)
+	pdf.RoundedRect(x, y, size, size, 2, "1234", "F")
+	if imageName != "" {
+		drawImageCover(pdf, imageName, x, y, size, size)
+		return
+	}
+	initial := "?"
+	if name := []rune(strings.TrimSpace(productName)); len(name) > 0 {
+		initial = strings.ToUpper(string(name[0]))
+	}
+	pdf.SetFont("NotoSans", "B", 16)
+	pdf.SetTextColor(0, 124, 115)
+	pdf.SetXY(x, y+(size-10)/2)
+	pdf.CellFormat(size, 10, initial, "", 0, "C", false, 0, "")
+}
+
+// posterPrice returns the current localized amount or a short variable-price
+// prompt for the narrow print cards.
+func posterPrice(product posterProduct) string {
+	if product.PriceMinor.Valid {
+		return formatPrice(product.PriceMinor.Int64, product.Currency)
+	}
+	return "Preis wählen"
+}
+
+const (
+	posterNoteBottom     = 274.0
+	posterNotePadding    = 3.0
+	posterNoteLineHeight = 5.3
+	posterNoteTextWidth  = 166.0
+)
+
+// drawPosterText centers optional editor copy above the footer and paginates it.
+// startY is the first free millimeter below page content; addPage repeats the
+// poster header and can return a context or drawing error.
+func drawPosterText(ctx context.Context, pdf *fpdf.Fpdf, value string, startY float64, addPage func() error) error {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
 	pdf.SetFont("NotoSans", "", 9)
 	lines := make([]string, 0)
 	for _, paragraph := range strings.Split(value, "\n") {
@@ -282,35 +394,72 @@ func drawPosterText(ctx context.Context, pdf *fpdf.Fpdf, value string, startY fl
 			lines = append(lines, "")
 			continue
 		}
-		lines = append(lines, pdf.SplitText(paragraph, width)...)
+		lines = append(lines, pdf.SplitText(paragraph, posterNoteTextWidth)...)
 	}
-	y := startY + 9
-	for _, line := range lines {
+	for offset := 0; offset < len(lines); {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if y+5 > bottom {
+		capacity := int((posterNoteBottom - startY - 2*posterNotePadding) / posterNoteLineHeight)
+		if capacity < 1 || (offset == 0 && len(lines) > capacity && startY > 70) {
 			if err := addPage(); err != nil {
 				return err
 			}
-			y = 57
+			startY = 70
+			continue
 		}
-		pdf.SetXY(left, y)
-		pdf.CellFormat(width, 5, line, "", 0, "L", false, 0, "")
-		y += 5.3
+		end := offset + capacity
+		if end > len(lines) {
+			end = len(lines)
+		}
+		drawPosterNote(pdf, lines[offset:end], posterNoteBottom)
+		offset = end
+		if offset < len(lines) {
+			if err := addPage(); err != nil {
+				return err
+			}
+			startY = 70
+		}
 	}
 	return pdf.Error()
 }
 
+// drawPosterNote places wrapped lines in a full-width capsule sized to the text height.
+// bottom is the lower edge of the capsule in millimeters above the footer.
+func drawPosterNote(pdf *fpdf.Fpdf, lines []string, bottom float64) {
+	pdf.SetFont("NotoSans", "", 9)
+	const boxWidth = 182.0
+	boxHeight := 2*posterNotePadding + float64(len(lines))*posterNoteLineHeight
+	x, y := 14.0, bottom-boxHeight
+	pdf.SetFillColor(247, 249, 250)
+	pdf.SetDrawColor(225, 232, 236)
+	pdf.SetLineWidth(0.2)
+	pdf.RoundedRect(x, y, boxWidth, boxHeight, 2.5, "1234", "DF")
+	pdf.SetTextColor(62, 77, 88)
+	for index, line := range lines {
+		pdf.SetXY(x+7, y+posterNotePadding+float64(index)*posterNoteLineHeight)
+		pdf.CellFormat(boxWidth-14, posterNoteLineHeight, line, "", 0, "C", false, 0, "")
+	}
+}
+
+// drawPosterFooter repeats the TeamTaler mark, compact slogan, and page count.
 func drawPosterFooter(pdf *fpdf.Fpdf) {
 	pdf.SetDrawColor(214, 223, 228)
 	pdf.SetLineWidth(0.25)
 	pdf.Line(14, 279, 196, 279)
+	pdf.SetTextColor(90, 105, 120)
+	pdf.SetFont("NotoSans", "", 7.5)
+	pdf.SetXY(14, 284)
+	pdf.CellFormat(65, 5, "Scannen · Buchen · Fertig", "", 0, "L", false, 0, "")
 	drawImageFit(pdf, "teamtaler-mark", 85, 282.5, 8, 8)
 	pdf.SetTextColor(6, 21, 45)
 	pdf.SetFont("NotoSans", "B", 10)
 	pdf.SetXY(96, 282.5)
 	pdf.CellFormat(40, 8, "TeamTaler", "", 0, "L", false, 0, "")
+	pdf.SetTextColor(90, 105, 120)
+	pdf.SetFont("NotoSans", "", 7.5)
+	pdf.SetXY(169, 284)
+	pdf.CellFormat(27, 5, fmt.Sprintf("%d / {nb}", pdf.PageNo()), "", 0, "R", false, 0, "")
 }
 
 func drawQR(pdf *fpdf.Fpdf, value string, x, y, size float64) error {
@@ -377,6 +526,25 @@ func drawImageFit(pdf *fpdf.Fpdf, name string, x, y, width, height float64) {
 		actualWidth = height * ratio
 	}
 	pdf.ImageOptions(name, x+(width-actualWidth)/2, y+(height-actualHeight)/2, actualWidth, actualHeight, false, fpdf.ImageOptions{ImageType: "PNG"}, 0, "")
+}
+
+// drawImageCover center-crops one registered image into a rounded print tile.
+// Coordinates and dimensions are millimeters; missing images leave the tile
+// background visible without changing the card layout.
+func drawImageCover(pdf *fpdf.Fpdf, name string, x, y, width, height float64) {
+	info := pdf.GetImageInfo(name)
+	if info == nil || info.Width() <= 0 || info.Height() <= 0 {
+		return
+	}
+	ratio := info.Width() / info.Height()
+	actualWidth, actualHeight := width, width/ratio
+	if actualHeight < height {
+		actualHeight = height
+		actualWidth = height * ratio
+	}
+	pdf.ClipRoundedRect(x, y, width, height, 2, false)
+	pdf.ImageOptions(name, x+(width-actualWidth)/2, y+(height-actualHeight)/2, actualWidth, actualHeight, false, fpdf.ImageOptions{ImageType: "PNG"}, 0, "")
+	pdf.ClipEnd()
 }
 
 func fitText(pdf *fpdf.Fpdf, value string, width float64) string {

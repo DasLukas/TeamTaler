@@ -9,8 +9,6 @@ import {
 } from '@dnd-kit/core';
 import { arrayMove, rectSortingStrategy, SortableContext, sortableKeyboardCoordinates, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down';
-import ArrowUp from 'lucide-react/dist/esm/icons/arrow-up';
 import GripVertical from 'lucide-react/dist/esm/icons/grip-vertical';
 import Plus from 'lucide-react/dist/esm/icons/plus';
 import Search from 'lucide-react/dist/esm/icons/search';
@@ -19,6 +17,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { formatMoney } from '@/api/money';
 import type { Category, Product } from '@/api/types';
+import { IconButton } from '@/components/ui/IconButton';
 import { ManagedImageFrame } from '@/components/ui/ManagedImage';
 import styles from './PosterProductComposer.module.css';
 
@@ -33,16 +32,18 @@ export interface PosterProductComposerProps {
 
 interface PosterProductCardProps {
   id: string;
-  index: number;
-  count: number;
   product?: Product;
   categoryActive: boolean;
-  onMove: (id: string, direction: -1 | 1) => void;
   onRemove: (id: string) => void;
 }
 
-/** Shows one print-order preview card with drag and accessible explicit movement controls. */
-function PosterProductCard({ id, index, count, product, categoryActive, onMove, onRemove }: PosterProductCardProps) {
+/**
+ * Renders one sortable poster product tile with catalog-style media and actions.
+ *
+ * @param props - Product data, availability, and removal callback.
+ * @returns An image-led tile with keyboard-accessible drag and remove controls.
+ */
+function PosterProductCard({ id, product, categoryActive, onRemove }: PosterProductCardProps) {
   const { t } = useTranslation();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   const available = Boolean(product?.active && categoryActive);
@@ -56,16 +57,13 @@ function PosterProductCard({ id, index, count, product, categoryActive, onMove, 
   >
     <div className={styles.productBody}>
       <span className={styles.productImage}>
-        {product?.imageUrl ? <ManagedImageFrame alt="" fallback={name.slice(0, 1)} frameClassName={styles.imageFrame} sizes="112px" src={product.imageUrl} /> : <span aria-hidden="true" className={styles.imageFallback}>{name.slice(0, 1)}</span>}
+        {product?.imageUrl ? <ManagedImageFrame alt="" fallback={name.slice(0, 1)} frameClassName={styles.imageFrame} sizes="104px" src={product.imageUrl} /> : <span aria-hidden="true" className={styles.imageFallback}>{name.slice(0, 1)}</span>}
       </span>
       <div className={styles.productText}><strong title={name}>{name}</strong>{product ? <span>{price}</span> : null}{!available ? <small className={styles.unavailableBadge}>{t('kiosk.unavailableProduct')}</small> : null}</div>
     </div>
     <div className={styles.cardActions}>
-      <button {...attributes} {...listeners} aria-label={t('kiosk.composerDrag', { name })} className={styles.dragHandle} type="button"><GripVertical aria-hidden="true" size={18} /></button>
-      <span className={styles.cardActionSpacer} />
-      <button aria-label={t('kiosk.moveUp', { name })} disabled={index === 0} onClick={() => onMove(id, -1)} type="button"><ArrowUp aria-hidden="true" size={16} /></button>
-      <button aria-label={t('kiosk.moveDown', { name })} disabled={index === count - 1} onClick={() => onMove(id, 1)} type="button"><ArrowDown aria-hidden="true" size={16} /></button>
-      <button aria-label={t('kiosk.removeProduct', { name })} className={styles.remove} onClick={() => onRemove(id)} type="button"><X aria-hidden="true" size={17} /></button>
+      <IconButton className={styles.remove} label={t('kiosk.removeProduct', { name })} onClick={() => onRemove(id)} variant="surface"><X aria-hidden="true" size={17} /></IconButton>
+      <IconButton {...attributes} {...listeners} className={styles.dragHandle} label={t('kiosk.composerDrag', { name })} variant="surface"><GripVertical aria-hidden="true" size={18} /></IconButton>
     </div>
   </article>;
 }
@@ -74,8 +72,8 @@ function PosterProductCard({ id, index, count, product, categoryActive, onMove, 
  * Edits the ordered product list as a two-column poster preview.
  *
  * Selected products remain visible even if archived or deleted so an administrator
- * can remove stale references before printing. Pointer, touch, keyboard drag,
- * and explicit movement buttons all update the same ordered ID list.
+ * can remove stale references before printing. Pointer, touch, and keyboard
+ * drag all update the same ordered ID list.
  *
  * @param props - Catalog, ordered IDs, and controlled change callback.
  * @returns Visual poster product grid and searchable category picker.
@@ -102,11 +100,6 @@ export function PosterProductComposer({ categories, productIds, onChange }: Post
     if (pickerOpen) searchRef.current?.focus();
   }, [pickerOpen]);
 
-  const move = (id: string, direction: -1 | 1) => {
-    const from = productIds.indexOf(id);
-    const to = from + direction;
-    if (from >= 0 && to >= 0 && to < productIds.length) onChange(arrayMove(productIds, from, to));
-  };
   const onDragEnd = ({ active, over }: DragEndEvent) => {
     if (!over || active.id === over.id) return;
     const from = productIds.indexOf(String(active.id));
@@ -125,9 +118,9 @@ export function PosterProductComposer({ categories, productIds, onChange }: Post
     <DndContext collisionDetection={closestCenter} onDragEnd={onDragEnd} sensors={sensors}>
       <SortableContext items={productIds} strategy={rectSortingStrategy}>
         <div className={styles.productGrid}>
-          {productIds.map((id, index) => {
+          {productIds.map((id) => {
             const entry = productIndex.get(id);
-            return <PosterProductCard categoryActive={entry?.categoryActive ?? false} count={productIds.length} id={id} index={index} key={id} onMove={move} onRemove={(removedId) => onChange(productIds.filter((item) => item !== removedId))} product={entry?.product} />;
+            return <PosterProductCard categoryActive={entry?.categoryActive ?? false} id={id} key={id} onRemove={(removedId) => onChange(productIds.filter((item) => item !== removedId))} product={entry?.product} />;
           })}
           {productIds.length < MAX_POSTER_PRODUCTS ? <button aria-expanded={pickerOpen} aria-label={t('kiosk.composerAdd')} className={styles.addCard} onClick={() => setPickerOpen((open) => !open)} type="button"><span><Plus aria-hidden="true" size={23} /></span><strong>{t('kiosk.composerAdd')}</strong></button> : null}
         </div>

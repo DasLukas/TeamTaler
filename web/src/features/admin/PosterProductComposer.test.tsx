@@ -43,15 +43,19 @@ describe('PosterProductComposer', () => {
     expect(onChange).toHaveBeenCalledWith(['coffee', 'cake']);
   });
 
-  it('retains stale products for correction and supports explicit reordering and removal', async () => {
+  it('retains stale products with remove above drag and no movement buttons', async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     render(<PosterProductComposer categories={categories} onChange={onChange} productIds={['coffee', 'deleted']} />);
 
     expect(screen.getByText(i18n.t('kiosk.unavailableProduct'))).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: i18n.t('kiosk.moveUp', { name: i18n.t('kiosk.deletedProduct') }) }));
-    expect(onChange).toHaveBeenCalledWith(['deleted', 'coffee']);
-    await user.click(screen.getByRole('button', { name: i18n.t('kiosk.removeProduct', { name: i18n.t('kiosk.deletedProduct') }) }));
+    const staleCard = screen.getByText(i18n.t('kiosk.deletedProduct')).closest('article');
+    expect(staleCard).not.toBeNull();
+    expect(within(staleCard!).getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual([
+      i18n.t('kiosk.removeProduct', { name: i18n.t('kiosk.deletedProduct') }),
+      i18n.t('kiosk.composerDrag', { name: i18n.t('kiosk.deletedProduct') }),
+    ]);
+    await user.click(within(staleCard!).getByRole('button', { name: i18n.t('kiosk.removeProduct', { name: i18n.t('kiosk.deletedProduct') }) }));
     expect(onChange).toHaveBeenCalledWith(['coffee']);
   });
 

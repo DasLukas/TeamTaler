@@ -140,6 +140,100 @@ describe('RightsPanel role definitions', () => {
     expect(screen.getAllByRole('switch')).toHaveLength(PERMISSION_KEYS.length - 1);
   });
 
+  it('explains inactive feature rights without locking their switches or grants', async () => {
+    const user = userEvent.setup();
+    mocks.useActiveGroup.mockReturnValue({
+      activeGroupId: 'group-a',
+      activeGroup: {
+        id: 'group-a',
+        kioskEnabled: false,
+        statisticsEnabled: false,
+        externalAccountsEnabled: false,
+        planningEnabled: false,
+        membership: { effectiveGrants: [{ permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }] },
+      },
+    });
+    const dependentPermissions = [
+      ['USE_KIOSK', 'Scan & Go verwenden'],
+      ['VIEW_STATISTICS', 'Statistik'],
+      ['VIEW_EXTERNAL_ACCOUNTS', 'Externe Konten einsehen'],
+      ['MANAGE_EXTERNAL_ACCOUNTS', 'Externe Konten verwalten'],
+      ['USE_PLANNING', 'Planung verwenden'],
+      ['CREATE_PLANNING_EVENTS', 'Termine erstellen'],
+      ['VIEW_PLANNING_PARTICIPANTS', 'Teilnehmende sehen'],
+      ['MANAGE_PLANNING_EVENTS', 'Planung verwalten'],
+    ] as const;
+    mocks.getPermissionDefinitions.mockResolvedValue([...dependentPermissions.map(([key]) => key), 'CREATE_OWN_BOOKING'].map((key) => ({ key })));
+    renderPanel();
+
+    expect(await screen.findByText('„Scan & Go“ aus')).toBeVisible();
+    expect(screen.getByText('„Statistik-Dashboard“ aus')).toBeVisible();
+    expect(screen.getAllByText('„Externe Konten“ aus')).toHaveLength(2);
+    expect(screen.getAllByText('„Planung“ aus')).toHaveLength(4);
+    expect(screen.getAllByText(/“ aus$/)).toHaveLength(dependentPermissions.length);
+
+    for (const [, label] of dependentPermissions) {
+      const switchControl = screen.getByRole('switch', { name: `Recht „${label}“ umschalten` });
+      expect(switchControl).toBeEnabled();
+      expect(switchControl.getAttribute('aria-describedby')).toBeTruthy();
+    }
+    expect(screen.getByRole('switch', { name: 'Recht „Buchungen erfassen“ umschalten' })).not.toHaveAttribute('aria-describedby');
+
+    await user.click(screen.getByRole('switch', { name: 'Recht „Scan & Go verwenden“ umschalten' }));
+    expect(screen.getByRole('switch', { name: 'Recht „Scan & Go verwenden“ umschalten' })).toBeChecked();
+    await user.click(screen.getByRole('button', { name: 'Speichern' }));
+    await waitFor(() => expect(mocks.updateRole).toHaveBeenCalledWith('group-a', 'role-member', expect.objectContaining({
+      grants: expect.arrayContaining([{ permission: 'USE_KIOSK', scope: { type: 'GROUP' } }]),
+    }), 1));
+  });
+
+  it('omits feature notices when the corresponding features are enabled', async () => {
+    mocks.useActiveGroup.mockReturnValue({
+      activeGroupId: 'group-a',
+      activeGroup: {
+        id: 'group-a',
+        kioskEnabled: true,
+        statisticsEnabled: true,
+        externalAccountsEnabled: true,
+        planningEnabled: true,
+        membership: { effectiveGrants: [{ permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }] },
+      },
+    });
+    mocks.getPermissionDefinitions.mockResolvedValue(PERMISSION_KEYS.map((key) => ({ key })));
+    renderPanel();
+
+    expect(await screen.findByRole('switch', { name: 'Recht „Scan & Go verwenden“ umschalten' })).toBeEnabled();
+    expect(screen.queryByText(/“ aus$/)).not.toBeInTheDocument();
+  });
+
+  it('shows implied rights as checked and locked while feature-dependent direct grants stay editable', async () => {
+    mocks.useActiveGroup.mockReturnValue({
+      activeGroupId: 'group-a',
+      activeGroup: {
+        id: 'group-a',
+        externalAccountsEnabled: false,
+        membership: { effectiveGrants: [{ permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }] },
+      },
+    });
+    mocks.getRoles.mockResolvedValue([{ ...baseRole, grants: [{ permission: 'MANAGE_EXTERNAL_ACCOUNTS', scope: { type: 'GROUP' } }] }]);
+    mocks.getPermissionDefinitions.mockResolvedValue([
+      { key: 'VIEW_EXTERNAL_ACCOUNTS' },
+      { key: 'MANAGE_EXTERNAL_ACCOUNTS' },
+    ]);
+    renderPanel();
+
+    const implied = await screen.findByRole('switch', { name: 'Recht „Externe Konten einsehen“ umschalten' });
+    const direct = screen.getByRole('switch', { name: 'Recht „Externe Konten verwalten“ umschalten' });
+    expect(implied).toBeChecked();
+    expect(implied).toBeDisabled();
+    expect(implied).toHaveClass(/muted/);
+    expect(direct).toBeChecked();
+    expect(direct).toBeEnabled();
+    expect(direct).toHaveClass(/muted/);
+    expect(screen.getAllByText('„Externe Konten“ aus')).toHaveLength(2);
+    expect(within(screen.getByText('Automatisch enthalten').parentElement!).getByText('„Externe Konten“ aus')).toBeVisible();
+  });
+
   it('starts a copied role from the duplicate action in the editor title row', async () => {
     const user = userEvent.setup();
     renderPanel();
