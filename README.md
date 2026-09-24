@@ -12,6 +12,7 @@ This README is the primary entry point for the person who installs and operates 
 - Group-owned roles and granular permissions for administration, bookings, finance, catalogue management, and reporting.
 - An optional statistics workspace with compact booking and finance tabs, privacy-aware purchasing visuals, and responsive charts. When external accounts are enabled, viewers with both statistics and external-account access also get a simple per-account balance overview and one selectable account trend in the same authorized snapshot.
 - Fixed-price and user-defined-price products with category, file or camera image capture, archive, and ordering support.
+- Optional kiosk and Scan and Go booking with product barcodes, camera scanning, and printable group posters with product QR codes.
 - Member balances, incoming payments with optional or required image/PDF receipts, configurable PayPal.Me and EUR SEPA payment instructions, optional group-owned external cash/bank/PayPal/other accounts, immutable external cash flows and reversals with optional evidence attachments, optional accounting periods, and settlement history.
 - One server-paginated chronological activity history for authorized bookings, incoming payments, their timestamped reversals, and account corrections, including linked original/reversal navigation, member identity, signed amounts, receipts, status badges, transaction-type filtering, and a persistent card/table choice on phones.
 - A focused personal account view for balance, payments, settlement history, printing, and CSV export without duplicating the unified activity table.
@@ -426,6 +427,14 @@ teamtaler healthcheck [--url URL] [--timeout DURATION]
 teamtaler backup create --output FILE.tar.gz
 teamtaler restore --input FILE.tar.gz [--force]
 ```
+
+## Kiosk and Scan and Go
+
+Group administrators can enable the kiosk feature in group settings and assign `USE_KIOSK` through a group role. A member also needs a booking permission to use the camera scanner. While kiosk is enabled, product editors can store multiple EAN-8, EAN-13, UPC-A, UPC-E, or Code 128 barcodes; the editor validates each value and displays a barcode preview. Previously stored codes remain unchanged when product metadata is edited while kiosk is disabled. Each code can identify only one product in a group. Scanning adds a product to the existing cart. On phones, the scan view shows the same cart as a collapsible bottom sheet for reviewing and adjusting scanned items without leaving the camera. The booking is recorded only after the member reviews and confirms that cart.
+
+Each group has one permanent `Standard` poster template. Administrators can edit its free text, but its name and empty product selection are fixed. Its A4 PDF contains a central QR code for the group's booking page. The poster editor is visible only while the kiosk feature is enabled; saved templates persist when it is turned off. Administrators can also save named product poster templates with free text and at least one ordered product, then download their PDFs while the kiosk feature is enabled. The product editor shows a two-column preview with current images and prices; administrators can add products through categorized search and reorder them by drag, keyboard, or movement buttons. Product QR codes appear in the generated PDF and add one current, active product to the cart after authentication. Printed prices are current at download time. Archived or deleted products must be removed from a template before it can be printed again. Legacy product templates with no products remain visible for repair but cannot be printed until a product is added.
+
+The QR codes use the configured HTTPS public URL and routes inside the PWA scope. An installed web app may receive the link where the device supports link capture; otherwise the same route opens in the browser. Product QR links require an enabled kiosk feature and a booking permission for cart insertion; opening the camera additionally requires `USE_KIOSK`. Group-only QR links continue to open the booking page when kiosk is disabled.
 
 ## Data and table exports
 

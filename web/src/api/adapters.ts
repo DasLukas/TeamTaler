@@ -510,6 +510,7 @@ export function adaptGroupSettings(input: unknown): GroupSettings {
   return {
     defaultTheme: isThemeId(source.defaultTheme) ? source.defaultTheme : 'TEAMTALER',
     statisticsEnabled: source.statisticsEnabled === true,
+    kioskEnabled: source.kioskEnabled === true,
     externalAccountsEnabled: source.externalAccountsEnabled === true,
     settlementsEnabled: source.settlementsEnabled === true,
     settlementDueSoonDays: Number(source.settlementDueSoonDays ?? 3),
@@ -876,6 +877,7 @@ export function adaptSession(input: unknown): Session {
       logoUrl: typeof group.logoUrl === 'string' ? group.logoUrl : undefined,
       defaultTheme: isThemeId(group.defaultTheme) ? group.defaultTheme : 'TEAMTALER',
       statisticsEnabled: group.statisticsEnabled === true,
+      kioskEnabled: group.kioskEnabled === true,
       externalAccountsEnabled: group.externalAccountsEnabled === true,
       planningEnabled: group.planningEnabled === true,
       membership: membership ? {
@@ -1140,6 +1142,12 @@ export function adaptProduct(input: unknown): Product {
     currency,
     price: pricingMode === 'FIXED' ? sourcePrice ? money(sourcePrice.minorUnits, sourcePrice.currency || currency) : money(source.priceMinor, currency) : undefined,
     imageUrl: typeof source.imageUrl === 'string' && source.imageUrl ? source.imageUrl : undefined,
+    barcodes: Array.isArray(source.barcodes) ? source.barcodes.flatMap((entry) => {
+      const barcode = asRecord(entry);
+      const format = barcode.format;
+      if (format !== 'EAN_8' && format !== 'EAN_13' && format !== 'UPC_A' && format !== 'UPC_E' && format !== 'CODE_128') return [];
+      return [{ format, value: String(barcode.value ?? '') }];
+    }) : [],
     active: source.active !== false,
     sortOrder: Number(source.sortOrder ?? 0),
   };

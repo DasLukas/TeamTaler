@@ -27,6 +27,7 @@ import { GroupSettingsPanel } from './GroupSettingsPanel';
 import { roleDisplayName } from './roleDisplayName';
 import styles from './BehaviorSettingsPanel.module.css';
 import { PlanningSettingsSection } from './PlanningSettingsSection';
+import { KioskSettingsSection } from './KioskSettingsSection';
 
 /** Properties for the editable group behavior settings form. */
 interface SettingsFormProps {
@@ -562,5 +563,6 @@ export function BehaviorSettingsPanel() {
 
   return <div className={styles.content}>
     <SettingsForm canManageDefaultRole={canManageDefaultRole} canManageExternalAccounts={canManageExternalAccounts} canManageFinancialSettings={canManageFinancialSettings} canManageGroup={canManageGroup} currency={activeGroup.currency} externalAccounts={externalAccountsQuery.data} groupId={activeGroupId} key={`${activeGroupId}:${JSON.stringify(settingsQuery.data)}`} roles={rolesQuery.data} settings={settingsQuery.data} />
+    {canManageGroup ? <KioskSettingsSection groupId={activeGroupId} key={activeGroupId} settings={settingsQuery.data} /> : null}
   </div>;
 }

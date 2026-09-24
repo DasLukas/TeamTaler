@@ -92,6 +92,8 @@ import type {
   GroupPreference,
   GroupSettings,
   GroupSettingsUpdateInput,
+  KioskPoster,
+  KioskPosterInput,
   InstanceCapabilities,
   TransactionSettings,
   Membership,
@@ -1035,6 +1037,7 @@ export const api = {
       name: input.name,
       pricingMode: input.pricingMode,
       priceMinor: input.price ? minorUnitsToSafeNumber(input.price.minorUnits) : undefined,
+      ...(input.barcodes !== undefined ? { barcodes: input.barcodes } : {}),
       sortOrder: 0,
     };
     return adaptProduct(await idempotentRequest<unknown>(groupId, 'product.create', path, payload, { method: 'POST', body: json(payload) }));
@@ -1044,6 +1047,7 @@ export const api = {
       name: input.name,
       pricingMode: input.pricingMode,
       priceMinor: input.price ? minorUnitsToSafeNumber(input.price.minorUnits) : undefined,
+      ...(input.barcodes !== undefined ? { barcodes: input.barcodes } : {}),
       active: input.active,
       sortOrder: input.sortOrder,
       version: input.version,
@@ -1058,6 +1062,15 @@ export const api = {
     method: 'DELETE',
     headers: { 'If-Match': `"v${version}"` },
   }),
+  getKioskPosters: (groupId: string): Promise<KioskPoster[]> => request<KioskPoster[]>(groupPath(groupId, 'kiosk-posters')),
+  createKioskPoster: (groupId: string, input: KioskPosterInput): Promise<KioskPoster> => request<KioskPoster>(groupPath(groupId, 'kiosk-posters'), { method: 'POST', body: json(input) }),
+  updateKioskPoster: (groupId: string, posterId: string, version: number, input: KioskPosterInput): Promise<KioskPoster> => request<KioskPoster>(groupPath(groupId, `kiosk-posters/${encodeURIComponent(posterId)}`), {
+    method: 'PUT', headers: { 'If-Match': `"v${version}"` }, body: json(input),
+  }),
+  deleteKioskPoster: (groupId: string, posterId: string, version: number): Promise<void> => request<void>(groupPath(groupId, `kiosk-posters/${encodeURIComponent(posterId)}`), {
+    method: 'DELETE', headers: { 'If-Match': `"v${version}"` },
+  }),
+  getKioskPosterPdf: (groupId: string, posterId: string): Promise<Blob> => requestBlob(groupPath(groupId, `kiosk-posters/${encodeURIComponent(posterId)}/pdf`)),
   uploadProductImage: async (groupId: string, productId: string, image: File): Promise<{ imageUrl: string }> => {
     const form = new FormData();
     form.set('image', image);

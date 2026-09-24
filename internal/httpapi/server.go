@@ -35,6 +35,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/externalaccounts"
 	"github.com/DasLukas/TeamTaler/internal/finance"
 	"github.com/DasLukas/TeamTaler/internal/groups"
+	"github.com/DasLukas/TeamTaler/internal/kiosk"
 	"github.com/DasLukas/TeamTaler/internal/notifications"
 	"github.com/DasLukas/TeamTaler/internal/paymentattachments"
 	"github.com/DasLukas/TeamTaler/internal/periods"
@@ -66,6 +67,7 @@ type Server struct {
 	auth               auth.Service
 	groups             groups.Service
 	catalog            catalog.Service
+	kiosk              kiosk.Service
 	bookings           bookings.Service
 	finance            finance.Service
 	externalAccounts   externalaccounts.Service
@@ -190,6 +192,7 @@ func New(cfg config.Config, db *sql.DB, buildInformation BuildInformation, logge
 		auth:               auth.Service{DB: db, SessionLifetime: cfg.SessionLifetime, TokenSealer: tokenSealer, EmailDeliveryAvailable: emailInfrastructureAvailable},
 		groups:             groupService,
 		catalog:            catalog.Service{DB: db},
+		kiosk:              kiosk.Service{DB: db, DataDirectory: cfg.DataDirectory, PublicURL: cfg.PublicURL.String()},
 		bookings:           bookings.Service{DB: db, Groups: groupService, Notifications: notificationService},
 		finance:            finance.Service{DB: db, Notifications: notificationService, Attachments: paymentattachments.Store{DataDirectory: cfg.DataDirectory}},
 		externalAccounts:   externalaccounts.Service{DB: db, Attachments: paymentattachments.Store{DataDirectory: cfg.DataDirectory}},
@@ -276,6 +279,11 @@ func New(cfg config.Config, db *sql.DB, buildInformation BuildInformation, logge
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}", server.handleUpdateGroup)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/settings", server.handleGetGroupSettings)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/settings", server.handleUpdateGroupSettings)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/kiosk-posters", server.handleListKioskPosters)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/kiosk-posters", server.handleCreateKioskPoster)
+	mux.HandleFunc("PUT /api/v1/groups/{groupID}/kiosk-posters/{posterID}", server.handleUpdateKioskPoster)
+	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/kiosk-posters/{posterID}", server.handleDeleteKioskPoster)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/kiosk-posters/{posterID}/pdf", server.handleKioskPosterPDF)
 	mux.HandleFunc("PUT /api/v1/groups/{groupID}/theme-preference", server.handleUpdateThemePreference)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/notification-preferences", server.handleGetNotificationPreferences)
 	mux.HandleFunc("PUT /api/v1/groups/{groupID}/notification-preferences", server.handleUpdateNotificationPreferences)

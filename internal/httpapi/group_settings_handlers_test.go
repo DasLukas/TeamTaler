@@ -25,19 +25,25 @@ func TestGroupSettingsExposeFinanceReminderCadence(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &settings); err != nil {
 		t.Fatalf("decode settings: %v", err)
 	}
-	if settings.SettlementsEnabled || settings.ExternalAccountsEnabled || settings.ExternalAccountsVersion != 1 || settings.SettlementDueSoonDays != 3 || settings.SettlementOverdueRepeatDays != 7 {
+	if settings.SettlementsEnabled || settings.KioskEnabled || settings.ExternalAccountsEnabled || settings.ExternalAccountsVersion != 1 || settings.SettlementDueSoonDays != 3 || settings.SettlementOverdueRepeatDays != 7 {
 		t.Fatalf("default settings = %#v", settings)
 	}
 
-	update := roleHandlerRequest(principal, administrator.GroupID, http.MethodPatch, `{"settlementsEnabled":true,"settlementDueSoonDays":5,"settlementOverdueRepeatDays":10,"defaultTheme":"NRW"}`)
+	update := roleHandlerRequest(principal, administrator.GroupID, http.MethodPatch, `{"settlementsEnabled":true,"kioskEnabled":true,"settlementDueSoonDays":5,"settlementOverdueRepeatDays":10,"defaultTheme":"NRW"}`)
 	updatedResponse := httptest.NewRecorder()
 	server.handleUpdateGroupSettings(updatedResponse, update)
 	if updatedResponse.Code != http.StatusOK {
 		t.Fatalf("settings update status = %d, body = %s", updatedResponse.Code, updatedResponse.Body.String())
 	}
 	var updatedSettings domain.GroupSettings
-	if err := json.Unmarshal(updatedResponse.Body.Bytes(), &updatedSettings); err != nil || !updatedSettings.SettlementsEnabled || updatedSettings.SettlementDueSoonDays != 5 || updatedSettings.SettlementOverdueRepeatDays != 10 || updatedSettings.DefaultTheme != domain.ThemeNRW {
+	if err := json.Unmarshal(updatedResponse.Body.Bytes(), &updatedSettings); err != nil || !updatedSettings.SettlementsEnabled || !updatedSettings.KioskEnabled || updatedSettings.SettlementDueSoonDays != 5 || updatedSettings.SettlementOverdueRepeatDays != 10 || updatedSettings.DefaultTheme != domain.ThemeNRW {
 		t.Fatalf("updated settings = %#v, err = %v", updatedSettings, err)
+	}
+	session := roleHandlerRequest(principal, administrator.GroupID, http.MethodGet, "")
+	sessionResponse := httptest.NewRecorder()
+	server.handleSession(sessionResponse, session)
+	if sessionResponse.Code != http.StatusOK || !bytes.Contains(sessionResponse.Body.Bytes(), []byte(`"kioskEnabled":true`)) {
+		t.Fatalf("session kiosk setting status/body = %d/%s", sessionResponse.Code, sessionResponse.Body.String())
 	}
 
 	unsupported := roleHandlerRequest(principal, administrator.GroupID, http.MethodPatch, `{"membersCanViewAllBookings":true}`)

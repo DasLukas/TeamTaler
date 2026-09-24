@@ -89,6 +89,7 @@ var permissionDefinitions = []domain.PermissionDefinition{
 	{Key: domain.PermissionCreatePlanningEvents, Description: "Create and manage own planning events.", ImpliedPermissions: []domain.PermissionKey{domain.PermissionUsePlanning}},
 	{Key: domain.PermissionViewPlanningParticipants, Description: "View identified planning participants.", ImpliedPermissions: []domain.PermissionKey{domain.PermissionUsePlanning}},
 	{Key: domain.PermissionManagePlanningEvents, Description: "Manage all planning events and recurring series.", ImpliedPermissions: []domain.PermissionKey{domain.PermissionUsePlanning, domain.PermissionCreatePlanningEvents, domain.PermissionViewPlanningParticipants}},
+	{Key: domain.PermissionUseKiosk, Description: "Use the camera scanner for kiosk and scan-and-go bookings."},
 }
 
 var permissionOrder = func() map[domain.PermissionKey]int {

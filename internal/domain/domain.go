@@ -97,6 +97,8 @@ const (
 	PermissionManageExternalAccounts PermissionKey = "MANAGE_EXTERNAL_ACCOUNTS"
 	// PermissionCatalogManagement permits category and product management.
 	PermissionCatalogManagement PermissionKey = "CATALOG_MANAGEMENT"
+	// PermissionUseKiosk permits use of the camera scanner when enabled for the group.
+	PermissionUseKiosk PermissionKey = "USE_KIOSK"
 	// PermissionViewMemberDirectory permits reading the group's member directory.
 	PermissionViewMemberDirectory PermissionKey = "VIEW_MEMBER_DIRECTORY"
 	// PermissionViewStatistics permits reading all group member, activity, and financial statistics.
@@ -327,6 +329,7 @@ type Group struct {
 	DefaultTheme            ThemeID    `json:"defaultTheme"`
 	StatisticsEnabled       bool       `json:"statisticsEnabled"`
 	ExternalAccountsEnabled bool       `json:"externalAccountsEnabled"`
+	KioskEnabled            bool       `json:"kioskEnabled"`
 	PlanningEnabled         bool       `json:"planningEnabled"`
 	Membership              Membership `json:"membership"`
 }
@@ -396,6 +399,7 @@ type GroupSettings struct {
 	DefaultTheme                 ThemeID            `json:"defaultTheme"`
 	StatisticsEnabled            bool               `json:"statisticsEnabled"`
 	ExternalAccountsEnabled      bool               `json:"externalAccountsEnabled"`
+	KioskEnabled                 bool               `json:"kioskEnabled"`
 	ExternalAccountsVersion      int64              `json:"externalAccountsVersion"`
 	SettlementsEnabled           bool               `json:"settlementsEnabled"`
 	SettlementDueSoonDays        int                `json:"settlementDueSoonDays"`
@@ -674,6 +678,12 @@ const (
 	MaxProductPriceMinor int64 = 100_000_000_000
 )
 
+// ProductBarcode identifies a physical code assigned to one group product.
+type ProductBarcode struct {
+	Format string `json:"format"`
+	Value  string `json:"value"`
+}
+
 // Product is a catalog item whose price is snapshotted when booked. PriceMinor
 // is present only for fixed-price products.
 type Product struct {
@@ -685,6 +695,7 @@ type Product struct {
 	PricingMode ProductPricingMode `json:"pricingMode"`
 	Currency    string             `json:"currency"`
 	ImageURL    string             `json:"imageUrl,omitempty"`
+	Barcodes    []ProductBarcode   `json:"barcodes"`
 	Active      bool               `json:"active"`
 	SortOrder   int                `json:"sortOrder"`
 	Version     int64              `json:"version"`

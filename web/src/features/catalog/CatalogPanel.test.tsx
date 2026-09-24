@@ -22,8 +22,10 @@ const apiMock = vi.hoisted(() => ({
 }));
 const imageUploadMock = vi.hoisted(() => ({ prepareSquareImage: vi.fn() }));
 const responsiveMock = vi.hoisted(() => ({ useMediaQuery: vi.fn() }));
+const barcodePreviewMock = vi.hoisted(() => ({ toCanvas: vi.fn() }));
 
 vi.mock('@/api/client', () => ({ api: apiMock }));
+vi.mock('@bwip-js/browser', () => ({ toCanvas: barcodePreviewMock.toCanvas }));
 vi.mock('@/hooks/useMediaQuery', () => ({ useMediaQuery: (query: string) => responsiveMock.useMediaQuery(query) }));
 vi.mock('@/components/media/imageUpload', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/components/media/imageUpload')>(),
@@ -61,11 +63,13 @@ const session: Session = {
   systemRoles: [],
 };
 
-function renderCatalog(): void {
+function renderCatalog(kioskEnabled = false): void {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  const activeGroup = { ...session.groups[0], kioskEnabled };
+  const currentSession = { ...session, groups: [activeGroup] };
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>
-      <ActiveGroupContext.Provider value={{ session, activeGroup: session.groups[0], activeGroupId: 'group-a', setActiveGroupId: vi.fn() }}>
+      <ActiveGroupContext.Provider value={{ session: currentSession, activeGroup, activeGroupId: 'group-a', setActiveGroupId: vi.fn() }}>
         {children}
       </ActiveGroupContext.Provider>
     </QueryClientProvider>
@@ -105,6 +109,29 @@ describe('CatalogPanel', () => {
     const image = card?.querySelector('img[data-managed-image-state]');
     expect(image).not.toBeNull();
     expect(image?.parentElement?.querySelector('[aria-hidden="true"]')).toHaveTextContent('W');
+  });
+
+  it('previews a saved product image and restores it after discarding a replacement', async () => {
+    const user = userEvent.setup();
+    const imageUrl = '/api/v1/groups/group-a/products/product-created/image';
+    const productWithImage = { ...createdProduct, imageUrl };
+    const replacement = new File(['replacement'], 'replacement.png', { type: 'image/png' });
+    apiMock.getCategories.mockResolvedValue([{ ...category, products: [productWithImage] }]);
+    renderCatalog();
+
+    await screen.findByText(productWithImage.name);
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.editProduct', { name: productWithImage.name }) }));
+    const savedPreview = screen.getByRole('img', { name: i18n.t('catalog.imagePreviewAlt') });
+    expect(savedPreview).toHaveAttribute('src', expect.stringContaining(imageUrl));
+    expect(savedPreview).toHaveAttribute('data-managed-image-state');
+
+    await user.upload(screen.getByLabelText(i18n.t('catalog.imageFileInput')), replacement);
+    expect(screen.queryByRole('img', { name: i18n.t('catalog.imagePreviewAlt') })?.querySelector('canvas')).toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: i18n.t('catalog.imagePreviewAlt') })?.querySelector('img')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.removeSelectedImage') }));
+    expect(screen.getByRole('img', { name: i18n.t('catalog.imagePreviewAlt') })).toHaveAttribute('src', expect.stringContaining(imageUrl));
+    expect(screen.queryByRole('button', { name: i18n.t('catalog.removeSelectedImage') })).not.toBeInTheDocument();
   });
 
   it('marks only archived products with an image overlay instead of status labels', async () => {
@@ -438,6 +465,77 @@ describe('CatalogPanel', () => {
       sortOrder: 4,
       version: 6,
     }));
+  });
+
+  it('hides barcode controls while kiosk is off and preserves stored codes on product edits', async () => {
+    const user = userEvent.setup();
+    const existingProduct: Product = { ...createdProduct, barcodes: [{ format: 'EAN_13', value: '4006381333931' }] };
+    apiMock.getCategories.mockResolvedValue([{ ...category, products: [existingProduct] }]);
+    renderCatalog();
+
+    await screen.findByText(existingProduct.name);
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.editProduct', { name: existingProduct.name }) }));
+    expect(screen.queryByText(i18n.t('kiosk.productBarcodes'))).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: i18n.t('common.save') }));
+    await waitFor(() => expect(apiMock.updateProduct).toHaveBeenCalledTimes(1));
+    expect(apiMock.updateProduct.mock.calls[0]?.[2]).not.toHaveProperty('barcodes');
+  });
+
+  it('offers product barcode controls while kiosk is enabled', async () => {
+    const user = userEvent.setup();
+    apiMock.getCategories.mockResolvedValue([{ ...category, products: [createdProduct] }]);
+    renderCatalog(true);
+
+    await screen.findByText(createdProduct.name);
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.editProduct', { name: createdProduct.name }) }));
+    expect(screen.getByText(i18n.t('kiosk.productBarcodes'))).toBeVisible();
+    expect(screen.getByRole('button', { name: i18n.t('kiosk.addBarcode') })).toBeVisible();
+  });
+
+  it('prevents saving an invalid barcode and saves a valid code with its preview', async () => {
+    const user = userEvent.setup();
+    apiMock.getCategories.mockResolvedValue([{ ...category, products: [createdProduct] }]);
+    renderCatalog(true);
+
+    await screen.findByText(createdProduct.name);
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.editProduct', { name: createdProduct.name }) }));
+    await user.click(screen.getByRole('button', { name: i18n.t('kiosk.addBarcode') }));
+    const input = screen.getByRole('textbox', { name: i18n.t('kiosk.barcodeValue', { number: 1 }) });
+    await user.type(input, '4006381333932');
+    expect(screen.getByRole('alert')).toHaveTextContent(i18n.t('kiosk.barcodeErrors.checkDigit'));
+    expect(screen.getByRole('button', { name: i18n.t('common.save') })).toBeDisabled();
+
+    await user.clear(input);
+    await user.type(input, '4006381333931');
+    await waitFor(() => expect(barcodePreviewMock.toCanvas).toHaveBeenCalledWith(expect.any(HTMLCanvasElement), expect.objectContaining({ bcid: 'ean13', text: '4006381333931' })));
+    await user.click(screen.getByRole('button', { name: i18n.t('common.save') }));
+    await waitFor(() => expect(apiMock.updateProduct).toHaveBeenCalledWith('group-a', createdProduct.id, expect.objectContaining({ barcodes: [{ format: 'EAN_13', value: '4006381333931' }] })));
+  });
+
+  it('shows a localized server rejection beneath the submitted barcode row', async () => {
+    const user = userEvent.setup();
+    apiMock.getCategories.mockResolvedValue([{ ...category, products: [createdProduct] }]);
+    apiMock.updateProduct.mockRejectedValueOnce(new Error('barcodes[0].value: contains an invalid value or check digit'));
+    renderCatalog(true);
+
+    await screen.findByText(createdProduct.name);
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.editProduct', { name: createdProduct.name }) }));
+    await user.click(screen.getByRole('button', { name: i18n.t('kiosk.addBarcode') }));
+    await user.click(screen.getByRole('button', { name: i18n.t('kiosk.addBarcode') }));
+    const first = screen.getByRole('textbox', { name: i18n.t('kiosk.barcodeValue', { number: 1 }) });
+    const second = screen.getByRole('textbox', { name: i18n.t('kiosk.barcodeValue', { number: 2 }) });
+    await user.type(second, '4006381333931');
+    await user.click(screen.getByRole('button', { name: i18n.t('common.save') }));
+
+    const message = await screen.findByRole('alert');
+    expect(message).toHaveTextContent(i18n.t('kiosk.barcodeErrors.serverInvalid'));
+    expect(second.parentElement).toContainElement(message);
+    expect(second).toHaveAttribute('aria-invalid', 'true');
+    expect(first).toHaveAttribute('aria-invalid', 'false');
+    expect(screen.queryByText(/barcodes\[0\]\.value/)).not.toBeInTheDocument();
+
+    await user.clear(second);
+    expect(screen.queryByText(i18n.t('kiosk.barcodeErrors.serverInvalid'))).not.toBeInTheDocument();
   });
 
   it('uses the crop editor when replacing an image while editing a product', async () => {

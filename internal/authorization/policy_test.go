@@ -16,8 +16,8 @@ import (
 
 func TestDefinitionsAndPermissionImplications(t *testing.T) {
 	definitions := authorization.Definitions()
-	if len(definitions) != 20 {
-		t.Fatalf("definition count = %d, want 20", len(definitions))
+	if len(definitions) != 21 {
+		t.Fatalf("definition count = %d, want 21", len(definitions))
 	}
 	if definitions[0].ImpliedPermissions == nil {
 		t.Fatal("permission implications are nil, want an empty API array")
@@ -28,6 +28,9 @@ func TestDefinitionsAndPermissionImplications(t *testing.T) {
 	}
 	if !authorization.IsKnownPermission(domain.PermissionViewStatistics) {
 		t.Fatal("VIEW_STATISTICS is not registered")
+	}
+	if !authorization.IsKnownPermission(domain.PermissionUseKiosk) {
+		t.Fatal("USE_KIOSK is not registered")
 	}
 	for _, legacy := range []domain.PermissionKey{"VIEW_MEMBER_STATISTICS", "VIEW_GROUP_STATISTICS"} {
 		if authorization.IsKnownPermission(legacy) {
@@ -101,6 +104,13 @@ func TestValidateGrantAcceptsOnlyKnownGroupScopesInV1(t *testing.T) {
 			name: "group grant",
 			grant: domain.PermissionGrant{
 				Permission: domain.PermissionRoleManagement,
+				Scope:      domain.PermissionScope{Type: domain.PermissionScopeGroup},
+			},
+		},
+		{
+			name: "kiosk group grant",
+			grant: domain.PermissionGrant{
+				Permission: domain.PermissionUseKiosk,
 				Scope:      domain.PermissionScope{Type: domain.PermissionScopeGroup},
 			},
 		},

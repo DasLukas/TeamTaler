@@ -81,6 +81,10 @@ func TestGroupSettingsDefaultAuthorizationPersistenceAndAudit(t *testing.T) {
 	if _, err := service.UpdateSettings(ctx, session.Principal, regularMember, SettingsUpdate{ExternalAccountsEnabled: &externalAccountsEnabled}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("regular-member external-account update error=%v, want forbidden", err)
 	}
+	kioskEnabled := true
+	if _, err := service.UpdateSettings(ctx, session.Principal, regularMember, SettingsUpdate{KioskEnabled: &kioskEnabled}); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("regular-member kiosk update error=%v, want forbidden", err)
+	}
 	nrwTheme := domain.ThemeNRW
 	if _, err := service.UpdateSettings(ctx, session.Principal, regularMember, SettingsUpdate{DefaultTheme: &nrwTheme}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("regular-member theme update error=%v, want forbidden", err)

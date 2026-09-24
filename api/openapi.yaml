@@ -30,6 +30,7 @@ tags:
   - name: Groups
   - name: Planning
   - name: Catalog
+  - name: Kiosk
   - name: Activities
   - name: Bookings
   - name: Finance
@@ -1709,7 +1710,7 @@ paths:
       tags: [Groups]
       summary: Partially update group or membership settings
       description: |
-        `defaultTheme` and `statisticsEnabled` require `GROUP_ADMINISTRATION`. `defaultRoleId` requires `ROLE_MANAGEMENT` or
+        `defaultTheme`, `statisticsEnabled`, and `kioskEnabled` require `GROUP_ADMINISTRATION`. `defaultRoleId` requires `ROLE_MANAGEMENT` or
         `GROUP_ADMINISTRATION`. Finance, settlement-reminder, and booking fields require
         `GROUP_ADMINISTRATION` or `FINANCE_MANAGEMENT`.
       parameters:
@@ -1728,6 +1729,106 @@ paths:
               schema: { $ref: '#/components/schemas/GroupSettings' }
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/kiosk-posters:
+    get:
+      tags: [Kiosk]
+      summary: List saved poster templates for one group
+      description: Requires a current GROUP_ADMINISTRATION grant; works while the kiosk feature is disabled. Every group has one non-deletable booking-only Standard template, listed first. Older empty custom templates remain visible but cannot generate a PDF until products are assigned.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Saved poster templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/KioskPoster' }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Kiosk]
+      summary: Save a new poster template
+      description: Custom templates require at least one active product. The name Standard is reserved for the group-owned default template.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/KioskPosterCommand' }
+      responses:
+        '201':
+          description: Created template
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KioskPoster' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/kiosk-posters/{posterId}:
+    put:
+      tags: [Kiosk]
+      summary: Replace a saved poster template
+      description: The Standard template accepts edits to its text only; send name Standard and an empty productIds array. Custom templates require at least one active product.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/KioskPosterId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/KioskPosterCommand' }
+      responses:
+        '200':
+          description: Updated template
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KioskPoster' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [Kiosk]
+      summary: Delete a saved poster template
+      description: The Standard template cannot be deleted and returns 409 Conflict.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/KioskPosterId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      responses:
+        '204': { description: Deleted template }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/kiosk-posters/{posterId}/pdf:
+    get:
+      tags: [Kiosk]
+      summary: Generate a current A4 Scan and Go poster PDF
+      description: Requires GROUP_ADMINISTRATION and kioskEnabled. Archived or deleted template products return 409 until the template is corrected. QR URLs use the configured public origin.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/KioskPosterId'
+      responses:
+        '200':
+          description: Printable PDF with group and product QR links
+          headers:
+            Content-Disposition: { schema: { type: string } }
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/theme-preference:
     put:
       tags: [Groups]
@@ -4504,6 +4605,11 @@ components:
       in: path
       required: true
       schema: { type: string }
+    KioskPosterId:
+      name: posterId
+      in: path
+      required: true
+      schema: { type: string }
     BookingId:
       name: bookingId
       in: path
@@ -6158,7 +6264,7 @@ components:
         avatarUrl: { type: string }
     Group:
       type: object
-      required: [id, name, currency, defaultTheme, statisticsEnabled, externalAccountsEnabled, planningEnabled, membership]
+      required: [id, name, currency, defaultTheme, statisticsEnabled, kioskEnabled, externalAccountsEnabled, planningEnabled, membership]
       properties:
         id: { type: string }
         name: { type: string }
@@ -6168,6 +6274,9 @@ components:
         statisticsEnabled:
           type: boolean
           description: Whether the unified group statistics feature is enabled.
+        kioskEnabled:
+          type: boolean
+          description: Whether the group permits the Scan and Go camera and product QR links for eligible members.
         externalAccountsEnabled:
           type: boolean
           description: Whether permission-scoped external-account screens and manual operations are enabled for this group.
@@ -6178,12 +6287,15 @@ components:
     GroupSettings:
       type: object
       additionalProperties: false
-      required: [defaultTheme, statisticsEnabled, externalAccountsEnabled, externalAccountsVersion, settlementsEnabled, settlementDueSoonDays, settlementOverdueRepeatDays, defaultRoleId, ownBookingReasonMode, foreignBookingReasonMode, ownPaymentReasonMode, otherPaymentReasonMode, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
+      required: [defaultTheme, statisticsEnabled, kioskEnabled, externalAccountsEnabled, externalAccountsVersion, settlementsEnabled, settlementDueSoonDays, settlementOverdueRepeatDays, defaultRoleId, ownBookingReasonMode, foreignBookingReasonMode, ownPaymentReasonMode, otherPaymentReasonMode, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
       properties:
         defaultTheme: { $ref: '#/components/schemas/ThemeId' }
         statisticsEnabled:
           type: boolean
           description: Master switch for every group-wide statistics projection.
+        kioskEnabled:
+          type: boolean
+          description: Group-administration switch for the Scan and Go camera, product QR links, and poster PDF generation.
         externalAccountsEnabled:
           type: boolean
           description: Group-administration switch for external-account UI and manual account operations. Linked payments and their reversals continue posting while disabled.
@@ -6250,6 +6362,9 @@ components:
         statisticsEnabled:
           type: boolean
           description: Enables or disables the statistics endpoints; requires GROUP_ADMINISTRATION.
+        kioskEnabled:
+          type: boolean
+          description: Enables or disables the kiosk capability; requires GROUP_ADMINISTRATION.
         externalAccountsEnabled:
           type: boolean
           description: Enables or disables external-account UI and manual operations; requires GROUP_ADMINISTRATION and does not grant account access by itself.
@@ -6596,6 +6711,7 @@ components:
         - VOID_ANY_BOOKING
         - BOOK_FOR_OTHERS
         - BOOK_FOR_GUESTS
+        - USE_KIOSK
         - USE_PLANNING
         - CREATE_PLANNING_EVENTS
         - VIEW_PLANNING_PARTICIPANTS
@@ -7014,9 +7130,46 @@ components:
             maxItems: 1000
             uniqueItems: true
             items: { type: string, minLength: 1 }
+    KioskPosterCommand:
+      type: object
+      additionalProperties: false
+      required: [name, text, productIds]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120, description: Standard is reserved for the immutable default template name. }
+        text: { type: string, maxLength: 2000, description: Plain text printed on the poster. }
+        productIds:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          description: Group-owned product IDs in print order; non-empty for custom templates and empty for the Standard template.
+          items: { type: string, minLength: 1 }
+    KioskPoster:
+      type: object
+      additionalProperties: false
+      required: [id, name, text, productIds, version, isDefault]
+      properties:
+        id: { type: string }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        text: { type: string, maxLength: 2000 }
+        productIds:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items: { type: string, minLength: 1 }
+        version: { type: integer, format: int64, minimum: 1 }
+        isDefault: { type: boolean, description: True only for the non-deletable booking-only Standard template. }
+    ProductBarcode:
+      type: object
+      additionalProperties: false
+      required: [format, value]
+      properties:
+        format:
+          type: string
+          enum: [EAN_8, EAN_13, UPC_A, UPC_E, CODE_128]
+        value: { type: string, minLength: 1, maxLength: 80 }
     Product:
       type: object
-      required: [id, groupId, categoryId, name, pricingMode, currency, active, sortOrder, version]
+      required: [id, groupId, categoryId, name, pricingMode, currency, barcodes, active, sortOrder, version]
       properties:
         id: { type: string }
         groupId: { type: string }
@@ -7029,6 +7182,11 @@ components:
           description: FIXED exposes priceMinor; USER_DEFINED requires the booking actor to submit a unit price.
         currency: { type: string }
         imageUrl: { type: string }
+        barcodes:
+          type: array
+          maxItems: 50
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/ProductBarcode' }
         active: { type: boolean }
         sortOrder: { type: integer }
         version: { type: integer, format: int64 }
@@ -7049,6 +7207,12 @@ components:
           type: string
           enum: [FIXED, USER_DEFINED]
           default: FIXED
+        barcodes:
+          type: array
+          maxItems: 50
+          uniqueItems: true
+          description: Retail and Code 128 identifiers; unique to one product within the group.
+          items: { $ref: '#/components/schemas/ProductBarcode' }
         sortOrder:
           type: integer
           description: Accepted for backward compatibility; newly created products are appended within their category.
@@ -8080,7 +8244,9 @@ components:
         type: { type: string, format: uri }
         title: { type: string }
         status: { type: integer, minimum: 400, maximum: 599 }
-        detail: { type: string }
+        detail:
+          type: string
+          description: Product barcode validation and ownership errors identify the submitted item with a zero-based `barcodes[n].value` or `barcode[n]` reference.
         instance: { type: string }
         existingMembershipId:
           type: string

@@ -32,8 +32,8 @@ func TestHandlePermissionDefinitionsReturnsStableArrayMetadata(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &definitions); err != nil {
 		t.Fatalf("decode permission definitions: %v", err)
 	}
-	if len(definitions) != 20 {
-		t.Fatalf("permission definition count = %d, want 20", len(definitions))
+	if len(definitions) != 21 {
+		t.Fatalf("permission definition count = %d, want 21", len(definitions))
 	}
 	keys := make([]domain.PermissionKey, 0, len(definitions))
 	for _, definition := range definitions {
@@ -44,6 +44,9 @@ func TestHandlePermissionDefinitionsReturnsStableArrayMetadata(t *testing.T) {
 	}
 	if !slices.Contains(keys, domain.PermissionViewExternalAccounts) || !slices.Contains(keys, domain.PermissionManageExternalAccounts) {
 		t.Fatalf("external account permissions missing: %v", keys)
+	}
+	if !slices.Contains(keys, domain.PermissionUseKiosk) {
+		t.Fatalf("kiosk permission missing: %v", keys)
 	}
 }
 

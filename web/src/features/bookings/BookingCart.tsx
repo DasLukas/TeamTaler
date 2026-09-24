@@ -4,6 +4,7 @@ import Minus from 'lucide-react/dist/esm/icons/minus';
 import Package from 'lucide-react/dist/esm/icons/package';
 import Plus from 'lucide-react/dist/esm/icons/plus';
 import ShoppingBasket from 'lucide-react/dist/esm/icons/shopping-basket';
+import ScanLine from 'lucide-react/dist/esm/icons/scan-line';
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
 import UsersRound from 'lucide-react/dist/esm/icons/users-round';
 import X from 'lucide-react/dist/esm/icons/x';
@@ -41,6 +42,9 @@ export interface BookingCartProps {
   onRemove: (productId: string) => void;
   onReasonChange: (reason: string) => void;
   onSubmit: () => void;
+  onOpenScanner?: () => void;
+  scannerOpening?: boolean;
+  scannerError?: string;
 }
 
 
@@ -68,6 +72,9 @@ export function BookingCart({
   onRemove,
   onReasonChange,
   onSubmit,
+  onOpenScanner,
+  scannerOpening = false,
+  scannerError,
 }: BookingCartProps) {
   const { t } = useTranslation();
   const cartRef = useRef<HTMLFormElement>(null);
@@ -189,35 +196,39 @@ export function BookingCart({
         ><span aria-hidden="true" className={styles.handle} /></button>
       ) : null}
       {minimized ? (
-        <button
-          aria-expanded="false"
-          aria-label={t('booking.cartExpandAccessible', {
-            products: t('booking.productCount', { count: itemCount }),
-            total: total ? formatMoney(total) : '—',
-          })}
-          className={styles.peekButton}
-          onClick={() => onViewChange('details')}
-          type="button"
-        >
-          <span className={styles.peekIdentity}>
-            <strong>{t('booking.cartTitle')}</strong>
-            <span aria-hidden="true" className={styles.peekProductCount}><Package size={16} strokeWidth={1.9} />{itemCount}</span>
-          </span>
-          <strong className={styles.peekTotal}>{total ? formatMoney(total) : '—'}</strong>
-          <ChevronUp aria-hidden="true" size={24} strokeWidth={2} />
-        </button>
+        <div className={styles.peekActions}>
+          <button
+            aria-expanded="false"
+            aria-label={t('booking.cartExpandAccessible', {
+              products: t('booking.productCount', { count: itemCount }),
+              total: total ? formatMoney(total) : '—',
+            })}
+            className={styles.peekButton}
+            onClick={() => onViewChange('details')}
+            type="button"
+          >
+            <span className={styles.peekIdentity}>
+              <strong>{t('booking.cartTitle')}</strong>
+              <span aria-hidden="true" className={styles.peekProductCount}><Package size={16} strokeWidth={1.9} />{itemCount}</span>
+            </span>
+            <strong className={styles.peekTotal}>{total ? formatMoney(total) : '—'}</strong>
+            <ChevronUp aria-hidden="true" size={24} strokeWidth={2} />
+          </button>
+          {onOpenScanner ? <Button aria-label={t('kiosk.openScanner')} className={styles.peekScanAction} disabled={scannerOpening} leadingIcon={<ScanLine size={18} />} onClick={onOpenScanner} size="small" variant="secondary">{t('kiosk.scannerTitle')}</Button> : null}
+        </div>
       ) : (
         <header className={styles.header}>
           <div>
             <h2>{t('booking.cartTitle')}</h2>
           </div>
-          {compact ? (
-            <div className={styles.headerActions}>
-              <IconButton aria-expanded="true" label={t('booking.cartCollapse')} onClick={() => onViewChange('peek')}><X size={28} strokeWidth={1.8} /></IconButton>
-            </div>
-          ) : null}
+          <div className={styles.headerActions}>
+            {onOpenScanner ? <Button aria-label={t('kiosk.openScanner')} className={styles.scanAction} disabled={scannerOpening} leadingIcon={<ScanLine size={18} />} onClick={onOpenScanner} size="small" variant="secondary">{t('kiosk.scannerTitle')}</Button> : null}
+            {compact ? <IconButton aria-expanded="true" label={t('booking.cartCollapse')} onClick={() => onViewChange('peek')}><X size={28} strokeWidth={1.8} /></IconButton> : null}
+          </div>
         </header>
       )}
+
+      {scannerError ? <p className={styles.scannerError} role="alert">{scannerError}</p> : null}
 
       {!minimized && showDetails ? (
         <div className={styles.details} ref={detailsRef}>

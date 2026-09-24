@@ -15,7 +15,7 @@ const PERMISSION_GROUPS: ReadonlyArray<{ key: PermissionGroupKey; permissions: r
   },
   {
     key: 'bookings',
-    permissions: ['CREATE_OWN_BOOKING', 'BOOK_FOR_OTHERS', 'BOOK_FOR_GUESTS', 'VOID_OWN_BOOKING', 'VOID_ANY_BOOKING', 'VIEW_ALL_BOOKING_ACTIVITY'],
+    permissions: ['CREATE_OWN_BOOKING', 'BOOK_FOR_OTHERS', 'BOOK_FOR_GUESTS', 'USE_KIOSK', 'VOID_OWN_BOOKING', 'VOID_ANY_BOOKING', 'VIEW_ALL_BOOKING_ACTIVITY'],
   },
   {
     key: 'statistics',

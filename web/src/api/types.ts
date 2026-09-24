@@ -222,6 +222,7 @@ export type PermissionKey =
   | 'VOID_ANY_BOOKING'
   | 'BOOK_FOR_OTHERS'
   | 'BOOK_FOR_GUESTS'
+  | 'USE_KIOSK'
   | 'USE_PLANNING'
   | 'CREATE_PLANNING_EVENTS'
   | 'VIEW_PLANNING_PARTICIPANTS'
@@ -245,6 +246,7 @@ export const PERMISSION_KEYS = [
   'VOID_ANY_BOOKING',
   'BOOK_FOR_OTHERS',
   'BOOK_FOR_GUESTS',
+  'USE_KIOSK',
   'USE_PLANNING',
   'CREATE_PLANNING_EVENTS',
   'VIEW_PLANNING_PARTICIPANTS',
@@ -447,6 +449,7 @@ export interface Group {
   logoUrl?: string;
   defaultTheme: ThemeId;
   statisticsEnabled: boolean;
+  kioskEnabled?: boolean;
   externalAccountsEnabled?: boolean;
   planningEnabled?: boolean;
   membership?: SessionMembership;
@@ -764,6 +767,7 @@ export interface TransactionSettings {
 export interface GroupSettings {
   defaultTheme: ThemeId;
   statisticsEnabled: boolean;
+  kioskEnabled?: boolean;
   externalAccountsEnabled?: boolean;
   settlementsEnabled: boolean;
   settlementDueSoonDays: number;
@@ -787,6 +791,7 @@ export interface GroupSettings {
 export interface GroupSettingsUpdateInput {
   defaultTheme?: ThemeId;
   statisticsEnabled?: boolean;
+  kioskEnabled?: boolean;
   externalAccountsEnabled?: boolean;
   settlementsEnabled?: boolean;
   settlementDueSoonDays?: number;
@@ -1237,6 +1242,28 @@ export interface GroupPreference {
 }
 
 /** A product that can be booked against a member account. */
+export type ProductBarcodeFormat = 'EAN_8' | 'EAN_13' | 'UPC_A' | 'UPC_E' | 'CODE_128';
+
+/** A manufacturer or group barcode assigned to a catalog product. */
+export interface ProductBarcode {
+  format: ProductBarcodeFormat;
+  value: string;
+}
+
+/** A saved printable kiosk poster configuration. */
+export interface KioskPoster {
+  id: string;
+  name: string;
+  text: string;
+  productIds: string[];
+  isDefault: boolean;
+  version: number;
+}
+
+/** Editable fields of a printable kiosk poster. */
+export type KioskPosterInput = Pick<KioskPoster, 'name' | 'text' | 'productIds'>;
+
+/** A product that can be booked against a member account. */
 export interface Product {
   id: string;
   categoryId: string;
@@ -1246,6 +1273,7 @@ export interface Product {
   currency: string;
   price?: Money;
   imageUrl?: string;
+  barcodes?: ProductBarcode[];
   active: boolean;
   sortOrder: number;
 }
@@ -1256,6 +1284,7 @@ export interface ProductCreateCommand {
   name: string;
   pricingMode: ProductPricingMode;
   price?: Money;
+  barcodes?: ProductBarcode[];
 }
 
 /** Command used by catalog managers to update one product optimistically. */
@@ -1263,6 +1292,7 @@ export interface ProductUpdateCommand {
   name: string;
   pricingMode: ProductPricingMode;
   price?: Money;
+  barcodes?: ProductBarcode[];
   active: boolean;
   sortOrder: number;
   version: number;

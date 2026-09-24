@@ -14,6 +14,8 @@ const apiMock = vi.hoisted(() => ({
   getExternalAccountLinks: vi.fn(),
   getExternalAccounts: vi.fn(),
   getGroupSettings: vi.fn(),
+  getKioskPosters: vi.fn(),
+  getCategories: vi.fn(),
   getPlanningSettings: vi.fn(),
   getRoles: vi.fn(),
   getTransactionSettings: vi.fn(),
@@ -87,6 +89,8 @@ describe('BehaviorSettingsPanel', () => {
     session.groups[0]!.externalAccountsEnabled = false;
     session.groups[0]!.membership!.effectiveGrants = [{ permission: 'GROUP_ADMINISTRATION', scope: { type: 'GROUP' } }, { permission: 'MEMBER_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'ROLE_MANAGEMENT', scope: { type: 'GROUP' } }, { permission: 'FINANCE_MANAGEMENT', scope: { type: 'GROUP' } }];
     apiMock.getGroupSettings.mockResolvedValue(settings);
+    apiMock.getKioskPosters.mockResolvedValue([]);
+    apiMock.getCategories.mockResolvedValue([]);
     apiMock.getExternalAccounts.mockResolvedValue({ items: [], version: 1 });
     apiMock.getExternalAccountLinks.mockResolvedValue({ links: settings.paymentMethods.map((method) => ({ paymentMethodId: method.id, externalAccountId: null })), version: 1 });
     apiMock.archiveExternalAccount.mockResolvedValue({ items: [], version: 2 });

@@ -10,6 +10,7 @@ import { BookingPage } from './BookingPage';
 
 const mocks = vi.hoisted(() => ({
   getBookingContext: vi.fn(),
+  getSession: vi.fn(),
   getCategories: vi.fn(),
   createBulkBookings: vi.fn(),
   useMediaQuery: vi.fn(),
@@ -19,6 +20,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/api/client', () => ({
   api: {
     getBookingContext: mocks.getBookingContext,
+    getSession: mocks.getSession,
     getCategories: mocks.getCategories,
     createBulkBookings: mocks.createBulkBookings,
   },
@@ -26,6 +28,7 @@ vi.mock('@/api/client', () => ({
 
 vi.mock('@/app/useActiveGroup', () => ({ useActiveGroup: () => mocks.useActiveGroup() }));
 vi.mock('@/hooks/useMediaQuery', () => ({ useMediaQuery: (query: string) => mocks.useMediaQuery(query) }));
+vi.mock('./KioskScanner', () => ({ KioskScanner: ({ cart, cartExpanded, embedded, onClose, onCollapseCart, onScan }: { cart?: ReactNode; cartExpanded?: boolean; embedded?: boolean; onClose: () => void; onCollapseCart: () => void; onScan: (value: string, format: 'EAN_13') => void }) => <div data-embedded={String(embedded)} role="dialog"><span>Cart expanded: {String(cartExpanded)}</span>{cart}<button onClick={() => onScan('4006381333931', 'EAN_13')} type="button">Test scan</button><button onClick={onCollapseCart} type="button">Camera background</button><button onClick={onClose} type="button">Close scanner</button></div> }));
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, to }: { children: ReactNode; to: string }) => <a href={to}>{children}</a>,
 }));
@@ -56,11 +59,136 @@ function recipientButtonLabel(count: number): string {
 describe('BookingPage multi-product workspace', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.history.replaceState({}, '', '/book');
     mocks.getCategories.mockResolvedValue(demoCategories);
+    mocks.getSession.mockResolvedValue(demoSession);
     mocks.getBookingContext.mockResolvedValue(bookingContext());
     mocks.createBulkBookings.mockResolvedValue([{ id: 'booking-created' }]);
     mocks.useMediaQuery.mockReturnValue(false);
     mocks.useActiveGroup.mockReturnValue({ activeGroupId: demoSession.activeGroupId, activeGroup: demoSession.groups[0], session: demoSession });
+  });
+
+  it('adds a product QR exactly once and opens the scanner with kiosk permission', async () => {
+    const group = { ...demoSession.groups[0], kioskEnabled: true, membership: { ...demoSession.groups[0]!.membership!, effectiveGrants: [
+      { permission: 'CREATE_OWN_BOOKING' as const, scope: { type: 'GROUP' as const } },
+      { permission: 'USE_KIOSK' as const, scope: { type: 'GROUP' as const } },
+    ] } };
+    mocks.useActiveGroup.mockReturnValue({ activeGroupId: group.id, activeGroup: group, session: demoSession });
+    mocks.getSession.mockResolvedValue({ ...demoSession, groups: [group] });
+    window.history.replaceState({}, '', `/book?group=${group.id}&product=product-water&scan=1`);
+    renderBookingPage();
+    expect(await screen.findByRole('dialog')).toBeVisible();
+    expect(window.location.search).toBe(`?group=${group.id}`);
+    expect(screen.getByRole('button', { name: i18n.t('booking.submit') })).toBeVisible();
+    expect(mocks.createBulkBookings).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toHaveAttribute('data-embedded', 'true');
+    expect(screen.getByRole('complementary', { name: i18n.t('booking.cartTitle') })).toHaveTextContent('Wasser');
+  });
+
+  it('switches between touch selection, scanning, and cart review without losing mobile cart lines', async () => {
+    const user = userEvent.setup();
+    const group = { ...demoSession.groups[0], kioskEnabled: true, membership: { ...demoSession.groups[0]!.membership!, effectiveGrants: [
+      { permission: 'CREATE_OWN_BOOKING' as const, scope: { type: 'GROUP' as const } },
+      { permission: 'USE_KIOSK' as const, scope: { type: 'GROUP' as const } },
+    ] } };
+    const categories = demoCategories.map((category) => ({ ...category, products: category.products.map((product) => product.id === 'product-water' ? { ...product, barcodes: [{ format: 'EAN_13' as const, value: '4006381333931' }] } : product) }));
+    mocks.useActiveGroup.mockReturnValue({ activeGroupId: group.id, activeGroup: group, session: { ...demoSession, groups: [group] } });
+    mocks.getSession.mockResolvedValue({ ...demoSession, groups: [group] });
+    mocks.getCategories.mockResolvedValue(categories);
+    mocks.useMediaQuery.mockReturnValue(true);
+    renderBookingPage();
+
+    const water = await screen.findByRole('button', { name: /Wasser.*1,00.*hinzufügen/i });
+    expect(screen.getByRole('button', { name: i18n.t('kiosk.scannerTitle') })).toBeVisible();
+    await user.click(water);
+    expect(screen.queryByRole('button', { name: i18n.t('kiosk.scannerTitle') })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: i18n.t('kiosk.openScanner') }));
+    expect(await screen.findByRole('dialog')).toHaveAttribute('data-embedded', 'false');
+    expect(screen.getByRole('dialog')).toHaveTextContent('Cart expanded: false');
+    expect(within(screen.getByRole('dialog')).getByRole('button', { name: /Warenkorb öffnen/ })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Test scan' }));
+    expect(within(screen.getByRole('dialog')).getByRole('button', { name: /Warenkorb öffnen.*2 Produkte/ })).toBeVisible();
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: /Warenkorb öffnen/ }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('Cart expanded: true');
+    expect(within(screen.getByRole('dialog')).getByRole('button', { name: i18n.t('booking.submit') })).toBeVisible();
+    expect(within(screen.getByRole('dialog')).queryByRole('button', { name: i18n.t('kiosk.openScanner') })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Camera background' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('Cart expanded: false');
+    expect(within(screen.getByRole('dialog')).getByRole('button', { name: /Warenkorb öffnen/ })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Close scanner' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Warenkorb öffnen/ })).toBeVisible();
+    expect(screen.getByRole('button', { name: /Wasser.*Aktuell 2 im Warenkorb/i })).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: i18n.t('kiosk.openScanner') }));
+    await screen.findByRole('dialog');
+    await user.click(screen.getByRole('button', { name: 'Close scanner' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: i18n.t('booking.cartExpandAccessible', { products: i18n.t('booking.productCount', { count: 2 }), total: '2,00\u00a0€' }) })).toBeVisible();
+    expect(screen.getByRole('button', { name: i18n.t('kiosk.openScanner') })).toBeVisible();
+    expect(mocks.createBulkBookings).not.toHaveBeenCalled();
+  });
+
+  it('keeps one scanner entry in the tablet cart after a touch selection', async () => {
+    const user = userEvent.setup();
+    const group = { ...demoSession.groups[0], kioskEnabled: true, membership: { ...demoSession.groups[0]!.membership!, effectiveGrants: [
+      { permission: 'CREATE_OWN_BOOKING' as const, scope: { type: 'GROUP' as const } },
+      { permission: 'USE_KIOSK' as const, scope: { type: 'GROUP' as const } },
+    ] } };
+    mocks.useActiveGroup.mockReturnValue({ activeGroupId: group.id, activeGroup: group, session: { ...demoSession, groups: [group] } });
+    mocks.getSession.mockResolvedValue({ ...demoSession, groups: [group] });
+    renderBookingPage();
+
+    await screen.findByRole('button', { name: /Wasser.*1,00.*hinzufügen/i });
+    expect(screen.getByRole('button', { name: i18n.t('kiosk.scannerTitle') })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: /Wasser.*1,00.*hinzufügen/i }));
+    expect(screen.queryByRole('button', { name: i18n.t('kiosk.scannerTitle') })).not.toBeInTheDocument();
+    const cart = screen.getByRole('complementary', { name: i18n.t('booking.cartTitle') });
+    expect(within(cart).getByRole('button', { name: i18n.t('kiosk.openScanner') })).toBeVisible();
+    await user.click(within(cart).getByRole('button', { name: i18n.t('kiosk.openScanner') }));
+    expect(await screen.findByRole('dialog')).toHaveAttribute('data-embedded', 'true');
+    expect(cart).toBeVisible();
+    expect(within(cart).getByRole('button', { name: i18n.t('booking.submit') })).toBeVisible();
+    expect(screen.queryByRole('button', { name: /Wasser.*1,00.*hinzufügen/i })).not.toBeInTheDocument();
+    await user.click(within(cart).getByRole('button', { name: /Anzahl von Wasser erhöhen/ }));
+    expect(within(cart).getByLabelText('Anzahl von Wasser')).toHaveTextContent('2');
+    expect(screen.getByRole('dialog')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Close scanner' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(within(cart).getByRole('button', { name: i18n.t('booking.submit') })).toBeVisible();
+    expect(screen.getByRole('button', { name: /Wasser.*Aktuell 2 im Warenkorb/i })).toBeVisible();
+  });
+
+  it('hides scanner entries when the group has no kiosk grant', async () => {
+    const group = { ...demoSession.groups[0], kioskEnabled: true, membership: { ...demoSession.groups[0]!.membership!, effectiveGrants: [{ permission: 'CREATE_OWN_BOOKING' as const, scope: { type: 'GROUP' as const } }] } };
+    mocks.useActiveGroup.mockReturnValue({ activeGroupId: group.id, activeGroup: group, session: { ...demoSession, groups: [group] } });
+    renderBookingPage();
+    await screen.findByRole('button', { name: /Wasser.*1,00.*hinzufügen/i });
+    expect(screen.queryByRole('button', { name: i18n.t('kiosk.scannerTitle') })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: i18n.t('kiosk.openScanner') })).not.toBeInTheDocument();
+  });
+
+  it('does not add an old product QR when kiosk is disabled', async () => {
+    window.history.replaceState({}, '', `/book?group=${demoSession.activeGroupId}&product=product-water&scan=1`);
+    renderBookingPage();
+    expect(await screen.findByText(i18n.t('kiosk.linkUnavailable'))).toBeVisible();
+    expect(window.location.search).toBe(`?group=${demoSession.activeGroupId}`);
+    expect(screen.queryByRole('button', { name: i18n.t('booking.submit') })).not.toBeInTheDocument();
+  });
+
+  it('does not query the old group for a foreign group-only QR', () => {
+    window.history.replaceState({}, '', '/book?group=foreign-group');
+    renderBookingPage();
+    expect(screen.getByText(i18n.t('kiosk.groupUnavailable'))).toBeVisible();
+    expect(mocks.getCategories).not.toHaveBeenCalled();
+    expect(mocks.getBookingContext).not.toHaveBeenCalled();
+  });
+
+  it('does not query the old group for a malformed group QR', () => {
+    window.history.replaceState({}, '', '/book?group=../other');
+    renderBookingPage();
+    expect(screen.getByText(i18n.t('kiosk.groupUnavailable'))).toBeVisible();
+    expect(mocks.getCategories).not.toHaveBeenCalled();
   });
 
   it('completes the common fixed-price self booking with product tap and visible confirmation', async () => {
