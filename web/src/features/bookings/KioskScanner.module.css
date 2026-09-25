@@ -8,8 +8,10 @@
 .viewport video { width: 100%; height: 100%; object-fit: cover; }
 .reticle { position: absolute; top: 50%; left: 50%; width: min(76vw, 340px, 78cqh); aspect-ratio: 1; transform: translate(-50%, -50%); border: 3px solid #b8f5dc; border-radius: 1.25rem; box-shadow: 0 0 0 100vmax #0006; pointer-events: none; }
 .scanGuide { position: absolute; inset: 0; display: grid; align-content: center; justify-items: center; gap: 1rem; padding: 1.25rem; pointer-events: none; }
+.scanMessage { position: relative; z-index: 1; display: grid; justify-items: center; width: 100%; }
 .scanGuide .reticle { position: relative; top: auto; left: auto; width: min(76cqw, 340px, 50cqh); height: min(76cqw, 340px, 50cqh); aspect-ratio: auto; transform: none; container-type: size; animation: scan-guide-morph 20s ease-in-out infinite; }
 .scanGuide .reticle::after { content: ''; position: absolute; inset: 50% 12% auto; height: 2px; background: #b8f5dc; box-shadow: 0 0 18px #b8f5dc; opacity: 0; animation: scan-guide-line 20s ease-in-out infinite; }
+.scanGuide .reticleSuccess::before { content: ''; position: absolute; inset: -4px; border: 4px solid #a5f5d5; border-radius: inherit; opacity: 0; animation: scan-success-ring 1.8s ease-out both; }
 .qrFinder { position: absolute; display: grid; place-items: center; box-sizing: border-box; width: 23cqw; aspect-ratio: 1; border: 3.3cqw solid #b8f5dc; border-radius: 5px; background: #06111a4d; box-shadow: 0 0 8px #b8f5dc2e; opacity: .68; animation: scan-guide-finders 20s ease-in-out infinite; }
 .qrFinder::after { content: ''; width: 60%; aspect-ratio: 1; border-radius: 1px; background: #b8f5dc; }
 .qrFinder:nth-child(1) { top: 8%; left: 8%; }
@@ -17,10 +19,15 @@
 .qrFinder:nth-child(3) { bottom: 8%; left: 8%; }
 .scanGuide > p { position: relative; z-index: 1; }
 .scanHint { max-width: 27rem; margin: 0; padding: .25rem .5rem; color: #f4faf7; font-size: .9375rem; line-height: 1.4; text-align: center; text-shadow: 0 1px 4px #000, 0 0 14px #0009; }
+.scanHintHidden { visibility: hidden; }
+.successNotice { position: absolute; z-index: 2; top: 0; left: 50%; display: flex; align-items: center; gap: .75rem; box-sizing: border-box; width: min(76cqw, 340px); max-width: 100%; padding: .75rem .875rem; border: 1px solid #a5f5d580; border-radius: 1rem; background: #082a31f2; box-shadow: 0 12px 36px #0008, 0 0 28px #a5f5d533; color: #f7fffb; font-size: .9375rem; line-height: 1.3; text-align: left; overflow-wrap: anywhere; pointer-events: none; animation: scan-success-notice 1.8s ease-in-out both; }
+.successNotice strong { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.successMark { display: grid; flex: none; place-items: center; width: 2.75rem; height: 2.75rem; border-radius: 50%; background: #b8f5dc; color: #073038; box-shadow: 0 0 0 5px #b8f5dc24; }
 .footer { display: grid; justify-items: center; gap: .75rem; padding: 1rem 1.25rem max(env(safe-area-inset-bottom), 1.25rem); text-align: center; }
 .scannerCart { position: absolute; z-index: 1; right: 0; bottom: 0; left: 0; }
 .footer p { margin: 0; }
-.feedback { font-weight: 700; color: #b8f5dc; }
+.feedback { max-width: 27rem; margin: 0; color: #b8f5dc; font-weight: 700; line-height: 1.4; text-align: center; text-shadow: 0 1px 4px #000, 0 0 14px #0009; overflow-wrap: anywhere; }
+.feedbackError { color: #ff919d; }
 .error { color: #ffbdbd; }
 .barcodeCapture { width: min(92vw, 560px); height: min(76dvh, 620px); max-height: calc(100dvh - 2rem); grid-template-rows: auto minmax(0, 1fr) auto; margin: auto; overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-xl); background: var(--color-surface); color: var(--color-text); box-shadow: var(--shadow-md); }
 .barcodeCapture::backdrop { background: var(--color-backdrop); backdrop-filter: blur(2px); }
@@ -45,6 +52,19 @@
   0%, 35%, 100% { opacity: .68; }
   50%, 85% { opacity: 0; }
 }
+@keyframes scan-success-ring {
+  0% { opacity: 0; transform: scale(.94); }
+  18% { opacity: 1; transform: scale(1); }
+  65%, 100% { opacity: 0; transform: scale(1.07); }
+}
+@keyframes scan-success-notice {
+  0% { opacity: 0; transform: translate(-50%, -.5rem) scale(.94); }
+  18% { opacity: 1; transform: translate(-50%, 0) scale(1.02); }
+  28%, 76% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -.35rem) scale(.98); }
+}
 @media (prefers-reduced-motion: reduce) {
   .scanGuide .reticle, .scanGuide .reticle::after, .qrFinder { animation: none; }
+  .scanGuide .reticleSuccess::before, .successNotice { animation: none; opacity: 1; }
+  .successNotice { transform: translate(-50%, 0); }
 }

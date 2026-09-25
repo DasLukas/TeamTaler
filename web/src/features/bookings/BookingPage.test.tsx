@@ -1,9 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { BookingContext, GroupRole } from '@/api/types';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { BookingContext, GroupRole, ProductBarcodeFormat } from '@/api/types';
 import { demoCategories, demoDashboard, demoMembers, demoSession } from '@/demo/data';
 import i18n from '@/i18n';
 import { BookingPage } from './BookingPage';
@@ -28,7 +28,29 @@ vi.mock('@/api/client', () => ({
 
 vi.mock('@/app/useActiveGroup', () => ({ useActiveGroup: () => mocks.useActiveGroup() }));
 vi.mock('@/hooks/useMediaQuery', () => ({ useMediaQuery: (query: string) => mocks.useMediaQuery(query) }));
-vi.mock('./KioskScanner', () => ({ KioskScanner: ({ cart, cartExpanded, embedded, onClose, onCollapseCart, onScan }: { cart?: ReactNode; cartExpanded?: boolean; embedded?: boolean; onClose: () => void; onCollapseCart: () => void; onScan: (value: string, format: 'EAN_13') => void }) => <div data-embedded={String(embedded)} role="dialog"><span>Cart expanded: {String(cartExpanded)}</span>{cart}<button onClick={() => onScan('4006381333931', 'EAN_13')} type="button">Test scan</button><button onClick={onCollapseCart} type="button">Camera background</button><button onClick={onClose} type="button">Close scanner</button></div> }));
+vi.mock('./KioskScanner', () => ({
+  KioskScanner: ({ cart, cartExpanded, embedded, feedback, feedbackTone, onClose, onCollapseCart, onScan, success }: {
+    cart?: ReactNode;
+    cartExpanded?: boolean;
+    embedded?: boolean;
+    feedback?: string;
+    feedbackTone?: 'default' | 'error';
+    onClose: () => void;
+    onCollapseCart: () => void;
+    onScan: (value: string, format: ProductBarcodeFormat | 'QR_CODE') => void;
+    success?: { id: number; message: string } | null;
+  }) => <div data-embedded={String(embedded)} role="dialog">
+    <span>Cart expanded: {String(cartExpanded)}</span>
+    {success ? <span data-testid="scanner-success">{success.message}</span> : null}
+    {feedback ? <span data-testid="scanner-feedback" data-tone={feedbackTone}>{feedback}</span> : null}
+    {cart}
+    <button onClick={() => onScan('4006381333931', 'EAN_13')} type="button">Test scan</button>
+    <button onClick={() => onScan(`${window.location.origin}/book?group=${demoSession.activeGroupId}&product=product-spezi&scan=1`, 'QR_CODE')} type="button">Test QR scan</button>
+    <button onClick={() => onScan('missing-product-code', 'CODE_128')} type="button">Test unknown scan</button>
+    <button onClick={onCollapseCart} type="button">Camera background</button>
+    <button onClick={onClose} type="button">Close scanner</button>
+  </div>,
+}));
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, to }: { children: ReactNode; to: string }) => <a href={to}>{children}</a>,
 }));
@@ -68,6 +90,8 @@ describe('BookingPage multi-product workspace', () => {
     mocks.useActiveGroup.mockReturnValue({ activeGroupId: demoSession.activeGroupId, activeGroup: demoSession.groups[0], session: demoSession });
   });
 
+  afterEach(() => { vi.useRealTimers(); });
+
   it('adds a product QR exactly once and opens the scanner with kiosk permission', async () => {
     const group = { ...demoSession.groups[0], kioskEnabled: true, membership: { ...demoSession.groups[0]!.membership!, effectiveGrants: [
       { permission: 'CREATE_OWN_BOOKING' as const, scope: { type: 'GROUP' as const } },
@@ -82,7 +106,94 @@ describe('BookingPage multi-product workspace', () => {
     expect(screen.getByRole('button', { name: i18n.t('booking.submit') })).toBeVisible();
     expect(mocks.createBulkBookings).not.toHaveBeenCalled();
     expect(screen.getByRole('dialog')).toHaveAttribute('data-embedded', 'true');
+    expect(within(screen.getByRole('dialog')).getByTestId('scanner-success')).toHaveTextContent('Wasser');
     expect(screen.getByRole('complementary', { name: i18n.t('booking.cartTitle') })).toHaveTextContent('Wasser');
+    expect(screen.getByLabelText(i18n.t('booking.productQuantity', { name: 'Wasser' }))).toHaveTextContent('1');
+  });
+
+  it('opens the mobile scanner and cart sheet from an external product QR', async () => {
+    const user = userEvent.setup();
+    const group = { ...demoSession.groups[0], kioskEnabled: true, membership: { ...demoSession.groups[0]!.membership!, effectiveGrants: [
+      { permission: 'CREATE_OWN_BOOKING' as const, scope: { type: 'GROUP' as const } },
+      { permission: 'USE_KIOSK' as const, scope: { type: 'GROUP' as const } },
+    ] } };
+    mocks.useActiveGroup.mockReturnValue({ activeGroupId: group.id, activeGroup: group, session: { ...demoSession, groups: [group] } });
+    mocks.getSession.mockResolvedValue({ ...demoSession, groups: [group] });
+    mocks.useMediaQuery.mockReturnValue(true);
+    window.history.replaceState({}, '', `/book?group=${group.id}&product=product-water&scan=1`);
+    renderBookingPage();
+
+    const scanner = await screen.findByRole('dialog');
+    expect(scanner).toHaveAttribute('data-embedded', 'false');
+    expect(within(scanner).getByTestId('scanner-success')).toHaveTextContent('Wasser');
+    const expandCart = within(scanner).getByRole('button', { name: i18n.t('booking.cartExpandAccessible', {
+      products: i18n.t('booking.productCount', { count: 1 }),
+      total: '1,00\u00a0€',
+    }) });
+    expect(expandCart).toBeVisible();
+    await user.click(expandCart);
+    expect(within(scanner).getByLabelText(i18n.t('booking.productQuantity', { name: 'Wasser' }))).toHaveTextContent('1');
+    expect(window.location.search).toBe(`?group=${group.id}`);
+    expect(mocks.createBulkBookings).not.toHaveBeenCalled();
+  });
+
+  it('adds a stored barcode and a product QR to the same Scan & Go cart', async () => {
+    const user = userEvent.setup();
+    const group = { ...demoSession.groups[0], kioskEnabled: true, membership: { ...demoSession.groups[0]!.membership!, effectiveGrants: [
+      { permission: 'CREATE_OWN_BOOKING' as const, scope: { type: 'GROUP' as const } },
+      { permission: 'USE_KIOSK' as const, scope: { type: 'GROUP' as const } },
+    ] } };
+    const categories = demoCategories.map((category) => ({
+      ...category,
+      products: category.products.map((product) => product.id === 'product-water'
+        ? { ...product, barcodes: [{ format: 'EAN_13' as const, value: '4006381333931' }] }
+        : product),
+    }));
+    mocks.useActiveGroup.mockReturnValue({ activeGroupId: group.id, activeGroup: group, session: { ...demoSession, groups: [group] } });
+    mocks.getSession.mockResolvedValue({ ...demoSession, groups: [group] });
+    mocks.getCategories.mockResolvedValue(categories);
+    renderBookingPage();
+
+    await user.click(await screen.findByRole('button', { name: i18n.t('kiosk.scannerTitle') }));
+    const scanner = await screen.findByRole('dialog');
+    const cart = screen.getByRole('complementary', { name: i18n.t('booking.cartTitle') });
+    await user.click(within(scanner).getByRole('button', { name: 'Test scan' }));
+    expect(within(scanner).getByTestId('scanner-success')).toHaveTextContent('Wasser');
+    await user.click(within(scanner).getByRole('button', { name: 'Test QR scan' }));
+    expect(within(scanner).getByTestId('scanner-success')).toHaveTextContent('Spezi');
+
+    expect(within(cart).getByText('Wasser')).toBeVisible();
+    expect(within(cart).getByText('Spezi')).toBeVisible();
+    expect(within(cart).getByLabelText(i18n.t('booking.productQuantity', { name: 'Wasser' }))).toHaveTextContent('1');
+    expect(within(cart).getByLabelText(i18n.t('booking.productQuantity', { name: 'Spezi' }))).toHaveTextContent('1');
+    expect(scanner).toBeVisible();
+    expect(mocks.createBulkBookings).not.toHaveBeenCalled();
+  });
+
+  it('marks an unknown scan as an error and dismisses it after the latest scan', async () => {
+    const user = userEvent.setup();
+    const group = { ...demoSession.groups[0], kioskEnabled: true, membership: { ...demoSession.groups[0]!.membership!, effectiveGrants: [
+      { permission: 'CREATE_OWN_BOOKING' as const, scope: { type: 'GROUP' as const } },
+      { permission: 'USE_KIOSK' as const, scope: { type: 'GROUP' as const } },
+    ] } };
+    mocks.useActiveGroup.mockReturnValue({ activeGroupId: group.id, activeGroup: group, session: { ...demoSession, groups: [group] } });
+    mocks.getSession.mockResolvedValue({ ...demoSession, groups: [group] });
+    renderBookingPage();
+
+    await user.click(await screen.findByRole('button', { name: i18n.t('kiosk.scannerTitle') }));
+    const scanner = await screen.findByRole('dialog');
+    const unknownScan = within(scanner).getByRole('button', { name: 'Test unknown scan' });
+    vi.useFakeTimers();
+
+    fireEvent.click(unknownScan);
+    expect(within(scanner).getByTestId('scanner-feedback')).toHaveAttribute('data-tone', 'error');
+    expect(within(scanner).getByTestId('scanner-feedback')).toHaveTextContent(i18n.t('kiosk.unknownCode'));
+    act(() => vi.advanceTimersByTime(2_500));
+    fireEvent.click(unknownScan);
+    act(() => vi.advanceTimersByTime(2_000));
+    expect(within(scanner).getByTestId('scanner-feedback')).toBeVisible();
+    act(() => vi.advanceTimersByTime(2_000));
+    expect(within(scanner).queryByTestId('scanner-feedback')).not.toBeInTheDocument();
   });
 
   it('switches between touch selection, scanning, and cart review without losing mobile cart lines', async () => {

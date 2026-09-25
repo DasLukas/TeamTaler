@@ -1,3 +1,4 @@
+import Check from 'lucide-react/dist/esm/icons/check';
 import ScanLine from 'lucide-react/dist/esm/icons/scan-line';
 import X from 'lucide-react/dist/esm/icons/x';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
@@ -11,6 +12,9 @@ export interface KioskScannerProps {
   onClose: () => void;
   onScan: (value: string, format?: ProductBarcodeFormat | 'QR_CODE') => void;
   feedback?: string;
+  feedbackTone?: 'default' | 'error';
+  /** Product confirmation; a new id restarts the animation for repeated names. */
+  success?: { id: number; message: string } | null;
   mode?: 'booking' | 'barcodeCapture';
   embedded?: boolean;
   cart?: ReactNode;
@@ -19,6 +23,7 @@ export interface KioskScannerProps {
 }
 
 const linearFormats: readonly ProductBarcodeFormat[] = ['EAN_8', 'EAN_13', 'UPC_A', 'UPC_E', 'CODE_128'];
+const SCAN_SUCCESS_DURATION_MS = 1_800;
 
 function isLinearFormat(format: string | undefined): format is ProductBarcodeFormat {
   return linearFormats.some((candidate) => candidate === format);
@@ -27,10 +32,10 @@ function isLinearFormat(format: string | undefined): format is ProductBarcodeFor
 /**
  * Opens a continuous camera decoder, imported only when the scanner is shown.
  *
- * @param props - Close, scan, and cart callbacks, optional booking feedback and cart sheet, and the scanner mode and presentation.
+ * @param props - Close, scan, and cart callbacks, optional booking feedback and success event, cart sheet, and scanner presentation.
  * @returns An accessible camera dialog for booking or catalog barcode capture.
  */
-export function KioskScanner({ onClose, onScan, feedback, mode = 'booking', embedded = false, cart, cartExpanded = false, onCollapseCart }: KioskScannerProps) {
+export function KioskScanner({ onClose, onScan, feedback, feedbackTone = 'default', success, mode = 'booking', embedded = false, cart, cartExpanded = false, onCollapseCart }: KioskScannerProps) {
   const { t } = useTranslation();
   const isBarcodeCapture = mode === 'barcodeCapture';
   const title = t(isBarcodeCapture ? 'kiosk.barcodeCaptureTitle' : 'kiosk.scannerTitle');
@@ -41,10 +46,17 @@ export function KioskScanner({ onClose, onScan, feedback, mode = 'booking', embe
   const closeCallbackRef = useRef(onClose);
   const cartExpandedRef = useRef(cartExpanded);
   const [error, setError] = useState('');
+  const [dismissedSuccessId, setDismissedSuccessId] = useState<number | null>(null);
+  const visibleSuccess = success && success.id !== dismissedSuccessId ? success : null;
 
   useEffect(() => { callbackRef.current = onScan; }, [onScan]);
   useEffect(() => { closeCallbackRef.current = onClose; }, [onClose]);
   useEffect(() => { cartExpandedRef.current = cartExpanded; }, [cartExpanded]);
+  useEffect(() => {
+    if (!success) return undefined;
+    const timeout = window.setTimeout(() => setDismissedSuccessId(success.id), SCAN_SUCCESS_DURATION_MS);
+    return () => window.clearTimeout(timeout);
+  }, [success]);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -110,13 +122,19 @@ export function KioskScanner({ onClose, onScan, feedback, mode = 'booking', embe
     <div className={styles.viewport} onClick={cartExpanded ? onCollapseCart : undefined}>
       <video autoPlay muted playsInline ref={videoRef} />
       {isBarcodeCapture ? <div aria-hidden="true" className={styles.reticle} /> : <div className={styles.scanGuide}>
-        <div aria-hidden="true" className={styles.reticle}>
+        <div aria-hidden="true" className={`${styles.reticle} ${visibleSuccess ? styles.reticleSuccess : ''}`}>
           <span className={styles.qrFinder} />
           <span className={styles.qrFinder} />
           <span className={styles.qrFinder} />
         </div>
-        <p className={styles.scanHint}>{t('kiosk.scannerHint')}</p>
-        {feedback ? <p className={styles.feedback} role="status">{feedback}</p> : null}
+        <div className={styles.scanMessage}>
+          <p aria-hidden={Boolean(visibleSuccess)} className={`${styles.scanHint} ${visibleSuccess ? styles.scanHintHidden : ''}`}>{t('kiosk.scannerHint')}</p>
+          {visibleSuccess ? <div className={styles.successNotice} key={visibleSuccess.id} role="status">
+            <span aria-hidden="true" className={styles.successMark}><Check size={30} strokeWidth={3} /></span>
+            <strong>{visibleSuccess.message}</strong>
+          </div> : null}
+        </div>
+        {feedback ? <p className={`${styles.feedback} ${feedbackTone === 'error' ? styles.feedbackError : ''}`} role={feedbackTone === 'error' ? 'alert' : 'status'}>{feedback}</p> : null}
         {error ? <p className={styles.error} role="alert">{error}</p> : null}
       </div>}
     </div>

@@ -26,6 +26,7 @@ import { resolveKioskScan } from './kioskScan';
 import styles from './BookingPage.module.css';
 
 const BOOKING_CONFIRMATION_DURATION_MS = 1_200;
+const UNKNOWN_SCAN_FEEDBACK_DURATION_MS = 4_000;
 
 /** Properties accepted by the loaded booking workspace. */
 interface BookingWorkspaceProps {
@@ -62,10 +63,14 @@ function BookingWorkspace({ groupId, categories, context, compact, canUseKiosk }
   const [scanOpening, setScanOpening] = useState(false);
   const [scannerOpenError, setScannerOpenError] = useState('');
   const [scanFeedback, setScanFeedback] = useState('');
+  const [scanFeedbackTone, setScanFeedbackTone] = useState<'default' | 'error'>('default');
+  const [scanSuccess, setScanSuccess] = useState<{ id: number; message: string } | null>(null);
   const [scanCategories, setScanCategories] = useState<Category[] | null>(null);
   const consumedLinkRef = useRef(false);
+  const scanSuccessIdRef = useRef(0);
   const targetSelectionTouchedRef = useRef(false);
   const confirmationTimerRef = useRef<number | undefined>(undefined);
+  const scanFeedbackTimerRef = useRef<number | undefined>(undefined);
   const priceEntryRequestIdRef = useRef(0);
   const availableTargetIds = new Set(context.targets.map((target) => target.membershipId));
   const targetsById = new Map(context.targets.map((target) => [target.membershipId, target]));
@@ -79,6 +84,12 @@ function BookingWorkspace({ groupId, categories, context, compact, canUseKiosk }
   const balanceLengthClass = balanceLabel.length > 10 ? styles.balanceAmountCompact : balanceLabel.length > 8 ? styles.balanceAmountReduced : '';
   useEffect(() => () => {
     if (confirmationTimerRef.current !== undefined) window.clearTimeout(confirmationTimerRef.current);
+    if (scanFeedbackTimerRef.current !== undefined) window.clearTimeout(scanFeedbackTimerRef.current);
+  }, []);
+
+  const clearScanFeedbackTimer = useCallback(() => {
+    if (scanFeedbackTimerRef.current !== undefined) window.clearTimeout(scanFeedbackTimerRef.current);
+    scanFeedbackTimerRef.current = undefined;
   }, []);
 
   const resetWorkspace = () => {
@@ -146,6 +157,20 @@ function BookingWorkspace({ groupId, categories, context, compact, canUseKiosk }
     setLines((current) => [...current, { product, quantity: 1, unitPriceInput: '', unitPriceTouched: false }]);
   }, [compact, lines, t]);
 
+  /**
+   * Records a localized product confirmation while leaving decoding active.
+   *
+   * @param message - Product-specific announcement shown over the camera.
+   * @returns Nothing; the latest confirmation replaces the previous one.
+   */
+  const showScanSuccess = useCallback((message: string) => {
+    clearScanFeedbackTimer();
+    scanSuccessIdRef.current += 1;
+    setScanSuccess({ id: scanSuccessIdRef.current, message });
+    setScanFeedback('');
+    setScanFeedbackTone('default');
+  }, [clearScanFeedbackTimer]);
+
   useEffect(() => {
     if (consumedLinkRef.current) return;
     const link = parseKioskBookingLink(window.location.href);
@@ -176,16 +201,21 @@ function BookingWorkspace({ groupId, categories, context, compact, canUseKiosk }
         const openLinkedScanner = Boolean(link.scan && can(group.membership?.effectiveGrants, 'USE_KIOSK'));
         addProduct(product, openLinkedScanner);
         setScanCategories(freshCategories);
-        setScanFeedback(t('kiosk.added', { name: product.name }));
-        if (openLinkedScanner) setScanOpen(true);
+        if (openLinkedScanner) {
+          showScanSuccess(t('kiosk.added', { name: product.name }));
+          setScanOpen(true);
+        } else setScanFeedback(t('kiosk.added', { name: product.name }));
       }).catch(() => { if (active) setScanFeedback(t('kiosk.verifyError')); });
     });
     return () => { active = false; };
-  }, [addProduct, groupId, queryClient, t]);
+  }, [addProduct, groupId, queryClient, showScanSuccess, t]);
 
   const openScanner = async () => {
+    clearScanFeedbackTimer();
     setScannerOpenError('');
     setScanFeedback('');
+    setScanFeedbackTone('default');
+    setScanSuccess(null);
     setScanOpening(true);
     try {
       const [freshSession, freshCategories] = await Promise.all([api.getSession(), api.getCategories(groupId)]);
@@ -207,7 +237,11 @@ function BookingWorkspace({ groupId, categories, context, compact, canUseKiosk }
   };
 
   const returnToProducts = () => {
+    clearScanFeedbackTimer();
     setScanOpen(false);
+    setScanSuccess(null);
+    setScanFeedback('');
+    setScanFeedbackTone('default');
     if (compact && lines.length > 0) setCartView('peek');
   };
 
@@ -215,9 +249,20 @@ function BookingWorkspace({ groupId, categories, context, compact, canUseKiosk }
     const resolved = resolveKioskScan(value, groupId, scanCategories ?? categories, format);
     if (resolved.kind === 'product') {
       addProduct(resolved.product, true);
-      setScanFeedback(t('kiosk.added', { name: resolved.product.name }));
-    } else if (resolved.kind === 'group') setScanFeedback(t('kiosk.groupQrHint'));
-    else setScanFeedback(t('kiosk.unknownCode'));
+      showScanSuccess(t('kiosk.added', { name: resolved.product.name }));
+    } else {
+      clearScanFeedbackTimer();
+      setScanSuccess(null);
+      setScanFeedback(t(resolved.kind === 'group' ? 'kiosk.groupQrHint' : 'kiosk.unknownCode'));
+      setScanFeedbackTone(resolved.kind === 'group' ? 'default' : 'error');
+      if (resolved.kind === 'unknown') {
+        scanFeedbackTimerRef.current = window.setTimeout(() => {
+          scanFeedbackTimerRef.current = undefined;
+          setScanFeedback('');
+          setScanFeedbackTone('default');
+        }, UNKNOWN_SCAN_FEEDBACK_DURATION_MS);
+      }
+    }
   };
 
   const changeLineQuantity = (productId: string, quantity: number) => {
@@ -267,7 +312,7 @@ function BookingWorkspace({ groupId, categories, context, compact, canUseKiosk }
     onReasonChange={setReason}
     onRemove={(productId) => changeLineQuantity(productId, 0)}
     onOpenScanner={canUseKiosk && !scanOpen ? () => { void openScanner(); } : undefined}
-    onSubmit={() => { if (scanOpen) setScanOpen(false); bookingMutation.mutate(); }}
+    onSubmit={() => { if (scanOpen) returnToProducts(); bookingMutation.mutate(); }}
     onUnitPriceBlur={(productId) => setLines((current) => current.map((line) => line.product.id === productId ? { ...line, unitPriceTouched: true } : line))}
     onUnitPriceChange={(productId, value) => setLines((current) => current.map((line) => line.product.id === productId ? { ...line, unitPriceInput: value } : line))}
     onViewChange={setCartView}
@@ -319,7 +364,7 @@ function BookingWorkspace({ groupId, categories, context, compact, canUseKiosk }
 
         {scanFeedback && !scanOpen ? <p className={styles.kioskFeedback} role="status">{scanFeedback}</p> : null}
         </> : null}
-        {scanOpen ? <KioskScanner cart={compact && lines.length > 0 ? cart : undefined} cartExpanded={compact && lines.length > 0 && cartView === 'details'} embedded={!compact} feedback={scanFeedback} onClose={returnToProducts} onCollapseCart={() => setCartView('peek')} onScan={handleScan} /> : null}
+        {scanOpen ? <KioskScanner cart={compact && lines.length > 0 ? cart : undefined} cartExpanded={compact && lines.length > 0 && cartView === 'details'} embedded={!compact} feedback={scanFeedback} feedbackTone={scanFeedbackTone} onClose={returnToProducts} onCollapseCart={() => setCartView('peek')} onScan={handleScan} success={scanSuccess} /> : null}
 
         {!scanOpen || compact ? <ProductPicker
           categories={bookableCategories}

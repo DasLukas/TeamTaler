@@ -51,6 +51,7 @@ describe('KioskScanner modes', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     Reflect.deleteProperty(HTMLDialogElement.prototype, 'show');
@@ -92,6 +93,26 @@ describe('KioskScanner modes', () => {
     await waitFor(() => expect(decoder.callback).toBeDefined());
     act(() => decoder.callback?.(decoded('4006381333931', BarcodeFormat.EAN_13)));
     expect(onScan).toHaveBeenCalledExactlyOnceWith('4006381333931', 'EAN_13');
+  });
+
+  it('shows each successful scan briefly while decoding remains available', async () => {
+    const onScan = vi.fn();
+    const { rerender } = render(<KioskScanner onClose={vi.fn()} onScan={onScan} />);
+    await waitFor(() => expect(decoder.callback).toBeDefined());
+    vi.useFakeTimers();
+
+    rerender(<KioskScanner onClose={vi.fn()} onScan={onScan} success={{ id: 1, message: 'Water added to cart' }} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Water added to cart');
+    await act(async () => {});
+    act(() => decoder.callback?.(decoded('4006381333931', BarcodeFormat.EAN_13)));
+    expect(onScan).toHaveBeenCalledExactlyOnceWith('4006381333931', 'EAN_13');
+
+    act(() => vi.advanceTimersByTime(900));
+    rerender(<KioskScanner onClose={vi.fn()} onScan={onScan} success={{ id: 2, message: 'Water added to cart' }} />);
+    act(() => vi.advanceTimersByTime(950));
+    expect(screen.getByRole('status')).toHaveTextContent('Water added to cart');
+    act(() => vi.advanceTimersByTime(850));
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
   it('keeps the cart in the scan dialog and pauses decoding while its details are open', async () => {
