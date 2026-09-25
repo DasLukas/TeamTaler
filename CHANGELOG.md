@@ -4,6 +4,24 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-25
+
+### Added
+
+- Optional group-owned external cash, bank, PayPal, and other accounts with ledger-derived balances, linked payment methods, manual income and expense entries, transfers, reversals, evidence attachments, authorized exports, and a compact statistics view.
+- Kiosk and Scan & Go booking with product barcodes, camera scanning, product QR links, configurable group permissions, and printable group posters.
+- Exact accounting-period filtering in the activity history, including navigation that preserves the selected period label.
+
+### Changed
+
+- Group finance and booking settings now save independently, and kiosk poster products can be arranged directly in the administration view.
+- Mobile sheets remain stable when the software keyboard opens; Scan & Go provides clearer scan feedback.
+
+### Upgrade notes
+
+- Migrations `0054` through `0060` add external-account and kiosk data. Migration `0054` moves existing PayPal.Me and SEPA destinations into account records and rebuilds payment methods and ledger references. Back up and verify the existing data before deployment, allow space for a database copy and WAL, and deploy the API and web client together during a maintenance window. The new external-account feature remains disabled for existing groups until explicitly enabled.
+- Migrations are forward-only. Restore the matching pre-upgrade archive and previous image if a rollback is required.
+
 ## [1.3.2] - 2026-09-13
 
 ### Changed
@@ -400,7 +418,8 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Explicit acting and charged membership display for every booking, including searchable third-party-assignment cues.
 - Canonical backup-entry allowlisting, target-width Argon2 parameter parsing, and directory-confined SPA asset serving with traversal regression coverage.
 
-[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v1.3.2...HEAD
+[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/DasLukas/TeamTaler/compare/v1.3.2...v1.4.0
 [1.3.2]: https://github.com/DasLukas/TeamTaler/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/DasLukas/TeamTaler/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/DasLukas/TeamTaler/compare/v1.2.0...v1.3.0
