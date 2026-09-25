@@ -10,7 +10,7 @@ import { useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import { majorUnitsInputPattern, majorUnitsInputValue, majorUnitsPlaceholder, validatePositiveMajorUnits } from '@/api/money';
-import type { Category, CategoryIcon as CategoryIconName, Product, ProductPricingMode } from '@/api/types';
+import type { Category, CategoryIcon as CategoryIconName, Product, ProductBarcode, ProductBarcodeFormat, ProductPricingMode } from '@/api/types';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { useInstanceCapabilities } from '@/app/useSession';
 import { CameraCapture } from '@/components/media/CameraCapture';
@@ -27,6 +27,7 @@ import { Button } from '@/components/ui/Button';
 import { ConfirmationDialog } from '@/components/ui/ConfirmationDialog';
 import { Field, TextInput } from '@/components/ui/FormField';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
+import { ManagedImageFrame } from '@/components/ui/ManagedImage';
 import { SelectMenu } from '@/components/ui/SelectMenu';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { CategoryIcon } from '@/features/shared/CategoryIcon';
@@ -34,10 +35,43 @@ import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { catalogOrderCommand } from './catalogOrder';
 import { CategoryIconPicker } from './CategoryIconPicker';
 import { CatalogSorter } from './CatalogSorter';
+import { ProductBarcodeFields } from './ProductBarcodeFields';
+import { validateProductBarcodes } from './productBarcodeValidation';
+import { KioskScanner } from '@/features/bookings/KioskScanner';
 import styles from './CatalogPanel.module.css';
 
 type CatalogDialog = 'category' | 'product' | 'delete' | null;
 type DeleteTarget = { kind: 'category'; item: Category } | { kind: 'product'; item: Product };
+type BarcodeServerError = { index: number; key: 'duplicate' | 'limit' | 'serverInvalid' | 'assignedElsewhere' };
+
+/**
+ * Locates a rejected barcode in the visible editor, including legacy server errors.
+ *
+ * @param error - Product mutation failure returned by the API.
+ * @param barcodes - Current editor rows, including optional empty rows.
+ * @returns The rejected row and translation key, or null for unrelated failures.
+ */
+function locateBarcodeServerError(error: Error | null, barcodes: ProductBarcode[]): BarcodeServerError | null {
+  if (!error) return null;
+  const detail = error.message;
+  const validation = /^barcodes(?:\[(\d+)\]\.value)?:\s*(.+)$/i.exec(detail);
+  const conflict = /barcode(?:\[(\d+)\])? is assigned to another product/i.exec(detail);
+  if (!validation && !conflict) return null;
+
+  const populatedRows = barcodes.flatMap((barcode, index) => barcode.value.trim() ? [index] : []);
+  const submittedIndex = Number(validation?.[1] ?? conflict?.[1]);
+  const localIndex = validateProductBarcodes(barcodes).findIndex((issue, index) => issue !== null && Boolean(barcodes[index].value.trim()));
+  const index = Number.isInteger(submittedIndex) && submittedIndex >= 0
+    ? populatedRows[submittedIndex]
+    : localIndex >= 0 ? localIndex : populatedRows[0];
+  if (index === undefined) return null;
+
+  const reason = validation?.[2] ?? '';
+  const key = conflict ? 'assignedElsewhere'
+    : reason.includes('same code more than once') ? 'duplicate'
+      : reason.includes('no more than 50') ? 'limit' : 'serverInvalid';
+  return { index, key };
+}
 
 /**
  * Renders the version-aware category and product catalog editor.
@@ -70,6 +104,8 @@ export function CatalogPanel() {
   const [productPrice, setProductPrice] = useState('');
   const [productPriceTouched, setProductPriceTouched] = useState(false);
   const [productActive, setProductActive] = useState(true);
+  const [productBarcodes, setProductBarcodes] = useState<ProductBarcode[]>([]);
+  const [barcodeScannerOpen, setBarcodeScannerOpen] = useState(false);
   const [productImage, setProductImage] = useState<File | undefined>();
   const [productImageTransform, setProductImageTransform] = useState<ImageTransform>(DEFAULT_IMAGE_TRANSFORM);
   const [productImageInputKey, setProductImageInputKey] = useState(0);
@@ -170,6 +206,8 @@ export function CatalogPanel() {
     setProductPrice('');
     setProductPriceTouched(false);
     setProductActive(true);
+    setProductBarcodes([]);
+    setBarcodeScannerOpen(false);
     resetProductImageInput();
     setPersistedProduct(null);
   };
@@ -188,6 +226,7 @@ export function CatalogPanel() {
     setProductPrice('');
     setProductPriceTouched(false);
     setProductActive(true);
+    setProductBarcodes([]);
     resetProductImageInput();
     setPersistedProduct(null);
     setDialog('product');
@@ -202,6 +241,7 @@ export function CatalogPanel() {
     setProductPrice(product.price ? majorUnitsInputValue(product.price) : '');
     setProductPriceTouched(false);
     setProductActive(product.active);
+    setProductBarcodes(product.barcodes ?? []);
     resetProductImageInput();
     setPersistedProduct(null);
     setDialog('product');
@@ -258,10 +298,12 @@ export function CatalogPanel() {
         ? { minorUnits: validation.minorUnits, currency: activeGroup.currency }
         : undefined;
       if (editingProduct) {
+        const barcodes = productBarcodes.filter((barcode) => barcode.value.trim()).map((barcode) => ({ ...barcode, value: barcode.value.trim() }));
         return api.updateProduct(activeGroupId, editingProduct.id, {
           name: productName.trim(),
           pricingMode: productPricingMode,
           price,
+          ...(activeGroup.kioskEnabled === true && JSON.stringify(barcodes) !== JSON.stringify(editingProduct.barcodes ?? []) ? { barcodes } : {}),
           active: productActive,
           sortOrder: editingProduct.sortOrder,
           version: editingProduct.version,
@@ -272,6 +314,7 @@ export function CatalogPanel() {
         name: productName.trim(),
         pricingMode: productPricingMode,
         price,
+        ...(activeGroup.kioskEnabled === true && productBarcodes.some((barcode) => barcode.value.trim()) ? { barcodes: productBarcodes.filter((barcode) => barcode.value.trim()).map((barcode) => ({ ...barcode, value: barcode.value.trim() })) } : {}),
       });
     },
     onSuccess: async (product) => {
@@ -329,6 +372,9 @@ export function CatalogPanel() {
 
   const productPriceValidation = productPricingMode === 'FIXED' ? validatePositiveMajorUnits(productPrice, activeGroup.currency) : {};
   const productPriceValid = productPricingMode === 'USER_DEFINED' || Boolean(productPriceValidation.minorUnits);
+  const productBarcodesValid = activeGroup.kioskEnabled !== true || !validateProductBarcodes(productBarcodes.filter((barcode) => barcode.value.trim())).some((issue) => issue !== null);
+  const barcodeServerError = activeGroup.kioskEnabled === true ? locateBarcodeServerError(productMutation.error, productBarcodes) : null;
+  const savedProductImageUrl = persistedProduct?.imageUrl ?? editingProduct?.imageUrl;
   const metadataLocked = Boolean(persistedProduct);
   const deleteProblemStatus = deleteMutation.error && 'problem' in deleteMutation.error
     ? (deleteMutation.error as { problem?: { status?: number } }).problem?.status
@@ -375,6 +421,7 @@ export function CatalogPanel() {
       <Modal onClose={clearProductDialog} open={dialog === 'product'} title={editingProduct ? t('catalog.editProductDialog') : t('catalog.productDialog')} variant={compact ? 'sheet' : 'dialog'}>
         <form className={styles.form} id={productFormId} onSubmit={(event) => {
           event.preventDefault();
+          if (!productBarcodesValid) return;
           if (persistedProduct && productImage) imageMutation.mutate({ productId: persistedProduct.id, image: productImage, transform: productImageTransform });
           else if (!persistedProduct) productMutation.mutate();
         }}>
@@ -397,8 +444,18 @@ export function CatalogPanel() {
           <Field htmlFor="product-pricing-mode" label={t('catalog.pricingMode')}><SelectMenu<ProductPricingMode> ariaLabel={t('catalog.pricingMode')} disabled={metadataLocked} id="product-pricing-mode" onChange={(pricingMode) => { setProductPricingMode(pricingMode); setProductPrice(''); setProductPriceTouched(false); }} options={[{ label: t('catalog.fixedPrice'), value: 'FIXED' }, { label: t('catalog.userDefinedPrice'), value: 'USER_DEFINED' }]} value={productPricingMode} /></Field>
           {productPricingMode === 'FIXED' ? <Field error={productPriceTouched ? productPriceValidation.error : undefined} htmlFor="product-price" label={t('catalog.price', { currency: activeGroup.currency })}><TextInput disabled={metadataLocked} id="product-price" inputMode="decimal" onBlur={() => setProductPriceTouched(true)} onChange={(event) => setProductPrice(event.target.value)} pattern={majorUnitsInputPattern(activeGroup.currency)} placeholder={majorUnitsPlaceholder(activeGroup.currency)} required type="text" value={productPrice} /></Field> : null}
           {editingProduct ? <Field htmlFor="product-status" label={t('common.status')}><SelectMenu ariaLabel={t('common.status')} disabled={metadataLocked} id="product-status" onChange={(status) => setProductActive(status === 'active')} options={[{ label: t('common.active'), value: 'active' }, { label: t('common.archived'), value: 'archived' }]} value={productActive ? 'active' : 'archived'} /></Field> : null}
+          {activeGroup.kioskEnabled === true ? <>
+            <ProductBarcodeFields barcodes={productBarcodes} disabled={metadataLocked} onCapture={() => setBarcodeScannerOpen(true)} onChange={(next) => { productMutation.reset(); setProductBarcodes(next); }} serverError={barcodeServerError ? { index: barcodeServerError.index, message: t(`kiosk.barcodeErrors.${barcodeServerError.key}`) } : undefined} />
+            {barcodeScannerOpen ? <KioskScanner mode="barcodeCapture" onClose={() => setBarcodeScannerOpen(false)} onScan={(value, detectedFormat) => {
+              if (!detectedFormat || detectedFormat === 'QR_CODE') return;
+              const format: ProductBarcodeFormat = detectedFormat;
+              productMutation.reset();
+              setProductBarcodes((current) => current.some((item) => item.value === value) ? current : [...current, { format, value }]);
+              setBarcodeScannerOpen(false);
+            }} /> : null}
+          </> : null}
           <Field error={productImageError || undefined} hint={editingProduct || persistedProduct ? t('catalog.replaceImage', { limit: uploadLimit }) : t('catalog.imageHint', { limit: uploadLimit })} htmlFor="product-image" label={t('catalog.image')}>
-            <div className={`${styles.imageSelection} ${productImage ? styles.imageSelectionWithPreview : ''}`}>
+            <div className={`${styles.imageSelection} ${productImage || savedProductImageUrl ? styles.imageSelectionWithPreview : ''}`}>
               {productImage ? (
                 <ImageCropEditor
                   alt={t('catalog.imagePreviewAlt')}
@@ -408,6 +465,8 @@ export function CatalogPanel() {
                   onChange={setProductImageTransform}
                   value={productImageTransform}
                 />
+              ) : savedProductImageUrl ? (
+                <ManagedImageFrame alt={t('catalog.imagePreviewAlt')} fallback={productName.slice(0, 1)} frameClassName={styles.savedImagePreview} sizes="112px" src={savedProductImageUrl} />
               ) : null}
               <div className={styles.imageUploadControls}>
                 <div className={styles.imageSourceActions}>
@@ -421,12 +480,12 @@ export function CatalogPanel() {
             </div>
             {productCameraOpen ? <CameraCapture onCancel={() => setProductCameraOpen(false)} onCapture={selectProductImage} onFallback={() => { setProductCameraOpen(false); productCameraInputRef.current?.click(); }} /> : null}
           </Field>
-          {productMutation.isError ? <p className={styles.error} role="alert">{productMutation.error.message}</p> : null}
+          {productMutation.isError && !barcodeServerError ? <p className={styles.error} role="alert">{productMutation.error.message}</p> : null}
           {persistedProduct && imageMutation.isError ? <p className={styles.error} role="alert">{editingProduct ? t('catalog.imageUpdateError') : t('catalog.imageUploadError')} {imageMutation.error.message}</p> : null}
           <ModalFooter><div className={styles.actions}>
             {editingProduct && !editingProduct.active && !persistedProduct ? <Button className={styles.deleteAction} disabled={productMutation.isPending} leadingIcon={<Trash2 size={16} />} onClick={() => openProductDeletion(editingProduct)} variant="danger">{t('catalog.deletePermanently')}</Button> : null}
             <Button leadingIcon={<X size={17} />} onClick={clearProductDialog} variant="secondary">{persistedProduct ? t('catalog.finishWithoutImage') : t('common.cancel')}</Button>
-            <Button disabled={!productName.trim() || !productPriceValid || productMutation.isPending || imageMutation.isPending || Boolean(persistedProduct && !productImage)} form={productFormId} leadingIcon={persistedProduct ? <RotateCcw size={17} /> : editingProduct ? <Save size={17} /> : <Plus size={17} />} type="submit">
+            <Button disabled={!productName.trim() || !productPriceValid || !productBarcodesValid || productMutation.isPending || imageMutation.isPending || Boolean(persistedProduct && !productImage)} form={productFormId} leadingIcon={persistedProduct ? <RotateCcw size={17} /> : editingProduct ? <Save size={17} /> : <Plus size={17} />} type="submit">
               {persistedProduct ? imageMutation.isPending ? t('catalog.imageUploadPending') : t('catalog.retryImage') : editingProduct ? t('common.save') : t('catalog.createProductAction')}
             </Button>
           </div></ModalFooter>

@@ -1,0 +1,27 @@
+.view { display: grid; gap: var(--space-5); min-width: 0; }
+.accountList { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: var(--space-3); }
+.accountButton { display: grid; min-width: 0; min-height: 120px; align-content: space-between; gap: var(--space-2); padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-raised); color: var(--color-text); text-align: start; cursor: pointer; box-shadow: inset 0 3px var(--chart-positive); }
+.accountButton[data-negative='true'] { box-shadow: inset 0 3px var(--chart-negative); }
+.accountButton[aria-pressed='true'] { border-color: var(--chart-primary); outline: 2px solid color-mix(in srgb, var(--chart-primary) 22%, transparent); }
+.accountButton:hover { background: var(--color-surface-muted); }
+.accountButton:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
+.accountTop { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--space-2); }
+.accountTop strong { overflow-wrap: anywhere; }
+.accountTop small { color: var(--color-text-muted); }
+.accountBalance { font-size: clamp(1.45rem, 2vw, 1.9rem); font-weight: 750; font-variant-numeric: tabular-nums; color: var(--chart-positive); }
+.accountButton[data-negative='true'] .accountBalance { color: var(--chart-negative); }
+.accountChange { color: var(--color-text-muted); font-size: var(--font-size-sm); font-variant-numeric: tabular-nums; }
+.chartFrame { min-width: 0; }
+.chartFrame > div { height: auto; }
+.chartBody { display: grid; min-width: 0; gap: var(--space-3); }
+.chartNumbers { display: flex; flex-wrap: wrap; gap: var(--space-4) var(--space-8); }
+.chartNumbers > div { display: grid; gap: var(--space-1); }
+.chartNumbers span, .endpoints, .singlePoint { color: var(--color-text-muted); font-size: var(--font-size-sm); }
+.chartNumbers strong { font-size: var(--font-size-xl); font-variant-numeric: tabular-nums; color: var(--chart-positive); }
+.chartNumbers strong[data-negative='true'] { color: var(--chart-negative); }
+.chartNumbers > div:last-child strong { color: var(--color-text); font-size: var(--font-size-md); }
+.plot { width: 100%; height: 250px; min-width: 0; }
+.endpoints { display: flex; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); font-variant-numeric: tabular-nums; }
+.singlePoint, .empty { margin: 0; }
+.empty { padding: var(--space-5); color: var(--color-text-muted); border: 1px solid var(--color-border); border-radius: var(--radius-md); }
+@media (max-width: 520px) { .accountList { grid-template-columns: repeat(2, minmax(0, 1fr)); } .accountButton { padding: var(--space-3); } .plot { height: 220px; } }

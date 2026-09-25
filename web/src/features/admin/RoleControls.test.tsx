@@ -34,7 +34,9 @@ describe('dynamic role controls', () => {
     await user.click(screen.getByRole('switch', { name: i18n.t('roleManagement.togglePermission', { permission: i18n.t('permissions.VOID_ANY_BOOKING.label') }) }));
 
     expect(screen.getAllByText(i18n.t('roleManagement.impliedPermission'))).toHaveLength(2);
+    expect(screen.getByRole('switch', { name: i18n.t('roleManagement.togglePermission', { permission: i18n.t('permissions.VOID_OWN_BOOKING.label') }) })).toBeChecked();
     expect(screen.getByRole('switch', { name: i18n.t('roleManagement.togglePermission', { permission: i18n.t('permissions.VOID_OWN_BOOKING.label') }) })).toBeDisabled();
+    expect(screen.getByRole('switch', { name: i18n.t('roleManagement.togglePermission', { permission: i18n.t('permissions.VIEW_ALL_BOOKING_ACTIVITY.label') }) })).toBeChecked();
     expect(screen.getByRole('switch', { name: i18n.t('roleManagement.togglePermission', { permission: i18n.t('permissions.VIEW_ALL_BOOKING_ACTIVITY.label') }) })).toBeDisabled();
   });
 

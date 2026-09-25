@@ -22,6 +22,10 @@
   transition: margin-left var(--motion-normal) ease;
 }
 
+.shell:has(dialog[data-kiosk-embedded]) { --shell-content-offset: var(--shell-safe-area-left); }
+.shell:has(dialog[data-kiosk-embedded]) > :global(#desktop-sidebar),
+.shell:has(dialog[data-kiosk-embedded]) > .sidebarBackdrop { display: none; }
+
 .sidebarBackdrop {
   position: fixed;
   z-index: 29;

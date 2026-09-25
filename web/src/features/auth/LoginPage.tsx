@@ -9,6 +9,7 @@ import { preferredAuthenticatedPath } from '@/app/groupCapabilities';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
 import { consumePendingNotificationPath } from '@/features/notifications/notificationDeepLink';
+import { consumePendingBookingPath } from '@/features/bookings/kioskDeepLink';
 import { AuthLayout } from './AuthLayout';
 import styles from './AuthForms.module.css';
 import { authenticationCapabilitiesQueryKey } from './authenticationCapabilities';
@@ -31,7 +32,10 @@ export function LoginPage() {
     onSuccess: async (session) => {
       queryClient.setQueryData(['session'], session);
       const pendingNotification = consumePendingNotificationPath();
-      await navigate(pendingNotification
+      const pendingBooking = consumePendingBookingPath();
+      await navigate(pendingBooking
+        ? { to: pendingBooking, replace: true }
+        : pendingNotification
         ? { to: pendingNotification, replace: true }
         : { to: preferredAuthenticatedPath(session) });
     },

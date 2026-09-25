@@ -1,0 +1,29 @@
+.content { display: grid; gap: 2rem; }
+.header, .sectionHeading { align-items: center; display: flex; gap: 1rem; justify-content: space-between; }
+.header h2, .header p, .sectionHeading h3 { margin: 0; }
+.header p { color: var(--color-text-muted); margin-top: .35rem; }
+.headerActions { display: flex; flex-wrap: wrap; gap: .6rem; }
+.accountGrid { display: grid; gap: 1rem; grid-auto-rows: 1fr; grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr)); margin-top: 1rem; }
+.accountCard { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 16px; display: grid; gap: .65rem; grid-template-rows: auto minmax(1.3rem, auto) auto minmax(2rem, auto); height: 100%; min-height: 14rem; padding: 1rem; }
+.accountCard[data-balance-tone='positive'] { border-color: color-mix(in srgb, var(--color-status-success) 42%, var(--color-border)); box-shadow: inset 0 3px 0 color-mix(in srgb, var(--color-status-success) 78%, transparent); }
+.accountCard[data-balance-tone='negative'] { border-color: var(--color-status-danger-border); box-shadow: inset 0 3px 0 color-mix(in srgb, var(--color-status-danger) 82%, transparent); }
+.accountCard header { align-items: start; display: flex; justify-content: space-between; }
+.accountCard header div { display: grid; gap: .2rem; }
+.accountCard header span, .accountCard small { color: var(--color-text-muted); }
+.accountIcon { align-items: center; background: var(--color-surface-muted); border-radius: 10px; color: var(--color-primary); display: inline-flex; flex: 0 0 auto; justify-content: center; padding: .45rem; }
+.descriptor { min-width: 0; }
+.balance { align-items: baseline; display: flex; gap: .75rem; justify-content: space-between; }
+.balance strong { font-size: 1.4rem; white-space: nowrap; }
+.accountCard[data-balance-tone='positive'] .balance strong { color: var(--color-status-success); }
+.accountCard[data-balance-tone='negative'] .balance strong { color: var(--color-status-danger); }
+.accountCard[data-balance-tone='neutral'] .balance strong { color: var(--color-text-muted); }
+.paymentMethods { align-self: end; min-width: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: .35rem; }
+.chips span { background: var(--color-surface-muted); border-radius: 999px; font-size: .82rem; padding: .3rem .55rem; }
+.archived { border-top: 1px solid var(--color-border); padding-top: 1rem; }
+.archived summary { cursor: pointer; font-weight: 700; }
+@media (max-width: 640px) {
+  .header, .sectionHeading { align-items: stretch; flex-direction: column; }
+  .headerActions { display: grid; }
+  .accountCard { min-height: 14rem; }
+}

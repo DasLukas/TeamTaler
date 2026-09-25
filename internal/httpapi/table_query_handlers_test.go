@@ -107,6 +107,17 @@ func TestTableQueryHandlersFilterSortAndPaginateWithoutChangingArrayBodies(t *te
 		reversalItems[0].CanReverse || reversalItems[0].Attachment != nil || !strings.Contains(reversalResponse.Body.String(), `"amountMinor":"100"`) {
 		t.Fatalf("unified reversal status=%d items=%#v err=%v body=%s", reversalResponse.Code, reversalItems, err, reversalResponse.Body.String())
 	}
+	periodResponse := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/activities?kind=BOOKING&periodId="+url.QueryEscape(periodID), server.handleActivities)
+	var periodItems []activities.Entry
+	if err := json.Unmarshal(periodResponse.Body.Bytes(), &periodItems); err != nil || periodResponse.Code != http.StatusOK || len(periodItems) != 3 {
+		t.Fatalf("unified period status=%d items=%#v err=%v body=%s", periodResponse.Code, periodItems, err, periodResponse.Body.String())
+	}
+	for _, item := range periodItems {
+		if item.PeriodID != periodID || item.Kind != activities.KindBooking {
+			t.Fatalf("unified period item=%#v, want period %q booking", item, periodID)
+		}
+	}
 	anchorID := firstUnified[1].ID
 	anchorResponse := performTableGET(t, principal, membership.GroupID,
 		"/api/v1/groups/"+membership.GroupID+"/activities?anchorId="+url.QueryEscape(anchorID)+"&kind=BOOKING&q=does-not-match&sort=amount&direction=asc&limit=3", server.handleActivities)
@@ -216,6 +227,23 @@ func TestTableQueryHandlersFilterSortAndPaginateWithoutChangingArrayBodies(t *te
 	var paymentItems []domain.Payment
 	if err := json.Unmarshal(paymentResponse.Body.Bytes(), &paymentItems); err != nil || paymentResponse.Code != http.StatusOK || len(paymentItems) != 2 || paymentItems[0].AmountMinor != 300 || paymentItems[1].AmountMinor != 200 || paymentItems[0].ActorMembershipID != membership.ID || paymentItems[0].ActorDisplayName != membership.DisplayName {
 		t.Fatalf("payments status=%d items=%#v err=%v body=%s", paymentResponse.Code, paymentItems, err, paymentResponse.Body.String())
+	}
+	linkedPaymentResponse := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/payments?paymentId="+url.QueryEscape(payments[0].ID)+"&limit=1", server.handleListPayments)
+	var linkedPaymentItems []domain.Payment
+	if err := json.Unmarshal(linkedPaymentResponse.Body.Bytes(), &linkedPaymentItems); err != nil || linkedPaymentResponse.Code != http.StatusOK || len(linkedPaymentItems) != 1 || linkedPaymentItems[0].ID != payments[0].ID || linkedPaymentResponse.Header().Get("X-Has-More") != "false" {
+		t.Fatalf("linked payment status=%d items=%#v err=%v body=%s", linkedPaymentResponse.Code, linkedPaymentItems, err, linkedPaymentResponse.Body.String())
+	}
+	missingPaymentResponse := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/payments?paymentId=pay_missing", server.handleListPayments)
+	var missingPaymentItems []domain.Payment
+	if err := json.Unmarshal(missingPaymentResponse.Body.Bytes(), &missingPaymentItems); err != nil || missingPaymentResponse.Code != http.StatusOK || len(missingPaymentItems) != 0 {
+		t.Fatalf("missing linked payment status=%d items=%#v err=%v body=%s", missingPaymentResponse.Code, missingPaymentItems, err, missingPaymentResponse.Body.String())
+	}
+	invalidPaymentIDResponse := performTableGET(t, principal, membership.GroupID,
+		"/api/v1/groups/"+membership.GroupID+"/payments?paymentId="+strings.Repeat("x", 121), server.handleListPayments)
+	if invalidPaymentIDResponse.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid payment ID status=%d body=%s", invalidPaymentIDResponse.Code, invalidPaymentIDResponse.Body.String())
 	}
 
 	movementResponse := performTableGET(t, principal, membership.GroupID,

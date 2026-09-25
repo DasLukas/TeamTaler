@@ -356,6 +356,23 @@ describe('SystemSettingsPanel', () => {
     await waitFor(() => expect(apiMock.updateSystemSettings).toHaveBeenCalledWith({ instanceName: 'Club Cloud' }, 4));
   });
 
+  it('preserves an unsaved access draft after a different system section is saved', async () => {
+    const user = userEvent.setup();
+    apiMock.updateSystemSettings.mockResolvedValue({ ...settings, revision: 5, instanceName: value('Club Cloud', 'DATABASE') });
+    renderPanel();
+    const general = (await screen.findByRole('heading', { name: 'Allgemein' })).closest('section');
+    const access = screen.getByRole('heading', { name: 'Zugriff und Wartung' }).closest('section');
+    if (!general || !access) throw new Error('Missing system settings sections.');
+
+    await user.type(within(access).getByLabelText('Kurzer Wartungshinweis'), 'Planned maintenance');
+    await user.clear(within(general).getByLabelText('Instanzname'));
+    await user.type(within(general).getByLabelText('Instanzname'), 'Club Cloud');
+    await user.click(within(general).getByRole('button', { name: 'Speichern' }));
+
+    await waitFor(() => expect(apiMock.updateSystemSettings).toHaveBeenCalledWith({ instanceName: 'Club Cloud' }, 4));
+    expect(within(access).getByLabelText('Kurzer Wartungshinweis')).toHaveValue('Planned maintenance');
+  });
+
   it('persists the installation time zone from general system settings', async () => {
     const user = userEvent.setup();
     renderPanel();

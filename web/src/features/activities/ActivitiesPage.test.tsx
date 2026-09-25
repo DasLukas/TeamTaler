@@ -11,8 +11,10 @@ import { ActivitiesPage } from './ActivitiesPage';
 import activityStyles from './ActivitiesPage.module.css';
 
 const apiMock = vi.hoisted(() => ({
+  exportGroupTable: vi.fn(),
   getActivitiesPage: vi.fn(),
   getActivityFilterOptions: vi.fn(),
+  getPeriods: vi.fn(),
   getPaymentAttachment: vi.fn(),
   reverseBooking: vi.fn(),
   reversePayment: vi.fn(),
@@ -34,6 +36,7 @@ const session: Session = {
 const booking: ActivityEntry = {
   id: 'BOOKING:booking-a',
   sourceId: 'booking-a',
+  periodId: 'period-a',
   kind: 'BOOKING',
   targetMembershipId: 'member-target',
   targetDisplayName: 'Target Member',
@@ -127,6 +130,7 @@ const bookingReversal: ActivityEntry = {
 
 const filterOptions: ActivityFilterOptions = {
   kinds: ['BOOKING', 'PAYMENT', 'REVERSAL', 'ADJUSTMENT'],
+  periods: [{ periodId: 'period-a', label: 'August 2026' }],
   members: [{ membershipId: 'member-target', displayName: 'Target Member', avatarUrl: '/avatars/target.png' }],
   categories: [{ categoryId: 'category-penalties', name: 'Penalties', icon: 'penalty' }],
   products: [{ productId: 'product-penalty', categoryId: 'category-penalties', name: 'Late arrival', imageUrl: '/images/late-arrival.png' }],
@@ -174,8 +178,10 @@ describe('ActivitiesPage unified feed', () => {
     window.localStorage.clear();
     window.history.replaceState({}, '', '/activities');
     apiMock.getActivityFilterOptions.mockResolvedValue(filterOptions);
+    apiMock.getPeriods.mockResolvedValue([]);
     apiMock.getActivitiesPage.mockResolvedValue(activityPage([adjustment, payment, booking]));
     apiMock.getPaymentAttachment.mockResolvedValue(new Blob(['receipt'], { type: 'image/jpeg' }));
+    apiMock.exportGroupTable.mockResolvedValue(new Blob(['csv'], { type: 'text/csv' }));
     apiMock.reverseBooking.mockResolvedValue(undefined);
     apiMock.reversePayment.mockResolvedValue(undefined);
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:receipt');
@@ -195,6 +201,82 @@ describe('ActivitiesPage unified feed', () => {
     expect(within(table).getByText(/-20,00/)).toBeVisible();
     expect(within(table).getByLabelText(i18n.t('activities.actorUnavailable'))).toBeVisible();
     expect(apiMock.getActivitiesPage).toHaveBeenCalledWith('group-a', expect.objectContaining({ limit: 50, sort: 'occurredAt', direction: 'desc' }));
+  });
+
+  it('restores settlement navigation as visible period, member, booking, and date filters', async () => {
+    const user = userEvent.setup();
+    const filters = {
+      kind: ['BOOKING'],
+      periodId: 'period-a',
+      targetMembershipId: 'member-target',
+      occurredAt: { from: '2026-08-01', to: '2026-08-20' },
+    };
+    const periodOption = { label: 'August 2026', periodId: 'period-a' };
+    apiMock.getActivityFilterOptions.mockResolvedValue({ ...filterOptions, periods: [] });
+    window.history.replaceState({}, '', `/activities?tt.activities.filters=${encodeURIComponent(JSON.stringify(filters))}&tt.activities.periodOption=${encodeURIComponent(JSON.stringify(periodOption))}`);
+
+    renderActivities();
+
+    await waitFor(() => expect(apiMock.getActivitiesPage).toHaveBeenLastCalledWith('group-a', expect.objectContaining({
+      kind: ['BOOKING'],
+      occurredFrom: '2026-08-01',
+      occurredTo: '2026-08-20',
+      periodId: 'period-a',
+      targetMembershipId: 'member-target',
+    })));
+    const chips = await screen.findByRole('list', { name: i18n.t('dataTable.filterHeading') });
+    expect(chips).toHaveTextContent(i18n.t('activities.bookingType'));
+    expect(chips).toHaveTextContent('August 2026');
+    expect(chips).toHaveTextContent('Target Member');
+    expect(chips).toHaveTextContent('2026-08-01');
+    expect(chips).toHaveTextContent('2026-08-20');
+
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:activity-export') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    const downloadClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    await user.click(screen.getByRole('button', { name: i18n.t('exports.table.action') }));
+    await user.click(screen.getByRole('button', { name: i18n.t('exports.table.csv') }));
+    await waitFor(() => expect(apiMock.exportGroupTable).toHaveBeenCalledWith('group-a', expect.objectContaining({
+      query: expect.objectContaining({
+        kind: ['BOOKING'],
+        occurredFrom: '2026-08-01',
+        occurredTo: '2026-08-20',
+        periodId: 'period-a',
+        targetMembershipId: 'member-target',
+      }),
+      table: 'ACTIVITIES',
+    })));
+    downloadClick.mockRestore();
+  });
+
+  it('resolves an old period-filter URL through the authorized period collection', async () => {
+    apiMock.getActivityFilterOptions.mockResolvedValue({ ...filterOptions, periods: [] });
+    apiMock.getPeriods.mockResolvedValue([{
+      id: 'period-technical-id',
+      label: 'Legacy period name',
+      status: 'CLOSED',
+      startsAt: '2026-07-01T00:00:00Z',
+      closedAt: '2026-08-01T00:00:00Z',
+      dueAt: '2026-08-15',
+    }]);
+    window.history.replaceState({}, '', `/activities?tt.activities.filters=${encodeURIComponent(JSON.stringify({ periodId: 'period-technical-id' }))}`);
+
+    renderActivities();
+
+    const chips = await screen.findByRole('list', { name: i18n.t('dataTable.filterHeading') });
+    await waitFor(() => expect(chips).toHaveTextContent('Legacy period name'));
+    expect(chips).not.toHaveTextContent('period-technical-id');
+  });
+
+  it('never exposes a technical period identifier when every display source is unavailable', async () => {
+    apiMock.getActivityFilterOptions.mockResolvedValue({ ...filterOptions, periods: [] });
+    window.history.replaceState({}, '', `/activities?tt.activities.filters=${encodeURIComponent(JSON.stringify({ periodId: 'period-technical-id' }))}`);
+
+    renderActivities();
+
+    const chips = await screen.findByRole('list', { name: i18n.t('dataTable.filterHeading') });
+    expect(chips).toHaveTextContent(i18n.t('periods.selectedFallback'));
+    expect(chips).not.toHaveTextContent('period-technical-id');
   });
 
   it('reserves enough table width to keep receipt and reversal actions inline', async () => {

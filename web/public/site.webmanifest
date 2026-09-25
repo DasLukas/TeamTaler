@@ -6,6 +6,7 @@
   "lang": "de",
   "start_url": "/book",
   "scope": "/",
+  "launch_handler": { "client_mode": "navigate-existing" },
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#041b38",

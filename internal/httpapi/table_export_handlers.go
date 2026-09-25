@@ -26,6 +26,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/authorization"
 	"github.com/DasLukas/TeamTaler/internal/domain"
 	"github.com/DasLukas/TeamTaler/internal/exporting/tabular"
+	"github.com/DasLukas/TeamTaler/internal/externalaccounts"
 	"github.com/DasLukas/TeamTaler/internal/finance"
 	"github.com/DasLukas/TeamTaler/internal/media"
 	"github.com/DasLukas/TeamTaler/internal/platform"
@@ -54,16 +55,17 @@ type tableExportDefinition struct {
 }
 
 var tableExportDefinitions = map[string]tableExportDefinition{
-	"ACTIVITIES":           {Title: "Aktivitäten"},
-	"PAYMENTS":             {Title: "Zahlungen"},
-	"ACCOUNT_BALANCES":     {Title: "Kontostände"},
-	"GROUP_SETTLEMENTS":    {Title: "Abgeschlossene Abrechnungen"},
-	"SETTLEMENT_STATEMENT": {Title: "Abgeschlossene Abrechnung"},
-	"PERSONAL_SETTLEMENTS": {Title: "Eigene Abrechnungen"},
-	"ACTIVE_MEMBERS":       {Title: "Aktive Mitglieder"},
-	"ARCHIVED_MEMBERS":     {Title: "Archivierte Mitglieder"},
-	"GROUP_AUDIT":          {Title: "Gruppen-Auditprotokoll"},
-	"SYSTEM_AUDIT":         {Title: "System-Auditprotokoll", SystemOnly: true},
+	"ACTIVITIES":                    {Title: "Aktivitäten"},
+	"PAYMENTS":                      {Title: "Zahlungen"},
+	"ACCOUNT_BALANCES":              {Title: "Kontostände"},
+	"EXTERNAL_ACCOUNT_TRANSACTIONS": {Title: "Externe Kontobuchungen"},
+	"GROUP_SETTLEMENTS":             {Title: "Abgeschlossene Abrechnungen"},
+	"SETTLEMENT_STATEMENT":          {Title: "Abgeschlossene Abrechnung"},
+	"PERSONAL_SETTLEMENTS":          {Title: "Eigene Abrechnungen"},
+	"ACTIVE_MEMBERS":                {Title: "Aktive Mitglieder"},
+	"ARCHIVED_MEMBERS":              {Title: "Archivierte Mitglieder"},
+	"GROUP_AUDIT":                   {Title: "Gruppen-Auditprotokoll"},
+	"SYSTEM_AUDIT":                  {Title: "System-Auditprotokoll", SystemOnly: true},
 }
 
 // handleGroupTableExport renders one complete, authorization-scoped group
@@ -103,6 +105,12 @@ func (s *Server) handleGroupTableExport(response http.ResponseWriter, request *h
 			return
 		}
 	}
+	if command.Table == "EXTERNAL_ACCOUNT_TRANSACTIONS" {
+		if _, err = s.externalAccounts.ListAccounts(ctx, membership); err != nil {
+			writeProblem(response, request, tableExportError(err, timeout))
+			return
+		}
+	}
 	document, err := s.buildGroupTableDocument(ctx, membership, command, definition, location, rowLimit)
 	if err != nil {
 		writeProblem(response, request, tableExportError(err, timeout))
@@ -128,6 +136,12 @@ func (s *Server) handleGroupTableExport(response http.ResponseWriter, request *h
 		s.logger.Error("record group table export", "error", err, "table", command.Table)
 		writeProblem(response, request, err)
 		return
+	}
+	if command.Table == "EXTERNAL_ACCOUNT_TRANSACTIONS" {
+		if _, err = s.externalAccounts.ListAccounts(ctx, membership); err != nil {
+			writeProblem(response, request, tableExportError(err, timeout))
+			return
+		}
 	}
 	serveTableArtifact(response, request, artifact, definition.Title, command.Format, document.ExportedAt)
 }
@@ -356,6 +370,8 @@ func (s *Server) groupTableRows(ctx context.Context, membership domain.Membershi
 		return s.paymentExportRows(ctx, membership, command.Query, location, rowLimit, includeMedia)
 	case "ACCOUNT_BALANCES":
 		return s.accountExportRows(ctx, membership, command.Query, rowLimit, includeMedia)
+	case "EXTERNAL_ACCOUNT_TRANSACTIONS":
+		return s.externalAccountTransactionExportRows(ctx, membership, command.Query, location, rowLimit, includeMedia)
 	case "GROUP_SETTLEMENTS":
 		if err := authorization.Require(ctx, s.db, membership.GroupID, membership.ID, domain.PermissionFinanceManagement, authorization.GroupResource(membership.GroupID)); err != nil {
 			return nil, nil, err
@@ -380,6 +396,7 @@ type activityExportQuery struct {
 	Sort               string   `json:"sort"`
 	Direction          string   `json:"direction"`
 	Kind               []string `json:"kind"`
+	PeriodID           string   `json:"periodId"`
 	TargetMembershipID string   `json:"targetMembershipId"`
 	CategoryID         []string `json:"categoryId"`
 	ProductID          []string `json:"productId"`
@@ -403,7 +420,7 @@ func (s *Server) activityExportRows(ctx context.Context, membership domain.Membe
 	if err != nil {
 		return nil, nil, err
 	}
-	query := activities.Query{Search: wire.Q, Sort: wire.Sort, Direction: wire.Direction, Kinds: wire.Kind, TargetMembershipID: wire.TargetMembershipID, CategoryIDs: wire.CategoryID, ProductIDs: wire.ProductID, Status: wire.Status, OccurredFrom: wire.OccurredFrom, OccurredTo: wire.OccurredTo, AmountMin: minimum, AmountMax: maximum}
+	query := activities.Query{Search: wire.Q, Sort: wire.Sort, Direction: wire.Direction, Kinds: wire.Kind, PeriodID: wire.PeriodID, TargetMembershipID: wire.TargetMembershipID, CategoryIDs: wire.CategoryID, ProductIDs: wire.ProductID, Status: wire.Status, OccurredFrom: wire.OccurredFrom, OccurredTo: wire.OccurredTo, AmountMin: minimum, AmountMax: maximum}
 	items, err := collectActivities(ctx, s.activities, membership, query, limit)
 	if err != nil {
 		return nil, nil, err
@@ -471,6 +488,93 @@ type paymentExportQuery struct {
 	ReceivedTo   string  `json:"receivedTo"`
 	AmountMin    *string `json:"amountMin"`
 	AmountMax    *string `json:"amountMax"`
+}
+
+type externalAccountTransactionExportQuery struct {
+	Q            string   `json:"q"`
+	AccountID    string   `json:"accountId"`
+	AccountIDs   []string `json:"accountIds"`
+	Kind         []string `json:"kind"`
+	Source       string   `json:"source"`
+	Status       string   `json:"status"`
+	OccurredFrom string   `json:"occurredFrom"`
+	OccurredTo   string   `json:"occurredTo"`
+	AmountMin    *string  `json:"amountMin"`
+	AmountMax    *string  `json:"amountMax"`
+	Sort         string   `json:"sort"`
+	Direction    string   `json:"direction"`
+}
+
+// externalAccountTransactionExportRows projects the complete, filtered
+// external-account history using the interactive table's query contract.
+func (s *Server) externalAccountTransactionExportRows(ctx context.Context, membership domain.Membership, raw json.RawMessage, location *time.Location, limit int, decorate bool) ([]tabular.Column, []tabular.Row, error) {
+	var wire externalAccountTransactionExportQuery
+	if err := decodeTableQuery(raw, &wire); err != nil {
+		return nil, nil, err
+	}
+	minimum, err := parseOptionalMinorUnits("amountMin", wire.AmountMin)
+	if err != nil {
+		return nil, nil, err
+	}
+	maximum, err := parseOptionalMinorUnits("amountMax", wire.AmountMax)
+	if err != nil {
+		return nil, nil, err
+	}
+	accounts, err := s.externalAccounts.ListAccounts(ctx, membership)
+	if err != nil {
+		return nil, nil, err
+	}
+	accountNames := make(map[string]string, len(accounts.Items))
+	for _, account := range accounts.Items {
+		accountNames[account.ID] = account.Name
+	}
+	accountIDs := append([]string{}, wire.AccountIDs...)
+	if wire.AccountID != "" {
+		accountIDs = append(accountIDs, wire.AccountID)
+	}
+	query := externalaccounts.TransactionQuery{
+		Search: wire.Q, AccountIDs: accountIDs, Kinds: wire.Kind, Source: wire.Source, Status: wire.Status,
+		OccurredFrom: wire.OccurredFrom, OccurredTo: wire.OccurredTo, AmountMin: minimum, AmountMax: maximum,
+		Sort: wire.Sort, Direction: wire.Direction,
+	}
+	items, err := collectExternalAccountTransactions(ctx, s.externalAccounts, membership, query, limit)
+	if err != nil {
+		return nil, nil, err
+	}
+	columns := []tabular.Column{
+		{ID: "occurred_at", Header: "Datum", Identity: true, WidthMM: 27},
+		{ID: "kind", Header: "Art", Identity: true, WidthMM: 30},
+		{ID: "source_account", Header: "Quellkonto", WidthMM: 38},
+		{ID: "destination_account", Header: "Zielkonto", WidthMM: 38},
+		{ID: "reason", Header: "Grund", WidthMM: 55},
+		moneyColumn("amount", "Betrag", 34),
+		{ID: "actor", Header: "Erfasst von", WidthMM: 38},
+		{ID: "status", Header: "Status", WidthMM: 27},
+	}
+	rows := make([]tabular.Row, 0, len(items))
+	for _, item := range items {
+		rows = append(rows, tabular.Row{Cells: []tabular.Cell{
+			textCell(formatGermanDate(item.OccurredAt, location)),
+			tonedTextCell(externalAccountTransactionKindLabel(item.Kind), transactionTone(item.Status), decorate),
+			textCell(externalAccountReferenceName(item.SourceAccount, accountNames)),
+			textCell(externalAccountReferenceName(item.DestinationAccount, accountNames)),
+			textCell(item.Reason),
+			tonedMoneyCell(item.AmountMinor, item.Currency, transactionTone(item.Status), decorate),
+			textCell(fallbackText(item.Actor.DisplayName, "System")),
+			tonedTextCell(externalAccountTransactionStatusLabel(item.Status), transactionTone(item.Status), decorate),
+		}})
+	}
+	return columns, rows, nil
+}
+
+func externalAccountReferenceName(reference *externalaccounts.AccountReference, names map[string]string) string {
+	if reference == nil {
+		return "–"
+	}
+	if reference.Name != "" {
+		return reference.Name
+	}
+	return fallbackText(names[reference.ID], "–")
 }
 
 func (s *Server) paymentExportRows(ctx context.Context, membership domain.Membership, raw json.RawMessage, location *time.Location, limit int, includeMedia bool) ([]tabular.Column, []tabular.Row, error) {
@@ -1131,6 +1235,30 @@ func collectPayments(ctx context.Context, service finance.Service, membership do
 	}
 }
 
+func collectExternalAccountTransactions(ctx context.Context, service externalaccounts.Service, membership domain.Membership, query externalaccounts.TransactionQuery, limit int) ([]externalaccounts.TransactionView, error) {
+	items := make([]externalaccounts.TransactionView, 0)
+	seen := make(map[string]struct{})
+	for {
+		query.Limit = 200
+		page, err := service.QueryTransactions(ctx, membership, query)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, page.Items...)
+		if err := enforceTableRowLimit(len(items), limit); err != nil {
+			return nil, err
+		}
+		if page.NextCursor == "" {
+			return items, nil
+		}
+		if _, duplicate := seen[page.NextCursor]; duplicate {
+			return nil, errors.New("external-account transaction export pagination returned a duplicate cursor")
+		}
+		seen[page.NextCursor] = struct{}{}
+		query.Cursor = page.NextCursor
+	}
+}
+
 func collectGroupAudit(ctx context.Context, db *sql.DB, groupID string, query tablequery.AuditQuery, limit int) ([]audit.Event, error) {
 	items := make([]audit.Event, 0)
 	seen := make(map[string]struct{})
@@ -1414,6 +1542,8 @@ func (s *Server) recordGroupTableExport(ctx context.Context, principal domain.Pr
 
 func tableExportPermission(table string) domain.PermissionKey {
 	switch table {
+	case "EXTERNAL_ACCOUNT_TRANSACTIONS":
+		return domain.PermissionViewExternalAccounts
 	case "PAYMENTS", "ACCOUNT_BALANCES", "GROUP_SETTLEMENTS", "SETTLEMENT_STATEMENT":
 		return domain.PermissionFinanceManagement
 	case "GROUP_AUDIT":
@@ -1695,6 +1825,34 @@ func activityStatusLabel(kind activities.Kind, status string) string {
 	default:
 		return "Verbucht"
 	}
+}
+
+func externalAccountTransactionKindLabel(kind domain.ExternalAccountTransactionKind) string {
+	switch kind {
+	case domain.ExternalAccountTransactionPayment:
+		return "Zahlung"
+	case domain.ExternalAccountTransactionOpeningBalance:
+		return "Anfangsbestand"
+	case domain.ExternalAccountTransactionIncome:
+		return "Einzahlung"
+	case domain.ExternalAccountTransactionExpense:
+		return "Auszahlung"
+	case domain.ExternalAccountTransactionTransfer:
+		return "Umbuchung"
+	case domain.ExternalAccountTransactionAdjustment:
+		return "Korrektur"
+	case domain.ExternalAccountTransactionReversal:
+		return "Stornierung"
+	default:
+		return string(kind)
+	}
+}
+
+func externalAccountTransactionStatusLabel(status string) string {
+	if status == "REVERSED" {
+		return "Storniert"
+	}
+	return "Verbucht"
 }
 
 func transactionStatusLabel(status string) string {

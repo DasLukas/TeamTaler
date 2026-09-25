@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -293,6 +294,7 @@ func TestUnifiedActivityFeedFiltersSortsAndBindsCursorsToEveryQueryDimension(t *
 		want  []string
 	}{
 		{name: "multiple kinds", query: activities.Query{Kinds: []string{"BOOKING", "PAYMENT"}}, want: []string{aliceBooking.ID, bobBooking.ID, alicePayment.ID, bobPayment.ID}},
+		{name: "period", query: activities.Query{PeriodID: periodID, Kinds: []string{"BOOKING"}}, want: []string{aliceBooking.ID, bobBooking.ID}},
 		{name: "reversal kind", query: activities.Query{Kinds: []string{"REVERSAL"}}, want: []string{bobBooking.ID, alicePayment.ID}},
 		{name: "target member", query: activities.Query{TargetMembershipID: alice.ID}, want: []string{aliceBooking.ID, alicePayment.ID, alicePayment.ID, "filter-alice-adjustment"}},
 		{name: "category", query: activities.Query{CategoryIDs: []string{alphaCategory.ID}}, want: []string{aliceBooking.ID}},
@@ -378,6 +380,7 @@ func TestUnifiedActivityFeedFiltersSortsAndBindsCursorsToEveryQueryDimension(t *
 	}{
 		{name: "search", mutate: func(query *activities.Query) { query.Search = "Alice" }},
 		{name: "kind", mutate: func(query *activities.Query) { query.Kinds = []string{"BOOKING"} }},
+		{name: "period", mutate: func(query *activities.Query) { query.PeriodID = periodID }},
 		{name: "member", mutate: func(query *activities.Query) { query.TargetMembershipID = alice.ID }},
 		{name: "category", mutate: func(query *activities.Query) { query.CategoryIDs = []string{alphaCategory.ID} }},
 		{name: "product", mutate: func(query *activities.Query) { query.ProductIDs = []string{alphaProduct.ID} }},
@@ -403,6 +406,7 @@ func TestUnifiedActivityFeedFiltersSortsAndBindsCursorsToEveryQueryDimension(t *
 		query activities.Query
 	}{
 		{name: "kind", query: activities.Query{Kinds: []string{"UNKNOWN"}}},
+		{name: "period", query: activities.Query{PeriodID: strings.Repeat("x", 201)}},
 		{name: "status", query: activities.Query{Status: "UNKNOWN"}},
 		{name: "date syntax", query: activities.Query{OccurredFrom: "20.08.2026"}},
 		{name: "date order", query: activities.Query{OccurredFrom: "2026-08-21", OccurredTo: "2026-08-20"}},
@@ -418,6 +422,57 @@ func TestUnifiedActivityFeedFiltersSortsAndBindsCursorsToEveryQueryDimension(t *
 		})
 	}
 	_ = betaCategory
+}
+
+func TestUnifiedActivityFeedSeparatesPeriodsClosedOnTheSameDay(t *testing.T) {
+	f := newFixture(t)
+	service := activities.Service{DB: f.db}
+	_, product := f.catalogItem("Same-day periods", 250)
+	firstPeriodID := f.openPeriodID()
+	originalNow := platform.Now
+	t.Cleanup(func() { platform.Now = originalNow })
+	platform.Now = func() time.Time { return time.Date(2026, 8, 20, 8, 0, 0, 0, time.UTC) }
+	first, err := f.bookings.Create(f.ctx, f.admin, f.membership, "same-day-first-period", bookings.CreateInput{
+		ProductID: product.ID, ProductVersion: product.Version, ExpectedPeriodID: firstPeriodID, Quantity: 1,
+	})
+	if err != nil {
+		t.Fatalf("create first-period booking: %v", err)
+	}
+	const secondPeriodID = "period-same-day-second"
+	const boundary = "2026-08-20T09:00:00Z"
+	if _, err := f.db.ExecContext(f.ctx, `UPDATE periods SET status='CLOSED',starts_at='2026-08-20T07:00:00Z',closed_at=?,due_at='2026-09-03' WHERE group_id=? AND id=?`, boundary, f.group.ID, firstPeriodID); err != nil {
+		t.Fatalf("close first same-day period: %v", err)
+	}
+	if _, err := f.db.ExecContext(f.ctx, `INSERT INTO periods(id,group_id,label,status,starts_at,created_at) VALUES(?,?,?,'OPEN',?,?)`, secondPeriodID, f.group.ID, "Second same-day period", boundary, boundary); err != nil {
+		t.Fatalf("open second same-day period: %v", err)
+	}
+	platform.Now = func() time.Time { return time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC) }
+	second, err := f.bookings.Create(f.ctx, f.admin, f.membership, "same-day-second-period", bookings.CreateInput{
+		ProductID: product.ID, ProductVersion: product.Version, ExpectedPeriodID: secondPeriodID, Quantity: 1,
+	})
+	if err != nil {
+		t.Fatalf("create second-period booking: %v", err)
+	}
+
+	firstPage, err := service.QueryEntries(f.ctx, f.membership, activities.Query{
+		Kinds: []string{"BOOKING"}, PeriodID: firstPeriodID, OccurredFrom: "2026-08-20", OccurredTo: "2026-08-20",
+	})
+	if err != nil {
+		t.Fatalf("query first same-day period: %v", err)
+	}
+	assertActivitySources(t, firstPage.Items, []string{first.ID})
+	secondPage, err := service.QueryEntries(f.ctx, f.membership, activities.Query{
+		Kinds: []string{"BOOKING"}, PeriodID: secondPeriodID, OccurredFrom: "2026-08-20", OccurredTo: "2026-08-20",
+	})
+	if err != nil {
+		t.Fatalf("query second same-day period: %v", err)
+	}
+	assertActivitySources(t, secondPage.Items, []string{second.ID})
+
+	options, err := service.ListFilterOptions(f.ctx, f.membership)
+	if err != nil || len(options.Periods) != 2 || options.Periods[0].PeriodID != secondPeriodID || options.Periods[1].PeriodID != firstPeriodID {
+		t.Fatalf("same-day period options=%#v err=%v", options.Periods, err)
+	}
 }
 
 func TestUnifiedActivityFeedReadsPaymentsCreatedBeforeMethodLabelSnapshots(t *testing.T) {

@@ -3,7 +3,7 @@ import Bell from 'lucide-react/dist/esm/icons/bell';
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
 import CircleUserRound from 'lucide-react/dist/esm/icons/circle-user-round';
 import { useTranslation } from 'react-i18next';
-import { canOpenStatistics, canUsePlanning, hasGroupCapability } from '@/app/groupCapabilities';
+import { canManageExternalAccounts, canOpenFinance, canOpenStatistics, canUsePlanning, hasGroupCapability } from '@/app/groupCapabilities';
 import { memberPaths } from '@/app/paths';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { isSystemAdministrator } from '@/app/useSession';
@@ -39,8 +39,9 @@ export function MorePage() {
           .filter((item) => {
             if (item.capability === 'planning') return canPlan;
             if (item.capability === 'statistics') return canOpenStatistics(activeGroup);
-            if (item.capability === 'administration') return hasGroupCapability(grants, item.capability) || isSystemAdministrator(session);
-            if (item.capability === 'catalog' || item.capability === 'finance') return hasGroupCapability(grants, item.capability);
+            if (item.capability === 'administration') return hasGroupCapability(grants, item.capability) || canManageExternalAccounts(activeGroup) || isSystemAdministrator(session);
+            if (item.capability === 'finance') return canOpenFinance(activeGroup);
+            if (item.capability === 'catalog') return hasGroupCapability(grants, item.capability);
             return false;
           })
           .map(({ to, key, icon: Icon }) => <Link key={to} to={to}><Icon aria-hidden="true" size={23} /><span>{t(`nav.${key}`)}</span><ChevronRight aria-hidden="true" size={20} /></Link>)}

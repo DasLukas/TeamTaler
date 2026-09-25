@@ -35,6 +35,13 @@ describe('permission evaluation', () => {
     expect(can(grants('VIEW_STATISTICS'), 'VIEW_STATISTICS')).toBe(true);
   });
 
+  it('expands finance and external-account management transitively', () => {
+    expect(can(grants('MANAGE_EXTERNAL_ACCOUNTS'), 'VIEW_EXTERNAL_ACCOUNTS')).toBe(true);
+    expect(can(grants('FINANCE_MANAGEMENT'), 'MANAGE_EXTERNAL_ACCOUNTS')).toBe(true);
+    expect(can(grants('FINANCE_MANAGEMENT'), 'VIEW_EXTERNAL_ACCOUNTS')).toBe(true);
+    expect(can(grants('VIEW_EXTERNAL_ACCOUNTS'), 'MANAGE_EXTERNAL_ACCOUNTS')).toBe(false);
+  });
+
   it('does not infer unrelated permissions', () => {
     const direct = grants('ROLE_MANAGEMENT');
 

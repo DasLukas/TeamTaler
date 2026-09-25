@@ -272,6 +272,12 @@ func TestRemoveCategoryTypeMigrationPreservesExistingRows(t *testing.T) {
 		`INSERT INTO schema_migrations(version) VALUES('0050_notification_settings_ownership.sql')`,
 		`INSERT INTO schema_migrations(version) VALUES('0051_statistics_dashboard.sql')`,
 		`INSERT INTO schema_migrations(version) VALUES('0052_unified_statistics_permission.sql')`,
+		`INSERT INTO schema_migrations(version) VALUES('0054_external_accounts.sql')`,
+		`INSERT INTO schema_migrations(version) VALUES('0056_external_account_bank_target_identity.sql')`,
+		`INSERT INTO schema_migrations(version) VALUES('0057_external_account_safe_deletion.sql')`,
+		`INSERT INTO schema_migrations(version) VALUES('0058_kiosk_product_barcodes.sql')`,
+		`INSERT INTO schema_migrations(version) VALUES('0059_kiosk_posters.sql')`,
+		`INSERT INTO schema_migrations(version) VALUES('0060_kiosk_standard_poster.sql')`,
 		`CREATE TABLE users(id TEXT PRIMARY KEY) STRICT`,
 		`CREATE TABLE groups(id TEXT PRIMARY KEY) STRICT`,
 		`CREATE TABLE invitations(id TEXT PRIMARY KEY, group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE) STRICT`,
@@ -459,8 +465,8 @@ func TestDynamicRoleMigrationBackfillsLegacyAccessAndDropsCategoryGrants(t *test
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM roles WHERE group_id='group-second'`).Scan(&secondRoleCount); err != nil {
 		t.Fatalf("count second roles: %v", err)
 	}
-	if permissionCount != 18 || mainRoleCount != 5 || secondRoleCount != 4 {
-		t.Fatalf("definitions/main roles/second roles = %d/%d/%d, want 18/5/4", permissionCount, mainRoleCount, secondRoleCount)
+	if permissionCount != 21 || mainRoleCount != 5 || secondRoleCount != 4 {
+		t.Fatalf("definitions/main roles/second roles = %d/%d/%d, want 21/5/4", permissionCount, mainRoleCount, secondRoleCount)
 	}
 	wantPresetGrantCounts := map[string]int{
 		"role:GROUP_ADMINISTRATOR:group-main": 18,

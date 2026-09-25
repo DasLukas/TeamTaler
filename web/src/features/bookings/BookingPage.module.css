@@ -15,6 +15,12 @@
   container-type: inline-size;
 }
 
+.content.scannerContent { height: 100dvh; max-width: none; padding: 0; }
+
+.titleRow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-6); }
+.titleRow h1 { margin: 0; }
+.kioskError { margin: calc(-1 * var(--space-3)) 0 var(--space-5); color: var(--color-status-danger); font-size: var(--font-size-sm); }
+
 .balanceRow {
   margin-bottom: var(--space-8);
 }
@@ -134,10 +140,12 @@
     padding: 28px var(--space-5) 40px;
   }
 
-  .content h1 { margin-bottom: var(--space-5); font-size: 2rem; }
+  .content .titleRow h1 { margin: 0; font-size: 2rem; }
+  .titleRow { margin-bottom: var(--space-5); }
   .balanceRow { margin-bottom: var(--space-6); }
   .balanceRow.hasTargetControl { grid-template-columns: minmax(0, 1fr) 104px; gap: var(--space-3); }
   .balance { min-height: 104px; grid-template-columns: minmax(0, 1fr) auto; padding: var(--space-5); }
   .balanceAmount > span { font-size: var(--font-size-sm); }
   .balanceAmount > strong { font-size: 2rem; white-space: nowrap; }
 }
+.kioskFeedback { margin: var(--space-3) 0; color: var(--color-text-muted); }

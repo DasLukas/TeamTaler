@@ -1,0 +1,26 @@
+.section { display: grid; gap: var(--space-5); padding-top: var(--space-3); }
+.section h3,.section h4,.section p { margin: 0; }
+.heading p,.settingRow p,.notice { color: var(--color-text-muted); }
+.card { display: grid; gap: var(--space-5); padding: var(--space-6); border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-sm); }
+.settingRow { display: flex; align-items: center; justify-content: space-between; gap: var(--space-6); }
+.settingRow > div { min-width: 0; }
+.settingRow p { margin-top: var(--space-2); }
+.settingRow > button { flex: none; }
+.notice { padding: var(--space-4); border-radius: var(--radius-md); background: var(--color-surface-muted); font-size: var(--font-size-sm); }
+.heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); }
+.posterList { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.posterList button { border: 1px solid var(--color-border); border-radius: 999px; padding: .45rem .8rem; background: var(--color-surface); color: var(--color-text); font: inherit; }
+.posterList .selected { border-color: var(--color-border-brand); background: var(--color-surface-brand-subtle); }
+.form { display: grid; gap: var(--space-4); }
+.form > label { display: grid; gap: var(--space-2); font-weight: 600; }
+.requiredLabel::after { content: ' *'; color: var(--color-status-danger); }
+.form > label input,.form > label textarea { width: 100%; min-height: 2.75rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: .65rem; background: var(--color-surface); color: var(--color-text); font: inherit; }
+.form > label textarea { resize: vertical; }
+.form > label input:read-only { background: var(--color-surface-muted); color: var(--color-text-muted); }
+.standardHint { padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-muted); color: var(--color-text-muted); }
+.warning { color: var(--color-status-danger); }
+.saveHint { color: var(--color-text-muted); font-size: var(--font-size-sm); }
+.actions,.deleteConfirm { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.actions { justify-content: flex-end; }
+.deleteConfirm { border-top: 1px solid var(--color-border); padding-top: var(--space-3); }
+.deleteConfirm p { flex-basis: 100%; }

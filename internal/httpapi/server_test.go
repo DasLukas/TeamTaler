@@ -36,6 +36,7 @@ func TestLimitBodyUsesLiveMediaLimitForUploadRoutes(t *testing.T) {
 		{name: "product image", method: http.MethodPost, path: "/api/v1/groups/grp_1/products/prd_1/image", wantStatus: http.StatusNoContent},
 		{name: "managed payment attachment", method: http.MethodPost, path: "/api/v1/groups/grp_1/payments", wantStatus: http.StatusNoContent},
 		{name: "self payment attachment", method: http.MethodPost, path: "/api/v1/groups/grp_1/payments/self", wantStatus: http.StatusNoContent},
+		{name: "external account attachment", method: http.MethodPost, path: "/api/v1/groups/grp_1/external-account-transactions", wantStatus: http.StatusNoContent},
 		{name: "ordinary API request", method: http.MethodPost, path: "/api/v1/groups", wantStatus: http.StatusRequestEntityTooLarge},
 		{name: "non-upload method", method: http.MethodPut, path: "/api/v1/groups/grp_1/logo", wantStatus: http.StatusRequestEntityTooLarge},
 	}

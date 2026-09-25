@@ -56,6 +56,9 @@ func newStatisticsFixture(t *testing.T) *statisticsFixture {
 	if err := db.QueryRowContext(ctx, `SELECT id FROM periods WHERE group_id=? AND status='OPEN'`, fixture.membership.GroupID).Scan(&fixture.periodID); err != nil {
 		t.Fatalf("read fixture open period: %v", err)
 	}
+	if _, err := db.ExecContext(ctx, `UPDATE periods SET starts_at='2026-08-01T00:00:00Z' WHERE id=?`, fixture.periodID); err != nil {
+		t.Fatalf("set deterministic fixture period start: %v", err)
+	}
 	if _, err := db.ExecContext(ctx, `UPDATE memberships SET joined_at='2026-07-01T00:00:00Z' WHERE id=?`, fixture.membership.ID); err != nil {
 		t.Fatalf("set deterministic fixture membership join time: %v", err)
 	}

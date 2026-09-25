@@ -19,6 +19,7 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/catalog"
 	"github.com/DasLukas/TeamTaler/internal/config"
 	"github.com/DasLukas/TeamTaler/internal/domain"
+	"github.com/DasLukas/TeamTaler/internal/externalaccounts"
 	"github.com/DasLukas/TeamTaler/internal/finance"
 	"github.com/DasLukas/TeamTaler/internal/groups"
 	"github.com/DasLukas/TeamTaler/internal/paymentattachments"
@@ -76,6 +77,29 @@ func TestCreateAndRestore(t *testing.T) {
 	var attachmentKey string
 	if err := db.QueryRowContext(ctx, `SELECT storage_key FROM payment_attachments WHERE payment_id=?`, payment.ID).Scan(&attachmentKey); err != nil {
 		t.Fatalf("read payment attachment key: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE group_settings SET external_accounts_enabled=1 WHERE group_id=?`, membership.GroupID); err != nil {
+		t.Fatalf("enable external accounts: %v", err)
+	}
+	externalService := externalaccounts.Service{DB: db, Attachments: paymentattachments.Store{DataDirectory: sourceDirectory}}
+	currentAccounts, err := externalService.ListAccounts(ctx, membership)
+	if err != nil {
+		t.Fatalf("list external accounts: %v", err)
+	}
+	accountCollection, err := externalService.CreateAccount(ctx, session.Principal, membership, "backup-external-account", currentAccounts.Version, externalaccounts.CreateAccountInput{AccountInput: externalaccounts.AccountInput{Name: "Backup cash", Type: "CASH"}})
+	if err != nil {
+		t.Fatalf("create external account: %v", err)
+	}
+	externalAttachmentBody := backupTestPDFWithMarker("external")
+	externalTransaction, err := externalService.CreateTransactionWithAttachment(ctx, session.Principal, membership, "backup-external-attachment", externalaccounts.CreateTransactionInput{
+		Kind: "INCOME", DestinationAccountID: accountCollection.Items[0].ID, AmountMinor: 175, OccurredAt: "2026-09-01", Reason: "Backup evidence",
+	}, &externalaccounts.TransactionAttachmentUpload{FileName: "external-evidence.pdf", Reader: bytes.NewReader(externalAttachmentBody), MaxBytes: config.DefaultAttachmentUploadBytes})
+	if err != nil || externalTransaction.Attachment == nil {
+		t.Fatalf("create external transaction attachment: transaction=%#v err=%v", externalTransaction, err)
+	}
+	var externalAttachmentKey string
+	if err := db.QueryRowContext(ctx, `SELECT storage_key FROM external_account_transaction_attachments WHERE transaction_id=?`, externalTransaction.ID).Scan(&externalAttachmentKey); err != nil {
+		t.Fatalf("read external transaction attachment key: %v", err)
 	}
 	categoryService := catalog.Service{DB: db}
 	category, err := categoryService.CreateCategory(ctx, session.Principal, membership, catalog.CreateCategoryInput{Name: "Drinks", Icon: domain.CategoryIconDrink})
@@ -144,6 +168,13 @@ func TestCreateAndRestore(t *testing.T) {
 	if body, err := os.ReadFile(filepath.Join(restoreDirectory, "attachments", attachmentKey)); err != nil || !bytes.Equal(body, attachmentBody) {
 		t.Fatalf("restored attachment=%q err=%v", body, err)
 	}
+	if body, err := os.ReadFile(filepath.Join(restoreDirectory, "attachments", externalAttachmentKey)); err != nil || !bytes.Equal(body, externalAttachmentBody) {
+		t.Fatalf("restored external attachment=%q err=%v", body, err)
+	}
+	var restoredExternalAttachments int
+	if err := restored.QueryRowContext(ctx, `SELECT count(*) FROM external_account_transaction_attachments WHERE transaction_id=?`, externalTransaction.ID).Scan(&restoredExternalAttachments); err != nil || restoredExternalAttachments != 1 {
+		t.Fatalf("restored external attachment rows=%d err=%v", restoredExternalAttachments, err)
+	}
 	if body, err := os.ReadFile(filepath.Join(restoreDirectory, "images", logoKey)); err != nil || string(body) != "logo-fixture" {
 		t.Fatalf("restored logo=%q err=%v", body, err)
 	}
@@ -210,7 +241,11 @@ func TestValidateArchiveEntryName(t *testing.T) {
 }
 
 func backupTestPDF() []byte {
-	prefix := "%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n"
+	return backupTestPDFWithMarker("")
+}
+
+func backupTestPDFWithMarker(marker string) []byte {
+	prefix := fmt.Sprintf("%%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Marker (%s) >>\nendobj\n", marker)
 	return []byte(fmt.Sprintf("%sxref\n0 2\n0000000000 65535 f \n0000000009 00000 n \ntrailer\n<< /Size 2 /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", prefix, len(prefix)))
 }
 

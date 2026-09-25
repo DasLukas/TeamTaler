@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/api/client';
 import { preservePendingNotificationFromHref } from '@/features/notifications/notificationDeepLink';
+import { preservePendingBookingFromHref } from '@/features/bookings/kioskDeepLink';
 import i18n from '@/i18n';
 import { InvitationPage } from './InvitationPage';
 import { LoginPage } from './LoginPage';
@@ -89,6 +90,16 @@ describe('authentication form policies', () => {
     await waitFor(() => expect(mocks.login).toHaveBeenCalled());
     expect(mocks.login.mock.calls[0]?.[0]).toEqual({ email: 'alex@example.test', password: 'short' });
     await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith({ to: '/book' }));
+  });
+
+  it('opens a pending product QR link after login exactly once', async () => {
+    const user = userEvent.setup();
+    preservePendingBookingFromHref(`${window.location.origin}/book?group=group-a&product=water&scan=1`);
+    renderPage(<LoginPage />);
+    await user.type(screen.getByLabelText(i18n.t('auth.email')), 'alex@example.test');
+    await user.type(screen.getByLabelText(i18n.t('auth.password')), 'password');
+    await user.click(screen.getByRole('button', { name: i18n.t('auth.loginAction') }));
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith({ to: '/book?group=group-a&product=water&scan=1', replace: true }));
   });
 
   it('opens the System workspace for a system administrator without a group', async () => {

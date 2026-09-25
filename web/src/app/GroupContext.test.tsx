@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
   recordLastUsedGroup: vi.fn(),
 }));
 
-vi.mock('@tanstack/react-router', () => ({ useNavigate: () => mocks.navigate }));
+vi.mock('@tanstack/react-router', () => ({ useNavigate: () => mocks.navigate, useLocation: () => ({ href: window.location.pathname + window.location.search }) }));
 vi.mock('@/api/client', () => ({ api: { recordLastUsedGroup: mocks.recordLastUsedGroup } }));
 
 const session: Session = {
@@ -38,6 +38,30 @@ function GroupSelectionProbe() {
 }
 
 describe('GroupProvider', () => {
+  it('starts in a valid QR-link group and ignores unavailable group identifiers', () => {
+    window.history.replaceState({}, '', '/book?group=group-b&product=water&scan=1');
+    const first = render(<GroupProvider session={session}><GroupSelectionProbe /></GroupProvider>);
+    expect(screen.getByLabelText('Active group')).toHaveTextContent('group-b');
+    first.unmount();
+    window.history.replaceState({}, '', '/book?group=group-missing&product=water&scan=1');
+    render(<GroupProvider session={session}><GroupSelectionProbe /></GroupProvider>);
+    expect(screen.getByLabelText('Active group')).toHaveTextContent('group-a');
+    window.history.replaceState({}, '', '/book');
+  });
+
+  it('switches an already mounted provider when an installed app receives a new group QR', async () => {
+    window.history.replaceState({}, '', '/book');
+    mocks.navigate.mockReset().mockResolvedValue(undefined);
+    mocks.recordLastUsedGroup.mockReset().mockResolvedValue(undefined);
+    const view = render(<GroupProvider session={session}><GroupSelectionProbe /></GroupProvider>);
+    expect(screen.getByLabelText('Active group')).toHaveTextContent('group-a');
+    window.history.replaceState({}, '', '/book?group=group-b');
+    view.rerender(<GroupProvider session={session}><GroupSelectionProbe /></GroupProvider>);
+    await waitFor(() => expect(screen.getByLabelText('Active group')).toHaveTextContent('group-b'));
+    expect(mocks.navigate).not.toHaveBeenCalled();
+    window.history.replaceState({}, '', '/book');
+  });
+
   it('updates navigation immediately and records rapid group switches in order', async () => {
     const user = userEvent.setup();
     mocks.navigate.mockReset().mockResolvedValue(undefined);

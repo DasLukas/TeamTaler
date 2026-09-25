@@ -32,8 +32,10 @@ import (
 	"github.com/DasLukas/TeamTaler/internal/email"
 	"github.com/DasLukas/TeamTaler/internal/exporting"
 	"github.com/DasLukas/TeamTaler/internal/exportnotifications"
+	"github.com/DasLukas/TeamTaler/internal/externalaccounts"
 	"github.com/DasLukas/TeamTaler/internal/finance"
 	"github.com/DasLukas/TeamTaler/internal/groups"
+	"github.com/DasLukas/TeamTaler/internal/kiosk"
 	"github.com/DasLukas/TeamTaler/internal/notifications"
 	"github.com/DasLukas/TeamTaler/internal/paymentattachments"
 	"github.com/DasLukas/TeamTaler/internal/periods"
@@ -65,8 +67,10 @@ type Server struct {
 	auth               auth.Service
 	groups             groups.Service
 	catalog            catalog.Service
+	kiosk              kiosk.Service
 	bookings           bookings.Service
 	finance            finance.Service
+	externalAccounts   externalaccounts.Service
 	statistics         statistics.Service
 	exports            *exporting.Service
 	periods            periods.Service
@@ -188,8 +192,10 @@ func New(cfg config.Config, db *sql.DB, buildInformation BuildInformation, logge
 		auth:               auth.Service{DB: db, SessionLifetime: cfg.SessionLifetime, TokenSealer: tokenSealer, EmailDeliveryAvailable: emailInfrastructureAvailable},
 		groups:             groupService,
 		catalog:            catalog.Service{DB: db},
+		kiosk:              kiosk.Service{DB: db, DataDirectory: cfg.DataDirectory, PublicURL: cfg.PublicURL.String()},
 		bookings:           bookings.Service{DB: db, Groups: groupService, Notifications: notificationService},
 		finance:            finance.Service{DB: db, Notifications: notificationService, Attachments: paymentattachments.Store{DataDirectory: cfg.DataDirectory}},
+		externalAccounts:   externalaccounts.Service{DB: db, Attachments: paymentattachments.Store{DataDirectory: cfg.DataDirectory}},
 		statistics:         statistics.Service{DB: db},
 		exports:            exportService,
 		periods:            periods.Service{DB: db, Notifications: notificationService},
@@ -273,6 +279,11 @@ func New(cfg config.Config, db *sql.DB, buildInformation BuildInformation, logge
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}", server.handleUpdateGroup)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/settings", server.handleGetGroupSettings)
 	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/settings", server.handleUpdateGroupSettings)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/kiosk-posters", server.handleListKioskPosters)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/kiosk-posters", server.handleCreateKioskPoster)
+	mux.HandleFunc("PUT /api/v1/groups/{groupID}/kiosk-posters/{posterID}", server.handleUpdateKioskPoster)
+	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/kiosk-posters/{posterID}", server.handleDeleteKioskPoster)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/kiosk-posters/{posterID}/pdf", server.handleKioskPosterPDF)
 	mux.HandleFunc("PUT /api/v1/groups/{groupID}/theme-preference", server.handleUpdateThemePreference)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/notification-preferences", server.handleGetNotificationPreferences)
 	mux.HandleFunc("PUT /api/v1/groups/{groupID}/notification-preferences", server.handleUpdateNotificationPreferences)
@@ -349,6 +360,19 @@ func New(cfg config.Config, db *sql.DB, buildInformation BuildInformation, logge
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/payments/self", server.handleCreateOwnPayment)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/payments/{paymentID}/attachment", server.handlePaymentAttachment)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/payments/{paymentID}/reverse", server.handleReversePayment)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/external-accounts", server.handleListExternalAccounts)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/external-accounts", server.handleCreateExternalAccount)
+	mux.HandleFunc("PATCH /api/v1/groups/{groupID}/external-accounts/{externalAccountID}", server.handleUpdateExternalAccount)
+	mux.HandleFunc("DELETE /api/v1/groups/{groupID}/external-accounts/{externalAccountID}", server.handleDeleteExternalAccount)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/external-accounts/{externalAccountID}/archive", server.handleArchiveExternalAccount)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/external-accounts/{externalAccountID}/reactivate", server.handleReactivateExternalAccount)
+	mux.HandleFunc("PUT /api/v1/groups/{groupID}/external-accounts/order", server.handleReorderExternalAccounts)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/external-account-links", server.handleListExternalAccountLinks)
+	mux.HandleFunc("PUT /api/v1/groups/{groupID}/external-account-links", server.handleReplaceExternalAccountLinks)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/external-account-transactions", server.handleListExternalAccountTransactions)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/external-account-transactions", server.handleCreateExternalAccountTransaction)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/external-account-transactions/{externalTransactionID}/attachment", server.handleExternalAccountTransactionAttachment)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/external-account-transactions/{externalTransactionID}/reverse", server.handleReverseExternalAccountTransaction)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/periods", server.handleListPeriods)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/periods/{periodID}/close", server.handleClosePeriod)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}/periods/{periodID}/statements", server.handleStatements)
@@ -506,7 +530,7 @@ func (s *Server) originCheck(next http.Handler) http.Handler {
 func (s *Server) limitBody(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		limit := s.config.MaxRequestBytes
-		if isPaymentAttachmentRequest(request) {
+		if isAttachmentRequest(request) {
 			if settings, loaded := effectiveSystemSettings(request); loaded {
 				limit = settings.AttachmentUploadMaxBytes.Value + systemadmin.MultipartRequestReserveBytes
 			} else {
@@ -533,6 +557,20 @@ func isPaymentAttachmentRequest(request *http.Request) bool {
 		return segments[0] == "api" && segments[1] == "v1" && segments[2] == "groups" && segments[4] == "payments"
 	}
 	return len(segments) == 6 && segments[0] == "api" && segments[1] == "v1" && segments[2] == "groups" && segments[4] == "payments" && segments[5] == "self"
+}
+
+func isAttachmentRequest(request *http.Request) bool {
+	if isPaymentAttachmentRequest(request) {
+		return true
+	}
+	if request.Method != http.MethodPost {
+		return false
+	}
+	segments := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
+	if len(segments) == 5 {
+		return segments[0] == "api" && segments[1] == "v1" && segments[2] == "groups" && segments[4] == "external-account-transactions"
+	}
+	return len(segments) == 7 && segments[0] == "api" && segments[1] == "v1" && segments[2] == "groups" && segments[4] == "external-account-transactions" && segments[6] == "correct"
 }
 
 // isMediaUploadRequest identifies the three multipart routes whose request
@@ -633,6 +671,8 @@ func writeProblem(response http.ResponseWriter, request *http.Request, err error
 		status, title, problemType = http.StatusPreconditionFailed, "Precondition Failed", "https://teamtaler.dev/problems/precondition"
 	case errors.Is(err, domain.ErrPlanningDisabled):
 		status, title, problemType = http.StatusConflict, "Planning Disabled", "https://teamtaler.dev/problems/planning-disabled"
+	case errors.Is(err, domain.ErrExternalAccountsDisabled):
+		status, title, problemType = http.StatusConflict, "External Accounts Disabled", "https://teamtaler.dev/problems/external-accounts-disabled"
 	case errors.Is(err, domain.ErrConflict), errors.Is(err, domain.ErrIdempotencyReuse):
 		status, title, problemType = http.StatusConflict, "Conflict", "https://teamtaler.dev/problems/conflict"
 	case errors.Is(err, domain.ErrRateLimited):
@@ -653,6 +693,9 @@ func writeProblem(response http.ResponseWriter, request *http.Request, err error
 	item := problem{Type: problemType, Title: title, Status: status, Detail: detail, Instance: request.URL.Path}
 	if errors.Is(err, domain.ErrPlanningDisabled) {
 		item.Code = "PLANNING_DISABLED"
+	}
+	if errors.Is(err, domain.ErrExternalAccountsDisabled) {
+		item.Code = "EXTERNAL_ACCOUNTS_DISABLED"
 	}
 	if memberCount, invitationCount, ok := roleConflictCounts(err); ok {
 		item.MemberCount = &memberCount

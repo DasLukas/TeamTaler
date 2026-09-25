@@ -1,5 +1,6 @@
 import { lazy, Suspense, type KeyboardEvent, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { canManageExternalAccounts } from '@/app/groupCapabilities';
 import { can } from '@/app/permissions';
 import { useOptionalActiveGroup } from '@/app/useActiveGroup';
 import { isSystemAdministrator, useSession } from '@/app/useSession';
@@ -42,6 +43,7 @@ export function AdminPage() {
   const canManageMembers = can(grants, 'MEMBER_MANAGEMENT');
   const canManageRoles = can(grants, 'ROLE_MANAGEMENT');
   const canManageFinances = can(grants, 'FINANCE_MANAGEMENT');
+  const canManageExternalAccountSettings = activeGroup ? canManageExternalAccounts(activeGroup) : false;
   const tabGroupId = useId();
   const tabRefs = useRef<Partial<Record<AdminTab, HTMLButtonElement | null>>>({});
   const [requestedTab, setRequestedTab] = useState<AdminTab>(() => {
@@ -55,7 +57,7 @@ export function AdminPage() {
     if (tab.id === 'rights') return canManageRoles;
     if (tab.id === 'exports') return canManageGroup;
     if (tab.id === 'members') return canManageMembers;
-    if (tab.id === 'settings') return canManageGroup || canManageRoles || canManageFinances;
+    if (tab.id === 'settings') return canManageGroup || canManageRoles || canManageFinances || canManageExternalAccountSettings;
     return canManageGroup;
   });
   const activeTab = availableTabs.some((tab) => tab.id === requestedTab) ? requestedTab : availableTabs[0]?.id;

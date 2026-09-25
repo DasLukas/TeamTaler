@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import CalendarCheck from 'lucide-react/dist/esm/icons/calendar-check';
 import Archive from 'lucide-react/dist/esm/icons/archive';
+import BookOpenCheck from 'lucide-react/dist/esm/icons/book-open-check';
 import CircleCheck from 'lucide-react/dist/esm/icons/circle-check';
 import CircleDashed from 'lucide-react/dist/esm/icons/circle-dashed';
 import CircleDollarSign from 'lucide-react/dist/esm/icons/circle-dollar-sign';
@@ -17,10 +18,11 @@ import { useActiveGroup } from '@/app/useActiveGroup';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/FormField';
+import { ItemAction } from '@/components/ui/ItemAction';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { DataTable, type DataTableColumnDef, type DataTableDateRange, type DataTableFilterDefinition, type DataTableNumberRange } from '@/features/shared/DataTable';
-import { formatGermanDate } from '@/features/shared/dateFormat';
+import { formatGermanDate, formatGermanDateRange, localDateKey } from '@/features/shared/dateFormat';
 import { createMemberFilterOption } from '@/features/shared/memberFilterOption';
 import tableStyles from '@/features/shared/Table.module.css';
 import { useDataTableLabels } from '@/features/shared/useDataTableLabels';
@@ -32,6 +34,25 @@ import { SettlementPdfPreviewAction } from './SettlementPdfPreviewAction';
 
 type SettlementFilterId = 'periodId' | 'membershipId' | 'membershipStatus' | 'dueAt' | 'amount' | 'status';
 const settlementCollator = new Intl.Collator('de-DE', { numeric: true, sensitivity: 'base' });
+
+/** Builds the shareable activity-table filter state for one immutable statement. */
+function settlementActivitySearch(settlement: Settlement): Record<string, unknown> {
+  return {
+    'tt.activities.filters': {
+      kind: ['BOOKING'],
+      periodId: settlement.periodId,
+      targetMembershipId: settlement.membershipId,
+      occurredAt: {
+        from: localDateKey(settlement.periodStartsAt),
+        to: localDateKey(settlement.periodClosedAt),
+      },
+    },
+    'tt.activities.periodOption': {
+      label: settlement.periodLabel,
+      periodId: settlement.periodId,
+    },
+  };
+}
 
 /** Properties for the settlement workflow and immutable history. */
 export interface SettlementsPanelProps {
@@ -182,13 +203,24 @@ export function SettlementsPanel({ settlements, settlementsEnabled }: Settlement
   const openPeriod = settlementsEnabled ? periodsQuery.data?.find((period) => period.status === 'OPEN') : undefined;
   const beginClose = (period: Period) => {
     setPeriodToClose(period);
-    setLabel(period.label);
+    setLabel(formatGermanDateRange(period.startsAt, new Date()));
     const defaultDue = new Date();
     defaultDue.setDate(defaultDue.getDate() + 14);
     setDueAt(defaultDue.toISOString().slice(0, 10));
   };
   const columns = useMemo<DataTableColumnDef<Settlement>[]>(() => [
-    { accessorKey: 'periodLabel', cell: ({ row }) => <strong>{row.original.periodLabel}</strong>, enableSorting: true, header: t('periods.period'), id: 'periodLabel', meta: { label: t('periods.period') } },
+    {
+      accessorKey: 'periodLabel',
+      cell: ({ row }) => {
+        const from = formatGermanDate(row.original.periodStartsAt);
+        const to = formatGermanDate(row.original.periodClosedAt);
+        return <span className={styles.periodCell}><strong>{row.original.periodLabel}</strong><span aria-label={t('periods.rangeAccessible', { from, to })} className={styles.periodRange}><time dateTime={row.original.periodStartsAt}>{from}</time><span aria-hidden="true"> – </span><time dateTime={row.original.periodClosedAt}>{to}</time></span></span>;
+      },
+      enableSorting: true,
+      header: t('periods.period'),
+      id: 'periodLabel',
+      meta: { label: t('periods.period') },
+    },
     {
       accessorKey: 'memberName',
       cell: ({ row }) => <span className={styles.member}><Avatar name={row.original.memberName} size="small" src={accountAvatarUrls.get(row.original.membershipId)} /><span>{row.original.memberName}</span></span>,
@@ -209,7 +241,13 @@ export function SettlementsPanel({ settlements, settlementsEnabled }: Settlement
       id: 'status',
       meta: { label: t('financeWorkspace.balanceState') },
     },
-    { cell: ({ row }) => <SettlementPdfPreviewAction groupId={activeGroupId} settlement={row.original} />, enableSorting: false, header: () => <span className="sr-only">{t('common.action')}</span>, id: 'action', meta: { label: t('common.action') } },
+    {
+      cell: ({ row }) => <span className={styles.rowActions}><ItemAction aria-label={t('periods.showBookingsFor', { member: row.original.memberName, period: row.original.periodLabel })} leadingIcon={<BookOpenCheck size={16} />} search={settlementActivitySearch(row.original)} to="/activities">{t('periods.showBookings')}</ItemAction><SettlementPdfPreviewAction groupId={activeGroupId} settlement={row.original} /></span>,
+      enableSorting: false,
+      header: () => <span className="sr-only">{t('common.action')}</span>,
+      id: 'action',
+      meta: { label: t('common.action') },
+    },
   ], [accountAvatarUrls, activeGroupId, t]);
 
   if (settlementsEnabled && periodsQuery.isLoading) return <div className={styles.state}><StatePanel kind="loading" /></div>;
@@ -229,7 +267,7 @@ export function SettlementsPanel({ settlements, settlementsEnabled }: Settlement
         filterDefinitions={filterDefinitions}
         getRowId={(settlement) => settlement.id}
         labels={{ ...labels, searchLabel: t('periods.searchLabel'), searchPlaceholder: t('periods.searchPlaceholder') }}
-        minTableWidth="1080px"
+        minTableWidth="1180px"
         {...tableState}
       />
       <Modal onClose={() => setPeriodToClose(null)} open={Boolean(periodToClose)} title={t('periods.closeDialog')} variant={compact ? 'sheet' : 'dialog'}>

@@ -35,12 +35,12 @@ func TestGroupSettingsDefaultAuthorizationPersistenceAndAudit(t *testing.T) {
 		t.Fatalf("list groups: groups=%d err=%v", len(items), err)
 	}
 	admin := items[0].Membership
-	if items[0].StatisticsEnabled {
-		t.Fatal("new group unexpectedly enabled statistics")
+	if items[0].StatisticsEnabled || items[0].ExternalAccountsEnabled {
+		t.Fatal("new group unexpectedly enabled an optional feature")
 	}
 	settings, err := service.Settings(ctx, admin)
 	guestRoleID := authorization.GuestRoleID(admin.GroupID)
-	if err != nil || settings.DefaultTheme != domain.ThemeTeamTaler || settings.StatisticsEnabled || settings.SettlementsEnabled || settings.SettlementDueSoonDays != 3 || settings.SettlementOverdueRepeatDays != 7 || settings.DefaultRoleID == nil || *settings.DefaultRoleID != guestRoleID {
+	if err != nil || settings.DefaultTheme != domain.ThemeTeamTaler || settings.StatisticsEnabled || settings.ExternalAccountsEnabled || settings.ExternalAccountsVersion != 1 || settings.SettlementsEnabled || settings.SettlementDueSoonDays != 3 || settings.SettlementOverdueRepeatDays != 7 || settings.DefaultRoleID == nil || *settings.DefaultRoleID != guestRoleID {
 		t.Fatalf("default settings=%#v err=%v", settings, err)
 	}
 	if !settings.ForeignBookingReasonRequired || !settings.OwnPaymentReasonRequired || settings.OtherPaymentReasonRequired || len(settings.PaymentMethods) != 5 {
@@ -77,6 +77,14 @@ func TestGroupSettingsDefaultAuthorizationPersistenceAndAudit(t *testing.T) {
 	if _, err := service.UpdateSettings(ctx, session.Principal, regularMember, SettingsUpdate{StatisticsEnabled: &statisticsEnabled}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("regular-member statistics update error=%v, want forbidden", err)
 	}
+	externalAccountsEnabled := true
+	if _, err := service.UpdateSettings(ctx, session.Principal, regularMember, SettingsUpdate{ExternalAccountsEnabled: &externalAccountsEnabled}); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("regular-member external-account update error=%v, want forbidden", err)
+	}
+	kioskEnabled := true
+	if _, err := service.UpdateSettings(ctx, session.Principal, regularMember, SettingsUpdate{KioskEnabled: &kioskEnabled}); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("regular-member kiosk update error=%v, want forbidden", err)
+	}
 	nrwTheme := domain.ThemeNRW
 	if _, err := service.UpdateSettings(ctx, session.Principal, regularMember, SettingsUpdate{DefaultTheme: &nrwTheme}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("regular-member theme update error=%v, want forbidden", err)
@@ -104,6 +112,10 @@ func TestGroupSettingsDefaultAuthorizationPersistenceAndAudit(t *testing.T) {
 	updated, err = service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{StatisticsEnabled: &statisticsEnabled})
 	if err != nil || !updated.StatisticsEnabled {
 		t.Fatalf("updated statistics setting=%#v err=%v", updated, err)
+	}
+	updated, err = service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{ExternalAccountsEnabled: &externalAccountsEnabled})
+	if err != nil || !updated.ExternalAccountsEnabled {
+		t.Fatalf("updated external-account setting=%#v err=%v", updated, err)
 	}
 	administratorRoleID := authorization.PresetRoleID(admin.GroupID, domain.RolePresetGroupAdministrator)
 	if _, err := service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{DefaultRoleID: &administratorRoleID}); !errors.Is(err, domain.ErrValidation) {
@@ -133,15 +145,15 @@ func TestGroupSettingsDefaultAuthorizationPersistenceAndAudit(t *testing.T) {
 		t.Fatalf("delete default role error=%v, want conflict", err)
 	}
 	persisted, err := service.Settings(ctx, admin)
-	if err != nil || !persisted.StatisticsEnabled || persisted.SettlementDueSoonDays != 3 || persisted.DefaultRoleID == nil || *persisted.DefaultRoleID != financeRoleID {
+	if err != nil || !persisted.StatisticsEnabled || !persisted.ExternalAccountsEnabled || persisted.SettlementDueSoonDays != 3 || persisted.DefaultRoleID == nil || *persisted.DefaultRoleID != financeRoleID {
 		t.Fatalf("persisted settings=%#v err=%v", persisted, err)
 	}
 	var auditCount int
-	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM audit_events WHERE group_id=? AND action='group.settings.updated'`, admin.GroupID).Scan(&auditCount); err != nil || auditCount != 5 {
-		t.Fatalf("settings audit count=%d err=%v, want five", auditCount, err)
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM audit_events WHERE group_id=? AND action='group.settings.updated'`, admin.GroupID).Scan(&auditCount); err != nil || auditCount != 6 {
+		t.Fatalf("settings audit count=%d err=%v, want six", auditCount, err)
 	}
 	listed, err := service.List(ctx, session.Principal.UserID)
-	if err != nil || len(listed) != 1 || !listed[0].StatisticsEnabled {
+	if err != nil || len(listed) != 1 || !listed[0].StatisticsEnabled || !listed[0].ExternalAccountsEnabled {
 		t.Fatalf("group statistics projection=%#v err=%v", listed, err)
 	}
 }
@@ -255,6 +267,9 @@ func TestPaymentTargetsPersistAndPatchPresencePreservesByStableMethodID(t *testi
 	if configured.PaymentMethods[0].PaymentTarget == nil || configured.PaymentMethods[0].PaymentTarget.IBAN != "DE89370400440532013000" {
 		t.Fatalf("normalized bank target = %#v", configured.PaymentMethods[0].PaymentTarget)
 	}
+	if configured.PaymentMethods[0].ExternalAccountID == nil || configured.ExternalAccountsVersion != settings.ExternalAccountsVersion+1 {
+		t.Fatalf("configured account link/version = %#v/%d", configured.PaymentMethods[0].ExternalAccountID, configured.ExternalAccountsVersion)
+	}
 
 	legacyMethods := make([]domain.PaymentMethod, 0, len(configured.PaymentMethods)+1)
 	legacyMethods = append(legacyMethods, domain.PaymentMethod{ID: "PAYPAL", Label: "PayPal private", AttachmentMode: domain.AttachmentModeOff})
@@ -275,6 +290,59 @@ func TestPaymentTargetsPersistAndPatchPresencePreservesByStableMethodID(t *testi
 	if preserved.PaymentMethods[len(preserved.PaymentMethods)-1].PaymentTarget != nil {
 		t.Fatalf("new omitted target = %#v, want nil", preserved.PaymentMethods[len(preserved.PaymentMethods)-1].PaymentTarget)
 	}
+	var bookedPayPalAccountID string
+	for _, method := range preserved.PaymentMethods {
+		if method.ID == "PAYPAL" && method.ExternalAccountID != nil {
+			bookedPayPalAccountID = *method.ExternalAccountID
+		}
+	}
+	if bookedPayPalAccountID == "" {
+		t.Fatal("configured PayPal account link is missing")
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO external_account_transactions(
+		id,group_id,kind,primary_account_id,amount_minor,booked_at,reason,created_by_membership_id,created_at
+	) VALUES('target-history',?,'INCOME',?,100,'2026-09-01T00:00:00Z','History fixture',?,'2026-09-01T00:00:00Z')`, admin.GroupID, bookedPayPalAccountID, admin.ID); err != nil {
+		t.Fatalf("insert booked target transaction: %v", err)
+	}
+	for _, ledger := range []struct {
+		id, account, externalAccountID string
+		amount                         int64
+	}{
+		{id: "target-history-account", account: "EXTERNAL_ACCOUNT", externalAccountID: bookedPayPalAccountID, amount: 100},
+		{id: "target-history-offset", account: "EXTERNAL_OFFSET", amount: -100},
+	} {
+		if _, err := db.ExecContext(ctx, `INSERT INTO ledger_entries(
+			id,group_id,period_id,external_account_id,external_transaction_id,account,amount_minor,description,created_at
+		) VALUES(?,?,(SELECT id FROM periods WHERE group_id=? AND status='OPEN'),nullif(?,''),'target-history',?,?,?,?)`, ledger.id, admin.GroupID, admin.GroupID, ledger.externalAccountID, ledger.account, ledger.amount, "History fixture", "2026-09-01T00:00:00Z"); err != nil {
+			t.Fatalf("insert booked target ledger: %v", err)
+		}
+	}
+	changedTargetMethods := append([]domain.PaymentMethod(nil), preserved.PaymentMethods...)
+	changedTargetPresence := make([]bool, len(changedTargetMethods))
+	for index := range changedTargetMethods {
+		if changedTargetMethods[index].ID == "PAYPAL" {
+			changedTargetMethods[index].PaymentTarget = &domain.PaymentTarget{Type: domain.PaymentTargetPayPalMe, PayPalMeHandle: "Club456"}
+			changedTargetMethods[index].ExternalAccountID = nil
+			changedTargetPresence[index] = true
+		}
+	}
+	preserved, err = service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{PaymentMethods: &changedTargetMethods, PaymentTargetsSpecified: changedTargetPresence})
+	if err != nil {
+		t.Fatalf("replace target backed by booked account: %v", err)
+	}
+	var replacementPayPalAccountID string
+	for _, method := range preserved.PaymentMethods {
+		if method.ID == "PAYPAL" && method.ExternalAccountID != nil {
+			replacementPayPalAccountID = *method.ExternalAccountID
+		}
+	}
+	if replacementPayPalAccountID == "" || replacementPayPalAccountID == bookedPayPalAccountID {
+		t.Fatalf("booked PayPal account was rewritten in place: old=%q replacement=%q", bookedPayPalAccountID, replacementPayPalAccountID)
+	}
+	var historicalHandle string
+	if err := db.QueryRowContext(ctx, `SELECT paypal_me_handle FROM external_accounts WHERE group_id=? AND id=?`, admin.GroupID, bookedPayPalAccountID).Scan(&historicalHandle); err != nil || historicalHandle != "Club123" {
+		t.Fatalf("historical PayPal target changed: handle=%q err=%v", historicalHandle, err)
+	}
 
 	clearPayPal := make([]domain.PaymentMethod, len(preserved.PaymentMethods))
 	clearPresence := make([]bool, len(preserved.PaymentMethods))
@@ -289,27 +357,44 @@ func TestPaymentTargetsPersistAndPatchPresencePreservesByStableMethodID(t *testi
 		t.Fatalf("clear PayPal target: %v", err)
 	}
 	var bankTarget, payPalTarget *domain.PaymentTarget
+	var bankAccountID, payPalAccountID *string
 	for _, method := range cleared.PaymentMethods {
 		switch method.ID {
 		case "BANK_TRANSFER":
 			bankTarget = method.PaymentTarget
+			bankAccountID = method.ExternalAccountID
 		case "PAYPAL":
 			payPalTarget = method.PaymentTarget
+			payPalAccountID = method.ExternalAccountID
 		}
 	}
-	if payPalTarget != nil || bankTarget == nil || bankTarget.IBAN != "DE89370400440532013000" {
-		t.Fatalf("cleared/preserved targets = PayPal %#v, bank %#v", payPalTarget, bankTarget)
+	if payPalTarget != nil || payPalAccountID != nil || bankTarget == nil || bankAccountID == nil || bankTarget.IBAN != "DE89370400440532013000" {
+		t.Fatalf("cleared/preserved targets = PayPal %#v/%#v, bank %#v/%#v", payPalTarget, payPalAccountID, bankTarget, bankAccountID)
 	}
 	operational, err := service.TransactionSettings(ctx, admin)
 	if err != nil || len(operational.PaymentMethods) != len(cleared.PaymentMethods) {
 		t.Fatalf("transaction settings = %#v, %v", operational, err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE external_accounts SET status='ARCHIVED' WHERE group_id=? AND id=?`, admin.GroupID, bookedPayPalAccountID); err != nil {
+		t.Fatalf("archive unlinked target account: %v", err)
+	}
+	archivedTargetMethods := append([]domain.PaymentMethod(nil), cleared.PaymentMethods...)
+	archivedTargetPresence := make([]bool, len(archivedTargetMethods))
+	for index := range archivedTargetMethods {
+		if archivedTargetMethods[index].ID == "PAYPAL" {
+			archivedTargetMethods[index].PaymentTarget = &domain.PaymentTarget{Type: domain.PaymentTargetPayPalMe, PayPalMeHandle: "Club123"}
+			archivedTargetPresence[index] = true
+		}
+	}
+	if _, err := service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{PaymentMethods: &archivedTargetMethods, PaymentTargetsSpecified: archivedTargetPresence}); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("link matching archived target error=%v, want conflict", err)
 	}
 
 	var auditMetadata string
 	if err := db.QueryRowContext(ctx, `SELECT group_concat(metadata_json,'') FROM audit_events WHERE group_id=? AND action='group.settings.updated'`, admin.GroupID).Scan(&auditMetadata); err != nil {
 		t.Fatalf("read settings audit: %v", err)
 	}
-	for _, secret := range []string{"Club123", "Team Club", "DE89370400440532013000", "COBADEFFXXX"} {
+	for _, secret := range []string{"Club123", "Club456", "Team Club", "DE89370400440532013000", "COBADEFFXXX"} {
 		if strings.Contains(auditMetadata, secret) {
 			t.Fatalf("settings audit leaked payment target data %q: %s", secret, auditMetadata)
 		}
@@ -321,5 +406,173 @@ func TestPaymentTargetsPersistAndPatchPresencePreservesByStableMethodID(t *testi
 	badPresence := []bool{true}
 	if _, err := service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{PaymentMethods: &clearPayPal, PaymentTargetsSpecified: badPresence}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("inconsistent target presence error = %v, want validation", err)
+	}
+}
+
+func TestLegacyBankTargetChangesRemainDistinctAcrossFeatureToggle(t *testing.T) {
+	ctx := context.Background()
+	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), "teamtaler.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+	authService := auth.Service{DB: db, SessionLifetime: 24 * time.Hour}
+	if err := authService.Bootstrap(ctx, "legacy-targets@example.test", "Targets Admin", "targets-password-long", "Targets Group", "EUR"); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	session, err := authService.Login(ctx, "legacy-targets@example.test", "targets-password-long")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	service := Service{DB: db}
+	groups, err := service.List(ctx, session.Principal.UserID)
+	if err != nil || len(groups) != 1 {
+		t.Fatalf("list groups: %v, count=%d", err, len(groups))
+	}
+	admin := groups[0].Membership
+	settings, err := service.Settings(ctx, admin)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	for index := range settings.PaymentMethods {
+		if settings.PaymentMethods[index].ID == "BANK_TRANSFER" || settings.PaymentMethods[index].ID == "OTHER" {
+			settings.PaymentMethods[index].PaymentTarget = &domain.PaymentTarget{Type: domain.PaymentTargetSEPATransfer, RecipientName: "Main club", IBAN: "DE89370400440532013000", BIC: "COBADEFFXXX"}
+		}
+	}
+	configured, err := service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{PaymentMethods: &settings.PaymentMethods})
+	if err != nil {
+		t.Fatalf("configure matching bank targets: %v", err)
+	}
+	var sharedAccountID string
+	for _, method := range configured.PaymentMethods {
+		if method.ID == "BANK_TRANSFER" || method.ID == "OTHER" {
+			if method.ExternalAccountID == nil {
+				t.Fatalf("%s has no account link", method.ID)
+			}
+			if sharedAccountID == "" {
+				sharedAccountID = *method.ExternalAccountID
+			} else if *method.ExternalAccountID != sharedAccountID {
+				t.Fatalf("matching targets linked to distinct accounts")
+			}
+		}
+	}
+	enabled := true
+	if _, err := service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{ExternalAccountsEnabled: &enabled}); err != nil {
+		t.Fatalf("enable accounts: %v", err)
+	}
+	enabled = false
+	if _, err := service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{ExternalAccountsEnabled: &enabled}); err != nil {
+		t.Fatalf("disable accounts: %v", err)
+	}
+	methods := append([]domain.PaymentMethod(nil), configured.PaymentMethods...)
+	targetSpecified := make([]bool, len(methods))
+	accountSpecified := make([]bool, len(methods))
+	for index := range methods {
+		targetSpecified[index] = true
+		accountSpecified[index] = true
+		if methods[index].ID == "BANK_TRANSFER" {
+			methods[index].PaymentTarget = &domain.PaymentTarget{Type: domain.PaymentTargetSEPATransfer, RecipientName: "Youth club", IBAN: "DE89370400440532013000", BIC: "DEUTDEFFXXX"}
+			methods[index].ExternalAccountID = nil
+			accountSpecified[index] = false
+		}
+	}
+	updated, err := service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{PaymentMethods: &methods, PaymentTargetsSpecified: targetSpecified, ExternalAccountIDsSpecified: accountSpecified})
+	if err != nil {
+		t.Fatalf("change one legacy bank target: %v", err)
+	}
+	var changedAccountID string
+	for _, method := range updated.PaymentMethods {
+		if method.ID == "BANK_TRANSFER" {
+			if method.ExternalAccountID == nil || method.PaymentTarget == nil || method.PaymentTarget.RecipientName != "Youth club" || method.PaymentTarget.BIC != "DEUTDEFFXXX" {
+				t.Fatalf("changed bank target=%#v", method)
+			}
+			changedAccountID = *method.ExternalAccountID
+		} else if method.ID == "OTHER" && (method.ExternalAccountID == nil || *method.ExternalAccountID != sharedAccountID || method.PaymentTarget == nil || method.PaymentTarget.RecipientName != "Main club") {
+			t.Fatalf("unchanged shared target=%#v", method)
+		}
+	}
+	if changedAccountID == sharedAccountID {
+		t.Fatal("changed target reused the shared account")
+	}
+	persisted, err := service.Settings(ctx, admin)
+	if err != nil || persisted.ExternalAccountsEnabled {
+		t.Fatalf("persisted disabled settings=%#v err=%v", persisted, err)
+	}
+	for _, method := range persisted.PaymentMethods {
+		if method.ID == "BANK_TRANSFER" && (method.PaymentTarget == nil || method.PaymentTarget.RecipientName != "Youth club") {
+			t.Fatalf("reloaded bank target=%#v", method.PaymentTarget)
+		}
+	}
+}
+
+func TestRemovingLinkedPaymentMethodPersistsAndUnlinksExternalAccount(t *testing.T) {
+	ctx := context.Background()
+	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), "teamtaler.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+	authService := auth.Service{DB: db, SessionLifetime: 24 * time.Hour}
+	if err := authService.Bootstrap(ctx, "remove-method-admin@example.test", "Settings Admin", "settings-password-long", "Settings Group", "EUR"); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	session, err := authService.Login(ctx, "remove-method-admin@example.test", "settings-password-long")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	service := Service{DB: db}
+	groups, err := service.List(ctx, session.Principal.UserID)
+	if err != nil || len(groups) != 1 {
+		t.Fatalf("list groups: groups=%d err=%v", len(groups), err)
+	}
+	admin := groups[0].Membership
+	settings, err := service.Settings(ctx, admin)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	for index := range settings.PaymentMethods {
+		if settings.PaymentMethods[index].ID == "BANK_TRANSFER" {
+			settings.PaymentMethods[index].PaymentTarget = &domain.PaymentTarget{
+				Type: domain.PaymentTargetSEPATransfer, RecipientName: "Team Club", IBAN: "DE89370400440532013000",
+			}
+		}
+	}
+	linked, err := service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{PaymentMethods: &settings.PaymentMethods})
+	if err != nil {
+		t.Fatalf("link payment method: %v", err)
+	}
+	var accountID string
+	remaining := make([]domain.PaymentMethod, 0, len(linked.PaymentMethods)-1)
+	for _, method := range linked.PaymentMethods {
+		if method.ID == "BANK_TRANSFER" {
+			if method.ExternalAccountID == nil {
+				t.Fatal("linked payment method has no external account")
+			}
+			accountID = *method.ExternalAccountID
+			continue
+		}
+		remaining = append(remaining, method)
+	}
+	if _, err := service.UpdateSettings(ctx, session.Principal, admin, SettingsUpdate{PaymentMethods: &remaining}); err != nil {
+		t.Fatalf("remove linked payment method: %v", err)
+	}
+	reloaded, err := service.Settings(ctx, admin)
+	if err != nil {
+		t.Fatalf("reload settings: %v", err)
+	}
+	for _, method := range reloaded.PaymentMethods {
+		if method.ID == "BANK_TRANSFER" {
+			t.Fatal("removed payment method returned after reload")
+		}
+	}
+	var accountCount, linkCount int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM external_accounts WHERE group_id=? AND id=?`, admin.GroupID, accountID).Scan(&accountCount); err != nil {
+		t.Fatalf("count external account: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM group_payment_methods WHERE group_id=? AND external_account_id=?`, admin.GroupID, accountID).Scan(&linkCount); err != nil {
+		t.Fatalf("count payment method links: %v", err)
+	}
+	if accountCount != 1 || linkCount != 0 {
+		t.Fatalf("account/link count after removal = %d/%d, want 1/0", accountCount, linkCount)
 	}
 }

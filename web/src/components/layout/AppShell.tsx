@@ -18,6 +18,7 @@ import { MobileHeader } from './MobileHeader';
 import { Sidebar } from './Sidebar';
 import { SystemNavigation } from './SystemNavigation';
 import styles from './AppShell.module.css';
+import { preservePendingBookingFromHref } from '@/features/bookings/kioskDeepLink';
 
 const SIDEBAR_PREFERENCE_STORAGE_KEY = 'teamtaler:sidebar:v1';
 
@@ -40,6 +41,7 @@ function SessionExpiredRedirect({ href }: { href: string }) {
   useEffect(() => {
     let active = true;
     preservePendingNotificationFromHref(href);
+    preservePendingBookingFromHref(href);
     queueMicrotask(() => {
       if (active) setReady(true);
     });

@@ -113,7 +113,7 @@ func (s *Server) handleListPayments(response http.ResponseWriter, request *http.
 	}
 	values := request.URL.Query()
 	query := finance.PaymentQuery{
-		Search: values.Get("q"), MembershipID: values.Get("membershipId"), Method: values.Get("method"),
+		Search: values.Get("q"), PaymentID: values.Get("paymentId"), MembershipID: values.Get("membershipId"), Method: values.Get("method"),
 		Status: values.Get("status"), ReceivedFrom: values.Get("receivedFrom"), ReceivedTo: values.Get("receivedTo"),
 		AmountMin: amountMin, AmountMax: amountMax, Sort: values.Get("sort"), Direction: values.Get("direction"),
 		Cursor: values.Get("cursor"), Limit: queryLimit(request),
@@ -134,7 +134,7 @@ func (s *Server) handleCreatePayment(response http.ResponseWriter, request *http
 		return
 	}
 	var input finance.CreatePaymentInput
-	attachment, err := s.decodePaymentCommand(response, request, &input)
+	attachment, err := s.decodeAttachmentCommand(response, request, &input)
 	if err != nil {
 		writeProblem(response, request, err)
 		return
@@ -157,7 +157,7 @@ func (s *Server) handleCreateOwnPayment(response http.ResponseWriter, request *h
 		return
 	}
 	var input finance.CreateOwnPaymentInput
-	attachment, err := s.decodePaymentCommand(response, request, &input)
+	attachment, err := s.decodeAttachmentCommand(response, request, &input)
 	if err != nil {
 		writeProblem(response, request, err)
 		return
@@ -170,7 +170,7 @@ func (s *Server) handleCreateOwnPayment(response http.ResponseWriter, request *h
 	writeJSON(response, http.StatusCreated, item)
 }
 
-func (s *Server) decodePaymentCommand(response http.ResponseWriter, request *http.Request, target any) (*finance.PaymentAttachmentUpload, error) {
+func (s *Server) decodeAttachmentCommand(response http.ResponseWriter, request *http.Request, target any) (*finance.PaymentAttachmentUpload, error) {
 	mediaType, parameters, err := mime.ParseMediaType(request.Header.Get("Content-Type"))
 	if err != nil {
 		return nil, domain.ValidationError{Message: "Content-Type must be application/json or multipart/form-data"}
@@ -283,7 +283,11 @@ func (s *Server) handlePaymentAttachment(response http.ResponseWriter, request *
 		writeProblem(response, request, err)
 		return
 	}
-	file, err := os.Open(attachment.Path)
+	s.writeAttachment(response, request, attachment.FileName, attachment.MediaType, attachment.SizeBytes, attachment.Path, "payment_id", request.PathValue("paymentID"))
+}
+
+func (s *Server) writeAttachment(response http.ResponseWriter, request *http.Request, fileName, mediaType string, sizeBytes int64, path, logKey, logValue string) {
+	file, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		writeProblem(response, request, domain.ErrNotFound)
 		return
@@ -294,16 +298,16 @@ func (s *Server) handlePaymentAttachment(response http.ResponseWriter, request *
 	}
 	defer file.Close()
 	disposition := "inline"
-	if attachment.MediaType == "application/pdf" {
+	if mediaType == "application/pdf" {
 		disposition = "attachment"
 	}
-	response.Header().Set("Content-Type", attachment.MediaType)
-	response.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": attachment.FileName}))
-	response.Header().Set("Content-Length", fmt.Sprintf("%d", attachment.SizeBytes))
+	response.Header().Set("Content-Type", mediaType)
+	response.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": fileName}))
+	response.Header().Set("Content-Length", fmt.Sprintf("%d", sizeBytes))
 	response.Header().Set("Cache-Control", "private, no-store")
 	response.Header().Set("X-Content-Type-Options", "nosniff")
-	if _, err := io.Copy(response, io.LimitReader(file, attachment.SizeBytes)); err != nil {
-		s.logger.Error("stream payment attachment", "payment_id", request.PathValue("paymentID"), "error", err)
+	if _, err := io.Copy(response, io.LimitReader(file, sizeBytes)); err != nil {
+		s.logger.Error("stream attachment", logKey, logValue, "error", err)
 	}
 }
 

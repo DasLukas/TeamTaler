@@ -46,6 +46,7 @@ type UpdateCategoryInput struct {
 // owning group's minor currency unit.
 type CreateProductInput struct {
 	Name        string                    `json:"name"`
+	Barcodes    []domain.ProductBarcode   `json:"barcodes"`
 	PriceMinor  *int64                    `json:"priceMinor,omitempty"`
 	PricingMode domain.ProductPricingMode `json:"pricingMode,omitempty"`
 	SortOrder   int                       `json:"sortOrder"`
@@ -55,6 +56,7 @@ type CreateProductInput struct {
 // match the current persisted version and historical booking snapshots remain unchanged.
 type UpdateProductInput struct {
 	Name        string                    `json:"name"`
+	Barcodes    []domain.ProductBarcode   `json:"barcodes"`
 	PriceMinor  *int64                    `json:"priceMinor,omitempty"`
 	PricingMode domain.ProductPricingMode `json:"pricingMode,omitempty"`
 	Active      bool                      `json:"active"`
@@ -113,6 +115,7 @@ func (s Service) List(ctx context.Context, groupID string) ([]domain.Category, e
 		return nil, err
 	}
 	defer products.Close()
+	productIndex := make(map[string][2]int)
 	for products.Next() {
 		var item domain.Product
 		var imageKey sql.NullString
@@ -123,10 +126,34 @@ func (s Service) List(ctx context.Context, groupID string) ([]domain.Category, e
 			item.ImageURL = "/api/v1/groups/" + item.GroupID + "/images/" + imageKey.String
 		}
 		if position, ok := index[item.CategoryID]; ok {
+			item.Barcodes = []domain.ProductBarcode{}
+			productIndex[item.ID] = [2]int{position, len(categories[position].Products)}
 			categories[position].Products = append(categories[position].Products, item)
 		}
 	}
-	return categories, products.Err()
+	if err := products.Err(); err != nil {
+		products.Close()
+		return nil, err
+	}
+	if err := products.Close(); err != nil {
+		return nil, err
+	}
+	barcodes, err := s.DB.QueryContext(ctx, `SELECT product_id,format,value FROM product_barcodes WHERE group_id=? ORDER BY product_id,sort_order`, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer barcodes.Close()
+	for barcodes.Next() {
+		var productID string
+		var barcode domain.ProductBarcode
+		if err := barcodes.Scan(&productID, &barcode.Format, &barcode.Value); err != nil {
+			return nil, err
+		}
+		if location, ok := productIndex[productID]; ok {
+			categories[location[0]].Products[location[1]].Barcodes = append(categories[location[0]].Products[location[1]].Barcodes, barcode)
+		}
+	}
+	return categories, barcodes.Err()
 }
 
 // CreateCategory validates input and creates a category in membership's group.
@@ -294,6 +321,14 @@ func (s Service) CreateProduct(ctx context.Context, actor domain.Principal, memb
 		return domain.Product{}, err
 	}
 	input.PricingMode = pricingMode
+	normalizedBarcodes, err := normalizeBarcodes(input.Barcodes)
+	if err != nil {
+		return domain.Product{}, err
+	}
+	input.Barcodes = make([]domain.ProductBarcode, 0, len(normalizedBarcodes))
+	for _, barcode := range normalizedBarcodes {
+		input.Barcodes = append(input.Barcodes, barcode.ProductBarcode)
+	}
 	requestHash, err := idempotency.Hash(map[string]any{"action": "product.create", "categoryId": categoryID, "input": input})
 	if err != nil {
 		return domain.Product{}, err
@@ -327,7 +362,10 @@ func (s Service) CreateProduct(ctx context.Context, actor domain.Principal, memb
 			id, membership.GroupID, categoryID, input.Name, input.PriceMinor, input.PricingMode, input.SortOrder, now, now); err != nil {
 			return err
 		}
-		item = domain.Product{ID: id, GroupID: membership.GroupID, CategoryID: categoryID, Name: input.Name, PriceMinor: input.PriceMinor, PricingMode: input.PricingMode, Currency: currency, Active: true, SortOrder: input.SortOrder, Version: 1}
+		if err := replaceProductBarcodes(ctx, tx, membership.GroupID, id, normalizedBarcodes); err != nil {
+			return err
+		}
+		item = domain.Product{ID: id, GroupID: membership.GroupID, CategoryID: categoryID, Name: input.Name, Barcodes: input.Barcodes, PriceMinor: input.PriceMinor, PricingMode: input.PricingMode, Currency: currency, Active: true, SortOrder: input.SortOrder, Version: 1}
 		if err := audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "product.created", "product", id, input); err != nil {
 			return err
 		}
@@ -471,6 +509,17 @@ func (s Service) UpdateProduct(ctx context.Context, actor domain.Principal, memb
 		return domain.Product{}, err
 	}
 	input.PricingMode = pricingMode
+	var normalizedBarcodes []normalizedBarcode
+	if input.Barcodes != nil {
+		normalizedBarcodes, err = normalizeBarcodes(input.Barcodes)
+		if err != nil {
+			return domain.Product{}, err
+		}
+		input.Barcodes = make([]domain.ProductBarcode, 0, len(normalizedBarcodes))
+		for _, barcode := range normalizedBarcodes {
+			input.Barcodes = append(input.Barcodes, barcode.ProductBarcode)
+		}
+	}
 	now := platform.Timestamp(platform.Now())
 	var item domain.Product
 	err = storage.WithTx(ctx, s.DB, func(tx *sql.Tx) error {
@@ -495,7 +544,17 @@ func (s Service) UpdateProduct(ctx context.Context, actor domain.Principal, memb
 		if err := tx.QueryRowContext(ctx, `SELECT p.category_id,g.currency FROM products p JOIN groups g ON g.id=p.group_id WHERE p.id=? AND p.group_id=? AND p.deleted_at IS NULL`, productID, membership.GroupID).Scan(&categoryID, &currency); err != nil {
 			return err
 		}
-		item = domain.Product{ID: productID, GroupID: membership.GroupID, CategoryID: categoryID, Name: input.Name, PriceMinor: input.PriceMinor, PricingMode: input.PricingMode, Currency: currency, Active: input.Active, SortOrder: input.SortOrder, Version: input.Version + 1}
+		if input.Barcodes != nil {
+			if err := replaceProductBarcodes(ctx, tx, membership.GroupID, productID, normalizedBarcodes); err != nil {
+				return err
+			}
+		} else {
+			input.Barcodes, err = loadProductBarcodes(ctx, tx, membership.GroupID, productID)
+			if err != nil {
+				return err
+			}
+		}
+		item = domain.Product{ID: productID, GroupID: membership.GroupID, CategoryID: categoryID, Name: input.Name, Barcodes: input.Barcodes, PriceMinor: input.PriceMinor, PricingMode: input.PricingMode, Currency: currency, Active: input.Active, SortOrder: input.SortOrder, Version: input.Version + 1}
 		return audit.Record(ctx, tx, membership.GroupID, actor.UserID, membership.ID, "product.updated", "product", productID, input)
 	})
 	return item, err
@@ -539,6 +598,9 @@ func (s Service) DeleteProduct(ctx context.Context, actor domain.Principal, memb
 		}
 		now := platform.Timestamp(platform.Now())
 		retainedForHistory := bookings > 0
+		if _, err := tx.ExecContext(ctx, `DELETE FROM product_barcodes WHERE group_id=? AND product_id=?`, membership.GroupID, productID); err != nil {
+			return err
+		}
 		if retainedForHistory {
 			result, err := tx.ExecContext(ctx, `UPDATE products SET active=0,image_key=NULL,deleted_at=?,version=version+1,updated_at=?
 				WHERE id=? AND group_id=? AND version=? AND active=0 AND deleted_at IS NULL`, now, now, productID, membership.GroupID, version)

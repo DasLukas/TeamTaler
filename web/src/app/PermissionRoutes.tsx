@@ -6,13 +6,14 @@ import { useActiveGroup, useOptionalActiveGroup } from './useActiveGroup';
 import { Page } from '@/components/layout/Page';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { BookingPage } from '@/features/bookings/BookingPage';
+import { parseKioskBookingLink } from '@/features/bookings/kioskDeepLink';
 
 const StatisticsPage = lazy(() => import('@/features/statistics/StatisticsPage').then((module) => ({ default: module.StatisticsPage })));
 
 /** Redirects the active group to its highest-priority permitted workspace. */
 export function PreferredWorkspaceRedirect() {
   const { activeGroup } = useActiveGroup();
-  return <Navigate replace to={preferredMemberPath(activeGroup.membership?.effectiveGrants)} />;
+  return <Navigate replace to={preferredMemberPath(activeGroup.membership?.effectiveGrants, activeGroup.externalAccountsEnabled)} />;
 }
 
 /** Prevents group-scoped route components from mounting without an active group. */
@@ -26,7 +27,13 @@ export function GroupRequiredRoute() {
  */
 export function BookingPermissionRoute() {
   const { t } = useTranslation();
-  const { activeGroup } = useActiveGroup();
+  const { activeGroup, session } = useActiveGroup();
+  const linkedGroup = parseKioskBookingLink(window.location.href);
+  const linkedGroupId = linkedGroup?.groupId;
+  if (new URLSearchParams(window.location.search).has('group') && (!linkedGroupId || !session.groups.some((group) => group.id === linkedGroupId))) {
+    return <StatePanel kind="empty" message={t('kiosk.groupUnavailable')} title={t('booking.noAccessTitle')} />;
+  }
+  if (linkedGroupId && linkedGroupId !== activeGroup.id) return <StatePanel kind="loading" />;
   if (!canOpenBooking(activeGroup.membership?.effectiveGrants)) {
     return <StatePanel kind="empty" message={t('booking.noAccessMessage')} title={t('booking.noAccessTitle')} />;
   }

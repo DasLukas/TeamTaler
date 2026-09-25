@@ -1,0 +1,53 @@
+.composer { display: grid; gap: var(--space-4); }
+.composerHeading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
+.composerHeading strong { color: var(--color-text); font-size: var(--font-size-md); }
+.composerHeading p { margin: .2rem 0 0; color: var(--color-text-muted); font-size: var(--font-size-sm); }
+.composerHeading > span { flex: none; color: var(--color-text-muted); font-size: var(--font-size-sm); font-variant-numeric: tabular-nums; }
+.productGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+.productCard,.addCard { min-width: 0; border-radius: var(--radius-md); }
+.productCard { position: relative; display: flex; align-items: stretch; gap: var(--space-2); min-height: 128px; padding: var(--space-2); border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text); touch-action: pan-y; }
+.productCard.dragging { z-index: 1; opacity: .78; box-shadow: var(--shadow-md); }
+.productCard.unavailable { border-color: var(--color-status-danger); }
+.unavailableBadge { color: var(--color-status-danger); font-size: .7rem; font-weight: 700; }
+.productBody { display: grid; flex: 1; min-width: 0; grid-template-columns: clamp(76px, 28%, 104px) minmax(0, 1fr); align-items: center; gap: var(--space-3); }
+.productImage { display: grid; width: 100%; aspect-ratio: 1; place-items: center; overflow: hidden; border-radius: var(--radius-sm); background: var(--color-surface-muted); }
+.imageFrame { width: 100%; height: 100%; }
+.imageFrame img { width: 100%; height: 100%; object-fit: cover; }
+.imageFallback { display: grid; width: 100%; height: 100%; place-items: center; color: var(--color-brand); font-size: 1.5rem; }
+.productText { display: grid; align-self: center; flex: 1; min-width: 0; gap: .3rem; }
+.productText strong { display: -webkit-box; overflow: hidden; overflow-wrap: anywhere; line-height: 1.2; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.productText > span { color: var(--color-brand); font-weight: 700; }
+.cardActions { display: flex; flex: none; flex-direction: column; align-items: center; justify-content: space-between; align-self: stretch; width: 44px; }
+.cardActions button { cursor: pointer; }
+.cardActions button:hover,.pickerHeading button:hover { border-color: var(--color-border-brand); background: var(--color-surface-brand-subtle); }
+.pickerHeading button { display: grid; flex: none; place-items: center; width: 1.8rem; height: 1.65rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text-muted); cursor: pointer; }
+.cardActions .remove { color: #a84154; }
+.dragHandle { cursor: grab !important; touch-action: none; }
+.dragHandle:active { cursor: grabbing !important; }
+.addCard { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-2); min-height: 128px; border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text-muted); cursor: pointer; transition: border-color .15s, background .15s; }
+.addCard:hover,.addCard[aria-expanded=true] { border-color: var(--color-border-brand); background: var(--color-surface-brand-subtle); color: var(--color-text); }
+.addCard > span { display: grid; place-items: center; width: 2.6rem; height: 2.6rem; border: 1px solid var(--color-brand); border-radius: 50%; color: var(--color-brand); }
+.addCard strong { font-size: .85rem; }
+.picker { display: grid; gap: var(--space-3); padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); }
+.pickerHeading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.pickerHeading strong { font-size: .94rem; }
+.search { display: flex; align-items: center; gap: var(--space-2); min-height: 2.75rem; padding: 0 .75rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); color: var(--color-text-muted); }
+.search:focus-within { outline: 2px solid var(--color-focus-ring); outline-offset: 1px; }
+.search input { width: 100%; min-width: 0; border: 0; outline: none; background: transparent; color: var(--color-text); font: inherit; }
+.pickerGroups { display: grid; gap: var(--space-4); max-height: 19rem; overflow-y: auto; }
+.pickerGroup { display: grid; gap: var(--space-2); }
+.pickerGroup h5 { margin: 0; color: var(--color-text-muted); font-size: .78rem; letter-spacing: .03em; }
+.pickerGroup > div { display: grid; gap: .4rem; }
+.pickerGroup button { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: 3.5rem; padding: .35rem .6rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text); text-align: left; cursor: pointer; }
+.pickerGroup button:hover { border-color: var(--color-border-brand); background: var(--color-surface-brand-subtle); }
+.pickerImage { display: grid; flex: none; place-items: center; width: 2.6rem; height: 2.6rem; overflow: hidden; border-radius: .4rem; background: var(--color-surface-brand-subtle); color: var(--color-text-brand); font-weight: 750; }
+.pickerImageFrame { width: 100%; height: 100%; }
+.pickerImageFrame img { width: 100%; height: 100%; object-fit: cover; }
+.pickerProduct { display: grid; flex: 1; min-width: 0; }
+.pickerProduct strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .88rem; }
+.pickerProduct small { color: var(--color-text-muted); }
+.noMatches { margin: 0; color: var(--color-text-muted); font-size: var(--font-size-sm); }
+@media (max-width: 680px) {
+  .productGrid { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { .addCard { transition: none; } }

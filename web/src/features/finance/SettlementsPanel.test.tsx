@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AccountSummary, Settlement } from '@/api/types';
 import modalStyles from '@/components/ui/Modal.module.css';
 import tableStyles from '@/features/shared/Table.module.css';
+import { formatGermanDateRange } from '@/features/shared/dateFormat';
 import i18n from '@/i18n';
 import { SettlementsPanel } from './SettlementsPanel';
 
@@ -24,6 +25,8 @@ const history: Settlement[] = [{
   id: 'settlement-a',
   periodId: 'period-a',
   periodLabel: 'Juli 2026',
+  periodStartsAt: '2026-07-01T00:00:00Z',
+  periodClosedAt: '2026-08-01T09:00:00Z',
   membershipId: 'member-a',
   membershipStatus: 'ACTIVE',
   memberName: 'Alex Example',
@@ -89,6 +92,40 @@ describe('SettlementsPanel feature modes', () => {
     expect(await screen.findByText(i18n.t('periods.current'))).toBeVisible();
     expect(screen.getByRole('button', { name: i18n.t('periods.close') })).toBeVisible();
     expect(screen.getByRole('heading', { name: i18n.t('periods.title') })).toBeVisible();
+  });
+
+  it('prefills an editable date-only period range when closing the current period', async () => {
+    const user = userEvent.setup();
+    renderPanel(true);
+
+    await user.click(await screen.findByRole('button', { name: i18n.t('periods.close') }));
+
+    const label = screen.getByRole('textbox', { name: i18n.t('periods.label') });
+    expect(label).toHaveValue(formatGermanDateRange('2026-08-01T00:00:00Z', new Date()));
+    await user.clear(label);
+    await user.type(label, 'Individuelle Abrechnung');
+    expect(label).toHaveValue('Individuelle Abrechnung');
+  });
+
+  it('shows the immutable period range and links to exactly filtered booking activities', () => {
+    renderPanel(false);
+
+    const range = screen.getByLabelText(i18n.t('periods.rangeAccessible', { from: '01.07.2026', to: '01.08.2026' }));
+    expect(range).toHaveTextContent('01.07.2026 – 01.08.2026');
+    expect(range.querySelectorAll('time')).toHaveLength(2);
+    const link = screen.getByRole('link', { name: i18n.t('periods.showBookingsFor', { member: 'Alex Example', period: 'Juli 2026' }) });
+    const target = new URL(link.getAttribute('href') ?? '', 'https://teamtaler.example');
+    expect(target.pathname).toBe('/activities');
+    expect(JSON.parse(target.searchParams.get('tt.activities.filters') ?? '')).toEqual({
+      kind: ['BOOKING'],
+      periodId: 'period-a',
+      targetMembershipId: 'member-a',
+      occurredAt: { from: '2026-07-01', to: '2026-08-01' },
+    });
+    expect(JSON.parse(target.searchParams.get('tt.activities.periodOption') ?? '')).toEqual({
+      label: 'Juli 2026',
+      periodId: 'period-a',
+    });
   });
 
   it('renders the period-close workflow as a bottom sheet on compact screens', async () => {

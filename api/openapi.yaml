@@ -30,6 +30,7 @@ tags:
   - name: Groups
   - name: Planning
   - name: Catalog
+  - name: Kiosk
   - name: Activities
   - name: Bookings
   - name: Finance
@@ -1709,7 +1710,7 @@ paths:
       tags: [Groups]
       summary: Partially update group or membership settings
       description: |
-        `defaultTheme` and `statisticsEnabled` require `GROUP_ADMINISTRATION`. `defaultRoleId` requires `ROLE_MANAGEMENT` or
+        `defaultTheme`, `statisticsEnabled`, and `kioskEnabled` require `GROUP_ADMINISTRATION`. `defaultRoleId` requires `ROLE_MANAGEMENT` or
         `GROUP_ADMINISTRATION`. Finance, settlement-reminder, and booking fields require
         `GROUP_ADMINISTRATION` or `FINANCE_MANAGEMENT`.
       parameters:
@@ -1728,6 +1729,106 @@ paths:
               schema: { $ref: '#/components/schemas/GroupSettings' }
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/kiosk-posters:
+    get:
+      tags: [Kiosk]
+      summary: List saved poster templates for one group
+      description: Requires a current GROUP_ADMINISTRATION grant; works while the kiosk feature is disabled. Every group has one non-deletable booking-only Standard template, listed first. Older empty custom templates remain visible but cannot generate a PDF until products are assigned.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: Saved poster templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/KioskPoster' }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Kiosk]
+      summary: Save a new poster template
+      description: Custom templates require at least one active product. The name Standard is reserved for the group-owned default template.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/KioskPosterCommand' }
+      responses:
+        '201':
+          description: Created template
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KioskPoster' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/kiosk-posters/{posterId}:
+    put:
+      tags: [Kiosk]
+      summary: Replace a saved poster template
+      description: The Standard template accepts edits to its text only; send name Standard and an empty productIds array. Custom templates require at least one active product.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/KioskPosterId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/KioskPosterCommand' }
+      responses:
+        '200':
+          description: Updated template
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KioskPoster' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [Kiosk]
+      summary: Delete a saved poster template
+      description: The Standard template cannot be deleted and returns 409 Conflict.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/KioskPosterId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/RequiredIfMatch'
+      responses:
+        '204': { description: Deleted template }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/kiosk-posters/{posterId}/pdf:
+    get:
+      tags: [Kiosk]
+      summary: Generate a current A4 Scan and Go poster PDF
+      description: Requires GROUP_ADMINISTRATION and kioskEnabled. Archived or deleted template products return 409 until the template is corrected. QR URLs use the configured public origin.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/KioskPosterId'
+      responses:
+        '200':
+          description: Printable PDF with group and product QR links
+          headers:
+            Content-Disposition: { schema: { type: string } }
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/theme-preference:
     put:
       tags: [Groups]
@@ -1874,7 +1975,7 @@ paths:
           schema: { type: string, format: date }
       responses:
         '200':
-          description: Complete member-activity and finance statistics
+          description: Complete member and finance statistics, with a permission-gated external-account section
           content:
             application/json:
               schema: { $ref: '#/components/schemas/StatisticsDashboard' }
@@ -3183,6 +3284,10 @@ paths:
             type: array
             maxItems: 200
             items: { $ref: '#/components/schemas/ActivityKind' }
+        - name: periodId
+          in: query
+          description: Exact accounting-period identifier. Entries without a period never match.
+          schema: { type: string, maxLength: 200 }
         - name: targetMembershipId
           in: query
           schema: { type: string }
@@ -3570,6 +3675,10 @@ paths:
         - $ref: '#/components/parameters/TableSearch'
         - $ref: '#/components/parameters/TableCursor'
         - $ref: '#/components/parameters/SortDirection'
+        - name: paymentId
+          in: query
+          description: Exact payment identifier for a direct link within this group.
+          schema: { type: string, maxLength: 120 }
         - name: membershipId
           in: query
           schema: { type: string }
@@ -3846,6 +3955,302 @@ paths:
       responses:
         '204': { description: Payment reversed }
         '409': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/external-accounts:
+    get:
+      tags: [Finance]
+      summary: List external accounts and calculated balances
+      description: |
+        Requires `VIEW_EXTERNAL_ACCOUNTS` and the enabled group feature. The
+        representation is `private, no-store` and deliberately has no `ETag`,
+        because ledger-derived balances can change without a configuration
+        version change. `X-External-Accounts-Config-ETag` is only an optimistic
+        concurrency token for subsequent configuration mutations.
+      parameters: [{ $ref: '#/components/parameters/GroupId' }]
+      responses:
+        '200':
+          description: Versioned account collection
+          headers:
+            X-External-Accounts-Config-ETag: { $ref: '#/components/headers/ExternalAccountsConfigETag' }
+            Cache-Control: { $ref: '#/components/headers/PrivateNoStore' }
+          content: { application/json: { schema: { $ref: '#/components/schemas/ExternalAccountCollection' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Finance]
+      summary: Create an account with an optional atomic opening balance
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExternalAccountsIfMatch'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ExternalAccountCreateCommand' } } }
+      responses:
+        '201':
+          description: Updated account collection
+          headers:
+            X-External-Accounts-Config-ETag: { $ref: '#/components/headers/ExternalAccountsConfigETag' }
+            Cache-Control: { $ref: '#/components/headers/PrivateNoStore' }
+          content: { application/json: { schema: { $ref: '#/components/schemas/ExternalAccountCollection' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/external-accounts/order:
+    put:
+      tags: [Finance]
+      summary: Replace the complete external-account order
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/ExternalAccountsIfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [accountIds]
+              properties: { accountIds: { type: array, uniqueItems: true, items: { type: string } } }
+      responses:
+        '200':
+          description: Reordered collection
+          headers:
+            X-External-Accounts-Config-ETag: { $ref: '#/components/headers/ExternalAccountsConfigETag' }
+            Cache-Control: { $ref: '#/components/headers/PrivateNoStore' }
+          content: { application/json: { schema: { $ref: '#/components/schemas/ExternalAccountCollection' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/external-accounts/{externalAccountId}:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - { name: externalAccountId, in: path, required: true, schema: { type: string } }
+    patch:
+      tags: [Finance]
+      summary: Update external-account metadata
+      description: Mask values returned by reads may be sent unchanged to retain provider details.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/ExternalAccountsIfMatch'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ExternalAccountInput' } } }
+      responses:
+        '200':
+          description: Updated collection
+          headers:
+            X-External-Accounts-Config-ETag: { $ref: '#/components/headers/ExternalAccountsConfigETag' }
+            Cache-Control: { $ref: '#/components/headers/PrivateNoStore' }
+          content: { application/json: { schema: { $ref: '#/components/schemas/ExternalAccountCollection' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [Finance]
+      summary: Remove an external account from everyday management
+      description: |
+        Physically deletes an archived, unused, unlinked account. A used account
+        must also have an exact zero balance; it is then retained as a hidden
+        historical identity so immutable transactions and exports keep their
+        account references. Active or non-zero accounts return 409.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/ExternalAccountsIfMatch'
+      responses:
+        '200':
+          description: Remaining collection
+          headers:
+            X-External-Accounts-Config-ETag: { $ref: '#/components/headers/ExternalAccountsConfigETag' }
+            Cache-Control: { $ref: '#/components/headers/PrivateNoStore' }
+          content: { application/json: { schema: { $ref: '#/components/schemas/ExternalAccountCollection' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/external-accounts/{externalAccountId}/archive:
+    post:
+      tags: [Finance]
+      summary: Archive an external account and detach its payment methods
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - { name: externalAccountId, in: path, required: true, schema: { type: string } }
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/ExternalAccountsIfMatch'
+      responses:
+        '200':
+          description: Updated collection after atomically clearing current payment-method links and archiving the account
+          headers:
+            X-External-Accounts-Config-ETag: { $ref: '#/components/headers/ExternalAccountsConfigETag' }
+            Cache-Control: { $ref: '#/components/headers/PrivateNoStore' }
+          content: { application/json: { schema: { $ref: '#/components/schemas/ExternalAccountCollection' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/external-accounts/{externalAccountId}/reactivate:
+    post:
+      tags: [Finance]
+      summary: Reactivate an archived external account
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - { name: externalAccountId, in: path, required: true, schema: { type: string } }
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/ExternalAccountsIfMatch'
+      responses:
+        '200':
+          description: Updated collection
+          headers:
+            X-External-Accounts-Config-ETag: { $ref: '#/components/headers/ExternalAccountsConfigETag' }
+            Cache-Control: { $ref: '#/components/headers/PrivateNoStore' }
+          content: { application/json: { schema: { $ref: '#/components/schemas/ExternalAccountCollection' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/external-account-links:
+    get:
+      tags: [Finance]
+      summary: List payment-method account links
+      parameters: [{ $ref: '#/components/parameters/GroupId' }]
+      responses:
+        '200':
+          description: Complete versioned links
+          headers:
+            ETag: { $ref: '#/components/headers/ExternalAccountLinksETag' }
+          content: { application/json: { schema: { $ref: '#/components/schemas/ExternalAccountLinkCollection' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+    put:
+      tags: [Finance]
+      summary: Replace all payment-method account links
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/ExternalAccountsIfMatch'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ExternalAccountLinkReplaceCommand' } } }
+      responses:
+        '200':
+          description: Updated links
+          headers:
+            ETag: { $ref: '#/components/headers/ExternalAccountLinksETag' }
+          content: { application/json: { schema: { $ref: '#/components/schemas/ExternalAccountLinkCollection' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/external-account-transactions:
+    get:
+      tags: [Finance]
+      summary: Query external-account transaction history
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - { name: q, in: query, schema: { type: string, maxLength: 200 } }
+        - { name: accountId, in: query, style: form, explode: true, schema: { type: array, uniqueItems: true, maxItems: 100, items: { type: string, maxLength: 200 } } }
+        - { name: kind, in: query, style: form, explode: true, schema: { type: array, items: { $ref: '#/components/schemas/ExternalAccountTransactionKind' } } }
+        - { name: source, in: query, schema: { type: string, enum: [MANUAL, PAYMENT] } }
+        - { name: status, in: query, schema: { type: string, enum: [POSTED, REVERSED] } }
+        - name: occurredFrom
+          in: query
+          description: Inclusive lower bound as YYYY-MM-DD or RFC 3339.
+          schema:
+            oneOf:
+              - { type: string, format: date }
+              - { type: string, format: date-time }
+        - name: occurredTo
+          in: query
+          description: Date-only values include that UTC calendar day; RFC 3339 timestamps are exclusive upper bounds.
+          schema:
+            oneOf:
+              - { type: string, format: date }
+              - { type: string, format: date-time }
+        - { name: amountMin, in: query, schema: { type: integer, format: int64 } }
+        - { name: amountMax, in: query, schema: { type: integer, format: int64 } }
+        - { name: sort, in: query, schema: { type: string, enum: [occurredAt, amount, kind, actorName, status] } }
+        - { name: direction, in: query, schema: { type: string, enum: [asc, desc] } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200 } }
+      responses:
+        '200': { description: History page with optional X-Next-Cursor header, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ExternalAccountTransaction' } } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Finance]
+      summary: Record a manual external-account transaction
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/ExternalAccountTransactionCommand' } }
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [command]
+              properties:
+                command: { $ref: '#/components/schemas/ExternalAccountTransactionCommand' }
+                attachment: { type: string, format: binary, description: Optional JPEG, PNG, WebP, or PDF evidence. }
+            encoding:
+              command: { contentType: application/json }
+      responses:
+        '201': { description: Immutable transaction, content: { application/json: { schema: { $ref: '#/components/schemas/ExternalAccountTransaction' } } } }
+        '413': { $ref: '#/components/responses/Problem' }
+        '415': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/external-account-transactions/{externalTransactionId}/attachment:
+    get:
+      tags: [Finance]
+      summary: Download immutable evidence for a manual external-account transaction
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - { name: externalTransactionId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Protected transaction evidence
+          headers:
+            Content-Disposition: { schema: { type: string } }
+            X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } }
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+            application/pdf: { schema: { type: string, format: binary } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /groups/{groupId}/external-account-transactions/{externalTransactionId}/reverse:
+    post:
+      tags: [Finance]
+      summary: Reverse an unreversed manual transaction
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - { name: externalTransactionId, in: path, required: true, schema: { type: string } }
+        - $ref: '#/components/parameters/CSRFToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: false, required: [reason], properties: { reason: { type: string, minLength: 1, maxLength: 240 } } } } }
+      responses:
+        '201': { description: Reversal transaction, content: { application/json: { schema: { $ref: '#/components/schemas/ExternalAccountTransaction' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /groups/{groupId}/periods:
     get:
       tags: [Periods]
@@ -4132,6 +4537,24 @@ components:
       type: apiKey
       in: cookie
       name: teamtaler_session
+  headers:
+    ExternalAccountsConfigETag:
+      description: |
+        Strong-form configuration concurrency token, for example `"v3"`.
+        Pass it unchanged as `If-Match` on an external-account configuration
+        mutation. It is not an HTTP validator for the returned collection,
+        whose ledger-derived balances may change while this token stays stable.
+      schema:
+        type: string
+        pattern: '^"v[1-9][0-9]*"$'
+    ExternalAccountLinksETag:
+      description: Strong validator for the link-only representation and a valid configuration token for a subsequent `If-Match` request.
+      schema:
+        type: string
+        pattern: '^"v[1-9][0-9]*"$'
+    PrivateNoStore:
+      description: Prevents storage of a private balance-bearing representation.
+      schema: { type: string, const: 'private, no-store' }
   parameters:
     ImageWidth:
       name: width
@@ -4179,6 +4602,11 @@ components:
       schema: { type: string }
     ProductId:
       name: productId
+      in: path
+      required: true
+      schema: { type: string }
+    KioskPosterId:
+      name: posterId
       in: path
       required: true
       schema: { type: string }
@@ -4233,6 +4661,14 @@ components:
       in: header
       required: true
       description: Strong entity tag containing the current resource version, for example `"v3"`.
+      schema:
+        type: string
+        pattern: '^"v[1-9][0-9]*"$'
+    ExternalAccountsIfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: Configuration concurrency token returned in `X-External-Accounts-Config-ETag` or represented by the collection `version`, for example `"v3"`.
       schema:
         type: string
         pattern: '^"v[1-9][0-9]*"$'
@@ -4660,6 +5096,7 @@ components:
         - ACTIVITIES
         - PAYMENTS
         - ACCOUNT_BALANCES
+        - EXTERNAL_ACCOUNT_TRANSACTIONS
         - GROUP_SETTLEMENTS
         - SETTLEMENT_STATEMENT
         - PERSONAL_SETTLEMENTS
@@ -4688,6 +5125,7 @@ components:
             - $ref: '#/components/schemas/ActivityTableExportQuery'
             - $ref: '#/components/schemas/PaymentTableExportQuery'
             - $ref: '#/components/schemas/AccountBalanceTableExportQuery'
+            - $ref: '#/components/schemas/ExternalAccountTransactionTableExportQuery'
             - $ref: '#/components/schemas/GroupSettlementTableExportQuery'
             - $ref: '#/components/schemas/SettlementStatementTableExportQuery'
             - $ref: '#/components/schemas/PersonalSettlementTableExportQuery'
@@ -4721,6 +5159,7 @@ components:
           maxItems: 200
           uniqueItems: true
           items: { type: string, enum: [BOOKING, PAYMENT, ADJUSTMENT] }
+        periodId: { type: string, maxLength: 200 }
         targetMembershipId: { type: string }
         categoryId:
           type: array
@@ -4781,6 +5220,38 @@ components:
           items: { type: string, enum: [due, settled, credit] }
         amountMin: { $ref: '#/components/schemas/MinorUnits' }
         amountMax: { $ref: '#/components/schemas/MinorUnits' }
+    ExternalAccountTransactionTableExportQuery:
+      type: object
+      additionalProperties: false
+      properties:
+        q: { type: string, maxLength: 200 }
+        accountId:
+          type: string
+          deprecated: true
+          description: Legacy single-account export filter. Use accountIds for new clients.
+        accountIds:
+          type: array
+          uniqueItems: true
+          maxItems: 100
+          items: { type: string, maxLength: 200 }
+        kind:
+          type: array
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/ExternalAccountTransactionKind' }
+        source: { type: string, enum: [MANUAL, PAYMENT] }
+        status: { type: string, enum: [POSTED, REVERSED] }
+        occurredFrom:
+          oneOf:
+            - { type: string, format: date }
+            - { type: string, format: date-time }
+        occurredTo:
+          oneOf:
+            - { type: string, format: date }
+            - { type: string, format: date-time }
+        amountMin: { $ref: '#/components/schemas/MinorUnits' }
+        amountMax: { $ref: '#/components/schemas/MinorUnits' }
+        sort: { type: string, enum: [occurredAt, amount, kind, actorName, status] }
+        direction: { type: string, enum: [asc, desc] }
     GroupSettlementTableExportQuery:
       type: object
       additionalProperties: false
@@ -5500,12 +5971,16 @@ components:
     ActivityFilterOptions:
       type: object
       additionalProperties: false
-      required: [kinds, members, categories, products]
+      required: [kinds, periods, members, categories, products]
       properties:
         kinds:
           type: array
           description: Distinct transaction kinds present in the caller's authorized unified feed.
           items: { $ref: '#/components/schemas/ActivityKind' }
+        periods:
+          type: array
+          description: Distinct accounting periods referenced by the caller's authorized unified feed, newest first.
+          items: { $ref: '#/components/schemas/ActivityPeriodFilterOption' }
         members:
           type: array
           description: Distinct targets present in the caller's authorized unified feed.
@@ -5518,6 +5993,13 @@ components:
           type: array
           description: Distinct booking products present in the caller's authorized unified feed, including retained historical products.
           items: { $ref: '#/components/schemas/ActivityProductFilterOption' }
+    ActivityPeriodFilterOption:
+      type: object
+      additionalProperties: false
+      required: [periodId, label]
+      properties:
+        periodId: { type: string }
+        label: { type: string }
     ActivityCategoryFilterOption:
       type: object
       additionalProperties: false
@@ -5782,7 +6264,7 @@ components:
         avatarUrl: { type: string }
     Group:
       type: object
-      required: [id, name, currency, defaultTheme, statisticsEnabled, planningEnabled, membership]
+      required: [id, name, currency, defaultTheme, statisticsEnabled, kioskEnabled, externalAccountsEnabled, planningEnabled, membership]
       properties:
         id: { type: string }
         name: { type: string }
@@ -5792,6 +6274,12 @@ components:
         statisticsEnabled:
           type: boolean
           description: Whether the unified group statistics feature is enabled.
+        kioskEnabled:
+          type: boolean
+          description: Whether the group permits the Scan and Go camera and product QR links for eligible members.
+        externalAccountsEnabled:
+          type: boolean
+          description: Whether permission-scoped external-account screens and manual operations are enabled for this group.
         planningEnabled:
           type: boolean
           description: Effective group feature switch used to hide planning navigation and routes when disabled.
@@ -5799,12 +6287,23 @@ components:
     GroupSettings:
       type: object
       additionalProperties: false
-      required: [defaultTheme, statisticsEnabled, settlementsEnabled, settlementDueSoonDays, settlementOverdueRepeatDays, defaultRoleId, ownBookingReasonMode, foreignBookingReasonMode, ownPaymentReasonMode, otherPaymentReasonMode, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
+      required: [defaultTheme, statisticsEnabled, kioskEnabled, externalAccountsEnabled, externalAccountsVersion, settlementsEnabled, settlementDueSoonDays, settlementOverdueRepeatDays, defaultRoleId, ownBookingReasonMode, foreignBookingReasonMode, ownPaymentReasonMode, otherPaymentReasonMode, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
       properties:
         defaultTheme: { $ref: '#/components/schemas/ThemeId' }
         statisticsEnabled:
           type: boolean
           description: Master switch for every group-wide statistics projection.
+        kioskEnabled:
+          type: boolean
+          description: Group-administration switch for the Scan and Go camera, product QR links, and poster PDF generation.
+        externalAccountsEnabled:
+          type: boolean
+          description: Group-administration switch for external-account UI and manual account operations. Linked payments and their reversals continue posting while disabled.
+        externalAccountsVersion:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Current external-account collection version used by account and link mutation preconditions.
         settlementsEnabled:
           type: boolean
           description: Whether administrators may close the unchanged technical open period and create settlement statements.
@@ -5863,6 +6362,12 @@ components:
         statisticsEnabled:
           type: boolean
           description: Enables or disables the statistics endpoints; requires GROUP_ADMINISTRATION.
+        kioskEnabled:
+          type: boolean
+          description: Enables or disables the kiosk capability; requires GROUP_ADMINISTRATION.
+        externalAccountsEnabled:
+          type: boolean
+          description: Enables or disables external-account UI and manual operations; requires GROUP_ADMINISTRATION and does not grant account access by itself.
         settlementsEnabled:
           type: boolean
           description: Enables or disables period closing without changing periods, ledger entries, balances, or settlement history.
@@ -6062,11 +6567,14 @@ components:
     PaymentMethod:
       type: object
       additionalProperties: false
-      required: [id, label, attachmentMode, paymentTarget]
+      required: [id, label, attachmentMode, externalAccountId, paymentTarget]
       properties:
         id: { type: string, minLength: 1, maxLength: 120 }
         label: { type: string, minLength: 1, maxLength: 120 }
         attachmentMode: { $ref: '#/components/schemas/AttachmentMode' }
+        externalAccountId:
+          type: [string, 'null']
+          description: Linked external account identifier. The payment target is derived from this relationship.
         paymentTarget:
           oneOf:
             - $ref: '#/components/schemas/PaymentTarget'
@@ -6080,6 +6588,9 @@ components:
         id: { type: string, minLength: 1, maxLength: 120 }
         label: { type: string, minLength: 1, maxLength: 120 }
         attachmentMode: { $ref: '#/components/schemas/AttachmentMode' }
+        externalAccountId:
+          type: [string, 'null']
+          description: Omission preserves the relationship, null removes it, and a group-owned active account identifier replaces it.
         paymentTarget:
           oneOf:
             - $ref: '#/components/schemas/PaymentTargetUpdate'
@@ -6092,11 +6603,14 @@ components:
     TransactionSettings:
       type: object
       additionalProperties: false
-      required: [settlementsEnabled, ownBookingReasonMode, foreignBookingReasonMode, ownPaymentReasonMode, otherPaymentReasonMode, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
+      required: [settlementsEnabled, externalAccountsEnabled, ownBookingReasonMode, foreignBookingReasonMode, ownPaymentReasonMode, otherPaymentReasonMode, foreignBookingReasonRequired, ownPaymentReasonRequired, otherPaymentReasonRequired, paymentMethods, bookingReasons, paymentReasons]
       properties:
         settlementsEnabled:
           type: boolean
           description: Whether settlement-period references and actions should be shown to active members.
+        externalAccountsEnabled:
+          type: boolean
+          description: Current group feature state; this does not imply VIEW_EXTERNAL_ACCOUNTS for the requesting membership.
         ownBookingReasonMode: { $ref: '#/components/schemas/ReasonMode' }
         foreignBookingReasonMode: { $ref: '#/components/schemas/ReasonMode' }
         ownPaymentReasonMode: { $ref: '#/components/schemas/ReasonMode' }
@@ -6185,6 +6699,8 @@ components:
         - MEMBER_MANAGEMENT
         - ROLE_MANAGEMENT
         - FINANCE_MANAGEMENT
+        - VIEW_EXTERNAL_ACCOUNTS
+        - MANAGE_EXTERNAL_ACCOUNTS
         - CATALOG_MANAGEMENT
         - VIEW_MEMBER_DIRECTORY
         - VIEW_STATISTICS
@@ -6195,6 +6711,7 @@ components:
         - VOID_ANY_BOOKING
         - BOOK_FOR_OTHERS
         - BOOK_FOR_GUESTS
+        - USE_KIOSK
         - USE_PLANNING
         - CREATE_PLANNING_EVENTS
         - VIEW_PLANNING_PARTICIPANTS
@@ -6613,9 +7130,46 @@ components:
             maxItems: 1000
             uniqueItems: true
             items: { type: string, minLength: 1 }
+    KioskPosterCommand:
+      type: object
+      additionalProperties: false
+      required: [name, text, productIds]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120, description: Standard is reserved for the immutable default template name. }
+        text: { type: string, maxLength: 2000, description: Plain text printed on the poster. }
+        productIds:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          description: Group-owned product IDs in print order; non-empty for custom templates and empty for the Standard template.
+          items: { type: string, minLength: 1 }
+    KioskPoster:
+      type: object
+      additionalProperties: false
+      required: [id, name, text, productIds, version, isDefault]
+      properties:
+        id: { type: string }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        text: { type: string, maxLength: 2000 }
+        productIds:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items: { type: string, minLength: 1 }
+        version: { type: integer, format: int64, minimum: 1 }
+        isDefault: { type: boolean, description: True only for the non-deletable booking-only Standard template. }
+    ProductBarcode:
+      type: object
+      additionalProperties: false
+      required: [format, value]
+      properties:
+        format:
+          type: string
+          enum: [EAN_8, EAN_13, UPC_A, UPC_E, CODE_128]
+        value: { type: string, minLength: 1, maxLength: 80 }
     Product:
       type: object
-      required: [id, groupId, categoryId, name, pricingMode, currency, active, sortOrder, version]
+      required: [id, groupId, categoryId, name, pricingMode, currency, barcodes, active, sortOrder, version]
       properties:
         id: { type: string }
         groupId: { type: string }
@@ -6628,6 +7182,11 @@ components:
           description: FIXED exposes priceMinor; USER_DEFINED requires the booking actor to submit a unit price.
         currency: { type: string }
         imageUrl: { type: string }
+        barcodes:
+          type: array
+          maxItems: 50
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/ProductBarcode' }
         active: { type: boolean }
         sortOrder: { type: integer }
         version: { type: integer, format: int64 }
@@ -6648,6 +7207,12 @@ components:
           type: string
           enum: [FIXED, USER_DEFINED]
           default: FIXED
+        barcodes:
+          type: array
+          maxItems: 50
+          uniqueItems: true
+          description: Retail and Code 128 identifiers; unique to one product within the group.
+          items: { $ref: '#/components/schemas/ProductBarcode' }
         sortOrder:
           type: integer
           description: Accepted for backward compatibility; newly created products are appended within their category.
@@ -7229,14 +7794,50 @@ components:
           oneOf:
             - $ref: '#/components/schemas/OverdueStatisticsSnapshot'
             - type: 'null'
+    ExternalAccountStatisticsPoint:
+      type: object
+      additionalProperties: false
+      required: [periodStart, closingBalanceMinor]
+      properties:
+        periodStart: { type: string, format: date-time }
+        closingBalanceMinor: { $ref: '#/components/schemas/MinorUnits' }
+    ExternalAccountStatisticsAccount:
+      type: object
+      additionalProperties: false
+      required: [id, name, type, status, openingBalanceMinor, closingBalanceMinor, series]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        type: { $ref: '#/components/schemas/ExternalAccountType' }
+        status: { $ref: '#/components/schemas/ExternalAccountStatus' }
+        openingBalanceMinor: { $ref: '#/components/schemas/MinorUnits' }
+        closingBalanceMinor: { $ref: '#/components/schemas/MinorUnits' }
+        series:
+          type: array
+          maxItems: 60
+          items: { $ref: '#/components/schemas/ExternalAccountStatisticsPoint' }
+    ExternalAccountsStatisticsSection:
+      type: object
+      additionalProperties: false
+      required: [currency, accounts]
+      properties:
+        currency: { type: string }
+        accounts:
+          type: array
+          items: { $ref: '#/components/schemas/ExternalAccountStatisticsAccount' }
     StatisticsDashboard:
       type: object
       additionalProperties: false
-      required: [meta, members, finance]
+      required: [meta, members, finance, externalAccounts]
       properties:
         meta: { $ref: '#/components/schemas/StatisticsMeta' }
         members: { $ref: '#/components/schemas/MemberStatisticsSection' }
         finance: { $ref: '#/components/schemas/FinanceStatisticsSection' }
+        externalAccounts:
+          description: Null unless external accounts are enabled and the viewer can view them.
+          oneOf:
+            - $ref: '#/components/schemas/ExternalAccountsStatisticsSection'
+            - type: 'null'
     Dashboard:
       type: object
       required: [account, openPeriod, recentBookings, unreadNotificationCount, planningEnabled]
@@ -7278,6 +7879,200 @@ components:
         receivedAt: { type: string, format: date-time }
         method: { type: string, minLength: 1, maxLength: 120, description: Stable identifier of a currently configured group payment method. }
         reference: { type: string, maxLength: 120, description: Required only when self-service payment reasons are enabled for the group. }
+    ExternalAccountType:
+      type: string
+      enum: [CASH, BANK, PAYPAL, OTHER]
+    ExternalAccountStatus:
+      type: string
+      enum: [ACTIVE, ARCHIVED]
+    ExternalAccountInput:
+      type: object
+      additionalProperties: false
+      required: [name, type]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        type: { $ref: '#/components/schemas/ExternalAccountType' }
+        paypalMeHandle: { type: string, minLength: 1, maxLength: 20, description: PayPal.Me handle on writes; the fixed mask `••••` preserves the current value on update. }
+        sepaRecipientName: { type: string, maxLength: 70, description: Recipient on writes; the fixed mask preserves the current value on update. }
+        sepaIban:
+          description: Checksum-valid 15-34 character IBAN, or the returned last-four mask to preserve the current value.
+          oneOf:
+            - { type: string, minLength: 15, maxLength: 34 }
+            - { type: string, pattern: '^••••[A-Z0-9]{4}$' }
+        sepaBic:
+          description: Optional 8- or 11-character BIC, or the fixed mask to preserve the current value.
+          oneOf:
+            - { type: string, minLength: 8, maxLength: 8 }
+            - { type: string, minLength: 11, maxLength: 11 }
+            - { type: string, const: '••••' }
+    ExternalAccountCreateCommand:
+      type: object
+      additionalProperties: false
+      required: [name, type]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        type: { $ref: '#/components/schemas/ExternalAccountType' }
+        paypalMeHandle: { type: string, minLength: 1, maxLength: 20, description: PayPal.Me handle on writes. }
+        sepaRecipientName: { type: string, maxLength: 70 }
+        sepaIban: { type: string, minLength: 15, maxLength: 34, description: Checksum-valid IBAN on writes. }
+        sepaBic:
+          description: Optional BIC according to the SEPA validation rules.
+          oneOf:
+            - { type: string, minLength: 8, maxLength: 8 }
+            - { type: string, minLength: 11, maxLength: 11 }
+        openingBalance:
+          type: object
+          additionalProperties: false
+          required: [amountMinor, occurredAt, reason]
+          properties:
+            amountMinor: { type: integer, format: int64, minimum: -100000000000000, maximum: 100000000000000, not: { const: 0 }, description: Signed, non-zero initial balance delta. }
+            occurredAt:
+              type: string
+              description: Business date as YYYY-MM-DD or an RFC 3339 timestamp.
+            reason: { type: string, minLength: 1, maxLength: 120 }
+            reference: { type: string, maxLength: 120 }
+            note: { type: string, maxLength: 2000 }
+    ExternalAccount:
+      type: object
+      additionalProperties: false
+      required: [id, groupId, name, type, status, sortOrder, balanceMinor, currency, version, createdAt, updatedAt, linkedPaymentMethodIds, hasTransactions, canChangeType, canDelete, canArchive, canReactivate]
+      properties:
+        id: { type: string }
+        groupId: { type: string }
+        name: { type: string }
+        type: { $ref: '#/components/schemas/ExternalAccountType' }
+        status: { $ref: '#/components/schemas/ExternalAccountStatus' }
+        sortOrder: { type: integer }
+        paypalMeHandle: { type: string, description: Masked; never contains the stored handle. }
+        sepaRecipientName: { type: string, description: Masked; never contains the stored recipient. }
+        sepaIban: { type: string, description: Masked except for the last four characters. }
+        sepaBic: { type: string, description: Masked; never contains the stored BIC. }
+        balanceMinor: { $ref: '#/components/schemas/MinorUnits' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        version: { type: integer, format: int64, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        hasTransactions: { type: boolean }
+        canChangeType: { type: boolean }
+        canDelete: { type: boolean, description: True for an archived, unlinked account that is unused or has an exact zero balance. }
+        canArchive: { type: boolean, description: True for every active account; archiving atomically clears its current payment-method links. }
+        canReactivate: { type: boolean }
+        linkedPaymentMethodIds: { type: array, items: { type: string } }
+    ExternalAccountCollection:
+      type: object
+      additionalProperties: false
+      required: [items, version]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ExternalAccount' } }
+        version: { type: integer, format: int64, minimum: 1, description: Configuration concurrency version; ledger-derived balance changes do not increment it. }
+    ExternalAccountLinkCollection:
+      type: object
+      additionalProperties: false
+      required: [links, version]
+      properties:
+        links:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [paymentMethodId, externalAccountId]
+            properties:
+              paymentMethodId: { type: string }
+              externalAccountId: { type: [string, 'null'] }
+        version: { type: integer, format: int64, minimum: 1, description: Collection version returned by reads and successful replacements. }
+    ExternalAccountLinkReplaceCommand:
+      type: object
+      additionalProperties: false
+      required: [links]
+      properties:
+        links:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [paymentMethodId, externalAccountId]
+            properties:
+              paymentMethodId: { type: string }
+              externalAccountId: { type: [string, 'null'] }
+    ExternalAccountTransactionKind:
+      type: string
+      description: ADJUSTMENT remains available only when reading historical transactions.
+      enum: [PAYMENT, OPENING_BALANCE, INCOME, EXPENSE, TRANSFER, ADJUSTMENT, REVERSAL]
+    ExternalAccountTransactionCommand:
+      type: object
+      additionalProperties: false
+      required: [kind, amountMinor, occurredAt, reason]
+      properties:
+        kind: { type: string, enum: [INCOME, EXPENSE, TRANSFER] }
+        sourceAccountId: { type: string, description: Required for expenses and transfers. }
+        destinationAccountId: { type: string, description: Required for income and transfers. }
+        amountMinor: { type: integer, format: int64, minimum: 1, maximum: 100000000000000 }
+        occurredAt:
+          type: string
+          description: Business date as YYYY-MM-DD or an RFC 3339 timestamp.
+        reason: { type: string, minLength: 1, maxLength: 120 }
+        reference: { type: string, maxLength: 120 }
+        note: { type: string, maxLength: 2000 }
+    ExternalAccountReference:
+      type: object
+      additionalProperties: false
+      required: [id, name, type]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        type: { $ref: '#/components/schemas/ExternalAccountType' }
+    ExternalAccountTransactionActor:
+      type: object
+      additionalProperties: false
+      required: [id, displayName]
+      properties:
+        id: { type: string }
+        displayName: { type: string }
+        avatarUrl: { type: string, description: Protected profile image URL when an avatar is available. }
+    ExternalAccountTransactionImpact:
+      type: object
+      additionalProperties: false
+      required: [account, amountMinor]
+      properties:
+        account: { $ref: '#/components/schemas/ExternalAccountReference' }
+        amountMinor: { $ref: '#/components/schemas/MinorUnits' }
+    ExternalAccountTransaction:
+      type: object
+      additionalProperties: false
+      required: [id, groupId, kind, primaryAccountId, amountMinor, currency, bookedAt, occurredAt, createdByMembershipId, createdAt, source, actor, impacts, status, canReverse]
+      properties:
+        id: { type: string }
+        groupId: { type: string }
+        kind: { $ref: '#/components/schemas/ExternalAccountTransactionKind' }
+        primaryAccountId: { type: string }
+        counterpartyAccountId: { type: string }
+        paymentId: { type: string }
+        amountMinor: { $ref: '#/components/schemas/MinorUnits' }
+        currency: { type: string }
+        bookedAt: { type: string, format: date-time }
+        occurredAt: { type: string, format: date-time }
+        reason: { type: string }
+        reference: { type: string }
+        note: { type: string }
+        attachment: { $ref: '#/components/schemas/PaymentAttachmentSummary' }
+        reversalOf: { type: string }
+        correctionOf: { type: string, description: Legacy correction reference; no new corrections can be posted., deprecated: true }
+        reversalOfId: { type: string, description: Compatibility projection of reversalOf. }
+        replacementForId: { type: string, description: Compatibility projection of the legacy correction reference., deprecated: true }
+        reversedById: { type: string, description: Reversal created for this original transaction. }
+        replacementId: { type: string, description: Legacy replacement reference, when present., deprecated: true }
+        createdByMembershipId: { type: string }
+        createdAt: { type: string, format: date-time }
+        source: { type: string, enum: [MANUAL, PAYMENT] }
+        sourceAccount: { $ref: '#/components/schemas/ExternalAccountReference' }
+        destinationAccount: { $ref: '#/components/schemas/ExternalAccountReference' }
+        actor: { $ref: '#/components/schemas/ExternalAccountTransactionActor' }
+        status: { type: string, enum: [POSTED, REVERSED] }
+        canReverse: { type: boolean }
+        impacts:
+          type: array
+          description: Signed balance changes for every affected external account.
+          items: { $ref: '#/components/schemas/ExternalAccountTransactionImpact' }
     PaymentAttachmentSummary:
       type: object
       additionalProperties: false
@@ -7449,7 +8244,9 @@ components:
         type: { type: string, format: uri }
         title: { type: string }
         status: { type: integer, minimum: 400, maximum: 599 }
-        detail: { type: string }
+        detail:
+          type: string
+          description: Product barcode validation and ownership errors identify the submitted item with a zero-based `barcodes[n].value` or `barcode[n]` reference.
         instance: { type: string }
         existingMembershipId:
           type: string
