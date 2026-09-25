@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/Button';
 import { Toggle } from '@/components/ui/Toggle';
 import { downloadExportBlob } from '@/features/shared/exportDownload';
 import { PosterProductComposer } from './PosterProductComposer';
+import { groupSettingsMutationScope } from './groupSettingsMutation';
 import styles from './KioskSettingsSection.module.css';
 
 /** Inputs for the group-administrator kiosk configuration. */
@@ -68,6 +69,7 @@ export function KioskSettingsSection({ groupId, settings }: KioskSettingsSection
     }));
   };
   const toggleMutation = useMutation({
+    scope: groupSettingsMutationScope(groupId),
     mutationFn: (enabled: boolean) => api.updateGroupSettings(groupId, { kioskEnabled: enabled }),
     onSuccess: (persisted) => {
       queryClient.setQueryData<GroupSettings>(['group-settings', groupId], persisted);
@@ -115,7 +117,7 @@ export function KioskSettingsSection({ groupId, settings }: KioskSettingsSection
         {posters.map((poster) => <button aria-pressed={selected?.id === poster.id} className={selected?.id === poster.id ? styles.selected : ''} key={poster.id} onClick={() => selectPoster(poster)} type="button">{poster.name}</button>)}
       </div>
       {draft !== null || selected ? <form className={styles.form} onSubmit={(event) => { event.preventDefault(); if (!name.trim() || needsProducts || reservedName) return; saveMutation.mutate({ name: isDefault ? 'Standard' : name.trim(), text: text.trim(), productIds: isDefault ? [] : productIds }); }}>
-        <label>{t('kiosk.posterName')}<input maxLength={120} onChange={(event) => updateDraft({ name: event.target.value })} readOnly={isDefault} required value={name} /></label>
+        <label><span className={styles.requiredLabel}>{t('kiosk.posterName')}</span><input aria-label={t('kiosk.posterName')} maxLength={120} onChange={(event) => updateDraft({ name: event.target.value })} readOnly={isDefault} required value={name} /></label>
         {reservedName ? <p className={styles.warning}>{t('kiosk.posterReservedName')}</p> : null}
         <label>{t('kiosk.posterText')}<textarea maxLength={2000} onChange={(event) => updateDraft({ text: event.target.value })} rows={3} value={text} /></label>
         {isDefault ? <p className={styles.standardHint}>{t('kiosk.standardPosterHint')}</p> : <><PosterProductComposer categories={categoriesQuery.data ?? []} onChange={(ids) => updateDraft({ productIds: ids })} productIds={productIds} />{needsProducts ? <p className={styles.saveHint}>{t('kiosk.posterNeedsProducts')}</p> : null}</>}

@@ -224,17 +224,6 @@
   justify-content: flex-end;
 }
 
-.formFooter {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-}
-
-.feedback {
-  min-width: 0;
-}
-
 .error,
 .success {
   font-size: var(--font-size-sm);
@@ -277,11 +266,6 @@
   .reasonModeControl {
     width: 100%;
     min-width: 0;
-  }
-
-  .formFooter {
-    align-items: stretch;
-    flex-direction: column;
   }
 
   .actions > * {

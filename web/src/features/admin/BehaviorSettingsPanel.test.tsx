@@ -157,7 +157,7 @@ describe('BehaviorSettingsPanel', () => {
     const toggle = screen.getByRole('switch', { name: i18n.t('behaviorSettings.settlementsToggle') });
     expect(toggle).not.toBeChecked();
     await user.click(toggle);
-    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
+    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.saveSection', { section: i18n.t('behaviorSettings.settlementsTitle') }) }));
 
     await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { settlementsEnabled: true }));
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['booking-context', 'group-a'] });
@@ -192,9 +192,44 @@ describe('BehaviorSettingsPanel', () => {
     await user.type(screen.getByLabelText(i18n.t('behaviorSettings.settlementDueSoonDays')), '5');
     await user.clear(screen.getByLabelText(i18n.t('behaviorSettings.settlementOverdueRepeatDays')));
     await user.type(screen.getByLabelText(i18n.t('behaviorSettings.settlementOverdueRepeatDays')), '10');
-    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
+    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.saveSection', { section: i18n.t('behaviorSettings.settlementsTitle') }) }));
 
     await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { settlementDueSoonDays: 5, settlementOverdueRepeatDays: 10 }));
+  });
+
+  it('saves only one card and preserves an unsaved draft in another card', async () => {
+    const user = userEvent.setup();
+    apiMock.updateGroupSettings.mockImplementation(async (_groupId: string, update: GroupSettingsUpdateInput) => ({ ...settings, ...update }));
+    renderPanel();
+
+    const cash = await screen.findByDisplayValue('Bar');
+    await user.type(cash, 'kasse');
+    await user.click(screen.getByRole('switch', { name: i18n.t('behaviorSettings.settlementsToggle') }));
+    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.saveSection', { section: i18n.t('behaviorSettings.settlementsTitle') }) }));
+
+    await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { settlementsEnabled: true }));
+    expect(apiMock.updateGroupSettings).toHaveBeenCalledTimes(1);
+    expect(screen.getByDisplayValue('Barkasse')).toBeVisible();
+    expect(screen.getByRole('button', { name: i18n.t('behaviorSettings.saveSection', { section: i18n.t('behaviorSettings.paymentMethods') }) })).toBeEnabled();
+  });
+
+  it('saves booking suggestions independently of an unsaved payment suggestion', async () => {
+    const user = userEvent.setup();
+    apiMock.updateGroupSettings.mockImplementation(async (_groupId: string, update: GroupSettingsUpdateInput) => ({ ...settings, ...update }));
+    renderPanel();
+    const booking = await screen.findByRole('region', { name: i18n.t('behaviorSettings.bookingReasons') });
+    const payment = screen.getByRole('region', { name: i18n.t('behaviorSettings.paymentReasons') });
+
+    await user.type(within(booking).getByRole('textbox', { name: i18n.t('behaviorSettings.addBookingReason') }), 'Training');
+    await user.click(within(booking).getByRole('button', { name: i18n.t('behaviorSettings.addBookingReason') }));
+    await user.type(within(payment).getByRole('textbox', { name: i18n.t('behaviorSettings.addPaymentReason') }), 'Cash desk');
+    await user.click(within(payment).getByRole('button', { name: i18n.t('behaviorSettings.addPaymentReason') }));
+    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.saveSection', { section: i18n.t('behaviorSettings.bookingReasons') }) }));
+
+    await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { bookingReasons: expect.arrayContaining([expect.objectContaining({ label: 'Training' })]) }));
+    expect(apiMock.updateGroupSettings).toHaveBeenCalledTimes(1);
+    expect(within(payment).getByDisplayValue('Cash desk')).toBeVisible();
+    expect(screen.getByRole('button', { name: i18n.t('behaviorSettings.saveSection', { section: i18n.t('behaviorSettings.paymentReasons') }) })).toBeEnabled();
   });
 
   it('persists the statistics master switch and clears the cached statistics snapshot', async () => {
@@ -235,7 +270,7 @@ describe('BehaviorSettingsPanel', () => {
     const featureSwitch = screen.getByRole('switch', { name: i18n.t('behaviorSettings.externalAccountsToggle') });
     expect(featureSwitch).toBeDisabled();
     expect(screen.getByText(i18n.t('behaviorSettings.saveBeforeSwitchingExternalAccounts'))).toBeVisible();
-    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
+    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.saveSection', { section: i18n.t('behaviorSettings.paymentMethods') }) }));
 
     await waitFor(() => expect(screen.getByRole('switch', { name: i18n.t('behaviorSettings.externalAccountsToggle') })).toBeEnabled());
     expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { paymentMethods: expect.arrayContaining([expect.objectContaining({ id: 'CASH', label: 'Barkasse' })]) });
@@ -367,7 +402,7 @@ describe('BehaviorSettingsPanel', () => {
     await user.click(targets[2]!);
     await user.click(screen.getByRole('option', { name: i18n.t('behaviorSettings.paymentTargetPaypal') }));
     await user.type(screen.getByLabelText(i18n.t('behaviorSettings.paypalMeHandle')), 'Club123');
-    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
+    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.saveSection', { section: i18n.t('behaviorSettings.paymentMethods') }) }));
 
     await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalled());
     const update = apiMock.updateGroupSettings.mock.calls[0]?.[1] as GroupSettingsUpdateInput;
@@ -422,30 +457,22 @@ describe('BehaviorSettingsPanel', () => {
     await waitFor(() => expect(screen.getByRole('switch', { name: i18n.t('behaviorSettings.statisticsToggle') })).not.toBeChecked());
   });
 
-  it('confirms before staging settlement deactivation', async () => {
+  it('confirms settlement deactivation when saving its card', async () => {
     const user = userEvent.setup();
     apiMock.getGroupSettings.mockResolvedValue({ ...settings, settlementsEnabled: true });
     apiMock.updateGroupSettings.mockResolvedValue({ ...settings, settlementsEnabled: false });
     renderPanel();
 
     const toggle = await screen.findByRole('switch', { name: i18n.t('behaviorSettings.settlementsToggle') });
-    expect(toggle).toBeChecked();
     await user.click(toggle);
-
-    const dialog = screen.getByRole('dialog', { name: i18n.t('behaviorSettings.settlementsDisableTitle') });
-    expect(dialog).toBeVisible();
-    expect(toggle).toBeChecked();
-    expect(apiMock.updateGroupSettings).not.toHaveBeenCalled();
-
-    await user.click(within(dialog).getByRole('button', { name: i18n.t('common.cancel') }));
-    expect(screen.queryByRole('dialog', { name: i18n.t('behaviorSettings.settlementsDisableTitle') })).not.toBeInTheDocument();
-    expect(toggle).toBeChecked();
-
-    await user.click(toggle);
-    await user.click(within(screen.getByRole('dialog', { name: i18n.t('behaviorSettings.settlementsDisableTitle') })).getByRole('button', { name: i18n.t('behaviorSettings.settlementsDisable') }));
     expect(toggle).not.toBeChecked();
-
-    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
+    expect(apiMock.updateGroupSettings).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.saveSection', { section: i18n.t('behaviorSettings.settlementsTitle') }) }));
+    const dialog = screen.getByRole('dialog', { name: i18n.t('behaviorSettings.settlementsDisableTitle') });
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('common.cancel') }));
+    expect(apiMock.updateGroupSettings).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.saveSection', { section: i18n.t('behaviorSettings.settlementsTitle') }) }));
+    await user.click(within(screen.getByRole('dialog', { name: i18n.t('behaviorSettings.settlementsDisableTitle') })).getByRole('button', { name: i18n.t('behaviorSettings.settlementsDisable') }));
     await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { settlementsEnabled: false }));
   });
 
@@ -457,7 +484,6 @@ describe('BehaviorSettingsPanel', () => {
     const ownBookingGroup = await screen.findByRole('group', { name: i18n.t('behaviorSettings.ownBookingReason') });
     expect(within(ownBookingGroup).getByRole('radio', { name: i18n.t('behaviorSettings.reasonModeOff') })).toBeChecked();
     await user.click(within(ownBookingGroup).getByRole('radio', { name: i18n.t('behaviorSettings.reasonModeOptional') }));
-    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
 
     await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', { ownBookingReasonMode: 'OPTIONAL' }));
   });
@@ -527,7 +553,7 @@ describe('BehaviorSettingsPanel', () => {
     expect(screen.queryByRole('region', { name: i18n.t('behaviorSettings.defaultRoleTitle') })).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: i18n.t('behaviorSettings.statisticsTitle') })).not.toBeInTheDocument();
     expect(apiMock.getRoles).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') })).toBeVisible();
+    expect(screen.getByRole('button', { name: i18n.t('behaviorSettings.saveSection', { section: i18n.t('behaviorSettings.paymentMethods') }) })).toBeVisible();
   });
 
   it('orders finance settings as payment methods, external accounts, settlements, and statistics', async () => {
@@ -580,7 +606,7 @@ describe('BehaviorSettingsPanel', () => {
     await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.moveUp', { name: 'PayPal' }) }));
     await user.type(screen.getByRole('textbox', { name: i18n.t('behaviorSettings.addPaymentMethod') }), 'Karte');
     await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.addPaymentMethod') }));
-    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
+    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.saveSection', { section: i18n.t('behaviorSettings.paymentMethods') }) }));
 
     await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', {
       paymentMethods: [
@@ -629,7 +655,7 @@ describe('BehaviorSettingsPanel', () => {
     expect(dialog).toHaveTextContent('„Karte“ ist mit einem externen Konto verknüpft.');
     expect(dialog).toHaveTextContent('Beim Löschen wird die Zahlungsart sofort entkoppelt.');
     expect(screen.getByDisplayValue('Karte')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') })).toBeDisabled();
+    expect(screen.getByRole('button', { name: i18n.t('behaviorSettings.saveSection', { section: i18n.t('behaviorSettings.paymentMethods') }) })).toBeDisabled();
 
     await user.click(within(dialog).getByRole('button', { name: i18n.t('common.cancel') }));
     expect(screen.getByDisplayValue('Karte')).toBeInTheDocument();
@@ -640,7 +666,7 @@ describe('BehaviorSettingsPanel', () => {
     const update = apiMock.updateGroupSettings.mock.calls[0]?.[1] as GroupSettingsUpdateInput;
     expect(update.paymentMethods?.map((method) => method.id)).not.toContain('CARD');
     await waitFor(() => expect(screen.queryByDisplayValue('Karte')).not.toBeInTheDocument());
-    expect(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') })).toBeDisabled();
+    expect(screen.getByRole('button', { name: i18n.t('behaviorSettings.saveSection', { section: i18n.t('behaviorSettings.paymentMethods') }) })).toBeDisabled();
     if (externalAccountsEnabled) {
       const accountRow = screen.getByText('Club account').closest('li');
       expect(accountRow).not.toBeNull();
@@ -675,7 +701,7 @@ describe('BehaviorSettingsPanel', () => {
     await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledOnce());
     expect((apiMock.updateGroupSettings.mock.calls[0]?.[1] as GroupSettingsUpdateInput).paymentMethods?.map((method) => method.id)).not.toContain('OTHER');
     await waitFor(() => expect(screen.queryByDisplayValue('Sonstige')).not.toBeInTheDocument());
-    expect(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') })).toBeDisabled();
+    expect(screen.getByRole('button', { name: i18n.t('behaviorSettings.saveSection', { section: i18n.t('behaviorSettings.paymentMethods') }) })).toBeDisabled();
   });
 
   it('keeps a payment method visible and reports a failed immediate deletion', async () => {
@@ -721,7 +747,7 @@ describe('BehaviorSettingsPanel', () => {
     ];
     modeOptions.forEach((option) => expect(option.querySelector('svg')).toBeInTheDocument());
     await user.click(modeOptions[2]);
-    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
+    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.saveSection', { section: i18n.t('behaviorSettings.paymentMethods') }) }));
 
     await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', {
       paymentMethods: expect.arrayContaining([{ id: 'CASH', label: 'Bar', attachmentMode: 'REQUIRED', paymentTarget: null }]),
@@ -738,11 +764,11 @@ describe('BehaviorSettingsPanel', () => {
     await user.click(screen.getByRole('option', { name: i18n.t('behaviorSettings.paymentTargetPaypal') }));
     const handle = screen.getByLabelText(i18n.t('behaviorSettings.paypalMeHandle'));
     await user.type(handle, 'https://paypal.me/TeamTaler42');
-    expect(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') })).toBeEnabled();
+    expect(screen.getByRole('button', { name: i18n.t('behaviorSettings.saveSection', { section: i18n.t('behaviorSettings.paymentMethods') }) })).toBeEnabled();
     await user.tab();
     expect(handle).toHaveValue('TeamTaler42');
     expect(screen.getByRole('link', { name: 'https://paypal.me/TeamTaler42' })).toBeVisible();
-    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
+    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.saveSection', { section: i18n.t('behaviorSettings.paymentMethods') }) }));
 
     await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', {
       paymentMethods: expect.arrayContaining([
@@ -783,7 +809,7 @@ describe('BehaviorSettingsPanel', () => {
     const targets = await screen.findAllByRole('combobox', { name: i18n.t('behaviorSettings.paymentTargetLabel') });
     await user.click(targets[0]);
     await user.click(screen.getByRole('option', { name: i18n.t('behaviorSettings.paymentTargetSepa') }));
-    const save = screen.getByRole('button', { name: i18n.t('behaviorSettings.save') });
+    const save = screen.getByRole('button', { name: i18n.t('behaviorSettings.saveSection', { section: i18n.t('behaviorSettings.paymentMethods') }) });
     expect(save).toBeDisabled();
     await user.type(screen.getByLabelText(i18n.t('behaviorSettings.sepaRecipient')), 'TeamTaler Club');
     await user.type(screen.getByLabelText(i18n.t('behaviorSettings.sepaIban')), 'de89 3704 0044 0532 0130 00');
@@ -813,7 +839,7 @@ describe('BehaviorSettingsPanel', () => {
     const cash = screen.getByDisplayValue('Bar');
     await user.clear(cash);
     await user.type(cash, 'Kasse');
-    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.save') }));
+    await user.click(screen.getByRole('button', { name: i18n.t('behaviorSettings.saveSection', { section: i18n.t('behaviorSettings.paymentMethods') }) }));
     await waitFor(() => expect(apiMock.updateGroupSettings).toHaveBeenCalledWith('group-a', {
       paymentMethods: expect.arrayContaining([expect.objectContaining({ id: 'CASH', label: 'Kasse' })]),
     }));

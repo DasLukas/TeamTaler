@@ -7,13 +7,14 @@ import Star from 'lucide-react/dist/esm/icons/star';
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
 import UsersRound from 'lucide-react/dist/esm/icons/users-round';
 import X from 'lucide-react/dist/esm/icons/x';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import type { Group, PermissionDefinition, PermissionKey, Role, RoleInput } from '@/api/types';
 import { can } from '@/app/permissions';
 import { useActiveGroup } from '@/app/useActiveGroup';
 import { Button } from '@/components/ui/Button';
+import { ConfirmationDialog } from '@/components/ui/ConfirmationDialog';
 import { Field, TextInput } from '@/components/ui/FormField';
 import { StatePanel } from '@/components/ui/StatePanel';
 import { PermissionEditor } from './PermissionEditor';
@@ -30,12 +31,13 @@ interface RoleEditorProps {
   onDuplicate?: () => void;
   onSaved: (role: Role) => void;
   onDeleted: () => void;
+  onDirtyChange: (dirty: boolean) => void;
   isDefaultRole?: boolean;
 }
 
 const ADMIN_CORE_PERMISSIONS: readonly PermissionKey[] = ['GROUP_ADMINISTRATION', 'MEMBER_MANAGEMENT', 'ROLE_MANAGEMENT'];
 
-function RoleEditor({ groupId, featureAvailability, definitions, role, initial, canManageProtectedRoles, onDuplicate, onSaved, onDeleted, isDefaultRole = false }: RoleEditorProps) {
+function RoleEditor({ groupId, featureAvailability, definitions, role, initial, canManageProtectedRoles, onDuplicate, onSaved, onDeleted, onDirtyChange, isDefaultRole = false }: RoleEditorProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [name, setName] = useState(initial?.name ?? role?.name ?? '');
@@ -52,6 +54,7 @@ function RoleEditor({ groupId, featureAvailability, definitions, role, initial, 
   const changed = name.trim() !== (role?.name ?? initial?.name ?? '')
     || description.trim() !== baselineDescription
     || JSON.stringify(grants.map((grant) => grant.permission).sort()) !== JSON.stringify((role?.grants ?? initial?.grants ?? []).map((grant) => grant.permission).sort());
+  useEffect(() => onDirtyChange(changed), [changed, onDirtyChange]);
 
   const invalidateRoleData = async () => {
     await Promise.all([
@@ -136,6 +139,8 @@ export function RightsPanel() {
   const settingsQuery = useQuery({ queryKey: ['group-settings', activeGroupId], queryFn: () => api.getGroupSettings(activeGroupId), enabled: canManageGroup });
   const [selectedRoleId, setSelectedRoleId] = useState('');
   const [newRoleSeed, setNewRoleSeed] = useState<RoleInput | null>(null);
+  const [roleDirty, setRoleDirty] = useState(false);
+  const [pendingSelection, setPendingSelection] = useState<{ roleId?: string; seed?: Role } | null>(null);
   const roles = rolesQuery.data ?? [];
   const selectedRole = roles.find((role) => role.id === selectedRoleId) ?? roles[0];
 
@@ -143,7 +148,9 @@ export function RightsPanel() {
   if (!rolesQuery.data || !definitionsQuery.data || (canManageGroup && !settingsQuery.data)) return <StatePanel kind="error" message={t('roleManagement.loadError')} />;
 
   const startCreate = (seed?: Role) => {
+    if (roleDirty) { setPendingSelection({ seed }); return; }
     setSelectedRoleId('');
+    setRoleDirty(false);
     setNewRoleSeed({
       name: seed ? t('roleManagement.copyName', { name: roleDisplayName(seed) }) : '',
       description: seed ? roleDisplayDescription(seed) : undefined,
@@ -151,7 +158,10 @@ export function RightsPanel() {
     });
   };
   const selectRole = (roleId: string) => {
+    if (!newRoleSeed && selectedRole?.id === roleId) return;
+    if (roleDirty) { setPendingSelection({ roleId }); return; }
     setNewRoleSeed(null);
+    setRoleDirty(false);
     setSelectedRoleId(roleId);
   };
 
@@ -169,12 +179,13 @@ export function RightsPanel() {
         </aside>
         <div className={styles.roleDetail}>
           {newRoleSeed ? (
-            <RoleEditor canManageProtectedRoles={canManageGroup} definitions={definitionsQuery.data ?? []} featureAvailability={activeGroup} groupId={activeGroupId} initial={newRoleSeed} key={`new-${newRoleSeed.name}`} onDeleted={() => undefined} onSaved={(saved) => { setNewRoleSeed(null); setSelectedRoleId(saved.id); }} />
+            <RoleEditor canManageProtectedRoles={canManageGroup} definitions={definitionsQuery.data ?? []} featureAvailability={activeGroup} groupId={activeGroupId} initial={newRoleSeed} key={`new-${newRoleSeed.name}`} onDeleted={() => undefined} onDirtyChange={setRoleDirty} onSaved={(saved) => { setRoleDirty(false); setNewRoleSeed(null); setSelectedRoleId(saved.id); }} />
           ) : selectedRole ? (
-            <RoleEditor canManageProtectedRoles={canManageGroup} definitions={definitionsQuery.data ?? []} featureAvailability={activeGroup} groupId={activeGroupId} isDefaultRole={settingsQuery.data?.defaultRoleId === selectedRole.id} key={`${selectedRole.id}-${selectedRole.version}`} onDeleted={() => setSelectedRoleId('')} onDuplicate={() => startCreate(selectedRole)} onSaved={(saved) => setSelectedRoleId(saved.id)} role={selectedRole} />
+            <RoleEditor canManageProtectedRoles={canManageGroup} definitions={definitionsQuery.data ?? []} featureAvailability={activeGroup} groupId={activeGroupId} isDefaultRole={settingsQuery.data?.defaultRoleId === selectedRole.id} key={`${selectedRole.id}-${selectedRole.version}`} onDeleted={() => setSelectedRoleId('')} onDirtyChange={setRoleDirty} onDuplicate={() => startCreate(selectedRole)} onSaved={(saved) => { setRoleDirty(false); setSelectedRoleId(saved.id); }} role={selectedRole} />
           ) : <StatePanel actionLabel={t('roleManagement.create')} kind="empty" message={t('roleManagement.noRoles')} onAction={() => startCreate()} />}
         </div>
       </section>
+      <ConfirmationDialog confirmIcon={<Trash2 size={17} />} confirmLabel={t('roleManagement.discard')} message={t('roleManagement.unsavedChangesMessage')} onClose={() => setPendingSelection(null)} onConfirm={() => { const next = pendingSelection; setPendingSelection(null); setRoleDirty(false); if (next?.roleId) { setNewRoleSeed(null); setSelectedRoleId(next.roleId); } else { setSelectedRoleId(''); setNewRoleSeed({ name: next?.seed ? t('roleManagement.copyName', { name: roleDisplayName(next.seed) }) : '', description: next?.seed ? roleDisplayDescription(next.seed) : undefined, grants: next?.seed?.grants.filter((grant) => canManageGroup || grant.permission !== 'GROUP_ADMINISTRATION') ?? [] }); } }} open={pendingSelection !== null} title={t('roleManagement.unsavedChangesTitle')} tone="danger" />
     </div>
   );
 }

@@ -13,7 +13,9 @@
 .posterList .selected { border-color: var(--color-border-brand); background: var(--color-surface-brand-subtle); }
 .form { display: grid; gap: var(--space-4); }
 .form > label { display: grid; gap: var(--space-2); font-weight: 600; }
+.requiredLabel::after { content: ' *'; color: var(--color-status-danger); }
 .form > label input,.form > label textarea { width: 100%; min-height: 2.75rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: .65rem; background: var(--color-surface); color: var(--color-text); font: inherit; }
+.form > label textarea { resize: vertical; }
 .form > label input:read-only { background: var(--color-surface-muted); color: var(--color-text-muted); }
 .standardHint { padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-muted); color: var(--color-text-muted); }
 .warning { color: var(--color-status-danger); }

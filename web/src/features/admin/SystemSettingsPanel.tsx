@@ -615,12 +615,12 @@ export function SystemSettingsPanel() {
   if (settings.isError || !settings.data) return <div className={styles.state}><StatePanel actionLabel={t('common.retry')} kind="error" message={t('systemSettings.loadError')} onAction={() => void settings.refetch()} /></div>;
   return (
     <div className={styles.content}>
-      <GeneralSettingsSection key={`general-${settings.data.revision}`} settings={settings.data} />
+      <GeneralSettingsSection key={`general-${JSON.stringify([settings.data.instanceName.value, settings.data.defaultCurrency.value, settings.data.timeZone.value, settings.data.mediaUploadMaxBytes.value, settings.data.attachmentUploadMaxBytes.value])}`} settings={settings.data} />
       <LegalDocumentsSettingsSection />
-      <SmtpSettingsSection key={`smtp-${settings.data.revision}`} settings={settings.data} />
-      <SystemWebPushSettingsSection key={`web-push-${settings.data.revision}`} settings={settings.data} />
-      <AccessSettingsSection key={`access-${settings.data.revision}`} settings={settings.data} />
-      <GroupsSettingsSection defaultCurrency={settings.data.defaultCurrency.value} key={`groups-${settings.data.revision}`} />
+      <SmtpSettingsSection key={`smtp-${JSON.stringify(smtpFormFromSettings(settings.data.smtp))}`} settings={settings.data} />
+      <SystemWebPushSettingsSection key={`web-push-${JSON.stringify([settings.data.webPush.enabled.value, settings.data.webPush.subject.value, settings.data.webPush.keyId])}`} settings={settings.data} />
+      <AccessSettingsSection key={`access-${JSON.stringify([settings.data.publicJoinEnabled.value, settings.data.maintenanceMode.value, settings.data.maintenanceMessage.value])}`} settings={settings.data} />
+      <GroupsSettingsSection defaultCurrency={settings.data.defaultCurrency.value} key={`groups-${settings.data.defaultCurrency.value}`} />
       <SystemAuditSection />
     </div>
   );

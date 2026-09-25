@@ -92,6 +92,23 @@ describe('RightsPanel role definitions', () => {
     expect(screen.getByLabelText('Rollenname')).toHaveValue('Member');
   });
 
+  it('asks before discarding an edited role when selecting another role', async () => {
+    const user = userEvent.setup();
+    mocks.getRoles.mockResolvedValue([baseRole, { ...baseRole, id: 'role-other', name: 'Other role' }]);
+    renderPanel();
+
+    await user.type(await screen.findByLabelText('Rollenname'), ' revised');
+    await user.click(screen.getByRole('button', { name: /Other role/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Ungespeicherte Rollenänderungen' });
+    expect(dialog).toBeVisible();
+    expect(screen.getByLabelText('Rollenname')).toHaveValue('Mitglied revised');
+    await user.click(within(dialog).getByRole('button', { name: 'Abbrechen' }));
+    expect(screen.getByLabelText('Rollenname')).toHaveValue('Mitglied revised');
+    await user.click(screen.getByRole('button', { name: /Other role/ }));
+    await user.click(within(screen.getByRole('dialog', { name: 'Ungespeicherte Rollenänderungen' })).getByRole('button', { name: 'Änderungen verwerfen' }));
+    expect(screen.getByLabelText('Rollenname')).toHaveValue('Other role');
+  });
+
   it('uses concise descriptions for booking and balance permissions', async () => {
     mocks.getPermissionDefinitions.mockResolvedValue([
       { key: 'VIEW_STATISTICS' },
