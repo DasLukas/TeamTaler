@@ -158,3 +158,28 @@ func writeStaticFixture(t *testing.T, root, name, body string) {
 		t.Fatalf("write static fixture: %v", err)
 	}
 }
+
+func TestBarcodeWorkerHasIsolatedWASMPolicy(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"index.html", "assets/barcodeScanner.worker-abc.js", "assets/documentDetection.worker-abc.js", "assets/index-abc.js", "assets/zxing_reader-abc.wasm"} {
+		writeStaticFixture(t, root, name, "fixture")
+	}
+	handler := (&Server{}).securityHeaders(spaHandler(root))
+	for _, name := range []string{"/", "/book", "/assets/barcodeScanner.worker-abc.js", "/assets/barcodeScanner.worker-missing.js", "/assets/documentDetection.worker-abc.js", "/assets/index-abc.js", "/assets/zxing_reader-abc.wasm"} {
+		t.Run(name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, name, nil))
+			policy := response.Header().Get("Content-Security-Policy")
+			wantWASM := name == "/assets/barcodeScanner.worker-abc.js"
+			if strings.Contains(policy, "'wasm-unsafe-eval'") != wantWASM || strings.Contains(policy, "'unsafe-eval'") {
+				t.Fatalf("unexpected policy for %s: %s", name, policy)
+			}
+			if wantWASM && policy != barcodeWorkerCSP {
+				t.Fatalf("worker policy = %q", policy)
+			}
+			if strings.HasSuffix(name, ".wasm") && response.Header().Get("Content-Type") != "application/wasm" {
+				t.Fatalf("WASM Content-Type = %q", response.Header().Get("Content-Type"))
+			}
+		})
+	}
+}

@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import ArrowLeft from 'lucide-react/dist/esm/icons/arrow-left';
 import ArrowUpDown from 'lucide-react/dist/esm/icons/arrow-up-down';
-import BookOpenCheck from 'lucide-react/dist/esm/icons/book-open-check';
+import ShoppingCart from 'lucide-react/dist/esm/icons/shopping-cart';
 import CircleDollarSign from 'lucide-react/dist/esm/icons/circle-dollar-sign';
 import LayoutList from 'lucide-react/dist/esm/icons/layout-list';
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
@@ -156,7 +156,7 @@ export function ActivitiesPage() {
       kind: 'multi-select',
       label: t('activities.transaction'),
       options: [
-        { label: t('activities.bookingType'), value: 'BOOKING', visual: <BookOpenCheck aria-hidden="true" size={19} /> },
+        { label: t('activities.bookingType'), value: 'BOOKING', visual: <ShoppingCart aria-hidden="true" size={19} /> },
         { label: t('activities.paymentType'), value: 'PAYMENT', visual: <CircleDollarSign aria-hidden="true" size={19} /> },
         ...(filterOptionsQuery.data?.kinds.includes('REVERSAL')
           ? [{ label: t('activities.reversalType'), value: 'REVERSAL', visual: <RotateCcw aria-hidden="true" size={19} /> }]

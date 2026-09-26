@@ -31,6 +31,8 @@ export interface MemberMultiSelectProps {
   canBookForGuests: boolean;
   disabled?: boolean;
   iconOnly?: boolean;
+  /** Visible text shown beside the icon when the compact trigger is used. */
+  iconLabel?: string;
   overlayOnMobile?: boolean;
   placeholder: string;
 }
@@ -57,6 +59,7 @@ export function MemberMultiSelect({
   canBookForGuests,
   disabled = false,
   iconOnly = false,
+  iconLabel,
   overlayOnMobile = false,
   placeholder,
 }: MemberMultiSelectProps) {
@@ -244,7 +247,8 @@ export function MemberMultiSelect({
       >
         {iconOnly ? (
           <>
-            <UsersRound aria-hidden="true" size={36} strokeWidth={1.9} />
+            <UsersRound aria-hidden="true" size={28} strokeWidth={1.9} />
+            {iconLabel ? <span className={styles.iconLabel}>{iconLabel}</span> : null}
             <span aria-hidden="true" className={styles.countBadge}>{totalTargetCount}</span>
           </>
         ) : (

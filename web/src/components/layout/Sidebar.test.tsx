@@ -55,7 +55,7 @@ describe('Sidebar role navigation', () => {
   it('shows catalog and finance before administration to administrators', () => {
     usePermissions(['CATALOG_MANAGEMENT', 'FINANCE_MANAGEMENT', 'GROUP_ADMINISTRATION']);
     render(<Sidebar collapsed={false} onCollapsedChange={vi.fn()} />);
-    const links = screen.getAllByRole('link').map((link) => link.textContent);
+    const links = screen.getAllByRole('link').map((link) => link.querySelector('span:not([aria-hidden])')?.textContent);
     expect(links.indexOf('Katalog')).toBeLessThan(links.indexOf('Finanzen'));
     expect(links.indexOf('Finanzen')).toBeLessThan(links.indexOf('Einstellungen'));
   });
@@ -75,7 +75,7 @@ describe('Sidebar role navigation', () => {
     render(<Sidebar collapsed={false} onCollapsedChange={vi.fn()} />);
 
     const navigation = screen.getByRole('navigation', { name: 'Hauptnavigation' });
-    expect(Array.from(navigation.querySelectorAll('a')).map((link) => link.textContent)).toEqual([
+    expect(Array.from(navigation.querySelectorAll('a')).map((link) => link.querySelector('span:not([aria-hidden])')?.textContent)).toEqual([
       'Übersicht',
       'Buchen',
       'Aktivitäten',

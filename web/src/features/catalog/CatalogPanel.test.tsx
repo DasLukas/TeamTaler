@@ -31,6 +31,15 @@ vi.mock('@/components/media/imageUpload', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/components/media/imageUpload')>(),
   prepareSquareImage: imageUploadMock.prepareSquareImage,
 }));
+vi.mock('@/features/bookings/KioskScanner', () => ({
+  KioskScanner: ({ feedback, onClose, onScan }: { feedback?: string; onClose: () => void; onScan: (value: string, format: 'EAN_13') => void }) => (
+    <div aria-label={i18n.t('kiosk.barcodeCaptureTitle')} role="dialog">
+      <button onClick={() => onScan('0012345000065', 'EAN_13')} type="button">Test barcode scan</button>
+      <button onClick={onClose} type="button">Close barcode scanner</button>
+      {feedback ? <p role="alert">{feedback}</p> : null}
+    </div>
+  ),
+}));
 
 const category: Category = {
   id: 'category-a',
@@ -490,6 +499,28 @@ describe('CatalogPanel', () => {
     await user.click(screen.getByRole('button', { name: i18n.t('catalog.editProduct', { name: createdProduct.name }) }));
     expect(screen.getByText(i18n.t('kiosk.productBarcodes'))).toBeVisible();
     expect(screen.getByRole('button', { name: i18n.t('kiosk.addBarcode') })).toBeVisible();
+  });
+
+  it('keeps the scanner open and names the product that already owns an equivalent barcode', async () => {
+    const user = userEvent.setup();
+    const assignedProduct: Product = {
+      ...createdProduct,
+      id: 'product-soda',
+      name: 'Club-Mate',
+      barcodes: [{ format: 'UPC_A', value: '012345000065' }],
+    };
+    const editedProduct: Product = { ...createdProduct, id: 'product-water', name: 'Water', barcodes: [] };
+    apiMock.getCategories.mockResolvedValue([{ ...category, products: [editedProduct, assignedProduct] }]);
+    renderCatalog(true);
+
+    await screen.findByText(editedProduct.name);
+    await user.click(screen.getByRole('button', { name: i18n.t('catalog.editProduct', { name: editedProduct.name }) }));
+    await user.click(screen.getByRole('button', { name: i18n.t('kiosk.captureBarcode') }));
+    await user.click(screen.getByRole('button', { name: 'Test barcode scan' }));
+
+    expect(screen.getByRole('dialog', { name: i18n.t('kiosk.barcodeCaptureTitle') })).toBeVisible();
+    expect(screen.getByRole('alert')).toHaveTextContent(i18n.t('kiosk.barcodeAlreadyAssigned', { name: assignedProduct.name }));
+    expect(screen.queryByRole('textbox', { name: i18n.t('kiosk.barcodeValue', { number: 1 }) })).not.toBeInTheDocument();
   });
 
   it('prevents saving an invalid barcode and saves a valid code with its preview', async () => {

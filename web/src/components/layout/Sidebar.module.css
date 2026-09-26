@@ -209,7 +209,7 @@
   .collapsed .brand strong,
   .collapsed .groupLabel,
   .collapsed .linkLabel,
-  .collapsed .link > span:not(.badge):not(.notificationIcon) {
+  .collapsed button.link > span:not([aria-hidden]) {
     display: none;
   }
 

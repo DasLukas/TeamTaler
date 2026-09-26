@@ -30,7 +30,38 @@ describe('kiosk scanner resolution', () => {
     expect(rearm.accept('A', 200)).toBe(false);
     rearm.missing(300);
     expect(rearm.accept('A', 500)).toBe(false);
-    expect(rearm.accept('A', 751)).toBe(true);
+    expect(rearm.accept('A', 751)).toBe(false);
+    rearm.missing(800);
+    rearm.missing(1250);
+    expect(rearm.accept('A', 1250)).toBe(true);
     expect(rearm.accept('B', 760)).toBe(true);
+  });
+
+  it('seeds external products and ignores camera startup gaps', () => {
+    const rearm = new ScanRearm('product:water');
+    rearm.missing(0);
+    expect(rearm.accept('product:water', 5000)).toBe(false);
+    rearm.missing(5100);
+    rearm.missing(5550);
+    expect(rearm.accept('product:water', 5550, false)).toBe(false);
+    expect(rearm.accept('product:water', 7000)).toBe(true);
+    expect(rearm.accept('product:water', 7100)).toBe(false);
+    rearm.suspend();
+    rearm.missing(7150);
+    expect(rearm.accept('product:water', 9000)).toBe(false);
+  });
+
+  it('does not mistake a delayed positive result for a continuous absence', () => {
+    const rearm = new ScanRearm();
+    expect(rearm.accept('A', 0)).toBe(true);
+    rearm.missing(100);
+    expect(rearm.accept('A', 2000)).toBe(false);
+  });
+
+  it('does not consume a different product during interaction', () => {
+    const rearm = new ScanRearm('A');
+    expect(rearm.accept('B', 100, false)).toBe(false);
+    expect(rearm.accept('B', 1500)).toBe(true);
+    expect(rearm.accept('A', 1600)).toBe(true);
   });
 });

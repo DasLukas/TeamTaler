@@ -4,6 +4,24 @@ All notable TeamTaler changes are documented in this file. The project follows [
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-09-26
+
+### Fixed
+
+- Scan and Go now prevents duplicate additions across QR entry, camera rotation, cart interaction, and booking retries while preserving the draft after failures.
+- Barcode detection uses the visible scan area and a locally bundled worker with orientation-aware decoding and narrowly scoped WebAssembly permissions.
+- Catalog scanning identifies existing barcode assignments, including equivalent UPC and EAN representations.
+
+### Changed
+
+- Account navigation displays the member avatar; shared navigation uses consistent booking and activity icons and the active group currency for finance.
+- Scan and Go separates camera feedback from the responsive cart and requires confirmation before disabling the feature.
+- Tagged releases must pass the complete CI workflow, including scanner browser and production decoder acceptance tests, before image publication.
+
+### Upgrade notes
+
+- No database migrations are introduced. Back up the running instance before updating the application and web client together.
+
 ## [1.4.0] - 2026-09-25
 
 ### Added
@@ -418,7 +436,8 @@ All notable TeamTaler changes are documented in this file. The project follows [
 - Explicit acting and charged membership display for every booking, including searchable third-party-assignment cues.
 - Canonical backup-entry allowlisting, target-width Argon2 parameter parsing, and directory-confined SPA asset serving with traversal regression coverage.
 
-[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/DasLukas/TeamTaler/compare/v1.4.1...HEAD
+[1.4.1]: https://github.com/DasLukas/TeamTaler/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/DasLukas/TeamTaler/compare/v1.3.2...v1.4.0
 [1.3.2]: https://github.com/DasLukas/TeamTaler/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/DasLukas/TeamTaler/compare/v1.3.0...v1.3.1

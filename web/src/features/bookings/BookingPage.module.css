@@ -17,24 +17,27 @@
 
 .content.scannerContent { height: 100dvh; max-width: none; padding: 0; }
 
-.titleRow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-6); }
+.titleRow { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-6); }
 .titleRow h1 { margin: 0; }
 .kioskError { margin: calc(-1 * var(--space-3)) 0 var(--space-5); color: var(--color-status-danger); font-size: var(--font-size-sm); }
 
 .balanceRow {
+  --booking-action-size: 124px;
+  --booking-actions-double-width: 260px;
+  --booking-row-gap: var(--space-6);
   margin-bottom: var(--space-8);
 }
 
-.balanceRow.hasTargetControl {
+.balanceRow.hasActions {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 124px;
-  gap: var(--space-6);
+  grid-template-columns: minmax(0, 1fr) var(--booking-action-size);
+  gap: var(--booking-row-gap);
 }
 
 .balance {
   display: grid;
   min-height: 124px;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
   padding: var(--space-6);
   border: 1px solid var(--color-border);
@@ -53,12 +56,45 @@
 .balanceAmount > strong.balanceAmountReduced { font-size: clamp(1.45rem, 3.3vw, 2.2rem); }
 .balanceAmount > strong.balanceAmountCompact { font-size: clamp(1.2rem, 2.55vw, 1.75rem); }
 .balanceAmount > strong.creditBalance { color: var(--color-status-success); }
-.balance > svg { justify-self: end; color: var(--color-text-strong); }
+
+.bookingActions {
+  display: grid;
+  min-width: 0;
+  min-height: var(--booking-action-size);
+  align-self: stretch;
+  gap: var(--space-2);
+}
+
+.hasTwoActions .bookingActions {
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
 
 .targetControl {
   min-width: 0;
+  min-height: 0;
 }
 
+.bookingAction {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-inline: var(--space-2);
+  text-align: center;
+  white-space: nowrap;
+}
+
+@container (min-width: 500px) {
+  .balanceRow.hasTwoActions {
+    grid-template-columns: minmax(0, 1fr) var(--booking-actions-double-width);
+  }
+
+  .hasTwoActions .bookingActions {
+    grid-template: minmax(0, 1fr) / repeat(2, minmax(0, 1fr));
+    gap: var(--space-3);
+  }
+}
 
 .confirmation { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-5); padding: var(--space-4); border-radius: var(--radius-md); color: var(--color-text-brand); background: var(--color-surface-brand-subtle); font-weight: 700; }
 
@@ -125,7 +161,11 @@
 
 @media (min-width: 768px) and (max-width: 839px) {
   .content { padding-inline: var(--space-8); }
-  .balanceRow.hasTargetControl { grid-template-columns: minmax(0, 1fr) 104px; gap: var(--space-3); }
+  .balanceRow {
+    --booking-action-size: 104px;
+    --booking-actions-double-width: 220px;
+    --booking-row-gap: var(--space-3);
+  }
 }
 
 @media (min-width: 768px) and (max-height: 500px) {
@@ -142,9 +182,13 @@
 
   .content .titleRow h1 { margin: 0; font-size: 2rem; }
   .titleRow { margin-bottom: var(--space-5); }
-  .balanceRow { margin-bottom: var(--space-6); }
-  .balanceRow.hasTargetControl { grid-template-columns: minmax(0, 1fr) 104px; gap: var(--space-3); }
-  .balance { min-height: 104px; grid-template-columns: minmax(0, 1fr) auto; padding: var(--space-5); }
+  .balanceRow {
+    --booking-action-size: 104px;
+    --booking-actions-double-width: 220px;
+    --booking-row-gap: var(--space-3);
+    margin-bottom: var(--space-6);
+  }
+  .balance { min-height: 104px; padding: var(--space-5); }
   .balanceAmount > span { font-size: var(--font-size-sm); }
   .balanceAmount > strong { font-size: 2rem; white-space: nowrap; }
 }

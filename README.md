@@ -19,7 +19,7 @@ This README is the primary entry point for the person who installs and operates 
 - Searchable, column-filterable, sortable operational collections with shareable query state, cursor-backed automatic infinite loading, complete horizontally scrollable mobile tables, and feature-owned card views where they improve phone usability.
 - Authorization-preserving CSV and A4-landscape PDF exports for operational tables, plus password-confirmed, asynchronous structured-data archives for a member or an administered group.
 - Individual invitations, CSV invitation imports, public join links, and temporary guest accounts.
-- Local accounts with profile images, password recovery, verified email changes, and server-side sessions.
+- Local accounts with profile images, password recovery, verified email changes, and server-side sessions. Account navigation shows a circular profile image when available. Shared navigation uses a shopping cart for bookings, transaction arrows for activities, and the active group currency symbol for finance.
 - In-app notifications plus independently configurable SMTP and standards-based Web Push delivery.
 - A client update notice that lets open browser and installed PWA sessions reload after a newer TeamTaler build is deployed, plus a compact version and legal-links block at the end of **My account**.
 - Global system administration for instance settings and the complete group lifecycle.
@@ -74,7 +74,7 @@ At minimum, edit these values:
 
 ```dotenv
 TEAMTALER_PUBLIC_URL=https://teamtaler.example.com
-TEAMTALER_VERSION=1.4.0
+TEAMTALER_VERSION=1.4.1
 TEAMTALER_HOST_PORT=8080
 TEAMTALER_TRUSTED_PROXY_CIDRS=
 ```
@@ -430,7 +430,15 @@ teamtaler restore --input FILE.tar.gz [--force]
 
 ## Kiosk and Scan and Go
 
-Group administrators can enable the kiosk feature in group settings and assign `USE_KIOSK` through a group role. A member also needs a booking permission to use the camera scanner. While kiosk is enabled, product editors can store multiple EAN-8, EAN-13, UPC-A, UPC-E, or Code 128 barcodes; the editor validates each value and displays a barcode preview. Previously stored codes remain unchanged when product metadata is edited while kiosk is disabled. Each code can identify only one product in a group. Scanning adds a product to the existing cart. On phones, the scan view shows the same cart as a collapsible bottom sheet for reviewing and adjusting scanned items without leaving the camera. The booking is recorded only after the member reviews and confirms that cart.
+An external product QR opens Scan and Go with one unit and an expanded cart, making the booking action immediately available when required fields are complete. One fixed square marks the actual scan area; QR and barcode icons identify both supported code types. The camera preview, guidance/errors, and cart occupy separate layout rows. A new accepted product minimizes the phone cart unless a free price is required; desktop cart details stay visible. Background motion alone never collapses the cart or permits a repeat. Touch, scrolling, keyboard input and focused fields suspend adoption until a 1.2-second quiet period has passed.
+
+Product IDs unify QR and barcode identities. The linked product is already counted: keeping its code visible, changing the background, or rotating the device cannot add it again. Re-scanning requires at least 450 ms between actual empty observations after the code was seen, or another accepted product. Layout, visibility and interaction changes invalidate absence evidence while retaining the last identity. Submission freezes the draft and blocks scan additions. Success closes the camera; failure preserves the expanded cart for retry. Camera and decoder failures stop scanning with visible guidance while the linked product remains bookable.
+
+The locally bundled ZXing-C++ reader runs in a dedicated worker. Only the pixels inside the visible frame are transferred, bounded to 720 pixels per side. Quarter turns and intermediate rotated views cover diagonal barcodes; no camera pixels leave the device. Multiple detected codes show a request to present one code instead of selecting a product. The application keeps its strict script policy; only the barcode worker receives permission to compile its local WebAssembly asset.
+
+Run `cd web && npm run build && npm run test:scan` for real-decoder browser regression tests at phone and desktop sizes. The suite uses synthetic camera streams, six formats at 48 angles, the production worker and production CSP, QR entry, repeats, rotation, editing, camera denial, and booking outcomes. CI runs this suite; tagged releases must pass the same complete CI workflow for their exact revision before publishing. Autofocus, glare, device camera permissions and mobile Safari still require physical-device acceptance; generated fixtures cannot establish optical reliability.
+
+Group administrators can enable the kiosk feature in group settings and assign `USE_KIOSK` through a group role. A member also needs a booking permission to use the camera scanner. While kiosk is enabled, product editors can store multiple EAN-8, EAN-13, UPC-A, UPC-E, or Code 128 barcodes; the editor validates each value and displays a barcode preview. Previously stored codes remain unchanged when product metadata is edited while kiosk is disabled. Each code can identify only one product in a group. If a catalog scan detects a code already assigned elsewhere, the scanner stays open and names the owning product so an administrator can find and remove the assignment. Equivalent UPC and EAN representations are treated as the same code. The camera scanner evaluates only the marked area and supports horizontal, vertical, and diagonal code orientations. Scanning adds a product to the existing cart. On phones, the scan view shows the same cart as a collapsible bottom sheet for reviewing and adjusting scanned items without leaving the camera. The booking is recorded only after the member reviews and confirms that cart. Disabling Scan and Go requires confirmation, hides its scanner and poster management, and pauses product QR codes while preserving poster templates and stored product barcodes.
 
 Each group has one permanent `Standard` poster template. Administrators can edit its free text, but its name and empty product selection are fixed. Its A4 PDF presents a large central QR code for the group's booking page. The poster editor is visible only while the kiosk feature is enabled; saved templates persist when it is turned off. Administrators can also save named product poster templates with free text and at least one ordered product, then download their PDFs while the kiosk feature is enabled. The product editor shows a two-column preview with current images and prices; administrators can add products through categorized search and reorder them with pointer or keyboard drag. Printed product posters use the booking page's navy-and-teal visual language, image-led product cards, current prices, and high-contrast QR codes; short selections receive larger cards while longer selections paginate in a compact two-column grid. Product QR codes add one current, active product to the cart after authentication. Printed prices are current at download time. Archived or deleted products must be removed from a template before it can be printed again. Legacy product templates with no products remain visible for repair but cannot be printed until a product is added.
 
@@ -546,3 +554,17 @@ Verify that the configuration is complete, TLS mode and port match the relay, `T
 TeamTaler is licensed under the GNU Affero General Public License v3.0 only (`AGPL-3.0-only`). See [LICENSE](LICENSE).
 
 Copyright © 2026 TeamTaler contributors.
+
+## Development
+
+Install Go 1.26 and Node.js 24, then run `make install` to install dependencies.
+Use `make dev-backend` and `make dev-frontend` in separate terminals for local development.
+Run `make verify` for formatting, static analysis, tests, and production builds;
+run `cd web && npm run test:scan` after building to verify scanner browser workflows.
+`make build` writes the server to `bin/teamtaler` and the web client to `web/dist`.
+Start the compiled server with `bin/teamtaler serve` using the host configuration above.
+
+The `dev` branch is the development integration branch. Reviewed release pull requests
+merge into `main`, the publication branch; semantic version tags trigger container
+publication. Merge published releases back into `dev` to keep both histories aligned.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for module boundaries, data flow, and extension points.

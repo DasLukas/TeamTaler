@@ -38,7 +38,7 @@ export function BottomNavigation() {
   return (
     <nav aria-label={t('nav.mobilePrimary')} className={styles.nav}>
       {items.filter((item) => item.key !== 'book' || canOpenBooking(activeGroup.membership?.effectiveGrants)).map(({ to, key, icon: Icon }) => (
-        <Link activeOptions={{ exact: true }} activeProps={{ className: styles.active }} className={`${styles.link} ${key === 'more' && overflowActive ? styles.active : ''}`} key={to} to={to}>
+        <Link activeOptions={{ exact: true, includeSearch: false }} activeProps={{ className: styles.active }} className={`${styles.link} ${key === 'more' && overflowActive ? styles.active : ''}`} key={to} to={to}>
           <span className={styles.iconWrap}><Icon aria-hidden="true" size={27} strokeWidth={1.8} />{key === 'more' ? <NotificationBadge className={styles.badge} count={unreadCount} /> : null}</span>
           <span>{t(`nav.${key}`)}</span>
         </Link>

@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_call:
   pull_request:
   push:
     branches:
@@ -60,6 +61,7 @@ jobs:
               ./internal/finance
               ./internal/groups
               ./internal/idempotency
+              ./internal/kiosk
               ./internal/ledger
               ./internal/media
               ./internal/memberimport
@@ -118,6 +120,16 @@ jobs:
         run: npm test -- --coverage
       - name: Build
         run: npm run build
+      - name: Install scanner test browser
+        run: npx playwright install --with-deps chromium
+      - name: Verify scanner workflows and production decoder
+        run: npm run test:scan
+      - name: Upload scanner failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scanner-failure-artifacts
+          path: web/test-results
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
       - name: Upload frontend build

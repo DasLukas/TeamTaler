@@ -1,24 +1,17 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { BarcodeFormat } from '@zxing/library';
+import type { KioskCameraOptions } from './scanner/camera';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { KioskScanner } from './KioskScanner';
 
-const decoder = vi.hoisted(() => ({
-  callback: undefined as ((result?: { getText: () => string; getBarcodeFormat: () => number }) => void) | undefined,
-  formats: [] as number[],
-  stop: vi.fn(),
-}));
-
-vi.mock('@zxing/browser', () => ({
-  BrowserMultiFormatReader: class {
-    set possibleFormats(formats: number[]) { decoder.formats = formats; }
-    async decodeFromConstraints(_constraints: unknown, _video: unknown, callback: typeof decoder.callback) {
-      decoder.callback = callback;
-      return { stop: decoder.stop };
-    }
-  },
-}));
+const decoder = vi.hoisted(() => ({ options: undefined as KioskCameraOptions | undefined, start: vi.fn(), stop: vi.fn() }));
+vi.mock('./scanner/camera', () => ({ startKioskCamera: (options: KioskCameraOptions) => {
+  decoder.start();
+  decoder.options = options;
+  return decoder.stop;
+} }));
+const BarcodeFormat = { QR_CODE: 'QR_CODE', EAN_13: 'EAN_13', UPC_E: 'UPC_E' } as const;
+const emit = (value: string, format: 'QR_CODE' | 'EAN_13' | 'UPC_E') => decoder.options?.onCodes([{ value, format }]);
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -34,14 +27,10 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-function decoded(value: string, format: BarcodeFormat) {
-  return { getText: () => value, getBarcodeFormat: () => format };
-}
-
 describe('KioskScanner modes', () => {
   beforeEach(() => {
-    decoder.callback = undefined;
-    decoder.formats = [];
+    decoder.options = undefined;
+    decoder.start.mockClear();
     decoder.stop.mockClear();
     Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: vi.fn() } });
     vi.stubGlobal('MediaStream', class MediaStream {});
@@ -64,11 +53,10 @@ describe('KioskScanner modes', () => {
 
     expect(screen.getByRole('dialog', { name: 'Scan & Go' })).toBeVisible();
     expect(screen.getByText('Scanne ein Produkt.')).toBeVisible();
-    await waitFor(() => expect(decoder.callback).toBeDefined());
-    expect(decoder.formats).toContain(BarcodeFormat.QR_CODE);
-    expect(decoder.formats).toContain(BarcodeFormat.EAN_13);
+    await waitFor(() => expect(decoder.options).toBeDefined());
+    expect(decoder.options?.barcodeOnly).toBe(false);
 
-    act(() => decoder.callback?.(decoded('https://example.test/book?group=one', BarcodeFormat.QR_CODE)));
+    act(() => emit('https://example.test/book?group=one', BarcodeFormat.QR_CODE));
     expect(onScan).toHaveBeenCalledWith('https://example.test/book?group=one', 'QR_CODE');
     unmount();
     expect(decoder.stop).toHaveBeenCalledOnce();
@@ -90,21 +78,21 @@ describe('KioskScanner modes', () => {
     expect(screen.getByRole('dialog', { name: 'Scan & Go' })).toBeVisible();
     expect(HTMLDialogElement.prototype.show).toHaveBeenCalledOnce();
     expect(HTMLDialogElement.prototype.showModal).not.toHaveBeenCalled();
-    await waitFor(() => expect(decoder.callback).toBeDefined());
-    act(() => decoder.callback?.(decoded('4006381333931', BarcodeFormat.EAN_13)));
+    await waitFor(() => expect(decoder.options).toBeDefined());
+    act(() => emit('4006381333931', BarcodeFormat.EAN_13));
     expect(onScan).toHaveBeenCalledExactlyOnceWith('4006381333931', 'EAN_13');
   });
 
   it('shows each successful scan briefly while decoding remains available', async () => {
     const onScan = vi.fn();
     const { rerender } = render(<KioskScanner onClose={vi.fn()} onScan={onScan} />);
-    await waitFor(() => expect(decoder.callback).toBeDefined());
+    await waitFor(() => expect(decoder.options).toBeDefined());
     vi.useFakeTimers();
 
     rerender(<KioskScanner onClose={vi.fn()} onScan={onScan} success={{ id: 1, message: 'Water added to cart' }} />);
     expect(screen.getByRole('status')).toHaveTextContent('Water added to cart');
     await act(async () => {});
-    act(() => decoder.callback?.(decoded('4006381333931', BarcodeFormat.EAN_13)));
+    act(() => emit('4006381333931', BarcodeFormat.EAN_13));
     expect(onScan).toHaveBeenCalledExactlyOnceWith('4006381333931', 'EAN_13');
 
     act(() => vi.advanceTimersByTime(900));
@@ -115,20 +103,35 @@ describe('KioskScanner modes', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
-  it('keeps the cart in the scan dialog and pauses decoding while its details are open', async () => {
+  it('keeps decoding behind expanded details without restarting the camera', async () => {
     const onScan = vi.fn();
     const { rerender } = render(<KioskScanner cart={<div>Cart summary</div>} cartExpanded onClose={vi.fn()} onScan={onScan} />);
 
     expect(screen.getByRole('dialog')).toHaveTextContent('Cart summary');
-    await waitFor(() => expect(decoder.callback).toBeDefined());
-    act(() => decoder.callback?.(decoded('https://example.test/book?group=one', BarcodeFormat.QR_CODE)));
-    expect(onScan).not.toHaveBeenCalled();
-
-    const pausedCallback = decoder.callback;
-    rerender(<KioskScanner cart={<div>Cart summary</div>} cartExpanded={false} onClose={vi.fn()} onScan={onScan} />);
-    await waitFor(() => expect(decoder.callback).not.toBe(pausedCallback));
-    act(() => decoder.callback?.(decoded('https://example.test/book?group=one', BarcodeFormat.QR_CODE)));
+    await waitFor(() => expect(decoder.options).toBeDefined());
+    act(() => emit('https://example.test/book?group=one', BarcodeFormat.QR_CODE));
     expect(onScan).toHaveBeenCalledOnce();
+
+    const pausedCallback = decoder.options;
+    rerender(<KioskScanner cart={<div>Cart summary</div>} cartExpanded={false} onClose={vi.fn()} onScan={onScan} />);
+    expect(decoder.options).toBe(pausedCallback);
+    expect(decoder.stop).not.toHaveBeenCalled();
+    act(() => emit('https://example.test/book?group=one', BarcodeFormat.QR_CODE));
+    expect(onScan).toHaveBeenCalledOnce();
+  });
+
+  it('protects external identities across formats and defers new products during interaction', async () => {
+    const onScan = vi.fn();
+    let blocked = true;
+    render(<KioskScanner cartExpanded initialScanKey="product:water" resolveScanKey={(value) => value === 'qr-water' || value === 'barcode-water' ? 'product:water' : value} isScanBlocked={() => blocked} onClose={vi.fn()} onScan={onScan} />);
+    await waitFor(() => expect(decoder.options).toBeDefined());
+    act(() => emit('qr-water', BarcodeFormat.QR_CODE));
+    act(() => emit('barcode-water', BarcodeFormat.EAN_13));
+    act(() => emit('next', BarcodeFormat.EAN_13));
+    expect(onScan).not.toHaveBeenCalled();
+    blocked = false;
+    act(() => emit('next', BarcodeFormat.EAN_13));
+    expect(onScan).toHaveBeenCalledExactlyOnceWith('next', 'EAN_13');
   });
 
   it('collapses expanded cart details when the camera background is clicked', () => {
@@ -162,20 +165,49 @@ describe('KioskScanner modes', () => {
     expect(screen.getByText('Halte einen EAN-, UPC- oder Code-128-Barcode in den Rahmen.')).toBeVisible();
     expect(screen.queryByText('Scan & Go')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Produkt manuell auswählen' })).not.toBeInTheDocument();
-    await waitFor(() => expect(decoder.callback).toBeDefined());
-    expect(decoder.formats).toEqual([BarcodeFormat.EAN_8, BarcodeFormat.EAN_13, BarcodeFormat.UPC_A, BarcodeFormat.UPC_E, BarcodeFormat.CODE_128]);
+    await waitFor(() => expect(decoder.options).toBeDefined());
+    expect(decoder.options?.barcodeOnly).toBe(true);
 
-    act(() => decoder.callback?.(decoded('https://example.test/book?group=one', BarcodeFormat.QR_CODE)));
+    act(() => emit('https://example.test/book?group=one', BarcodeFormat.QR_CODE));
     expect(onScan).not.toHaveBeenCalled();
-    act(() => decoder.callback?.(decoded('01234565', BarcodeFormat.UPC_E)));
+    act(() => emit('01234565', BarcodeFormat.UPC_E));
     expect(onScan).toHaveBeenCalledExactlyOnceWith('01234565', 'UPC_E');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(decoder.stop).toHaveBeenCalledOnce();
   });
 
+  it('shows catalog capture conflicts as a themed warning inside the scanner footer', () => {
+    render(<KioskScanner feedback="Dieser Barcode wird bereits für „Club-Mate“ verwendet." feedbackTone="warning" mode="barcodeCapture" onClose={vi.fn()} onScan={vi.fn()} />);
+
+    const warning = screen.getByRole('alert');
+    expect(warning).toHaveTextContent('Club-Mate');
+    expect(warning.className).toContain('feedbackWarning');
+    expect(screen.getByRole('dialog', { name: 'Produkt-Barcode erfassen' })).toContainElement(warning);
+  });
+
+  it('keeps the latest identity across phone rotation and cart layout changes', () => {
+    const onScan = vi.fn();
+    const { rerender } = render(<KioskScanner initialScanKey="QR_CODE:water" onClose={vi.fn()} onScan={onScan} />);
+    act(() => emit('spezi', 'QR_CODE'));
+    rerender(<KioskScanner embedded initialScanKey="QR_CODE:water" onClose={vi.fn()} onScan={onScan} />);
+    act(() => { decoder.options?.onSuspend(); emit('spezi', 'QR_CODE'); });
+    expect(decoder.start).toHaveBeenCalledOnce();
+    expect(onScan).toHaveBeenCalledOnce();
+  });
+
+  it('refuses ambiguous frames without rearming the current product', () => {
+    const onScan = vi.fn();
+    render(<KioskScanner onClose={vi.fn()} onScan={onScan} />);
+    act(() => emit('water', 'QR_CODE'));
+    act(() => decoder.options?.onCodes([{ value: 'water', format: 'QR_CODE' }, { value: 'spezi', format: 'QR_CODE' }]));
+    expect(screen.getByRole('status')).toHaveTextContent('kiosk.multipleCodes');
+    act(() => emit('water', 'QR_CODE'));
+    expect(onScan).toHaveBeenCalledOnce();
+  });
+
   it('gives catalog-specific guidance when camera access is unavailable', async () => {
-    Reflect.deleteProperty(navigator, 'mediaDevices');
     render(<KioskScanner mode="barcodeCapture" onClose={vi.fn()} onScan={vi.fn()} />);
+    act(() => decoder.options?.onError());
     expect(await screen.findByRole('alert')).toHaveTextContent('Gib den Barcode im Produktformular ein.');
   });
 });

@@ -30,7 +30,7 @@ function usePermissions(
 
 function menuItems(): string[] {
   const navigation = screen.getByRole('navigation', { name: 'Weitere Bereiche' });
-  return Array.from(navigation.querySelectorAll('a, button')).map((item) => item.textContent ?? '');
+  return Array.from(navigation.querySelectorAll('a, button')).map((item) => item.querySelector('span:not([aria-hidden])')?.textContent ?? item.textContent ?? '');
 }
 
 describe('MorePage role navigation', () => {
