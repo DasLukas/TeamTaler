@@ -4,11 +4,10 @@ import Minus from 'lucide-react/dist/esm/icons/minus';
 import Package from 'lucide-react/dist/esm/icons/package';
 import Plus from 'lucide-react/dist/esm/icons/plus';
 import ShoppingBasket from 'lucide-react/dist/esm/icons/shopping-basket';
-import ScanLine from 'lucide-react/dist/esm/icons/scan-line';
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
 import UsersRound from 'lucide-react/dist/esm/icons/users-round';
 import X from 'lucide-react/dist/esm/icons/x';
-import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useRef, type RefCallback, type PointerEvent as ReactPointerEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { formatMoney, majorUnitsInputPattern, majorUnitsPlaceholder, validatePositiveMajorUnits } from '@/api/money';
 import type { ConfigurableItem, ReasonMode } from '@/api/types';
@@ -42,9 +41,7 @@ export interface BookingCartProps {
   onRemove: (productId: string) => void;
   onReasonChange: (reason: string) => void;
   onSubmit: () => void;
-  onOpenScanner?: () => void;
-  scannerOpening?: boolean;
-  scannerError?: string;
+  interactionRef?: RefCallback<HTMLFormElement>;
 }
 
 
@@ -72,12 +69,14 @@ export function BookingCart({
   onRemove,
   onReasonChange,
   onSubmit,
-  onOpenScanner,
-  scannerOpening = false,
-  scannerError,
+  interactionRef,
 }: BookingCartProps) {
   const { t } = useTranslation();
   const cartRef = useRef<HTMLFormElement>(null);
+  const attachCart = useCallback((element: HTMLFormElement | null) => {
+    cartRef.current = element;
+    return interactionRef?.(element);
+  }, [interactionRef]);
   const detailsRef = useRef<HTMLDivElement>(null);
   const lineRefs = useRef(new Map<string, HTMLLIElement>());
   const dragRef = useRef<{ pointerId: number; startY: number; startTime: number; moved: boolean } | null>(null);
@@ -115,6 +114,8 @@ export function BookingCart({
       const detailsTop = details.getBoundingClientRect().top;
       const lineTop = line.getBoundingClientRect().top;
       details.scrollTop = Math.max(0, details.scrollTop + lineTop - detailsTop);
+      const clippedInput = input.getBoundingClientRect().bottom - details.getBoundingClientRect().bottom;
+      if (clippedInput > 0) details.scrollTop += clippedInput + 8;
     });
     return () => window.cancelAnimationFrame(frame);
   }, [compact, priceEntryRequest, view]);
@@ -175,7 +176,7 @@ export function BookingCart({
   }
 
   return (
-    <form className={`${styles.cart} ${compact ? styles.compact : ''} ${minimized ? styles.peekMode : ''}`} onSubmit={(event) => { event.preventDefault(); onSubmit(); }} ref={cartRef}>
+    <form aria-busy={pending} inert={pending} className={`${styles.cart} ${compact ? styles.compact : ''} ${minimized ? styles.peekMode : ''}`} onSubmit={(event) => { event.preventDefault(); if (!submitDisabled) onSubmit(); }} ref={attachCart}>
       {compact ? minimized ? <span aria-hidden="true" className={styles.handle} /> : (
         <button
           aria-expanded="true"
@@ -196,39 +197,33 @@ export function BookingCart({
         ><span aria-hidden="true" className={styles.handle} /></button>
       ) : null}
       {minimized ? (
-        <div className={styles.peekActions}>
-          <button
-            aria-expanded="false"
-            aria-label={t('booking.cartExpandAccessible', {
-              products: t('booking.productCount', { count: itemCount }),
-              total: total ? formatMoney(total) : '—',
-            })}
-            className={styles.peekButton}
-            onClick={() => onViewChange('details')}
-            type="button"
-          >
-            <span className={styles.peekIdentity}>
-              <strong>{t('booking.cartTitle')}</strong>
-              <span aria-hidden="true" className={styles.peekProductCount}><Package size={16} strokeWidth={1.9} />{itemCount}</span>
-            </span>
-            <strong className={styles.peekTotal}>{total ? formatMoney(total) : '—'}</strong>
-            <ChevronUp aria-hidden="true" size={24} strokeWidth={2} />
-          </button>
-          {onOpenScanner ? <Button aria-label={t('kiosk.openScanner')} className={styles.peekScanAction} disabled={scannerOpening} leadingIcon={<ScanLine size={18} />} onClick={onOpenScanner} size="small" variant="secondary">{t('kiosk.scannerTitle')}</Button> : null}
-        </div>
+        <button
+          aria-expanded="false"
+          aria-label={t('booking.cartExpandAccessible', {
+            products: t('booking.productCount', { count: itemCount }),
+            total: total ? formatMoney(total) : '—',
+          })}
+          className={styles.peekButton}
+          onClick={() => onViewChange('details')}
+          type="button"
+        >
+          <span className={styles.peekIdentity}>
+            <strong>{t('booking.cartTitle')}</strong>
+            <span aria-hidden="true" className={styles.peekProductCount}><Package size={16} strokeWidth={1.9} />{itemCount}</span>
+          </span>
+          <strong className={styles.peekTotal}>{total ? formatMoney(total) : '—'}</strong>
+          <ChevronUp aria-hidden="true" size={24} strokeWidth={2} />
+        </button>
       ) : (
         <header className={styles.header}>
           <div>
             <h2>{t('booking.cartTitle')}</h2>
           </div>
           <div className={styles.headerActions}>
-            {onOpenScanner ? <Button aria-label={t('kiosk.openScanner')} className={styles.scanAction} disabled={scannerOpening} leadingIcon={<ScanLine size={18} />} onClick={onOpenScanner} size="small" variant="secondary">{t('kiosk.scannerTitle')}</Button> : null}
             {compact ? <IconButton aria-expanded="true" label={t('booking.cartCollapse')} onClick={() => onViewChange('peek')}><X size={28} strokeWidth={1.8} /></IconButton> : null}
           </div>
         </header>
       )}
-
-      {scannerError ? <p className={styles.scannerError} role="alert">{scannerError}</p> : null}
 
       {!minimized && showDetails ? (
         <div className={styles.details} ref={detailsRef}>

@@ -1,7 +1,7 @@
 import { Link } from '@tanstack/react-router';
 import Bell from 'lucide-react/dist/esm/icons/bell';
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
-import CircleUserRound from 'lucide-react/dist/esm/icons/circle-user-round';
+import { AccountNavigationIcon } from '@/components/layout/AccountNavigationIcon';
 import { useTranslation } from 'react-i18next';
 import { canManageExternalAccounts, canOpenFinance, canOpenStatistics, canUsePlanning, hasGroupCapability } from '@/app/groupCapabilities';
 import { memberPaths } from '@/app/paths';
@@ -44,9 +44,9 @@ export function MorePage() {
             if (item.capability === 'catalog') return hasGroupCapability(grants, item.capability);
             return false;
           })
-          .map(({ to, key, icon: Icon }) => <Link key={to} to={to}><Icon aria-hidden="true" size={23} /><span>{t(`nav.${key}`)}</span><ChevronRight aria-hidden="true" size={20} /></Link>)}
+          .map(({ to, key, icon: Icon }) => <Link key={to} to={to}><Icon {...(key === 'finance' ? { currency: activeGroup?.currency } : {})} aria-hidden="true" size={23} /><span>{t(`nav.${key}`)}</span><ChevronRight aria-hidden="true" size={20} /></Link>)}
         <Link to={memberPaths.notifications}><Bell aria-hidden="true" size={23} /><span>{t('nav.notifications')}</span><span className={styles.end}><NotificationBadge count={unreadCount} /><ChevronRight aria-hidden="true" size={20} /></span></Link>
-        <Link to="/account"><CircleUserRound aria-hidden="true" size={23} /><span>{t('nav.account')}</span><ChevronRight aria-hidden="true" size={20} /></Link>
+        <Link to="/account"><AccountNavigationIcon avatarUrl={session.user?.avatarUrl} aria-hidden="true" size={23} /><span>{t('nav.account')}</span><ChevronRight aria-hidden="true" size={20} /></Link>
         <LogoutButton className={styles.logout} showChevron />
       </nav>
     </Page>

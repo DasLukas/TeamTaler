@@ -780,6 +780,10 @@ func (filesystem spaFileSystem) Open(name string) (http.File, error) {
 	return filesystem.root.Open("/index.html")
 }
 
+// barcodeWorkerCSP permits local WASM compilation only in the isolated barcode worker.
+// The application document and other workers retain the stricter default policy.
+const barcodeWorkerCSP = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'"
+
 // spaHandler serves build assets from directory through net/http's constrained
 // file-server abstraction and returns index.html for extensionless React routes.
 // Only GET and HEAD are accepted. Hashed /assets files receive immutable caching,
@@ -800,6 +804,15 @@ func spaHandler(directory string) http.Handler {
 			response.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		} else if path.Ext(request.URL.Path) != "" && path.Base(request.URL.Path) != "index.html" {
 			response.Header().Set("Cache-Control", "public, max-age=3600, must-revalidate")
+		}
+		name := request.URL.Path
+		if path.Dir(name) == "/assets" && strings.HasPrefix(path.Base(name), "barcodeScanner.worker-") && strings.HasSuffix(name, ".js") {
+			if asset, err := http.Dir(directory).Open(name); err == nil {
+				if info, statErr := asset.Stat(); statErr == nil && info.Mode().IsRegular() {
+					response.Header().Set("Content-Security-Policy", barcodeWorkerCSP)
+				}
+				asset.Close()
+			}
 		}
 		files.ServeHTTP(response, request)
 	})

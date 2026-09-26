@@ -27,6 +27,7 @@ describe('MemberMultiSelect', () => {
       canBookForGuests={false}
       currentMembershipId="member-regular"
       iconOnly
+      iconLabel={i18n.t('booking.members')}
       id="target-picker"
       label={label}
       onAddGuest={vi.fn()}
@@ -39,6 +40,7 @@ describe('MemberMultiSelect', () => {
     />);
 
     const trigger = screen.getByRole('button', { name: label });
+    expect(trigger).toHaveTextContent(i18n.t('booking.members'));
     expect(trigger).toHaveTextContent('2');
     expect(trigger).not.toHaveTextContent('Regular Member');
     await user.click(trigger);

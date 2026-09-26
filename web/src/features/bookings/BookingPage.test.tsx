@@ -92,6 +92,17 @@ describe('BookingPage multi-product workspace', () => {
 
   afterEach(() => { vi.useRealTimers(); });
 
+  it('labels the member action and keeps the balance card free of decorative icons', async () => {
+    renderBookingPage();
+
+    await screen.findByRole('button', { name: /Wasser.*1,00.*hinzufügen/i });
+    const memberAction = screen.getByRole('button', { name: recipientButtonLabel(1) });
+    const balance = screen.getByText(i18n.t('booking.openBalance')).parentElement?.parentElement;
+
+    expect(memberAction).toHaveTextContent(i18n.t('booking.members'));
+    expect(balance?.querySelector('svg') ?? null).not.toBeInTheDocument();
+  });
+
   it('adds a product QR exactly once and opens the scanner with kiosk permission', async () => {
     const group = { ...demoSession.groups[0], kioskEnabled: true, membership: { ...demoSession.groups[0]!.membership!, effectiveGrants: [
       { permission: 'CREATE_OWN_BOOKING' as const, scope: { type: 'GROUP' as const } },
@@ -126,15 +137,16 @@ describe('BookingPage multi-product workspace', () => {
     const scanner = await screen.findByRole('dialog');
     expect(scanner).toHaveAttribute('data-embedded', 'false');
     expect(within(scanner).getByTestId('scanner-success')).toHaveTextContent('Wasser');
-    const expandCart = within(scanner).getByRole('button', { name: i18n.t('booking.cartExpandAccessible', {
-      products: i18n.t('booking.productCount', { count: 1 }),
-      total: '1,00\u00a0€',
-    }) });
-    expect(expandCart).toBeVisible();
-    await user.click(expandCart);
+    expect(scanner).toHaveTextContent('Cart expanded: true');
+    const submit = within(scanner).getByRole('button', { name: i18n.t('booking.submit') });
+    expect(submit).toBeVisible();
+    expect(submit).toBeEnabled();
     expect(within(scanner).getByLabelText(i18n.t('booking.productQuantity', { name: 'Wasser' }))).toHaveTextContent('1');
     expect(window.location.search).toBe(`?group=${group.id}`);
     expect(mocks.createBulkBookings).not.toHaveBeenCalled();
+    await user.click(submit);
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(mocks.createBulkBookings).toHaveBeenCalledOnce();
   });
 
   it('adds a stored barcode and a product QR to the same Scan & Go cart', async () => {
@@ -168,6 +180,53 @@ describe('BookingPage multi-product workspace', () => {
     expect(within(cart).getByLabelText(i18n.t('booking.productQuantity', { name: 'Spezi' }))).toHaveTextContent('1');
     expect(scanner).toBeVisible();
     expect(mocks.createBulkBookings).not.toHaveBeenCalled();
+  });
+
+  it('locks the submitted snapshot against scans and preserves expanded details after rejection', async () => {
+    const group = { ...demoSession.groups[0], kioskEnabled: true, membership: { ...demoSession.groups[0]!.membership!, effectiveGrants: [
+      { permission: 'CREATE_OWN_BOOKING' as const, scope: { type: 'GROUP' as const } },
+      { permission: 'USE_KIOSK' as const, scope: { type: 'GROUP' as const } },
+    ] } };
+    mocks.useActiveGroup.mockReturnValue({ activeGroupId: group.id, activeGroup: group, session: { ...demoSession, groups: [group] } });
+    mocks.getSession.mockResolvedValue({ ...demoSession, groups: [group] });
+    mocks.useMediaQuery.mockReturnValue(true);
+    let rejectBooking: (error: Error) => void = () => {};
+    mocks.createBulkBookings.mockImplementation(() => new Promise((_resolve, reject) => { rejectBooking = reject; }));
+    window.history.replaceState({}, '', `/book?group=${group.id}&product=product-water&scan=1`);
+    renderBookingPage();
+    const scanner = await screen.findByRole('dialog');
+    const submit = within(scanner).getByRole('button', { name: i18n.t('booking.submit') });
+    fireEvent.click(submit);
+    fireEvent.click(within(scanner).getByRole('button', { name: 'Test QR scan' }));
+    fireEvent.click(submit);
+    await waitFor(() => expect(mocks.createBulkBookings).toHaveBeenCalledOnce());
+    expect(mocks.createBulkBookings.mock.calls[0][1].items).toEqual([expect.objectContaining({ productId: 'product-water', quantity: 1 })]);
+    expect(scanner).toBeVisible();
+    await act(async () => rejectBooking(new Error('Booking failed')));
+    expect(await within(scanner).findByText('Booking failed')).toBeVisible();
+    expect(scanner).toHaveTextContent('Cart expanded: true');
+    expect(within(scanner).getByLabelText(i18n.t('booking.productQuantity', { name: 'Wasser' }))).toHaveTextContent('1');
+    expect(within(scanner).queryByLabelText(i18n.t('booking.productQuantity', { name: 'Spezi' }))).not.toBeInTheDocument();
+  });
+
+  it('keeps free-price details open and blocks background changes while entering a price', async () => {
+    const group = { ...demoSession.groups[0], kioskEnabled: true, membership: { ...demoSession.groups[0]!.membership!, effectiveGrants: [
+      { permission: 'CREATE_OWN_BOOKING' as const, scope: { type: 'GROUP' as const } },
+      { permission: 'USE_KIOSK' as const, scope: { type: 'GROUP' as const } },
+    ] } };
+    mocks.useActiveGroup.mockReturnValue({ activeGroupId: group.id, activeGroup: group, session: { ...demoSession, groups: [group] } });
+    mocks.getSession.mockResolvedValue({ ...demoSession, groups: [group] });
+    mocks.getCategories.mockResolvedValue(demoCategories.map((category) => ({ ...category, products: category.products.map((product) => product.id === 'product-spezi' ? { ...product, pricingMode: 'USER_DEFINED', price: undefined } : product) })));
+    mocks.useMediaQuery.mockReturnValue(true);
+    window.history.replaceState({}, '', `/book?group=${group.id}&product=product-water&scan=1`);
+    renderBookingPage();
+    const scanner = await screen.findByRole('dialog');
+    fireEvent.click(within(scanner).getByRole('button', { name: 'Test QR scan' }));
+    expect(scanner).toHaveTextContent('Cart expanded: true');
+    const price = within(scanner).getByRole('textbox', { name: i18n.t('booking.unitPriceForProduct', { name: 'Spezi', currency: 'EUR' }) });
+    await waitFor(() => expect(price).toHaveFocus());
+    fireEvent.click(within(scanner).getByRole('button', { name: 'Test QR scan' }));
+    expect(within(scanner).getByLabelText(i18n.t('booking.productQuantity', { name: 'Spezi' }))).toHaveTextContent('1');
   });
 
   it('marks an unknown scan as an error and dismisses it after the latest scan', async () => {
@@ -212,8 +271,9 @@ describe('BookingPage multi-product workspace', () => {
     const water = await screen.findByRole('button', { name: /Wasser.*1,00.*hinzufügen/i });
     expect(screen.getByRole('button', { name: i18n.t('kiosk.scannerTitle') })).toBeVisible();
     await user.click(water);
-    expect(screen.queryByRole('button', { name: i18n.t('kiosk.scannerTitle') })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: i18n.t('kiosk.openScanner') }));
+    expect(screen.getByRole('button', { name: i18n.t('kiosk.scannerTitle') })).toBeVisible();
+    expect(within(screen.getByRole('complementary', { name: i18n.t('booking.cartTitle') })).queryByRole('button', { name: i18n.t('kiosk.openScanner') })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: i18n.t('kiosk.scannerTitle') }));
     expect(await screen.findByRole('dialog')).toHaveAttribute('data-embedded', 'false');
     expect(screen.getByRole('dialog')).toHaveTextContent('Cart expanded: false');
     expect(within(screen.getByRole('dialog')).getByRole('button', { name: /Warenkorb öffnen/ })).toBeVisible();
@@ -231,16 +291,17 @@ describe('BookingPage multi-product workspace', () => {
     expect(screen.getByRole('button', { name: /Warenkorb öffnen/ })).toBeVisible();
     expect(screen.getByRole('button', { name: /Wasser.*Aktuell 2 im Warenkorb/i })).toBeVisible();
 
-    await user.click(screen.getByRole('button', { name: i18n.t('kiosk.openScanner') }));
+    await user.click(screen.getByRole('button', { name: i18n.t('kiosk.scannerTitle') }));
     await screen.findByRole('dialog');
     await user.click(screen.getByRole('button', { name: 'Close scanner' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: i18n.t('booking.cartExpandAccessible', { products: i18n.t('booking.productCount', { count: 2 }), total: '2,00\u00a0€' }) })).toBeVisible();
-    expect(screen.getByRole('button', { name: i18n.t('kiosk.openScanner') })).toBeVisible();
+    expect(screen.getByRole('button', { name: i18n.t('kiosk.scannerTitle') })).toBeVisible();
+    expect(screen.queryByRole('button', { name: i18n.t('kiosk.openScanner') })).not.toBeInTheDocument();
     expect(mocks.createBulkBookings).not.toHaveBeenCalled();
   });
 
-  it('keeps one scanner entry in the tablet cart after a touch selection', async () => {
+  it('keeps one scanner entry above the balance after a tablet touch selection', async () => {
     const user = userEvent.setup();
     const group = { ...demoSession.groups[0], kioskEnabled: true, membership: { ...demoSession.groups[0]!.membership!, effectiveGrants: [
       { permission: 'CREATE_OWN_BOOKING' as const, scope: { type: 'GROUP' as const } },
@@ -253,10 +314,10 @@ describe('BookingPage multi-product workspace', () => {
     await screen.findByRole('button', { name: /Wasser.*1,00.*hinzufügen/i });
     expect(screen.getByRole('button', { name: i18n.t('kiosk.scannerTitle') })).toBeVisible();
     await user.click(screen.getByRole('button', { name: /Wasser.*1,00.*hinzufügen/i }));
-    expect(screen.queryByRole('button', { name: i18n.t('kiosk.scannerTitle') })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: i18n.t('kiosk.scannerTitle') })).toBeVisible();
     const cart = screen.getByRole('complementary', { name: i18n.t('booking.cartTitle') });
-    expect(within(cart).getByRole('button', { name: i18n.t('kiosk.openScanner') })).toBeVisible();
-    await user.click(within(cart).getByRole('button', { name: i18n.t('kiosk.openScanner') }));
+    expect(within(cart).queryByRole('button', { name: i18n.t('kiosk.openScanner') })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: i18n.t('kiosk.scannerTitle') }));
     expect(await screen.findByRole('dialog')).toHaveAttribute('data-embedded', 'true');
     expect(cart).toBeVisible();
     expect(within(cart).getByRole('button', { name: i18n.t('booking.submit') })).toBeVisible();

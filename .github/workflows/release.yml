@@ -16,7 +16,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validation:
+    name: Validate release revision
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   image:
+    needs: validation
     name: Publish multi-architecture image
     if: github.repository == 'DasLukas/TeamTaler'
     runs-on: ubuntu-latest

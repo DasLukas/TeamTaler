@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import Ban from 'lucide-react/dist/esm/icons/ban';
 import Download from 'lucide-react/dist/esm/icons/download';
 import Plus from 'lucide-react/dist/esm/icons/plus';
 import X from 'lucide-react/dist/esm/icons/x';
@@ -9,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 import { api } from '@/api/client';
 import type { GroupSettings, KioskPoster, KioskPosterInput, Session } from '@/api/types';
 import { Button } from '@/components/ui/Button';
+import { ConfirmationDialog } from '@/components/ui/ConfirmationDialog';
 import { Toggle } from '@/components/ui/Toggle';
 import { downloadExportBlob } from '@/features/shared/exportDownload';
 import { PosterProductComposer } from './PosterProductComposer';
@@ -40,6 +42,7 @@ export function KioskSettingsSection({ groupId, settings }: KioskSettingsSection
   const postersQuery = useQuery({ queryKey: ['kiosk-posters', groupId], queryFn: () => api.getKioskPosters(groupId), enabled: settings.kioskEnabled });
   const categoriesQuery = useQuery({ queryKey: ['categories', groupId], queryFn: () => api.getCategories(groupId), enabled: settings.kioskEnabled });
   const [draft, setDraft] = useState<PosterDraft | null>(null);
+  const [confirmDisable, setConfirmDisable] = useState(false);
   const [deleteRequested, setDeleteRequested] = useState(false);
   const [notice, setNotice] = useState('');
   const posters = postersQuery.data ?? [];
@@ -77,6 +80,7 @@ export function KioskSettingsSection({ groupId, settings }: KioskSettingsSection
         ...session,
         groups: session.groups.map((group) => group.id === groupId ? { ...group, kioskEnabled: persisted.kioskEnabled } : group),
       } : session);
+      setConfirmDisable(false);
     },
   });
   const saveMutation = useMutation({
@@ -105,10 +109,26 @@ export function KioskSettingsSection({ groupId, settings }: KioskSettingsSection
     <div className={styles.card}>
       <div className={styles.settingRow}>
         <div><h3 id="kiosk-settings-title">{t('kiosk.settingsTitle')}</h3><p id="kiosk-settings-description">{t('kiosk.settingsDescription')}</p></div>
-        <Toggle checked={settings.kioskEnabled === true} descriptionId="kiosk-settings-description" disabled={toggleMutation.isPending} label={t('kiosk.enable')} onChange={(enabled) => toggleMutation.mutate(enabled)} />
+        <Toggle checked={settings.kioskEnabled === true} descriptionId="kiosk-settings-description" disabled={toggleMutation.isPending} label={t('kiosk.enable')} onChange={(enabled) => {
+          toggleMutation.reset();
+          if (enabled) toggleMutation.mutate(true);
+          else setConfirmDisable(true);
+        }} />
       </div>
       <p className={styles.notice}>{t(settings.kioskEnabled ? 'kiosk.enabledHint' : 'kiosk.disabledHint')}</p>
-      {toggleMutation.isError ? <p role="alert">{toggleMutation.error.message}</p> : null}
+      {toggleMutation.isError && !confirmDisable ? <p role="alert">{t('kiosk.saveError')}</p> : null}
+      <ConfirmationDialog
+        confirmIcon={<Ban size={17} />}
+        confirmLabel={t('kiosk.disable')}
+        errorMessage={toggleMutation.isError ? t('kiosk.saveError') : undefined}
+        message={t('kiosk.disableImpact')}
+        onClose={() => { toggleMutation.reset(); setConfirmDisable(false); }}
+        onConfirm={() => toggleMutation.mutate(false)}
+        open={confirmDisable}
+        pending={toggleMutation.isPending}
+        title={t('kiosk.disableTitle')}
+        tone="danger"
+      />
     </div>
     {settings.kioskEnabled ? <div className={styles.card}>
       <div className={styles.heading}><div><h4>{t('kiosk.postersTitle')}</h4><p>{t('kiosk.postersDescription')}</p></div><Button leadingIcon={<Plus size={16} />} onClick={() => selectPoster()} size="small" variant="secondary">{t('kiosk.newPoster')}</Button></div>

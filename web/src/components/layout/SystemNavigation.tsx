@@ -1,10 +1,10 @@
 import { Link } from '@tanstack/react-router';
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left';
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
-import CircleUserRound from 'lucide-react/dist/esm/icons/circle-user-round';
+import { AccountNavigationIcon } from './AccountNavigationIcon';
 import Settings from 'lucide-react/dist/esm/icons/settings';
 import { useTranslation } from 'react-i18next';
-import { useInstanceCapabilities } from '@/app/useSession';
+import { useInstanceCapabilities, useSession } from '@/app/useSession';
 import { LogoutButton } from '@/components/auth/LogoutButton';
 import { Brand } from '@/components/brand/Brand';
 import bottomStyles from './BottomNavigation.module.css';
@@ -20,7 +20,7 @@ export interface SystemNavigationProps {
 
 const destinations = [
   { to: '/admin', labelKey: 'nav.system', icon: Settings },
-  { to: '/account', labelKey: 'nav.account', icon: CircleUserRound },
+  { to: '/account', labelKey: 'nav.account', icon: AccountNavigationIcon },
 ] as const;
 
 /**
@@ -32,6 +32,7 @@ const destinations = [
 export function SystemNavigation({ collapsed, onCollapsedChange, onNavigate }: SystemNavigationProps) {
   const { t } = useTranslation();
   const capabilities = useInstanceCapabilities();
+  const session = useSession();
   return (
     <>
       <aside className={`${sidebarStyles.sidebar} ${collapsed ? sidebarStyles.collapsed : ''}`} data-collapsed={collapsed} id="desktop-sidebar">
@@ -53,7 +54,7 @@ export function SystemNavigation({ collapsed, onCollapsedChange, onNavigate }: S
         <nav aria-label={t('nav.primary')} className={sidebarStyles.nav}>
           {destinations.map(({ to, labelKey, icon: Icon }) => (
             <Link activeProps={{ className: sidebarStyles.active }} aria-label={t(labelKey)} className={sidebarStyles.link} key={to} onClick={onNavigate} title={collapsed ? t(labelKey) : undefined} to={to}>
-              <Icon aria-hidden="true" size={24} strokeWidth={1.8} />
+              <Icon {...(to === '/account' ? { avatarUrl: session.user.avatarUrl } : {})} aria-hidden="true" size={24} strokeWidth={1.8} />
               <span className={sidebarStyles.linkLabel}>{t(labelKey)}</span>
             </Link>
           ))}
@@ -64,7 +65,7 @@ export function SystemNavigation({ collapsed, onCollapsedChange, onNavigate }: S
       <nav aria-label={t('nav.mobilePrimary')} className={bottomStyles.nav}>
         {destinations.map(({ to, labelKey, icon: Icon }) => (
           <Link activeProps={{ className: bottomStyles.active }} className={bottomStyles.link} key={to} to={to}>
-            <Icon aria-hidden="true" size={27} strokeWidth={1.8} />
+            <Icon {...(to === '/account' ? { avatarUrl: session.user.avatarUrl } : {})} aria-hidden="true" size={27} strokeWidth={1.8} />
             <span>{t(labelKey)}</span>
           </Link>
         ))}

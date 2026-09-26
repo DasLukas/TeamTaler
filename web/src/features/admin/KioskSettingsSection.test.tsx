@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GroupSettings, KioskPoster, Session } from '@/api/types';
@@ -53,6 +53,29 @@ describe('KioskSettingsSection', () => {
     await user.click(await screen.findByRole('switch', { name: i18n.t('kiosk.enable') }));
     await waitFor(() => expect(mocks.updateGroupSettings).toHaveBeenCalledWith('group-a', { kioskEnabled: true }));
     expect(queryClient.getQueryData<Session>(['session'])?.groups[0]?.kioskEnabled).toBe(true);
+  });
+
+  it('explains the impact and confirms before disabling Scan and Go', async () => {
+    const user = userEvent.setup();
+    mocks.updateGroupSettings.mockResolvedValue({ ...settings, kioskEnabled: false });
+    renderSection({ kioskEnabled: true });
+
+    const toggle = await screen.findByRole('switch', { name: i18n.t('kiosk.enable') });
+    await user.click(toggle);
+
+    const dialog = screen.getByRole('dialog', { name: i18n.t('kiosk.disableTitle') });
+    expect(within(dialog).getByText(i18n.t('kiosk.disableImpact'))).toBeVisible();
+    expect(toggle).toBeChecked();
+    expect(mocks.updateGroupSettings).not.toHaveBeenCalled();
+
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('common.cancel') }));
+    expect(screen.queryByRole('dialog', { name: i18n.t('kiosk.disableTitle') })).not.toBeInTheDocument();
+    expect(mocks.updateGroupSettings).not.toHaveBeenCalled();
+
+    await user.click(toggle);
+    await user.click(within(screen.getByRole('dialog', { name: i18n.t('kiosk.disableTitle') })).getByRole('button', { name: i18n.t('kiosk.disable') }));
+    await waitFor(() => expect(mocks.updateGroupSettings).toHaveBeenCalledWith('group-a', { kioskEnabled: false }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: i18n.t('kiosk.disableTitle') })).not.toBeInTheDocument());
   });
 
   it('shows poster management only while Scan and Go is enabled', async () => {

@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2';
-import WalletCards from 'lucide-react/dist/esm/icons/wallet-cards';
 import ScanLine from 'lucide-react/dist/esm/icons/scan-line';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -23,6 +22,7 @@ import { getBookableCategories } from './bookable';
 import { KioskScanner } from './KioskScanner';
 import { clearKioskProductFromUrl, parseKioskBookingLink } from './kioskDeepLink';
 import { resolveKioskScan } from './kioskScan';
+import { useScanInteractionGuard } from './useScanInteractionGuard';
 import styles from './BookingPage.module.css';
 
 const BOOKING_CONFIRMATION_DURATION_MS = 1_200;
@@ -60,6 +60,10 @@ function BookingWorkspace({ groupId, categories, context, compact, canUseKiosk }
   const [confirmation, setConfirmation] = useState('');
   const [cartLimitError, setCartLimitError] = useState('');
   const [scanOpen, setScanOpen] = useState(false);
+  const [initialScanKey, setInitialScanKey] = useState<string>();
+  const bookingInFlightRef = useRef(false);
+  const interactionGuard = useScanInteractionGuard();
+  const isScanBlocked = () => bookingInFlightRef.current || interactionGuard.isBlocked();
   const [scanOpening, setScanOpening] = useState(false);
   const [scannerOpenError, setScannerOpenError] = useState('');
   const [scanFeedback, setScanFeedback] = useState('');
@@ -82,6 +86,8 @@ function BookingWorkspace({ groupId, categories, context, compact, canUseKiosk }
   const reasonMode = hasForeignBooking ? context.foreignBookingReasonMode : hasOwnBooking ? context.ownBookingReasonMode : 'OFF';
   const balanceLabel = formatMoney(context.ownBalance);
   const balanceLengthClass = balanceLabel.length > 10 ? styles.balanceAmountCompact : balanceLabel.length > 8 ? styles.balanceAmountReduced : '';
+  const showKioskAction = canUseKiosk && !scanOpen;
+  const bookingActionCount = Number(canAssignOthers) + Number(showKioskAction);
   useEffect(() => () => {
     if (confirmationTimerRef.current !== undefined) window.clearTimeout(confirmationTimerRef.current);
     if (scanFeedbackTimerRef.current !== undefined) window.clearTimeout(scanFeedbackTimerRef.current);
@@ -103,19 +109,12 @@ function BookingWorkspace({ groupId, categories, context, compact, canUseKiosk }
   };
 
   const bookingMutation = useMutation({
-    mutationFn: () => api.createBulkBookings(groupId, {
-      expectedPeriodId: context.openPeriod.id,
-      items: lines.map((line) => ({
-        productId: line.product.id,
-        productVersion: line.product.version,
-        quantity: line.quantity,
-        unitPrice: line.product.pricingMode === 'USER_DEFINED' ? resolveCartLinePrice(line) : undefined,
-      })),
-      targetMembershipIds,
-      ...(temporaryGuestDisplayNames.length > 0 ? { temporaryGuestDisplayNames } : {}),
-      reason: reasonMode !== 'OFF' ? reason.trim() || undefined : undefined,
-    }),
+    mutationFn: (draft: Parameters<typeof api.createBulkBookings>[1]) => api.createBulkBookings(groupId, draft),
+    onError: () => { setCartView('details'); },
+    onSettled: () => { bookingInFlightRef.current = false; },
     onSuccess: (createdBookings) => {
+      setScanOpen(false);
+      setScanSuccess(null);
       setConfirmation(t('booking.bulkSuccess', { count: createdBookings.length }));
       resetWorkspace();
       if (confirmationTimerRef.current !== undefined) window.clearTimeout(confirmationTimerRef.current);
@@ -136,7 +135,26 @@ function BookingWorkspace({ groupId, categories, context, compact, canUseKiosk }
     },
   });
 
+  /** Snapshots the validated draft and synchronously locks scan adoption until settlement. */
+  const submitBooking = () => {
+    if (bookingInFlightRef.current) return;
+    bookingInFlightRef.current = true;
+    bookingMutation.mutate({
+      expectedPeriodId: context.openPeriod.id,
+      items: lines.map((line) => ({
+        productId: line.product.id,
+        productVersion: line.product.version,
+        quantity: line.quantity,
+        unitPrice: line.product.pricingMode === 'USER_DEFINED' ? resolveCartLinePrice(line) : undefined,
+      })),
+      targetMembershipIds,
+      ...(temporaryGuestDisplayNames.length > 0 ? { temporaryGuestDisplayNames } : {}),
+      reason: reasonMode !== 'OFF' ? reason.trim() || undefined : undefined,
+    });
+  };
+
   const addProduct = useCallback((product: Product, fromScanner = false) => {
+    if (bookingInFlightRef.current) return;
     if (product.pricingMode === 'USER_DEFINED') {
       priceEntryRequestIdRef.current += 1;
       setPriceEntryRequest({ productId: product.id, requestId: priceEntryRequestIdRef.current });
@@ -202,6 +220,8 @@ function BookingWorkspace({ groupId, categories, context, compact, canUseKiosk }
         addProduct(product, openLinkedScanner);
         setScanCategories(freshCategories);
         if (openLinkedScanner) {
+          setInitialScanKey(`product:${product.id}`);
+          setCartView('details');
           showScanSuccess(t('kiosk.added', { name: product.name }));
           setScanOpen(true);
         } else setScanFeedback(t('kiosk.added', { name: product.name }));
@@ -211,6 +231,7 @@ function BookingWorkspace({ groupId, categories, context, compact, canUseKiosk }
   }, [addProduct, groupId, queryClient, showScanSuccess, t]);
 
   const openScanner = async () => {
+    setInitialScanKey(undefined);
     clearScanFeedbackTimer();
     setScannerOpenError('');
     setScanFeedback('');
@@ -246,6 +267,7 @@ function BookingWorkspace({ groupId, categories, context, compact, canUseKiosk }
   };
 
   const handleScan = (value: string, format?: import('@/api/types').ProductBarcodeFormat | 'QR_CODE') => {
+    if (isScanBlocked()) return;
     const resolved = resolveKioskScan(value, groupId, scanCategories ?? categories, format);
     if (resolved.kind === 'product') {
       addProduct(resolved.product, true);
@@ -266,6 +288,7 @@ function BookingWorkspace({ groupId, categories, context, compact, canUseKiosk }
   };
 
   const changeLineQuantity = (productId: string, quantity: number) => {
+    if (bookingInFlightRef.current) return;
     setCartLimitError('');
     setLines((current) => quantity <= 0
       ? current.filter((line) => line.product.id !== productId)
@@ -307,12 +330,12 @@ function BookingWorkspace({ groupId, categories, context, compact, canUseKiosk }
     bookingReasons={context.bookingReasons}
     compact={compact}
     error={cartLimitError || (bookingMutation.isError ? bookingMutation.error.message : undefined)}
+    interactionRef={interactionGuard.ref}
     lines={lines}
     onQuantityChange={changeLineQuantity}
     onReasonChange={setReason}
     onRemove={(productId) => changeLineQuantity(productId, 0)}
-    onOpenScanner={canUseKiosk && !scanOpen ? () => { void openScanner(); } : undefined}
-    onSubmit={() => { if (scanOpen) returnToProducts(); bookingMutation.mutate(); }}
+    onSubmit={submitBooking}
     onUnitPriceBlur={(productId) => setLines((current) => current.map((line) => line.product.id === productId ? { ...line, unitPriceTouched: true } : line))}
     onUnitPriceChange={(productId, value) => setLines((current) => current.map((line) => line.product.id === productId ? { ...line, unitPriceInput: value } : line))}
     onViewChange={setCartView}
@@ -320,8 +343,6 @@ function BookingWorkspace({ groupId, categories, context, compact, canUseKiosk }
     priceEntryRequest={priceEntryRequest}
     reason={reason}
     reasonMode={reasonMode}
-    scannerError={scannerOpenError}
-    scannerOpening={scanOpening}
     targetCount={targetCount}
     view={cartView}
   />;
@@ -332,15 +353,14 @@ function BookingWorkspace({ groupId, categories, context, compact, canUseKiosk }
         {!scanOpen || compact ? <>
         <div className={styles.titleRow}>
           <h1>{t('booking.quickTitle')}</h1>
-          {canUseKiosk && lines.length === 0 ? <Button disabled={scanOpening} leadingIcon={<ScanLine size={18} />} onClick={() => { void openScanner(); }} size="small" variant="secondary">{t('kiosk.scannerTitle')}</Button> : null}
         </div>
-        {scannerOpenError && lines.length === 0 ? <p className={styles.kioskError} role="alert">{scannerOpenError}</p> : null}
-        <div className={`${styles.balanceRow} ${canAssignOthers ? styles.hasTargetControl : ''}`}>
+        {scannerOpenError ? <p className={styles.kioskError} role="alert">{scannerOpenError}</p> : null}
+        <div className={`${styles.balanceRow} ${bookingActionCount > 0 ? styles.hasActions : ''} ${bookingActionCount > 1 ? styles.hasTwoActions : ''}`}>
           <div className={styles.balance}>
             <div className={styles.balanceAmount}><span>{t('booking.openBalance')}</span><strong className={`${isCreditBalance(context.ownBalance) ? styles.creditBalance : ''} ${balanceLengthClass}`} data-financial-state={isCreditBalance(context.ownBalance) ? 'credit' : 'due'} title={balanceLabel}>{balanceLabel}</strong></div>
-            {!canAssignOthers ? <WalletCards aria-hidden="true" size={40} strokeWidth={1.8} /> : null}
           </div>
-          {canAssignOthers ? <div className={styles.targetControl}>
+          {bookingActionCount > 0 ? <div className={styles.bookingActions}>
+            {canAssignOthers ? <div className={styles.targetControl}>
               <MemberMultiSelect
                 canBookForGuests={context.canBookForGuests}
                 currentMembershipId={context.currentMembership.id}
@@ -348,6 +368,7 @@ function BookingWorkspace({ groupId, categories, context, compact, canUseKiosk }
                 id="booking-member"
                 iconOnly
                 label={t('booking.targetButtonLabel', { count: targetCount })}
+                iconLabel={t('booking.members')}
                 onAddGuest={addTemporaryGuest}
                 onChange={changeTargets}
                 onRemoveGuest={(index) => { targetSelectionTouchedRef.current = true; setTemporaryGuestDisplayNames((current) => current.filter((_, itemIndex) => itemIndex !== index)); }}
@@ -357,6 +378,8 @@ function BookingWorkspace({ groupId, categories, context, compact, canUseKiosk }
                 selectedIds={targetMembershipIds}
                 targets={context.targets}
               />
+            </div> : null}
+            {showKioskAction ? <Button className={styles.bookingAction} disabled={scanOpening} leadingIcon={<ScanLine size={28} />} onClick={() => { void openScanner(); }} size="small" variant="secondary">{t('kiosk.scannerTitle')}</Button> : null}
           </div> : null}
         </div>
 
@@ -364,7 +387,10 @@ function BookingWorkspace({ groupId, categories, context, compact, canUseKiosk }
 
         {scanFeedback && !scanOpen ? <p className={styles.kioskFeedback} role="status">{scanFeedback}</p> : null}
         </> : null}
-        {scanOpen ? <KioskScanner cart={compact && lines.length > 0 ? cart : undefined} cartExpanded={compact && lines.length > 0 && cartView === 'details'} embedded={!compact} feedback={scanFeedback} feedbackTone={scanFeedbackTone} onClose={returnToProducts} onCollapseCart={() => setCartView('peek')} onScan={handleScan} success={scanSuccess} /> : null}
+        {scanOpen ? <KioskScanner cart={compact && lines.length > 0 ? cart : undefined} cartExpanded={compact && lines.length > 0 && cartView === 'details'} embedded={!compact} feedback={scanFeedback} feedbackTone={scanFeedbackTone} initialScanKey={initialScanKey} isScanBlocked={isScanBlocked} resolveScanKey={(value, format) => {
+          const resolved = resolveKioskScan(value, groupId, scanCategories ?? categories, format);
+          return resolved.kind === 'product' ? `product:${resolved.product.id}` : undefined;
+        }} onClose={returnToProducts} onCollapseCart={() => setCartView('peek')} onScan={handleScan} success={scanSuccess} /> : null}
 
         {!scanOpen || compact ? <ProductPicker
           categories={bookableCategories}

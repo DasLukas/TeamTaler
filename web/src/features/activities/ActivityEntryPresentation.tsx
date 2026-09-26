@@ -1,4 +1,4 @@
-import BookOpenCheck from 'lucide-react/dist/esm/icons/book-open-check';
+import ShoppingCart from 'lucide-react/dist/esm/icons/shopping-cart';
 import CircleCheck from 'lucide-react/dist/esm/icons/circle-check';
 import CircleDollarSign from 'lucide-react/dist/esm/icons/circle-dollar-sign';
 import Link2 from 'lucide-react/dist/esm/icons/link-2';
@@ -81,7 +81,7 @@ export function MembershipIdentity({ avatarUrl, name, status }: MembershipIdenti
 export function ActivityType({ kind }: Pick<ActivityEntry, 'kind'>) {
   const { t } = useTranslation();
   const label = activityTypeLabel(kind, t);
-  const TypeIcon = kind === 'BOOKING' ? BookOpenCheck : kind === 'PAYMENT' ? CircleDollarSign : kind === 'REVERSAL' ? RotateCcw : Scale;
+  const TypeIcon = kind === 'BOOKING' ? ShoppingCart : kind === 'PAYMENT' ? CircleDollarSign : kind === 'REVERSAL' ? RotateCcw : Scale;
   const tone = kind === 'BOOKING'
     ? styles.activityTypeBooking
     : kind === 'PAYMENT' ? styles.activityTypePayment : kind === 'REVERSAL' ? styles.activityTypeReversal : styles.activityTypeAdjustment;

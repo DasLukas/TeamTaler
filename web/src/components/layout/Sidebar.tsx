@@ -2,7 +2,7 @@ import { Link, useRouterState } from '@tanstack/react-router';
 import Bell from 'lucide-react/dist/esm/icons/bell';
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left';
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
-import CircleUserRound from 'lucide-react/dist/esm/icons/circle-user-round';
+import { AccountNavigationIcon } from '@/components/layout/AccountNavigationIcon';
 import Ellipsis from 'lucide-react/dist/esm/icons/ellipsis';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -145,7 +145,7 @@ export function Sidebar({ collapsed, onCollapsedChange, onNavigate }: SidebarPro
       <nav aria-label={t('nav.primary')} className={styles.nav} ref={navigationRef}>
         {visibleNavigation.map(({ to, key, icon: Icon }) => (
           <Link
-            activeOptions={{ exact: key !== 'planning' }}
+            activeOptions={{ exact: key !== 'planning', includeSearch: false }}
             activeProps={{ className: styles.active }}
             aria-label={t(`nav.${key}`)}
             className={styles.link}
@@ -154,7 +154,7 @@ export function Sidebar({ collapsed, onCollapsedChange, onNavigate }: SidebarPro
             title={collapsed ? t(`nav.${key}`) : undefined}
             to={to}
           >
-            <Icon aria-hidden="true" size={25} strokeWidth={1.8} />
+            <Icon {...(key === 'finance' ? { currency: activeGroup?.currency } : {})} aria-hidden="true" size={25} strokeWidth={1.8} />
             <span className={styles.linkLabel}>{t(`nav.${key}`)}</span>
           </Link>
           ))}
@@ -164,7 +164,7 @@ export function Sidebar({ collapsed, onCollapsedChange, onNavigate }: SidebarPro
             <span className={styles.linkLabel}>{t('nav.more')}</span>
           </button>
           {overflowOpen ? <div aria-label={t('nav.more')} className={styles.overflowMenu} id="sidebar-overflow-menu" ref={overflowMenuRef} role="menu" style={overflowPosition}>
-            {overflowNavigation.map(({ to, key, icon: Icon }) => <Link activeProps={{ className: styles.overflowMenuActive }} aria-label={t(`nav.${key}`)} className={styles.overflowMenuLink} key={to} onClick={closeAfterNavigation} role="menuitem" to={to}><Icon aria-hidden="true" size={21} strokeWidth={1.8} /><span>{t(`nav.${key}`)}</span></Link>)}
+            {overflowNavigation.map(({ to, key, icon: Icon }) => <Link activeOptions={{ includeSearch: false }} activeProps={{ className: styles.overflowMenuActive }} aria-label={t(`nav.${key}`)} className={styles.overflowMenuLink} key={to} onClick={closeAfterNavigation} role="menuitem" to={to}><Icon {...(key === 'finance' ? { currency: activeGroup?.currency } : {})} aria-hidden="true" size={21} strokeWidth={1.8} /><span>{t(`nav.${key}`)}</span></Link>)}
           </div> : null}
         </> : null}
       </nav>
@@ -177,7 +177,7 @@ export function Sidebar({ collapsed, onCollapsedChange, onNavigate }: SidebarPro
           <span className={styles.linkLabel}>{t('nav.notifications')}</span>
         </Link>
         <Link aria-label={t('nav.account')} activeProps={{ className: styles.active }} className={styles.link} onClick={onNavigate} title={collapsed ? t('nav.account') : undefined} to="/account">
-          <CircleUserRound aria-hidden="true" size={23} strokeWidth={1.8} />
+          <AccountNavigationIcon avatarUrl={session.user?.avatarUrl} aria-hidden="true" size={23} strokeWidth={1.8} />
           <span className={styles.linkLabel}>{t('nav.account')}</span>
         </Link>
         <LogoutButton className={styles.link} />

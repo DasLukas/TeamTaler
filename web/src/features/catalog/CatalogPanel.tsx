@@ -36,13 +36,29 @@ import { catalogOrderCommand } from './catalogOrder';
 import { CategoryIconPicker } from './CategoryIconPicker';
 import { CatalogSorter } from './CatalogSorter';
 import { ProductBarcodeFields } from './ProductBarcodeFields';
-import { validateProductBarcodes } from './productBarcodeValidation';
+import { validateProductBarcode, validateProductBarcodes } from './productBarcodeValidation';
 import { KioskScanner } from '@/features/bookings/KioskScanner';
 import styles from './CatalogPanel.module.css';
 
 type CatalogDialog = 'category' | 'product' | 'delete' | null;
 type DeleteTarget = { kind: 'category'; item: Category } | { kind: 'product'; item: Product };
 type BarcodeServerError = { index: number; key: 'duplicate' | 'limit' | 'serverInvalid' | 'assignedElsewhere' };
+
+/**
+ * Compares scanned and stored codes through the same canonical UPC/EAN identity.
+ *
+ * @param format - Format reported by the camera decoder.
+ * @param value - Raw scanned value.
+ * @param barcode - Stored or drafted product barcode.
+ * @returns Whether both values identify the same physical barcode.
+ */
+function matchesBarcode(format: ProductBarcodeFormat, value: string, barcode: ProductBarcode): boolean {
+  const scannedKey = validateProductBarcode({ format, value }).key;
+  const candidateKey = validateProductBarcode(barcode).key;
+  return scannedKey !== null && candidateKey !== null
+    ? scannedKey === candidateKey
+    : format === barcode.format && value.trim() === barcode.value.trim();
+}
 
 /**
  * Locates a rejected barcode in the visible editor, including legacy server errors.
@@ -106,6 +122,7 @@ export function CatalogPanel() {
   const [productActive, setProductActive] = useState(true);
   const [productBarcodes, setProductBarcodes] = useState<ProductBarcode[]>([]);
   const [barcodeScannerOpen, setBarcodeScannerOpen] = useState(false);
+  const [barcodeScannerFeedback, setBarcodeScannerFeedback] = useState('');
   const [productImage, setProductImage] = useState<File | undefined>();
   const [productImageTransform, setProductImageTransform] = useState<ImageTransform>(DEFAULT_IMAGE_TRANSFORM);
   const [productImageInputKey, setProductImageInputKey] = useState(0);
@@ -208,6 +225,7 @@ export function CatalogPanel() {
     setProductActive(true);
     setProductBarcodes([]);
     setBarcodeScannerOpen(false);
+    setBarcodeScannerFeedback('');
     resetProductImageInput();
     setPersistedProduct(null);
   };
@@ -227,6 +245,7 @@ export function CatalogPanel() {
     setProductPriceTouched(false);
     setProductActive(true);
     setProductBarcodes([]);
+    setBarcodeScannerFeedback('');
     resetProductImageInput();
     setPersistedProduct(null);
     setDialog('product');
@@ -242,6 +261,7 @@ export function CatalogPanel() {
     setProductPriceTouched(false);
     setProductActive(product.active);
     setProductBarcodes(product.barcodes ?? []);
+    setBarcodeScannerFeedback('');
     resetProductImageInput();
     setPersistedProduct(null);
     setDialog('product');
@@ -445,12 +465,22 @@ export function CatalogPanel() {
           {productPricingMode === 'FIXED' ? <Field error={productPriceTouched ? productPriceValidation.error : undefined} htmlFor="product-price" label={t('catalog.price', { currency: activeGroup.currency })}><TextInput disabled={metadataLocked} id="product-price" inputMode="decimal" onBlur={() => setProductPriceTouched(true)} onChange={(event) => setProductPrice(event.target.value)} pattern={majorUnitsInputPattern(activeGroup.currency)} placeholder={majorUnitsPlaceholder(activeGroup.currency)} required type="text" value={productPrice} /></Field> : null}
           {editingProduct ? <Field htmlFor="product-status" label={t('common.status')}><SelectMenu ariaLabel={t('common.status')} disabled={metadataLocked} id="product-status" onChange={(status) => setProductActive(status === 'active')} options={[{ label: t('common.active'), value: 'active' }, { label: t('common.archived'), value: 'archived' }]} value={productActive ? 'active' : 'archived'} /></Field> : null}
           {activeGroup.kioskEnabled === true ? <>
-            <ProductBarcodeFields barcodes={productBarcodes} disabled={metadataLocked} onCapture={() => setBarcodeScannerOpen(true)} onChange={(next) => { productMutation.reset(); setProductBarcodes(next); }} serverError={barcodeServerError ? { index: barcodeServerError.index, message: t(`kiosk.barcodeErrors.${barcodeServerError.key}`) } : undefined} />
-            {barcodeScannerOpen ? <KioskScanner mode="barcodeCapture" onClose={() => setBarcodeScannerOpen(false)} onScan={(value, detectedFormat) => {
+            <ProductBarcodeFields barcodes={productBarcodes} disabled={metadataLocked} onCapture={() => { setBarcodeScannerFeedback(''); setBarcodeScannerOpen(true); }} onChange={(next) => { productMutation.reset(); setProductBarcodes(next); }} serverError={barcodeServerError ? { index: barcodeServerError.index, message: t(`kiosk.barcodeErrors.${barcodeServerError.key}`) } : undefined} />
+            {barcodeScannerOpen ? <KioskScanner feedback={barcodeScannerFeedback} feedbackTone="warning" mode="barcodeCapture" onClose={() => { setBarcodeScannerOpen(false); setBarcodeScannerFeedback(''); }} onScan={(value, detectedFormat) => {
               if (!detectedFormat || detectedFormat === 'QR_CODE') return;
               const format: ProductBarcodeFormat = detectedFormat;
+              const catalogOwner = categoriesQuery.data
+                .flatMap((category) => category.products)
+                .find((product) => product.id !== editingProduct?.id && product.barcodes?.some((barcode) => matchesBarcode(format, value, barcode)));
+              const draftContainsBarcode = productBarcodes.some((barcode) => matchesBarcode(format, value, barcode));
+              const ownerName = catalogOwner?.name ?? (draftContainsBarcode ? productName.trim() || t('catalog.newProduct') : '');
+              if (ownerName) {
+                setBarcodeScannerFeedback(t('kiosk.barcodeAlreadyAssigned', { name: ownerName }));
+                return;
+              }
               productMutation.reset();
-              setProductBarcodes((current) => current.some((item) => item.value === value) ? current : [...current, { format, value }]);
+              setProductBarcodes((current) => [...current, { format, value }]);
+              setBarcodeScannerFeedback('');
               setBarcodeScannerOpen(false);
             }} /> : null}
           </> : null}

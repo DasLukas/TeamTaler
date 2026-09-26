@@ -1,11 +1,11 @@
-import BookOpenCheck from 'lucide-react/dist/esm/icons/book-open-check';
+import ShoppingCart from 'lucide-react/dist/esm/icons/shopping-cart';
 import Boxes from 'lucide-react/dist/esm/icons/boxes';
 import CalendarDays from 'lucide-react/dist/esm/icons/calendar-days';
 import ChartNoAxesCombined from 'lucide-react/dist/esm/icons/chart-no-axes-combined';
-import Clock3 from 'lucide-react/dist/esm/icons/clock-3';
+import ArrowLeftRight from 'lucide-react/dist/esm/icons/arrow-left-right';
 import Home from 'lucide-react/dist/esm/icons/home';
 import Settings from 'lucide-react/dist/esm/icons/settings';
-import WalletCards from 'lucide-react/dist/esm/icons/wallet-cards';
+import { FinanceNavigationIcon } from './FinanceNavigationIcon';
 import { memberPaths } from '@/app/paths';
 
 /** Capability discriminator used to filter shared module destinations. */
@@ -19,12 +19,12 @@ export type NavigationCapability = 'book' | 'planning' | 'statistics' | 'catalog
  */
 export const moduleNavigationItems = [
   { to: memberPaths.overview, key: 'overview', icon: Home, capability: null },
-  { to: memberPaths.booking, key: 'book', icon: BookOpenCheck, capability: 'book' },
-  { to: memberPaths.activities, key: 'activities', icon: Clock3, capability: null },
+  { to: memberPaths.booking, key: 'book', icon: ShoppingCart, capability: 'book' },
+  { to: memberPaths.activities, key: 'activities', icon: ArrowLeftRight, capability: null },
   { to: memberPaths.planning, key: 'planning', icon: CalendarDays, capability: 'planning' },
   { to: memberPaths.statistics, key: 'statistics', icon: ChartNoAxesCombined, capability: 'statistics' },
   { to: memberPaths.catalog, key: 'catalog', icon: Boxes, capability: 'catalog' },
-  { to: memberPaths.finance, key: 'finance', icon: WalletCards, capability: 'finance' },
+  { to: memberPaths.finance, key: 'finance', icon: FinanceNavigationIcon, capability: 'finance' },
   { to: '/admin', key: 'administration', icon: Settings, capability: 'administration' },
 ] as const;
 

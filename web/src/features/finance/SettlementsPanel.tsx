@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import CalendarCheck from 'lucide-react/dist/esm/icons/calendar-check';
 import Archive from 'lucide-react/dist/esm/icons/archive';
-import BookOpenCheck from 'lucide-react/dist/esm/icons/book-open-check';
+import ShoppingCart from 'lucide-react/dist/esm/icons/shopping-cart';
 import CircleCheck from 'lucide-react/dist/esm/icons/circle-check';
 import CircleDashed from 'lucide-react/dist/esm/icons/circle-dashed';
 import CircleDollarSign from 'lucide-react/dist/esm/icons/circle-dollar-sign';
@@ -242,7 +242,7 @@ export function SettlementsPanel({ settlements, settlementsEnabled }: Settlement
       meta: { label: t('financeWorkspace.balanceState') },
     },
     {
-      cell: ({ row }) => <span className={styles.rowActions}><ItemAction aria-label={t('periods.showBookingsFor', { member: row.original.memberName, period: row.original.periodLabel })} leadingIcon={<BookOpenCheck size={16} />} search={settlementActivitySearch(row.original)} to="/activities">{t('periods.showBookings')}</ItemAction><SettlementPdfPreviewAction groupId={activeGroupId} settlement={row.original} /></span>,
+      cell: ({ row }) => <span className={styles.rowActions}><ItemAction aria-label={t('periods.showBookingsFor', { member: row.original.memberName, period: row.original.periodLabel })} leadingIcon={<ShoppingCart size={16} />} search={settlementActivitySearch(row.original)} to="/activities">{t('periods.showBookings')}</ItemAction><SettlementPdfPreviewAction groupId={activeGroupId} settlement={row.original} /></span>,
       enableSorting: false,
       header: () => <span className="sr-only">{t('common.action')}</span>,
       id: 'action',

@@ -51,19 +51,55 @@ export function resolveKioskScan(value: string, groupId: string, categories: Cat
 
 /** Prevents repeated camera frames from adding one visible barcode multiple times. */
 export class ScanRearm {
-  private lastCode = '';
-  private absenceSince = 0;
+  private lastCode: string;
+  private absenceSince: number | undefined;
+  private absenceLast = 0;
+  private seen = false;
+  private repeatReady = false;
 
-  /** Records a frame without a decoded value so the previous code may rearm. */
+  /**
+   * Seeds an externally added identity without treating camera startup as absence.
+   * @param initialCode - Canonical identity already added by the external link, if any.
+   */
+  constructor(initialCode = '') { this.lastCode = initialCode; }
+
+  /**
+   * Invalidates absence evidence during layout, visibility or interaction pauses.
+   * @returns Nothing; retains the last identity until it is observed again.
+   */
+  suspend(): void { this.absenceSince = undefined; this.seen = false; this.repeatReady = false; }
+
+  /**
+   * Records absence only after the seeded or accepted code has actually been seen.
+   * @param now - Camera frame timestamp in milliseconds.
+   * @returns Nothing; updates the continuous absence interval.
+   */
   missing(now: number): void {
-    if (this.lastCode && this.absenceSince === 0) this.absenceSince = now;
+    if (this.lastCode && this.seen) {
+      this.absenceSince ??= now;
+      this.absenceLast = now;
+    }
   }
 
-  /** Accepts a new code, or the previous code after it left view briefly. */
-  accept(code: string, now: number): boolean {
-    if (code === this.lastCode && (this.absenceSince === 0 || now - this.absenceSince < 450)) return false;
+  /**
+   * Accepts a new identity or a deliberately repeated one, preserving deferred eligibility.
+   * @param code - Canonical product identity or a separately tracked feedback identity.
+   * @param _now - Observation timestamp retained for callers; positive-frame delays never count as absence.
+   * @param allowed - Whether interaction and submission guards permit adoption.
+   * @returns Whether the caller may process this observation exactly once.
+   */
+  accept(code: string, _now: number, allowed = true): boolean {
+    if (code === this.lastCode) {
+      this.repeatReady ||= this.absenceSince !== undefined && this.absenceLast - this.absenceSince >= 450;
+      this.absenceSince = undefined;
+      this.seen = true;
+      if (!this.repeatReady) return false;
+    }
+    if (!allowed) return false;
     this.lastCode = code;
-    this.absenceSince = 0;
+    this.absenceSince = undefined;
+    this.seen = true;
+    this.repeatReady = false;
     return true;
   }
 }
